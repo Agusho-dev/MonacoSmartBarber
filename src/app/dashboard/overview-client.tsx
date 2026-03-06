@@ -11,6 +11,7 @@ import {
   CardDescription,
   CardAction,
 } from '@/components/ui/card'
+import Link from 'next/link'
 import {
   Users,
   Clock,
@@ -95,6 +96,24 @@ export function OverviewClient({
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold tracking-tight">Inicio</h2>
+
+      {atRiskClients > 0 && (
+        <Link href="/dashboard/estadisticas">
+          <div className="flex items-center gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-4 transition-colors hover:bg-yellow-500/15">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-yellow-500/20">
+              <AlertTriangle className="size-5 text-yellow-400" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-yellow-400">
+                {atRiskClients} cliente{atRiskClients !== 1 ? 's' : ''} en riesgo
+              </p>
+              <p className="text-xs text-muted-foreground">
+                No han visitado en 25-39 días. Tocá para ver detalles.
+              </p>
+            </div>
+          </div>
+        </Link>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard title="Clientes hoy" value={uniqueClientsToday} icon={Users} />
