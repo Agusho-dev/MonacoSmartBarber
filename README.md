@@ -1,36 +1,98 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Monaco Smart Barber
 
-## Getting Started
+Sistema inteligente de gestión para barberías con múltiples sucursales.
 
-First, run the development server:
+## Stack
+
+- **Frontend:** Next.js 16 (App Router) + TypeScript + Tailwind CSS v4
+- **UI:** shadcn/ui (tema oscuro: negro/blanco/gris)
+- **Base de datos:** Supabase (PostgreSQL + Realtime + Auth + RLS)
+- **Estado:** Zustand
+- **Deploy:** Vercel
+
+## Rutas
+
+| Ruta | Descripción | Acceso |
+|---|---|---|
+| `/` | Landing page con accesos | Público |
+| `/checkin` | Check-in de clientes (tablet) | Público |
+| `/barbero/login` | Login de barberos (PIN) | Público |
+| `/barbero/cola` | Cola de espera en tiempo real | Barbero (PIN) |
+| `/login` | Login de administración | Público |
+| `/dashboard` | Panel principal del dueño | Owner/Admin |
+| `/dashboard/sucursales` | Gestión de sucursales | Owner/Admin |
+| `/dashboard/barberos` | Gestión de barberos | Owner/Admin |
+| `/dashboard/servicios` | Gestión de servicios | Owner/Admin |
+| `/dashboard/clientes` | CRM de clientes | Owner/Admin |
+
+## Setup
+
+### 1. Variables de entorno
+
+Copiar `.env.local.example` a `.env.local` y completar con las credenciales de Supabase:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+NEXT_PUBLIC_SUPABASE_URL=https://tu-proyecto.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=tu-anon-key
+SUPABASE_SERVICE_ROLE_KEY=tu-service-role-key
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Base de datos
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Ejecutar la migración SQL en el editor SQL de Supabase:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+supabase/migrations/001_initial_schema.sql
+```
 
-## Learn More
+Esto crea todas las tablas, enums, triggers, funciones y políticas RLS.
 
-To learn more about Next.js, take a look at the following resources:
+### 3. Habilitar Realtime
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+En Supabase Dashboard → Database → Replication, habilitar Realtime para la tabla `queue_entries`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 4. Crear usuario owner
 
-## Deploy on Vercel
+Crear un usuario en Supabase Auth (email/password) y luego insertar su registro en la tabla `staff`:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```sql
+INSERT INTO staff (auth_user_id, role, full_name, email)
+VALUES ('uuid-del-usuario-auth', 'owner', 'Nombre del Dueño', 'email@ejemplo.com');
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### 5. Desarrollo local
+
+```bash
+npm install
+npm run dev
+```
+
+## Estructura del proyecto
+
+```
+src/
+├── app/
+│   ├── (auth)/login/          # Login staff (owner/admin)
+│   ├── (tablet)/checkin/      # Check-in tablet
+│   ├── barbero/               # Panel de barberos
+│   │   ├── login/             # Login por PIN
+│   │   └── cola/              # Cola en tiempo real
+│   ├── dashboard/             # Dashboard administrativo
+│   │   ├── barberos/
+│   │   ├── clientes/
+│   │   ├── servicios/
+│   │   └── sucursales/
+│   └── page.tsx               # Landing
+├── components/
+│   ├── barber/                # Componentes del panel barbero
+│   ├── dashboard/             # Shell del dashboard
+│   └── ui/                    # shadcn/ui
+├── lib/
+│   ├── actions/               # Server actions
+│   ├── supabase/              # Clientes Supabase
+│   ├── types/                 # Tipos TypeScript
+│   ├── format.ts              # Formateo ARS/fechas
+│   └── utils.ts               # Utilidades
+├── stores/                    # Zustand stores
+└── middleware.ts               # Auth middleware
+```
