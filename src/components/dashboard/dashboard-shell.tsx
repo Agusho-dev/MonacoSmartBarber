@@ -11,6 +11,7 @@ import {
   Users,
   BarChart3,
   Settings,
+  Target,
   Menu,
   LogOut,
 } from 'lucide-react'
@@ -50,6 +51,7 @@ const navItems = [
   { href: '/dashboard/servicios', label: 'Servicios', icon: Sparkles },
   { href: '/dashboard/clientes', label: 'Clientes', icon: Users },
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3 },
+  { href: '/dashboard/metas', label: 'Metas', icon: Target },
   { href: '/dashboard/configuracion', label: 'Configuración', icon: Settings },
 ]
 

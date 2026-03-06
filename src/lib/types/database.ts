@@ -124,6 +124,29 @@ export interface BranchOccupancy {
   available_barbers: number
 }
 
+export interface AppSettings {
+  id: string
+  lost_client_days: number
+  at_risk_client_days: number
+  business_hours_open: string
+  business_hours_close: string
+  business_days: number[]
+  updated_at: string
+}
+
+export interface Goal {
+  id: string
+  branch_id: string | null
+  barber_id: string | null
+  month: string
+  target_cuts: number
+  target_revenue: number
+  created_at: string
+  updated_at: string
+  branch?: Branch
+  barber?: Staff
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -136,6 +159,8 @@ export interface Database {
       rewards_config: { Row: RewardsConfig; Insert: Partial<RewardsConfig>; Update: Partial<RewardsConfig> }
       client_points: { Row: ClientPoints; Insert: Partial<ClientPoints> & Pick<ClientPoints, 'client_id'>; Update: Partial<ClientPoints> }
       point_transactions: { Row: PointTransaction; Insert: Partial<PointTransaction> & Pick<PointTransaction, 'client_id' | 'points' | 'type'>; Update: Partial<PointTransaction> }
+      app_settings: { Row: AppSettings; Insert: Partial<AppSettings>; Update: Partial<AppSettings> }
+      goals: { Row: Goal; Insert: Partial<Goal> & Pick<Goal, 'month'>; Update: Partial<Goal> }
     }
     Views: {
       branch_occupancy: { Row: BranchOccupancy }
