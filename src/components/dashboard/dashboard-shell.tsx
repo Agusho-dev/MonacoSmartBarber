@@ -10,6 +10,7 @@ import {
   Sparkles,
   Users,
   BarChart3,
+  DollarSign,
   Settings,
   Target,
   Menu,
@@ -51,6 +52,7 @@ const navItems = [
   { href: '/dashboard/servicios', label: 'Servicios', icon: Sparkles },
   { href: '/dashboard/clientes', label: 'Clientes', icon: Users },
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3 },
+  { href: '/dashboard/finanzas', label: 'Finanzas', icon: DollarSign },
   { href: '/dashboard/metas', label: 'Metas', icon: Target },
   { href: '/dashboard/configuracion', label: 'Configuración', icon: Settings },
 ]

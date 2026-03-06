@@ -147,6 +147,18 @@ export interface Goal {
   barber?: Staff
 }
 
+export interface FixedExpense {
+  id: string
+  branch_id: string
+  name: string
+  category: string | null
+  amount: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  branch?: Branch
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -161,6 +173,7 @@ export interface Database {
       point_transactions: { Row: PointTransaction; Insert: Partial<PointTransaction> & Pick<PointTransaction, 'client_id' | 'points' | 'type'>; Update: Partial<PointTransaction> }
       app_settings: { Row: AppSettings; Insert: Partial<AppSettings>; Update: Partial<AppSettings> }
       goals: { Row: Goal; Insert: Partial<Goal> & Pick<Goal, 'month'>; Update: Partial<Goal> }
+      fixed_expenses: { Row: FixedExpense; Insert: Partial<FixedExpense> & Pick<FixedExpense, 'branch_id' | 'name' | 'amount'>; Update: Partial<FixedExpense> }
     }
     Views: {
       branch_occupancy: { Row: BranchOccupancy }
