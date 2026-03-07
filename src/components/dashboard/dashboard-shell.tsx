@@ -12,7 +12,6 @@ import {
   BarChart3,
   DollarSign,
   Settings,
-  Target,
   Menu,
   LogOut,
 } from 'lucide-react'
@@ -53,7 +52,6 @@ const navItems = [
   { href: '/dashboard/clientes', label: 'Clientes', icon: Users },
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3 },
   { href: '/dashboard/finanzas', label: 'Finanzas', icon: DollarSign },
-  { href: '/dashboard/metas', label: 'Metas', icon: Target },
   { href: '/dashboard/configuracion', label: 'Configuración', icon: Settings },
 ]
 

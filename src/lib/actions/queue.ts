@@ -100,30 +100,23 @@ export async function completeService(
     return { error: 'Error al completar servicio' }
   }
 
-  // Update visit payment method if service was selected
-  if (serviceId) {
-    const { data: entry } = await supabase
-      .from('queue_entries')
-      .select('id')
-      .eq('id', queueEntryId)
-      .single()
+  const visitUpdate: Record<string, unknown> = { payment_method: paymentMethod }
+  if (serviceId) visitUpdate.service_id = serviceId
 
-    if (entry) {
-      await supabase
-        .from('visits')
-        .update({ payment_method: paymentMethod, service_id: serviceId })
-        .eq('queue_entry_id', queueEntryId)
-    }
-  } else {
-    await supabase
-      .from('visits')
-      .update({ payment_method: paymentMethod })
-      .eq('queue_entry_id', queueEntryId)
-  }
+  await supabase
+    .from('visits')
+    .update(visitUpdate)
+    .eq('queue_entry_id', queueEntryId)
+
+  const { data: visit } = await supabase
+    .from('visits')
+    .select('id')
+    .eq('queue_entry_id', queueEntryId)
+    .single()
 
   revalidatePath('/barbero/cola')
   revalidatePath('/dashboard')
-  return { success: true }
+  return { success: true, visitId: visit?.id ?? null }
 }
 
 export async function cancelQueueEntry(queueEntryId: string) {

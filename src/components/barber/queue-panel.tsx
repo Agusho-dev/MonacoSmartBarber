@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Clock, User, Scissors, LogOut, Check, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
+import { ClientHistory } from './client-history'
 
 interface BarberSession {
   staff_id: string
@@ -274,6 +275,11 @@ export function QueuePanel({ session, branchName }: QueuePanelProps) {
                       </p>
                     </div>
                   </div>
+
+                  {myActiveEntry.client_id && (
+                    <ClientHistory clientId={myActiveEntry.client_id} />
+                  )}
+
                   <div className="flex gap-3">
                     <Button
                       className="flex-1"

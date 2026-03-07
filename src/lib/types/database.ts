@@ -75,6 +75,8 @@ export interface Visit {
   amount: number
   commission_pct: number
   commission_amount: number
+  notes: string | null
+  tags: string[] | null
   started_at: string
   completed_at: string
   created_at: string
@@ -82,6 +84,21 @@ export interface Visit {
   barber?: Staff
   service?: Service
   branch?: Branch
+}
+
+export interface VisitPhoto {
+  id: string
+  visit_id: string
+  storage_path: string
+  order_index: number
+  created_at: string
+}
+
+export interface ServiceTag {
+  id: string
+  name: string
+  is_active: boolean
+  created_at: string
 }
 
 export interface RewardsConfig {
@@ -134,19 +151,6 @@ export interface AppSettings {
   updated_at: string
 }
 
-export interface Goal {
-  id: string
-  branch_id: string | null
-  barber_id: string | null
-  month: string
-  target_cuts: number
-  target_revenue: number
-  created_at: string
-  updated_at: string
-  branch?: Branch
-  barber?: Staff
-}
-
 export interface FixedExpense {
   id: string
   branch_id: string
@@ -172,8 +176,9 @@ export interface Database {
       client_points: { Row: ClientPoints; Insert: Partial<ClientPoints> & Pick<ClientPoints, 'client_id'>; Update: Partial<ClientPoints> }
       point_transactions: { Row: PointTransaction; Insert: Partial<PointTransaction> & Pick<PointTransaction, 'client_id' | 'points' | 'type'>; Update: Partial<PointTransaction> }
       app_settings: { Row: AppSettings; Insert: Partial<AppSettings>; Update: Partial<AppSettings> }
-      goals: { Row: Goal; Insert: Partial<Goal> & Pick<Goal, 'month'>; Update: Partial<Goal> }
       fixed_expenses: { Row: FixedExpense; Insert: Partial<FixedExpense> & Pick<FixedExpense, 'branch_id' | 'name' | 'amount'>; Update: Partial<FixedExpense> }
+      visit_photos: { Row: VisitPhoto; Insert: Partial<VisitPhoto> & Pick<VisitPhoto, 'visit_id' | 'storage_path'>; Update: Partial<VisitPhoto> }
+      service_tags: { Row: ServiceTag; Insert: Partial<ServiceTag> & Pick<ServiceTag, 'name'>; Update: Partial<ServiceTag> }
     }
     Views: {
       branch_occupancy: { Row: BranchOccupancy }
