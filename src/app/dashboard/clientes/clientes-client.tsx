@@ -1,9 +1,10 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { Search, Eye } from 'lucide-react'
+import { useMemo, useState, useEffect, useCallback } from 'react'
+import { Search, Eye, Star, Tag, Camera } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
+import { createClient } from '@/lib/supabase/client'
 import type { Client } from '@/lib/types/database'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -29,15 +30,25 @@ interface VisitRow {
   id: string
   client_id: string
   branch_id: string
+  barber_id: string
   amount: number
   completed_at: string
-  service: { name: string }[] | null
-  barber: { full_name: string }[] | null
+  notes: string | null
+  tags: string[] | null
+  service: { name: string } | null
+  barber: { full_name: string } | null
 }
 
 interface PointsRow {
   client_id: string
   points_balance: number
+}
+
+interface PhotoRow {
+  id: string
+  visit_id: string
+  storage_path: string
+  order_index: number
 }
 
 type Segment = 'nuevo' | 'regular' | 'vip' | 'en_riesgo' | 'perdido'
@@ -73,8 +84,11 @@ interface Props {
 
 export function ClientesClient({ clients, visits, points }: Props) {
   const { selectedBranchId } = useBranchStore()
+  const supabase = useMemo(() => createClient(), [])
   const [search, setSearch] = useState('')
   const [detailClient, setDetailClient] = useState<Client | null>(null)
+  const [photos, setPhotos] = useState<PhotoRow[]>([])
+  const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null)
 
   const now = Date.now()
   const thirtyDaysMs = 30 * 86400000
@@ -93,10 +107,44 @@ export function ClientesClient({ clients, visits, points }: Props) {
     [visits, selectedBranchId]
   )
 
-  const clientStats = useMemo(() => {
+  const globalClientStats = useMemo(() => {
     const map = new Map<
       string,
-      { totalVisits: number; last30Visits: number; lastVisitDate: string | null }
+      {
+        totalVisits: number
+        last30Visits: number
+        lastVisitDate: string | null
+      }
+    >()
+
+    visits.forEach((v) => {
+      const existing = map.get(v.client_id) ?? {
+        totalVisits: 0,
+        last30Visits: 0,
+        lastVisitDate: null,
+      }
+      existing.totalVisits++
+      if (now - new Date(v.completed_at).getTime() <= thirtyDaysMs) {
+        existing.last30Visits++
+      }
+      if (!existing.lastVisitDate || v.completed_at > existing.lastVisitDate) {
+        existing.lastVisitDate = v.completed_at
+      }
+      map.set(v.client_id, existing)
+    })
+
+    return map
+  }, [visits, now])
+
+  const branchClientStats = useMemo(() => {
+    if (!selectedBranchId) return globalClientStats
+    const map = new Map<
+      string,
+      {
+        totalVisits: number
+        last30Visits: number
+        lastVisitDate: string | null
+      }
     >()
 
     branchVisits.forEach((v) => {
@@ -116,10 +164,10 @@ export function ClientesClient({ clients, visits, points }: Props) {
     })
 
     return map
-  }, [branchVisits, now])
+  }, [branchVisits, globalClientStats, selectedBranchId, now])
 
   function getSegment(client: Client): Segment {
-    const stats = clientStats.get(client.id)
+    const stats = globalClientStats.get(client.id)
     if (!stats || !stats.lastVisitDate) {
       const createdDaysAgo = Math.floor(
         (now - new Date(client.created_at).getTime()) / 86400000
@@ -154,6 +202,62 @@ export function ClientesClient({ clients, visits, points }: Props) {
         : [],
     [detailClient, branchVisits]
   )
+
+  const frequentBarber = useMemo(() => {
+    if (!clientVisitHistory.length) return null
+    const counts = new Map<string, { name: string; count: number }>()
+    for (const v of clientVisitHistory) {
+      const name = v.barber?.full_name ?? '?'
+      const existing = counts.get(v.barber_id) || { name, count: 0 }
+      existing.count++
+      counts.set(v.barber_id, existing)
+    }
+    let best: { name: string; count: number } | null = null
+    for (const [, data] of counts) {
+      if (!best || data.count > best.count) best = data
+    }
+    return best
+  }, [clientVisitHistory])
+
+  const loadPhotos = useCallback(
+    async (visitIds: string[]) => {
+      if (!visitIds.length) {
+        setPhotos([])
+        return
+      }
+      const { data } = await supabase
+        .from('visit_photos')
+        .select('id, visit_id, storage_path, order_index')
+        .in('visit_id', visitIds)
+        .order('order_index')
+      setPhotos(data ?? [])
+    },
+    [supabase]
+  )
+
+  useEffect(() => {
+    if (detailClient) {
+      const ids = clientVisitHistory.map((v) => v.id)
+      loadPhotos(ids)
+    } else {
+      setPhotos([])
+    }
+  }, [detailClient, clientVisitHistory, loadPhotos])
+
+  const photosByVisit = useMemo(() => {
+    const m = new Map<string, PhotoRow[]>()
+    for (const p of photos) {
+      const arr = m.get(p.visit_id) || []
+      arr.push(p)
+      m.set(p.visit_id, arr)
+    }
+    return m
+  }, [photos])
+
+  function getUrl(path: string) {
+    const { data } = supabase.storage.from('visit-photos').getPublicUrl(path)
+    return data.publicUrl
+  }
 
   return (
     <div className="space-y-6">
@@ -201,7 +305,7 @@ export function ClientesClient({ clients, visits, points }: Props) {
               </TableRow>
             )}
             {filteredClients.map((client) => {
-              const stats = clientStats.get(client.id)
+              const displayStats = branchClientStats.get(client.id)
               const segment = getSegment(client)
               const segCfg = segmentConfig[segment]
               const pts = pointsMap.get(client.id) ?? 0
@@ -213,11 +317,11 @@ export function ClientesClient({ clients, visits, points }: Props) {
                     {client.phone}
                   </TableCell>
                   <TableCell className="text-right">
-                    {stats?.totalVisits ?? 0}
+                    {displayStats?.totalVisits ?? 0}
                   </TableCell>
                   <TableCell>
-                    {stats?.lastVisitDate
-                      ? formatDate(stats.lastVisitDate)
+                    {displayStats?.lastVisitDate
+                      ? formatDate(displayStats.lastVisitDate)
                       : '—'}
                   </TableCell>
                   <TableCell>
@@ -242,18 +346,20 @@ export function ClientesClient({ clients, visits, points }: Props) {
         </Table>
       </div>
 
+      {/* Client profile dialog */}
       <Dialog
         open={!!detailClient}
         onOpenChange={(open) => !open && setDetailClient(null)}
       >
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{detailClient?.name}</DialogTitle>
           </DialogHeader>
 
           {detailClient && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
+              {/* Summary row */}
+              <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
                 <div>
                   <p className="text-muted-foreground">Teléfono</p>
                   <p className="font-mono">{detailClient.phone}</p>
@@ -272,54 +378,146 @@ export function ClientesClient({ clients, visits, points }: Props) {
                   <p className="text-muted-foreground">Segmento</p>
                   <Badge
                     variant="outline"
-                    className={segmentConfig[getSegment(detailClient)].className}
+                    className={
+                      segmentConfig[getSegment(detailClient)].className
+                    }
                   >
                     {segmentConfig[getSegment(detailClient)].label}
                   </Badge>
                 </div>
               </div>
 
+              {/* Frequent barber */}
+              {frequentBarber && (
+                <div className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+                  <Star className="size-4 text-yellow-400" />
+                  <span className="text-muted-foreground">
+                    Barbero habitual:{' '}
+                    <strong className="text-foreground">
+                      {frequentBarber.name}
+                    </strong>{' '}
+                    ({frequentBarber.count} visitas)
+                  </span>
+                </div>
+              )}
+
               {detailClient.notes && (
                 <div className="text-sm">
-                  <p className="text-muted-foreground">Notas</p>
+                  <p className="text-muted-foreground">Notas del cliente</p>
                   <p>{detailClient.notes}</p>
                 </div>
               )}
 
               <Separator />
 
+              {/* Visit history */}
               <div>
-                <p className="mb-3 text-sm font-medium">Historial de visitas</p>
-                <ScrollArea className="h-[240px]">
+                <p className="mb-3 text-sm font-medium">
+                  Historial de visitas ({clientVisitHistory.length})
+                </p>
+                <ScrollArea className="h-[360px]">
                   {clientVisitHistory.length === 0 && (
                     <p className="py-4 text-center text-sm text-muted-foreground">
                       Sin visitas registradas
                     </p>
                   )}
-                  <div className="space-y-3">
-                    {clientVisitHistory.map((visit) => (
-                      <div
-                        key={visit.id}
-                        className="flex items-center justify-between rounded-lg border p-3"
-                      >
-                        <div>
-                          <p className="text-sm font-medium">
-                            {visit.service?.[0]?.name ?? 'Servicio'}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {visit.barber?.[0]?.full_name ?? 'Barbero'} &middot;{' '}
-                            {formatDateTime(visit.completed_at)}
-                          </p>
+                  <div className="space-y-3 pr-2">
+                    {clientVisitHistory.map((visit) => {
+                      const visitPhotos = photosByVisit.get(visit.id) ?? []
+                      return (
+                        <div
+                          key={visit.id}
+                          className="space-y-2 rounded-lg border p-3"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-sm font-medium">
+                                {visit.service?.name ?? 'Servicio'}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {visit.barber?.full_name ?? 'Barbero'}{' '}
+                                &middot; {formatDateTime(visit.completed_at)}
+                              </p>
+                            </div>
+                            <p className="text-sm font-medium">
+                              {formatCurrency(visit.amount)}
+                            </p>
+                          </div>
+
+                          {visit.notes && (
+                            <p className="text-xs text-muted-foreground">
+                              {visit.notes}
+                            </p>
+                          )}
+
+                          {visit.tags && visit.tags.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {visit.tags.map((tag: string) => (
+                                <Badge
+                                  key={tag}
+                                  variant="secondary"
+                                  className="gap-1 text-xs"
+                                >
+                                  <Tag className="size-2.5" />
+                                  {tag}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+
+                          {visitPhotos.length > 0 && (
+                            <div className="flex gap-2 overflow-x-auto pt-1">
+                              {visitPhotos.map((photo) => {
+                                const url = getUrl(photo.storage_path)
+                                return (
+                                  <button
+                                    key={photo.id}
+                                    type="button"
+                                    onClick={() => setEnlargedPhoto(url)}
+                                    className="shrink-0"
+                                  >
+                                    <img
+                                      src={url}
+                                      alt="Corte"
+                                      className="size-20 rounded-md border object-cover transition-opacity hover:opacity-80"
+                                    />
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          )}
+
+                          {visitPhotos.length === 0 &&
+                            !visit.notes &&
+                            (!visit.tags || visit.tags.length === 0) && (
+                              <div className="flex items-center gap-1 text-xs text-muted-foreground/50">
+                                <Camera className="size-3" />
+                                Sin detalles adicionales
+                              </div>
+                            )}
                         </div>
-                        <p className="text-sm font-medium">
-                          {formatCurrency(visit.amount)}
-                        </p>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </ScrollArea>
               </div>
             </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Enlarged photo overlay */}
+      <Dialog
+        open={!!enlargedPhoto}
+        onOpenChange={(open) => !open && setEnlargedPhoto(null)}
+      >
+        <DialogContent className="max-w-lg p-2">
+          {enlargedPhoto && (
+            <img
+              src={enlargedPhoto}
+              alt="Foto ampliada"
+              className="w-full rounded-lg"
+            />
           )}
         </DialogContent>
       </Dialog>
