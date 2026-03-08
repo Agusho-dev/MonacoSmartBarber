@@ -25,6 +25,19 @@ export async function checkinClient(formData: FormData) {
   if (existingClient) {
     clientId = existingClient.id
     await supabase.from('clients').update({ name }).eq('id', clientId)
+
+    const { data: activeEntry } = await supabase
+      .from('queue_entries')
+      .select('id, position, status, barber_id')
+      .eq('client_id', clientId)
+      .in('status', ['waiting', 'in_progress'])
+      .order('checked_in_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (activeEntry) {
+      return { alreadyInQueue: true, position: activeEntry.position, queueEntryId: activeEntry.id }
+    }
   } else {
     const { data: newClient, error } = await supabase
       .from('clients')
@@ -227,6 +240,61 @@ export async function reassignBarber(
   revalidatePath('/barbero/cola')
   revalidatePath('/dashboard/cola')
   return { success: true }
+}
+
+export async function checkinClientByFace(
+  clientId: string,
+  branchId: string,
+  barberId: string | null
+) {
+  const supabase = await createClient()
+
+  const { data: client } = await supabase
+    .from('clients')
+    .select('id, name')
+    .eq('id', clientId)
+    .single()
+
+  if (!client) {
+    return { error: 'Cliente no encontrado' }
+  }
+
+  const { data: activeEntry } = await supabase
+    .from('queue_entries')
+    .select('id, position, status, barber_id')
+    .eq('client_id', clientId)
+    .in('status', ['waiting', 'in_progress'])
+    .order('checked_in_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (activeEntry) {
+    return { alreadyInQueue: true, position: activeEntry.position, queueEntryId: activeEntry.id }
+  }
+
+  const { data: position } = await supabase.rpc('next_queue_position', {
+    p_branch_id: branchId,
+  })
+
+  const { data: queueEntry, error: queueError } = await supabase
+    .from('queue_entries')
+    .insert({
+      branch_id: branchId,
+      client_id: clientId,
+      barber_id: barberId,
+      position: position ?? 1,
+      status: 'waiting',
+    })
+    .select('id')
+    .single()
+
+  if (queueError || !queueEntry) {
+    return { error: 'Error al agregar a la cola' }
+  }
+
+  revalidatePath('/checkin')
+  revalidatePath('/barbero/cola')
+  return { success: true, position, queueEntryId: queueEntry.id }
 }
 
 export async function reassignMyBarber(

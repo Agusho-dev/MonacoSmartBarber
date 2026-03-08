@@ -35,9 +35,11 @@ import {
   ArrowRight,
   ArrowLeft,
   Gift,
+  ScanFace,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { FaceEnrollment } from '@/components/checkin/face-enrollment'
 
 const PAYMENT_OPTIONS: {
   value: PaymentMethod | 'points'
@@ -84,6 +86,8 @@ export function CompleteServiceDialog({
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const [clientNotes, setClientNotes] = useState('')
   const [originalClientNotes, setOriginalClientNotes] = useState('')
+  const [showFaceEnroll, setShowFaceEnroll] = useState(false)
+  const [hasFaceData, setHasFaceData] = useState(false)
 
   useEffect(() => {
     if (!entry) {
@@ -98,10 +102,11 @@ export function CompleteServiceDialog({
       setPhotoPreviews([])
       setClientNotes('')
       setOriginalClientNotes('')
+      setShowFaceEnroll(false)
+      setHasFaceData(false)
       return
     }
 
-    // Load existing client notes
     if (entry.client_id) {
       supabase
         .from('clients')
@@ -112,6 +117,15 @@ export function CompleteServiceDialog({
           const notes = data?.notes ?? ''
           setClientNotes(notes)
           setOriginalClientNotes(notes)
+        })
+
+      supabase
+        .from('client_face_descriptors')
+        .select('id')
+        .eq('client_id', entry.client_id)
+        .limit(1)
+        .then(({ data }) => {
+          setHasFaceData(!!(data && data.length > 0))
         })
     }
 
@@ -238,6 +252,22 @@ export function CompleteServiceDialog({
 
         <Separator />
 
+        {showFaceEnroll && entry ? (
+          <div className="py-2">
+            <FaceEnrollment
+              clientId={entry.client_id}
+              clientName={entry.client?.name ?? 'Cliente'}
+              source="barber"
+              onComplete={() => {
+                setShowFaceEnroll(false)
+                setHasFaceData(true)
+                toast.success('Cara registrada correctamente')
+              }}
+              onSkip={() => setShowFaceEnroll(false)}
+            />
+          </div>
+        ) : (
+          <>
         {entry?.reward_claimed && step === 1 && (
           <div className="rounded-lg border border-purple-500/20 bg-purple-500/10 p-4 text-purple-600 dark:text-purple-400 flex items-start gap-3">
             <Gift className="size-5 mt-0.5 shrink-0" />
@@ -450,6 +480,22 @@ export function CompleteServiceDialog({
               />
             </div>
 
+            {/* Face enrollment */}
+            {entry && (
+              <div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowFaceEnroll(true)}
+                  className="w-full gap-2"
+                >
+                  <ScanFace className="size-4" />
+                  {hasFaceData ? 'Actualizar reconocimiento facial' : 'Registrar cara del cliente'}
+                </Button>
+              </div>
+            )}
+
             <div className="flex gap-3">
               <Button
                 variant="outline"
@@ -479,6 +525,8 @@ export function CompleteServiceDialog({
               </Button>
             </div>
           </div>
+        )}
+          </>
         )}
       </DialogContent>
     </Dialog>

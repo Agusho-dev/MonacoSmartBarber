@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { checkinClient, reassignMyBarber } from '@/lib/actions/queue'
+import { checkinClient, checkinClientByFace, reassignMyBarber } from '@/lib/actions/queue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -27,11 +27,16 @@ import {
   statusConfig,
   getLoadColor,
 } from '@/lib/barber-utils'
+import { FaceCamera } from '@/components/checkin/face-camera'
+import { FaceEnrollment } from '@/components/checkin/face-enrollment'
+import type { FaceMatchResult } from '@/lib/face-recognition'
 
 type Step =
   | 'branch'
+  | 'face_scan'
   | 'phone'
   | 'name'
+  | 'face_enroll'
   | 'barber'
   | 'success'
   | 'manage_phone'
@@ -74,6 +79,11 @@ export default function CheckinPage() {
   const [myQueueEntry, setMyQueueEntry] = useState<QueueEntry | null>(null)
   const [changingBarberInManage, setChangingBarberInManage] = useState(false)
   const [lookingUpManage, setLookingUpManage] = useState(false)
+
+  const [faceMatch, setFaceMatch] = useState<FaceMatchResult | null>(null)
+  const [faceDescriptor, setFaceDescriptor] = useState<Float32Array | null>(null)
+  const [faceClientId, setFaceClientId] = useState<string | null>(null)
+  const [hasExistingFace, setHasExistingFace] = useState(false)
 
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -213,6 +223,10 @@ export default function CheckinPage() {
     setMyQueueEntry(null)
     setChangingBarberInManage(false)
     setLookingUpManage(false)
+    setFaceMatch(null)
+    setFaceDescriptor(null)
+    setFaceClientId(null)
+    setHasExistingFace(false)
     goTo('branch')
   }
 
@@ -220,7 +234,7 @@ export default function CheckinPage() {
 
   const selectBranch = (branch: Branch) => {
     setSelectedBranch(branch)
-    goTo('phone')
+    goTo('face_scan')
   }
 
   // ── Phone keypad ──
@@ -256,24 +270,49 @@ export default function CheckinPage() {
       const supabase = createClient()
       const { data } = await supabase
         .from('clients')
-        .select('id, name, phone')
+        .select('id, name, phone, face_photo_url')
         .eq('phone', ph)
         .single()
 
       if (data) {
         setName(data.name)
+        setFaceClientId(data.id)
         setIsReturning(true)
+
+        const { data: faceData } = await supabase
+          .from('client_face_descriptors')
+          .select('id')
+          .eq('client_id', data.id)
+          .limit(1)
+        setHasExistingFace(!!(faceData && faceData.length > 0))
+
+        const { data: activeEntry } = await supabase
+          .from('queue_entries')
+          .select('*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)')
+          .eq('client_id', data.id)
+          .in('status', ['waiting', 'in_progress'])
+          .order('checked_in_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (activeEntry) {
+          setMyQueueEntry(activeEntry as unknown as QueueEntry)
+          setLookingUp(false)
+          goTo('manage_turn')
+          return
+        }
       } else {
         setName('')
+        setFaceClientId(null)
         setIsReturning(false)
+        setHasExistingFace(false)
       }
     } catch {
       setName('')
       setIsReturning(false)
-    } finally {
-      setLookingUp(false)
-      goTo('name')
     }
+    setLookingUp(false)
+    goTo('name')
   }
 
   const lookupManageTurn = async (ph: string) => {
@@ -348,10 +387,105 @@ export default function CheckinPage() {
     return getBarberStats(minWaitBarber, queueEntries, barberAvgMinutes).eta
   }, [minWaitBarber, queueEntries, barberAvgMinutes])
 
+  // ── Face ID handlers ──
+
+  const handleFaceMatch = useCallback(
+    async (match: FaceMatchResult, descriptor: Float32Array) => {
+      setFaceMatch(match)
+      setFaceDescriptor(descriptor)
+      setName(match.clientName)
+      setPhone(match.clientPhone)
+      setFaceClientId(match.clientId)
+      setIsReturning(true)
+      setHasExistingFace(true)
+
+      const supabase = createClient()
+      const { data: activeEntry } = await supabase
+        .from('queue_entries')
+        .select('*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)')
+        .eq('client_id', match.clientId)
+        .in('status', ['waiting', 'in_progress'])
+        .order('checked_in_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (activeEntry) {
+        setMyQueueEntry(activeEntry as unknown as QueueEntry)
+        goTo('manage_turn')
+      } else {
+        goTo('barber')
+      }
+    },
+    []
+  )
+
+  const handleFaceNoMatch = useCallback(
+    (descriptor: Float32Array) => {
+      setFaceDescriptor(descriptor)
+      goTo('phone')
+    },
+    []
+  )
+
+  const handleFaceManualEntry = useCallback(() => {
+    goTo('phone')
+  }, [])
+
+  const handleFaceConfirmBarber = useCallback(
+    async (chosenBarberId: string | null) => {
+      if (!selectedBranch || !faceClientId || submitting) return
+      setSubmitting(true)
+      setError('')
+
+      try {
+        const result = await checkinClientByFace(
+          faceClientId,
+          selectedBranch.id,
+          chosenBarberId
+        )
+
+        if ('error' in result && result.error) {
+          setError(result.error)
+          setSubmitting(false)
+          return
+        }
+
+        if ('alreadyInQueue' in result && result.alreadyInQueue) {
+          const supabase = createClient()
+          const { data: entry } = await supabase
+            .from('queue_entries')
+            .select('*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)')
+            .eq('id', result.queueEntryId)
+            .maybeSingle()
+          if (entry) setMyQueueEntry(entry as unknown as QueueEntry)
+          setSubmitting(false)
+          goTo('manage_turn')
+          return
+        }
+
+        setPosition(result.position)
+        if ('queueEntryId' in result) {
+          setQueueEntryId(result.queueEntryId as string)
+        }
+        setSubmitting(false)
+        goTo('success')
+        resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
+      } catch {
+        setError('Error al registrar. Intentá de nuevo.')
+        setSubmitting(false)
+      }
+    },
+    [selectedBranch, faceClientId, submitting]
+  )
+
   // ── Confirm ──
 
   const handleConfirm = useCallback(
     async (chosenBarberId: string | null) => {
+      if (faceClientId && selectedBranch) {
+        return handleFaceConfirmBarber(chosenBarberId)
+      }
+
       if (!selectedBranch || !name.trim() || submitting) return
       setSubmitting(true)
       setError('')
@@ -373,10 +507,34 @@ export default function CheckinPage() {
           return
         }
 
+        if ('alreadyInQueue' in result && result.alreadyInQueue) {
+          const supabase = createClient()
+          const { data: entry } = await supabase
+            .from('queue_entries')
+            .select('*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)')
+            .eq('id', result.queueEntryId)
+            .maybeSingle()
+          if (entry) setMyQueueEntry(entry as unknown as QueueEntry)
+          setSubmitting(false)
+          goTo('manage_turn')
+          return
+        }
+
         setPosition(result.position)
         if ('queueEntryId' in result) {
           setQueueEntryId(result.queueEntryId as string)
         }
+
+        if (!faceClientId && result.queueEntryId) {
+          const supabase = createClient()
+          const { data: entry } = await supabase
+            .from('queue_entries')
+            .select('client_id')
+            .eq('id', result.queueEntryId)
+            .single()
+          if (entry) setFaceClientId(entry.client_id)
+        }
+
         setSubmitting(false)
         goTo('success')
         resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
@@ -385,7 +543,7 @@ export default function CheckinPage() {
         setSubmitting(false)
       }
     },
-    [selectedBranch, name, phone, submitting]
+    [selectedBranch, name, phone, submitting, faceClientId, handleFaceConfirmBarber]
   )
 
   const handleBarberClick = (barber: Staff) => {
@@ -409,7 +567,6 @@ export default function CheckinPage() {
         } else {
           setChangingBarberInSuccess(false)
           setChangingBarberInManage(false)
-          // Reload the queue entry for manage_turn
           if (myQueueEntry) {
             const supabase = createClient()
             const { data } = await supabase
@@ -716,6 +873,26 @@ export default function CheckinPage() {
         </div>
       )}
 
+      {/* ═══════════════ FACE SCAN ═══════════════ */}
+      {step === 'face_scan' && (
+        <div
+          key={`face-scan-${animKey}`}
+          className="w-full max-w-lg flex flex-col items-center gap-5 px-6 animate-in fade-in slide-in-from-right-4 duration-400"
+        >
+          {backButton(() => {
+            setSelectedBranch(null)
+            goTo('branch')
+          })}
+
+          <FaceCamera
+            branchName={selectedBranch?.name}
+            onMatch={handleFaceMatch}
+            onNoMatch={handleFaceNoMatch}
+            onManualEntry={handleFaceManualEntry}
+          />
+        </div>
+      )}
+
       {/* ═══════════════ PHONE ENTRY ═══════════════ */}
       {step === 'phone' && (
         <div
@@ -724,7 +901,7 @@ export default function CheckinPage() {
         >
           {backButton(() => {
             setPhone('')
-            goTo('branch')
+            goTo('face_scan')
           })}
 
           <div className="text-center mt-2">
@@ -801,6 +978,22 @@ export default function CheckinPage() {
           >
             Continuar
           </Button>
+        </div>
+      )}
+
+      {/* ═══════════════ FACE ENROLLMENT ═══════════════ */}
+      {step === 'face_enroll' && faceClientId && (
+        <div
+          key={`face-enroll-${animKey}`}
+          className="w-full max-w-lg flex flex-col items-center gap-5 px-6 animate-in fade-in slide-in-from-right-4 duration-400"
+        >
+          <FaceEnrollment
+            clientId={faceClientId}
+            clientName={name}
+            source="checkin"
+            onComplete={reset}
+            onSkip={reset}
+          />
         </div>
       )}
 
@@ -885,6 +1078,27 @@ export default function CheckinPage() {
                     <p className="text-base font-medium">Cambiar barbero</p>
                     <p className="text-sm text-muted-foreground mt-0.5">
                       Si cambiaste de idea, podés elegir otro
+                    </p>
+                  </div>
+                </button>
+              )}
+
+              {/* Face enrollment offer */}
+              {!hasExistingFace && faceClientId && (
+                <button
+                  onClick={() => {
+                    if (resetTimer.current) clearTimeout(resetTimer.current)
+                    goTo('face_enroll')
+                  }}
+                  className="flex items-center gap-4 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-5 w-full max-w-lg transition-all hover:bg-blue-500/10 hover:border-blue-500/30 active:scale-[0.98]"
+                >
+                  <div className="shrink-0 size-12 rounded-xl bg-blue-500/10 flex items-center justify-center">
+                    <User className="size-6 text-blue-400" />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-base font-medium text-blue-300">Registrar tu cara</p>
+                    <p className="text-sm text-blue-400/70 mt-0.5">
+                      La próxima vez hacé check-in solo con mirarte
                     </p>
                   </div>
                 </button>
