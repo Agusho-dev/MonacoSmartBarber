@@ -1,11 +1,12 @@
 'use client'
 
 import { useMemo, useState, useEffect, useCallback, useTransition } from 'react'
-import { Search, Eye, Star, Tag, Camera, Save } from 'lucide-react'
+import { Search, Eye, Star, Tag, Camera, Save, MessageCircle, Instagram, Plus } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
 import { updateClientNotes } from '@/lib/actions/clients'
+import { checkinClient } from '@/lib/actions/queue'
 import type { Client } from '@/lib/types/database'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -92,6 +93,7 @@ export function ClientesClient({ clients, visits, points }: Props) {
   const [photos, setPhotos] = useState<PhotoRow[]>([])
   const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null)
   const [editableNotes, setEditableNotes] = useState('')
+  const [editableInstagram, setEditableInstagram] = useState('')
   const [isSavingNotes, startSavingNotes] = useTransition()
 
   const now = Date.now()
@@ -242,11 +244,13 @@ export function ClientesClient({ clients, visits, points }: Props) {
   useEffect(() => {
     if (detailClient) {
       setEditableNotes(detailClient.notes ?? '')
+      setEditableInstagram(detailClient.instagram ?? '')
       const ids = clientVisitHistory.map((v) => v.id)
       loadPhotos(ids)
     } else {
       setPhotos([])
       setEditableNotes('')
+      setEditableInstagram('')
     }
   }, [detailClient, clientVisitHistory, loadPhotos])
 
@@ -393,6 +397,55 @@ export function ClientesClient({ clients, visits, points }: Props) {
                 </div>
               </div>
 
+              <div className="flex flex-wrap items-center gap-2 pt-2">
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500/20"
+                  onClick={() => window.open(`https://wa.me/${detailClient.phone.replace(/\D/g, '')}`, '_blank')}
+                >
+                  <MessageCircle className="mr-2 size-4" />
+                  WhatsApp
+                </Button>
+                {detailClient.instagram && (
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    className="bg-pink-500/10 text-pink-500 border-pink-500/20 hover:bg-pink-500/20"
+                    onClick={() => window.open(`https://instagram.com/${detailClient.instagram?.replace('@', '')}`, '_blank')}
+                  >
+                    <Instagram className="mr-2 size-4" />
+                    Instagram
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto"
+                  onClick={async () => {
+                    if (!selectedBranchId) {
+                      toast.error('Debes seleccionar una sucursal específica arriba a la derecha para añadir clientes a la cola.')
+                      return
+                    }
+
+                    const formData = new FormData()
+                    formData.append('name', detailClient.name)
+                    formData.append('phone', detailClient.phone)
+                    formData.append('branch_id', selectedBranchId!)
+                    
+                    const res = await checkinClient(formData)
+                    if (res?.error) {
+                      toast.error(res.error)
+                    } else {
+                      toast.success(`${detailClient.name} añadido a la cola`)
+                    }
+                  }}
+                >
+                  <Plus className="mr-2 size-4" />
+                  Añadir a cola
+                </Button>
+              </div>
+
               {/* Frequent barber */}
               {frequentBarber && (
                 <div className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
@@ -407,37 +460,57 @@ export function ClientesClient({ clients, visits, points }: Props) {
                 </div>
               )}
 
-              <div className="text-sm space-y-2">
-                <p className="font-medium">Observaciones internas</p>
-                <textarea
-                  value={editableNotes}
-                  onChange={(e) => setEditableNotes(e.target.value)}
-                  placeholder="Ej: Prefiere degradé bajo, alérgico a ciertos productos..."
-                  rows={2}
-                  className="w-full resize-none rounded-lg border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={isSavingNotes || editableNotes === (detailClient.notes ?? '')}
-                  onClick={() => {
-                    startSavingNotes(async () => {
-                      const result = await updateClientNotes(
-                        detailClient.id,
-                        editableNotes.trim() || null
-                      )
-                      if (result.error) {
-                        toast.error(result.error)
-                      } else {
-                        toast.success('Notas guardadas')
-                        detailClient.notes = editableNotes.trim() || null
-                      }
-                    })
-                  }}
-                >
-                  <Save className="mr-2 size-3.5" />
-                  {isSavingNotes ? 'Guardando...' : 'Guardar notas'}
-                </Button>
+              <div className="text-sm space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Usuario de Instagram</label>
+                  <div className="relative">
+                    <Instagram className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+                    <Input
+                      value={editableInstagram}
+                      onChange={(e) => setEditableInstagram(e.target.value)}
+                      placeholder="@usuario"
+                      className="pl-9 h-9"
+                    />
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Observaciones internas</label>
+                  <textarea
+                    value={editableNotes}
+                    onChange={(e) => setEditableNotes(e.target.value)}
+                    placeholder="Ej: Prefiere degradé bajo, alérgico a ciertos productos..."
+                    rows={2}
+                    className="w-full resize-none rounded-lg border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+                
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    variant="default"
+                    disabled={isSavingNotes || (editableNotes === (detailClient.notes ?? '') && editableInstagram === (detailClient.instagram ?? ''))}
+                    onClick={() => {
+                      startSavingNotes(async () => {
+                        const result = await updateClientNotes(
+                          detailClient.id,
+                          editableNotes.trim() || null,
+                          editableInstagram.trim() || null
+                        )
+                        if (result.error) {
+                          toast.error(result.error)
+                        } else {
+                          toast.success('Datos actualizados')
+                          detailClient.notes = editableNotes.trim() || null
+                          detailClient.instagram = editableInstagram.trim() || null
+                        }
+                      })
+                    }}
+                  >
+                    <Save className="mr-2 size-3.5" />
+                    {isSavingNotes ? 'Guardando...' : 'Guardar cambios'}
+                  </Button>
+                </div>
               </div>
 
               <Separator />

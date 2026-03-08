@@ -15,6 +15,17 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
+import {
   Clock,
   User,
   Scissors,
@@ -266,15 +277,36 @@ export function QueuePanel({
                   <span className="hidden sm:inline">Reasignar</span>
                 </Button>
               )}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleCancel(entry.id)}
-                disabled={actionLoading === entry.id}
-                className="text-muted-foreground hover:text-destructive"
-              >
-                <X className="size-4" />
-              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    disabled={actionLoading === entry.id}
+                    className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    title="No se presentó / Ausente"
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>¿El cliente no se presentó?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Esto marcará a <strong>{entry.client?.name ?? 'Cliente'}</strong> como Ausente y lo quitará de la cola de espera de forma permanente.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Volver</AlertDialogCancel>
+                    <AlertDialogAction 
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={() => handleCancel(entry.id)}
+                    >
+                      Sí, cancelar turno
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           </CardContent>
         </Card>
@@ -286,29 +318,39 @@ export function QueuePanel({
                 Reasignar a:
               </p>
               <div className="grid gap-1.5">
-                {otherBarbers.map((barber) => (
-                  <button
-                    key={barber.id}
-                    onClick={() => handleReassign(entry.id, barber.id)}
-                    disabled={actionLoading === entry.id}
-                    className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-accent active:bg-accent/80 disabled:opacity-50"
-                  >
-                    <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
-                      {barber.full_name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium truncate">
-                        {barber.full_name}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {barber.status === 'paused' ? 'En pausa' : 'Disponible'}
-                      </p>
-                    </div>
-                    {actionLoading === entry.id && (
-                      <div className="size-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-                    )}
-                  </button>
-                ))}
+                {otherBarbers
+                  .map((barber) => {
+                    const waitCount = entries.filter(
+                      (e) => e.status === 'waiting' && e.barber_id === barber.id
+                    ).length
+                    return { ...barber, waitCount }
+                  })
+                  .sort((a, b) => a.waitCount - b.waitCount)
+                  .map((barber) => (
+                    <button
+                      key={barber.id}
+                      onClick={() => handleReassign(entry.id, barber.id)}
+                      disabled={actionLoading === entry.id}
+                      className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-accent active:bg-accent/80 disabled:opacity-50"
+                    >
+                      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
+                        {barber.full_name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate">
+                          {barber.full_name}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {barber.waitCount === 0
+                            ? 'Sin clientes'
+                            : `${barber.waitCount} en espera`}
+                        </p>
+                      </div>
+                      {actionLoading === entry.id && (
+                        <div className="size-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+                      )}
+                    </button>
+                  ))}
               </div>
               <button
                 onClick={() => setReassigningEntryId(null)}

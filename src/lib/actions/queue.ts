@@ -55,7 +55,8 @@ export async function checkinClient(formData: FormData) {
     .single()
 
   if (queueError || !queueEntry) {
-    return { error: 'Error al agregar a la cola' }
+    console.error('Insert queue entry error:', queueError)
+    return { error: 'Error al agregar a la cola: ' + (queueError?.message || 'Error desconocido') }
   }
 
   revalidatePath('/checkin')
