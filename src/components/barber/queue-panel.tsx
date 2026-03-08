@@ -2,11 +2,11 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { startService, cancelQueueEntry } from '@/lib/actions/queue'
+import { startService, cancelQueueEntry, reassignBarber } from '@/lib/actions/queue'
 import { toggleBarberStatus, fetchBarberDayStats } from '@/lib/actions/barber'
 import { logoutBarber } from '@/lib/actions/auth'
 import { formatCurrency } from '@/lib/format'
-import type { QueueEntry, StaffStatus } from '@/lib/types/database'
+import type { QueueEntry, Staff, StaffStatus } from '@/lib/types/database'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -24,6 +24,7 @@ import {
   Pause,
   Play,
   DollarSign,
+  ArrowRightLeft,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
@@ -55,6 +56,8 @@ export function QueuePanel({
   const [barberStatus, setBarberStatus] = useState<StaffStatus>(initialStatus)
   const [statusLoading, setStatusLoading] = useState(false)
   const [dayStats, setDayStats] = useState({ servicesCount: 0, revenue: 0 })
+  const [otherBarbers, setOtherBarbers] = useState<Staff[]>([])
+  const [reassigningEntryId, setReassigningEntryId] = useState<string | null>(null)
 
   const supabase = useMemo(() => createClient(), [])
 
@@ -77,9 +80,23 @@ export function QueuePanel({
     setDayStats(stats)
   }, [session.staff_id, session.branch_id])
 
+  const fetchOtherBarbers = useCallback(async () => {
+    const { data } = await supabase
+      .from('staff')
+      .select('*')
+      .eq('branch_id', session.branch_id)
+      .eq('role', 'barber')
+      .eq('is_active', true)
+      .neq('id', session.staff_id)
+      .order('full_name')
+
+    if (data) setOtherBarbers(data as Staff[])
+  }, [supabase, session.branch_id, session.staff_id])
+
   useEffect(() => {
     fetchQueue()
     refreshStats()
+    fetchOtherBarbers()
 
     const channel = supabase
       .channel('queue')
@@ -96,12 +113,24 @@ export function QueuePanel({
           refreshStats()
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'staff',
+          filter: `branch_id=eq.${session.branch_id}`,
+        },
+        () => {
+          fetchOtherBarbers()
+        }
+      )
       .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, session.branch_id, fetchQueue, refreshStats])
+  }, [supabase, session.branch_id, fetchQueue, refreshStats, fetchOtherBarbers])
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)
@@ -156,6 +185,20 @@ export function QueuePanel({
     setActionLoading(null)
   }
 
+  async function handleReassign(entryId: string, targetBarberId: string) {
+    setActionLoading(entryId)
+    const result = await reassignBarber(entryId, targetBarberId)
+    if ('error' in result) {
+      toast.error(result.error)
+    } else {
+      const target = otherBarbers.find((b) => b.id === targetBarberId)
+      toast.success(`Reasignado a ${target?.full_name ?? 'otro barbero'}`)
+      setReassigningEntryId(null)
+    }
+    await fetchQueue()
+    setActionLoading(null)
+  }
+
   function formatElapsed(timestamp: string) {
     const elapsed = now - new Date(timestamp).getTime()
     if (isNaN(elapsed) || elapsed < 0) return '0m 0s'
@@ -168,47 +211,108 @@ export function QueuePanel({
   }
 
   function renderQueueEntry(entry: QueueEntry) {
+    const isMyEntry = entry.barber_id === session.staff_id
+    const canReassign = isPaused && isMyEntry && entry.status === 'waiting' && otherBarbers.length > 0
+    const isReassigning = reassigningEntryId === entry.id
+
     return (
-      <Card key={entry.id} className="gap-0 py-0">
-        <CardContent className="flex items-center gap-4 p-4">
-          <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-secondary text-lg font-bold">
-            #{entry.position}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-medium">
-              {entry.client?.name ?? 'Cliente'}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              {entry.client?.phone}
-            </p>
-            <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-              <Clock className="size-3" />
-              <span>{formatElapsed(entry.checked_in_at)} esperando</span>
+      <div key={entry.id} className="space-y-2">
+        <Card className="gap-0 py-0">
+          <CardContent className="flex items-center gap-4 p-4">
+            <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-secondary text-lg font-bold">
+              #{entry.position}
             </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {!myActiveEntry && !isPaused && (
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium">
+                {entry.client?.name ?? 'Cliente'}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {entry.client?.phone}
+              </p>
+              <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                <Clock className="size-3" />
+                <span>{formatElapsed(entry.checked_in_at)} esperando</span>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {!myActiveEntry && !isPaused && (
+                <Button
+                  size="lg"
+                  onClick={() => handleStartService(entry.id)}
+                  disabled={actionLoading === entry.id}
+                >
+                  <Scissors className="size-4" />
+                  <span className="hidden sm:inline">Atender</span>
+                </Button>
+              )}
+              {canReassign && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setReassigningEntryId(isReassigning ? null : entry.id)
+                  }
+                  disabled={actionLoading === entry.id}
+                  className="text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10"
+                >
+                  <ArrowRightLeft className="size-4" />
+                  <span className="hidden sm:inline">Reasignar</span>
+                </Button>
+              )}
               <Button
-                size="lg"
-                onClick={() => handleStartService(entry.id)}
+                variant="ghost"
+                size="icon"
+                onClick={() => handleCancel(entry.id)}
                 disabled={actionLoading === entry.id}
+                className="text-muted-foreground hover:text-destructive"
               >
-                <Scissors className="size-4" />
-                <span className="hidden sm:inline">Atender</span>
+                <X className="size-4" />
               </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleCancel(entry.id)}
-              disabled={actionLoading === entry.id}
-              className="text-muted-foreground hover:text-destructive"
-            >
-              <X className="size-4" />
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+            </div>
+          </CardContent>
+        </Card>
+
+        {isReassigning && (
+          <Card className="gap-0 border-yellow-500/20 bg-yellow-500/3 py-0 animate-in fade-in slide-in-from-top-2 duration-200">
+            <CardContent className="p-3 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                Reasignar a:
+              </p>
+              <div className="grid gap-1.5">
+                {otherBarbers.map((barber) => (
+                  <button
+                    key={barber.id}
+                    onClick={() => handleReassign(entry.id, barber.id)}
+                    disabled={actionLoading === entry.id}
+                    className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-accent active:bg-accent/80 disabled:opacity-50"
+                  >
+                    <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
+                      {barber.full_name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">
+                        {barber.full_name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {barber.status === 'paused' ? 'En pausa' : 'Disponible'}
+                      </p>
+                    </div>
+                    {actionLoading === entry.id && (
+                      <div className="size-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+                    )}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setReassigningEntryId(null)}
+                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
+              >
+                Cancelar
+              </button>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     )
   }
 

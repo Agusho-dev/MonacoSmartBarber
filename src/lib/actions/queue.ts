@@ -8,6 +8,7 @@ export async function checkinClient(formData: FormData) {
   const name = (formData.get('name') as string).trim()
   const phone = (formData.get('phone') as string).trim()
   const branchId = formData.get('branch_id') as string
+  const barberId = (formData.get('barber_id') as string | null) || null
 
   if (!name || !phone || !branchId) {
     return { error: 'Todos los campos son obligatorios' }
@@ -41,20 +42,25 @@ export async function checkinClient(formData: FormData) {
     p_branch_id: branchId,
   })
 
-  const { error: queueError } = await supabase.from('queue_entries').insert({
-    branch_id: branchId,
-    client_id: clientId,
-    position: position ?? 1,
-    status: 'waiting',
-  })
+  const { data: queueEntry, error: queueError } = await supabase
+    .from('queue_entries')
+    .insert({
+      branch_id: branchId,
+      client_id: clientId,
+      barber_id: barberId,
+      position: position ?? 1,
+      status: 'waiting',
+    })
+    .select('id')
+    .single()
 
-  if (queueError) {
+  if (queueError || !queueEntry) {
     return { error: 'Error al agregar a la cola' }
   }
 
   revalidatePath('/checkin')
   revalidatePath('/barbero/cola')
-  return { success: true, position }
+  return { success: true, position, queueEntryId: queueEntry.id }
 }
 
 export async function startService(queueEntryId: string, barberId: string) {
@@ -152,6 +158,28 @@ export async function reassignBarber(
     return { error: 'Error al reasignar barbero' }
   }
 
+  revalidatePath('/barbero/cola')
+  revalidatePath('/dashboard/cola')
+  return { success: true }
+}
+
+export async function reassignMyBarber(
+  queueEntryId: string,
+  newBarberId: string
+) {
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('queue_entries')
+    .update({ barber_id: newBarberId })
+    .eq('id', queueEntryId)
+    .eq('status', 'waiting')
+
+  if (error) {
+    return { error: 'Error al cambiar barbero' }
+  }
+
+  revalidatePath('/checkin')
   revalidatePath('/barbero/cola')
   revalidatePath('/dashboard/cola')
   return { success: true }
