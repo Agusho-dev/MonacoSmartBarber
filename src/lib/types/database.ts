@@ -58,6 +58,7 @@ export interface QueueEntry {
   barber_id: string | null
   status: QueueStatus
   position: number
+  reward_claimed: boolean
   checked_in_at: string
   started_at: string | null
   completed_at: string | null

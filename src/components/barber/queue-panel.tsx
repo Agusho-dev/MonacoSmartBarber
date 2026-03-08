@@ -24,6 +24,7 @@ import {
   Pause,
   Play,
   DollarSign,
+  Gift,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
@@ -181,6 +182,12 @@ export function QueuePanel({
             <p className="text-sm text-muted-foreground">
               {entry.client?.phone}
             </p>
+            {entry.reward_claimed && (
+              <Badge variant="secondary" className="mt-1 gap-1 text-xs bg-purple-500/15 text-purple-500 hover:bg-purple-500/25 border-purple-500/20">
+                <Gift className="size-3" />
+                Premio reclamado
+              </Badge>
+            )}
             <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
               <Clock className="size-3" />
               <span>{formatElapsed(entry.checked_in_at)} esperando</span>
@@ -415,6 +422,14 @@ export function QueuePanel({
                         {myActiveEntry.client?.phone}
                       </p>
                     </div>
+                    {myActiveEntry.reward_claimed && (
+                      <div className="ml-auto">
+                        <Badge variant="secondary" className="gap-1 bg-purple-500/15 text-purple-500 hover:bg-purple-500/25 border-purple-500/20 px-3 py-1">
+                          <Gift className="size-3.5" />
+                          Tiene premio
+                        </Badge>
+                      </div>
+                    )}
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">

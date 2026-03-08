@@ -15,6 +15,7 @@ import {
   Menu,
   LogOut,
   ListOrdered,
+  Gift,
 } from 'lucide-react'
 import { logout } from '@/lib/actions/auth'
 import { useBranchStore } from '@/stores/branch-store'
@@ -52,6 +53,7 @@ const navItems = [
   { href: '/dashboard/barberos', label: 'Barberos', icon: Scissors },
   { href: '/dashboard/servicios', label: 'Servicios', icon: Sparkles },
   { href: '/dashboard/clientes', label: 'Clientes', icon: Users },
+  { href: '/dashboard/fidelizacion', label: 'Fidelización', icon: Gift },
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3 },
   { href: '/dashboard/finanzas', label: 'Finanzas', icon: DollarSign },
   { href: '/dashboard/configuracion', label: 'Configuración', icon: Settings },

@@ -19,7 +19,7 @@ export default async function ClientesPage() {
   return (
     <ClientesClient
       clients={clients ?? []}
-      visits={visits ?? []}
+      visits={(visits as any) ?? []}
       points={points ?? []}
     />
   )

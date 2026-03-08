@@ -81,7 +81,8 @@ export async function startService(queueEntryId: string, barberId: string) {
 export async function completeService(
   queueEntryId: string,
   paymentMethod: 'cash' | 'card' | 'transfer',
-  serviceId?: string
+  serviceId?: string,
+  isRewardClaim: boolean = false
 ) {
   const supabase = await createClient()
 
@@ -110,9 +111,74 @@ export async function completeService(
 
   const { data: visit } = await supabase
     .from('visits')
-    .select('id')
+    .select('id, client_id, branch_id')
     .eq('queue_entry_id', queueEntryId)
     .single()
+
+  // Handle reward claim deduction explicitly if requested
+  if (isRewardClaim && visit?.client_id && visit?.branch_id) {
+    // 1. Get branch reward config to know the cost
+    const { data: config } = await supabase
+      .from('rewards_config')
+      .select('redemption_threshold')
+      .eq('branch_id', visit.branch_id)
+      .eq('is_active', true)
+      .single()
+
+    const cost = config?.redemption_threshold || 10 // Default fallback
+
+    // 2. Validate user has enough points
+    const { data: clientPoints } = await supabase
+      .from('client_points')
+      .select('points_balance')
+      .eq('client_id', visit.client_id)
+      .eq('branch_id', visit.branch_id)
+      .single()
+
+    if (clientPoints && clientPoints.points_balance >= cost) {
+      // 3. Insert point transaction (negative)
+      await supabase.from('point_transactions').insert({
+        client_id: visit.client_id,
+        visit_id: visit.id,
+        points: -cost,
+        type: 'redeemed',
+        description: 'Canje de beneficio',
+      })
+
+      // 4. Update balance
+      await supabase.rpc('decrement_points', {
+        p_client_id: visit.client_id,
+        p_branch_id: visit.branch_id,
+        p_amount: cost,
+      })
+      
+      // Note: An alternative to RPC is just a direct update since we have the clientPoints record, 
+      // but an RPC or a direct update works:
+      // await supabase.from('client_points').update({ 
+      //   points_balance: clientPoints.points_balance - cost,
+      //   total_redeemed: (clientPoints.total_redeemed || 0) + cost 
+      // }).eq('client_id', visit.client_id).eq('branch_id', visit.branch_id)
+      
+      // We will do the safe straightforward direct update for now:
+      const { data: currentStats } = await supabase
+        .from('client_points')
+        .select('*')
+        .eq('client_id', visit.client_id)
+        .eq('branch_id', visit.branch_id)
+        .single()
+        
+      if (currentStats) {
+        await supabase
+          .from('client_points')
+          .update({
+            points_balance: currentStats.points_balance - cost,
+            total_redeemed: currentStats.total_redeemed + cost,
+          })
+          .eq('client_id', visit.client_id)
+          .eq('branch_id', visit.branch_id)
+      }
+    }
+  }
 
   revalidatePath('/barbero/cola')
   revalidatePath('/dashboard')

@@ -34,18 +34,20 @@ import {
   X,
   ArrowRight,
   ArrowLeft,
+  Gift,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
 const PAYMENT_OPTIONS: {
-  value: PaymentMethod
+  value: PaymentMethod | 'points'
   label: string
-  icon: typeof Banknote
+  icon: React.ElementType
 }[] = [
   { value: 'cash', label: 'Efectivo', icon: Banknote },
   { value: 'card', label: 'Tarjeta', icon: CreditCard },
   { value: 'transfer', label: 'Transferencia', icon: ArrowRightLeft },
+  { value: 'points', label: 'Puntos', icon: Gift },
 ]
 
 interface CompleteServiceDialogProps {
@@ -69,7 +71,7 @@ export function CompleteServiceDialog({
   const [loading, setLoading] = useState(false)
 
   // Step 1
-  const [selectedPayment, setSelectedPayment] = useState<PaymentMethod | null>(null)
+  const [selectedPayment, setSelectedPayment] = useState<PaymentMethod | 'points' | null>(null)
   const [selectedService, setSelectedService] = useState<string>('')
 
   // Step 2
@@ -173,8 +175,9 @@ export function CompleteServiceDialog({
     try {
       const result = await completeService(
         entry.id,
-        selectedPayment,
-        selectedService || undefined
+        selectedPayment === 'points' ? 'cash' : selectedPayment, // Backend will handle points separately later, defaults to cash to satisfy db enum for now
+        selectedService || undefined,
+        selectedPayment === 'points' // pass a flag to the backend action
       )
 
       if ('error' in result) {
@@ -235,12 +238,23 @@ export function CompleteServiceDialog({
 
         <Separator />
 
+        {entry?.reward_claimed && step === 1 && (
+          <div className="rounded-lg border border-purple-500/20 bg-purple-500/10 p-4 text-purple-600 dark:text-purple-400 flex items-start gap-3">
+            <Gift className="size-5 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-semibold text-sm">El cliente solicita canjear un premio</p>
+              <p className="text-xs mt-1 opacity-90">Seleccioná "Puntos" como método de pago para registrar el servicio a costo $0 y descontar los puntos.</p>
+            </div>
+          </div>
+        )}
+
         {step === 1 ? (
           <div className="space-y-6">
             <div>
               <p className="mb-3 text-sm font-medium">Método de pago</p>
               <div className="grid grid-cols-3 gap-3">
                 {PAYMENT_OPTIONS.map((option) => {
+                  if (option.value === 'points' && !entry?.reward_claimed) return null
                   const Icon = option.icon
                   const selected = selectedPayment === option.value
                   return (
