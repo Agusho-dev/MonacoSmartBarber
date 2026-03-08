@@ -36,9 +36,17 @@ export interface Client {
   name: string
   auth_user_id: string | null
   notes: string | null
-  instagram: string | null
   created_at: string
   updated_at: string
+}
+
+export interface ClientFaceDescriptor {
+  id: string
+  client_id: string
+  descriptor: number[]
+  quality_score: number
+  source: 'checkin' | 'barber'
+  created_at: string
 }
 
 export interface Service {
@@ -183,6 +191,7 @@ export interface Database {
       fixed_expenses: { Row: FixedExpense; Insert: Partial<FixedExpense> & Pick<FixedExpense, 'branch_id' | 'name' | 'amount'>; Update: Partial<FixedExpense> }
       visit_photos: { Row: VisitPhoto; Insert: Partial<VisitPhoto> & Pick<VisitPhoto, 'visit_id' | 'storage_path'>; Update: Partial<VisitPhoto> }
       service_tags: { Row: ServiceTag; Insert: Partial<ServiceTag> & Pick<ServiceTag, 'name'>; Update: Partial<ServiceTag> }
+      client_face_descriptors: { Row: ClientFaceDescriptor; Insert: Partial<ClientFaceDescriptor> & Pick<ClientFaceDescriptor, 'client_id' | 'descriptor'>; Update: Partial<ClientFaceDescriptor> }
     }
     Views: {
       branch_occupancy: { Row: BranchOccupancy }
