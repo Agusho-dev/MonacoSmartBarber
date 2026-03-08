@@ -3,15 +3,28 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { startService, cancelQueueEntry } from '@/lib/actions/queue'
+import { toggleBarberStatus, fetchBarberDayStats } from '@/lib/actions/barber'
 import { logoutBarber } from '@/lib/actions/auth'
-import type { QueueEntry } from '@/lib/types/database'
+import { formatCurrency } from '@/lib/format'
+import type { QueueEntry, StaffStatus } from '@/lib/types/database'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Clock, User, Scissors, LogOut, Check, X } from 'lucide-react'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import {
+  Clock,
+  User,
+  Scissors,
+  LogOut,
+  Check,
+  X,
+  Pause,
+  Play,
+  DollarSign,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
 import { ClientHistory } from './client-history'
@@ -26,16 +39,26 @@ interface BarberSession {
 interface QueuePanelProps {
   session: BarberSession
   branchName: string
+  initialStatus?: StaffStatus
 }
 
-export function QueuePanel({ session, branchName }: QueuePanelProps) {
+export function QueuePanel({
+  session,
+  branchName,
+  initialStatus = 'available',
+}: QueuePanelProps) {
   const [entries, setEntries] = useState<QueueEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
   const [now, setNow] = useState(Date.now())
+  const [barberStatus, setBarberStatus] = useState<StaffStatus>(initialStatus)
+  const [statusLoading, setStatusLoading] = useState(false)
+  const [dayStats, setDayStats] = useState({ servicesCount: 0, revenue: 0 })
 
   const supabase = useMemo(() => createClient(), [])
+
+  const isPaused = barberStatus === 'paused'
 
   const fetchQueue = useCallback(async () => {
     const { data } = await supabase
@@ -49,8 +72,14 @@ export function QueuePanel({ session, branchName }: QueuePanelProps) {
     setLoading(false)
   }, [supabase, session.branch_id])
 
+  const refreshStats = useCallback(async () => {
+    const stats = await fetchBarberDayStats(session.staff_id, session.branch_id)
+    setDayStats(stats)
+  }, [session.staff_id, session.branch_id])
+
   useEffect(() => {
     fetchQueue()
+    refreshStats()
 
     const channel = supabase
       .channel('queue')
@@ -62,14 +91,17 @@ export function QueuePanel({ session, branchName }: QueuePanelProps) {
           table: 'queue_entries',
           filter: `branch_id=eq.${session.branch_id}`,
         },
-        () => fetchQueue()
+        () => {
+          fetchQueue()
+          refreshStats()
+        }
       )
       .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, session.branch_id, fetchQueue])
+  }, [supabase, session.branch_id, fetchQueue, refreshStats])
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)
@@ -79,10 +111,34 @@ export function QueuePanel({ session, branchName }: QueuePanelProps) {
   const myActiveEntry = entries.find(
     (e) => e.barber_id === session.staff_id && e.status === 'in_progress'
   )
-  const waitingEntries = entries.filter((e) => e.status === 'waiting')
+
+  // "Mi cola": clients that have no barber assigned or are assigned to me
+  const myWaitingEntries = entries.filter(
+    (e) =>
+      e.status === 'waiting' &&
+      (!e.barber_id || e.barber_id === session.staff_id)
+  )
+
+  // "Cola general": ALL waiting clients
+  const allWaitingEntries = entries.filter((e) => e.status === 'waiting')
+
   const otherInProgress = entries.filter(
     (e) => e.status === 'in_progress' && e.barber_id !== session.staff_id
   )
+
+  async function handleToggleStatus() {
+    setStatusLoading(true)
+    const result = await toggleBarberStatus(session.staff_id)
+    if ('error' in result) {
+      toast.error(result.error)
+    } else if (result.status) {
+      setBarberStatus(result.status)
+      toast.success(
+        result.status === 'paused' ? 'En pausa' : 'Disponible'
+      )
+    }
+    setStatusLoading(false)
+  }
 
   async function handleStartService(entryId: string) {
     setActionLoading(entryId)
@@ -111,6 +167,101 @@ export function QueuePanel({ session, branchName }: QueuePanelProps) {
     return `${minutes}m ${seconds}s`
   }
 
+  function renderQueueEntry(entry: QueueEntry) {
+    return (
+      <Card key={entry.id} className="gap-0 py-0">
+        <CardContent className="flex items-center gap-4 p-4">
+          <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-secondary text-lg font-bold">
+            #{entry.position}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-medium">
+              {entry.client?.name ?? 'Cliente'}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {entry.client?.phone}
+            </p>
+            <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+              <Clock className="size-3" />
+              <span>{formatElapsed(entry.checked_in_at)} esperando</span>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {!myActiveEntry && !isPaused && (
+              <Button
+                size="lg"
+                onClick={() => handleStartService(entry.id)}
+                disabled={actionLoading === entry.id}
+              >
+                <Scissors className="size-4" />
+                <span className="hidden sm:inline">Atender</span>
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => handleCancel(entry.id)}
+              disabled={actionLoading === entry.id}
+              className="text-muted-foreground hover:text-destructive"
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  function renderInProgressOthers() {
+    if (otherInProgress.length === 0) return null
+    return (
+      <>
+        <div className="flex items-center gap-3 pt-4">
+          <Separator className="flex-1" />
+          <span className="whitespace-nowrap text-xs text-muted-foreground">
+            En atención por otros barberos
+          </span>
+          <Separator className="flex-1" />
+        </div>
+        {otherInProgress.map((entry) => (
+          <Card
+            key={entry.id}
+            className="gap-0 border-dashed py-0 opacity-60"
+          >
+            <CardContent className="flex items-center gap-4 p-4">
+              <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-secondary">
+                <Scissors className="size-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium">
+                  {entry.client?.name ?? 'Cliente'}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Atendido por {entry.barber?.full_name ?? 'otro barbero'}
+                </p>
+                {entry.started_at && (
+                  <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                    <Clock className="size-3" />
+                    <span>{formatElapsed(entry.started_at)}</span>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </>
+    )
+  }
+
+  function renderEmptyQueue() {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+        <User className="mb-3 size-10 opacity-30" />
+        <p className="text-sm">No hay clientes en espera</p>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-dvh flex-col bg-background">
       {/* Top bar */}
@@ -124,117 +275,122 @@ export function QueuePanel({ session, branchName }: QueuePanelProps) {
             <p className="mt-0.5 text-sm text-muted-foreground">{branchName}</p>
           </div>
         </div>
-        <form action={logoutBarber}>
-          <Button variant="ghost" size="sm" type="submit">
-            <LogOut className="size-4" />
-            <span className="hidden sm:inline">Salir</span>
+        <div className="flex items-center gap-2">
+          <Button
+            variant={isPaused ? 'default' : 'outline'}
+            size="sm"
+            onClick={handleToggleStatus}
+            disabled={statusLoading}
+            className={
+              isPaused
+                ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/30'
+                : ''
+            }
+          >
+            {isPaused ? (
+              <>
+                <Play className="size-4" />
+                <span className="hidden sm:inline">Reanudar</span>
+              </>
+            ) : (
+              <>
+                <Pause className="size-4" />
+                <span className="hidden sm:inline">Pausa</span>
+              </>
+            )}
           </Button>
-        </form>
+          <form action={logoutBarber}>
+            <Button variant="ghost" size="sm" type="submit">
+              <LogOut className="size-4" />
+              <span className="hidden sm:inline">Salir</span>
+            </Button>
+          </form>
+        </div>
       </header>
+
+      {/* Day stats bar */}
+      <div className="flex items-center gap-6 border-b px-4 py-2 md:px-6">
+        <div className="flex items-center gap-2 text-sm">
+          <Scissors className="size-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">Hoy:</span>
+          <span className="font-semibold">{dayStats.servicesCount} servicios</span>
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <DollarSign className="size-3.5 text-muted-foreground" />
+          <span className="font-semibold">{formatCurrency(dayStats.revenue)}</span>
+        </div>
+        {isPaused && (
+          <Badge
+            variant="outline"
+            className="ml-auto bg-yellow-500/15 text-yellow-400 border-yellow-500/30"
+          >
+            En pausa
+          </Badge>
+        )}
+      </div>
 
       <main className="flex flex-1 flex-col overflow-hidden lg:flex-row">
         {/* Queue list */}
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b lg:border-b-0 lg:border-r">
-          <div className="flex items-center justify-between px-4 py-3 md:px-6">
-            <h2 className="text-lg font-semibold">Cola de espera</h2>
-            <Badge variant="secondary">{waitingEntries.length} esperando</Badge>
-          </div>
-          <Separator />
-          <ScrollArea className="flex-1">
-            <div className="space-y-2 p-4 md:p-6">
-              {loading ? (
-                Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-[88px] w-full rounded-xl" />
-                ))
-              ) : waitingEntries.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                  <User className="mb-3 size-10 opacity-30" />
-                  <p className="text-sm">No hay clientes en espera</p>
-                </div>
-              ) : (
-                waitingEntries.map((entry) => (
-                  <Card key={entry.id} className="gap-0 py-0">
-                    <CardContent className="flex items-center gap-4 p-4">
-                      <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-secondary text-lg font-bold">
-                        #{entry.position}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-medium">
-                          {entry.client?.name ?? 'Cliente'}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {entry.client?.phone}
-                        </p>
-                        <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                          <Clock className="size-3" />
-                          <span>{formatElapsed(entry.checked_in_at)} esperando</span>
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        {!myActiveEntry && (
-                          <Button
-                            size="lg"
-                            onClick={() => handleStartService(entry.id)}
-                            disabled={actionLoading === entry.id}
-                          >
-                            <Scissors className="size-4" />
-                            <span className="hidden sm:inline">Atender</span>
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleCancel(entry.id)}
-                          disabled={actionLoading === entry.id}
-                          className="text-muted-foreground hover:text-destructive"
-                        >
-                          <X className="size-4" />
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))
-              )}
-
-              {otherInProgress.length > 0 && (
-                <>
-                  <div className="flex items-center gap-3 pt-4">
-                    <Separator className="flex-1" />
-                    <span className="whitespace-nowrap text-xs text-muted-foreground">
-                      En atención por otros barberos
-                    </span>
-                    <Separator className="flex-1" />
-                  </div>
-                  {otherInProgress.map((entry) => (
-                    <Card
-                      key={entry.id}
-                      className="gap-0 border-dashed py-0 opacity-60"
-                    >
-                      <CardContent className="flex items-center gap-4 p-4">
-                        <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-secondary">
-                          <Scissors className="size-5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium">
-                            {entry.client?.name ?? 'Cliente'}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Atendido por {entry.barber?.full_name ?? 'otro barbero'}
-                          </p>
-                          {entry.started_at && (
-                            <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                              <Clock className="size-3" />
-                              <span>{formatElapsed(entry.started_at)}</span>
-                            </div>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </>
-              )}
+          <Tabs defaultValue="my-queue" className="flex flex-1 flex-col overflow-hidden">
+            <div className="px-4 py-3 md:px-6">
+              <TabsList className="w-full">
+                <TabsTrigger value="my-queue" className="flex-1">
+                  Mi cola
+                  <Badge variant="secondary" className="ml-2">
+                    {myWaitingEntries.length}
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger value="general-queue" className="flex-1">
+                  Cola general
+                  <Badge variant="secondary" className="ml-2">
+                    {allWaitingEntries.length}
+                  </Badge>
+                </TabsTrigger>
+              </TabsList>
             </div>
-          </ScrollArea>
+            <Separator />
+
+            <TabsContent
+              value="my-queue"
+              className="mt-0 flex-1 overflow-hidden"
+            >
+              <ScrollArea className="h-full">
+                <div className="space-y-2 p-4 md:p-6">
+                  {loading ? (
+                    Array.from({ length: 3 }).map((_, i) => (
+                      <Skeleton key={i} className="h-[88px] w-full rounded-xl" />
+                    ))
+                  ) : myWaitingEntries.length === 0 ? (
+                    renderEmptyQueue()
+                  ) : (
+                    myWaitingEntries.map(renderQueueEntry)
+                  )}
+                  {!loading && renderInProgressOthers()}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent
+              value="general-queue"
+              className="mt-0 flex-1 overflow-hidden"
+            >
+              <ScrollArea className="h-full">
+                <div className="space-y-2 p-4 md:p-6">
+                  {loading ? (
+                    Array.from({ length: 3 }).map((_, i) => (
+                      <Skeleton key={i} className="h-[88px] w-full rounded-xl" />
+                    ))
+                  ) : allWaitingEntries.length === 0 ? (
+                    renderEmptyQueue()
+                  ) : (
+                    allWaitingEntries.map(renderQueueEntry)
+                  )}
+                  {!loading && renderInProgressOthers()}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+          </Tabs>
         </section>
 
         {/* Current client */}
@@ -305,7 +461,9 @@ export function QueuePanel({ session, branchName }: QueuePanelProps) {
                 <Scissors className="mb-3 size-12 opacity-15" />
                 <p className="font-medium">Sin cliente en atención</p>
                 <p className="mt-1 max-w-[220px] text-xs opacity-60">
-                  Selecciona un cliente de la cola para comenzar
+                  {isPaused
+                    ? 'Estás en pausa. Reanudate para atender clientes.'
+                    : 'Selecciona un cliente de la cola para comenzar'}
                 </p>
               </div>
             )}

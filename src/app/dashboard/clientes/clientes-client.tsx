@@ -1,10 +1,11 @@
 'use client'
 
-import { useMemo, useState, useEffect, useCallback } from 'react'
-import { Search, Eye, Star, Tag, Camera } from 'lucide-react'
+import { useMemo, useState, useEffect, useCallback, useTransition } from 'react'
+import { Search, Eye, Star, Tag, Camera, Save } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
+import { updateClientNotes } from '@/lib/actions/clients'
 import type { Client } from '@/lib/types/database'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -25,6 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { toast } from 'sonner'
 
 interface VisitRow {
   id: string
@@ -89,6 +91,8 @@ export function ClientesClient({ clients, visits, points }: Props) {
   const [detailClient, setDetailClient] = useState<Client | null>(null)
   const [photos, setPhotos] = useState<PhotoRow[]>([])
   const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null)
+  const [editableNotes, setEditableNotes] = useState('')
+  const [isSavingNotes, startSavingNotes] = useTransition()
 
   const now = Date.now()
   const thirtyDaysMs = 30 * 86400000
@@ -237,10 +241,12 @@ export function ClientesClient({ clients, visits, points }: Props) {
 
   useEffect(() => {
     if (detailClient) {
+      setEditableNotes(detailClient.notes ?? '')
       const ids = clientVisitHistory.map((v) => v.id)
       loadPhotos(ids)
     } else {
       setPhotos([])
+      setEditableNotes('')
     }
   }, [detailClient, clientVisitHistory, loadPhotos])
 
@@ -401,12 +407,38 @@ export function ClientesClient({ clients, visits, points }: Props) {
                 </div>
               )}
 
-              {detailClient.notes && (
-                <div className="text-sm">
-                  <p className="text-muted-foreground">Notas del cliente</p>
-                  <p>{detailClient.notes}</p>
-                </div>
-              )}
+              <div className="text-sm space-y-2">
+                <p className="font-medium">Observaciones internas</p>
+                <textarea
+                  value={editableNotes}
+                  onChange={(e) => setEditableNotes(e.target.value)}
+                  placeholder="Ej: Prefiere degradé bajo, alérgico a ciertos productos..."
+                  rows={2}
+                  className="w-full resize-none rounded-lg border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isSavingNotes || editableNotes === (detailClient.notes ?? '')}
+                  onClick={() => {
+                    startSavingNotes(async () => {
+                      const result = await updateClientNotes(
+                        detailClient.id,
+                        editableNotes.trim() || null
+                      )
+                      if (result.error) {
+                        toast.error(result.error)
+                      } else {
+                        toast.success('Notas guardadas')
+                        detailClient.notes = editableNotes.trim() || null
+                      }
+                    })
+                  }}
+                >
+                  <Save className="mr-2 size-3.5" />
+                  {isSavingNotes ? 'Guardando...' : 'Guardar notas'}
+                </Button>
+              </div>
 
               <Separator />
 

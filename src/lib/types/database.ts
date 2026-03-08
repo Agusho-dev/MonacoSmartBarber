@@ -2,6 +2,7 @@ export type UserRole = 'owner' | 'admin' | 'receptionist' | 'barber'
 export type QueueStatus = 'waiting' | 'in_progress' | 'completed' | 'cancelled'
 export type PaymentMethod = 'cash' | 'card' | 'transfer'
 export type PointTxType = 'earned' | 'redeemed'
+export type StaffStatus = 'available' | 'paused'
 
 export interface Branch {
   id: string
@@ -22,6 +23,7 @@ export interface Staff {
   email: string | null
   pin: string | null
   commission_pct: number
+  status: StaffStatus
   is_active: boolean
   created_at: string
   updated_at: string

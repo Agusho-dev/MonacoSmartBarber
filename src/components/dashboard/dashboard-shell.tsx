@@ -14,6 +14,7 @@ import {
   Settings,
   Menu,
   LogOut,
+  ListOrdered,
 } from 'lucide-react'
 import { logout } from '@/lib/actions/auth'
 import { useBranchStore } from '@/stores/branch-store'
@@ -46,6 +47,7 @@ import {
 
 const navItems = [
   { href: '/dashboard', label: 'Inicio', icon: LayoutDashboard },
+  { href: '/dashboard/cola', label: 'Cola', icon: ListOrdered },
   { href: '/dashboard/sucursales', label: 'Sucursales', icon: Building2 },
   { href: '/dashboard/barberos', label: 'Barberos', icon: Scissors },
   { href: '/dashboard/servicios', label: 'Servicios', icon: Sparkles },

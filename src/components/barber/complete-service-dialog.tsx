@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { completeService } from '@/lib/actions/queue'
 import { saveVisitDetails } from '@/lib/actions/visit-history'
+import { updateClientNotes } from '@/lib/actions/clients'
 import { compressToWebP, uploadVisitPhotos } from '@/lib/image-utils'
 import type { QueueEntry, Service, ServiceTag, PaymentMethod } from '@/lib/types/database'
 import {
@@ -79,6 +80,8 @@ export function CompleteServiceDialog({
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
+  const [clientNotes, setClientNotes] = useState('')
+  const [originalClientNotes, setOriginalClientNotes] = useState('')
 
   useEffect(() => {
     if (!entry) {
@@ -91,7 +94,23 @@ export function CompleteServiceDialog({
       setPhotoFiles([])
       photoPreviews.forEach(URL.revokeObjectURL)
       setPhotoPreviews([])
+      setClientNotes('')
+      setOriginalClientNotes('')
       return
+    }
+
+    // Load existing client notes
+    if (entry.client_id) {
+      supabase
+        .from('clients')
+        .select('notes')
+        .eq('id', entry.client_id)
+        .single()
+        .then(({ data }) => {
+          const notes = data?.notes ?? ''
+          setClientNotes(notes)
+          setOriginalClientNotes(notes)
+        })
     }
 
     supabase
@@ -184,6 +203,14 @@ export function CompleteServiceDialog({
         }
       }
 
+      // Save client notes if changed
+      if (clientNotes.trim() !== originalClientNotes) {
+        await updateClientNotes(
+          entry.client_id,
+          clientNotes.trim() || null
+        )
+      }
+
       onCompleted?.()
     } catch {
       toast.error('Error al finalizar el servicio')
@@ -274,9 +301,9 @@ export function CompleteServiceDialog({
           </div>
         ) : (
           <div className="space-y-5">
-            {/* Notes */}
+            {/* Service notes */}
             <div>
-              <p className="mb-2 text-sm font-medium">Descripción</p>
+              <p className="mb-2 text-sm font-medium">Descripción del corte</p>
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
@@ -395,6 +422,18 @@ export function CompleteServiceDialog({
                   Galería
                 </Button>
               </div>
+            </div>
+
+            {/* Client notes */}
+            <div>
+              <p className="mb-2 text-sm font-medium">Notas del cliente</p>
+              <textarea
+                value={clientNotes}
+                onChange={(e) => setClientNotes(e.target.value)}
+                placeholder="Ej: Prefiere degradé bajo, alérgico a ciertos productos..."
+                rows={2}
+                className="w-full resize-none rounded-lg border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
             </div>
 
             <div className="flex gap-3">

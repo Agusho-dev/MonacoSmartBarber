@@ -132,5 +132,27 @@ export async function cancelQueueEntry(queueEntryId: string) {
   }
 
   revalidatePath('/barbero/cola')
+  revalidatePath('/dashboard/cola')
+  return { success: true }
+}
+
+export async function reassignBarber(
+  queueEntryId: string,
+  newBarberId: string | null
+) {
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('queue_entries')
+    .update({ barber_id: newBarberId })
+    .eq('id', queueEntryId)
+    .eq('status', 'waiting')
+
+  if (error) {
+    return { error: 'Error al reasignar barbero' }
+  }
+
+  revalidatePath('/barbero/cola')
+  revalidatePath('/dashboard/cola')
   return { success: true }
 }
