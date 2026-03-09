@@ -22,10 +22,14 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 
@@ -293,11 +297,11 @@ export function ClientesClient({ clients, visits, points }: Props) {
           <TableHeader>
             <TableRow>
               <TableHead>Nombre</TableHead>
-              <TableHead>Teléfono</TableHead>
-              <TableHead className="text-right">Total visitas</TableHead>
-              <TableHead>Última visita</TableHead>
-              <TableHead>Segmento</TableHead>
-              <TableHead className="text-right">Puntos</TableHead>
+              <TableHead className="hidden sm:table-cell">Teléfono</TableHead>
+              <TableHead className="text-right hidden md:table-cell">Total visitas</TableHead>
+              <TableHead className="hidden md:table-cell">Última visita</TableHead>
+              <TableHead className="hidden lg:table-cell">Segmento</TableHead>
+              <TableHead className="text-right hidden sm:table-cell">Puntos</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
@@ -323,23 +327,23 @@ export function ClientesClient({ clients, visits, points }: Props) {
               return (
                 <TableRow key={client.id}>
                   <TableCell className="font-medium">{client.name}</TableCell>
-                  <TableCell className="font-mono text-sm">
+                  <TableCell className="font-mono text-sm hidden sm:table-cell">
                     {client.phone}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right hidden md:table-cell">
                     {displayStats?.totalVisits ?? 0}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden md:table-cell">
                     {displayStats?.lastVisitDate
                       ? formatDate(displayStats.lastVisitDate)
                       : '—'}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden lg:table-cell">
                     <Badge variant="outline" className={segCfg.className}>
                       {segCfg.label}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right">{pts}</TableCell>
+                  <TableCell className="text-right hidden sm:table-cell">{pts}</TableCell>
                   <TableCell className="text-right">
                     <Button
                       variant="ghost"
@@ -356,260 +360,257 @@ export function ClientesClient({ clients, visits, points }: Props) {
         </Table>
       </div>
 
-      {/* Client profile dialog */}
-      <Dialog
+      {/* Client profile sheet */}
+      <Sheet
         open={!!detailClient}
         onOpenChange={(open) => !open && setDetailClient(null)}
       >
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{detailClient?.name}</DialogTitle>
-          </DialogHeader>
+        <SheetContent className="w-full !max-w-[480px] overflow-y-auto p-0">
+          {detailClient && (() => {
+            const segment = getSegment(detailClient)
+            const segCfg = segmentConfig[segment]
+            const pts = pointsMap.get(detailClient.id) ?? 0
+            const stats = branchClientStats.get(detailClient.id)
 
-          {detailClient && (
-            <div className="space-y-4">
-              {/* Summary row */}
-              <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
-                <div>
-                  <p className="text-muted-foreground">Teléfono</p>
-                  <p className="font-mono">{detailClient.phone}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Puntos</p>
-                  <p className="font-medium">
-                    {pointsMap.get(detailClient.id) ?? 0}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Cliente desde</p>
-                  <p>{formatDate(detailClient.created_at)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Segmento</p>
-                  <Badge
-                    variant="outline"
-                    className={
-                      segmentConfig[getSegment(detailClient)].className
-                    }
-                  >
-                    {segmentConfig[getSegment(detailClient)].label}
-                  </Badge>
-                </div>
-              </div>
+            return (
+              <>
+                {/* Header with gradient accent */}
+                <div className="relative border-b bg-gradient-to-b from-white/[0.03] to-transparent px-6 pb-5 pt-6">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="truncate text-xl font-bold tracking-tight">
+                        {detailClient.name}
+                      </h2>
+                      <p className="mt-0.5 font-mono text-sm text-muted-foreground">
+                        {detailClient.phone}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={`shrink-0 ${segCfg.className}`}>
+                      {segCfg.label}
+                    </Badge>
+                  </div>
 
-              <div className="flex flex-wrap items-center gap-2 pt-2">
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  className="bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500/20"
-                  onClick={() => window.open(`https://wa.me/${detailClient.phone.replace(/\D/g, '')}`, '_blank')}
-                >
-                  <MessageCircle className="mr-2 size-4" />
-                  WhatsApp
-                </Button>
-                {detailClient.instagram && (
-                  <Button 
-                    size="sm" 
-                    variant="outline" 
-                    className="bg-pink-500/10 text-pink-500 border-pink-500/20 hover:bg-pink-500/20"
-                    onClick={() => window.open(`https://instagram.com/${detailClient.instagram?.replace('@', '')}`, '_blank')}
-                  >
-                    <Instagram className="mr-2 size-4" />
-                    Instagram
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="ml-auto"
-                  onClick={async () => {
-                    if (!selectedBranchId) {
-                      toast.error('Debes seleccionar una sucursal específica arriba a la derecha para añadir clientes a la cola.')
-                      return
-                    }
-
-                    const formData = new FormData()
-                    formData.append('name', detailClient.name)
-                    formData.append('phone', detailClient.phone)
-                    formData.append('branch_id', selectedBranchId!)
-                    
-                    const res = await checkinClient(formData)
-                    if (res?.error) {
-                      toast.error(res.error)
-                    } else {
-                      toast.success(`${detailClient.name} añadido a la cola`)
-                    }
-                  }}
-                >
-                  <Plus className="mr-2 size-4" />
-                  Añadir a cola
-                </Button>
-              </div>
-
-              {/* Frequent barber */}
-              {frequentBarber && (
-                <div className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
-                  <Star className="size-4 text-yellow-400" />
-                  <span className="text-muted-foreground">
-                    Barbero habitual:{' '}
-                    <strong className="text-foreground">
-                      {frequentBarber.name}
-                    </strong>{' '}
-                    ({frequentBarber.count} visitas)
-                  </span>
-                </div>
-              )}
-
-              <div className="text-sm space-y-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Usuario de Instagram</label>
-                  <div className="relative">
-                    <Instagram className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-                    <Input
-                      value={editableInstagram}
-                      onChange={(e) => setEditableInstagram(e.target.value)}
-                      placeholder="@usuario"
-                      className="pl-9 h-9"
-                    />
+                  {/* Stats row */}
+                  <div className="mt-4 grid grid-cols-3 gap-3">
+                    <div className="rounded-lg border bg-card/50 px-3 py-2.5 text-center">
+                      <p className="text-xs text-muted-foreground">Visitas</p>
+                      <p className="text-lg font-semibold tabular-nums">
+                        {stats?.totalVisits ?? 0}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-card/50 px-3 py-2.5 text-center">
+                      <p className="text-xs text-muted-foreground">Puntos</p>
+                      <p className="text-lg font-semibold tabular-nums">{pts}</p>
+                    </div>
+                    <div className="rounded-lg border bg-card/50 px-3 py-2.5 text-center">
+                      <p className="text-xs text-muted-foreground">Cliente desde</p>
+                      <p className="text-sm font-medium">{formatDate(detailClient.created_at)}</p>
+                    </div>
                   </div>
                 </div>
-                
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Observaciones internas</label>
-                  <textarea
-                    value={editableNotes}
-                    onChange={(e) => setEditableNotes(e.target.value)}
-                    placeholder="Ej: Prefiere degradé bajo, alérgico a ciertos productos..."
-                    rows={2}
-                    className="w-full resize-none rounded-lg border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </div>
-                
-                <div className="flex justify-end">
-                  <Button
-                    size="sm"
-                    variant="default"
-                    disabled={isSavingNotes || (editableNotes === (detailClient.notes ?? '') && editableInstagram === (detailClient.instagram ?? ''))}
-                    onClick={() => {
-                      startSavingNotes(async () => {
-                        const result = await updateClientNotes(
-                          detailClient.id,
-                          editableNotes.trim() || null,
-                          editableInstagram.trim() || null
-                        )
-                        if (result.error) {
-                          toast.error(result.error)
-                        } else {
-                          toast.success('Datos actualizados')
-                          detailClient.notes = editableNotes.trim() || null
-                          detailClient.instagram = editableInstagram.trim() || null
+
+                {/* Content */}
+                <div className="space-y-5 px-6 py-5">
+                  {/* Action buttons */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="h-9 bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500/20 hover:text-green-400 transition-colors"
+                      onClick={() => window.open(`https://wa.me/${detailClient.phone.replace(/\D/g, '')}`, '_blank')}
+                    >
+                      <MessageCircle className="mr-2 size-4" />
+                      WhatsApp
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-9 transition-colors"
+                      onClick={async () => {
+                        if (!selectedBranchId) {
+                          toast.error('Seleccioná una sucursal para añadir a la cola.')
+                          return
                         }
-                      })
-                    }}
-                  >
-                    <Save className="mr-2 size-3.5" />
-                    {isSavingNotes ? 'Guardando...' : 'Guardar cambios'}
-                  </Button>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Visit history */}
-              <div>
-                <p className="mb-3 text-sm font-medium">
-                  Historial de visitas ({clientVisitHistory.length})
-                </p>
-                <ScrollArea className="h-[360px]">
-                  {clientVisitHistory.length === 0 && (
-                    <p className="py-4 text-center text-sm text-muted-foreground">
-                      Sin visitas registradas
-                    </p>
-                  )}
-                  <div className="space-y-3 pr-2">
-                    {clientVisitHistory.map((visit) => {
-                      const visitPhotos = photosByVisit.get(visit.id) ?? []
-                      return (
-                        <div
-                          key={visit.id}
-                          className="space-y-2 rounded-lg border p-3"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="text-sm font-medium">
-                                {visit.service?.name ?? 'Servicio'}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                {visit.barber?.full_name ?? 'Barbero'}{' '}
-                                &middot; {formatDateTime(visit.completed_at)}
-                              </p>
-                            </div>
-                            <p className="text-sm font-medium">
-                              {formatCurrency(visit.amount)}
-                            </p>
-                          </div>
-
-                          {visit.notes && (
-                            <p className="text-xs text-muted-foreground">
-                              {visit.notes}
-                            </p>
-                          )}
-
-                          {visit.tags && visit.tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {visit.tags.map((tag: string) => (
-                                <Badge
-                                  key={tag}
-                                  variant="secondary"
-                                  className="gap-1 text-xs"
-                                >
-                                  <Tag className="size-2.5" />
-                                  {tag}
-                                </Badge>
-                              ))}
-                            </div>
-                          )}
-
-                          {visitPhotos.length > 0 && (
-                            <div className="flex gap-2 overflow-x-auto pt-1">
-                              {visitPhotos.map((photo) => {
-                                const url = getUrl(photo.storage_path)
-                                return (
-                                  <button
-                                    key={photo.id}
-                                    type="button"
-                                    onClick={() => setEnlargedPhoto(url)}
-                                    className="shrink-0"
-                                  >
-                                    <img
-                                      src={url}
-                                      alt="Corte"
-                                      className="size-20 rounded-md border object-cover transition-opacity hover:opacity-80"
-                                    />
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          )}
-
-                          {visitPhotos.length === 0 &&
-                            !visit.notes &&
-                            (!visit.tags || visit.tags.length === 0) && (
-                              <div className="flex items-center gap-1 text-xs text-muted-foreground/50">
-                                <Camera className="size-3" />
-                                Sin detalles adicionales
-                              </div>
-                            )}
-                        </div>
-                      )
-                    })}
+                        const formData = new FormData()
+                        formData.append('name', detailClient.name)
+                        formData.append('phone', detailClient.phone)
+                        formData.append('branch_id', selectedBranchId!)
+                        const res = await checkinClient(formData)
+                        if (res?.error) {
+                          toast.error(res.error)
+                        } else {
+                          toast.success(`${detailClient.name} añadido a la cola`)
+                        }
+                      }}
+                    >
+                      <Plus className="mr-2 size-4" />
+                      Añadir a cola
+                    </Button>
                   </div>
-                </ScrollArea>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+
+                  {/* Frequent barber */}
+                  {frequentBarber && (
+                    <div className="flex items-center gap-2.5 rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-3 py-2.5 text-sm">
+                      <Star className="size-4 shrink-0 text-yellow-400" />
+                      <span className="text-muted-foreground">
+                        Barbero habitual:{' '}
+                        <strong className="text-foreground">
+                          {frequentBarber.name}
+                        </strong>{' '}
+                        ({frequentBarber.count} visitas)
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Instagram & Notes section */}
+                  <div className="space-y-3 rounded-lg border bg-card/30 p-4">
+                    <div>
+                      <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                        <Instagram className="size-3" />
+                        Instagram
+                      </label>
+                      <Input
+                        value={editableInstagram}
+                        onChange={(e) => setEditableInstagram(e.target.value)}
+                        placeholder="@usuario"
+                        className="h-9"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="mb-1.5 text-xs font-medium text-muted-foreground block">
+                        Observaciones internas
+                      </label>
+                      <textarea
+                        value={editableNotes}
+                        onChange={(e) => setEditableNotes(e.target.value)}
+                        placeholder="Ej: Prefiere degradé bajo, alérgico a ciertos productos..."
+                        rows={2}
+                        className="w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    </div>
+                    
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        variant="default"
+                        className="h-8"
+                        disabled={isSavingNotes || (editableNotes === (detailClient.notes ?? '') && editableInstagram === (detailClient.instagram ?? ''))}
+                        onClick={() => {
+                          startSavingNotes(async () => {
+                            const result = await updateClientNotes(
+                              detailClient.id,
+                              editableNotes.trim() || null,
+                              editableInstagram.trim() || null
+                            )
+                            if (result.error) {
+                              toast.error(result.error)
+                            } else {
+                              toast.success('Datos actualizados')
+                              detailClient.notes = editableNotes.trim() || null
+                              detailClient.instagram = editableInstagram.trim() || null
+                            }
+                          })
+                        }}
+                      >
+                        <Save className="mr-1.5 size-3.5" />
+                        {isSavingNotes ? 'Guardando...' : 'Guardar'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Visit history */}
+                  <div>
+                    <div className="mb-3 flex items-center gap-2">
+                      <h3 className="text-sm font-semibold">Historial de visitas</h3>
+                      <Badge variant="secondary" className="text-xs tabular-nums">
+                        {clientVisitHistory.length}
+                      </Badge>
+                    </div>
+                    <ScrollArea className="h-[320px]">
+                      {clientVisitHistory.length === 0 && (
+                        <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+                          <Camera className="mb-2 size-8 opacity-30" />
+                          <p className="text-sm">Sin visitas registradas</p>
+                        </div>
+                      )}
+                      <div className="space-y-2 pr-2">
+                        {clientVisitHistory.map((visit) => {
+                          const visitPhotos = photosByVisit.get(visit.id) ?? []
+                          return (
+                            <div
+                              key={visit.id}
+                              className="space-y-2 rounded-lg border bg-card/30 p-3 transition-colors hover:bg-card/60"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm font-medium">
+                                    {visit.service?.name ?? 'Servicio'}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {visit.barber?.full_name ?? 'Barbero'}{' '}
+                                    &middot; {formatDateTime(visit.completed_at)}
+                                  </p>
+                                </div>
+                                <p className="text-sm font-semibold tabular-nums">
+                                  {formatCurrency(visit.amount)}
+                                </p>
+                              </div>
+
+                              {visit.notes && (
+                                <p className="text-xs text-muted-foreground">
+                                  {visit.notes}
+                                </p>
+                              )}
+
+                              {visit.tags && visit.tags.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {visit.tags.map((tag: string) => (
+                                    <Badge
+                                      key={tag}
+                                      variant="secondary"
+                                      className="gap-1 text-xs"
+                                    >
+                                      <Tag className="size-2.5" />
+                                      {tag}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              )}
+
+                              {visitPhotos.length > 0 && (
+                                <div className="flex gap-2 overflow-x-auto pt-1">
+                                  {visitPhotos.map((photo) => {
+                                    const url = getUrl(photo.storage_path)
+                                    return (
+                                      <button
+                                        key={photo.id}
+                                        type="button"
+                                        onClick={() => setEnlargedPhoto(url)}
+                                        className="shrink-0"
+                                      >
+                                        <img
+                                          src={url}
+                                          alt="Corte"
+                                          className="size-20 rounded-md border object-cover transition-opacity hover:opacity-80"
+                                        />
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                </div>
+              </>
+            )
+          })()}
+        </SheetContent>
+      </Sheet>
 
       {/* Enlarged photo overlay */}
       <Dialog
