@@ -1301,7 +1301,7 @@ export default function CheckinPage() {
           <div className="text-center">
             <h2 className="text-2xl md:text-3xl font-bold">¿Qué te vas a hacer?</h2>
             <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
-              Elegí un servicio principal
+              Elegí tu servicio
             </p>
           </div>
 
