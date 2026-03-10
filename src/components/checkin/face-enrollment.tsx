@@ -171,10 +171,10 @@ export function FaceEnrollment({
   }, [clientId, source, onComplete, stopCamera, captureOnly, onCapture])
 
   return (
-    <div className="w-full max-w-lg flex flex-col items-center gap-6">
+    <div className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6">
       <div className="text-center">
-        <h2 className="text-3xl font-bold">Registrar tu cara</h2>
-        <p className="text-muted-foreground mt-2 text-lg">
+        <h2 className="text-2xl md:text-3xl font-bold">Registrar tu cara</h2>
+        <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
           {clientName}, mirá a la cámara para futuras visitas
         </p>
       </div>
@@ -193,9 +193,8 @@ export function FaceEnrollment({
         {(state === 'positioning' || state === 'capturing') && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div
-              className={`w-48 h-64 rounded-full border-2 border-dashed transition-colors duration-300 ${
-                faceDetected ? 'border-emerald-400/60' : 'border-white/20'
-              }`}
+              className={`w-48 h-64 rounded-full border-2 border-dashed transition-colors duration-300 ${faceDetected ? 'border-emerald-400/60' : 'border-white/20'
+                }`}
             />
           </div>
         )}
@@ -253,11 +252,11 @@ export function FaceEnrollment({
       {/* Status & instructions */}
       {state === 'positioning' && (
         <div className="text-center space-y-2">
-          <p className={`text-lg font-medium ${faceDetected ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+          <p className={`text-base md:text-lg font-medium ${faceDetected ? 'text-emerald-400' : 'text-muted-foreground'}`}>
             {faceDetected ? '¡Perfecto! Tu cara está bien posicionada' : 'Posicioná tu cara dentro del óvalo'}
           </p>
           {faceDetected && (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs md:text-sm text-muted-foreground">
               Quedate quieto un momento
             </p>
           )}
@@ -269,7 +268,7 @@ export function FaceEnrollment({
         <Button
           onClick={handleCapture}
           disabled={!faceDetected}
-          className="w-full h-16 text-xl rounded-2xl font-semibold"
+          className="w-full h-14 md:h-16 text-lg md:text-xl rounded-2xl font-semibold"
           size="lg"
         >
           <Camera className="size-5 mr-2" />

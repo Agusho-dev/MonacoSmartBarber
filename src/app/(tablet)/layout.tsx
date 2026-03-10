@@ -1,3 +1,5 @@
+import { FullscreenButton } from '@/components/ui/fullscreen-button'
+
 export default function TabletLayout({
   children,
 }: {
@@ -6,6 +8,7 @@ export default function TabletLayout({
   return (
     <div className="min-h-dvh bg-background text-foreground overflow-hidden">
       {children}
+      <FullscreenButton />
     </div>
   )
 }

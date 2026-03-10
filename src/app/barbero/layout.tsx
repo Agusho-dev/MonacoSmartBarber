@@ -2,6 +2,7 @@ import { BarberNav } from '@/components/barber/barber-nav'
 import { getBarberSession } from '@/lib/actions/auth'
 import { BarberFaceCheck } from '@/components/barber/barber-face-check'
 import { createClient } from '@/lib/supabase/server'
+import { FullscreenButton } from '@/components/ui/fullscreen-button'
 
 export default async function BarberLayout({
   children,
@@ -32,6 +33,7 @@ export default async function BarberLayout({
           staffName={session.full_name}
         />
       )}
+      <FullscreenButton />
     </div>
   )
 }

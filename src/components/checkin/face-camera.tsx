@@ -216,11 +216,11 @@ export function FaceCamera({
   }
 
   return (
-    <div className="w-full max-w-lg flex flex-col items-center gap-6">
+    <div className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6">
       <div className="text-center">
-        <h2 className="text-3xl font-bold">Check-in</h2>
+        <h2 className="text-2xl md:text-3xl font-bold">Check-in</h2>
         {branchName && (
-          <p className="text-muted-foreground mt-2 text-lg">{branchName}</p>
+          <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">{branchName}</p>
         )}
       </div>
 
@@ -303,7 +303,7 @@ export function FaceCamera({
       </div>
 
       {/* Status text */}
-      <p className={`text-lg font-medium text-center transition-colors ${statusColor()}`}>
+      <p className={`text-base md:text-lg font-medium text-center transition-colors ${statusColor()}`}>
         {statusLabel()}
       </p>
 
@@ -311,7 +311,7 @@ export function FaceCamera({
       <Button
         onClick={state === 'no_match' ? handleManualNoMatch : onManualEntry}
         variant="outline"
-        className="w-full h-16 text-lg rounded-2xl gap-3"
+        className="w-full h-14 md:h-16 text-base md:text-lg rounded-2xl gap-2 md:gap-3"
       >
         <KeyboardIcon className="size-5" />
         Ingresar manualmente

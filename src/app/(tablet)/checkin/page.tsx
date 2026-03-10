@@ -952,44 +952,44 @@ export default function CheckinPage() {
       {step === 'branch' && (
         <div
           key={`branch-${animKey}`}
-          className="w-full max-w-2xl flex flex-col items-center gap-10 px-8 animate-in fade-in zoom-in-95 duration-500"
+          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-6 md:gap-10 px-4 md:px-8 animate-in fade-in zoom-in-95 duration-500"
         >
-          <div className="flex flex-col items-center gap-5">
-            <div className="size-24 rounded-3xl bg-white/4 border border-white/10 flex items-center justify-center">
-              <Scissors className="size-12 text-white" strokeWidth={1.5} />
+          <div className="flex flex-col items-center gap-4 md:gap-5">
+            <div className="size-20 md:size-24 rounded-[1.5rem] md:rounded-3xl bg-white/4 border border-white/10 flex items-center justify-center">
+              <Scissors className="size-10 md:size-12 text-white" strokeWidth={1.5} />
             </div>
             <div className="text-center">
-              <h1 className="text-5xl font-bold tracking-tight">
+              <h1 className="text-3xl md:text-5xl font-bold tracking-tight">
                 Monaco Smart Barber
               </h1>
-              <p className="text-xl text-muted-foreground mt-3">Bienvenido</p>
+              <p className="text-lg md:text-xl text-muted-foreground mt-2 md:mt-3">Bienvenido</p>
             </div>
           </div>
 
           <div className="w-24 h-px bg-white/10" />
 
           <div className="w-full space-y-4">
-            <p className="text-center text-muted-foreground text-lg">
+            <p className="text-center text-muted-foreground text-base md:text-lg">
               Seleccioná tu sucursal
             </p>
 
             {branches.length === 0 ? (
-              <div className="flex items-center justify-center py-16">
+              <div className="flex items-center justify-center py-10 md:py-16">
                 <Loader2 className="size-8 animate-spin text-muted-foreground" />
               </div>
             ) : (
-              <div className="grid gap-4">
+              <div className="grid gap-3 md:gap-4 w-full">
                 {branches.map((branch) => (
                   <button
                     key={branch.id}
                     onClick={() => selectBranch(branch)}
-                    className="group flex items-center gap-5 w-full rounded-2xl border border-white/8 bg-white/2 p-6 text-left transition-all duration-200 hover:bg-white/6 hover:border-white/20 active:scale-[0.98]"
+                    className="group flex items-center gap-4 md:gap-5 w-full rounded-2xl border border-white/8 bg-white/2 p-4 md:p-6 text-left transition-all duration-200 hover:bg-white/6 hover:border-white/20 active:scale-[0.98]"
                   >
-                    <div className="shrink-0 size-16 rounded-xl bg-white/4 flex items-center justify-center group-hover:bg-white/8 transition-colors duration-200">
-                      <MapPin className="size-7 text-white/60 group-hover:text-white/80 transition-colors" />
+                    <div className="shrink-0 size-12 md:size-16 rounded-xl bg-white/4 flex items-center justify-center group-hover:bg-white/8 transition-colors duration-200">
+                      <MapPin className="size-6 md:size-7 text-white/60 group-hover:text-white/80 transition-colors" />
                     </div>
                     <div className="min-w-0">
-                      <span className="text-2xl font-semibold block">
+                      <span className="text-lg md:text-2xl font-semibold block truncate">
                         {branch.name}
                       </span>
                       {branch.address && (
@@ -1010,29 +1010,29 @@ export default function CheckinPage() {
       {step === 'home' && selectedBranch && (
         <div
           key={`home-${animKey}`}
-          className="w-full max-w-2xl flex flex-col items-center gap-10 px-8 animate-in fade-in zoom-in-95 duration-500"
+          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-8 md:gap-10 px-4 md:px-8 animate-in fade-in zoom-in-95 duration-500"
         >
-          <div className="flex flex-col items-center gap-5">
-            <div className="size-24 rounded-3xl bg-white/4 border border-white/10 flex items-center justify-center">
-              <Scissors className="size-12 text-white" strokeWidth={1.5} />
+          <div className="flex flex-col items-center gap-4 md:gap-5">
+            <div className="size-20 md:size-24 rounded-[1.5rem] md:rounded-3xl bg-white/4 border border-white/10 flex items-center justify-center">
+              <Scissors className="size-10 md:size-12 text-white" strokeWidth={1.5} />
             </div>
             <div className="text-center">
-              <h1 className="text-5xl font-bold tracking-tight">
+              <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
                 Monaco Smart Barber
               </h1>
-              <div className="flex items-center justify-center gap-2 mt-3">
-                <MapPin className="size-5 text-muted-foreground" />
-                <p className="text-xl text-muted-foreground">{selectedBranch.name}</p>
+              <div className="flex items-center justify-center gap-2 mt-2 md:mt-3">
+                <MapPin className="size-4 md:size-5 text-muted-foreground" />
+                <p className="text-lg md:text-xl text-muted-foreground">{selectedBranch.name}</p>
               </div>
             </div>
           </div>
 
           <Button
             onClick={() => goTo('face_scan')}
-            className="w-full max-w-md h-24 text-3xl rounded-3xl font-bold tracking-wide gap-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+            className="w-full max-w-xs md:max-w-md h-16 md:h-24 text-xl md:text-3xl rounded-2xl md:rounded-3xl font-bold tracking-wide gap-3 md:gap-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
             size="lg"
           >
-            <ScanFace className="size-9" strokeWidth={1.5} />
+            <ScanFace className="size-7 md:size-9" strokeWidth={1.5} />
             INGRESAR
           </Button>
 
@@ -1040,18 +1040,18 @@ export default function CheckinPage() {
             <div className="flex items-center gap-6 justify-center">
               <button
                 onClick={() => goTo('phone')}
-                className="flex items-center gap-3 text-muted-foreground hover:text-foreground transition-colors py-3"
+                className="flex items-center gap-2 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-2 md:py-3"
               >
-                <Search className="size-5" />
-                <span className="text-lg">Ya tengo turno</span>
+                <Search className="size-4 md:size-5" />
+                <span className="text-base md:text-lg">Ya tengo turno</span>
               </button>
               <span className="text-white/20">·</span>
               <button
                 onClick={() => goTo('staff_face_scan')}
-                className="flex items-center gap-3 text-muted-foreground hover:text-foreground transition-colors py-3"
+                className="flex items-center gap-2 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-2 md:py-3"
               >
-                <LogIn className="size-5" />
-                <span className="text-lg">Soy barbero</span>
+                <LogIn className="size-4 md:size-5" />
+                <span className="text-base md:text-lg">Soy barbero</span>
               </button>
             </div>
 
@@ -1087,21 +1087,21 @@ export default function CheckinPage() {
       {step === 'no_match_options' && (
         <div
           key={`no-match-opts-${animKey}`}
-          className="w-full max-w-lg flex flex-col items-center gap-8 px-6 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-6 md:gap-8 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => goTo('face_scan'))}
 
-          <div className="text-center mt-4">
-            <div className="size-20 rounded-full bg-white/4 border border-white/10 flex items-center justify-center mx-auto mb-5">
-              <User className="size-10 text-white/60" />
+          <div className="text-center mt-2 md:mt-4">
+            <div className="size-16 md:size-20 rounded-full bg-white/4 border border-white/10 flex items-center justify-center mx-auto mb-4 md:mb-5">
+              <User className="size-8 md:size-10 text-white/60" />
             </div>
-            <h2 className="text-3xl font-bold">No te reconocemos</h2>
-            <p className="text-lg text-muted-foreground mt-3">
+            <h2 className="text-2xl md:text-3xl font-bold">No te reconocemos</h2>
+            <p className="text-base md:text-lg text-muted-foreground mt-2 md:mt-3">
               ¿Cómo querés ingresar?
             </p>
           </div>
 
-          <div className="w-full grid gap-4">
+          <div className="w-full grid gap-3 md:gap-4">
             <button
               onClick={() => {
                 setWantsEnrollment(false)
@@ -1109,14 +1109,14 @@ export default function CheckinPage() {
                 setName('')
                 goTo('phone')
               }}
-              className="group flex items-center gap-5 w-full rounded-2xl border border-white/8 bg-white/2 p-6 text-left transition-all duration-200 hover:bg-white/6 hover:border-white/20 active:scale-[0.98]"
+              className="group flex items-center gap-4 md:gap-5 w-full rounded-2xl border border-white/8 bg-white/2 p-4 md:p-6 text-left transition-all duration-200 hover:bg-white/6 hover:border-white/20 active:scale-[0.98]"
             >
-              <div className="shrink-0 size-16 rounded-xl bg-white/4 flex items-center justify-center group-hover:bg-white/8 transition-colors">
-                <Keyboard className="size-7 text-white/60 group-hover:text-white/80 transition-colors" />
+              <div className="shrink-0 size-12 md:size-16 rounded-xl bg-white/4 flex items-center justify-center group-hover:bg-white/8 transition-colors">
+                <Keyboard className="size-6 md:size-7 text-white/60 group-hover:text-white/80 transition-colors" />
               </div>
               <div>
-                <p className="text-xl font-semibold">Ingresar con teléfono</p>
-                <p className="text-base text-muted-foreground mt-1">
+                <p className="text-lg md:text-xl font-semibold">Ingresar con teléfono</p>
+                <p className="text-sm md:text-base text-muted-foreground mt-1">
                   Ingresá tu número para entrar a la cola
                 </p>
               </div>
@@ -1129,14 +1129,14 @@ export default function CheckinPage() {
                 setName('')
                 goTo('face_enroll')
               }}
-              className="group flex items-center gap-5 w-full rounded-2xl border border-blue-500/20 bg-blue-500/5 p-6 text-left transition-all duration-200 hover:bg-blue-500/10 hover:border-blue-500/30 active:scale-[0.98]"
+              className="group flex items-center gap-4 md:gap-5 w-full rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4 md:p-6 text-left transition-all duration-200 hover:bg-blue-500/10 hover:border-blue-500/30 active:scale-[0.98]"
             >
-              <div className="shrink-0 size-16 rounded-xl bg-blue-500/10 flex items-center justify-center group-hover:bg-blue-500/15 transition-colors">
-                <ScanFace className="size-7 text-blue-400" />
+              <div className="shrink-0 size-12 md:size-16 rounded-xl bg-blue-500/10 flex items-center justify-center group-hover:bg-blue-500/15 transition-colors">
+                <ScanFace className="size-6 md:size-7 text-blue-400" />
               </div>
               <div>
-                <p className="text-xl font-semibold text-blue-300">Registrar mi rostro</p>
-                <p className="text-base text-blue-400/70 mt-1">
+                <p className="text-lg md:text-xl font-semibold text-blue-300">Registrar mi rostro</p>
+                <p className="text-sm md:text-base text-blue-400/70 mt-1">
                   La próxima vez ingresás solo con mirarte
                 </p>
               </div>
@@ -1149,7 +1149,7 @@ export default function CheckinPage() {
       {step === 'phone' && (
         <div
           key={`phone-${animKey}`}
-          className="w-full max-w-md flex flex-col items-center gap-5 px-6 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-md flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             setPhone('')
@@ -1157,8 +1157,8 @@ export default function CheckinPage() {
           })}
 
           <div className="text-center mt-2">
-            <h2 className="text-3xl font-bold">Ingresá tu número</h2>
-            <p className="text-muted-foreground mt-2 text-lg">
+            <h2 className="text-2xl md:text-3xl font-bold">Ingresá tu número</h2>
+            <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
               {selectedBranch?.name}
             </p>
           </div>
@@ -1171,7 +1171,7 @@ export default function CheckinPage() {
       {step === 'name' && (
         <div
           key={`name-${animKey}`}
-          className="w-full max-w-lg flex flex-col items-center gap-6 px-6 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             setPhone('')
@@ -1181,26 +1181,26 @@ export default function CheckinPage() {
           })}
 
           {isReturning ? (
-            <div className="flex flex-col items-center gap-6 mt-6">
-              <div className="size-24 rounded-full bg-white/4 border border-white/10 flex items-center justify-center animate-in zoom-in-75 duration-500">
-                <span className="text-5xl">👋</span>
+            <div className="flex flex-col items-center gap-4 md:gap-6 mt-4 md:mt-6">
+              <div className="size-20 md:size-24 rounded-full bg-white/4 border border-white/10 flex items-center justify-center animate-in zoom-in-75 duration-500">
+                <span className="text-4xl md:text-5xl">👋</span>
               </div>
               <div className="text-center">
-                <h2 className="text-3xl font-bold">¡Bienvenido de vuelta!</h2>
-                <p className="text-4xl font-bold mt-4">{name}</p>
-                <p className="text-muted-foreground mt-3 text-lg">
+                <h2 className="text-2xl md:text-3xl font-bold">¡Bienvenido de vuelta!</h2>
+                <p className="text-3xl md:text-4xl font-bold mt-2 md:mt-4">{name}</p>
+                <p className="text-muted-foreground mt-2 md:mt-3 text-base md:text-lg">
                   Tel: {formatPhone(phone)}
                 </p>
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-6 mt-6 w-full">
+            <div className="flex flex-col items-center gap-4 md:gap-6 mt-4 md:mt-6 w-full">
               <div className="text-center">
-                <h2 className="text-3xl font-bold">¡Primera vez!</h2>
-                <p className="text-xl text-muted-foreground mt-2">
+                <h2 className="text-2xl md:text-3xl font-bold">¡Primera vez!</h2>
+                <p className="text-lg md:text-xl text-muted-foreground mt-1 md:mt-2">
                   Te damos la bienvenida
                 </p>
-                <p className="text-muted-foreground mt-1 text-base">
+                <p className="text-muted-foreground mt-1 text-sm md:text-base">
                   Ingresá tu nombre para continuar
                 </p>
               </div>
@@ -1212,7 +1212,7 @@ export default function CheckinPage() {
                   if (e.key === 'Enter' && name.trim()) goToBarberStep()
                 }}
                 placeholder="Tu nombre"
-                className="h-16 text-2xl text-center rounded-2xl border-white/10 bg-white/3"
+                className="h-14 md:h-16 text-xl md:text-2xl text-center rounded-2xl border-white/10 bg-white/3"
                 autoComplete="off"
               />
             </div>
@@ -1225,7 +1225,7 @@ export default function CheckinPage() {
           <Button
             onClick={goToBarberStep}
             disabled={!name.trim()}
-            className="w-full h-16 text-xl rounded-2xl font-semibold mt-2"
+            className="w-full h-14 md:h-16 text-lg md:text-xl rounded-2xl font-semibold mt-2"
             size="lg"
           >
             Continuar
@@ -1237,7 +1237,7 @@ export default function CheckinPage() {
       {step === 'face_enroll' && (
         <div
           key={`face-enroll-${animKey}`}
-          className="w-full max-w-lg flex flex-col items-center gap-5 px-6 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             if (wantsEnrollment && capturedFaceDescriptors.length === 0) {
@@ -1273,7 +1273,7 @@ export default function CheckinPage() {
       {step === 'barber' && (
         <div
           key={`barber-${animKey}`}
-          className="w-full max-w-2xl flex flex-col items-center gap-6 px-6 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto py-8"
+          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto py-6 md:py-8"
         >
           {backButton(() => {
             setExpandedPausedBarber(null)
@@ -1281,20 +1281,20 @@ export default function CheckinPage() {
           })}
 
           <div className="text-center">
-            <h2 className="text-3xl font-bold">Elegí tu barbero</h2>
-            <p className="text-muted-foreground mt-2 text-lg">
+            <h2 className="text-2xl md:text-3xl font-bold">Elegí tu barbero</h2>
+            <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
               {name} · {selectedBranch?.name}
             </p>
           </div>
 
           {loadingBarbers ? (
-            <div className="flex items-center justify-center py-16">
+            <div className="flex items-center justify-center py-10 md:py-16">
               <Loader2 className="size-8 animate-spin text-muted-foreground" />
             </div>
           ) : barbers.length === 0 ? (
-            <div className="text-center py-16">
-              <User className="size-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-lg text-muted-foreground">
+            <div className="text-center py-10 md:py-16">
+              <User className="size-10 md:size-12 text-muted-foreground mx-auto mb-3 md:mb-4" />
+              <p className="text-base md:text-lg text-muted-foreground">
                 {!branchIsOpen ? 'La sucursal está cerrada' : 'No hay barberos disponibles en este momento'}
               </p>
               {!branchIsOpen && branchHours && (
@@ -1324,19 +1324,19 @@ export default function CheckinPage() {
       {step === 'success' && (
         <div
           key={`success-${animKey}`}
-          className="w-full max-w-2xl flex flex-col items-center gap-8 px-6 animate-in fade-in zoom-in-95 duration-500 max-h-dvh overflow-y-auto py-8"
+          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-6 md:gap-8 px-4 md:px-6 animate-in fade-in zoom-in-95 duration-500 max-h-dvh overflow-y-auto py-6 md:py-8"
         >
           {!changingBarberInSuccess ? (
             <>
-              <div className="size-28 rounded-full bg-white/4 border border-white/10 flex items-center justify-center animate-in zoom-in-50 duration-700">
-                <CheckCircle2 className="size-16 text-white" strokeWidth={1.5} />
+              <div className="size-20 md:size-28 rounded-full bg-white/4 border border-white/10 flex items-center justify-center animate-in zoom-in-50 duration-700">
+                <CheckCircle2 className="size-12 md:size-16 text-white" strokeWidth={1.5} />
               </div>
 
               <div className="text-center">
-                <h2 className="text-4xl font-bold">¡Estás en la fila!</h2>
-                <div className="mt-6 py-8 px-12 rounded-3xl border border-white/10 bg-white/3">
-                  <p className="text-muted-foreground text-lg">Tu turno</p>
-                  <p className="text-8xl font-bold mt-2 tabular-nums">
+                <h2 className="text-3xl md:text-4xl font-bold">¡Estás en la fila!</h2>
+                <div className="mt-4 md:mt-6 py-6 md:py-8 px-8 md:px-12 rounded-3xl border border-white/10 bg-white/3">
+                  <p className="text-muted-foreground text-base md:text-lg">Tu turno</p>
+                  <p className="text-6xl md:text-8xl font-bold mt-2 tabular-nums">
                     #{position}
                   </p>
                 </div>
@@ -1348,12 +1348,12 @@ export default function CheckinPage() {
                     if (resetTimer.current) clearTimeout(resetTimer.current)
                     setChangingBarberInSuccess(true)
                   }}
-                  className="flex items-center gap-3 rounded-2xl border border-white/8 bg-white/2 p-5 w-full max-w-lg transition-all hover:bg-white/6 hover:border-white/20 active:scale-[0.98]"
+                  className="flex items-center gap-3 rounded-2xl border border-white/8 bg-white/2 p-4 md:p-5 w-full max-w-lg transition-all hover:bg-white/6 hover:border-white/20 active:scale-[0.98]"
                 >
-                  <RefreshCw className="size-6 text-muted-foreground shrink-0" />
+                  <RefreshCw className="size-5 md:size-6 text-muted-foreground shrink-0" />
                   <div className="text-left">
-                    <p className="text-base font-medium">Cambiar barbero</p>
-                    <p className="text-sm text-muted-foreground mt-0.5">
+                    <p className="text-sm md:text-base font-medium">Cambiar barbero</p>
+                    <p className="text-xs md:text-sm text-muted-foreground mt-0.5">
                       Si cambiaste de idea, podés elegir otro
                     </p>
                   </div>
@@ -1367,14 +1367,14 @@ export default function CheckinPage() {
                     if (resetTimer.current) clearTimeout(resetTimer.current)
                     goTo('face_enroll')
                   }}
-                  className="flex items-center gap-4 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-5 w-full max-w-lg transition-all hover:bg-blue-500/10 hover:border-blue-500/30 active:scale-[0.98]"
+                  className="flex items-center gap-3 md:gap-4 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4 md:p-5 w-full max-w-lg transition-all hover:bg-blue-500/10 hover:border-blue-500/30 active:scale-[0.98]"
                 >
-                  <div className="shrink-0 size-12 rounded-xl bg-blue-500/10 flex items-center justify-center">
-                    <User className="size-6 text-blue-400" />
+                  <div className="shrink-0 size-10 md:size-12 rounded-xl bg-blue-500/10 flex items-center justify-center">
+                    <User className="size-5 md:size-6 text-blue-400" />
                   </div>
                   <div className="text-left">
-                    <p className="text-base font-medium text-blue-300">Registrar tu cara</p>
-                    <p className="text-sm text-blue-400/70 mt-0.5">
+                    <p className="text-sm md:text-base font-medium text-blue-300">Registrar tu cara</p>
+                    <p className="text-xs md:text-sm text-blue-400/70 mt-0.5">
                       La próxima vez hacé check-in solo con mirarte
                     </p>
                   </div>
@@ -1382,9 +1382,9 @@ export default function CheckinPage() {
               )}
 
               {/* App promo */}
-              <div className="flex items-center gap-4 rounded-2xl border border-white/6 bg-white/2 p-5 mt-2">
-                <Smartphone className="size-8 text-muted-foreground shrink-0" />
-                <p className="text-base text-muted-foreground leading-relaxed">
+              <div className="flex items-center gap-3 md:gap-4 rounded-2xl border border-white/6 bg-white/2 p-4 md:p-5 mt-2">
+                <Smartphone className="size-6 md:size-8 text-muted-foreground shrink-0" />
+                <p className="text-sm md:text-base text-muted-foreground leading-relaxed">
                   ¿Sabías que podés ver la ocupación en tiempo real?{' '}
                   <span className="text-foreground font-medium">
                     Descargá nuestra app
@@ -1420,19 +1420,19 @@ export default function CheckinPage() {
               })}
 
               <div className="text-center">
-                <h2 className="text-3xl font-bold">Cambiar barbero</h2>
-                <p className="text-muted-foreground mt-2 text-lg">
+                <h2 className="text-2xl md:text-3xl font-bold">Cambiar barbero</h2>
+                <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
                   Turno #{position}
                 </p>
               </div>
 
               {loadingBarbers ? (
-                <div className="flex items-center justify-center py-16">
+                <div className="flex items-center justify-center py-10 md:py-16">
                   <Loader2 className="size-8 animate-spin text-muted-foreground" />
                 </div>
               ) : barbers.length === 0 ? (
-                <div className="text-center py-16">
-                  <p className="text-lg text-muted-foreground">
+                <div className="text-center py-10 md:py-16">
+                  <p className="text-base md:text-lg text-muted-foreground">
                     {!branchIsOpen ? 'La sucursal está cerrada' : 'No hay barberos disponibles'}
                   </p>
                 </div>
@@ -1459,16 +1459,15 @@ export default function CheckinPage() {
 
 
 
-      {/* ═══════════════ STAFF FACE SCAN ═══════════════ */}
       {step === 'staff_face_scan' && (
         <div
           key={`staff-face-${animKey}`}
-          className="w-full max-w-lg flex flex-col items-center gap-5 px-6 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => goTo('branch'))}
           <div className="text-center mt-2">
-            <h2 className="text-3xl font-bold">Identificación barbero</h2>
-            <p className="text-muted-foreground mt-2 text-lg">Mirá la cámara para identificarte</p>
+            <h2 className="text-2xl md:text-3xl font-bold">Identificación barbero</h2>
+            <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">Mirá la cámara para identificarte</p>
           </div>
           <FaceCamera
             branchName={selectedBranch?.name ?? 'Sucursal'}
@@ -1490,19 +1489,19 @@ export default function CheckinPage() {
       {step === 'staff_action_confirm' && staffFaceMatch && (
         <div
           key={`staff-action-${animKey}`}
-          className="w-full max-w-lg flex flex-col items-center gap-8 px-6 animate-in fade-in zoom-in-95 duration-500"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-6 md:gap-8 px-4 md:px-6 animate-in fade-in zoom-in-95 duration-500"
         >
           {!staffActionDone ? (
             <>
               <div className="text-center">
-                <div className="size-24 rounded-full bg-white/4 border border-white/10 flex items-center justify-center mx-auto mb-4 animate-in zoom-in-50 duration-700">
-                  <span className="text-5xl font-bold">{staffFaceMatch.clientName.charAt(0)}</span>
+                <div className="size-20 md:size-24 rounded-full bg-white/4 border border-white/10 flex items-center justify-center mx-auto mb-3 md:mb-4 animate-in zoom-in-50 duration-700">
+                  <span className="text-4xl md:text-5xl font-bold">{staffFaceMatch.clientName.charAt(0)}</span>
                 </div>
-                <h2 className="text-3xl font-bold">{staffFaceMatch.clientName}</h2>
-                <p className="text-muted-foreground mt-2 text-lg">¿Qué querés registrar?</p>
+                <h2 className="text-2xl md:text-3xl font-bold">{staffFaceMatch.clientName}</h2>
+                <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">¿Qué querés registrar?</p>
               </div>
 
-              <div className="w-full grid grid-cols-3 gap-4">
+              <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
                 <button
                   onClick={async () => {
                     const supabase = createClient()
@@ -1572,19 +1571,19 @@ export default function CheckinPage() {
                 </button>
               </div>
 
-              {error && <p className="text-destructive text-center text-lg">{error}</p>}
+              {error && <p className="text-destructive text-center text-base md:text-lg">{error}</p>}
             </>
           ) : (
             <>
-              <div className="size-28 rounded-full bg-white/4 border border-white/10 flex items-center justify-center animate-in zoom-in-50 duration-700">
-                <CheckCircle2 className="size-16 text-white" strokeWidth={1.5} />
+              <div className="size-24 md:size-28 rounded-full bg-white/4 border border-white/10 flex items-center justify-center animate-in zoom-in-50 duration-700">
+                <CheckCircle2 className="size-12 md:size-16 text-white" strokeWidth={1.5} />
               </div>
               <div className="text-center">
-                <h2 className="text-4xl font-bold">
+                <h2 className="text-3xl md:text-4xl font-bold">
                   {staffAction === 'clock_in' ? '¡Entrada registrada!' : '¡Salida registrada!'}
                 </h2>
-                <p className="text-2xl text-muted-foreground mt-3">{staffFaceMatch.clientName}</p>
-                <p className="text-lg text-muted-foreground mt-1">
+                <p className="text-xl md:text-2xl text-muted-foreground mt-2 md:mt-3">{staffFaceMatch.clientName}</p>
+                <p className="text-base md:text-lg text-muted-foreground mt-1">
                   {new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
@@ -1604,7 +1603,7 @@ export default function CheckinPage() {
       {step === 'manage_turn' && myQueueEntry && (
         <div
           key={`manage-turn-${animKey}`}
-          className="w-full max-w-2xl flex flex-col items-center gap-6 px-6 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto py-8"
+          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto py-6 md:py-8"
         >
           {backButton(() => {
             setMyQueueEntry(null)
@@ -1616,16 +1615,16 @@ export default function CheckinPage() {
           {!changingBarberInManage ? (
             <>
               <div className="text-center">
-                <h2 className="text-3xl font-bold">Tu turno</h2>
+                <h2 className="text-2xl md:text-3xl font-bold">Tu turno</h2>
               </div>
 
-              <div className="py-8 px-12 rounded-3xl border border-white/10 bg-white/3 text-center">
-                <p className="text-muted-foreground text-lg">Posición</p>
-                <p className="text-8xl font-bold mt-2 tabular-nums">
+              <div className="py-6 md:py-8 px-8 md:px-12 rounded-3xl border border-white/10 bg-white/3 text-center">
+                <p className="text-muted-foreground text-base md:text-lg">Posición</p>
+                <p className="text-6xl md:text-8xl font-bold mt-2 tabular-nums">
                   #{myQueueEntry.position}
                 </p>
                 {myQueueEntry.status === 'in_progress' && (
-                  <p className="text-emerald-400 font-medium mt-3 text-lg">
+                  <p className="text-emerald-400 font-medium mt-2 md:mt-3 text-base md:text-lg">
                     Te están atendiendo
                   </p>
                 )}
@@ -1653,16 +1652,16 @@ export default function CheckinPage() {
                 <Button
                   onClick={() => setChangingBarberInManage(true)}
                   variant="outline"
-                  className="h-14 text-lg rounded-2xl px-8"
+                  className="h-12 md:h-14 text-base md:text-lg rounded-2xl px-6 md:px-8"
                 >
-                  <RefreshCw className="size-5 mr-2" />
+                  <RefreshCw className="size-4 md:size-5 mr-2" />
                   Cambiar barbero
                 </Button>
               )}
 
               <button
                 onClick={reset}
-                className="text-muted-foreground hover:text-foreground transition-colors py-3 text-lg"
+                className="text-muted-foreground hover:text-foreground transition-colors py-2 md:py-3 text-base md:text-lg"
               >
                 Volver al inicio
               </button>
@@ -1670,14 +1669,14 @@ export default function CheckinPage() {
           ) : (
             <>
               <div className="text-center">
-                <h2 className="text-3xl font-bold">Cambiar barbero</h2>
-                <p className="text-muted-foreground mt-2 text-lg">
+                <h2 className="text-2xl md:text-3xl font-bold">Cambiar barbero</h2>
+                <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
                   Turno #{myQueueEntry.position}
                 </p>
               </div>
 
               {loadingBarbers ? (
-                <div className="flex items-center justify-center py-16">
+                <div className="flex items-center justify-center py-10 md:py-16">
                   <Loader2 className="size-8 animate-spin text-muted-foreground" />
                 </div>
               ) : (
