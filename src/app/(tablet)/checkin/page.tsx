@@ -17,7 +17,9 @@ import {
   User,
   AlertTriangle,
   RefreshCw,
-  Search,
+  ScanFace,
+  Keyboard,
+  Settings2,
 } from 'lucide-react'
 import type { Branch, Staff, QueueEntry, Visit } from '@/lib/types/database'
 import {
@@ -33,14 +35,17 @@ import type { FaceMatchResult } from '@/lib/face-recognition'
 
 type Step =
   | 'branch'
+  | 'home'
   | 'face_scan'
+  | 'no_match_options'
   | 'phone'
   | 'name'
   | 'face_enroll'
   | 'barber'
   | 'success'
-  | 'manage_phone'
   | 'manage_turn'
+
+const LOCALSTORAGE_KEY = 'checkin_branch'
 
 const PHONE_LENGTH = 10
 const RESET_DELAY_MS = 5_000
@@ -57,6 +62,7 @@ export default function CheckinPage() {
   const [step, setStep] = useState<Step>('branch')
   const [branches, setBranches] = useState<Branch[]>([])
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null)
+  const [wantsEnrollment, setWantsEnrollment] = useState(false)
   const [phone, setPhone] = useState('')
   const [name, setName] = useState('')
   const [isReturning, setIsReturning] = useState(false)
@@ -75,10 +81,8 @@ export default function CheckinPage() {
   const [queueEntryId, setQueueEntryId] = useState<string | null>(null)
   const [changingBarberInSuccess, setChangingBarberInSuccess] = useState(false)
 
-  const [managePhone, setManagePhone] = useState('')
   const [myQueueEntry, setMyQueueEntry] = useState<QueueEntry | null>(null)
   const [changingBarberInManage, setChangingBarberInManage] = useState(false)
-  const [lookingUpManage, setLookingUpManage] = useState(false)
 
   const [faceMatch, setFaceMatch] = useState<FaceMatchResult | null>(null)
   const [faceDescriptor, setFaceDescriptor] = useState<Float32Array | null>(null)
@@ -97,6 +101,18 @@ export default function CheckinPage() {
       .then(({ data }) => {
         if (data) setBranches(data)
       })
+
+    // Restore branch from localStorage
+    try {
+      const stored = localStorage.getItem(LOCALSTORAGE_KEY)
+      if (stored) {
+        const branch = JSON.parse(stored) as Branch
+        setSelectedBranch(branch)
+        setStep('home')
+      }
+    } catch {
+      localStorage.removeItem(LOCALSTORAGE_KEY)
+    }
   }, [])
 
   useEffect(() => {
@@ -204,7 +220,6 @@ export default function CheckinPage() {
 
   const reset = () => {
     if (resetTimer.current) clearTimeout(resetTimer.current)
-    setSelectedBranch(null)
     setPhone('')
     setName('')
     setIsReturning(false)
@@ -219,50 +234,36 @@ export default function CheckinPage() {
     setExpandedPausedBarber(null)
     setQueueEntryId(null)
     setChangingBarberInSuccess(false)
-    setManagePhone('')
     setMyQueueEntry(null)
     setChangingBarberInManage(false)
-    setLookingUpManage(false)
+    setWantsEnrollment(false)
     setFaceMatch(null)
     setFaceDescriptor(null)
     setFaceClientId(null)
     setHasExistingFace(false)
-    goTo('branch')
+    // Keep selectedBranch — go back to home, not branch
+    goTo('home')
   }
 
   // ── Branch ──
 
   const selectBranch = (branch: Branch) => {
     setSelectedBranch(branch)
-    goTo('face_scan')
+    try {
+      localStorage.setItem(LOCALSTORAGE_KEY, JSON.stringify(branch))
+    } catch { /* ignore */ }
+    goTo('home')
+  }
+
+  const changeBranch = () => {
+    setSelectedBranch(null)
+    try {
+      localStorage.removeItem(LOCALSTORAGE_KEY)
+    } catch { /* ignore */ }
+    goTo('branch')
   }
 
   // ── Phone keypad ──
-
-  const pressDigit = (digit: string, target: 'phone' | 'manage') => {
-    const current = target === 'phone' ? phone : managePhone
-    const setter = target === 'phone' ? setPhone : setManagePhone
-    const isLooking = target === 'phone' ? lookingUp : lookingUpManage
-
-    if (current.length >= PHONE_LENGTH || isLooking) return
-    const next = current + digit
-    setter(next)
-
-    if (next.length === PHONE_LENGTH) {
-      if (target === 'phone') {
-        lookupPhone(next)
-      } else {
-        lookupManageTurn(next)
-      }
-    }
-  }
-
-  const pressDeleteFor = (target: 'phone' | 'manage') => {
-    const isLooking = target === 'phone' ? lookingUp : lookingUpManage
-    if (isLooking) return
-    const setter = target === 'phone' ? setPhone : setManagePhone
-    setter((p) => p.slice(0, -1))
-  }
 
   const lookupPhone = async (ph: string) => {
     setLookingUp(true)
@@ -315,48 +316,20 @@ export default function CheckinPage() {
     goTo('name')
   }
 
-  const lookupManageTurn = async (ph: string) => {
-    setLookingUpManage(true)
-    setError('')
-    try {
-      const supabase = createClient()
-      const { data: client } = await supabase
-        .from('clients')
-        .select('id')
-        .eq('phone', ph)
-        .single()
+  const pressDigit = (digit: string) => {
+    if (phone.length >= PHONE_LENGTH || lookingUp) return
+    const next = phone + digit
+    setPhone(next)
 
-      if (!client) {
-        setError('No se encontró un cliente con ese número')
-        setLookingUpManage(false)
-        return
-      }
-
-      const { data: entry } = await supabase
-        .from('queue_entries')
-        .select('*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)')
-        .eq('client_id', client.id)
-        .in('status', ['waiting', 'in_progress'])
-        .order('checked_in_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (!entry) {
-        setError('No tenés turno activo')
-        setLookingUpManage(false)
-        return
-      }
-
-      setMyQueueEntry(entry as unknown as QueueEntry)
-      goTo('manage_turn')
-    } catch {
-      setError('Error al buscar turno')
-    } finally {
-      setLookingUpManage(false)
+    if (next.length === PHONE_LENGTH) {
+      lookupPhone(next)
     }
   }
 
-  // ── Barber selection helpers ──
+  const pressDelete = () => {
+    if (lookingUp) return
+    setPhone((p) => p.slice(0, -1))
+  }
 
   const maxLoad = useMemo(
     () =>
@@ -422,13 +395,13 @@ export default function CheckinPage() {
   const handleFaceNoMatch = useCallback(
     (descriptor: Float32Array) => {
       setFaceDescriptor(descriptor)
-      goTo('phone')
+      goTo('no_match_options')
     },
     []
   )
 
   const handleFaceManualEntry = useCallback(() => {
-    goTo('phone')
+    goTo('no_match_options')
   }, [])
 
   const handleFaceConfirmBarber = useCallback(
@@ -746,7 +719,6 @@ export default function CheckinPage() {
 
   const renderPhoneKeypad = (
     currentPhone: string,
-    target: 'phone' | 'manage',
     isLooking: boolean
   ) => (
     <>
@@ -774,7 +746,7 @@ export default function CheckinPage() {
         {KEYPAD.map((d) => (
           <button
             key={d}
-            onClick={() => pressDigit(d, target)}
+            onClick={() => pressDigit(d)}
             disabled={isLooking}
             className="h-[72px] rounded-2xl bg-white/4 border border-white/6 text-2xl font-semibold transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
           >
@@ -783,14 +755,14 @@ export default function CheckinPage() {
         ))}
 
         <button
-          onClick={() => pressDeleteFor(target)}
+          onClick={() => pressDelete()}
           disabled={isLooking || currentPhone.length === 0}
           className="h-[72px] rounded-2xl bg-white/4 border border-white/6 flex items-center justify-center transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
         >
           <Delete className="size-6" />
         </button>
         <button
-          onClick={() => pressDigit('0', target)}
+          onClick={() => pressDigit('0')}
           disabled={isLooking}
           className="h-[72px] rounded-2xl bg-white/4 border border-white/6 text-2xl font-semibold transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
         >
@@ -860,15 +832,45 @@ export default function CheckinPage() {
               </div>
             )}
           </div>
+        </div>
+      )}
 
-          <div className="w-full h-px bg-white/8" />
+      {/* ═══════════════ HOME (sucursal seleccionada) ═══════════════ */}
+      {step === 'home' && selectedBranch && (
+        <div
+          key={`home-${animKey}`}
+          className="w-full max-w-2xl flex flex-col items-center gap-10 px-8 animate-in fade-in zoom-in-95 duration-500"
+        >
+          <div className="flex flex-col items-center gap-5">
+            <div className="size-24 rounded-3xl bg-white/4 border border-white/10 flex items-center justify-center">
+              <Scissors className="size-12 text-white" strokeWidth={1.5} />
+            </div>
+            <div className="text-center">
+              <h1 className="text-5xl font-bold tracking-tight">
+                Monaco Smart Barber
+              </h1>
+              <div className="flex items-center justify-center gap-2 mt-3">
+                <MapPin className="size-5 text-muted-foreground" />
+                <p className="text-xl text-muted-foreground">{selectedBranch.name}</p>
+              </div>
+            </div>
+          </div>
+
+          <Button
+            onClick={() => goTo('face_scan')}
+            className="w-full max-w-md h-24 text-3xl rounded-3xl font-bold tracking-wide gap-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+            size="lg"
+          >
+            <ScanFace className="size-9" strokeWidth={1.5} />
+            INGRESAR
+          </Button>
 
           <button
-            onClick={() => goTo('manage_phone')}
-            className="flex items-center gap-3 text-muted-foreground hover:text-foreground transition-colors py-3"
+            onClick={changeBranch}
+            className="flex items-center gap-2 text-sm text-muted-foreground/60 hover:text-muted-foreground transition-colors py-2"
           >
-            <Search className="size-5" />
-            <span className="text-lg">Ya tengo turno</span>
+            <Settings2 className="size-4" />
+            Cambiar sucursal
           </button>
         </div>
       )}
@@ -879,10 +881,7 @@ export default function CheckinPage() {
           key={`face-scan-${animKey}`}
           className="w-full max-w-lg flex flex-col items-center gap-5 px-6 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          {backButton(() => {
-            setSelectedBranch(null)
-            goTo('branch')
-          })}
+          {backButton(() => goTo('home'))}
 
           <FaceCamera
             branchName={selectedBranch?.name}
@@ -890,6 +889,68 @@ export default function CheckinPage() {
             onNoMatch={handleFaceNoMatch}
             onManualEntry={handleFaceManualEntry}
           />
+        </div>
+      )}
+
+      {/* ═══════════════ NO MATCH OPTIONS ═══════════════ */}
+      {step === 'no_match_options' && (
+        <div
+          key={`no-match-opts-${animKey}`}
+          className="w-full max-w-lg flex flex-col items-center gap-8 px-6 animate-in fade-in slide-in-from-right-4 duration-400"
+        >
+          {backButton(() => goTo('face_scan'))}
+
+          <div className="text-center mt-4">
+            <div className="size-20 rounded-full bg-white/4 border border-white/10 flex items-center justify-center mx-auto mb-5">
+              <User className="size-10 text-white/60" />
+            </div>
+            <h2 className="text-3xl font-bold">No te reconocemos</h2>
+            <p className="text-lg text-muted-foreground mt-3">
+              ¿Cómo querés ingresar?
+            </p>
+          </div>
+
+          <div className="w-full grid gap-4">
+            <button
+              onClick={() => {
+                setWantsEnrollment(false)
+                setPhone('')
+                setName('')
+                goTo('phone')
+              }}
+              className="group flex items-center gap-5 w-full rounded-2xl border border-white/8 bg-white/2 p-6 text-left transition-all duration-200 hover:bg-white/6 hover:border-white/20 active:scale-[0.98]"
+            >
+              <div className="shrink-0 size-16 rounded-xl bg-white/4 flex items-center justify-center group-hover:bg-white/8 transition-colors">
+                <Keyboard className="size-7 text-white/60 group-hover:text-white/80 transition-colors" />
+              </div>
+              <div>
+                <p className="text-xl font-semibold">Ingresar con teléfono</p>
+                <p className="text-base text-muted-foreground mt-1">
+                  Ingresá tu número para entrar a la cola
+                </p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => {
+                setWantsEnrollment(true)
+                setPhone('')
+                setName('')
+                goTo('phone')
+              }}
+              className="group flex items-center gap-5 w-full rounded-2xl border border-blue-500/20 bg-blue-500/5 p-6 text-left transition-all duration-200 hover:bg-blue-500/10 hover:border-blue-500/30 active:scale-[0.98]"
+            >
+              <div className="shrink-0 size-16 rounded-xl bg-blue-500/10 flex items-center justify-center group-hover:bg-blue-500/15 transition-colors">
+                <ScanFace className="size-7 text-blue-400" />
+              </div>
+              <div>
+                <p className="text-xl font-semibold text-blue-300">Registrar mi rostro</p>
+                <p className="text-base text-blue-400/70 mt-1">
+                  La próxima vez ingresás solo con mirarte
+                </p>
+              </div>
+            </button>
+          </div>
         </div>
       )}
 
@@ -901,7 +962,7 @@ export default function CheckinPage() {
         >
           {backButton(() => {
             setPhone('')
-            goTo('face_scan')
+            goTo('no_match_options')
           })}
 
           <div className="text-center mt-2">
@@ -911,7 +972,7 @@ export default function CheckinPage() {
             </p>
           </div>
 
-          {renderPhoneKeypad(phone, 'phone', lookingUp)}
+          {renderPhoneKeypad(phone, lookingUp)}
         </div>
       )}
 
@@ -1174,32 +1235,7 @@ export default function CheckinPage() {
         </div>
       )}
 
-      {/* ═══════════════ MANAGE PHONE ═══════════════ */}
-      {step === 'manage_phone' && (
-        <div
-          key={`manage-phone-${animKey}`}
-          className="w-full max-w-md flex flex-col items-center gap-5 px-6 animate-in fade-in slide-in-from-right-4 duration-400"
-        >
-          {backButton(() => {
-            setManagePhone('')
-            setError('')
-            goTo('branch')
-          })}
 
-          <div className="text-center mt-2">
-            <h2 className="text-3xl font-bold">Buscá tu turno</h2>
-            <p className="text-muted-foreground mt-2 text-lg">
-              Ingresá el número con el que te registraste
-            </p>
-          </div>
-
-          {error && (
-            <p className="text-destructive text-center text-lg">{error}</p>
-          )}
-
-          {renderPhoneKeypad(managePhone, 'manage', lookingUpManage)}
-        </div>
-      )}
 
       {/* ═══════════════ MANAGE TURN ═══════════════ */}
       {step === 'manage_turn' && myQueueEntry && (
@@ -1208,11 +1244,10 @@ export default function CheckinPage() {
           className="w-full max-w-2xl flex flex-col items-center gap-6 px-6 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto py-8"
         >
           {backButton(() => {
-            setManagePhone('')
             setMyQueueEntry(null)
             setChangingBarberInManage(false)
             setError('')
-            goTo('branch')
+            goTo('home')
           })}
 
           {!changingBarberInManage ? (
