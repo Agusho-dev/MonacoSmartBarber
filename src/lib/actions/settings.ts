@@ -9,26 +9,36 @@ export async function updateAppSettings(formData: FormData) {
   const { data: existing } = await supabase
     .from('app_settings')
     .select('id')
-    .single()
-  if (!existing) return { error: 'No se encontró la configuración' }
+    .maybeSingle()
 
   const businessDaysRaw = formData.get('business_days') as string
   const businessDays = businessDaysRaw
     ? businessDaysRaw.split(',').map(Number)
     : [1, 2, 3, 4, 5, 6]
 
-  const { error } = await supabase
-    .from('app_settings')
-    .update({
-      lost_client_days: Number(formData.get('lost_client_days')),
-      at_risk_client_days: Number(formData.get('at_risk_client_days')),
-      business_hours_open: formData.get('business_hours_open') as string,
-      business_hours_close: formData.get('business_hours_close') as string,
-      business_days: businessDays,
-    })
-    .eq('id', existing.id)
+  const updateData = {
+    lost_client_days: Number(formData.get('lost_client_days')),
+    at_risk_client_days: Number(formData.get('at_risk_client_days')),
+    business_hours_open: formData.get('business_hours_open') as string,
+    business_hours_close: formData.get('business_hours_close') as string,
+    business_days: businessDays,
+  }
 
-  if (error) return { error: error.message }
+  let opError
+  if (existing) {
+    const { error } = await supabase
+      .from('app_settings')
+      .update(updateData)
+      .eq('id', existing.id)
+    opError = error
+  } else {
+    const { error } = await supabase
+      .from('app_settings')
+      .insert([updateData])
+    opError = error
+  }
+
+  if (opError) return { error: opError.message }
   revalidatePath('/dashboard/configuracion')
   return { success: true }
 }
@@ -48,12 +58,12 @@ export async function updateRewardsConfig(formData: FormData) {
 
   let error
   if (id) {
-    ;({ error } = await supabase
+    ; ({ error } = await supabase
       .from('rewards_config')
       .update(data)
       .eq('id', id))
   } else {
-    ;({ error } = await supabase.from('rewards_config').insert(data))
+    ; ({ error } = await supabase.from('rewards_config').insert(data))
   }
 
   if (error) return { error: error.message }
