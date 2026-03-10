@@ -14,5 +14,5 @@ export default async function HistorialPage() {
 
     const history = await fetchBarberHistory(session.staff_id, session.branch_id)
 
-    return <HistorialClient session={session} history={history} />
+    return <HistorialClient session={session} history={history as any} />
 }
