@@ -64,7 +64,7 @@ export async function initFaceModels(): Promise<void> {
   modelsLoading = (async () => {
     const api = await loadFaceApi()
     await Promise.all([
-      api.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+      api.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
       api.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
       api.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
     ])
@@ -84,7 +84,7 @@ export async function detectFace(
   if (!modelsLoaded || !faceapi) return null
 
   const detection = await faceapi
-    .detectSingleFace(video, new faceapi.SsdMobilenetv1Options({ minConfidence: DETECTION_SCORE_THRESHOLD }))
+    .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: DETECTION_SCORE_THRESHOLD }))
     .withFaceLandmarks()
     .withFaceDescriptor()
 
