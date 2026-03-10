@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 
 export async function checkinClient(formData: FormData) {
@@ -116,7 +116,9 @@ export async function completeService(
   isRewardClaim: boolean = false,
   paymentAccountId?: string | null
 ) {
-  const supabase = await createClient()
+  // Use admin client because barber pin authentications do not set a Supabase Auth session
+  // This causes RLS on visits and client_points to fail when the queue trigger fires using SECURITY INVOKER
+  const supabase = createAdminClient()
 
   // 1. Complete the queue entry – this fires the on_queue_completed trigger
   //    which creates a visit record with amount=0 as placeholder
@@ -130,7 +132,8 @@ export async function completeService(
     .eq('status', 'in_progress')
 
   if (error) {
-    return { error: 'Error al completar servicio' }
+    console.error('completeService error:', error)
+    return { error: 'Error al completar servicio: ' + error.message }
   }
 
   // 2. Get the visit created by the trigger

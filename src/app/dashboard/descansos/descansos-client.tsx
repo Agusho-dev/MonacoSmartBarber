@@ -223,7 +223,7 @@ export function DescansosDashboard({ breakConfigs, branches, barbers }: Props) {
       name: bc.name,
       duration_minutes: String(bc.duration_minutes),
       tolerance_minutes: String(bc.tolerance_minutes),
-      scheduled_time: bc.scheduled_time ?? '',
+      scheduled_time: bc.scheduled_time ? bc.scheduled_time.substring(0, 5) : '',
     })
     setDialogOpen(true)
   }
@@ -387,6 +387,7 @@ export function DescansosDashboard({ breakConfigs, branches, barbers }: Props) {
                 <Input
                   type="number"
                   min="1"
+                  step="1"
                   className="mt-1.5"
                   value={form.duration_minutes}
                   onChange={(e) => setForm((f) => ({ ...f, duration_minutes: e.target.value }))}
@@ -398,6 +399,7 @@ export function DescansosDashboard({ breakConfigs, branches, barbers }: Props) {
                 <Input
                   type="number"
                   min="0"
+                  step="1"
                   className="mt-1.5"
                   value={form.tolerance_minutes}
                   onChange={(e) => setForm((f) => ({ ...f, tolerance_minutes: e.target.value }))}
@@ -411,9 +413,11 @@ export function DescansosDashboard({ breakConfigs, branches, barbers }: Props) {
               </Label>
               <Input
                 type="time"
+                step="60"
                 className="mt-1.5"
+                /* step="60" is the default, but we should ensure the value is only HH:mm */
                 value={form.scheduled_time}
-                onChange={(e) => setForm((f) => ({ ...f, scheduled_time: e.target.value }))}
+                onChange={(e) => setForm((f) => ({ ...f, scheduled_time: e.target.value.substring(0, 5) }))}
               />
             </div>
             <DialogFooter>
