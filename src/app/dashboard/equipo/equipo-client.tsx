@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Scissors, Coffee, Trophy, AlertTriangle } from 'lucide-react'
+import { Scissors, Coffee, Trophy, AlertTriangle, Shield } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // Re-use existing client components
@@ -10,12 +10,15 @@ import { BarberosClient } from '../barberos/barberos-client'
 import { DescansosDashboard } from '../descansos/descansos-client'
 import { IncentivosClient } from '../incentivos/incentivos-client'
 import { DisciplinaClient } from '../disciplina/disciplina-client'
+import { RolesClient } from './roles-client'
+import type { Role, Branch } from '@/lib/types/database'
 
 const TABS = [
-    { id: 'barberos', label: 'Barberos', icon: Scissors },
-    { id: 'descansos', label: 'Descansos', icon: Coffee },
-    { id: 'incentivos', label: 'Incentivos', icon: Trophy },
-    { id: 'disciplina', label: 'Disciplina', icon: AlertTriangle },
+    { id: 'barberos', label: 'Barberos', icon: Scissors, permission: 'staff.view' },
+    { id: 'descansos', label: 'Descansos', icon: Coffee, permission: 'breaks.view' },
+    { id: 'incentivos', label: 'Incentivos', icon: Trophy, permission: 'incentives.view' },
+    { id: 'disciplina', label: 'Disciplina', icon: AlertTriangle, permission: 'discipline.view' },
+    { id: 'roles', label: 'Roles', icon: Shield, ownerOnly: true, permission: 'roles.manage' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -36,6 +39,10 @@ interface EquipoClientProps {
     disciplinaryEvents: unknown[]
     defaultPeriod: string
     fromDate: string
+    // Roles
+    roles: Role[]
+    isOwner: boolean
+    permissions: Record<string, boolean>
 }
 
 export function EquipoClient({
@@ -50,10 +57,44 @@ export function EquipoClient({
     disciplinaryEvents,
     defaultPeriod,
     fromDate,
+    roles,
+    isOwner,
+    permissions,
 }: EquipoClientProps) {
     const searchParams = useSearchParams()
-    const initialTab = (searchParams.get('tab') as TabId) || 'barberos'
-    const [activeTab, setActiveTab] = useState<TabId>(initialTab)
+
+    // Filter tabs based on permissions
+    const visibleTabs = TABS.filter(tab => {
+        if ('ownerOnly' in tab && tab.ownerOnly && !isOwner) return false
+        return permissions[tab.permission]
+    })
+
+    const initialTabId = searchParams.get('tab') as TabId
+    const firstAvailableTab = visibleTabs.length > 0 ? visibleTabs[0].id : null
+
+    // If requested tab is not visible or no tab requested, use the first available one
+    const defaultTab = visibleTabs.some(t => t.id === initialTabId)
+        ? initialTabId
+        : firstAvailableTab
+
+    const [activeTab, setActiveTab] = useState<TabId | null>(defaultTab || null)
+
+    // Force activeTab to be valid if permissions change or state is stale
+    useEffect(() => {
+        if (activeTab && visibleTabs.length > 0 && !visibleTabs.some(t => t.id === activeTab)) {
+            setActiveTab(visibleTabs[0].id)
+        } else if (!activeTab && visibleTabs.length > 0) {
+            setActiveTab(visibleTabs[0].id)
+        }
+    }, [activeTab, visibleTabs])
+
+    if (visibleTabs.length === 0) {
+        return (
+            <div className="flex h-[50vh] items-center justify-center">
+                <p className="text-muted-foreground">No tienes acceso a ninguna sección de Equipo.</p>
+            </div>
+        )
+    }
 
     return (
         <div className="space-y-6">
@@ -66,21 +107,23 @@ export function EquipoClient({
 
             {/* Tab navigation */}
             <div className="flex gap-1 rounded-lg border bg-muted/50 p-1">
-                {TABS.map((tab) => (
-                    <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id)}
-                        className={cn(
-                            'flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all',
-                            activeTab === tab.id
-                                ? 'bg-background text-foreground shadow-sm'
-                                : 'text-muted-foreground hover:text-foreground'
-                        )}
-                    >
-                        <tab.icon className="size-4" />
-                        {tab.label}
-                    </button>
-                ))}
+                {visibleTabs.map((tab) => {
+                    return (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            className={cn(
+                                'flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all',
+                                activeTab === tab.id
+                                    ? 'bg-background text-foreground shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground'
+                            )}
+                        >
+                            <tab.icon className="size-4" />
+                            {tab.label}
+                        </button>
+                    )
+                })}
             </div>
 
             {/* Tab content */}
@@ -90,6 +133,7 @@ export function EquipoClient({
                         barbers={barbers as Parameters<typeof BarberosClient>[0]['barbers']}
                         branches={branches as Parameters<typeof BarberosClient>[0]['branches']}
                         todayVisits={todayVisits as Parameters<typeof BarberosClient>[0]['todayVisits']}
+                        roles={roles}
                     />
                 )}
                 {activeTab === 'descansos' && (
@@ -131,6 +175,12 @@ export function EquipoClient({
                         }
                         events={disciplinaryEvents as Parameters<typeof DisciplinaClient>[0]['events']}
                         fromDate={fromDate}
+                    />
+                )}
+                {activeTab === 'roles' && isOwner && (
+                    <RolesClient
+                        roles={roles}
+                        branches={branches as Branch[]}
                     />
                 )}
             </div>

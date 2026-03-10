@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { EquipoClient } from './equipo-client'
 import type { Metadata } from 'next'
+import type { Role } from '@/lib/types/database'
 
 export const metadata: Metadata = {
     title: 'Equipo | Monaco Smart Barber',
@@ -22,6 +23,24 @@ export default async function EquipoPage() {
     const today = new Date()
     const defaultPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
 
+    // Check if current user is owner
+    const {
+        data: { user: authUser },
+    } = await supabase.auth.getUser()
+
+    let isOwner = false
+    let currentStaff = null
+    if (authUser) {
+        const { data: staffData } = await supabase
+            .from('staff')
+            .select('*')
+            .eq('auth_user_id', authUser.id)
+            .eq('is_active', true)
+            .single()
+        currentStaff = staffData
+        isOwner = currentStaff?.role === 'owner'
+    }
+
     const [
         { data: barbers },
         { data: branches },
@@ -32,6 +51,7 @@ export default async function EquipoPage() {
         { data: incentiveAchievements },
         { data: disciplinaryRules },
         { data: disciplinaryEvents },
+        { data: roles },
     ] = await Promise.all([
         supabase.from('staff').select('*, branch:branches(*)').order('full_name'),
         supabase.from('branches').select('*').eq('is_active', true).order('name'),
@@ -64,7 +84,29 @@ export default async function EquipoPage() {
             .select('*, staff:staff(id, full_name, branch_id)')
             .gte('event_date', fromDate)
             .order('event_date', { ascending: false }),
+        supabase
+            .from('roles')
+            .select('*, role_branch_scope(branch_id)')
+            .order('name'),
     ])
+
+    // Get user permissions
+    let roleData = null
+    if (currentStaff?.role_id) {
+        const { data: role } = await supabase
+            .from('roles')
+            .select('permissions')
+            .eq('id', currentStaff.role_id)
+            .single()
+        roleData = role
+    }
+
+    const { getEffectivePermissions } = await import('@/lib/permissions')
+    const isOwnerOrAdmin = ['owner', 'admin'].includes(currentStaff?.role || '')
+    const userPermissions = getEffectivePermissions(
+        roleData?.permissions as Record<string, boolean> | undefined,
+        isOwnerOrAdmin
+    )
 
     return (
         <EquipoClient
@@ -80,6 +122,9 @@ export default async function EquipoPage() {
             disciplinaryEvents={disciplinaryEvents ?? []}
             defaultPeriod={defaultPeriod}
             fromDate={fromDate}
+            roles={(roles as Role[]) ?? []}
+            isOwner={isOwner}
+            permissions={userPermissions}
         />
     )
 }

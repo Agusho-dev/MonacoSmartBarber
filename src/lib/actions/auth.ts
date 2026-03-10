@@ -36,7 +36,7 @@ export async function loginWithPin(formData: FormData) {
 
   const { data: staff, error } = await supabase
     .from('staff')
-    .select('id, pin, full_name, branch_id, role')
+    .select('id, pin, full_name, branch_id, role, role_id')
     .eq('id', staffId)
     .eq('is_active', true)
     .single()
@@ -45,12 +45,27 @@ export async function loginWithPin(formData: FormData) {
     return { error: 'PIN incorrecto' }
   }
 
+  // Fetch permissions from custom role if exists
+  let permissions: Record<string, boolean> = {}
+  if (staff.role_id) {
+    const { data: customRole } = await supabase
+      .from('roles')
+      .select('permissions')
+      .eq('id', staff.role_id)
+      .single()
+    if (customRole) {
+      permissions = customRole.permissions as Record<string, boolean>
+    }
+  }
+
   const cookieStore = await cookies()
   const session = JSON.stringify({
     staff_id: staff.id,
     full_name: staff.full_name,
     branch_id: staff.branch_id,
     role: staff.role,
+    role_id: staff.role_id,
+    permissions,
   })
 
   cookieStore.set('barber_session', session, {
@@ -74,6 +89,8 @@ export async function getBarberSession() {
       full_name: string
       branch_id: string
       role: string
+      role_id: string | null
+      permissions: Record<string, boolean>
     }
   } catch {
     return null

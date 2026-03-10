@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { DollarSign, Wallet, Banknote } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -9,9 +9,9 @@ import { CuentasClient } from '../cuentas/cuentas-client'
 import { SueldosClient } from '../sueldos/sueldos-client'
 
 const TABS = [
-    { id: 'resumen', label: 'Resumen', icon: DollarSign },
-    { id: 'cuentas', label: 'Cuentas de cobro', icon: Wallet },
-    { id: 'sueldos', label: 'Sueldos', icon: Banknote },
+    { id: 'resumen', label: 'Resumen', icon: DollarSign, permission: 'finances.view' },
+    { id: 'cuentas', label: 'Cuentas de cobro', icon: Wallet, permission: 'finances.view' },
+    { id: 'sueldos', label: 'Sueldos', icon: Banknote, permission: 'salary.view' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -23,6 +23,7 @@ interface FinanzasTabsClientProps {
     accounts: Parameters<typeof CuentasClient>[0]['accounts']
     barbers: Parameters<typeof SueldosClient>[0]['barbers']
     payments: Parameters<typeof SueldosClient>[0]['payments']
+    permissions: Record<string, boolean>
 }
 
 export function FinanzasTabsClient({
@@ -32,10 +33,36 @@ export function FinanzasTabsClient({
     accounts,
     barbers,
     payments,
+    permissions,
 }: FinanzasTabsClientProps) {
     const searchParams = useSearchParams()
-    const initialTab = (searchParams.get('tab') as TabId) || 'resumen'
-    const [activeTab, setActiveTab] = useState<TabId>(initialTab)
+
+    const visibleTabs = TABS.filter(tab => permissions[tab.permission])
+    const initialTabId = searchParams.get('tab') as TabId
+    const firstAvailableTab = visibleTabs.length > 0 ? visibleTabs[0].id : null
+
+    const defaultTab = visibleTabs.some(t => t.id === initialTabId)
+        ? initialTabId
+        : firstAvailableTab
+
+    const [activeTab, setActiveTab] = useState<TabId | null>(defaultTab || null)
+
+    // Force activeTab to be valid if permissions change or state is stale
+    useEffect(() => {
+        if (activeTab && visibleTabs.length > 0 && !visibleTabs.some(t => t.id === activeTab)) {
+            setActiveTab(visibleTabs[0].id)
+        } else if (!activeTab && visibleTabs.length > 0) {
+            setActiveTab(visibleTabs[0].id)
+        }
+    }, [activeTab, visibleTabs])
+
+    if (visibleTabs.length === 0) {
+        return (
+            <div className="flex h-[50vh] items-center justify-center">
+                <p className="text-muted-foreground">No tienes acceso a ninguna sección de Finanzas.</p>
+            </div>
+        )
+    }
 
     return (
         <div className="space-y-6">
@@ -48,7 +75,7 @@ export function FinanzasTabsClient({
 
             {/* Tab navigation */}
             <div className="flex gap-1 rounded-lg border bg-muted/50 p-1">
-                {TABS.map((tab) => (
+                {visibleTabs.map((tab) => (
                     <button
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id)}

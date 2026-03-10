@@ -58,6 +58,7 @@ export interface Staff {
   auth_user_id: string | null
   branch_id: string | null
   role: UserRole
+  role_id: string | null
   full_name: string
   email: string | null
   phone: string | null
@@ -70,6 +71,25 @@ export interface Staff {
   break_ends_at: string | null
   created_at: string
   updated_at: string
+  branch?: Branch
+  custom_role?: Role
+}
+
+export interface Role {
+  id: string
+  name: string
+  description: string | null
+  permissions: Record<string, boolean>
+  is_system: boolean
+  created_at: string
+  updated_at: string
+  role_branch_scope?: RoleBranchScope[]
+}
+
+export interface RoleBranchScope {
+  id: string
+  role_id: string
+  branch_id: string
   branch?: Branch
 }
 
@@ -397,6 +417,8 @@ export interface Database {
       incentive_achievements: { Row: IncentiveAchievement; Insert: Partial<IncentiveAchievement> & Pick<IncentiveAchievement, 'staff_id' | 'rule_id' | 'period_label' | 'amount_earned'>; Update: Partial<IncentiveAchievement> }
       disciplinary_rules: { Row: DisciplinaryRule; Insert: Partial<DisciplinaryRule> & Pick<DisciplinaryRule, 'branch_id' | 'event_type' | 'occurrence_number'>; Update: Partial<DisciplinaryRule> }
       disciplinary_events: { Row: DisciplinaryEvent; Insert: Partial<DisciplinaryEvent> & Pick<DisciplinaryEvent, 'staff_id' | 'branch_id' | 'event_type'>; Update: Partial<DisciplinaryEvent> }
+      roles: { Row: Role; Insert: Partial<Role> & Pick<Role, 'name'>; Update: Partial<Role> }
+      role_branch_scope: { Row: RoleBranchScope; Insert: Partial<RoleBranchScope> & Pick<RoleBranchScope, 'role_id' | 'branch_id'>; Update: Partial<RoleBranchScope> }
     }
     Views: {
       branch_occupancy: { Row: BranchOccupancy }

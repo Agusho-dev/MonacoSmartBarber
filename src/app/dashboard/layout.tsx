@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { DashboardShell } from '@/components/dashboard/dashboard-shell'
+import { hasPermission } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,13 +23,43 @@ export default async function DashboardLayout({
 
   const { data: staff, error: staffError } = await supabase
     .from('staff')
-    .select('full_name, email, role')
+    .select('full_name, email, role, role_id')
     .eq('auth_user_id', authUser.id)
     .eq('is_active', true)
     .single()
 
-  if (staffError || !staff || !['owner', 'admin'].includes(staff.role)) {
+  if (staffError || !staff) {
     console.error('Staff lookup failed:', { staffError, authUserId: authUser.id })
+    redirect('/login')
+  }
+
+  // Check dashboard access: owner/admin always have access,
+  // or staff with a custom role that has dashboard.access permission
+  const isOwnerOrAdmin = ['owner', 'admin'].includes(staff.role)
+  let userPermissions: Record<string, boolean> = {}
+
+  if (isOwnerOrAdmin) {
+    userPermissions = { 'dashboard.access': true } // We will expand this via helper if needed, but let's just use getEffectivePermissions
+  }
+
+  let roleData = null
+  if (staff.role_id) {
+    const { data: role } = await supabase
+      .from('roles')
+      .select('permissions')
+      .eq('id', staff.role_id)
+      .single()
+    roleData = role
+  }
+
+  // Get effective permissions
+  const { getEffectivePermissions } = await import('@/lib/permissions')
+  userPermissions = getEffectivePermissions(
+    roleData?.permissions as Record<string, boolean> | undefined,
+    isOwnerOrAdmin
+  )
+
+  if (!userPermissions['dashboard.access']) {
     redirect('/login')
   }
 
@@ -42,6 +73,7 @@ export default async function DashboardLayout({
     <DashboardShell
       user={{ full_name: staff.full_name, email: staff.email, role: staff.role }}
       branches={branches ?? []}
+      permissions={userPermissions}
     >
       {children}
     </DashboardShell>

@@ -10,6 +10,37 @@ export const metadata: Metadata = {
 export default async function FinanzasPage() {
   const supabase = await createClient()
 
+  // Get user permissions
+  const { data: { user: authUser } } = await supabase.auth.getUser()
+
+  let isOwnerOrAdmin = false
+  let roleData = null
+
+  if (authUser) {
+    const { data: currentStaff } = await supabase
+      .from('staff')
+      .select('role, role_id')
+      .eq('auth_user_id', authUser.id)
+      .eq('is_active', true)
+      .single()
+
+    isOwnerOrAdmin = ['owner', 'admin'].includes(currentStaff?.role || '')
+    if (currentStaff?.role_id) {
+      const { data: role } = await supabase
+        .from('roles')
+        .select('permissions')
+        .eq('id', currentStaff.role_id)
+        .single()
+      roleData = role
+    }
+  }
+
+  const { getEffectivePermissions } = await import('@/lib/permissions')
+  const userPermissions = getEffectivePermissions(
+    roleData?.permissions as Record<string, boolean> | undefined,
+    isOwnerOrAdmin
+  )
+
   const financialData = await fetchFinancialData(6)
   const expenses = await getFixedExpenses()
 
@@ -41,6 +72,7 @@ export default async function FinanzasPage() {
       accounts={accounts ?? []}
       barbers={barbersRaw ?? []}
       payments={payments ?? []}
+      permissions={userPermissions}
     />
   )
 }
