@@ -186,8 +186,8 @@ export default function CheckinPage() {
         supabase
           .from('services')
           .select('*')
-          .eq('branch_id', branchId)
           .eq('is_active', true)
+          .or(`branch_id.eq.${branchId},branch_id.is.null`)
           .order('name'),
       ])
 
@@ -242,6 +242,7 @@ export default function CheckinPage() {
 
   // Load barber data + realtime when viewing barbers
   const needsBarbers =
+    step === 'service_selection' ||
     step === 'barber' ||
     (step === 'success' && changingBarberInSuccess) ||
     (step === 'manage_turn' && changingBarberInManage)

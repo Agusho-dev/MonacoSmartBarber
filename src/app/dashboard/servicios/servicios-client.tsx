@@ -76,7 +76,9 @@ export function ServiciosClient({ services, branches, tags }: Props) {
   const [tagSaving, setTagSaving] = useState(false)
 
   const filtered = selectedBranchId
-    ? services.filter((s) => s.branch_id === selectedBranchId)
+    ? services.filter(
+      (s) => s.branch_id === selectedBranchId || s.branch_id === null
+    )
     : services
 
   // --- Service CRUD ---
