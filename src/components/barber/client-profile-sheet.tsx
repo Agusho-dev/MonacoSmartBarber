@@ -1,18 +1,13 @@
 'use client'
 
-import { useState, useEffect, useTransition } from 'react'
 import {
     Sheet,
     SheetContent,
     SheetHeader,
     SheetTitle,
 } from '@/components/ui/sheet'
-import { updateClientNotes } from '@/lib/actions/clients'
 import type { Client } from '@/lib/types/database'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Save, Instagram, User } from 'lucide-react'
-import { toast } from 'sonner'
+import { Instagram, User } from 'lucide-react'
 import { ClientHistory } from './client-history'
 
 interface ClientProfileSheetProps {
@@ -26,39 +21,7 @@ export function ClientProfileSheet({
     isOpen,
     onClose,
 }: ClientProfileSheetProps) {
-    const [editableNotes, setEditableNotes] = useState('')
-    const [editableInstagram, setEditableInstagram] = useState('')
-    const [isSaving, startSaving] = useTransition()
-
-    useEffect(() => {
-        if (client) {
-            setEditableNotes(client.notes ?? '')
-            setEditableInstagram(client.instagram ?? '')
-        }
-    }, [client])
-
     if (!client) return null
-
-    const handleSave = () => {
-        startSaving(async () => {
-            const result = await updateClientNotes(
-                client.id,
-                editableNotes.trim() || null,
-                editableInstagram.trim() || null
-            )
-            if (result.error) {
-                toast.error(result.error)
-            } else {
-                toast.success('Perfil actualizado correctamente')
-                client.notes = editableNotes.trim() || null
-                client.instagram = editableInstagram.trim() || null
-            }
-        })
-    }
-
-    const hasChanges =
-        editableNotes !== (client.notes ?? '') ||
-        editableInstagram !== (client.instagram ?? '')
 
     return (
         <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -79,36 +42,18 @@ export function ClientProfileSheet({
                                 <Instagram className="size-4" />
                                 Instagram
                             </label>
-                            <Input
-                                value={editableInstagram}
-                                onChange={(e) => setEditableInstagram(e.target.value)}
-                                placeholder="@usuario"
-                            />
+                            <div className="text-sm font-medium mt-1">
+                                {client.instagram ? client.instagram : <span className="text-muted-foreground font-normal">No especificado</span>}
+                            </div>
                         </div>
 
                         <div>
                             <label className="mb-1.5 block text-sm font-medium">
                                 Observaciones internas
                             </label>
-                            <textarea
-                                value={editableNotes}
-                                onChange={(e) => setEditableNotes(e.target.value)}
-                                placeholder="Ej: Prefiere degradé bajo, alérgico a ciertos productos..."
-                                rows={3}
-                                className="w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                            />
-                        </div>
-
-                        <div className="flex justify-end">
-                            <Button
-                                size="sm"
-                                variant="default"
-                                disabled={isSaving || !hasChanges}
-                                onClick={handleSave}
-                            >
-                                <Save className="mr-2 size-4" />
-                                {isSaving ? 'Guardando...' : 'Guardar Cambios'}
-                            </Button>
+                            <div className="w-full rounded-md border bg-transparent px-3 py-2 text-sm text-foreground min-h-[80px]">
+                                {client.notes ? client.notes : <span className="text-muted-foreground">Ninguna</span>}
+                            </div>
                         </div>
                     </div>
 

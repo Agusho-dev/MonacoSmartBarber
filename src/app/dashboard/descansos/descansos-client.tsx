@@ -9,6 +9,12 @@ import {
   unblockBarber,
   checkAndBlockOverdueBreaks,
 } from '@/lib/actions/breaks'
+import {
+  approveBreak,
+  rejectBreak,
+  startApprovedBreak,
+  completeBreakRequest,
+} from '@/lib/actions/break-requests'
 import type { Branch, BreakConfig, StaffStatus } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -39,7 +45,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Coffee, Plus, Pencil, Trash2, Play, RotateCcw, ShieldAlert, Clock } from 'lucide-react'
+import { Coffee, Plus, Pencil, Trash2, Play, RotateCcw, ShieldAlert, Clock, CheckCircle2, XCircle, HandMetal } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -54,10 +60,23 @@ interface BarberWithBreak {
   break_configs?: { name: string; duration_minutes: number; tolerance_minutes: number } | null
 }
 
+interface BreakRequestRow {
+  id: string
+  staff_id: string
+  branch_id: string
+  break_config_id: string
+  status: string
+  requested_at: string
+  started_at: string | null
+  staff?: { id: string; full_name: string } | null
+  break_config?: { name: string; duration_minutes: number } | null
+}
+
 interface Props {
   breakConfigs: BreakConfig[]
   branches: Branch[]
   barbers: BarberWithBreak[]
+  breakRequests: BreakRequestRow[]
 }
 
 const EMPTY_FORM = { id: '', branch_id: '', name: '', duration_minutes: '30', tolerance_minutes: '5', scheduled_time: '' }
@@ -192,7 +211,88 @@ function BarberBreakRow({ barber, breakConfigs, branchId, onAction }: {
   )
 }
 
-export function DescansosDashboard({ breakConfigs, branches, barbers }: Props) {
+function BreakRequestCard({ request }: { request: BreakRequestRow }) {
+  const [, startTransition] = useTransition()
+  const staffName = request.staff?.full_name ?? 'Barbero'
+  const breakName = request.break_config?.name ?? 'Descanso'
+  const duration = request.break_config?.duration_minutes ?? 0
+  const isPending = request.status === 'pending'
+  const isApproved = request.status === 'approved'
+
+  const timeSince = (() => {
+    const diff = Date.now() - new Date(request.requested_at).getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1) return 'hace un momento'
+    if (mins < 60) return `hace ${mins} min`
+    return `hace ${Math.floor(mins / 60)}h ${mins % 60}min`
+  })()
+
+  function handleApprove() {
+    startTransition(async () => {
+      // Approve break with the current authenticated user's session ID (handled on server side)
+      const r = await approveBreak(request.id)
+      if (r.error) { toast.error(r.error) } else { toast.success(`Descanso aprobado para ${staffName}`); window.location.reload() }
+    })
+  }
+
+  function handleReject() {
+    startTransition(async () => {
+      // Reject break with the current authenticated user's session ID (handled on server side)
+      const r = await rejectBreak(request.id)
+      if (r.error) { toast.error(r.error) } else { toast.success('Solicitud rechazada'); window.location.reload() }
+    })
+  }
+
+  function handleStartBreak() {
+    startTransition(async () => {
+      const r = await startApprovedBreak(request.id)
+      if (r.error) { toast.error(r.error) } else { toast.success(`${staffName} comenzó su descanso`); window.location.reload() }
+    })
+  }
+
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-5 py-4">
+      <div className="flex items-center gap-3 flex-1 min-w-0">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-600 font-semibold text-sm">
+          {staffName.charAt(0).toUpperCase()}
+        </div>
+        <div className="min-w-0">
+          <p className="font-medium truncate">{staffName}</p>
+          <div className="flex items-center gap-2 flex-wrap mt-0.5">
+            <Badge variant="outline" className={cn('text-xs', isPending ? 'bg-yellow-500/15 text-yellow-500 border-yellow-500/30' : 'bg-green-500/15 text-green-600 border-green-500/30')}>
+              {isPending ? 'Pendiente' : 'Aprobado'}
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              {breakName} ({duration}min) · {timeSince}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        {isPending && (
+          <>
+            <Button size="sm" variant="outline" className="text-green-600 border-green-500/30 hover:bg-green-500/10" onClick={handleApprove}>
+              <CheckCircle2 className="size-4 mr-1.5" />
+              Aprobar
+            </Button>
+            <Button size="sm" variant="outline" className="text-red-500 border-red-500/30 hover:bg-red-500/10" onClick={handleReject}>
+              <XCircle className="size-4 mr-1.5" />
+              Rechazar
+            </Button>
+          </>
+        )}
+        {isApproved && !request.started_at && (
+          <Button size="sm" variant="outline" onClick={handleStartBreak}>
+            <Play className="size-4 mr-1.5" />
+            Iniciar descanso
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export function DescansosDashboard({ breakConfigs, branches, barbers, breakRequests }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [, startTransition] = useTransition()
@@ -326,6 +426,31 @@ export function DescansosDashboard({ breakConfigs, branches, barbers }: Props) {
             ))}
           </div>
         )}
+      </section>
+
+      {/* Break requests */}
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          <HandMetal className="size-4 inline mr-1.5 -mt-0.5" />
+          Solicitudes de descanso
+        </h2>
+        {(() => {
+          const branchRequests = breakRequests.filter((r) => r.branch_id === selectedBranchId)
+          if (branchRequests.length === 0) {
+            return (
+              <div className="rounded-xl border bg-card p-8 text-center">
+                <p className="text-sm text-muted-foreground">No hay solicitudes de descanso pendientes.</p>
+              </div>
+            )
+          }
+          return (
+            <div className="divide-y rounded-xl border bg-card">
+              {branchRequests.map((req) => (
+                <BreakRequestCard key={req.id} request={req} />
+              ))}
+            </div>
+          )
+        })()}
       </section>
 
       {/* Barber status panel */}

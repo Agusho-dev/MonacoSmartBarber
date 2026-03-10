@@ -2,16 +2,18 @@
 
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { DollarSign, Wallet, Banknote } from 'lucide-react'
+import { DollarSign, Wallet, Banknote, Receipt } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FinanzasClient } from './finanzas-client'
 import { CuentasClient } from '../cuentas/cuentas-client'
 import { SueldosClient } from '../sueldos/sueldos-client'
+import { EgresosClient } from './egresos-client'
 
 const TABS = [
     { id: 'resumen', label: 'Resumen', icon: DollarSign, permission: 'finances.view' },
     { id: 'cuentas', label: 'Cuentas de cobro', icon: Wallet, permission: 'finances.view' },
     { id: 'sueldos', label: 'Sueldos', icon: Banknote, permission: 'salary.view' },
+    { id: 'egresos', label: 'Egresos', icon: Receipt, permission: 'finances.view' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -23,6 +25,7 @@ interface FinanzasTabsClientProps {
     accounts: Parameters<typeof CuentasClient>[0]['accounts']
     barbers: Parameters<typeof SueldosClient>[0]['barbers']
     payments: Parameters<typeof SueldosClient>[0]['payments']
+    expenseTickets: Parameters<typeof EgresosClient>[0]['expenseTickets']
     permissions: Record<string, boolean>
 }
 
@@ -33,6 +36,7 @@ export function FinanzasTabsClient({
     accounts,
     barbers,
     payments,
+    expenseTickets,
     permissions,
 }: FinanzasTabsClientProps) {
     const searchParams = useSearchParams()
@@ -109,6 +113,12 @@ export function FinanzasTabsClient({
                         branches={branches}
                         barbers={barbers}
                         payments={payments}
+                    />
+                )}
+                {activeTab === 'egresos' && (
+                    <EgresosClient
+                        expenseTickets={expenseTickets}
+                        branches={branches}
                     />
                 )}
             </div>

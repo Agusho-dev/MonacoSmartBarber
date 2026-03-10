@@ -15,7 +15,7 @@ export default async function ColaPage() {
 
   const supabase = await createClient()
 
-  const [{ data: branch }, { data: staff }] = await Promise.all([
+  const [{ data: branch }, { data: staff }, { data: breakConfigs }] = await Promise.all([
     supabase
       .from('branches')
       .select('name')
@@ -26,6 +26,12 @@ export default async function ColaPage() {
       .select('status')
       .eq('id', session.staff_id)
       .single(),
+    supabase
+      .from('break_configs')
+      .select('*')
+      .eq('branch_id', session.branch_id)
+      .eq('is_active', true)
+      .order('name'),
   ])
 
   return (
@@ -33,6 +39,7 @@ export default async function ColaPage() {
       session={session}
       branchName={branch?.name ?? 'Sucursal'}
       initialStatus={(staff?.status as StaffStatus) ?? 'available'}
+      breakConfigs={breakConfigs ?? []}
     />
   )
 }

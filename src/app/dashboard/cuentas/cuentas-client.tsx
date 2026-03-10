@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/select'
 import { Plus, Pencil, Trash2, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
+import { formatCurrency } from '@/lib/format'
 
 interface AccountWithBranch extends PaymentAccount {
   branch?: { name: string } | null
@@ -45,7 +46,7 @@ interface Props {
   branches: Branch[]
 }
 
-const EMPTY_FORM = { id: '', branch_id: '', name: '', alias_or_cbu: '' }
+const EMPTY_FORM = { id: '', branch_id: '', name: '', alias_or_cbu: '', daily_limit: '', sort_order: '0' }
 
 export function CuentasClient({ accounts, branches }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -63,6 +64,8 @@ export function CuentasClient({ accounts, branches }: Props) {
       branch_id: acc.branch_id,
       name: acc.name,
       alias_or_cbu: acc.alias_or_cbu ?? '',
+      daily_limit: acc.daily_limit ? String(acc.daily_limit) : '',
+      sort_order: String(acc.sort_order ?? 0)
     })
     setDialogOpen(true)
   }
@@ -74,6 +77,8 @@ export function CuentasClient({ accounts, branches }: Props) {
     fd.append('branch_id', form.branch_id)
     fd.append('name', form.name)
     fd.append('alias_or_cbu', form.alias_or_cbu)
+    if (form.daily_limit) fd.append('daily_limit', form.daily_limit)
+    fd.append('sort_order', form.sort_order)
 
     startTransition(async () => {
       const result = await upsertPaymentAccount(fd)
@@ -145,8 +150,25 @@ export function CuentasClient({ accounts, branches }: Props) {
                 {acc.alias_or_cbu && (
                   <p className="text-sm text-muted-foreground font-mono">{acc.alias_or_cbu}</p>
                 )}
+                <div className="flex gap-2 items-center mt-1">
+                  <Badge variant="outline" className="text-xs">Orden: {acc.sort_order}</Badge>
+                </div>
+                {acc.daily_limit !== null && (
+                  <div className="mt-3 text-xs text-muted-foreground max-w-[240px]">
+                    <div className="flex justify-between mb-1.5">
+                      <span>Acumulado hoy:</span>
+                      <span className="font-medium text-foreground">{formatCurrency(acc.accumulated_today ?? 0)} / {formatCurrency(acc.daily_limit)}</span>
+                    </div>
+                    <div className="w-full bg-secondary h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full ${((acc.accumulated_today ?? 0) / acc.daily_limit) >= 1 ? 'bg-destructive' : 'bg-primary'}`}
+                        style={{ width: `${Math.min(((acc.accumulated_today ?? 0) / acc.daily_limit) * 100, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
                 {acc.branch && (
-                  <p className="text-xs text-muted-foreground mt-0.5">{acc.branch.name}</p>
+                  <p className="text-xs text-muted-foreground mt-1.5">{acc.branch.name}</p>
                 )}
               </div>
               <div className="flex items-center gap-3 shrink-0">
@@ -227,6 +249,28 @@ export function CuentasClient({ accounts, branches }: Props) {
                 value={form.alias_or_cbu}
                 onChange={(e) => setForm((f) => ({ ...f, alias_or_cbu: e.target.value }))}
               />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Límite Diario ($) <span className="text-muted-foreground">(opcional)</span></Label>
+                <Input
+                  className="mt-1.5"
+                  type="number"
+                  placeholder="Ej: 50000"
+                  value={form.daily_limit}
+                  onChange={(e) => setForm((f) => ({ ...f, daily_limit: e.target.value }))}
+                />
+              </div>
+              <div>
+                <Label>Orden de prioridad</Label>
+                <Input
+                  className="mt-1.5"
+                  type="number"
+                  placeholder="Ej: 1"
+                  value={form.sort_order}
+                  onChange={(e) => setForm((f) => ({ ...f, sort_order: e.target.value }))}
+                />
+              </div>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>

@@ -2,6 +2,7 @@
 
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { recordTransfer } from '@/lib/actions/paymentAccounts'
 
 export async function checkinClient(formData: FormData) {
   const supabase = await createClient()
@@ -186,6 +187,10 @@ export async function completeService(
     .from('visits')
     .update(visitUpdate)
     .eq('id', visit.id)
+
+  if (paymentMethod === 'transfer' && paymentAccountId) {
+    await recordTransfer(visit.id, paymentAccountId, amount, visit.branch_id)
+  }
 
   // 5. Handle reward redemption (deduct points)
   if (isRewardClaim && visit.client_id && visit.branch_id) {

@@ -11,6 +11,8 @@ export type DisciplinaryEventType = 'absence' | 'late'
 export type ConsequenceType = 'none' | 'presentismo_loss' | 'warning' | 'incentive_loss' | 'salary_deduction'
 export type ReviewRequestStatus = 'pending' | 'completed' | 'expired'
 export type ReviewRatingCategory = 'high' | 'improvement' | 'low'
+export type BreakRequestStatus = 'pending' | 'approved' | 'rejected' | 'completed'
+export type ServiceAvailability = 'checkin' | 'upsell' | 'both'
 
 export interface Branch {
   id: string
@@ -129,9 +131,37 @@ export interface Service {
   name: string
   price: number
   duration_minutes: number | null
+  availability: ServiceAvailability
   is_active: boolean
   created_at: string
   updated_at: string
+}
+
+export interface Product {
+  id: string
+  branch_id: string
+  name: string
+  cost: number
+  sale_price: number
+  barber_commission: number
+  stock: number | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ProductSale {
+  id: string
+  visit_id: string | null
+  product_id: string
+  barber_id: string
+  branch_id: string
+  quantity: number
+  unit_price: number
+  commission_amount: number
+  sold_at: string
+  product?: Product
+  barber?: Staff
 }
 
 export interface QueueEntry {
@@ -242,6 +272,45 @@ export interface AppSettings {
   updated_at: string
 }
 
+export interface PaymentAccount {
+  id: string
+  branch_id: string
+  name: string
+  bank_name: string | null
+  cbu_cvu: string | null
+  alias: string | null
+  is_active: boolean
+  daily_limit: number | null
+  sort_order: number
+  accumulated_today: number
+  last_reset_date: string
+  created_at: string
+}
+
+export interface ExpenseTicket {
+  id: string
+  branch_id: string
+  amount: number
+  category: string
+  description: string | null
+  receipt_url: string | null
+  created_by: string | null
+  expense_date: string
+  created_at: string
+  created_by_staff?: Staff
+}
+
+export interface TransferLog {
+  id: string
+  visit_id: string | null
+  payment_account_id: string
+  amount: number
+  branch_id: string
+  transferred_at: string
+  payment_account?: PaymentAccount
+  visit?: Visit
+}
+
 export interface FixedExpense {
   id: string
   branch_id: string
@@ -266,14 +335,59 @@ export interface BreakConfig {
   updated_at: string
 }
 
+export interface BreakRequest {
+  id: string
+  staff_id: string
+  branch_id: string
+  break_config_id: string
+  status: BreakRequestStatus
+  requested_at: string
+  approved_by: string | null
+  approved_at: string | null
+  started_at: string | null
+  ended_at: string | null
+  notes: string | null
+  created_at: string
+  staff?: Staff
+  break_config?: BreakConfig
+}
+
 export interface PaymentAccount {
   id: string
   branch_id: string
   name: string
   alias_or_cbu: string | null
   is_active: boolean
+  daily_limit: number | null
+  sort_order: number
+  accumulated_today: number
+  last_reset_date: string
   created_at: string
   updated_at: string
+}
+
+export interface ExpenseTicket {
+  id: string
+  branch_id: string
+  amount: number
+  category: string
+  description: string | null
+  receipt_url: string | null
+  created_by: string | null
+  expense_date: string
+  created_at: string
+  created_by_staff?: Staff
+}
+
+export interface TransferLog {
+  id: string
+  visit_id: string | null
+  payment_account_id: string
+  amount: number
+  branch_id: string
+  transferred_at: string
+  payment_account?: PaymentAccount
+  visit?: Visit
 }
 
 export interface StaffSchedule {
@@ -392,9 +506,14 @@ export interface Database {
   public: {
     Tables: {
       branches: { Row: Branch; Insert: Partial<Branch> & Pick<Branch, 'name'>; Update: Partial<Branch> }
+      payment_accounts: { Row: PaymentAccount; Insert: Partial<PaymentAccount> & Pick<PaymentAccount, 'branch_id' | 'name'>; Update: Partial<PaymentAccount> }
+      expense_tickets: { Row: ExpenseTicket; Insert: Partial<ExpenseTicket> & Pick<ExpenseTicket, 'branch_id' | 'amount' | 'category'>; Update: Partial<ExpenseTicket> }
+      transfer_logs: { Row: TransferLog; Insert: Partial<TransferLog> & Pick<TransferLog, 'payment_account_id' | 'amount' | 'branch_id'>; Update: Partial<TransferLog> }
       staff: { Row: Staff; Insert: Partial<Staff> & Pick<Staff, 'role' | 'full_name'>; Update: Partial<Staff> }
       clients: { Row: Client; Insert: Partial<Client> & Pick<Client, 'phone' | 'name'>; Update: Partial<Client> }
       services: { Row: Service; Insert: Partial<Service> & Pick<Service, 'name' | 'price'>; Update: Partial<Service> }
+      products: { Row: Product; Insert: Partial<Product> & Pick<Product, 'branch_id' | 'name'>; Update: Partial<Product> }
+      product_sales: { Row: ProductSale; Insert: Partial<ProductSale> & Pick<ProductSale, 'product_id' | 'barber_id' | 'branch_id' | 'unit_price'>; Update: Partial<ProductSale> }
       queue_entries: { Row: QueueEntry; Insert: Partial<QueueEntry> & Pick<QueueEntry, 'branch_id' | 'client_id' | 'position'>; Update: Partial<QueueEntry> }
       visits: { Row: Visit; Insert: Partial<Visit> & Pick<Visit, 'branch_id' | 'client_id' | 'barber_id' | 'amount' | 'started_at' | 'completed_at'>; Update: Partial<Visit> }
       rewards_config: { Row: RewardsConfig; Insert: Partial<RewardsConfig>; Update: Partial<RewardsConfig> }
@@ -407,7 +526,7 @@ export interface Database {
       client_face_descriptors: { Row: ClientFaceDescriptor; Insert: Partial<ClientFaceDescriptor> & Pick<ClientFaceDescriptor, 'client_id' | 'descriptor'>; Update: Partial<ClientFaceDescriptor> }
       staff_face_descriptors: { Row: StaffFaceDescriptor; Insert: Partial<StaffFaceDescriptor> & Pick<StaffFaceDescriptor, 'staff_id' | 'descriptor'>; Update: Partial<StaffFaceDescriptor> }
       break_configs: { Row: BreakConfig; Insert: Partial<BreakConfig> & Pick<BreakConfig, 'branch_id' | 'name'>; Update: Partial<BreakConfig> }
-      payment_accounts: { Row: PaymentAccount; Insert: Partial<PaymentAccount> & Pick<PaymentAccount, 'branch_id' | 'name'>; Update: Partial<PaymentAccount> }
+      break_requests: { Row: BreakRequest; Insert: Partial<BreakRequest> & Pick<BreakRequest, 'staff_id' | 'branch_id' | 'break_config_id'>; Update: Partial<BreakRequest> }
       staff_schedules: { Row: StaffSchedule; Insert: Partial<StaffSchedule> & Pick<StaffSchedule, 'staff_id' | 'day_of_week' | 'start_time' | 'end_time'>; Update: Partial<StaffSchedule> }
       staff_schedule_exceptions: { Row: StaffScheduleException; Insert: Partial<StaffScheduleException> & Pick<StaffScheduleException, 'staff_id' | 'exception_date'>; Update: Partial<StaffScheduleException> }
       attendance_logs: { Row: AttendanceLog; Insert: Partial<AttendanceLog> & Pick<AttendanceLog, 'staff_id' | 'branch_id' | 'action_type'>; Update: Partial<AttendanceLog> }

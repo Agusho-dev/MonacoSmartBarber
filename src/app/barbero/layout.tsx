@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/server'
 import { FullscreenButton } from '@/components/ui/fullscreen-button'
 import { WakeLock } from '@/components/ui/wake-lock'
 
+import { BarberThemeClient } from '@/components/barber/barber-theme-client'
+
 export default async function BarberLayout({
   children,
 }: {
@@ -25,6 +27,7 @@ export default async function BarberLayout({
 
   return (
     <div className="barber-theme min-h-dvh bg-background text-foreground pb-20">
+      <BarberThemeClient />
       <WakeLock />
       {children}
       <BarberNav />

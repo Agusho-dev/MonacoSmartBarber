@@ -44,7 +44,7 @@ export default async function FinanzasPage() {
   const financialData = await fetchFinancialData(6)
   const expenses = await getFixedExpenses()
 
-  const [{ data: branches }, { data: accounts }, { data: barbersRaw }, { data: payments }] =
+  const [{ data: branches }, { data: accounts }, { data: barbersRaw }, { data: payments }, { data: expenseTickets }] =
     await Promise.all([
       supabase.from('branches').select('*').eq('is_active', true).order('name'),
       supabase
@@ -62,6 +62,11 @@ export default async function FinanzasPage() {
         .select('*, staff:staff(id, full_name, branch_id)')
         .order('period_start', { ascending: false })
         .limit(100),
+      supabase
+        .from('expense_tickets')
+        .select('*, created_by_staff:created_by(full_name)')
+        .order('expense_date', { ascending: false })
+        .limit(100),
     ])
 
   return (
@@ -72,6 +77,7 @@ export default async function FinanzasPage() {
       accounts={accounts ?? []}
       barbers={barbersRaw ?? []}
       payments={payments ?? []}
+      expenseTickets={expenseTickets ?? []}
       permissions={userPermissions}
     />
   )

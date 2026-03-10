@@ -42,7 +42,9 @@ export default async function BarberBillingPage() {
     .lt('completed_at', endOfDay)
     .order('completed_at', { ascending: false })
 
-  const totalAmount = (visits ?? []).reduce((sum, v) => sum + v.amount, 0)
+  const cashVisits = (visits ?? []).filter(v => v.payment_method === 'cash')
+  const cashAmount = cashVisits.reduce((sum, v) => sum + v.amount, 0)
+  const cashCount = cashVisits.length
   const totalCount = visits?.length ?? 0
 
   const byMethod: Record<string, { count: number; total: number }> = {}
@@ -72,11 +74,11 @@ export default async function BarberBillingPage() {
       </div>
 
       <div className="space-y-4 p-4">
-        {/* Summary */}
+        {/* Summary – Cash to hand over */}
         <div className="rounded-xl border bg-card p-5">
-          <p className="text-sm text-muted-foreground">Total facturado</p>
-          <p className="mt-1 text-4xl font-bold tabular-nums">{formatCurrency(totalAmount)}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{totalCount} {totalCount === 1 ? 'servicio' : 'servicios'}</p>
+          <p className="text-sm text-muted-foreground">Efectivo a rendir</p>
+          <p className="mt-1 text-4xl font-bold tabular-nums">{formatCurrency(cashAmount)}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{cashCount} {cashCount === 1 ? 'cobro en efectivo' : 'cobros en efectivo'}</p>
         </div>
 
         {/* Breakdown by payment method */}

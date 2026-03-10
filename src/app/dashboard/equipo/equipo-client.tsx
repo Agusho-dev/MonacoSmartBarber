@@ -31,6 +31,7 @@ interface EquipoClientProps {
     // Descansos
     breakConfigs: unknown[]
     breakBarbers: unknown[]
+    breakRequests: unknown[]
     // Incentivos
     incentiveRules: unknown[]
     incentiveAchievements: unknown[]
@@ -51,6 +52,7 @@ export function EquipoClient({
     todayVisits,
     breakConfigs,
     breakBarbers,
+    breakRequests,
     incentiveRules,
     incentiveAchievements,
     disciplinaryRules,
@@ -141,6 +143,7 @@ export function EquipoClient({
                         breakConfigs={breakConfigs as Parameters<typeof DescansosDashboard>[0]['breakConfigs']}
                         branches={branches as Parameters<typeof DescansosDashboard>[0]['branches']}
                         barbers={breakBarbers as Parameters<typeof DescansosDashboard>[0]['barbers']}
+                        breakRequests={breakRequests as Parameters<typeof DescansosDashboard>[0]['breakRequests']}
                     />
                 )}
                 {activeTab === 'incentivos' && (

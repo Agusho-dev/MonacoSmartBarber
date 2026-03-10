@@ -22,6 +22,7 @@ import {
   Banknote,
   Trophy,
   AlertTriangle,
+  Package,
 } from 'lucide-react'
 import { logout } from '@/lib/actions/auth'
 import { useBranchStore } from '@/stores/branch-store'
@@ -58,6 +59,7 @@ const navItems = [
   { href: '/dashboard/sucursales', label: 'Sucursales', icon: Building2, requiredPermissions: ['branches.view'] },
   { href: '/dashboard/equipo', label: 'Equipo', icon: Scissors, requiredPermissions: ['staff.view', 'roles.manage', 'breaks.view', 'incentives.view', 'discipline.view'] },
   { href: '/dashboard/servicios', label: 'Servicios', icon: Sparkles, requiredPermissions: ['services.view'] },
+  { href: '/dashboard/productos', label: 'Productos', icon: Package, requiredPermissions: ['services.view'] },
   { href: '/dashboard/clientes', label: 'Clientes', icon: Users, requiredPermissions: ['clients.view'] },
   { href: '/dashboard/fidelizacion', label: 'Fidelización', icon: Gift, requiredPermissions: ['rewards.view'] },
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3, requiredPermissions: ['stats.view'] },

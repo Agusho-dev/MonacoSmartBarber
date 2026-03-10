@@ -9,7 +9,9 @@ export async function getPaymentAccounts(branchId: string) {
     .from('payment_accounts')
     .select('*')
     .eq('branch_id', branchId)
-    .order('name')
+    .order('sort_order', { ascending: true })
+    .order('name', { ascending: true })
+
   if (error) return { error: error.message, data: null }
   return { data, error: null }
 }
@@ -20,19 +22,36 @@ export async function upsertPaymentAccount(formData: FormData) {
   const branchId = formData.get('branch_id') as string
   const name = (formData.get('name') as string).trim()
   const aliasOrCbu = (formData.get('alias_or_cbu') as string | null)?.trim() || null
+  const dailyLimitStr = formData.get('daily_limit') as string | null
+  const sortOrderStr = formData.get('sort_order') as string | null
+
+  const dailyLimit = dailyLimitStr && dailyLimitStr !== '' ? Number(dailyLimitStr) : null
+  const sortOrder = sortOrderStr && sortOrderStr !== '' ? Number(sortOrderStr) : 0
 
   if (!branchId || !name) return { error: 'Nombre y sucursal son obligatorios' }
 
   if (id) {
     const { error } = await supabase
       .from('payment_accounts')
-      .update({ name, alias_or_cbu: aliasOrCbu })
+      .update({
+        name,
+        alias_or_cbu: aliasOrCbu,
+        daily_limit: dailyLimit,
+        sort_order: sortOrder
+      })
       .eq('id', id)
     if (error) return { error: error.message }
   } else {
+    // If it's a new account, last_reset_date defaults to today via DB.
     const { error } = await supabase
       .from('payment_accounts')
-      .insert({ branch_id: branchId, name, alias_or_cbu: aliasOrCbu })
+      .insert({
+        branch_id: branchId,
+        name,
+        alias_or_cbu: aliasOrCbu,
+        daily_limit: dailyLimit,
+        sort_order: sortOrder
+      })
     if (error) return { error: error.message }
   }
 
@@ -59,5 +78,97 @@ export async function deletePaymentAccount(id: string) {
     .eq('id', id)
   if (error) return { error: error.message }
   revalidatePath('/dashboard/cuentas')
+  return { success: true }
+}
+
+export async function resetDailyAccumulation() {
+  const supabase = await createClient()
+  // DB side, we update all accounts whose last_reset_date is less than current date
+  const todayDate = new Date().toISOString().split('T')[0]
+
+  const { error } = await supabase
+    .from('payment_accounts')
+    .update({
+      accumulated_today: 0,
+      last_reset_date: todayDate
+    })
+    .lt('last_reset_date', todayDate)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function getActiveAccountForTransfer(branchId: string, transferAmount: number) {
+  const supabase = await createClient()
+
+  // First ensure daily accumulations are reset if it's a new day
+  await resetDailyAccumulation()
+
+  // Get all active accounts for the branch ordered by sort_order
+  const { data: accounts, error } = await supabase
+    .from('payment_accounts')
+    .select('*')
+    .eq('branch_id', branchId)
+    .eq('is_active', true)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
+
+  if (error || !accounts || accounts.length === 0) {
+    return { account_id: null, error: error?.message || 'No hay cuentas activas disponibles' }
+  }
+
+  // Find the first account that can accept the transfer amount without exceeding daily_limit
+  let selectedAccount = null
+  for (const account of accounts) {
+    if (account.daily_limit === null) {
+      selectedAccount = account
+      break
+    }
+
+    if ((account.accumulated_today + transferAmount) <= account.daily_limit) {
+      selectedAccount = account
+      break
+    }
+  }
+
+  // If all accounts are full, fallback to the last account regardless of limit (or a default branch behavior)
+  if (!selectedAccount) {
+    selectedAccount = accounts[accounts.length - 1]
+  }
+
+  return { account_id: selectedAccount.id, error: null }
+}
+
+export async function recordTransfer(visitId: string, accountId: string, amount: number, branchId: string) {
+  const supabase = await createClient()
+
+  // 1. Log the transfer
+  const { error: logError } = await supabase
+    .from('transfer_logs')
+    .insert({
+      visit_id: visitId,
+      payment_account_id: accountId,
+      amount: amount,
+      branch_id: branchId
+    })
+
+  if (logError) return { error: logError.message }
+
+  // 2. We need to increment the accumulated_today for the account.
+  // The best way to do this concurrently is via a database RPC, but since there's no RPC,
+  // we'll fetch the current value and update it. A small race condition exists here.
+  const { data: acc } = await supabase
+    .from('payment_accounts')
+    .select('accumulated_today')
+    .eq('id', accountId)
+    .single()
+
+  if (acc) {
+    await supabase
+      .from('payment_accounts')
+      .update({ accumulated_today: acc.accumulated_today + amount })
+      .eq('id', accountId)
+  }
+
   return { success: true }
 }

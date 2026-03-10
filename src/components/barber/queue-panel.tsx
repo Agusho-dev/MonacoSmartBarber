@@ -4,9 +4,11 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { startService, cancelQueueEntry, reassignBarber } from '@/lib/actions/queue'
 import { toggleBarberStatus, fetchBarberDayStats } from '@/lib/actions/barber'
+import { startBreak } from '@/lib/actions/breaks'
 import { logoutBarber } from '@/lib/actions/auth'
+import { requestBreak, getBarberActiveBreakRequest } from '@/lib/actions/break-requests'
 import { formatCurrency } from '@/lib/format'
-import type { QueueEntry, Staff, StaffStatus, Client } from '@/lib/types/database'
+import type { QueueEntry, Staff, StaffStatus, Client, BreakConfig } from '@/lib/types/database'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -38,30 +40,49 @@ import {
   Gift,
   ArrowRightLeft,
   Receipt,
+  Coffee,
 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
 import { ClientHistory } from './client-history'
 import { ClientProfileSheet } from './client-profile-sheet'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 interface BarberSession {
   staff_id: string
   full_name: string
   branch_id: string
   role: string
+  role_id?: string | null
+  permissions?: Record<string, boolean>
 }
 
 interface QueuePanelProps {
   session: BarberSession
   branchName: string
   initialStatus?: StaffStatus
+  breakConfigs?: BreakConfig[]
 }
 
 export function QueuePanel({
   session,
   branchName,
   initialStatus = 'available',
+  breakConfigs = [],
 }: QueuePanelProps) {
   const [entries, setEntries] = useState<QueueEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -74,10 +95,16 @@ export function QueuePanel({
   const [otherBarbers, setOtherBarbers] = useState<Staff[]>([])
   const [reassigningEntryId, setReassigningEntryId] = useState<string | null>(null)
   const [profileClient, setProfileClient] = useState<Client | null>(null)
+  // Break request state
+  const [breakDialogOpen, setBreakDialogOpen] = useState(false)
+  const [selectedBreakConfig, setSelectedBreakConfig] = useState('')
+  const [breakRequestStatus, setBreakRequestStatus] = useState<string | null>(null)
+  const [breakRequestLoading, setBreakRequestLoading] = useState(false)
 
   const supabase = useMemo(() => createClient(), [])
 
   const isPaused = barberStatus === 'paused'
+  const canManageBreaks = session.role === 'admin' || session.permissions?.manage_breaks === true
 
   const fetchQueue = useCallback(async () => {
     const { data } = await supabase
@@ -113,6 +140,10 @@ export function QueuePanel({
     fetchQueue()
     refreshStats()
     fetchOtherBarbers()
+    // Check for existing break request
+    getBarberActiveBreakRequest(session.staff_id).then(({ data }) => {
+      if (data) setBreakRequestStatus(data.status)
+    })
 
     const channel = supabase
       .channel(`barber-queue-${session.branch_id}-${session.staff_id}`)
@@ -441,6 +472,25 @@ export function QueuePanel({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Break request button */}
+          {!breakRequestStatus && breakConfigs.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={() => setBreakDialogOpen(true)}>
+              <Coffee className="size-4" />
+              <span className="hidden sm:inline">Descanso</span>
+            </Button>
+          )}
+          {breakRequestStatus === 'pending' && (
+            <Badge variant="outline" className="bg-yellow-500/15 text-yellow-500 border-yellow-500/30">
+              <Coffee className="size-3 mr-1" />
+              Descanso solicitado
+            </Badge>
+          )}
+          {breakRequestStatus === 'approved' && (
+            <Badge variant="outline" className="bg-green-500/15 text-green-600 border-green-500/30">
+              <Coffee className="size-3 mr-1" />
+              Descanso aprobado
+            </Badge>
+          )}
           <form action={logoutBarber}>
             <Button variant="ghost" size="sm" type="submit">
               <LogOut className="size-4" />
@@ -586,6 +636,18 @@ export function QueuePanel({
                     </div>
                   </div>
 
+                  {myActiveEntry.client?.notes && (
+                    <div className="rounded-lg bg-muted/50 p-4 border border-border/50">
+                      <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1.5">
+                        <User className="size-3.5" />
+                        Observaciones del cliente
+                      </p>
+                      <p className="text-sm font-medium italic text-foreground whitespace-pre-wrap">
+                        {myActiveEntry.client.notes}
+                      </p>
+                    </div>
+                  )}
+
                   <div className="flex gap-4">
                     <Button
                       variant="outline"
@@ -597,7 +659,7 @@ export function QueuePanel({
                       }}
                     >
                       <User className="mr-2 size-5" />
-                      Ver Perfil y Notas
+                      Ver Historial y Fotos
                     </Button>
                   </div>
 
@@ -640,6 +702,66 @@ export function QueuePanel({
         isOpen={!!profileClient}
         onClose={() => setProfileClient(null)}
       />
+
+      {/* Break request dialog */}
+      <Dialog open={breakDialogOpen} onOpenChange={setBreakDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{canManageBreaks ? 'Tomar descanso' : 'Solicitar descanso'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <p className="text-sm text-muted-foreground mb-2">Seleccioná el tipo de descanso:</p>
+              <Select value={selectedBreakConfig} onValueChange={setSelectedBreakConfig}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Tipo de descanso..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {breakConfigs.filter(bc => bc.is_active && bc.branch_id === session.branch_id).map((bc) => (
+                    <SelectItem key={bc.id} value={bc.id}>
+                      {bc.name} ({bc.duration_minutes} min)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBreakDialogOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={!selectedBreakConfig || breakRequestLoading}
+              onClick={async () => {
+                setBreakRequestLoading(true)
+                if (canManageBreaks) {
+                  const result = await startBreak(session.staff_id, selectedBreakConfig)
+                  if (result.error) {
+                    toast.error(result.error)
+                  } else {
+                    toast.success('Descanso iniciado')
+                    setBarberStatus('paused')
+                    setBreakDialogOpen(false)
+                    setSelectedBreakConfig('')
+                  }
+                } else {
+                  const result = await requestBreak(session.staff_id, session.branch_id, selectedBreakConfig)
+                  if (result.error) {
+                    toast.error(result.error)
+                  } else {
+                    toast.success('Solicitud de descanso enviada')
+                    setBreakRequestStatus('pending')
+                    setBreakDialogOpen(false)
+                    setSelectedBreakConfig('')
+                  }
+                }
+                setBreakRequestLoading(false)
+              }}
+            >
+              <Coffee className="size-4 mr-2" />
+              {canManageBreaks ? 'Iniciar' : 'Solicitar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

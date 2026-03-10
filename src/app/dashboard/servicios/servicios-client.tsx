@@ -10,7 +10,7 @@ import {
   upsertServiceTag,
   deleteServiceTag,
 } from '@/lib/actions/tags'
-import type { Service, Branch, ServiceTag } from '@/lib/types/database'
+import type { Service, Branch, ServiceTag, ServiceAvailability } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -56,6 +56,7 @@ const emptyForm = {
   price: '',
   duration_minutes: '',
   branch_id: '',
+  availability: 'both' as ServiceAvailability,
 }
 
 export function ServiciosClient({ services, branches, tags }: Props) {
@@ -100,6 +101,7 @@ export function ServiciosClient({ services, branches, tags }: Props) {
         ? String(service.duration_minutes)
         : '',
       branch_id: service.branch_id ?? '',
+      availability: service.availability ?? 'both',
     })
     setDialogOpen(true)
   }
@@ -113,6 +115,7 @@ export function ServiciosClient({ services, branches, tags }: Props) {
         ? Number(form.duration_minutes)
         : null,
       branch_id: form.branch_id || null,
+      availability: form.availability,
     }
 
     if (editingId) {
@@ -194,6 +197,7 @@ export function ServiciosClient({ services, branches, tags }: Props) {
                 <TableHead>Nombre</TableHead>
                 <TableHead className="text-right">Precio</TableHead>
                 <TableHead className="text-right">Duración</TableHead>
+                <TableHead>Disponibilidad</TableHead>
                 <TableHead>Sucursal</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="text-right">Acciones</TableHead>
@@ -220,6 +224,11 @@ export function ServiciosClient({ services, branches, tags }: Props) {
                     {service.duration_minutes
                       ? `${service.duration_minutes} min`
                       : '—'}
+                  </TableCell>
+                  <TableCell>
+                    {service.availability === 'checkin' && <Badge variant="outline">Totem</Badge>}
+                    {service.availability === 'upsell' && <Badge variant="outline">Adicionales</Badge>}
+                    {service.availability === 'both' && <Badge variant="outline">Ambos</Badge>}
                   </TableCell>
                   <TableCell>{service.branch?.name ?? 'Todas'}</TableCell>
                   <TableCell>
@@ -357,26 +366,44 @@ export function ServiciosClient({ services, branches, tags }: Props) {
                 />
               </div>
             </div>
-            <div className="grid gap-2">
-              <Label>Sucursal</Label>
-              <Select
-                value={form.branch_id || 'all'}
-                onValueChange={(v) =>
-                  setForm({ ...form, branch_id: v === 'all' ? '' : v })
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Todas las sucursales" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas las sucursales</SelectItem>
-                  {branches.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Disponibilidad</Label>
+                <Select
+                  value={form.availability}
+                  onValueChange={(v) => setForm({ ...form, availability: v as ServiceAvailability })}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Seleccionar" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="both">Totem y Adicionales</SelectItem>
+                    <SelectItem value="checkin">Solo Totem (Ingreso)</SelectItem>
+                    <SelectItem value="upsell">Solo Adicionales</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Sucursal</Label>
+                <Select
+                  value={form.branch_id || 'all'}
+                  onValueChange={(v) =>
+                    setForm({ ...form, branch_id: v === 'all' ? '' : v })
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Todas las sucursales" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas las sucursales</SelectItem>
+                    {branches.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
 

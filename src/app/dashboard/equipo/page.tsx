@@ -52,6 +52,7 @@ export default async function EquipoPage() {
         { data: disciplinaryRules },
         { data: disciplinaryEvents },
         { data: roles },
+        { data: breakRequests },
     ] = await Promise.all([
         supabase.from('staff').select('*, branch:branches(*)').order('full_name'),
         supabase.from('branches').select('*').eq('is_active', true).order('name'),
@@ -88,6 +89,11 @@ export default async function EquipoPage() {
             .from('roles')
             .select('*, role_branch_scope(branch_id)')
             .order('name'),
+        supabase
+            .from('break_requests')
+            .select('*, staff:staff_id(id, full_name), break_config:break_config_id(name, duration_minutes)')
+            .in('status', ['pending', 'approved'])
+            .order('requested_at', { ascending: true }),
     ])
 
     // Get user permissions
@@ -116,6 +122,8 @@ export default async function EquipoPage() {
             breakConfigs={breakConfigs ?? []}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             breakBarbers={(breakBarbers ?? []) as any}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            breakRequests={(breakRequests ?? []) as any}
             incentiveRules={incentiveRules ?? []}
             incentiveAchievements={incentiveAchievements ?? []}
             disciplinaryRules={disciplinaryRules ?? []}
