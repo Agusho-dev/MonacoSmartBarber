@@ -262,7 +262,7 @@ export function QueuePanel({
                   disabled={actionLoading === entry.id}
                 >
                   <Scissors className="size-4" />
-                  <span className="hidden sm:inline">Atender</span>
+                  <span className="hidden xl:inline">Atender</span>
                 </Button>
               )}
               {canReassign && (
@@ -276,7 +276,7 @@ export function QueuePanel({
                   className="text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10"
                 >
                   <ArrowRightLeft className="size-4" />
-                  <span className="hidden sm:inline">Reasignar</span>
+                  <span className="hidden xl:inline">Reasignar</span>
                 </Button>
               )}
               <AlertDialog>
@@ -488,9 +488,9 @@ export function QueuePanel({
         )}
       </div>
 
-      <main className="flex flex-1 flex-col overflow-hidden lg:flex-row">
+      <main className="flex flex-1 flex-col overflow-hidden sm:flex-row">
         {/* Queue list */}
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b lg:border-b-0 lg:border-r">
+        <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b sm:border-b-0 sm:border-r">
           <Tabs defaultValue="my-queue" className="flex flex-1 flex-col overflow-hidden">
             <div className="px-4 py-3 md:px-6">
               <TabsList className="w-full">
@@ -553,7 +553,7 @@ export function QueuePanel({
         </section>
 
         {/* Current client */}
-        <section className="flex shrink-0 flex-col lg:w-[420px]">
+        <section className="flex shrink-0 flex-col sm:w-[280px] md:w-[340px] lg:w-[420px]">
           <div className="px-4 py-3 md:px-6">
             <h2 className="text-lg font-semibold">Tu cliente actual</h2>
           </div>
