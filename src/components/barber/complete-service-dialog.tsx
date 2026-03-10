@@ -254,7 +254,7 @@ export function CompleteServiceDialog({
 
   return (
     <Dialog open={!!entry} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>
             {step === 1 ? 'Detalles del corte' : 'Cobro'}
@@ -304,7 +304,7 @@ export function CompleteServiceDialog({
                       <span className="text-muted-foreground">(opcional)</span>
                     </p>
                     <Select value={selectedService} onValueChange={setSelectedService}>
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className="h-14 w-full text-lg">
                         <SelectValue placeholder="Seleccionar servicio principal" />
                       </SelectTrigger>
                       <SelectContent>
@@ -349,7 +349,7 @@ export function CompleteServiceDialog({
                         }
                       }}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className="h-14 w-full text-lg">
                         <SelectValue placeholder="Agregar extra..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -372,8 +372,8 @@ export function CompleteServiceDialog({
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     placeholder="Ej: Degradé bajo, 2 a los costados..."
-                    rows={2}
-                    className="w-full resize-none rounded-lg border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    rows={3}
+                    className="min-h-[100px] w-full resize-none rounded-lg border bg-transparent p-4 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                 </div>
 
@@ -395,7 +395,7 @@ export function CompleteServiceDialog({
                   <div className="flex gap-2">
                     {tags.length > 0 && (
                       <Select value="" onValueChange={(v) => addTag(v)}>
-                        <SelectTrigger className="flex-1">
+                        <SelectTrigger className="h-14 flex-1 text-base">
                           <SelectValue placeholder="Predefinidas..." />
                         </SelectTrigger>
                         <SelectContent>
@@ -414,7 +414,7 @@ export function CompleteServiceDialog({
                       onChange={(e) => setCustomTag(e.target.value)}
                       onKeyDown={handleCustomTagKey}
                       placeholder="Personalizada..."
-                      className="flex-1"
+                      className="h-14 flex-1 text-base"
                     />
                   </div>
                 </div>
@@ -463,21 +463,21 @@ export function CompleteServiceDialog({
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
+                      size="lg"
+                      className="h-14 flex-1 text-base"
                       onClick={() => cameraInputRef.current?.click()}
-                      className="flex-1"
                     >
-                      <Camera className="mr-2 size-4" />
+                      <Camera className="mr-2 size-5" />
                       Cámara
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
+                      size="lg"
+                      className="h-14 flex-1 text-base"
                       onClick={() => fileInputRef.current?.click()}
-                      className="flex-1"
                     >
-                      <ImagePlus className="mr-2 size-4" />
+                      <ImagePlus className="mr-2 size-5" />
                       Galería
                     </Button>
                   </div>
@@ -490,8 +490,8 @@ export function CompleteServiceDialog({
                     value={clientNotes}
                     onChange={(e) => setClientNotes(e.target.value)}
                     placeholder="Ej: Prefiere degradé bajo, alérgico a ciertos productos..."
-                    rows={2}
-                    className="w-full resize-none rounded-lg border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    rows={3}
+                    className="min-h-[100px] w-full resize-none rounded-lg border bg-transparent p-4 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                 </div>
 
@@ -501,23 +501,23 @@ export function CompleteServiceDialog({
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
+                      size="lg"
+                      className="h-14 w-full gap-2 text-base"
                       onClick={() => setShowFaceEnroll(true)}
-                      className="w-full gap-2"
                     >
-                      <ScanFace className="size-4" />
+                      <ScanFace className="size-5" />
                       {hasFaceData ? 'Actualizar reconocimiento facial' : 'Registrar cara del cliente'}
                     </Button>
                   </div>
                 )}
 
                 <Button
-                  className="w-full"
+                  className="h-14 w-full text-lg"
                   size="lg"
                   onClick={() => setStep(2)}
                 >
                   Continuar al cobro
-                  <ArrowRight className="ml-2 size-4" />
+                  <ArrowRight className="ml-2 size-5" />
                 </Button>
               </div>
             ) : (
@@ -536,14 +536,14 @@ export function CompleteServiceDialog({
                           type="button"
                           onClick={() => setSelectedPayment(option.value)}
                           className={cn(
-                            'flex flex-col items-center gap-2.5 rounded-xl border-2 p-5 transition-colors',
+                            'flex flex-col items-center gap-3 rounded-xl border-2 p-6 transition-colors',
                             selected
                               ? 'border-primary bg-primary/10 text-foreground'
                               : 'border-border text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground'
                           )}
                         >
-                          <Icon className="size-8" />
-                          <span className="text-sm font-medium">{option.label}</span>
+                          <Icon className="size-10" />
+                          <span className="text-base font-semibold">{option.label}</span>
                         </button>
                       )
                     })}
@@ -559,7 +559,7 @@ export function CompleteServiceDialog({
                       <span className="text-muted-foreground">(opcional)</span>
                     </p>
                     <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className="h-14 w-full text-lg">
                         <SelectValue placeholder="Seleccionar cuenta..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -578,18 +578,19 @@ export function CompleteServiceDialog({
                   </div>
                 )}
 
-                <div className="flex gap-3">
+                <div className="flex gap-4">
                   <Button
                     variant="outline"
-                    size="sm"
+                    size="lg"
+                    className="h-16 px-6 text-lg"
                     onClick={() => setStep(1)}
                     disabled={loading}
                   >
-                    <ArrowLeft className="mr-1 size-3" />
+                    <ArrowLeft className="mr-2 size-5" />
                     Atrás
                   </Button>
                   <Button
-                    className="flex-1"
+                    className="h-16 flex-1 text-xl"
                     size="lg"
                     onClick={finishService}
                     disabled={loading || !selectedPayment}

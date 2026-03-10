@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { checkinClient, checkinClientByFace, reassignMyBarber } from '@/lib/actions/queue'
+import { registerBarberClockIn } from '@/lib/actions/attendance'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -1590,12 +1591,10 @@ export default function CheckinPage() {
                       .eq('branch_id', branchId)
                       .single()
                     if (!staffData) { setError('Barbero no encontrado'); return }
-                    await supabase.from('attendance_logs').insert({
-                      staff_id: staffData.id,
-                      branch_id: branchId,
-                      action_type: 'clock_in',
-                      face_verified: true,
-                    })
+
+                    const res = await registerBarberClockIn(staffData.id, branchId, true)
+                    if (res.error) { setError(res.error); return }
+
                     setStaffAction('clock_in')
                     setStaffActionDone(true)
                     resetTimer.current = setTimeout(reset, RESET_DELAY_MS)

@@ -234,13 +234,13 @@ export function QueuePanel({
     return (
       <div key={entry.id} className="space-y-2">
         <Card className="gap-0 py-0">
-          <CardContent className="flex items-center gap-4 p-4">
-            <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-secondary text-lg font-bold">
+          <CardContent className="flex items-center gap-4 p-5 md:p-6">
+            <div className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-secondary text-xl font-bold">
               #{entry.position}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <p className="truncate font-medium">
+                <p className="truncate text-lg font-semibold">
                   {entry.client?.name ?? 'Cliente'}
                 </p>
                 {(!entry.client?.loyalty?.length || entry.client.loyalty[0]?.total_visits === 0) && (
@@ -267,24 +267,25 @@ export function QueuePanel({
               {!myActiveEntry && !isPaused && (
                 <Button
                   size="lg"
+                  className="h-14 px-6 text-lg"
                   onClick={() => handleStartService(entry.id)}
                   disabled={actionLoading === entry.id}
                 >
-                  <Scissors className="size-4" />
+                  <Scissors className="mr-2 size-5" />
                   <span className="hidden xl:inline">Atender</span>
                 </Button>
               )}
               {canReassign && (
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="lg"
+                  className="h-14 px-5 text-base text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10"
                   onClick={() =>
                     setReassigningEntryId(isReassigning ? null : entry.id)
                   }
                   disabled={actionLoading === entry.id}
-                  className="text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10"
                 >
-                  <ArrowRightLeft className="size-4" />
+                  <ArrowRightLeft className="size-5 md:mr-2" />
                   <span className="hidden xl:inline">Reasignar</span>
                 </Button>
               )}
@@ -294,10 +295,10 @@ export function QueuePanel({
                     variant="ghost"
                     size="icon"
                     disabled={actionLoading === entry.id}
-                    className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    className="size-14 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     title="No se presentó / Ausente"
                   >
-                    <X className="size-4" />
+                    <X className="size-6" />
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
@@ -480,15 +481,15 @@ export function QueuePanel({
           <Tabs defaultValue="my-queue" className="flex flex-1 flex-col overflow-hidden">
             <div className="px-4 py-3 md:px-6">
               <TabsList className="w-full">
-                <TabsTrigger value="my-queue" className="flex-1">
+                <TabsTrigger value="my-queue" className="flex-1 py-3 text-lg">
                   Mi cola
-                  <Badge variant="secondary" className="ml-2">
+                  <Badge variant="secondary" className="ml-2 px-2 text-base">
                     {myWaitingEntries.length}
                   </Badge>
                 </TabsTrigger>
-                <TabsTrigger value="general-queue" className="flex-1">
+                <TabsTrigger value="general-queue" className="flex-1 py-3 text-lg">
                   Cola general
-                  <Badge variant="secondary" className="ml-2">
+                  <Badge variant="secondary" className="ml-2 px-2 text-base">
                     {allWaitingEntries.length}
                   </Badge>
                 </TabsTrigger>
@@ -540,23 +541,23 @@ export function QueuePanel({
 
         {/* Current client */}
         <section className="flex shrink-0 flex-col sm:w-[280px] md:w-[340px] lg:w-[420px]">
-          <div className="px-4 py-3 md:px-6">
-            <h2 className="text-lg font-semibold">Tu cliente actual</h2>
+          <div className="px-4 py-4 md:px-6">
+            <h2 className="text-xl font-semibold">Tu cliente actual</h2>
           </div>
           <Separator />
           <div className="flex flex-1 flex-col p-4 md:p-6">
             {myActiveEntry ? (
               <Card className="border-primary/20 bg-primary/3">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-primary text-xl font-bold text-primary-foreground">
+                <CardHeader className="p-5 md:p-6">
+                  <div className="flex items-center gap-4">
+                    <div className="flex size-16 shrink-0 items-center justify-center rounded-xl bg-primary text-2xl font-bold text-primary-foreground">
                       #{myActiveEntry.position}
                     </div>
                     <div>
-                      <CardTitle className="text-xl">
+                      <CardTitle className="text-2xl md:text-3xl">
                         {myActiveEntry.client?.name ?? 'Cliente'}
                       </CardTitle>
-                      <p className="mt-1 text-sm text-muted-foreground">
+                      <p className="mt-1.5 text-base text-muted-foreground">
                         {myActiveEntry.client?.phone}
                       </p>
                     </div>
@@ -570,14 +571,14 @@ export function QueuePanel({
                     )}
                   </div>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center gap-3 rounded-lg bg-secondary px-4 py-3">
-                    <Clock className="size-5 shrink-0 text-muted-foreground" />
+                <CardContent className="space-y-5 p-5 pt-0 md:p-6 md:pt-0">
+                  <div className="flex items-center gap-4 rounded-xl bg-secondary px-5 py-4">
+                    <Clock className="size-6 shrink-0 text-muted-foreground" />
                     <div>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-sm font-medium text-muted-foreground">
                         Tiempo de servicio
                       </p>
-                      <p className="text-2xl font-bold tabular-nums tracking-tight">
+                      <p className="text-4xl font-bold tabular-nums tracking-tight">
                         {myActiveEntry.started_at
                           ? formatElapsed(myActiveEntry.started_at)
                           : '—'}
@@ -585,28 +586,28 @@ export function QueuePanel({
                     </div>
                   </div>
 
-                  <div className="flex gap-3">
+                  <div className="flex gap-4">
                     <Button
                       variant="outline"
-                      className="w-full bg-card hover:bg-accent flex-1"
+                      className="h-14 w-full bg-card text-lg hover:bg-accent flex-1"
                       onClick={() => {
                         if (myActiveEntry?.client) {
                           setProfileClient(myActiveEntry.client)
                         }
                       }}
                     >
-                      <User className="mr-2 size-4" />
+                      <User className="mr-2 size-5" />
                       Ver Perfil y Notas
                     </Button>
                   </div>
 
-                  <div className="flex gap-3">
+                  <div className="flex gap-4">
                     <Button
-                      className="flex-1"
+                      className="h-16 flex-1 text-xl"
                       size="lg"
                       onClick={() => setCompletingEntry(myActiveEntry)}
                     >
-                      <Check className="size-4" />
+                      <Check className="mr-2 size-6" />
                       Finalizar
                     </Button>
                   </div>
