@@ -46,7 +46,6 @@ export default async function EquipoPage() {
         { data: branches },
         { data: todayVisits },
         { data: breakConfigs },
-        { data: breakBarbers },
         { data: incentiveRules },
         { data: incentiveAchievements },
         { data: disciplinaryRules },
@@ -62,14 +61,6 @@ export default async function EquipoPage() {
             .gte('completed_at', todayStr)
             .lt('completed_at', tomorrowStr),
         supabase.from('break_configs').select('*').order('name'),
-        supabase
-            .from('staff')
-            .select(
-                'id, full_name, status, break_config_id, break_started_at, break_ends_at, branch_id, break_configs:break_config_id(name, duration_minutes, tolerance_minutes)'
-            )
-            .eq('role', 'barber')
-            .eq('is_active', true)
-            .order('full_name'),
         supabase.from('incentive_rules').select('*').order('name'),
         supabase
             .from('incentive_achievements')
@@ -120,8 +111,6 @@ export default async function EquipoPage() {
             branches={branches ?? []}
             todayVisits={todayVisits ?? []}
             breakConfigs={breakConfigs ?? []}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            breakBarbers={(breakBarbers ?? []) as any}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             breakRequests={(breakRequests ?? []) as any}
             incentiveRules={incentiveRules ?? []}

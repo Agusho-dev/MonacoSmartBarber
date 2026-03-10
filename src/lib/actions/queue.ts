@@ -232,13 +232,62 @@ export async function completeService(
     }
   }
 
+  // 6. Check if the barber's next waiting entry is a ghost break → auto-start it
+  const { data: nextGhost } = await supabase
+    .from('queue_entries')
+    .select('id')
+    .eq('barber_id', visit.barber_id)
+    .eq('branch_id', visit.branch_id)
+    .eq('status', 'waiting')
+    .eq('is_break', true)
+    .order('position', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  let breakAutoStarted = false
+  if (nextGhost) {
+    // Check that there are no real waiting clients before the ghost
+    const { data: realWaiting } = await supabase
+      .from('queue_entries')
+      .select('id')
+      .eq('barber_id', visit.barber_id)
+      .eq('branch_id', visit.branch_id)
+      .eq('status', 'waiting')
+      .eq('is_break', false)
+      .limit(1)
+      .maybeSingle()
+
+    // Also check unassigned waiting clients
+    const { data: unassignedWaiting } = await supabase
+      .from('queue_entries')
+      .select('id, position')
+      .eq('branch_id', visit.branch_id)
+      .eq('status', 'waiting')
+      .eq('is_break', false)
+      .is('barber_id', null)
+      .limit(1)
+      .maybeSingle()
+
+    // Only auto-start if no real clients are waiting for this barber
+    if (!realWaiting && !unassignedWaiting) {
+      await supabase
+        .from('queue_entries')
+        .update({
+          status: 'in_progress',
+          started_at: new Date().toISOString(),
+        })
+        .eq('id', nextGhost.id)
+      breakAutoStarted = true
+    }
+  }
+
   revalidatePath('/barbero/cola')
   revalidatePath('/barbero/facturacion')
   revalidatePath('/barbero/rendimiento')
   revalidatePath('/dashboard')
   revalidatePath('/dashboard/finanzas')
   revalidatePath('/dashboard/estadisticas')
-  return { success: true, visitId: visit.id }
+  return { success: true, visitId: visit.id, breakAutoStarted }
 }
 
 export async function cancelQueueEntry(queueEntryId: string) {

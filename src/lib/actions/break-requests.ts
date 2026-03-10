@@ -1,10 +1,10 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 
-async function getApproverStaffId(supabase: any) {
+async function getApproverStaffId(supabase: ReturnType<typeof createAdminClient>) {
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
         const { data: staff } = await supabase
@@ -25,6 +25,9 @@ async function getApproverStaffId(supabase: any) {
     return null
 }
 
+/**
+ * Barber requests a break. Creates a pending break_request.
+ */
 export async function requestBreak(staffId: string, branchId: string, breakConfigId: string) {
     const supabase = await createClient()
 
@@ -48,31 +51,113 @@ export async function requestBreak(staffId: string, branchId: string, breakConfi
 
     if (error) return { error: error.message }
     revalidatePath('/dashboard/descansos')
+    revalidatePath('/dashboard/equipo')
     revalidatePath('/barbero/cola')
     return { success: true }
 }
 
-export async function approveBreak(requestId: string) {
-    const supabase = await createClient()
+/**
+ * Approve a break request and insert a ghost entry into the queue.
+ * cutsBeforeBreak: how many cuts the barber should complete before the break (0 = immediate)
+ */
+export async function approveBreak(requestId: string, cutsBeforeBreak: number) {
+    const supabase = createAdminClient()
     const approverId = await getApproverStaffId(supabase)
     if (!approverId) return { error: 'No autorizado' }
 
-    const { error } = await supabase
+    // Get request details
+    const { data: req, error: fetchErr } = await supabase
+        .from('break_requests')
+        .select('id, staff_id, branch_id, break_config_id, status')
+        .eq('id', requestId)
+        .eq('status', 'pending')
+        .single()
+
+    if (fetchErr || !req) return { error: 'Solicitud no encontrada o ya procesada' }
+
+    // Update request to approved
+    const { error: updateErr } = await supabase
         .from('break_requests')
         .update({
             status: 'approved',
             approved_by: approverId,
             approved_at: new Date().toISOString(),
+            cuts_before_break: cutsBeforeBreak,
         })
         .eq('id', requestId)
-        .eq('status', 'pending')
 
-    if (error) return { error: error.message }
+    if (updateErr) return { error: updateErr.message }
+
+    // Calculate ghost position: find the barber's current waiting entries, then insert after N
+    const ghostPosition = await calculateGhostPosition(supabase, req.staff_id, req.branch_id, cutsBeforeBreak)
+
+    // Insert the ghost break entry into the queue
+    const { error: insertErr } = await supabase.from('queue_entries').insert({
+        branch_id: req.branch_id,
+        client_id: null,
+        barber_id: req.staff_id,
+        status: cutsBeforeBreak === 0 ? 'in_progress' : 'waiting',
+        position: ghostPosition,
+        is_break: true,
+        break_request_id: req.id,
+        checked_in_at: new Date().toISOString(),
+        started_at: cutsBeforeBreak === 0 ? new Date().toISOString() : null,
+    })
+
+    if (insertErr) return { error: insertErr.message }
+
     revalidatePath('/dashboard/descansos')
+    revalidatePath('/dashboard/equipo')
     revalidatePath('/barbero/cola')
     return { success: true }
 }
 
+/**
+ * Calculate the correct position for a ghost break entry.
+ * It should be placed after the barber's next N waiting clients.
+ */
+async function calculateGhostPosition(
+    supabase: ReturnType<typeof createAdminClient>,
+    staffId: string,
+    branchId: string,
+    cutsBeforeBreak: number
+): Promise<number> {
+    // Get all waiting/in_progress entries for this branch, ordered by position
+    const { data: entries } = await supabase
+        .from('queue_entries')
+        .select('id, position, barber_id, status, is_break')
+        .eq('branch_id', branchId)
+        .in('status', ['waiting', 'in_progress'])
+        .order('position')
+
+    if (!entries || entries.length === 0) return 1
+
+    // Filter entries assigned to this barber (or unassigned) that are real clients (not breaks)
+    const barberWaiting = entries.filter(
+        e => e.status === 'waiting' && !e.is_break && (!e.barber_id || e.barber_id === staffId)
+    )
+
+    if (cutsBeforeBreak === 0 || barberWaiting.length === 0) {
+        // Insert at the next position after any in_progress entry for this barber
+        const barberInProgress = entries.find(
+            e => e.status === 'in_progress' && e.barber_id === staffId && !e.is_break
+        )
+        if (barberInProgress) {
+            return barberInProgress.position + 1
+        }
+        // Otherwise at the end
+        return Math.max(...entries.map(e => e.position)) + 1
+    }
+
+    // Place after the Nth waiting client of this barber
+    const targetIdx = Math.min(cutsBeforeBreak, barberWaiting.length)
+    const targetEntry = barberWaiting[targetIdx - 1]
+    return targetEntry.position + 1
+}
+
+/**
+ * Reject a break request.
+ */
 export async function rejectBreak(requestId: string, notes?: string) {
     const supabase = await createClient()
     const approverId = await getApproverStaffId(supabase)
@@ -91,62 +176,95 @@ export async function rejectBreak(requestId: string, notes?: string) {
 
     if (error) return { error: error.message }
     revalidatePath('/dashboard/descansos')
+    revalidatePath('/dashboard/equipo')
     revalidatePath('/barbero/cola')
     return { success: true }
 }
 
-export async function startApprovedBreak(requestId: string) {
+/**
+ * Cancel a pending break request (by the barber themselves).
+ * Also removes the ghost entry if the request was already approved.
+ */
+export async function cancelBreakRequest(requestId: string) {
     const supabase = await createClient()
 
-    // Get the request details
-    const { data: req, error: fetchErr } = await supabase
+    // Get request status
+    const { data: req } = await supabase
         .from('break_requests')
-        .select('staff_id, break_config_id')
+        .select('id, status')
         .eq('id', requestId)
-        .eq('status', 'approved')
+        .in('status', ['pending', 'approved'])
         .single()
 
-    if (fetchErr || !req) return { error: 'Solicitud no encontrada o no aprobada' }
+    if (!req) return { error: 'Solicitud no encontrada' }
 
-    // Start the break via existing RPC
-    const { error: rpcErr } = await supabase.rpc('start_barber_break', {
-        p_staff_id: req.staff_id,
-        p_break_config_id: req.break_config_id,
-    })
-    if (rpcErr) return { error: rpcErr.message }
+    // If approved, remove the ghost queue entry
+    if (req.status === 'approved') {
+        await supabase
+            .from('queue_entries')
+            .delete()
+            .eq('break_request_id', requestId)
+            .eq('is_break', true)
+            .in('status', ['waiting', 'in_progress'])
+    }
 
-    // Mark started
-    await supabase
+    // Delete the request
+    const { error } = await supabase
         .from('break_requests')
-        .update({ started_at: new Date().toISOString() })
+        .delete()
         .eq('id', requestId)
 
+    if (error) return { error: error.message }
     revalidatePath('/dashboard/descansos')
+    revalidatePath('/dashboard/equipo')
     revalidatePath('/barbero/cola')
     return { success: true }
 }
 
-export async function completeBreakRequest(requestId: string, staffId: string) {
+/**
+ * Complete a break (the barber finishes their break).
+ * Marks the ghost queue entry as completed and the break_request as completed.
+ */
+export async function completeBreakRequest(queueEntryId: string) {
     const supabase = await createClient()
 
-    // End the break via existing RPC
-    const { error: rpcErr } = await supabase.rpc('end_barber_break', { p_staff_id: staffId })
-    if (rpcErr) return { error: rpcErr.message }
+    // Get the ghost entry
+    const { data: entry } = await supabase
+        .from('queue_entries')
+        .select('id, break_request_id')
+        .eq('id', queueEntryId)
+        .eq('is_break', true)
+        .eq('status', 'in_progress')
+        .single()
 
-    // Mark completed
+    if (!entry) return { error: 'Descanso no encontrado o no activo' }
+
+    // Mark ghost entry as completed
     await supabase
-        .from('break_requests')
+        .from('queue_entries')
         .update({
             status: 'completed',
-            ended_at: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
         })
-        .eq('id', requestId)
+        .eq('id', queueEntryId)
+
+    // Mark break_request as completed
+    if (entry.break_request_id) {
+        await supabase
+            .from('break_requests')
+            .update({ status: 'completed' })
+            .eq('id', entry.break_request_id)
+    }
 
     revalidatePath('/dashboard/descansos')
+    revalidatePath('/dashboard/equipo')
     revalidatePath('/barbero/cola')
     return { success: true }
 }
 
+/**
+ * Get pending/approved break requests for a branch.
+ */
 export async function getPendingBreakRequests(branchId: string) {
     const supabase = await createClient()
     const { data, error } = await supabase
@@ -159,6 +277,9 @@ export async function getPendingBreakRequests(branchId: string) {
     return { data: data ?? [], error }
 }
 
+/**
+ * Get the barber's active (pending or approved) break request.
+ */
 export async function getBarberActiveBreakRequest(staffId: string) {
     const supabase = await createClient()
     const { data, error } = await supabase

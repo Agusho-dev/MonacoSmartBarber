@@ -2,7 +2,7 @@ export type UserRole = 'owner' | 'admin' | 'receptionist' | 'barber'
 export type QueueStatus = 'waiting' | 'in_progress' | 'completed' | 'cancelled'
 export type PaymentMethod = 'cash' | 'card' | 'transfer'
 export type PointTxType = 'earned' | 'redeemed'
-export type StaffStatus = 'available' | 'paused' | 'blocked'
+export type StaffStatus = 'available'
 export type SalaryScheme = 'fixed' | 'commission' | 'hybrid'
 export type AttendanceAction = 'clock_in' | 'clock_out'
 export type IncentiveMetric = 'haircut_count' | 'content_post' | 'custom'
@@ -68,9 +68,6 @@ export interface Staff {
   commission_pct: number
   status: StaffStatus
   is_active: boolean
-  break_config_id: string | null
-  break_started_at: string | null
-  break_ends_at: string | null
   created_at: string
   updated_at: string
   branch?: Branch
@@ -167,12 +164,14 @@ export interface ProductSale {
 export interface QueueEntry {
   id: string
   branch_id: string
-  client_id: string
+  client_id: string | null
   barber_id: string | null
   service_id: string | null
   status: QueueStatus
   position: number
   reward_claimed: boolean
+  is_break: boolean
+  break_request_id: string | null
   checked_in_at: string
   started_at: string | null
   completed_at: string | null
@@ -180,6 +179,7 @@ export interface QueueEntry {
   client?: Client
   barber?: Staff
   service?: Service
+  break_request?: BreakRequest
 }
 
 export interface Visit {
@@ -328,8 +328,6 @@ export interface BreakConfig {
   branch_id: string
   name: string
   duration_minutes: number
-  tolerance_minutes: number
-  scheduled_time: string | null
   is_active: boolean
   created_at: string
   updated_at: string
@@ -341,11 +339,10 @@ export interface BreakRequest {
   branch_id: string
   break_config_id: string
   status: BreakRequestStatus
+  cuts_before_break: number
   requested_at: string
   approved_by: string | null
   approved_at: string | null
-  started_at: string | null
-  ended_at: string | null
   notes: string | null
   created_at: string
   staff?: Staff

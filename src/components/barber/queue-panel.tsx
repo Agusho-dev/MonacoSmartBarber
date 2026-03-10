@@ -3,12 +3,19 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { startService, cancelQueueEntry, reassignBarber } from '@/lib/actions/queue'
-import { toggleBarberStatus, fetchBarberDayStats } from '@/lib/actions/barber'
-import { startBreak } from '@/lib/actions/breaks'
+import { fetchBarberDayStats } from '@/lib/actions/barber'
 import { logoutBarber } from '@/lib/actions/auth'
-import { requestBreak, getBarberActiveBreakRequest } from '@/lib/actions/break-requests'
+import {
+  requestBreak,
+  getBarberActiveBreakRequest,
+  cancelBreakRequest,
+  completeBreakRequest,
+  approveBreak as approveBreakAction,
+  rejectBreak as rejectBreakAction,
+  getPendingBreakRequests,
+} from '@/lib/actions/break-requests'
 import { formatCurrency } from '@/lib/format'
-import type { QueueEntry, Staff, StaffStatus, Client, BreakConfig } from '@/lib/types/database'
+import type { QueueEntry, Staff, Client, BreakConfig } from '@/lib/types/database'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -16,6 +23,8 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,18 +43,17 @@ import {
   LogOut,
   Check,
   X,
-  Pause,
-  Play,
   DollarSign,
   Gift,
   ArrowRightLeft,
   Receipt,
   Coffee,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
-import { ClientHistory } from './client-history'
 import { ClientProfileSheet } from './client-profile-sheet'
 import {
   Dialog,
@@ -74,14 +82,24 @@ interface BarberSession {
 interface QueuePanelProps {
   session: BarberSession
   branchName: string
-  initialStatus?: StaffStatus
   breakConfigs?: BreakConfig[]
+}
+
+interface BreakRequestRow {
+  id: string
+  staff_id: string
+  branch_id: string
+  break_config_id: string
+  status: string
+  cuts_before_break: number
+  requested_at: string
+  staff?: { id: string; full_name: string } | null
+  break_config?: { name: string; duration_minutes: number } | null
 }
 
 export function QueuePanel({
   session,
   branchName,
-  initialStatus = 'available',
   breakConfigs = [],
 }: QueuePanelProps) {
   const [entries, setEntries] = useState<QueueEntry[]>([])
@@ -89,8 +107,6 @@ export function QueuePanel({
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
   const [now, setNow] = useState(Date.now())
-  const [barberStatus, setBarberStatus] = useState<StaffStatus>(initialStatus)
-  const [statusLoading, setStatusLoading] = useState(false)
   const [dayStats, setDayStats] = useState({ servicesCount: 0, revenue: 0 })
   const [otherBarbers, setOtherBarbers] = useState<Staff[]>([])
   const [reassigningEntryId, setReassigningEntryId] = useState<string | null>(null)
@@ -99,12 +115,18 @@ export function QueuePanel({
   const [breakDialogOpen, setBreakDialogOpen] = useState(false)
   const [selectedBreakConfig, setSelectedBreakConfig] = useState('')
   const [breakRequestStatus, setBreakRequestStatus] = useState<string | null>(null)
+  const [breakRequestId, setBreakRequestId] = useState<string | null>(null)
   const [breakRequestLoading, setBreakRequestLoading] = useState(false)
+  // Self-approve cuts
+  const [selfApproveCuts, setSelfApproveCuts] = useState('0')
+  // Break requests management (for barbers with breaks.grant)
+  const [breakRequestsDialogOpen, setBreakRequestsDialogOpen] = useState(false)
+  const [pendingBreakRequests, setPendingBreakRequests] = useState<BreakRequestRow[]>([])
+  const [approveLoading, setApproveLoading] = useState<string | null>(null)
+  const [approveCutsInputs, setApproveCutsInputs] = useState<Record<string, string>>({})
 
   const supabase = useMemo(() => createClient(), [])
-
-  const isPaused = barberStatus === 'paused'
-  const canManageBreaks = session.role === 'admin' || session.permissions?.manage_breaks === true
+  const canManageBreaks = session.role === 'admin' || session.role === 'owner' || session.permissions?.['breaks.grant'] === true
 
   const fetchQueue = useCallback(async () => {
     const { data } = await supabase
@@ -136,14 +158,34 @@ export function QueuePanel({
     if (data) setOtherBarbers(data as Staff[])
   }, [supabase, session.branch_id, session.staff_id])
 
+  const fetchBreakRequestStatus = useCallback(async () => {
+    const { data } = await getBarberActiveBreakRequest(session.staff_id)
+    if (data) {
+      setBreakRequestStatus(data.status)
+      setBreakRequestId(data.id)
+    } else {
+      setBreakRequestStatus(null)
+      setBreakRequestId(null)
+    }
+  }, [session.staff_id])
+
+  const fetchPendingBreakRequests = useCallback(async () => {
+    if (!canManageBreaks) return
+    const { data } = await getPendingBreakRequests(session.branch_id)
+    if (data) {
+      // Filter out the current barber's own requests
+      setPendingBreakRequests(
+        (data as BreakRequestRow[]).filter(r => r.staff_id !== session.staff_id)
+      )
+    }
+  }, [canManageBreaks, session.branch_id, session.staff_id])
+
   useEffect(() => {
     fetchQueue()
     refreshStats()
     fetchOtherBarbers()
-    // Check for existing break request
-    getBarberActiveBreakRequest(session.staff_id).then(({ data }) => {
-      if (data) setBreakRequestStatus(data.status)
-    })
+    fetchBreakRequestStatus()
+    fetchPendingBreakRequests()
 
     const channel = supabase
       .channel(`barber-queue-${session.branch_id}-${session.staff_id}`)
@@ -172,23 +214,41 @@ export function QueuePanel({
           fetchOtherBarbers()
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'break_requests',
+          filter: `branch_id=eq.${session.branch_id}`,
+        },
+        () => {
+          fetchBreakRequestStatus()
+          fetchPendingBreakRequests()
+        }
+      )
       .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, session.branch_id, fetchQueue, refreshStats, fetchOtherBarbers])
+  }, [supabase, session.branch_id, session.staff_id, fetchQueue, refreshStats, fetchOtherBarbers, fetchBreakRequestStatus, fetchPendingBreakRequests])
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(interval)
   }, [])
 
-  const myActiveEntry = entries.find(
-    (e) => e.barber_id === session.staff_id && e.status === 'in_progress'
+  // My active break (ghost entry that is in_progress)
+  const myActiveBreak = entries.find(
+    (e) => e.barber_id === session.staff_id && e.status === 'in_progress' && e.is_break
   )
 
-  // "Mi cola": clients that have no barber assigned or are assigned to me
+  const myActiveEntry = entries.find(
+    (e) => e.barber_id === session.staff_id && e.status === 'in_progress' && !e.is_break
+  )
+
+  // "Mi cola": clients that have no barber assigned or are assigned to me (including ghost breaks)
   const myWaitingEntries = entries.filter(
     (e) =>
       e.status === 'waiting' &&
@@ -199,22 +259,8 @@ export function QueuePanel({
   const allWaitingEntries = entries.filter((e) => e.status === 'waiting')
 
   const otherInProgress = entries.filter(
-    (e) => e.status === 'in_progress' && e.barber_id !== session.staff_id
+    (e) => e.status === 'in_progress' && e.barber_id !== session.staff_id && !e.is_break
   )
-
-  async function handleToggleStatus() {
-    setStatusLoading(true)
-    const result = await toggleBarberStatus(session.staff_id)
-    if ('error' in result) {
-      toast.error(result.error)
-    } else if (result.status) {
-      setBarberStatus(result.status)
-      toast.success(
-        result.status === 'paused' ? 'En pausa' : 'Disponible'
-      )
-    }
-    setStatusLoading(false)
-  }
 
   async function handleStartService(entryId: string) {
     setActionLoading(entryId)
@@ -246,6 +292,63 @@ export function QueuePanel({
     setActionLoading(null)
   }
 
+  async function handleCancelBreakRequest() {
+    if (!breakRequestId) return
+    setBreakRequestLoading(true)
+    const result = await cancelBreakRequest(breakRequestId)
+    if (result.error) {
+      toast.error(result.error)
+    } else {
+      toast.success('Solicitud de descanso cancelada')
+      setBreakRequestStatus(null)
+      setBreakRequestId(null)
+    }
+    setBreakRequestLoading(false)
+    fetchQueue()
+  }
+
+  async function handleCompleteBreak() {
+    if (!myActiveBreak) return
+    setActionLoading(myActiveBreak.id)
+    const result = await completeBreakRequest(myActiveBreak.id)
+    if (result.error) {
+      toast.error(result.error)
+    } else {
+      toast.success('Descanso finalizado')
+      setBreakRequestStatus(null)
+      setBreakRequestId(null)
+    }
+    await fetchQueue()
+    setActionLoading(null)
+  }
+
+  async function handleApproveOtherBreak(requestId: string) {
+    const cuts = parseInt(approveCutsInputs[requestId] || '0', 10)
+    if (isNaN(cuts) || cuts < 0) { toast.error('Número de cortes inválido'); return }
+    setApproveLoading(requestId)
+    const result = await approveBreakAction(requestId, cuts)
+    if (result.error) {
+      toast.error(result.error)
+    } else {
+      toast.success('Descanso aprobado')
+      fetchPendingBreakRequests()
+      fetchQueue()
+    }
+    setApproveLoading(null)
+  }
+
+  async function handleRejectOtherBreak(requestId: string) {
+    setApproveLoading(requestId)
+    const result = await rejectBreakAction(requestId)
+    if (result.error) {
+      toast.error(result.error)
+    } else {
+      toast.success('Solicitud rechazada')
+      fetchPendingBreakRequests()
+    }
+    setApproveLoading(null)
+  }
+
   function formatElapsed(timestamp: string) {
     const elapsed = now - new Date(timestamp).getTime()
     if (isNaN(elapsed) || elapsed < 0) return '0m 0s'
@@ -257,9 +360,41 @@ export function QueuePanel({
     return `${minutes}m ${seconds}s`
   }
 
+  function renderGhostBreakEntry(entry: QueueEntry) {
+    // Count real waiting clients before this ghost for this barber
+    const myRealWaiting = entries.filter(
+      e => e.status === 'waiting' && !e.is_break && (!e.barber_id || e.barber_id === session.staff_id) && e.position < entry.position
+    ).length
+
+    return (
+      <Card key={entry.id} className="gap-0 py-0 border-amber-500/30 bg-amber-500/5">
+        <CardContent className="flex items-center gap-4 p-5 md:p-6">
+          <div className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600">
+            <Coffee className="size-6" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-lg font-semibold text-amber-600">Tu descanso</p>
+            <p className="text-sm text-muted-foreground">
+              {myRealWaiting === 0
+                ? 'Siguiente en atenderse'
+                : `En ${myRealWaiting} corte${myRealWaiting > 1 ? 's' : ''}`}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
   function renderQueueEntry(entry: QueueEntry) {
+    // Render ghost break entries differently
+    if (entry.is_break) {
+      if (entry.barber_id === session.staff_id) {
+        return renderGhostBreakEntry(entry)
+      }
+      return null // Don't show other barbers' ghost breaks
+    }
+
     const isMyEntry = entry.barber_id === session.staff_id
-    const canReassign = isPaused && isMyEntry && entry.status === 'waiting' && otherBarbers.length > 0
     const isReassigning = reassigningEntryId === entry.id
 
     return (
@@ -295,7 +430,7 @@ export function QueuePanel({
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              {!myActiveEntry && !isPaused && (
+              {!myActiveEntry && !myActiveBreak && (
                 <Button
                   size="lg"
                   className="h-14 px-6 text-lg"
@@ -306,7 +441,7 @@ export function QueuePanel({
                   <span className="hidden xl:inline">Atender</span>
                 </Button>
               )}
-              {canReassign && (
+              {isMyEntry && entry.status === 'waiting' && otherBarbers.length > 0 && (
                 <Button
                   variant="outline"
                   size="lg"
@@ -364,7 +499,7 @@ export function QueuePanel({
                 {otherBarbers
                   .map((barber) => {
                     const waitCount = entries.filter(
-                      (e) => e.status === 'waiting' && e.barber_id === barber.id
+                      (e) => e.status === 'waiting' && e.barber_id === barber.id && !e.is_break
                     ).length
                     return { ...barber, waitCount }
                   })
@@ -472,25 +607,54 @@ export function QueuePanel({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {/* Break request button */}
-          {!breakRequestStatus && breakConfigs.length > 0 && (
+          {/* Break request button / status */}
+          {!breakRequestStatus && !myActiveBreak && breakConfigs.length > 0 && (
             <Button variant="ghost" size="sm" onClick={() => setBreakDialogOpen(true)}>
               <Coffee className="size-4" />
               <span className="hidden sm:inline">Descanso</span>
             </Button>
           )}
           {breakRequestStatus === 'pending' && (
-            <Badge variant="outline" className="bg-yellow-500/15 text-yellow-500 border-yellow-500/30">
-              <Coffee className="size-3 mr-1" />
-              Descanso solicitado
-            </Badge>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-yellow-500"
+              onClick={handleCancelBreakRequest}
+              disabled={breakRequestLoading}
+            >
+              <Coffee className="size-4 mr-1" />
+              <span className="hidden sm:inline">Solicitado</span>
+              <X className="size-3 ml-1" />
+            </Button>
           )}
-          {breakRequestStatus === 'approved' && (
+          {breakRequestStatus === 'approved' && !myActiveBreak && (
             <Badge variant="outline" className="bg-green-500/15 text-green-600 border-green-500/30">
               <Coffee className="size-3 mr-1" />
-              Descanso aprobado
+              Aprobado
             </Badge>
           )}
+
+          {/* Manage breaks button for barbers with permission */}
+          {canManageBreaks && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                fetchPendingBreakRequests()
+                setBreakRequestsDialogOpen(true)
+              }}
+              className="relative"
+            >
+              <Coffee className="size-4" />
+              <span className="hidden sm:inline">Gestionar</span>
+              {pendingBreakRequests.length > 0 && (
+                <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
+                  {pendingBreakRequests.length}
+                </span>
+              )}
+            </Button>
+          )}
+
           <form action={logoutBarber}>
             <Button variant="ghost" size="sm" type="submit">
               <LogOut className="size-4" />
@@ -515,14 +679,6 @@ export function QueuePanel({
           <Receipt className="size-3.5" />
           <span className="hidden sm:inline">Ver detalle</span>
         </Link>
-        {isPaused && (
-          <Badge
-            variant="outline"
-            className="ml-auto bg-yellow-500/15 text-yellow-400 border-yellow-500/30"
-          >
-            En pausa
-          </Badge>
-        )}
       </div>
 
       <main className="flex flex-1 flex-col overflow-hidden sm:flex-row">
@@ -534,13 +690,13 @@ export function QueuePanel({
                 <TabsTrigger value="my-queue" className="flex-1 py-3 text-lg">
                   Mi cola
                   <Badge variant="secondary" className="ml-2 px-2 text-base">
-                    {myWaitingEntries.length}
+                    {myWaitingEntries.filter(e => !e.is_break).length}
                   </Badge>
                 </TabsTrigger>
                 <TabsTrigger value="general-queue" className="flex-1 py-3 text-lg">
                   Cola general
                   <Badge variant="secondary" className="ml-2 px-2 text-base">
-                    {allWaitingEntries.length}
+                    {allWaitingEntries.filter(e => !e.is_break).length}
                   </Badge>
                 </TabsTrigger>
               </TabsList>
@@ -589,14 +745,59 @@ export function QueuePanel({
           </Tabs>
         </section>
 
-        {/* Current client */}
+        {/* Current client / Active break */}
         <section className="flex shrink-0 flex-col sm:w-[280px] md:w-[340px] lg:w-[420px]">
           <div className="px-4 py-4 md:px-6">
-            <h2 className="text-xl font-semibold">Tu cliente actual</h2>
+            <h2 className="text-xl font-semibold">
+              {myActiveBreak ? 'En descanso' : 'Tu cliente actual'}
+            </h2>
           </div>
           <Separator />
           <div className="flex flex-1 flex-col p-4 md:p-6">
-            {myActiveEntry ? (
+            {myActiveBreak ? (
+              /* Active break panel */
+              <Card className="border-amber-500/20 bg-amber-500/5">
+                <CardHeader className="p-5 md:p-6">
+                  <div className="flex items-center gap-4">
+                    <div className="flex size-16 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600">
+                      <Coffee className="size-8" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-2xl md:text-3xl text-amber-600">
+                        Descanso
+                      </CardTitle>
+                      <p className="mt-1.5 text-base text-muted-foreground">
+                        Disfrutá tu descanso ☕
+                      </p>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-5 p-5 pt-0 md:p-6 md:pt-0">
+                  <div className="flex items-center gap-4 rounded-xl bg-secondary px-5 py-4">
+                    <Clock className="size-6 shrink-0 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">
+                        Tiempo de descanso
+                      </p>
+                      <p className="text-4xl font-bold tabular-nums tracking-tight">
+                        {myActiveBreak.started_at
+                          ? formatElapsed(myActiveBreak.started_at)
+                          : '—'}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    className="h-16 w-full text-xl"
+                    size="lg"
+                    onClick={handleCompleteBreak}
+                    disabled={actionLoading === myActiveBreak.id}
+                  >
+                    <Check className="mr-2 size-6" />
+                    Finalizar descanso
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : myActiveEntry ? (
               <Card className="border-primary/20 bg-primary/3">
                 <CardHeader className="p-5 md:p-6">
                   <div className="flex items-center gap-4">
@@ -680,9 +881,7 @@ export function QueuePanel({
                 <Scissors className="mb-3 size-12 opacity-15" />
                 <p className="font-medium">Sin cliente en atención</p>
                 <p className="mt-1 max-w-[220px] text-xs opacity-60">
-                  {isPaused
-                    ? 'Estás en pausa. Reanudate para atender clientes.'
-                    : 'Selecciona un cliente de la cola para comenzar'}
+                  Selecciona un cliente de la cola para comenzar
                 </p>
               </div>
             )}
@@ -725,6 +924,22 @@ export function QueuePanel({
                 </SelectContent>
               </Select>
             </div>
+            {canManageBreaks && (
+              <div>
+                <Label className="text-sm">¿Luego de cuántos cortes?</Label>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="w-24"
+                    value={selfApproveCuts}
+                    onChange={(e) => setSelfApproveCuts(e.target.value)}
+                  />
+                  <span className="text-sm text-muted-foreground">cortes (0 = ahora)</span>
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBreakDialogOpen(false)}>Cancelar</Button>
@@ -733,14 +948,25 @@ export function QueuePanel({
               onClick={async () => {
                 setBreakRequestLoading(true)
                 if (canManageBreaks) {
-                  const result = await startBreak(session.staff_id, selectedBreakConfig)
-                  if (result.error) {
-                    toast.error(result.error)
+                  const cuts = parseInt(selfApproveCuts, 10) || 0
+                  // Request + auto-approve
+                  const reqResult = await requestBreak(session.staff_id, session.branch_id, selectedBreakConfig)
+                  if (reqResult.error) {
+                    toast.error(reqResult.error)
                   } else {
-                    toast.success('Descanso iniciado')
-                    setBarberStatus('paused')
-                    setBreakDialogOpen(false)
-                    setSelectedBreakConfig('')
+                    // Get the request ID and approve it
+                    const { data: req } = await getBarberActiveBreakRequest(session.staff_id)
+                    if (req) {
+                      const approveResult = await approveBreakAction(req.id, cuts)
+                      if (approveResult.error) {
+                        toast.error(approveResult.error)
+                      } else {
+                        toast.success(cuts === 0 ? 'Descanso iniciado' : `Descanso programado en ${cuts} corte${cuts > 1 ? 's' : ''}`)
+                        setBreakRequestStatus('approved')
+                        setBreakRequestId(req.id)
+                        fetchQueue()
+                      }
+                    }
                   }
                 } else {
                   const result = await requestBreak(session.staff_id, session.branch_id, selectedBreakConfig)
@@ -749,10 +975,12 @@ export function QueuePanel({
                   } else {
                     toast.success('Solicitud de descanso enviada')
                     setBreakRequestStatus('pending')
-                    setBreakDialogOpen(false)
-                    setSelectedBreakConfig('')
+                    fetchBreakRequestStatus()
                   }
                 }
+                setBreakDialogOpen(false)
+                setSelectedBreakConfig('')
+                setSelfApproveCuts('0')
                 setBreakRequestLoading(false)
               }}
             >
@@ -760,6 +988,80 @@ export function QueuePanel({
               {canManageBreaks ? 'Iniciar' : 'Solicitar'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manage break requests dialog (for barbers with breaks.grant) */}
+      <Dialog open={breakRequestsDialogOpen} onOpenChange={setBreakRequestsDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Solicitudes de descanso</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto">
+            {pendingBreakRequests.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No hay solicitudes pendientes de otros barberos.
+              </p>
+            ) : (
+              pendingBreakRequests.map((req) => {
+                const staffName = req.staff?.full_name ?? 'Barbero'
+                const breakName = req.break_config?.name ?? 'Descanso'
+                const duration = req.break_config?.duration_minutes ?? 0
+                const isPending = req.status === 'pending'
+
+                return (
+                  <div key={req.id} className="rounded-lg border p-4 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-600 font-semibold text-sm">
+                        {staffName.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium truncate">{staffName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {breakName} ({duration}min) · {isPending ? 'Pendiente' : `Aprobado — en ${req.cuts_before_break} cortes`}
+                        </p>
+                      </div>
+                    </div>
+                    {isPending && (
+                      <div className="flex items-center gap-2">
+                        <Label className="text-xs whitespace-nowrap">Luego de</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="1"
+                          className="w-20 h-8 text-sm"
+                          value={approveCutsInputs[req.id] ?? '0'}
+                          onChange={(e) => setApproveCutsInputs(prev => ({ ...prev, [req.id]: e.target.value }))}
+                        />
+                        <span className="text-xs text-muted-foreground">cortes</span>
+                        <div className="flex-1" />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-green-600 border-green-500/30 hover:bg-green-500/10"
+                          onClick={() => handleApproveOtherBreak(req.id)}
+                          disabled={approveLoading === req.id}
+                        >
+                          <CheckCircle2 className="size-3.5 mr-1" />
+                          Aprobar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-red-500 border-red-500/30 hover:bg-red-500/10"
+                          onClick={() => handleRejectOtherBreak(req.id)}
+                          disabled={approveLoading === req.id}
+                        >
+                          <XCircle className="size-3.5 mr-1" />
+                          Rechazar
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

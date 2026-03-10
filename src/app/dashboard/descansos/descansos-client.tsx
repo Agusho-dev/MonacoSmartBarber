@@ -1,21 +1,15 @@
 'use client'
 
-import { useState, useTransition, useEffect, useRef } from 'react'
+import { useState, useTransition } from 'react'
 import {
   upsertBreakConfig,
   deleteBreakConfig,
-  startBreak,
-  endBreak,
-  unblockBarber,
-  checkAndBlockOverdueBreaks,
 } from '@/lib/actions/breaks'
 import {
   approveBreak,
   rejectBreak,
-  startApprovedBreak,
-  completeBreakRequest,
 } from '@/lib/actions/break-requests'
-import type { Branch, BreakConfig, StaffStatus } from '@/lib/types/database'
+import type { Branch, BreakConfig } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -45,20 +39,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Coffee, Plus, Pencil, Trash2, Play, RotateCcw, ShieldAlert, Clock, CheckCircle2, XCircle, HandMetal } from 'lucide-react'
+import { Coffee, Plus, Pencil, Trash2, CheckCircle2, XCircle, HandMetal } from 'lucide-react'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
-
-interface BarberWithBreak {
-  id: string
-  full_name: string
-  status: StaffStatus
-  break_config_id: string | null
-  break_started_at: string | null
-  break_ends_at: string | null
-  branch_id: string | null
-  break_configs?: { name: string; duration_minutes: number; tolerance_minutes: number } | null
-}
 
 interface BreakRequestRow {
   id: string
@@ -66,8 +48,8 @@ interface BreakRequestRow {
   branch_id: string
   break_config_id: string
   status: string
+  cuts_before_break: number
   requested_at: string
-  started_at: string | null
   staff?: { id: string; full_name: string } | null
   break_config?: { name: string; duration_minutes: number } | null
 }
@@ -75,144 +57,14 @@ interface BreakRequestRow {
 interface Props {
   breakConfigs: BreakConfig[]
   branches: Branch[]
-  barbers: BarberWithBreak[]
   breakRequests: BreakRequestRow[]
 }
 
-const EMPTY_FORM = { id: '', branch_id: '', name: '', duration_minutes: '30', tolerance_minutes: '5', scheduled_time: '' }
-
-function useCountdown(endsAt: string | null) {
-  const [remaining, setRemaining] = useState<number | null>(null)
-  useEffect(() => {
-    if (!endsAt) { setRemaining(null); return }
-    const tick = () => setRemaining(Math.max(0, new Date(endsAt).getTime() - Date.now()))
-    tick()
-    const id = setInterval(tick, 1000)
-    return () => clearInterval(id)
-  }, [endsAt])
-  return remaining
-}
-
-function BarberBreakRow({ barber, breakConfigs, branchId, onAction }: {
-  barber: BarberWithBreak
-  breakConfigs: BreakConfig[]
-  branchId: string
-  onAction: () => void
-}) {
-  const [selectedConfig, setSelectedConfig] = useState('')
-  const [, startTransition] = useTransition()
-  const remaining = useCountdown(barber.break_ends_at)
-  const branchConfigs = breakConfigs.filter((bc) => bc.branch_id === branchId && bc.is_active)
-
-  const statusColors: Record<StaffStatus, string> = {
-    available: 'bg-green-500/15 text-green-600 border-green-500/30',
-    paused: 'bg-yellow-500/15 text-yellow-500 border-yellow-500/30',
-    blocked: 'bg-red-500/15 text-red-500 border-red-500/30',
-  }
-
-  const statusLabels: Record<StaffStatus, string> = {
-    available: 'Disponible',
-    paused: 'En descanso',
-    blocked: 'BLOQUEADO',
-  }
-
-  function formatMs(ms: number) {
-    const totalSec = Math.floor(ms / 1000)
-    const m = Math.floor(totalSec / 60)
-    const s = totalSec % 60
-    return `${m}:${s.toString().padStart(2, '0')}`
-  }
-
-  function handleStart() {
-    if (!selectedConfig) return
-    startTransition(async () => {
-      const r = await startBreak(barber.id, selectedConfig)
-      if (r.error) toast.error(r.error)
-      else { toast.success('Descanso iniciado'); onAction() }
-    })
-  }
-
-  function handleEnd() {
-    startTransition(async () => {
-      const r = await endBreak(barber.id)
-      if (r.error) toast.error(r.error)
-      else { toast.success('Descanso finalizado'); onAction() }
-    })
-  }
-
-  function handleUnblock() {
-    startTransition(async () => {
-      const r = await unblockBarber(barber.id)
-      if (r.error) toast.error(r.error)
-      else { toast.success(`${barber.full_name} desbloqueado`); onAction() }
-    })
-  }
-
-  return (
-    <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-5 py-4">
-      <div className="flex items-center gap-3 flex-1 min-w-0">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-sm">
-          {barber.full_name.charAt(0).toUpperCase()}
-        </div>
-        <div className="min-w-0">
-          <p className="font-medium truncate">{barber.full_name}</p>
-          <div className="flex items-center gap-2 flex-wrap mt-0.5">
-            <Badge variant="outline" className={cn('text-xs', statusColors[barber.status])}>
-              {statusLabels[barber.status]}
-            </Badge>
-            {barber.status === 'paused' && remaining !== null && (
-              <span className={cn('flex items-center gap-1 text-xs font-mono', remaining < 60000 ? 'text-red-500' : 'text-muted-foreground')}>
-                <Clock className="size-3" />
-                {formatMs(remaining)} restante
-              </span>
-            )}
-            {barber.status === 'paused' && barber.break_configs && (
-              <span className="text-xs text-muted-foreground">({barber.break_configs.name})</span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 shrink-0">
-        {barber.status === 'available' && branchConfigs.length > 0 && (
-          <>
-            <Select value={selectedConfig} onValueChange={setSelectedConfig}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="Tipo..." />
-              </SelectTrigger>
-              <SelectContent>
-                {branchConfigs.map((bc) => (
-                  <SelectItem key={bc.id} value={bc.id}>
-                    {bc.name} ({bc.duration_minutes}min)
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button size="sm" variant="outline" disabled={!selectedConfig} onClick={handleStart}>
-              <Play className="size-4 mr-1.5" />
-              Iniciar
-            </Button>
-          </>
-        )}
-        {barber.status === 'paused' && (
-          <Button size="sm" variant="outline" onClick={handleEnd}>
-            <RotateCcw className="size-4 mr-1.5" />
-            Volver
-          </Button>
-        )}
-        {barber.status === 'blocked' && (
-          <Button size="sm" variant="destructive" onClick={handleUnblock}>
-            <ShieldAlert className="size-4 mr-1.5" />
-            Desbloquear
-          </Button>
-        )}
-      </div>
-    </div>
-  )
-}
+const EMPTY_FORM = { id: '', branch_id: '', name: '', duration_minutes: '30' }
 
 function BreakRequestCard({ request }: { request: BreakRequestRow }) {
   const [, startTransition] = useTransition()
+  const [cutsInput, setCutsInput] = useState('0')
   const staffName = request.staff?.full_name ?? 'Barbero'
   const breakName = request.break_config?.name ?? 'Descanso'
   const duration = request.break_config?.duration_minutes ?? 0
@@ -228,87 +80,81 @@ function BreakRequestCard({ request }: { request: BreakRequestRow }) {
   })()
 
   function handleApprove() {
+    const cuts = parseInt(cutsInput, 10)
+    if (isNaN(cuts) || cuts < 0) { toast.error('Número de cortes inválido'); return }
     startTransition(async () => {
-      // Approve break with the current authenticated user's session ID (handled on server side)
-      const r = await approveBreak(request.id)
-      if (r.error) { toast.error(r.error) } else { toast.success(`Descanso aprobado para ${staffName}`); window.location.reload() }
+      const r = await approveBreak(request.id, cuts)
+      if (r.error) { toast.error(r.error) } else {
+        toast.success(`Descanso aprobado para ${staffName}${cuts > 0 ? ` en ${cuts} corte${cuts > 1 ? 's' : ''}` : ' (inmediato)'}`)
+        window.location.reload()
+      }
     })
   }
 
   function handleReject() {
     startTransition(async () => {
-      // Reject break with the current authenticated user's session ID (handled on server side)
       const r = await rejectBreak(request.id)
       if (r.error) { toast.error(r.error) } else { toast.success('Solicitud rechazada'); window.location.reload() }
     })
   }
 
-  function handleStartBreak() {
-    startTransition(async () => {
-      const r = await startApprovedBreak(request.id)
-      if (r.error) { toast.error(r.error) } else { toast.success(`${staffName} comenzó su descanso`); window.location.reload() }
-    })
-  }
-
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-5 py-4">
-      <div className="flex items-center gap-3 flex-1 min-w-0">
+    <div className="flex flex-col gap-3 px-5 py-4">
+      <div className="flex items-center gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-600 font-semibold text-sm">
           {staffName.charAt(0).toUpperCase()}
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="font-medium truncate">{staffName}</p>
           <div className="flex items-center gap-2 flex-wrap mt-0.5">
-            <Badge variant="outline" className={cn('text-xs', isPending ? 'bg-yellow-500/15 text-yellow-500 border-yellow-500/30' : 'bg-green-500/15 text-green-600 border-green-500/30')}>
+            <Badge variant="outline" className={`text-xs ${isPending ? 'bg-yellow-500/15 text-yellow-500 border-yellow-500/30' : 'bg-green-500/15 text-green-600 border-green-500/30'}`}>
               {isPending ? 'Pendiente' : 'Aprobado'}
             </Badge>
             <span className="text-xs text-muted-foreground">
               {breakName} ({duration}min) · {timeSince}
             </span>
+            {isApproved && (
+              <Badge variant="outline" className="text-xs bg-blue-500/15 text-blue-500 border-blue-500/30">
+                {request.cuts_before_break === 0 ? 'Inmediato' : `En ${request.cuts_before_break} corte${request.cuts_before_break > 1 ? 's' : ''}`}
+              </Badge>
+            )}
           </div>
         </div>
       </div>
-      <div className="flex items-center gap-2 shrink-0">
-        {isPending && (
-          <>
-            <Button size="sm" variant="outline" className="text-green-600 border-green-500/30 hover:bg-green-500/10" onClick={handleApprove}>
-              <CheckCircle2 className="size-4 mr-1.5" />
-              Aprobar
-            </Button>
-            <Button size="sm" variant="outline" className="text-red-500 border-red-500/30 hover:bg-red-500/10" onClick={handleReject}>
-              <XCircle className="size-4 mr-1.5" />
-              Rechazar
-            </Button>
-          </>
-        )}
-        {isApproved && !request.started_at && (
-          <Button size="sm" variant="outline" onClick={handleStartBreak}>
-            <Play className="size-4 mr-1.5" />
-            Iniciar descanso
+      {isPending && (
+        <div className="flex items-center gap-2 ml-12">
+          <div className="flex items-center gap-2 flex-1">
+            <Label className="text-xs text-muted-foreground whitespace-nowrap">Luego de</Label>
+            <Input
+              type="number"
+              min="0"
+              step="1"
+              className="w-20 h-8 text-sm"
+              value={cutsInput}
+              onChange={(e) => setCutsInput(e.target.value)}
+            />
+            <span className="text-xs text-muted-foreground">cortes</span>
+          </div>
+          <Button size="sm" variant="outline" className="text-green-600 border-green-500/30 hover:bg-green-500/10" onClick={handleApprove}>
+            <CheckCircle2 className="size-4 mr-1.5" />
+            Aprobar
           </Button>
-        )}
-      </div>
+          <Button size="sm" variant="outline" className="text-red-500 border-red-500/30 hover:bg-red-500/10" onClick={handleReject}>
+            <XCircle className="size-4 mr-1.5" />
+            Rechazar
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
 
-export function DescansosDashboard({ breakConfigs, branches, barbers, breakRequests }: Props) {
+export function DescansosDashboard({ breakConfigs, branches, breakRequests }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [, startTransition] = useTransition()
   const [selectedBranchId, setSelectedBranchId] = useState(branches[0]?.id ?? '')
-  const [localBarbers, setLocalBarbers] = useState(barbers)
 
-  // Poll to check and block overdue breaks
-  useEffect(() => {
-    const check = () => {
-      checkAndBlockOverdueBreaks()
-    }
-    const id = setInterval(check, 30000)
-    return () => clearInterval(id)
-  }, [])
-
-  const branchBarbers = localBarbers.filter((b) => b.branch_id === selectedBranchId)
   const branchConfigs = breakConfigs.filter((bc) => bc.branch_id === selectedBranchId)
 
   function openCreate() {
@@ -322,8 +168,6 @@ export function DescansosDashboard({ breakConfigs, branches, barbers, breakReque
       branch_id: bc.branch_id,
       name: bc.name,
       duration_minutes: String(bc.duration_minutes),
-      tolerance_minutes: String(bc.tolerance_minutes),
-      scheduled_time: bc.scheduled_time ? bc.scheduled_time.substring(0, 5) : '',
     })
     setDialogOpen(true)
   }
@@ -353,7 +197,7 @@ export function DescansosDashboard({ breakConfigs, branches, barbers, breakReque
         <div>
           <h1 className="text-2xl font-bold">Descansos</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Configurá tipos de descanso y gestioná el estado de los barberos en tiempo real.
+            Configurá tipos de descanso y gestioná solicitudes de los barberos.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -392,8 +236,7 @@ export function DescansosDashboard({ breakConfigs, branches, barbers, breakReque
                 <div className="flex-1 min-w-0">
                   <p className="font-medium">{bc.name}</p>
                   <p className="text-sm text-muted-foreground">
-                    {bc.duration_minutes} min + {bc.tolerance_minutes} min tolerancia
-                    {bc.scheduled_time && ` · Programado: ${bc.scheduled_time}`}
+                    {bc.duration_minutes} min
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -410,7 +253,7 @@ export function DescansosDashboard({ breakConfigs, branches, barbers, breakReque
                       <AlertDialogHeader>
                         <AlertDialogTitle>¿Eliminar tipo de descanso?</AlertDialogTitle>
                         <AlertDialogDescription>
-                          Los barberos actualmente en este descanso no se verán afectados.
+                          Esta acción no se puede deshacer.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
@@ -453,30 +296,6 @@ export function DescansosDashboard({ breakConfigs, branches, barbers, breakReque
         })()}
       </section>
 
-      {/* Barber status panel */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Estado de barberos
-        </h2>
-        {branchBarbers.length === 0 ? (
-          <div className="rounded-xl border bg-card p-8 text-center">
-            <p className="text-sm text-muted-foreground">No hay barberos activos en esta sucursal.</p>
-          </div>
-        ) : (
-          <div className="divide-y rounded-xl border bg-card">
-            {branchBarbers.map((b) => (
-              <BarberBreakRow
-                key={b.id}
-                barber={b}
-                breakConfigs={breakConfigs}
-                branchId={selectedBranchId}
-                onAction={() => window.location.reload()}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -506,43 +325,16 @@ export function DescansosDashboard({ breakConfigs, branches, barbers, breakReque
                 required
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Duración (minutos)</Label>
-                <Input
-                  type="number"
-                  min="1"
-                  step="1"
-                  className="mt-1.5"
-                  value={form.duration_minutes}
-                  onChange={(e) => setForm((f) => ({ ...f, duration_minutes: e.target.value }))}
-                  required
-                />
-              </div>
-              <div>
-                <Label>Tolerancia extra (min)</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="1"
-                  className="mt-1.5"
-                  value={form.tolerance_minutes}
-                  onChange={(e) => setForm((f) => ({ ...f, tolerance_minutes: e.target.value }))}
-                />
-              </div>
-            </div>
             <div>
-              <Label>
-                Hora programada{' '}
-                <span className="text-muted-foreground">(opcional, ej: 13:00)</span>
-              </Label>
+              <Label>Duración (minutos)</Label>
               <Input
-                type="time"
-                step="60"
+                type="number"
+                min="1"
+                step="1"
                 className="mt-1.5"
-                /* step="60" is the default, but we should ensure the value is only HH:mm */
-                value={form.scheduled_time}
-                onChange={(e) => setForm((f) => ({ ...f, scheduled_time: e.target.value.substring(0, 5) }))}
+                value={form.duration_minutes}
+                onChange={(e) => setForm((f) => ({ ...f, duration_minutes: e.target.value }))}
+                required
               />
             </div>
             <DialogFooter>
