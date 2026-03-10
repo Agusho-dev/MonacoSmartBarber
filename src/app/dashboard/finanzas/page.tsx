@@ -1,6 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
 import { fetchFinancialData, getFixedExpenses } from '@/lib/actions/finances'
-import { FinanzasClient } from './finanzas-client'
+import { FinanzasTabsClient } from './finanzas-tabs-client'
+import type { Metadata } from 'next'
+
+export const metadata: Metadata = {
+  title: 'Finanzas | Monaco Smart Barber',
+}
 
 export default async function FinanzasPage() {
   const supabase = await createClient()
@@ -8,17 +13,34 @@ export default async function FinanzasPage() {
   const financialData = await fetchFinancialData(6)
   const expenses = await getFixedExpenses()
 
-  const { data: branches } = await supabase
-    .from('branches')
-    .select('*')
-    .eq('is_active', true)
-    .order('name')
+  const [{ data: branches }, { data: accounts }, { data: barbersRaw }, { data: payments }] =
+    await Promise.all([
+      supabase.from('branches').select('*').eq('is_active', true).order('name'),
+      supabase
+        .from('payment_accounts')
+        .select('*, branch:branches(name)')
+        .order('name'),
+      supabase
+        .from('staff')
+        .select('id, full_name, commission_pct, branch_id, salary_configs(*)')
+        .eq('role', 'barber')
+        .eq('is_active', true)
+        .order('full_name'),
+      supabase
+        .from('salary_payments')
+        .select('*, staff:staff(id, full_name, branch_id)')
+        .order('period_start', { ascending: false })
+        .limit(100),
+    ])
 
   return (
-    <FinanzasClient
+    <FinanzasTabsClient
       initialData={financialData}
       initialExpenses={expenses}
       branches={branches ?? []}
+      accounts={accounts ?? []}
+      barbers={barbersRaw ?? []}
+      payments={payments ?? []}
     />
   )
 }

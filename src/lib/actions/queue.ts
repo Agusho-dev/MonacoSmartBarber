@@ -68,6 +68,17 @@ export async function checkinClient(formData: FormData) {
     .single()
 
   if (queueError || !queueEntry) {
+    // Unique constraint violation: client already in queue (race condition)
+    if (queueError?.code === '23505') {
+      const { data: existing } = await supabase
+        .from('queue_entries')
+        .select('id, position')
+        .eq('client_id', clientId)
+        .eq('branch_id', branchId)
+        .in('status', ['waiting', 'in_progress'])
+        .single()
+      return { alreadyInQueue: true, position: existing?.position ?? 1, queueEntryId: existing?.id ?? '' }
+    }
     console.error('Insert queue entry error:', queueError)
     return { error: 'Error al agregar a la cola: ' + (queueError?.message || 'Error desconocido') }
   }
@@ -102,18 +113,19 @@ export async function completeService(
   queueEntryId: string,
   paymentMethod: 'cash' | 'card' | 'transfer',
   serviceId?: string,
-  isRewardClaim: boolean = false
+  isRewardClaim: boolean = false,
+  paymentAccountId?: string | null
 ) {
   const supabase = await createClient()
 
-  const updateData: Record<string, unknown> = {
-    status: 'completed',
-    completed_at: new Date().toISOString(),
-  }
-
+  // 1. Complete the queue entry – this fires the on_queue_completed trigger
+  //    which creates a visit record with amount=0 as placeholder
   const { error } = await supabase
     .from('queue_entries')
-    .update(updateData)
+    .update({
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+    })
     .eq('id', queueEntryId)
     .eq('status', 'in_progress')
 
@@ -121,23 +133,50 @@ export async function completeService(
     return { error: 'Error al completar servicio' }
   }
 
-  const visitUpdate: Record<string, unknown> = { payment_method: paymentMethod }
+  // 2. Get the visit created by the trigger
+  const { data: visit } = await supabase
+    .from('visits')
+    .select('id, client_id, branch_id, barber_id, commission_pct')
+    .eq('queue_entry_id', queueEntryId)
+    .single()
+
+  if (!visit) {
+    return { error: 'Error: visita no encontrada tras completar' }
+  }
+
+  // 3. Calculate proper amount and commission from the selected service
+  let amount = 0
+  let commissionAmount = 0
+
+  if (serviceId) {
+    const { data: service } = await supabase
+      .from('services')
+      .select('price')
+      .eq('id', serviceId)
+      .single()
+
+    if (service) {
+      amount = Number(service.price)
+      commissionAmount = amount * (Number(visit.commission_pct) / 100)
+    }
+  }
+
+  // 4. Update the visit with correct data
+  const visitUpdate: Record<string, unknown> = {
+    payment_method: paymentMethod,
+    amount,
+    commission_amount: commissionAmount,
+  }
   if (serviceId) visitUpdate.service_id = serviceId
+  if (paymentAccountId) visitUpdate.payment_account_id = paymentAccountId
 
   await supabase
     .from('visits')
     .update(visitUpdate)
-    .eq('queue_entry_id', queueEntryId)
+    .eq('id', visit.id)
 
-  const { data: visit } = await supabase
-    .from('visits')
-    .select('id, client_id, branch_id')
-    .eq('queue_entry_id', queueEntryId)
-    .single()
-
-  // Handle reward claim deduction explicitly if requested
-  if (isRewardClaim && visit?.client_id && visit?.branch_id) {
-    // 1. Get branch reward config to know the cost
+  // 5. Handle reward redemption (deduct points)
+  if (isRewardClaim && visit.client_id && visit.branch_id) {
     const { data: config } = await supabase
       .from('rewards_config')
       .select('redemption_threshold')
@@ -145,18 +184,17 @@ export async function completeService(
       .eq('is_active', true)
       .single()
 
-    const cost = config?.redemption_threshold || 10 // Default fallback
+    const cost = config?.redemption_threshold || 10
 
-    // 2. Validate user has enough points
     const { data: clientPoints } = await supabase
       .from('client_points')
-      .select('points_balance')
+      .select('points_balance, total_redeemed')
       .eq('client_id', visit.client_id)
       .eq('branch_id', visit.branch_id)
       .single()
 
     if (clientPoints && clientPoints.points_balance >= cost) {
-      // 3. Insert point transaction (negative)
+      // Insert redemption transaction
       await supabase.from('point_transactions').insert({
         client_id: visit.client_id,
         visit_id: visit.id,
@@ -165,44 +203,25 @@ export async function completeService(
         description: 'Canje de beneficio',
       })
 
-      // 4. Update balance
-      await supabase.rpc('decrement_points', {
-        p_client_id: visit.client_id,
-        p_branch_id: visit.branch_id,
-        p_amount: cost,
-      })
-      
-      // Note: An alternative to RPC is just a direct update since we have the clientPoints record, 
-      // but an RPC or a direct update works:
-      // await supabase.from('client_points').update({ 
-      //   points_balance: clientPoints.points_balance - cost,
-      //   total_redeemed: (clientPoints.total_redeemed || 0) + cost 
-      // }).eq('client_id', visit.client_id).eq('branch_id', visit.branch_id)
-      
-      // We will do the safe straightforward direct update for now:
-      const { data: currentStats } = await supabase
+      // Update balance directly
+      await supabase
         .from('client_points')
-        .select('*')
+        .update({
+          points_balance: clientPoints.points_balance - cost,
+          total_redeemed: (clientPoints.total_redeemed || 0) + cost,
+        })
         .eq('client_id', visit.client_id)
         .eq('branch_id', visit.branch_id)
-        .single()
-        
-      if (currentStats) {
-        await supabase
-          .from('client_points')
-          .update({
-            points_balance: currentStats.points_balance - cost,
-            total_redeemed: currentStats.total_redeemed + cost,
-          })
-          .eq('client_id', visit.client_id)
-          .eq('branch_id', visit.branch_id)
-      }
     }
   }
 
   revalidatePath('/barbero/cola')
+  revalidatePath('/barbero/facturacion')
+  revalidatePath('/barbero/rendimiento')
   revalidatePath('/dashboard')
-  return { success: true, visitId: visit?.id ?? null }
+  revalidatePath('/dashboard/finanzas')
+  revalidatePath('/dashboard/estadisticas')
+  return { success: true, visitId: visit.id }
 }
 
 export async function cancelQueueEntry(queueEntryId: string) {
@@ -290,6 +309,16 @@ export async function checkinClientByFace(
     .single()
 
   if (queueError || !queueEntry) {
+    if (queueError?.code === '23505') {
+      const { data: existing } = await supabase
+        .from('queue_entries')
+        .select('id, position')
+        .eq('client_id', clientId)
+        .eq('branch_id', branchId)
+        .in('status', ['waiting', 'in_progress'])
+        .single()
+      return { alreadyInQueue: true, position: existing?.position ?? 1, queueEntryId: existing?.id ?? '' }
+    }
     return { error: 'Error al agregar a la cola' }
   }
 

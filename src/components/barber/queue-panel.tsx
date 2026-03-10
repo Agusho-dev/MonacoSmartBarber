@@ -37,7 +37,9 @@ import {
   DollarSign,
   Gift,
   ArrowRightLeft,
+  Receipt,
 } from 'lucide-react'
+import Link from 'next/link'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
 import { ClientHistory } from './client-history'
@@ -472,6 +474,10 @@ export function QueuePanel({
           <DollarSign className="size-3.5 text-muted-foreground" />
           <span className="font-semibold">{formatCurrency(dayStats.revenue)}</span>
         </div>
+        <Link href="/barbero/facturacion" className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+          <Receipt className="size-3.5" />
+          <span className="hidden sm:inline">Ver detalle</span>
+        </Link>
         {isPaused && (
           <Badge
             variant="outline"

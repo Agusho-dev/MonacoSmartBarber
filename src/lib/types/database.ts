@@ -2,7 +2,13 @@ export type UserRole = 'owner' | 'admin' | 'receptionist' | 'barber'
 export type QueueStatus = 'waiting' | 'in_progress' | 'completed' | 'cancelled'
 export type PaymentMethod = 'cash' | 'card' | 'transfer'
 export type PointTxType = 'earned' | 'redeemed'
-export type StaffStatus = 'available' | 'paused'
+export type StaffStatus = 'available' | 'paused' | 'blocked'
+export type SalaryScheme = 'fixed' | 'commission' | 'hybrid'
+export type AttendanceAction = 'clock_in' | 'clock_out'
+export type IncentiveMetric = 'haircut_count' | 'content_post' | 'custom'
+export type IncentivePeriod = 'weekly' | 'monthly'
+export type DisciplinaryEventType = 'absence' | 'late'
+export type ConsequenceType = 'none' | 'presentismo_loss' | 'warning' | 'incentive_loss' | 'salary_deduction'
 
 export interface Branch {
   id: string
@@ -10,6 +16,10 @@ export interface Branch {
   address: string | null
   phone: string | null
   is_active: boolean
+  business_hours_open: string
+  business_hours_close: string
+  business_days: number[]
+  timezone: string
   created_at: string
   updated_at: string
 }
@@ -25,6 +35,9 @@ export interface Staff {
   commission_pct: number
   status: StaffStatus
   is_active: boolean
+  break_config_id: string | null
+  break_started_at: string | null
+  break_ends_at: string | null
   created_at: string
   updated_at: string
   branch?: Branch
@@ -85,6 +98,7 @@ export interface Visit {
   service_id: string | null
   queue_entry_id: string | null
   payment_method: PaymentMethod
+  payment_account_id: string | null
   amount: number
   commission_pct: number
   commission_amount: number
@@ -97,6 +111,7 @@ export interface Visit {
   barber?: Staff
   service?: Service
   branch?: Branch
+  payment_account?: PaymentAccount
 }
 
 export interface VisitPhoto {
@@ -176,6 +191,140 @@ export interface FixedExpense {
   branch?: Branch
 }
 
+export interface BreakConfig {
+  id: string
+  branch_id: string
+  name: string
+  duration_minutes: number
+  tolerance_minutes: number
+  scheduled_time: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface PaymentAccount {
+  id: string
+  branch_id: string
+  name: string
+  alias_or_cbu: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface StaffSchedule {
+  id: string
+  staff_id: string
+  day_of_week: number
+  start_time: string
+  end_time: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  staff?: Staff
+}
+
+export interface StaffScheduleException {
+  id: string
+  staff_id: string
+  exception_date: string
+  is_absent: boolean
+  reason: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AttendanceLog {
+  id: string
+  staff_id: string
+  branch_id: string
+  action_type: AttendanceAction
+  recorded_at: string
+  face_verified: boolean
+  notes: string | null
+  staff?: Staff
+}
+
+export interface SalaryConfig {
+  id: string
+  staff_id: string
+  scheme: SalaryScheme
+  base_amount: number
+  commission_pct: number
+  created_at: string
+  updated_at: string
+  staff?: Staff
+}
+
+export interface SalaryPayment {
+  id: string
+  staff_id: string
+  period_start: string
+  period_end: string
+  calculated_amount: number
+  is_paid: boolean
+  paid_at: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+  staff?: Staff
+}
+
+export interface IncentiveRule {
+  id: string
+  branch_id: string
+  name: string
+  description: string | null
+  metric: IncentiveMetric
+  threshold: number
+  reward_amount: number
+  period: IncentivePeriod
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface IncentiveAchievement {
+  id: string
+  staff_id: string
+  rule_id: string
+  period_label: string
+  achieved_at: string
+  amount_earned: number
+  notes: string | null
+  staff?: Staff
+  rule?: IncentiveRule
+}
+
+export interface DisciplinaryRule {
+  id: string
+  branch_id: string
+  event_type: DisciplinaryEventType
+  occurrence_number: number
+  consequence: ConsequenceType
+  deduction_amount: number | null
+  description: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DisciplinaryEvent {
+  id: string
+  staff_id: string
+  branch_id: string
+  event_type: DisciplinaryEventType
+  event_date: string
+  occurrence_number: number
+  consequence_applied: ConsequenceType | null
+  deduction_amount: number | null
+  notes: string | null
+  created_by: string | null
+  source: string
+  created_at: string
+  staff?: Staff
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -193,6 +342,17 @@ export interface Database {
       visit_photos: { Row: VisitPhoto; Insert: Partial<VisitPhoto> & Pick<VisitPhoto, 'visit_id' | 'storage_path'>; Update: Partial<VisitPhoto> }
       service_tags: { Row: ServiceTag; Insert: Partial<ServiceTag> & Pick<ServiceTag, 'name'>; Update: Partial<ServiceTag> }
       client_face_descriptors: { Row: ClientFaceDescriptor; Insert: Partial<ClientFaceDescriptor> & Pick<ClientFaceDescriptor, 'client_id' | 'descriptor'>; Update: Partial<ClientFaceDescriptor> }
+      break_configs: { Row: BreakConfig; Insert: Partial<BreakConfig> & Pick<BreakConfig, 'branch_id' | 'name'>; Update: Partial<BreakConfig> }
+      payment_accounts: { Row: PaymentAccount; Insert: Partial<PaymentAccount> & Pick<PaymentAccount, 'branch_id' | 'name'>; Update: Partial<PaymentAccount> }
+      staff_schedules: { Row: StaffSchedule; Insert: Partial<StaffSchedule> & Pick<StaffSchedule, 'staff_id' | 'day_of_week' | 'start_time' | 'end_time'>; Update: Partial<StaffSchedule> }
+      staff_schedule_exceptions: { Row: StaffScheduleException; Insert: Partial<StaffScheduleException> & Pick<StaffScheduleException, 'staff_id' | 'exception_date'>; Update: Partial<StaffScheduleException> }
+      attendance_logs: { Row: AttendanceLog; Insert: Partial<AttendanceLog> & Pick<AttendanceLog, 'staff_id' | 'branch_id' | 'action_type'>; Update: Partial<AttendanceLog> }
+      salary_configs: { Row: SalaryConfig; Insert: Partial<SalaryConfig> & Pick<SalaryConfig, 'staff_id' | 'scheme'>; Update: Partial<SalaryConfig> }
+      salary_payments: { Row: SalaryPayment; Insert: Partial<SalaryPayment> & Pick<SalaryPayment, 'staff_id' | 'period_start' | 'period_end' | 'calculated_amount'>; Update: Partial<SalaryPayment> }
+      incentive_rules: { Row: IncentiveRule; Insert: Partial<IncentiveRule> & Pick<IncentiveRule, 'branch_id' | 'name' | 'threshold' | 'reward_amount'>; Update: Partial<IncentiveRule> }
+      incentive_achievements: { Row: IncentiveAchievement; Insert: Partial<IncentiveAchievement> & Pick<IncentiveAchievement, 'staff_id' | 'rule_id' | 'period_label' | 'amount_earned'>; Update: Partial<IncentiveAchievement> }
+      disciplinary_rules: { Row: DisciplinaryRule; Insert: Partial<DisciplinaryRule> & Pick<DisciplinaryRule, 'branch_id' | 'event_type' | 'occurrence_number'>; Update: Partial<DisciplinaryRule> }
+      disciplinary_events: { Row: DisciplinaryEvent; Insert: Partial<DisciplinaryEvent> & Pick<DisciplinaryEvent, 'staff_id' | 'branch_id' | 'event_type'>; Update: Partial<DisciplinaryEvent> }
     }
     Views: {
       branch_occupancy: { Row: BranchOccupancy }

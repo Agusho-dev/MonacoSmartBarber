@@ -18,6 +18,9 @@ import {
   AlertTriangle,
   RefreshCw,
   Search,
+  LogIn,
+  LogOut,
+  Coffee,
 } from 'lucide-react'
 import type { Branch, Staff, QueueEntry, Visit } from '@/lib/types/database'
 import {
@@ -41,6 +44,10 @@ type Step =
   | 'success'
   | 'manage_phone'
   | 'manage_turn'
+  | 'staff_face_scan'
+  | 'staff_action_confirm'
+
+type AttendanceActionType = 'clock_in' | 'clock_out'
 
 const PHONE_LENGTH = 10
 const RESET_DELAY_MS = 5_000
@@ -71,6 +78,9 @@ export default function CheckinPage() {
   const [barberAvgMinutes, setBarberAvgMinutes] = useState<Record<string, number>>({})
   const [loadingBarbers, setLoadingBarbers] = useState(false)
   const [expandedPausedBarber, setExpandedPausedBarber] = useState<string | null>(null)
+  const [availableTodayIds, setAvailableTodayIds] = useState<Set<string>>(new Set())
+  const [branchIsOpen, setBranchIsOpen] = useState(true)
+  const [branchHours, setBranchHours] = useState<{ opens: string; closes: string } | null>(null)
 
   const [queueEntryId, setQueueEntryId] = useState<string | null>(null)
   const [changingBarberInSuccess, setChangingBarberInSuccess] = useState(false)
@@ -84,6 +94,11 @@ export default function CheckinPage() {
   const [faceDescriptor, setFaceDescriptor] = useState<Float32Array | null>(null)
   const [faceClientId, setFaceClientId] = useState<string | null>(null)
   const [hasExistingFace, setHasExistingFace] = useState(false)
+
+  // Staff attendance state
+  const [staffFaceMatch, setStaffFaceMatch] = useState<FaceMatchResult | null>(null)
+  const [staffAction, setStaffAction] = useState<AttendanceActionType | null>(null)
+  const [staffActionDone, setStaffActionDone] = useState(false)
 
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -116,7 +131,7 @@ export default function CheckinPage() {
       const supabase = createClient()
       setLoadingBarbers(true)
 
-      const [staffRes, queueRes, visitsRes] = await Promise.all([
+      const [staffRes, queueRes, visitsRes, availableRes, openRes] = await Promise.all([
         supabase
           .from('staff')
           .select('*')
@@ -135,9 +150,26 @@ export default function CheckinPage() {
           .eq('branch_id', branchId)
           .order('completed_at', { ascending: false })
           .limit(200),
+        supabase.rpc('get_available_barbers_today', { p_branch_id: branchId }),
+        supabase.rpc('get_branch_open_status', { p_branch_id: branchId }),
       ])
 
-      if (staffRes.data) setBarbers(staffRes.data)
+      // Track branch open status
+      if (openRes.data && openRes.data.length > 0) {
+        const status = openRes.data[0] as { is_open: boolean; opens_at: string; closes_at: string }
+        setBranchIsOpen(status.is_open)
+        setBranchHours({ opens: status.opens_at, closes: status.closes_at })
+      }
+
+      if (staffRes.data) {
+        const availIds = new Set<string>(
+          (availableRes.data ?? []).map((r: { staff_id: string }) => r.staff_id)
+        )
+        setAvailableTodayIds(availIds)
+        // Show ALL non-blocked barbers (absent ones shown with warning)
+        const filtered = staffRes.data.filter((s) => s.status !== 'blocked')
+        setBarbers(filtered)
+      }
       if (queueRes.data) setQueueEntries(queueRes.data)
       if (visitsRes.data) {
         setBarberAvgMinutes(
@@ -227,6 +259,9 @@ export default function CheckinPage() {
     setFaceDescriptor(null)
     setFaceClientId(null)
     setHasExistingFace(false)
+    setStaffFaceMatch(null)
+    setStaffAction(null)
+    setStaffActionDone(false)
     goTo('branch')
   }
 
@@ -612,15 +647,19 @@ export default function CheckinPage() {
     const cfg = statusConfig[stats.status]
     const loadPct = Math.min(100, (stats.totalLoad / Math.max(maxLoad, 4)) * 100)
     const isExpanded = showExpand && expandedPausedBarber === barber.id
+    const isAbsentToday = availableTodayIds.size > 0 && !availableTodayIds.has(barber.id)
 
     return (
       <div
         key={barber.id}
-        className="w-full rounded-2xl border border-white/8 bg-white/2 text-left transition-all duration-200 overflow-hidden"
+        className={`w-full rounded-2xl border text-left transition-all duration-200 overflow-hidden ${isAbsentToday ? 'border-yellow-500/20 bg-yellow-500/3 opacity-70' : 'border-white/8 bg-white/2'
+          }`}
       >
         <button
           onClick={() => {
             if (stats.status === 'paused' && showExpand) {
+              setExpandedPausedBarber((prev) => (prev === barber.id ? null : barber.id))
+            } else if (isAbsentToday && showExpand) {
               setExpandedPausedBarber((prev) => (prev === barber.id ? null : barber.id))
             } else {
               onSelect(barber.id)
@@ -637,41 +676,55 @@ export default function CheckinPage() {
               <div>
                 <p className="text-xl font-semibold">{barber.full_name}</p>
                 <p className="text-base text-muted-foreground mt-0.5">
-                  {stats.attending && 'Atendiendo 1 persona'}
-                  {stats.attending && stats.waiting > 0 && ' · '}
-                  {stats.waiting > 0 &&
-                    `${stats.waiting} ${stats.waiting === 1 ? 'persona espera' : 'personas esperan'}`}
-                  {!stats.attending && stats.waiting === 0 && 'Sin espera'}
+                  {isAbsentToday ? (
+                    <span className="text-yellow-400">⚠️ No trabaja hoy</span>
+                  ) : (
+                    <>
+                      {stats.attending && 'Atendiendo 1 persona'}
+                      {stats.attending && stats.waiting > 0 && ' · '}
+                      {stats.waiting > 0 &&
+                        `${stats.waiting} ${stats.waiting === 1 ? 'persona espera' : 'personas esperan'}`}
+                      {!stats.attending && stats.waiting === 0 && 'Sin espera'}
+                    </>
+                  )}
                 </p>
               </div>
             </div>
-            <span
-              className={`shrink-0 inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium ${cfg.className}`}
-            >
-              {cfg.label}
-            </span>
+            {isAbsentToday ? (
+              <span className="shrink-0 inline-flex items-center rounded-full border border-yellow-500/30 bg-yellow-500/10 text-yellow-400 px-3 py-1 text-sm font-medium">
+                Ausente
+              </span>
+            ) : (
+              <span
+                className={`shrink-0 inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium ${cfg.className}`}
+              >
+                {cfg.label}
+              </span>
+            )}
           </div>
 
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-sm text-muted-foreground">
-              <span>
-                {stats.totalLoad} {stats.totalLoad === 1 ? 'persona' : 'personas'} en total
-              </span>
-              <span className="font-medium text-foreground">
-                {formatWaitTime(stats.eta)}
-              </span>
+          {!isAbsentToday && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-sm text-muted-foreground">
+                <span>
+                  {stats.totalLoad} {stats.totalLoad === 1 ? 'persona' : 'personas'} en total
+                </span>
+                <span className="font-medium text-foreground">
+                  {formatWaitTime(stats.eta)}
+                </span>
+              </div>
+              <div className="h-2.5 w-full rounded-full bg-white/6 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${getLoadColor(stats.totalLoad)}`}
+                  style={{ width: `${loadPct}%` }}
+                />
+              </div>
             </div>
-            <div className="h-2.5 w-full rounded-full bg-white/6 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${getLoadColor(stats.totalLoad)}`}
-                style={{ width: `${loadPct}%` }}
-              />
-            </div>
-          </div>
+          )}
         </button>
 
         {/* Expanded paused warning */}
-        {isExpanded && (
+        {isExpanded && stats.status === 'paused' && (
           <div className="border-t border-white/8 p-5 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
             <div className="flex items-start gap-3 rounded-xl border border-yellow-500/30 bg-yellow-500/5 p-4">
               <AlertTriangle className="size-5 text-yellow-400 shrink-0 mt-0.5" />
@@ -707,12 +760,67 @@ export default function CheckinPage() {
             </div>
           </div>
         )}
+
+        {/* Expanded absent warning */}
+        {isExpanded && isAbsentToday && (
+          <div className="border-t border-yellow-500/20 p-5 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+            <div className="flex items-start gap-3 rounded-xl border border-yellow-500/30 bg-yellow-500/5 p-4">
+              <AlertTriangle className="size-5 text-yellow-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-yellow-300">
+                  Este barbero no trabaja hoy
+                </p>
+                <p className="text-sm text-yellow-400/70 mt-1">
+                  Puede que no esté disponible para atenderte. ¿Querés esperarlo de todas formas?
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <Button
+                onClick={() => onSelect(barber.id)}
+                disabled={submitting}
+                className="flex-1 h-14 text-base rounded-xl font-semibold"
+                variant="default"
+              >
+                {submitting ? (
+                  <Loader2 className="size-5 animate-spin" />
+                ) : (
+                  `Esperar igual`
+                )}
+              </Button>
+              <Button
+                onClick={() => setExpandedPausedBarber(null)}
+                variant="outline"
+                className="h-14 text-base rounded-xl px-6"
+              >
+                Elegir otro
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
 
   const renderBarberList = (onSelect: (barberId: string) => void, showExpand = true) => (
     <div className="w-full space-y-4">
+      {/* Branch closed warning */}
+      {!branchIsOpen && (
+        <div className="flex items-start gap-3 rounded-2xl border border-red-500/30 bg-red-500/5 p-5">
+          <AlertTriangle className="size-6 text-red-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-lg font-semibold text-red-300">
+              La sucursal está cerrada
+            </p>
+            <p className="text-base text-red-400/70 mt-1">
+              {branchHours
+                ? `Horario: ${branchHours.opens.slice(0, 5)} - ${branchHours.closes.slice(0, 5)}`
+                : 'Fuera de horario comercial'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {minWaitBarber && (
         <button
           onClick={() => onSelect(minWaitBarber.id)}
@@ -863,13 +971,23 @@ export default function CheckinPage() {
 
           <div className="w-full h-px bg-white/8" />
 
-          <button
-            onClick={() => goTo('manage_phone')}
-            className="flex items-center gap-3 text-muted-foreground hover:text-foreground transition-colors py-3"
-          >
-            <Search className="size-5" />
-            <span className="text-lg">Ya tengo turno</span>
-          </button>
+          <div className="flex items-center gap-6 justify-center">
+            <button
+              onClick={() => goTo('manage_phone')}
+              className="flex items-center gap-3 text-muted-foreground hover:text-foreground transition-colors py-3"
+            >
+              <Search className="size-5" />
+              <span className="text-lg">Ya tengo turno</span>
+            </button>
+            <span className="text-white/20">·</span>
+            <button
+              onClick={() => goTo('staff_face_scan')}
+              className="flex items-center gap-3 text-muted-foreground hover:text-foreground transition-colors py-3"
+            >
+              <LogIn className="size-5" />
+              <span className="text-lg">Soy barbero</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -1198,6 +1316,146 @@ export default function CheckinPage() {
           )}
 
           {renderPhoneKeypad(managePhone, 'manage', lookingUpManage)}
+        </div>
+      )}
+
+      {/* ═══════════════ STAFF FACE SCAN ═══════════════ */}
+      {step === 'staff_face_scan' && (
+        <div
+          key={`staff-face-${animKey}`}
+          className="w-full max-w-lg flex flex-col items-center gap-5 px-6 animate-in fade-in slide-in-from-right-4 duration-400"
+        >
+          {backButton(() => goTo('branch'))}
+          <div className="text-center mt-2">
+            <h2 className="text-3xl font-bold">Identificación barbero</h2>
+            <p className="text-muted-foreground mt-2 text-lg">Mirá la cámara para identificarte</p>
+          </div>
+          <FaceCamera
+            branchName={selectedBranch?.name ?? 'Sucursal'}
+            onMatch={(match) => {
+              setStaffFaceMatch(match)
+              goTo('staff_action_confirm')
+            }}
+            onNoMatch={() => {
+              setError('No se reconoció tu cara. Pedí ayuda al administrador.')
+            }}
+            onManualEntry={() => setError('El ingreso manual no está disponible en modo barbero.')}
+          />
+          {error && <p className="text-destructive text-center text-lg">{error}</p>}
+        </div>
+      )}
+
+      {/* ═══════════════ STAFF ACTION CONFIRM ═══════════════ */}
+      {step === 'staff_action_confirm' && staffFaceMatch && (
+        <div
+          key={`staff-action-${animKey}`}
+          className="w-full max-w-lg flex flex-col items-center gap-8 px-6 animate-in fade-in zoom-in-95 duration-500"
+        >
+          {!staffActionDone ? (
+            <>
+              <div className="text-center">
+                <div className="size-24 rounded-full bg-white/4 border border-white/10 flex items-center justify-center mx-auto mb-4 animate-in zoom-in-50 duration-700">
+                  <span className="text-5xl font-bold">{staffFaceMatch.clientName.charAt(0)}</span>
+                </div>
+                <h2 className="text-3xl font-bold">{staffFaceMatch.clientName}</h2>
+                <p className="text-muted-foreground mt-2 text-lg">¿Qué querés registrar?</p>
+              </div>
+
+              <div className="w-full grid grid-cols-3 gap-4">
+                <button
+                  onClick={async () => {
+                    const supabase = createClient()
+                    const branchId = selectedBranch?.id
+                    if (!branchId) return
+                    const { data: staffData } = await supabase
+                      .from('staff')
+                      .select('id')
+                      .eq('full_name', staffFaceMatch.clientName)
+                      .eq('role', 'barber')
+                      .eq('branch_id', branchId)
+                      .single()
+                    if (!staffData) { setError('Barbero no encontrado'); return }
+                    await supabase.from('attendance_logs').insert({
+                      staff_id: staffData.id,
+                      branch_id: branchId,
+                      action_type: 'clock_in',
+                      face_verified: true,
+                    })
+                    setStaffAction('clock_in')
+                    setStaffActionDone(true)
+                    resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
+                  }}
+                  className="flex flex-col items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6 text-left transition-all hover:bg-emerald-500/10 active:scale-95"
+                >
+                  <LogIn className="size-10 text-emerald-400" />
+                  <span className="text-lg font-semibold text-emerald-300">Entrada</span>
+                </button>
+
+                <button
+                  onClick={async () => {
+                    const supabase = createClient()
+                    const branchId = selectedBranch?.id
+                    if (!branchId) return
+                    const { data: staffData } = await supabase
+                      .from('staff')
+                      .select('id')
+                      .eq('full_name', staffFaceMatch.clientName)
+                      .eq('role', 'barber')
+                      .eq('branch_id', branchId)
+                      .single()
+                    if (!staffData) { setError('Barbero no encontrado'); return }
+                    await supabase.from('attendance_logs').insert({
+                      staff_id: staffData.id,
+                      branch_id: branchId,
+                      action_type: 'clock_out',
+                      face_verified: true,
+                    })
+                    setStaffAction('clock_out')
+                    setStaffActionDone(true)
+                    resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
+                  }}
+                  className="flex flex-col items-center gap-3 rounded-2xl border border-red-500/30 bg-red-500/5 p-6 text-left transition-all hover:bg-red-500/10 active:scale-95"
+                >
+                  <LogOut className="size-10 text-red-400" />
+                  <span className="text-lg font-semibold text-red-300">Salida</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    goTo('branch')
+                  }}
+                  className="flex flex-col items-center gap-3 rounded-2xl border border-white/10 bg-white/2 p-6 text-left transition-all hover:bg-white/6 active:scale-95"
+                >
+                  <Coffee className="size-10 text-yellow-400" />
+                  <span className="text-lg font-semibold text-yellow-300">Volver</span>
+                </button>
+              </div>
+
+              {error && <p className="text-destructive text-center text-lg">{error}</p>}
+            </>
+          ) : (
+            <>
+              <div className="size-28 rounded-full bg-white/4 border border-white/10 flex items-center justify-center animate-in zoom-in-50 duration-700">
+                <CheckCircle2 className="size-16 text-white" strokeWidth={1.5} />
+              </div>
+              <div className="text-center">
+                <h2 className="text-4xl font-bold">
+                  {staffAction === 'clock_in' ? '¡Entrada registrada!' : '¡Salida registrada!'}
+                </h2>
+                <p className="text-2xl text-muted-foreground mt-3">{staffFaceMatch.clientName}</p>
+                <p className="text-lg text-muted-foreground mt-1">
+                  {new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              </div>
+              <div className="w-full max-w-xs h-1 rounded-full bg-white/10 overflow-hidden">
+                <div
+                  className="h-full bg-white/40 rounded-full origin-left"
+                  style={{ animation: `checkin-countdown ${RESET_DELAY_MS}ms linear forwards` }}
+                />
+              </div>
+              <p className="text-sm text-muted-foreground">Volviendo al inicio...</p>
+            </>
+          )}
         </div>
       )}
 
