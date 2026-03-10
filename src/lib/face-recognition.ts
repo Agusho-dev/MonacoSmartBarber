@@ -16,13 +16,15 @@ async function loadFaceApi(): Promise<FaceApiModule> {
 
   // Try to set WebGL backend for better performance on mobile
   try {
-    await faceapi.tf.setBackend('webgl')
-    await faceapi.tf.ready()
+    const tf = faceapi.tf as any
+    await tf.setBackend('webgl')
+    await tf.ready()
   } catch (e) {
     console.warn('WebGL backend not available, falling back', e)
     try {
-      await faceapi.tf.setBackend('wasm')
-      await faceapi.tf.ready()
+      const tf = faceapi.tf as any
+      await tf.setBackend('wasm')
+      await tf.ready()
     } catch (e2) {
       console.warn('WASM backend not available, falling back to cpu', e2)
     }
