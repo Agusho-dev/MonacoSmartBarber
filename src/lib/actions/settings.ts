@@ -39,6 +39,19 @@ export async function updateAppSettings(formData: FormData) {
   }
 
   if (opError) return { error: opError.message }
+
+  // Sync to all branches since it applies to all of them globally
+  const { error: branchError } = await supabase
+    .from('branches')
+    .update({
+      business_hours_open: updateData.business_hours_open,
+      business_hours_close: updateData.business_hours_close,
+      business_days: updateData.business_days,
+    })
+    .not('id', 'is', null) // Match all existing branches
+
+  if (branchError) return { error: branchError.message }
+
   revalidatePath('/dashboard/configuracion')
   return { success: true }
 }
