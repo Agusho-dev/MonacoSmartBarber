@@ -10,7 +10,7 @@ export default async function BarberosPage() {
     .toISOString()
     .slice(0, 10)
 
-  const [{ data: barbers }, { data: branches }, { data: todayVisits }] = await Promise.all([
+  const [{ data: barbers }, { data: branches }, { data: todayVisits }, { data: roles }] = await Promise.all([
     supabase
       .from('staff')
       .select('*, branch:branches(*)')
@@ -21,6 +21,7 @@ export default async function BarberosPage() {
       .select('barber_id, amount')
       .gte('completed_at', todayStr)
       .lt('completed_at', tomorrowStr),
+    supabase.from('roles').select('*').order('name'),
   ])
 
   return (
@@ -28,6 +29,7 @@ export default async function BarberosPage() {
       barbers={barbers ?? []}
       branches={branches ?? []}
       todayVisits={todayVisits ?? []}
+      roles={roles ?? []}
     />
   )
 }
