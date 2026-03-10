@@ -60,6 +60,7 @@ const emptyForm = {
   pin: '',
   role: 'barber' as UserRole,
   email: '',
+  phone: '',
 }
 
 export function BarberosClient({ barbers, branches, todayVisits }: Props) {
@@ -100,6 +101,7 @@ export function BarberosClient({ barbers, branches, todayVisits }: Props) {
       pin: barber.pin ?? '',
       role: barber.role,
       email: barber.email ?? '',
+      phone: barber.phone ?? '',
     })
     setDialogOpen(true)
   }
@@ -117,6 +119,7 @@ export function BarberosClient({ barbers, branches, todayVisits }: Props) {
       pin: form.pin || null,
       role: form.role,
       email: form.email || null,
+      phone: form.phone || null,
     }
 
     if (editingId) {
@@ -161,6 +164,7 @@ export function BarberosClient({ barbers, branches, todayVisits }: Props) {
               <TableHead>Sucursal</TableHead>
               <TableHead>Rol</TableHead>
               <TableHead className="text-right">Comisión %</TableHead>
+              <TableHead>Teléfono</TableHead>
               <TableHead>PIN</TableHead>
               <TableHead>Estado</TableHead>
               <TableHead className="text-right">Hoy</TableHead>
@@ -183,6 +187,7 @@ export function BarberosClient({ barbers, branches, todayVisits }: Props) {
                   <TableCell>{barber.branch?.name ?? '—'}</TableCell>
                   <TableCell>{roleLabels[barber.role]}</TableCell>
                   <TableCell className="text-right">{barber.commission_pct}%</TableCell>
+                  <TableCell className="text-muted-foreground">{barber.phone ?? '—'}</TableCell>
                   <TableCell className="font-mono text-muted-foreground">
                     {barber.pin ? '••••' : '—'}
                   </TableCell>
@@ -239,14 +244,25 @@ export function BarberosClient({ barbers, branches, todayVisits }: Props) {
                 placeholder="Juan Pérez"
               />
             </div>
-            <div className="grid gap-2">
-              <Label>Email</Label>
-              <Input
-                type="email"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-                placeholder="juan@email.com"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Email</Label>
+                <Input
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  placeholder="juan@email.com"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Teléfono</Label>
+                <Input
+                  type="tel"
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  placeholder="3410000000"
+                />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">

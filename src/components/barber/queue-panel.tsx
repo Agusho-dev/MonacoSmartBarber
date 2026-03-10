@@ -113,7 +113,7 @@ export function QueuePanel({
     fetchOtherBarbers()
 
     const channel = supabase
-      .channel('queue')
+      .channel(`barber-queue-${session.branch_id}-${session.staff_id}`)
       .on(
         'postgres_changes',
         {
@@ -300,7 +300,7 @@ export function QueuePanel({
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Volver</AlertDialogCancel>
-                    <AlertDialogAction 
+                    <AlertDialogAction
                       className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                       onClick={() => handleCancel(entry.id)}
                     >

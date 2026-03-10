@@ -17,6 +17,7 @@ interface FaceCameraProps {
   onNoMatch: (descriptor: Float32Array) => void
   onManualEntry: () => void
   branchName?: string
+  targetRole?: 'client' | 'staff'
 }
 
 type CameraState =
@@ -37,6 +38,7 @@ export function FaceCamera({
   onNoMatch,
   onManualEntry,
   branchName,
+  targetRole = 'client',
 }: FaceCameraProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -141,7 +143,7 @@ export function FaceCamera({
       setState('matching')
       setLastDescriptor(detection.descriptor)
 
-      const match = await matchFaceInDB(detection.descriptor)
+      const match = await matchFaceInDB(detection.descriptor, targetRole)
       if (!mountedRef.current) return
 
       if (match) {
@@ -241,9 +243,8 @@ export function FaceCamera({
         {(state === 'scanning' || state === 'matching') && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div
-              className={`w-48 h-64 rounded-full border-2 border-dashed transition-colors duration-300 ${
-                faceBox ? 'border-emerald-400/60' : 'border-white/20'
-              }`}
+              className={`w-48 h-64 rounded-full border-2 border-dashed transition-colors duration-300 ${faceBox ? 'border-emerald-400/60' : 'border-white/20'
+                }`}
             />
           </div>
         )}

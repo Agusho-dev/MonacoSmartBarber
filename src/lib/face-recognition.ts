@@ -74,13 +74,15 @@ export async function detectFace(
 }
 
 export async function matchFaceInDB(
-  descriptor: Float32Array
+  descriptor: Float32Array,
+  targetRole: 'client' | 'staff' = 'client'
 ): Promise<FaceMatchResult | null> {
   const supabase = createClient()
 
   const descriptorArray = Array.from(descriptor)
+  const rpcName = targetRole === 'staff' ? 'match_staff_face_descriptor' : 'match_face_descriptor'
 
-  const { data, error } = await supabase.rpc('match_face_descriptor', {
+  const { data, error } = await supabase.rpc(rpcName as any, {
     query_descriptor: JSON.stringify(descriptorArray),
     match_threshold: MATCH_THRESHOLD,
     max_results: 1,
@@ -143,6 +145,51 @@ export async function saveFacePhoto(
     .update({ face_photo_url: data.publicUrl })
     .eq('id', clientId)
 
+  return data.publicUrl
+}
+
+export async function enrollStaffFaceDescriptor(
+  staffId: string,
+  descriptor: Float32Array,
+  source: 'checkin' | 'barber' = 'barber',
+  qualityScore = 0
+): Promise<boolean> {
+  const supabase = createClient()
+  const descriptorArray = Array.from(descriptor)
+
+  const { error } = await supabase.from('staff_face_descriptors').insert({
+    staff_id: staffId,
+    descriptor: JSON.stringify(descriptorArray),
+    quality_score: qualityScore,
+    source,
+  })
+
+  return !error
+}
+
+export async function saveStaffFacePhoto(
+  staffId: string,
+  photoBlob: Blob
+): Promise<string | null> {
+  const supabase = createClient()
+  const filename = `${staffId}/${crypto.randomUUID()}-staff.webp`
+
+  const { error: uploadError } = await supabase.storage
+    .from('face-references')
+    .upload(filename, photoBlob, {
+      contentType: 'image/webp',
+      cacheControl: '31536000',
+      upsert: false,
+    })
+
+  if (uploadError) return null
+
+  const { data } = supabase.storage
+    .from('face-references')
+    .getPublicUrl(filename)
+
+  // We don't have face_photo_url on staff table yet, so we just return the URL for now 
+  // or could optionally update if we add that column later.
   return data.publicUrl
 }
 

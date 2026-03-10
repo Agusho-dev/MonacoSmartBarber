@@ -100,7 +100,7 @@ export default function CheckinPage() {
   const [faceDescriptor, setFaceDescriptor] = useState<Float32Array | null>(null)
   const [faceClientId, setFaceClientId] = useState<string | null>(null)
   const [hasExistingFace, setHasExistingFace] = useState(false)
-  
+
   const [capturedFaceDescriptors, setCapturedFaceDescriptors] = useState<Float32Array[]>([])
   const [capturedFacePhoto, setCapturedFacePhoto] = useState<Blob | null>(null)
 
@@ -152,7 +152,7 @@ export default function CheckinPage() {
       const supabase = createClient()
       setLoadingBarbers(true)
 
-      const [staffRes, queueRes, visitsRes, availableRes, openRes] = await Promise.all([
+      const [staffRes, queueRes, visitsRes, availableRes, openRes, attendanceRes] = await Promise.all([
         supabase
           .from('staff')
           .select('*')
@@ -173,22 +173,44 @@ export default function CheckinPage() {
           .limit(200),
         supabase.rpc('get_available_barbers_today', { p_branch_id: branchId }),
         supabase.rpc('get_branch_open_status', { p_branch_id: branchId }),
+        supabase
+          .from('attendance_logs')
+          .select('staff_id, action_type')
+          .eq('branch_id', branchId)
+          .gte('recorded_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
+          .order('recorded_at', { ascending: false }),
       ])
+
+      let branchOpen = true
 
       // Track branch open status
       if (openRes.data && openRes.data.length > 0) {
         const status = openRes.data[0] as { is_open: boolean; opens_at: string; closes_at: string }
+        branchOpen = status.is_open
         setBranchIsOpen(status.is_open)
         setBranchHours({ opens: status.opens_at, closes: status.closes_at })
       }
 
       if (staffRes.data) {
+        const latestAttendance: Record<string, string> = {}
+        if (attendanceRes.data) {
+          attendanceRes.data.forEach((log: { staff_id: string; action_type: string }) => {
+            if (!latestAttendance[log.staff_id]) {
+              latestAttendance[log.staff_id] = log.action_type
+            }
+          })
+        }
+
         const availIds = new Set<string>(
           (availableRes.data ?? []).map((r: { staff_id: string }) => r.staff_id)
         )
         setAvailableTodayIds(availIds)
-        // Show ALL non-blocked barbers (absent ones shown with warning)
-        const filtered = staffRes.data.filter((s) => s.status !== 'blocked')
+
+        const filtered = !branchOpen ? [] : staffRes.data.filter((s) => {
+          if (s.status === 'blocked') return false
+          if (latestAttendance[s.id] === 'clock_out') return false
+          return true
+        })
         setBarbers(filtered)
       }
       if (queueRes.data) setQueueEntries(queueRes.data)
@@ -239,6 +261,30 @@ export default function CheckinPage() {
             .then(({ data }) => {
               if (data && !cancelled) setQueueEntries(data)
             })
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'staff',
+          filter: `branch_id=eq.${branchId}`,
+        },
+        () => {
+          if (!cancelled) loadBarberData(branchId)
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'attendance_logs',
+          filter: `branch_id=eq.${branchId}`,
+        },
+        () => {
+          if (!cancelled) loadBarberData(branchId)
         }
       )
       .subscribe()
@@ -1200,7 +1246,7 @@ export default function CheckinPage() {
               goTo('home')
             }
           })}
-          
+
           <FaceEnrollment
             clientId={faceClientId || undefined}
             clientName={name || 'Cliente'}
@@ -1214,9 +1260,9 @@ export default function CheckinPage() {
             onComplete={reset}
             onSkip={() => {
               if (wantsEnrollment && capturedFaceDescriptors.length === 0) {
-                 goTo('no_match_options')
+                goTo('no_match_options')
               } else {
-                 reset()
+                reset()
               }
             }}
           />
@@ -1249,8 +1295,13 @@ export default function CheckinPage() {
             <div className="text-center py-16">
               <User className="size-12 text-muted-foreground mx-auto mb-4" />
               <p className="text-lg text-muted-foreground">
-                No hay barberos activos en esta sucursal
+                {!branchIsOpen ? 'La sucursal está cerrada' : 'No hay barberos disponibles en este momento'}
               </p>
+              {!branchIsOpen && branchHours && (
+                <p className="text-sm mt-3 text-muted-foreground font-medium">
+                  Horario: {branchHours.opens.slice(0, 5)} - {branchHours.closes.slice(0, 5)}
+                </p>
+              )}
             </div>
           ) : (
             renderBarberList((barberId) => handleConfirm(barberId))
@@ -1379,6 +1430,12 @@ export default function CheckinPage() {
                 <div className="flex items-center justify-center py-16">
                   <Loader2 className="size-8 animate-spin text-muted-foreground" />
                 </div>
+              ) : barbers.length === 0 ? (
+                <div className="text-center py-16">
+                  <p className="text-lg text-muted-foreground">
+                    {!branchIsOpen ? 'La sucursal está cerrada' : 'No hay barberos disponibles'}
+                  </p>
+                </div>
               ) : (
                 renderBarberList((barberId) => {
                   if (queueEntryId) handleReassign(queueEntryId, barberId)
@@ -1415,6 +1472,7 @@ export default function CheckinPage() {
           </div>
           <FaceCamera
             branchName={selectedBranch?.name ?? 'Sucursal'}
+            targetRole="staff"
             onMatch={(match) => {
               setStaffFaceMatch(match)
               goTo('staff_action_confirm')

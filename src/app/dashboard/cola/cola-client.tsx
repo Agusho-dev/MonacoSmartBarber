@@ -60,6 +60,7 @@ export function ColaClient({
 }: ColaClientProps) {
   const { selectedBranchId } = useBranchStore()
   const [entries, setEntries] = useState<QueueEntry[]>(initialEntries)
+  const [liveBarbers, setLiveBarbers] = useState<BarberRow[]>(barbers)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [now, setNow] = useState(Date.now())
 
@@ -76,8 +77,20 @@ export function ColaClient({
     if (data) setEntries(data as QueueEntry[])
   }, [supabase])
 
+  const fetchBarbers = useCallback(async () => {
+    const { data } = await supabase
+      .from('staff')
+      .select('id, full_name, branch_id, status, is_active')
+      .eq('role', 'barber')
+      .eq('is_active', true)
+      .order('full_name')
+
+    if (data) setLiveBarbers(data as BarberRow[])
+  }, [supabase])
+
   useEffect(() => {
     fetchQueue()
+    fetchBarbers()
 
     const channel = supabase
       .channel('admin-queue')
@@ -90,12 +103,21 @@ export function ColaClient({
         },
         () => fetchQueue()
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'staff',
+        },
+        () => fetchBarbers()
+      )
       .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, fetchQueue])
+  }, [supabase, fetchQueue, fetchBarbers])
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)
@@ -113,8 +135,8 @@ export function ColaClient({
   )
 
   const filteredBarbers = selectedBranchId
-    ? barbers.filter((b) => b.branch_id === selectedBranchId)
-    : barbers
+    ? liveBarbers.filter((b) => b.branch_id === selectedBranchId)
+    : liveBarbers
 
   async function handleCancel(entryId: string) {
     setActionLoading(entryId)
@@ -172,13 +194,12 @@ export function ColaClient({
             <Card key={barber.id} className="gap-0 py-0">
               <CardContent className="flex items-center gap-3 p-4">
                 <div
-                  className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${
-                    isPaused
+                  className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${isPaused
                       ? 'bg-yellow-500/15'
                       : activeEntry
                         ? 'bg-primary/10'
                         : 'bg-muted'
-                  }`}
+                    }`}
                 >
                   {isPaused ? (
                     <Pause className="size-4 text-yellow-400" />
@@ -277,9 +298,9 @@ export function ColaClient({
                           </SelectItem>
                           {(selectedBranchId
                             ? filteredBarbers
-                            : barbers.filter(
-                                (b) => b.branch_id === entry.branch_id
-                              )
+                            : liveBarbers.filter(
+                              (b) => b.branch_id === entry.branch_id
+                            )
                           ).map((b) => (
                             <SelectItem key={b.id} value={b.id}>
                               {b.full_name}

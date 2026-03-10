@@ -31,6 +31,7 @@ export interface Staff {
   role: UserRole
   full_name: string
   email: string | null
+  phone: string | null
   pin: string | null
   commission_pct: number
   status: StaffStatus
@@ -57,6 +58,15 @@ export interface Client {
 export interface ClientFaceDescriptor {
   id: string
   client_id: string
+  descriptor: number[]
+  quality_score: number
+  source: 'checkin' | 'barber'
+  created_at: string
+}
+
+export interface StaffFaceDescriptor {
+  id: string
+  staff_id: string
   descriptor: number[]
   quality_score: number
   source: 'checkin' | 'barber'
@@ -342,6 +352,7 @@ export interface Database {
       visit_photos: { Row: VisitPhoto; Insert: Partial<VisitPhoto> & Pick<VisitPhoto, 'visit_id' | 'storage_path'>; Update: Partial<VisitPhoto> }
       service_tags: { Row: ServiceTag; Insert: Partial<ServiceTag> & Pick<ServiceTag, 'name'>; Update: Partial<ServiceTag> }
       client_face_descriptors: { Row: ClientFaceDescriptor; Insert: Partial<ClientFaceDescriptor> & Pick<ClientFaceDescriptor, 'client_id' | 'descriptor'>; Update: Partial<ClientFaceDescriptor> }
+      staff_face_descriptors: { Row: StaffFaceDescriptor; Insert: Partial<StaffFaceDescriptor> & Pick<StaffFaceDescriptor, 'staff_id' | 'descriptor'>; Update: Partial<StaffFaceDescriptor> }
       break_configs: { Row: BreakConfig; Insert: Partial<BreakConfig> & Pick<BreakConfig, 'branch_id' | 'name'>; Update: Partial<BreakConfig> }
       payment_accounts: { Row: PaymentAccount; Insert: Partial<PaymentAccount> & Pick<PaymentAccount, 'branch_id' | 'name'>; Update: Partial<PaymentAccount> }
       staff_schedules: { Row: StaffSchedule; Insert: Partial<StaffSchedule> & Pick<StaffSchedule, 'staff_id' | 'day_of_week' | 'start_time' | 'end_time'>; Update: Partial<StaffSchedule> }
