@@ -3,6 +3,7 @@ import { getBarberSession } from '@/lib/actions/auth'
 import { BarberFaceCheck } from '@/components/barber/barber-face-check'
 import { createClient } from '@/lib/supabase/server'
 import { FullscreenButton } from '@/components/ui/fullscreen-button'
+import { WakeLock } from '@/components/ui/wake-lock'
 
 export default async function BarberLayout({
   children,
@@ -23,7 +24,8 @@ export default async function BarberLayout({
   }
 
   return (
-    <div className="min-h-dvh bg-background pb-20">
+    <div className="barber-theme min-h-dvh bg-background text-foreground pb-20">
+      <WakeLock />
       {children}
       <BarberNav />
       {session && typeof needsFaceId === 'boolean' && (
