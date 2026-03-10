@@ -32,6 +32,7 @@ import {
 import { FaceCamera } from '@/components/checkin/face-camera'
 import { FaceEnrollment } from '@/components/checkin/face-enrollment'
 import type { FaceMatchResult } from '@/lib/face-recognition'
+import { saveFacePhoto, enrollFaceDescriptor } from '@/lib/face-recognition'
 
 type Step =
   | 'branch'
@@ -88,6 +89,9 @@ export default function CheckinPage() {
   const [faceDescriptor, setFaceDescriptor] = useState<Float32Array | null>(null)
   const [faceClientId, setFaceClientId] = useState<string | null>(null)
   const [hasExistingFace, setHasExistingFace] = useState(false)
+  
+  const [capturedFaceDescriptors, setCapturedFaceDescriptors] = useState<Float32Array[]>([])
+  const [capturedFacePhoto, setCapturedFacePhoto] = useState<Blob | null>(null)
 
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -241,6 +245,8 @@ export default function CheckinPage() {
     setFaceDescriptor(null)
     setFaceClientId(null)
     setHasExistingFace(false)
+    setCapturedFaceDescriptors([])
+    setCapturedFacePhoto(null)
     // Keep selectedBranch — go back to home, not branch
     goTo('home')
   }
@@ -498,14 +504,24 @@ export default function CheckinPage() {
           setQueueEntryId(result.queueEntryId as string)
         }
 
-        if (!faceClientId && result.queueEntryId) {
-          const supabase = createClient()
-          const { data: entry } = await supabase
-            .from('queue_entries')
-            .select('client_id')
-            .eq('id', result.queueEntryId)
-            .single()
-          if (entry) setFaceClientId(entry.client_id)
+        const newClientId = result.clientId || faceClientId
+
+        // If we captured face data during this flow, save it now to the real client
+        if (wantsEnrollment && capturedFaceDescriptors.length > 0 && newClientId) {
+          const savePromises = capturedFaceDescriptors.map((d, i) =>
+            enrollFaceDescriptor(newClientId, d, 'checkin', i === 0 ? 0.99 : 0) // We use 0.99 as a placeholder score for the best descriptor
+          )
+          if (capturedFacePhoto) {
+            savePromises.push(saveFacePhoto(newClientId, capturedFacePhoto).then(() => true))
+          }
+          await Promise.all(savePromises)
+          setHasExistingFace(true)
+          setWantsEnrollment(false)
+          setFaceClientId(newClientId)
+        }
+
+        if (!faceClientId && newClientId) {
+          setFaceClientId(newClientId)
         }
 
         setSubmitting(false)
@@ -516,7 +532,7 @@ export default function CheckinPage() {
         setSubmitting(false)
       }
     },
-    [selectedBranch, name, phone, submitting, faceClientId, handleFaceConfirmBarber]
+    [selectedBranch, name, phone, submitting, faceClientId, handleFaceConfirmBarber, wantsEnrollment, capturedFaceDescriptors, capturedFacePhoto]
   )
 
   const handleBarberClick = (barber: Staff) => {
@@ -936,7 +952,7 @@ export default function CheckinPage() {
                 setWantsEnrollment(true)
                 setPhone('')
                 setName('')
-                goTo('phone')
+                goTo('face_enroll')
               }}
               className="group flex items-center gap-5 w-full rounded-2xl border border-blue-500/20 bg-blue-500/5 p-6 text-left transition-all duration-200 hover:bg-blue-500/10 hover:border-blue-500/30 active:scale-[0.98]"
             >
@@ -1043,17 +1059,37 @@ export default function CheckinPage() {
       )}
 
       {/* ═══════════════ FACE ENROLLMENT ═══════════════ */}
-      {step === 'face_enroll' && faceClientId && (
+      {step === 'face_enroll' && (
         <div
           key={`face-enroll-${animKey}`}
           className="w-full max-w-lg flex flex-col items-center gap-5 px-6 animate-in fade-in slide-in-from-right-4 duration-400"
         >
+          {backButton(() => {
+            if (wantsEnrollment && capturedFaceDescriptors.length === 0) {
+              goTo('no_match_options')
+            } else {
+              goTo('home')
+            }
+          })}
+          
           <FaceEnrollment
-            clientId={faceClientId}
-            clientName={name}
+            clientId={faceClientId || undefined}
+            clientName={name || 'Cliente'}
             source="checkin"
+            captureOnly={wantsEnrollment}
+            onCapture={(descriptors, photo) => {
+              setCapturedFaceDescriptors(descriptors)
+              setCapturedFacePhoto(photo)
+              goTo('phone')
+            }}
             onComplete={reset}
-            onSkip={reset}
+            onSkip={() => {
+              if (wantsEnrollment && capturedFaceDescriptors.length === 0) {
+                 goTo('no_match_options')
+              } else {
+                 reset()
+              }
+            }}
           />
         </div>
       )}

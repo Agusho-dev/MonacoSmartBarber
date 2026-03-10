@@ -74,7 +74,7 @@ export async function checkinClient(formData: FormData) {
 
   revalidatePath('/checkin')
   revalidatePath('/barbero/cola')
-  return { success: true, position, queueEntryId: queueEntry.id }
+  return { success: true, position, queueEntryId: queueEntry.id, clientId }
 }
 
 export async function startService(queueEntryId: string, barberId: string) {

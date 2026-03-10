@@ -13,11 +13,13 @@ import { Loader2, Camera, CheckCircle2, SkipForward } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 interface FaceEnrollmentProps {
-  clientId: string
+  clientId?: string
   clientName: string
   onComplete: () => void
   onSkip: () => void
   source?: 'checkin' | 'barber'
+  captureOnly?: boolean
+  onCapture?: (descriptors: Float32Array[], photo: Blob | null) => void
 }
 
 type EnrollState = 'loading' | 'positioning' | 'capturing' | 'saving' | 'done' | 'error'
@@ -31,6 +33,8 @@ export function FaceEnrollment({
   onComplete,
   onSkip,
   source = 'checkin',
+  captureOnly = false,
+  onCapture,
 }: FaceEnrollmentProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -134,6 +138,15 @@ export function FaceEnrollment({
       return
     }
 
+    // Capture-only mode: return data without saving
+    if (captureOnly && onCapture) {
+      stopCamera()
+      onCapture(descriptors, bestPhoto)
+      return
+    }
+
+    if (!clientId) return
+
     setState('saving')
 
     const savePromises = descriptors.map((d, i) =>
@@ -155,7 +168,7 @@ export function FaceEnrollment({
     setTimeout(() => {
       if (mountedRef.current) onComplete()
     }, 1500)
-  }, [clientId, source, onComplete, stopCamera])
+  }, [clientId, source, onComplete, stopCamera, captureOnly, onCapture])
 
   return (
     <div className="w-full max-w-lg flex flex-col items-center gap-6">
