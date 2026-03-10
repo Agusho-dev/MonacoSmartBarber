@@ -9,6 +9,8 @@ export type IncentiveMetric = 'haircut_count' | 'content_post' | 'custom'
 export type IncentivePeriod = 'weekly' | 'monthly'
 export type DisciplinaryEventType = 'absence' | 'late'
 export type ConsequenceType = 'none' | 'presentismo_loss' | 'warning' | 'incentive_loss' | 'salary_deduction'
+export type ReviewRequestStatus = 'pending' | 'completed' | 'expired'
+export type ReviewRatingCategory = 'high' | 'improvement' | 'low'
 
 export interface Branch {
   id: string
@@ -20,8 +22,35 @@ export interface Branch {
   business_hours_close: string
   business_days: number[]
   timezone: string
+  google_review_url?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface ReviewRequest {
+  id: string
+  client_id: string
+  branch_id: string
+  visit_id: string
+  barber_id: string | null
+  token: string
+  status: ReviewRequestStatus
+  created_at: string
+  expires_at: string
+  branch?: Pick<Branch, 'name' | 'google_review_url'>
+}
+
+export interface ClientReview {
+  id: string
+  review_request_id: string
+  client_id: string
+  branch_id: string
+  rating: number
+  category: ReviewRatingCategory
+  improvement_categories: string[] | null
+  comment: string | null
+  redirected_to_google: boolean
+  created_at: string
 }
 
 export interface Staff {
@@ -53,6 +82,7 @@ export interface Client {
   instagram: string | null
   created_at: string
   updated_at: string
+  loyalty?: { total_visits: number }[]
 }
 
 export interface ClientFaceDescriptor {
@@ -89,6 +119,7 @@ export interface QueueEntry {
   branch_id: string
   client_id: string
   barber_id: string | null
+  service_id: string | null
   status: QueueStatus
   position: number
   reward_claimed: boolean
@@ -98,6 +129,7 @@ export interface QueueEntry {
   created_at: string
   client?: Client
   barber?: Staff
+  service?: Service
 }
 
 export interface Visit {
@@ -106,6 +138,7 @@ export interface Visit {
   client_id: string
   barber_id: string
   service_id: string | null
+  extra_services: string[] | null
   queue_entry_id: string | null
   payment_method: PaymentMethod
   payment_account_id: string | null

@@ -47,11 +47,11 @@ const PAYMENT_OPTIONS: {
   label: string
   icon: React.ElementType
 }[] = [
-  { value: 'cash', label: 'Efectivo', icon: Banknote },
-  { value: 'card', label: 'Tarjeta', icon: CreditCard },
-  { value: 'transfer', label: 'Transferencia', icon: ArrowRightLeft },
-  { value: 'points', label: 'Puntos', icon: Gift },
-]
+    { value: 'cash', label: 'Efectivo', icon: Banknote },
+    { value: 'card', label: 'Tarjeta', icon: CreditCard },
+    { value: 'transfer', label: 'Transferencia', icon: ArrowRightLeft },
+    { value: 'points', label: 'Puntos', icon: Gift },
+  ]
 
 interface CompleteServiceDialogProps {
   entry: QueueEntry | null
@@ -76,6 +76,7 @@ export function CompleteServiceDialog({
 
   // Step 1 — service details
   const [selectedService, setSelectedService] = useState<string>('')
+  const [extraServices, setExtraServices] = useState<string[]>([])
   const [notes, setNotes] = useState('')
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [customTag, setCustomTag] = useState('')
@@ -97,6 +98,7 @@ export function CompleteServiceDialog({
       setStep(1)
       setSelectedPayment(null)
       setSelectedService('')
+      setExtraServices([])
       setNotes('')
       setSelectedTags([])
       setCustomTag('')
@@ -109,6 +111,10 @@ export function CompleteServiceDialog({
       setHasFaceData(false)
       setSelectedAccountId('')
       return
+    }
+
+    if (entry.service_id) {
+      setSelectedService(entry.service_id)
     }
 
     if (entry.client_id) {
@@ -206,7 +212,8 @@ export function CompleteServiceDialog({
         selectedPayment === 'points' ? 'cash' : selectedPayment,
         selectedService || undefined,
         selectedPayment === 'points',
-        selectedAccountId || null
+        selectedAccountId || null,
+        extraServices.length > 0 ? extraServices : undefined
       )
 
       if ('error' in result) {
@@ -293,12 +300,12 @@ export function CompleteServiceDialog({
                 {services.length > 0 && (
                   <div>
                     <p className="mb-2 text-sm font-medium">
-                      Servicio realizado{' '}
+                      Servicio principal{' '}
                       <span className="text-muted-foreground">(opcional)</span>
                     </p>
                     <Select value={selectedService} onValueChange={setSelectedService}>
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Seleccionar servicio" />
+                        <SelectValue placeholder="Seleccionar servicio principal" />
                       </SelectTrigger>
                       <SelectContent>
                         {services.map((service) => (
@@ -306,6 +313,53 @@ export function CompleteServiceDialog({
                             {service.name} — ${service.price}
                           </SelectItem>
                         ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Extra Services/Products */}
+                {services.length > 0 && (
+                  <div>
+                    <p className="mb-2 text-sm font-medium">
+                      Servicios Extra / Productos{' '}
+                      <span className="text-muted-foreground">(opcional)</span>
+                    </p>
+                    {extraServices.length > 0 && (
+                      <div className="mb-2 flex flex-wrap gap-1.5">
+                        {extraServices.map((id) => {
+                          const s = services.find((x) => x.id === id)
+                          if (!s) return null
+                          return (
+                            <Badge key={id} variant="secondary" className="gap-1 px-2 py-1 text-sm bg-white/5 border-white/10 hover:bg-white/10">
+                              {s.name} (+${s.price})
+                              <button type="button" onClick={() => setExtraServices((prev) => prev.filter((x) => x !== id))} className="ml-1 text-muted-foreground hover:text-white">
+                                <X className="size-3" />
+                              </button>
+                            </Badge>
+                          )
+                        })}
+                      </div>
+                    )}
+                    <Select
+                      value=""
+                      onValueChange={(id) => {
+                        if (id && !extraServices.includes(id) && id !== selectedService) {
+                          setExtraServices((prev) => [...prev, id])
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Agregar extra..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {services
+                          .filter((s) => s.id !== selectedService && !extraServices.includes(s.id))
+                          .map((service) => (
+                            <SelectItem key={service.id} value={service.id}>
+                              {service.name} — +${service.price}
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   </div>

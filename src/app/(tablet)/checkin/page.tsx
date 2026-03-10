@@ -25,7 +25,7 @@ import {
   Keyboard,
   Settings2,
 } from 'lucide-react'
-import type { Branch, Staff, QueueEntry, Visit } from '@/lib/types/database'
+import type { Branch, Staff, QueueEntry, Visit, Service } from '@/lib/types/database'
 import {
   buildBarberAvgMinutes,
   getBarberStats,
@@ -46,6 +46,7 @@ type Step =
   | 'phone'
   | 'name'
   | 'face_enroll'
+  | 'service_selection'
   | 'barber'
   | 'success'
   | 'manage_turn'
@@ -109,6 +110,9 @@ export default function CheckinPage() {
   const [staffAction, setStaffAction] = useState<AttendanceActionType | null>(null)
   const [staffActionDone, setStaffActionDone] = useState(false)
 
+  const [services, setServices] = useState<Service[]>([])
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null)
+
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
 
@@ -152,7 +156,7 @@ export default function CheckinPage() {
       const supabase = createClient()
       setLoadingBarbers(true)
 
-      const [staffRes, queueRes, visitsRes, availableRes, openRes, attendanceRes] = await Promise.all([
+      const [staffRes, queueRes, visitsRes, availableRes, openRes, attendanceRes, servicesRes] = await Promise.all([
         supabase
           .from('staff')
           .select('*')
@@ -179,6 +183,12 @@ export default function CheckinPage() {
           .eq('branch_id', branchId)
           .gte('recorded_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
           .order('recorded_at', { ascending: false }),
+        supabase
+          .from('services')
+          .select('*')
+          .eq('branch_id', branchId)
+          .eq('is_active', true)
+          .order('name'),
       ])
 
       let branchOpen = true
@@ -221,6 +231,9 @@ export default function CheckinPage() {
             25
           )
         )
+      }
+      if (servicesRes?.data) {
+        setServices(servicesRes.data as Service[])
       }
       setLoadingBarbers(false)
     },
@@ -329,6 +342,7 @@ export default function CheckinPage() {
     setStaffFaceMatch(null)
     setStaffAction(null)
     setStaffActionDone(false)
+    setSelectedServiceId(null)
     // Keep selectedBranch — go back to home, not branch
     goTo('home')
   }
@@ -474,7 +488,7 @@ export default function CheckinPage() {
         setMyQueueEntry(activeEntry as unknown as QueueEntry)
         goTo('manage_turn')
       } else {
-        goTo('barber')
+        goTo('service_selection')
       }
     },
     []
@@ -502,7 +516,8 @@ export default function CheckinPage() {
         const result = await checkinClientByFace(
           faceClientId,
           selectedBranch.id,
-          chosenBarberId
+          chosenBarberId,
+          selectedServiceId
         )
 
         if ('error' in result && result.error) {
@@ -558,6 +573,9 @@ export default function CheckinPage() {
         fd.append('branch_id', selectedBranch.id)
         if (chosenBarberId) {
           fd.append('barber_id', chosenBarberId)
+        }
+        if (selectedServiceId) {
+          fd.append('service_id', selectedServiceId)
         }
 
         const result = await checkinClient(fd)
@@ -659,7 +677,7 @@ export default function CheckinPage() {
 
   const goToBarberStep = () => {
     if (!name.trim()) return
-    goTo('barber')
+    goTo('service_selection')
   }
 
   // ── Shared UI pieces ──
@@ -1269,6 +1287,62 @@ export default function CheckinPage() {
         </div>
       )}
 
+      {/* ═══════════════ SERVICE SELECTION ═══════════════ */}
+      {step === 'service_selection' && (
+        <div
+          key={`service-${animKey}`}
+          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto py-6 md:py-8"
+        >
+          {backButton(() => {
+            if (isReturning) goTo('phone')
+            else goTo('name')
+          })}
+
+          <div className="text-center">
+            <h2 className="text-2xl md:text-3xl font-bold">¿Qué te vas a hacer?</h2>
+            <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
+              Elegí un servicio principal
+            </p>
+          </div>
+
+          <div className="w-full grid gap-3 md:gap-4 mt-2">
+            {services.map(s => (
+              <button
+                key={s.id}
+                onClick={() => {
+                  setSelectedServiceId(s.id)
+                  goTo('barber')
+                }}
+                className="flex items-center justify-between p-5 rounded-2xl border border-white/8 bg-white/2 hover:bg-white/6 hover:border-white/20 transition-all text-left"
+              >
+                <div>
+                  <h3 className="text-lg md:text-xl font-semibold">{s.name}</h3>
+                </div>
+                <div className="shrink-0 text-right">
+                  {s.duration_minutes && (
+                    <p className="text-sm font-medium text-muted-foreground mb-1">{s.duration_minutes} min</p>
+                  )}
+                  {s.price > 0 && (
+                    <p className="text-sm font-bold text-foreground">${s.price}</p>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setSelectedServiceId(null)
+              goTo('barber')
+            }}
+            className="mt-4 text-muted-foreground hover:text-white"
+          >
+            Omitir o no estoy seguro
+          </Button>
+        </div>
+      )}
+
       {/* ═══════════════ BARBER SELECTION ═══════════════ */}
       {step === 'barber' && (
         <div
@@ -1277,7 +1351,7 @@ export default function CheckinPage() {
         >
           {backButton(() => {
             setExpandedPausedBarber(null)
-            goTo('name')
+            goTo('service_selection')
           })}
 
           <div className="text-center">

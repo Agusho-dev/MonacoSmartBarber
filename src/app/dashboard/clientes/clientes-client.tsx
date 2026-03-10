@@ -7,6 +7,7 @@ import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
 import { updateClientNotes } from '@/lib/actions/clients'
 import { checkinClient } from '@/lib/actions/queue'
+import { createReviewRequest } from '@/lib/actions/reviews'
 import type { Client } from '@/lib/types/database'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -99,6 +100,7 @@ export function ClientesClient({ clients, visits, points }: Props) {
   const [editableNotes, setEditableNotes] = useState('')
   const [editableInstagram, setEditableInstagram] = useState('')
   const [isSavingNotes, startSavingNotes] = useTransition()
+  const [requestingReview, setRequestingReview] = useState<string | null>(null)
 
   const now = Date.now()
   const thirtyDaysMs = 30 * 86400000
@@ -413,9 +415,9 @@ export function ClientesClient({ clients, visits, points }: Props) {
                 <div className="space-y-5 px-6 py-5">
                   {/* Action buttons */}
                   <div className="grid grid-cols-2 gap-2">
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
+                    <Button
+                      size="sm"
+                      variant="outline"
                       className="h-9 bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500/20 hover:text-green-400 transition-colors"
                       onClick={() => window.open(`https://wa.me/${detailClient.phone.replace(/\D/g, '')}`, '_blank')}
                     >
@@ -476,7 +478,7 @@ export function ClientesClient({ clients, visits, points }: Props) {
                         className="h-9"
                       />
                     </div>
-                    
+
                     <div>
                       <label className="mb-1.5 text-xs font-medium text-muted-foreground block">
                         Observaciones internas
@@ -489,7 +491,7 @@ export function ClientesClient({ clients, visits, points }: Props) {
                         className="w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       />
                     </div>
-                    
+
                     <div className="flex justify-end">
                       <Button
                         size="sm"
@@ -552,9 +554,40 @@ export function ClientesClient({ clients, visits, points }: Props) {
                                     &middot; {formatDateTime(visit.completed_at)}
                                   </p>
                                 </div>
-                                <p className="text-sm font-semibold tabular-nums">
-                                  {formatCurrency(visit.amount)}
-                                </p>
+                                <div className="text-right">
+                                  <p className="text-sm font-semibold tabular-nums">
+                                    {formatCurrency(visit.amount)}
+                                  </p>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 mt-1 px-2 text-[10px] text-muted-foreground hover:text-amber-500 hover:bg-amber-500/10 border border-transparent hover:border-amber-500/20"
+                                    disabled={requestingReview === visit.id}
+                                    onClick={async () => {
+                                      setRequestingReview(visit.id)
+                                      try {
+                                        const res = await createReviewRequest(
+                                          visit.client_id,
+                                          visit.branch_id,
+                                          visit.id,
+                                          visit.barber_id
+                                        )
+                                        if (res.error) {
+                                          toast.error(res.error)
+                                          return
+                                        }
+                                        const url = `${window.location.origin}/review/${res.token}`
+                                        const msg = `¡Hola ${detailClient?.name}! Gracias por visitarnos en Monaco Smart Barber. Podés contarnos qué te pareció el servicio acá: ${url}`
+                                        window.open(`https://wa.me/${detailClient?.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`, '_blank')
+                                      } finally {
+                                        setRequestingReview(null)
+                                      }
+                                    }}
+                                  >
+                                    <Star className="mr-1 size-3" />
+                                    Pedir Reseña
+                                  </Button>
+                                </div>
                               </div>
 
                               {visit.notes && (

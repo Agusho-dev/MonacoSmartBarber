@@ -9,6 +9,7 @@ export async function checkinClient(formData: FormData) {
   const phone = (formData.get('phone') as string).trim()
   const branchId = formData.get('branch_id') as string
   const barberId = (formData.get('barber_id') as string | null) || null
+  const serviceId = (formData.get('service_id') as string | null) || null
 
   if (!name || !phone || !branchId) {
     return { error: 'Todos los campos son obligatorios' }
@@ -61,6 +62,7 @@ export async function checkinClient(formData: FormData) {
       branch_id: branchId,
       client_id: clientId,
       barber_id: barberId,
+      service_id: serviceId,
       position: position ?? 1,
       status: 'waiting',
     })
@@ -114,7 +116,8 @@ export async function completeService(
   paymentMethod: 'cash' | 'card' | 'transfer',
   serviceId?: string,
   isRewardClaim: boolean = false,
-  paymentAccountId?: string | null
+  paymentAccountId?: string | null,
+  extraServiceIds?: string[]
 ) {
   // Use admin client because barber pin authentications do not set a Supabase Auth session
   // This causes RLS on visits and client_points to fail when the queue trigger fires using SECURITY INVOKER
@@ -150,16 +153,21 @@ export async function completeService(
   // 3. Calculate proper amount and commission from the selected service
   let amount = 0
   let commissionAmount = 0
+  const allServiceIds = [
+    ...(serviceId ? [serviceId] : []),
+    ...(extraServiceIds || [])
+  ]
 
-  if (serviceId) {
-    const { data: service } = await supabase
+  if (allServiceIds.length > 0) {
+    const { data: activeServices } = await supabase
       .from('services')
-      .select('price')
-      .eq('id', serviceId)
-      .single()
+      .select('id, price')
+      .in('id', allServiceIds)
 
-    if (service) {
-      amount = Number(service.price)
+    if (activeServices) {
+      for (const s of activeServices) {
+        amount += Number(s.price)
+      }
       commissionAmount = amount * (Number(visit.commission_pct) / 100)
     }
   }
@@ -172,6 +180,7 @@ export async function completeService(
   }
   if (serviceId) visitUpdate.service_id = serviceId
   if (paymentAccountId) visitUpdate.payment_account_id = paymentAccountId
+  if (extraServiceIds && extraServiceIds.length > 0) visitUpdate.extra_services = extraServiceIds
 
   await supabase
     .from('visits')
@@ -268,7 +277,8 @@ export async function reassignBarber(
 export async function checkinClientByFace(
   clientId: string,
   branchId: string,
-  barberId: string | null
+  barberId: string | null,
+  serviceId: string | null = null
 ) {
   const supabase = await createClient()
 
@@ -305,6 +315,7 @@ export async function checkinClientByFace(
       branch_id: branchId,
       client_id: clientId,
       barber_id: barberId,
+      service_id: serviceId,
       position: position ?? 1,
       status: 'waiting',
     })

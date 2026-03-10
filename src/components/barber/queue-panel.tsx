@@ -6,7 +6,7 @@ import { startService, cancelQueueEntry, reassignBarber } from '@/lib/actions/qu
 import { toggleBarberStatus, fetchBarberDayStats } from '@/lib/actions/barber'
 import { logoutBarber } from '@/lib/actions/auth'
 import { formatCurrency } from '@/lib/format'
-import type { QueueEntry, Staff, StaffStatus } from '@/lib/types/database'
+import type { QueueEntry, Staff, StaffStatus, Client } from '@/lib/types/database'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -43,6 +43,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
 import { ClientHistory } from './client-history'
+import { ClientProfileSheet } from './client-profile-sheet'
 
 interface BarberSession {
   staff_id: string
@@ -72,6 +73,7 @@ export function QueuePanel({
   const [dayStats, setDayStats] = useState({ servicesCount: 0, revenue: 0 })
   const [otherBarbers, setOtherBarbers] = useState<Staff[]>([])
   const [reassigningEntryId, setReassigningEntryId] = useState<string | null>(null)
+  const [profileClient, setProfileClient] = useState<Client | null>(null)
 
   const supabase = useMemo(() => createClient(), [])
 
@@ -80,7 +82,7 @@ export function QueuePanel({
   const fetchQueue = useCallback(async () => {
     const { data } = await supabase
       .from('queue_entries')
-      .select('*, client:clients(*), barber:staff(*)')
+      .select('*, client:clients(*, loyalty:client_loyalty_state(total_visits)), barber:staff(*)')
       .eq('branch_id', session.branch_id)
       .in('status', ['waiting', 'in_progress'])
       .order('position')
@@ -237,9 +239,16 @@ export function QueuePanel({
               #{entry.position}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate font-medium">
-                {entry.client?.name ?? 'Cliente'}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="truncate font-medium">
+                  {entry.client?.name ?? 'Cliente'}
+                </p>
+                {(!entry.client?.loyalty?.length || entry.client.loyalty[0]?.total_visits === 0) && (
+                  <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-emerald-500/15 text-emerald-500 border-emerald-500/30">
+                    Primer Corte
+                  </Badge>
+                )}
+              </div>
               <p className="text-sm text-muted-foreground">
                 {entry.client?.phone}
               </p>
@@ -431,29 +440,6 @@ export function QueuePanel({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant={isPaused ? 'default' : 'outline'}
-            size="sm"
-            onClick={handleToggleStatus}
-            disabled={statusLoading}
-            className={
-              isPaused
-                ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/30'
-                : ''
-            }
-          >
-            {isPaused ? (
-              <>
-                <Play className="size-4" />
-                <span className="hidden sm:inline">Reanudar</span>
-              </>
-            ) : (
-              <>
-                <Pause className="size-4" />
-                <span className="hidden sm:inline">Pausa</span>
-              </>
-            )}
-          </Button>
           <form action={logoutBarber}>
             <Button variant="ghost" size="sm" type="submit">
               <LogOut className="size-4" />
@@ -599,9 +585,20 @@ export function QueuePanel({
                     </div>
                   </div>
 
-                  {myActiveEntry.client_id && (
-                    <ClientHistory clientId={myActiveEntry.client_id} />
-                  )}
+                  <div className="flex gap-3">
+                    <Button
+                      variant="outline"
+                      className="w-full bg-card hover:bg-accent flex-1"
+                      onClick={() => {
+                        if (myActiveEntry?.client) {
+                          setProfileClient(myActiveEntry.client)
+                        }
+                      }}
+                    >
+                      <User className="mr-2 size-4" />
+                      Ver Perfil y Notas
+                    </Button>
+                  </div>
 
                   <div className="flex gap-3">
                     <Button
@@ -611,14 +608,6 @@ export function QueuePanel({
                     >
                       <Check className="size-4" />
                       Finalizar
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="lg"
-                      onClick={() => handleCancel(myActiveEntry.id)}
-                      disabled={actionLoading === myActiveEntry.id}
-                    >
-                      Cancelar
                     </Button>
                   </div>
                 </CardContent>
@@ -643,6 +632,12 @@ export function QueuePanel({
         branchId={session.branch_id}
         onClose={() => setCompletingEntry(null)}
         onCompleted={fetchQueue}
+      />
+
+      <ClientProfileSheet
+        client={profileClient}
+        isOpen={!!profileClient}
+        onClose={() => setProfileClient(null)}
       />
     </div>
   )
