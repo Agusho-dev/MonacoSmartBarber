@@ -24,7 +24,7 @@ interface FaceEnrollmentProps {
 
 type EnrollState = 'loading' | 'positioning' | 'capturing' | 'saving' | 'done' | 'error'
 const CAPTURE_COUNT = 3
-const CAPTURE_INTERVAL_MS = 1200
+const CAPTURE_INTERVAL_MS = 600
 
 export function FaceEnrollment({
   clientId,
@@ -60,7 +60,7 @@ export function FaceEnrollment({
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } },
+          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         })
         if (cancelled) {
@@ -95,8 +95,25 @@ export function FaceEnrollment({
       if (cancelled || !videoRef.current || !areModelsLoaded()) return
       const detection = await detectFace(videoRef.current)
       if (cancelled) return
-      setFaceDetected(!!detection && detection.score > 0.6)
-      setTimeout(checkFace, 800)
+
+      let isFaceValid = false
+      if (detection) {
+        const videoW = videoRef.current.videoWidth
+        const videoH = videoRef.current.videoHeight
+        const faceCenterX = detection.box.x + detection.box.width / 2
+        const faceCenterY = detection.box.y + detection.box.height / 2
+
+        isFaceValid = (
+          faceCenterX > videoW * 0.30 &&
+          faceCenterX < videoW * 0.70 &&
+          faceCenterY > videoH * 0.20 &&
+          faceCenterY < videoH * 0.80
+        )
+      }
+
+      setFaceDetected(!!detection && isFaceValid && detection.score > 0.6)
+
+      setTimeout(checkFace, 300)
     }
 
     checkFace()
@@ -117,14 +134,34 @@ export function FaceEnrollment({
 
       const detection = await detectFace(videoRef.current)
       if (detection && detection.score > 0.6) {
-        descriptors.push(detection.descriptor)
+        const videoW = videoRef.current.videoWidth
+        const videoH = videoRef.current.videoHeight
+        const faceCenterX = detection.box.x + detection.box.width / 2
+        const faceCenterY = detection.box.y + detection.box.height / 2
 
-        if (detection.score > bestScore) {
-          bestScore = detection.score
-          bestPhoto = await captureFrameAsBlob(videoRef.current)
+        const isFaceValid = (
+          faceCenterX > videoW * 0.30 &&
+          faceCenterX < videoW * 0.70 &&
+          faceCenterY > videoH * 0.20 &&
+          faceCenterY < videoH * 0.80
+        )
+
+        if (isFaceValid) {
+          descriptors.push(detection.descriptor)
+
+          if (detection.score > bestScore) {
+            bestScore = detection.score
+            bestPhoto = await captureFrameAsBlob(videoRef.current)
+          }
+
+          setCapturedCount(i + 1)
+        } else {
+          // Retry this capture index if face is outside bounding box
+          i--
         }
-
-        setCapturedCount(i + 1)
+      } else {
+        // Retry this capture index if no face detected
+        i--
       }
 
       if (i < CAPTURE_COUNT - 1) {

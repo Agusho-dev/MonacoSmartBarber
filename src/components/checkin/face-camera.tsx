@@ -30,7 +30,7 @@ type CameraState =
   | 'no_match'
   | 'error'
 
-const SCAN_INTERVAL_MS = 1000
+const SCAN_INTERVAL_MS = 200
 const MATCH_HOLD_MS = 2000
 
 export function FaceCamera({
@@ -66,7 +66,7 @@ export function FaceCamera({
     setState('requesting_camera')
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } },
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       })
       if (!mountedRef.current) {
@@ -104,7 +104,7 @@ export function FaceCamera({
   }, [startCamera, stopCamera])
 
   const drawFaceOverlay = useCallback(
-    (detection: FaceDetectionResult | null) => {
+    (detection: FaceDetectionResult | null, isValid: boolean = false) => {
       const canvas = canvasRef.current
       const video = videoRef.current
       if (!canvas || !video) return
@@ -116,7 +116,7 @@ export function FaceCamera({
 
       if (detection) {
         const { x, y, width, height } = detection.box
-        ctx.strokeStyle = '#22c55e'
+        ctx.strokeStyle = isValid ? '#22c55e' : '#f59e0b'
         ctx.lineWidth = 3
         ctx.beginPath()
         ctx.roundRect(x, y, width, height, 12)
@@ -137,9 +137,27 @@ export function FaceCamera({
     const detection = await detectFace(videoRef.current)
     if (!mountedRef.current || state !== 'scanning') return
 
-    drawFaceOverlay(detection)
+    let isFaceValid = false
+    if (detection) {
+      const { x, y, width, height } = detection.box
+      const videoW = videoRef.current.videoWidth
+      const videoH = videoRef.current.videoHeight
 
-    if (detection && detection.score > 0.6) {
+      const faceCenterX = x + width / 2
+      const faceCenterY = y + height / 2
+
+      // Check if face center falls roughly within central 40% width and 60% height
+      isFaceValid = (
+        faceCenterX > videoW * 0.30 &&
+        faceCenterX < videoW * 0.70 &&
+        faceCenterY > videoH * 0.20 &&
+        faceCenterY < videoH * 0.80
+      )
+    }
+
+    drawFaceOverlay(detection, isFaceValid)
+
+    if (detection && isFaceValid && detection.score > 0.6) {
       setState('matching')
       setLastDescriptor(detection.descriptor)
 
@@ -163,7 +181,7 @@ export function FaceCamera({
     } else {
       scanTimerRef.current = setTimeout(runScanLoop, SCAN_INTERVAL_MS)
     }
-  }, [state, drawFaceOverlay, onMatch])
+  }, [state, drawFaceOverlay, onMatch, targetRole])
 
   useEffect(() => {
     if (state === 'scanning') {
