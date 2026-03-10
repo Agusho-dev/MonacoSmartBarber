@@ -30,7 +30,7 @@ type CameraState =
   | 'no_match'
   | 'error'
 
-const SCAN_INTERVAL_MS = 600
+const SCAN_INTERVAL_MS = 1000
 const MATCH_HOLD_MS = 2000
 
 export function FaceCamera({
@@ -66,7 +66,7 @@ export function FaceCamera({
     setState('requesting_camera')
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } },
         audio: false,
       })
       if (!mountedRef.current) {
@@ -139,7 +139,7 @@ export function FaceCamera({
 
     drawFaceOverlay(detection)
 
-    if (detection && detection.score > 0.7) {
+    if (detection && detection.score > 0.6) {
       setState('matching')
       setLastDescriptor(detection.descriptor)
 

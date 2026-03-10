@@ -23,9 +23,8 @@ interface FaceEnrollmentProps {
 }
 
 type EnrollState = 'loading' | 'positioning' | 'capturing' | 'saving' | 'done' | 'error'
-
 const CAPTURE_COUNT = 3
-const CAPTURE_INTERVAL_MS = 800
+const CAPTURE_INTERVAL_MS = 1200
 
 export function FaceEnrollment({
   clientId,
@@ -61,7 +60,7 @@ export function FaceEnrollment({
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+          video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } },
           audio: false,
         })
         if (cancelled) {
@@ -96,8 +95,8 @@ export function FaceEnrollment({
       if (cancelled || !videoRef.current || !areModelsLoaded()) return
       const detection = await detectFace(videoRef.current)
       if (cancelled) return
-      setFaceDetected(!!detection && detection.score > 0.7)
-      setTimeout(checkFace, 500)
+      setFaceDetected(!!detection && detection.score > 0.6)
+      setTimeout(checkFace, 800)
     }
 
     checkFace()

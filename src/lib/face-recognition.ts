@@ -7,12 +7,37 @@ let modelsLoaded = false
 let modelsLoading: Promise<void> | null = null
 
 const MODEL_URL = '/models'
-const DETECTION_SCORE_THRESHOLD = 0.65
-const MATCH_THRESHOLD = 0.55
+const DETECTION_SCORE_THRESHOLD = 0.55 // lowered slightly for lower-res inputs
+const MATCH_THRESHOLD = 0.52 // lowered slightly to accommodate lower quality descriptor
 
 async function loadFaceApi(): Promise<FaceApiModule> {
   if (faceapi) return faceapi
   faceapi = await import('@vladmandic/face-api')
+
+  // Try to set WebGL backend for better performance on mobile
+  try {
+    await faceapi.tf.setBackend('webgl')
+    await faceapi.tf.ready()
+  } catch (e) {
+    console.warn('WebGL backend not available, falling back', e)
+    try {
+      await faceapi.tf.setBackend('wasm')
+      await faceapi.tf.ready()
+    } catch (e2) {
+      console.warn('WASM backend not available, falling back to cpu', e2)
+    }
+  }
+
+  // Optimize tensors globally
+  faceapi.env.monkeyPatch({
+    Canvas: HTMLCanvasElement,
+    Image: HTMLImageElement,
+    ImageData: ImageData,
+    Video: HTMLVideoElement,
+    createCanvasElement: () => document.createElement('canvas'),
+    createImageElement: () => document.createElement('img')
+  })
+
   return faceapi
 }
 
