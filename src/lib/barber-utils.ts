@@ -12,7 +12,7 @@ export function buildBarberAvgMinutes(
       (new Date(v.completed_at).getTime() - new Date(v.started_at).getTime()) /
       60_000
     if (mins < 5 || mins > 120) continue
-    ;(groups[v.barber_id] ??= []).push(mins)
+      ; (groups[v.barber_id] ??= []).push(mins)
   }
 
   const result: Record<string, number> = {}
@@ -25,7 +25,7 @@ export function buildBarberAvgMinutes(
   return result
 }
 
-export type BarberStatus = 'available' | 'occupied' | 'has_queue' | 'paused'
+export type BarberStatus = 'available' | 'occupied' | 'has_queue'
 
 export interface BarberStats {
   waiting: number
@@ -51,9 +51,7 @@ export function getBarberStats(
   const totalLoad = waiting + (attending ? 1 : 0)
   const eta = Math.round(totalLoad * avg)
 
-  if (barber.status === 'paused') {
-    return { waiting, attending, totalLoad, eta, avg, status: 'paused' }
-  }
+  // Paused status was removed
 
   let status: BarberStatus
   if (attending) {
@@ -88,10 +86,6 @@ export const statusConfig: Record<
   has_queue: {
     label: 'Con cola',
     className: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-  },
-  paused: {
-    label: 'En pausa',
-    className: 'bg-white/8 text-white/40 border-white/10',
   },
 }
 

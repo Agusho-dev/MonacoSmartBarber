@@ -209,8 +209,8 @@ export function CompleteServiceDialog({
         }
       }
 
-      if (clientNotes.trim() !== originalClientNotes) {
-        await updateClientNotes(entry.client_id, clientNotes.trim() || null, '')
+      if (entry.client_id && clientNotes.trim() !== originalClientNotes) {
+        await updateClientNotes(entry.client_id, clientNotes.trim(), '')
       }
 
       onCompleted?.()

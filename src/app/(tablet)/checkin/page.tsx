@@ -445,7 +445,7 @@ export default function CheckinPage() {
   )
 
   const minWaitBarber = useMemo(() => {
-    const active = barbers.filter((b) => b.status !== 'paused')
+    const active = barbers
     if (active.length === 0) return null
     let best: Staff | null = null
     let bestEta = Infinity
@@ -639,12 +639,7 @@ export default function CheckinPage() {
 
   const handleBarberClick = (barber: Staff) => {
     if (submitting) return
-    const stats = getBarberStats(barber, queueEntries, barberAvgMinutes)
-    if (stats.status === 'paused') {
-      setExpandedPausedBarber((prev) => (prev === barber.id ? null : barber.id))
-    } else {
-      handleConfirm(barber.id)
-    }
+    handleConfirm(barber.id)
   }
 
   const handleReassign = useCallback(
@@ -702,7 +697,7 @@ export default function CheckinPage() {
     const stats = getBarberStats(barber, queueEntries, barberAvgMinutes)
     const cfg = statusConfig[stats.status]
     const loadPct = Math.min(100, (stats.totalLoad / Math.max(maxLoad, 4)) * 100)
-    const isExpanded = showExpand && expandedPausedBarber === barber.id
+    const isExpanded = showExpand
     const isAbsentToday = availableTodayIds.size > 0 && !availableTodayIds.has(barber.id)
 
     return (
@@ -713,9 +708,7 @@ export default function CheckinPage() {
       >
         <button
           onClick={() => {
-            if (stats.status === 'paused' && showExpand) {
-              setExpandedPausedBarber((prev) => (prev === barber.id ? null : barber.id))
-            } else if (isAbsentToday && showExpand) {
+            if (isAbsentToday && showExpand) {
               setExpandedPausedBarber((prev) => (prev === barber.id ? null : barber.id))
             } else {
               onSelect(barber.id)
@@ -778,44 +771,6 @@ export default function CheckinPage() {
             </div>
           )}
         </button>
-
-        {/* Expanded paused warning */}
-        {isExpanded && stats.status === 'paused' && (
-          <div className="border-t border-white/8 p-5 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-            <div className="flex items-start gap-3 rounded-xl border border-yellow-500/30 bg-yellow-500/5 p-4">
-              <AlertTriangle className="size-5 text-yellow-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-medium text-yellow-300">
-                  Este barbero está en pausa
-                </p>
-                <p className="text-sm text-yellow-400/70 mt-1">
-                  Podés esperarlo, pero puede demorar más de lo estimado.
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <Button
-                onClick={() => onSelect(barber.id)}
-                disabled={submitting}
-                className="flex-1 h-14 text-base rounded-xl font-semibold"
-                variant="default"
-              >
-                {submitting ? (
-                  <Loader2 className="size-5 animate-spin" />
-                ) : (
-                  `Esperar a ${barber.full_name.split(' ')[0]}`
-                )}
-              </Button>
-              <Button
-                onClick={() => setExpandedPausedBarber(null)}
-                variant="outline"
-                className="h-14 text-base rounded-xl px-6"
-              >
-                Elegir otro
-              </Button>
-            </div>
-          </div>
-        )}
 
         {/* Expanded absent warning */}
         {isExpanded && isAbsentToday && (
