@@ -64,7 +64,7 @@ export default async function FinanzasPage() {
         .limit(100),
       supabase
         .from('expense_tickets')
-        .select('*, created_by_staff:created_by(full_name)')
+        .select('*, created_by_staff:created_by(full_name), payment_account:payment_accounts(name, alias_or_cbu)')
         .order('expense_date', { ascending: false })
         .limit(100),
     ])

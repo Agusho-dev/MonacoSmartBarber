@@ -307,9 +307,11 @@ export interface ExpenseTicket {
   description: string | null
   receipt_url: string | null
   created_by: string | null
+  payment_account_id: string | null
   expense_date: string
   created_at: string
   created_by_staff?: Staff
+  payment_account?: PaymentAccount
 }
 
 export interface TransferLog {
@@ -383,9 +385,11 @@ export interface ExpenseTicket {
   description: string | null
   receipt_url: string | null
   created_by: string | null
+  payment_account_id: string | null
   expense_date: string
   created_at: string
   created_by_staff?: Staff
+  payment_account?: PaymentAccount
 }
 
 export interface TransferLog {

@@ -119,6 +119,7 @@ export function FinanzasTabsClient({
                     <EgresosClient
                         expenseTickets={expenseTickets}
                         branches={branches}
+                        accounts={accounts}
                     />
                 )}
             </div>

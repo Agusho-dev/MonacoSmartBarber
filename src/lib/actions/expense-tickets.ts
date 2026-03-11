@@ -8,7 +8,7 @@ export async function getExpenseTickets(branchId: string, startDate?: string, en
 
     let query = supabase
         .from('expense_tickets')
-        .select('*, created_by_staff:created_by(full_name)')
+        .select('*, created_by_staff:created_by(full_name), payment_account:payment_accounts(name, alias_or_cbu)')
         .eq('branch_id', branchId)
         .order('expense_date', { ascending: false })
 
@@ -32,6 +32,7 @@ export async function createExpenseTicket(data: {
     receipt_url?: string
     created_by?: string
     expense_date?: string
+    payment_account_id?: string | null
 }) {
     const supabase = await createClient()
 
@@ -44,6 +45,7 @@ export async function createExpenseTicket(data: {
             receipt_url: data.receipt_url || null,
             created_by: data.created_by || null,
             expense_date: data.expense_date || new Date().toISOString().split('T')[0],
+            payment_account_id: data.payment_account_id || null,
         },
     ])
 
