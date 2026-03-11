@@ -1023,8 +1023,8 @@ export default function CheckinPage() {
           className="w-full max-w-sm md:max-w-2xl flex flex-col items-center justify-center gap-6 md:gap-8 px-4 md:px-8 animate-in fade-in zoom-in-95 duration-500"
         >
           <div className="flex flex-col items-center gap-3 md:gap-4">
-            <div className="size-16 md:size-20 rounded-[1.25rem] md:rounded-3xl bg-white/4 border border-white/10 flex items-center justify-center">
-              <Scissors className="size-8 md:size-10 text-white" strokeWidth={1.5} />
+            <div className="size-20 md:size-24 rounded-[1.25rem] md:rounded-3xl overflow-hidden flex items-center justify-center">
+              <img src="/logo-monaco.webp" alt="Monaco Smart Barber" className="w-full h-full object-contain" />
             </div>
             <div className="text-center">
               <h1 className="text-3xl md:text-5xl font-bold tracking-tight">
