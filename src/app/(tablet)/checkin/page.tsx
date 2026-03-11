@@ -129,20 +129,28 @@ export default function CheckinPage() {
       .select('*')
       .eq('is_active', true)
       .then(({ data }) => {
-        if (data) setBranches(data)
-      })
+        if (data) {
+          setBranches(data)
 
-    // Restore branch from localStorage
-    try {
-      const stored = localStorage.getItem(LOCALSTORAGE_KEY)
-      if (stored) {
-        const branch = JSON.parse(stored) as Branch
-        setSelectedBranch(branch)
-        setStep('home')
-      }
-    } catch {
-      localStorage.removeItem(LOCALSTORAGE_KEY)
-    }
+          // Restore branch from localStorage, but validate it still exists in DB
+          try {
+            const stored = localStorage.getItem(LOCALSTORAGE_KEY)
+            if (stored) {
+              const cachedBranch = JSON.parse(stored) as Branch
+              const found = data.find((b) => b.id === cachedBranch.id)
+              if (found) {
+                setSelectedBranch(found)
+                setStep('home')
+              } else {
+                // Cached branch no longer exists — clear it
+                localStorage.removeItem(LOCALSTORAGE_KEY)
+              }
+            }
+          } catch {
+            localStorage.removeItem(LOCALSTORAGE_KEY)
+          }
+        }
+      })
   }, [])
 
   useEffect(() => {
@@ -1416,19 +1424,12 @@ export default function CheckinPage() {
               <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
                 <button
                   onClick={async () => {
-                    const supabase = createClient()
                     const branchId = selectedBranch?.id
                     if (!branchId) return
-                    const { data: staffData } = await supabase
-                      .from('staff')
-                      .select('id')
-                      .eq('full_name', staffFaceMatch.clientName)
-                      .eq('role', 'barber')
-                      .eq('branch_id', branchId)
-                      .single()
-                    if (!staffData) { setError('Barbero no encontrado'); return }
+                    const staffId = staffFaceMatch.clientId
+                    if (!staffId) { setError('Barbero no encontrado'); return }
 
-                    const res = await registerBarberClockIn(staffData.id, branchId, true)
+                    const res = await registerBarberClockIn(staffId, branchId, true)
                     if (res.error) { setError(res.error); return }
 
                     setStaffAction('clock_in')
@@ -1446,16 +1447,10 @@ export default function CheckinPage() {
                     const supabase = createClient()
                     const branchId = selectedBranch?.id
                     if (!branchId) return
-                    const { data: staffData } = await supabase
-                      .from('staff')
-                      .select('id')
-                      .eq('full_name', staffFaceMatch.clientName)
-                      .eq('role', 'barber')
-                      .eq('branch_id', branchId)
-                      .single()
-                    if (!staffData) { setError('Barbero no encontrado'); return }
+                    const staffId = staffFaceMatch.clientId
+                    if (!staffId) { setError('Barbero no encontrado'); return }
                     await supabase.from('attendance_logs').insert({
-                      staff_id: staffData.id,
+                      staff_id: staffId,
                       branch_id: branchId,
                       action_type: 'clock_out',
                       face_verified: true,
