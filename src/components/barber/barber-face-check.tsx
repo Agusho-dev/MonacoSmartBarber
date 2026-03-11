@@ -1,24 +1,38 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { StaffFaceEnrollment } from './staff-face-enrollment'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
 
 export function BarberFaceCheck({
-    needsFaceId,
     staffId,
     staffName,
 }: {
-    needsFaceId: boolean
     staffId?: string
     staffName?: string
 }) {
-    const [showPrompt, setShowPrompt] = useState(needsFaceId)
+    const [showPrompt, setShowPrompt] = useState(false)
+    const [checked, setChecked] = useState(false)
 
-    if (!staffId || !staffName) return null
+    useEffect(() => {
+        if (!staffId) return
+        const supabase = createClient()
+        supabase
+            .from('staff_face_descriptors')
+            .select('id', { count: 'exact', head: true })
+            .eq('staff_id', staffId)
+            .then(({ count }) => {
+                setChecked(true)
+                if (count === 0 || count === null) {
+                    setShowPrompt(true)
+                }
+            })
+    }, [staffId])
 
-    // We use a custom full-screen overlay or just a Dialog 
+    if (!staffId || !staffName || !checked) return null
+
     return (
         <Dialog open={showPrompt} onOpenChange={setShowPrompt}>
             <DialogContent className="sm:max-w-md [&>button:last-child]:hidden p-0 overflow-hidden bg-transparent border-none shadow-none">

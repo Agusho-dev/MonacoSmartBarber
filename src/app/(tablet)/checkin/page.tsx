@@ -234,7 +234,8 @@ export default function CheckinPage() {
 
         const filtered = staffRes.data.filter((s) => {
           if (s.status === 'blocked') return false
-          if (latestAttendance[s.id] === 'clock_out') return false
+          // Only show barbers who have clocked in today
+          if (latestAttendance[s.id] !== 'clock_in') return false
           return true
         })
         setBarbers(filtered)
