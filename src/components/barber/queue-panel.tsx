@@ -211,7 +211,6 @@ export function QueuePanel({
           event: '*',
           schema: 'public',
           table: 'queue_entries',
-          filter: `branch_id=eq.${session.branch_id}`,
         },
         () => {
           fetchQueue()
@@ -224,7 +223,6 @@ export function QueuePanel({
           event: '*',
           schema: 'public',
           table: 'staff',
-          filter: `branch_id=eq.${session.branch_id}`,
         },
         () => {
           fetchBarbersAndSchedules()
@@ -236,14 +234,15 @@ export function QueuePanel({
           event: '*',
           schema: 'public',
           table: 'break_requests',
-          filter: `branch_id=eq.${session.branch_id}`,
         },
         () => {
           fetchBreakRequestStatus()
           fetchPendingBreakRequests()
         }
       )
-      .subscribe()
+      .subscribe((status, err) => {
+        console.log('Realtime channel status:', status, err)
+      })
 
     return () => {
       supabase.removeChannel(channel)

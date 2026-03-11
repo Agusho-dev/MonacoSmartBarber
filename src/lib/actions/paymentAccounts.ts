@@ -172,3 +172,35 @@ export async function recordTransfer(visitId: string, accountId: string, amount:
 
   return { success: true }
 }
+
+export async function getAccountBalanceSummary(accountId: string) {
+  const supabase = await createClient()
+  const today = new Date().toISOString().split('T')[0]
+
+  // Get income (transfer_logs) for this account today
+  const { data: todayTransfers } = await supabase
+    .from('transfer_logs')
+    .select('id, amount, transferred_at, visit:visits(client:clients(name), barber:staff(full_name))')
+    .eq('payment_account_id', accountId)
+    .gte('transferred_at', `${today}T00:00:00`)
+    .order('transferred_at', { ascending: false })
+
+  // Get expenses (expense_tickets) associated with this account today
+  const { data: todayExpenses } = await supabase
+    .from('expense_tickets')
+    .select('id, amount, category, description, expense_date, created_by_staff:created_by(full_name)')
+    .eq('payment_account_id', accountId)
+    .eq('expense_date', today)
+    .order('created_at', { ascending: false })
+
+  const totalIncome = (todayTransfers ?? []).reduce((s, t) => s + Number(t.amount), 0)
+  const totalExpenses = (todayExpenses ?? []).reduce((s, e) => s + Number(e.amount), 0)
+
+  return {
+    totalIncome,
+    totalExpenses,
+    estimatedBalance: totalIncome - totalExpenses,
+    transfers: todayTransfers ?? [],
+    expenses: todayExpenses ?? [],
+  }
+}

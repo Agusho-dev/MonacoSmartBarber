@@ -1,11 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, Trash2, CalendarIcon, Receipt } from 'lucide-react'
+import { Plus, Trash2, Wallet } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
 import { createExpenseTicket, deleteExpenseTicket } from '@/lib/actions/expense-tickets'
 import { useBranchStore } from '@/stores/branch-store'
-import type { Branch, ExpenseTicket } from '@/lib/types/database'
+import type { Branch, ExpenseTicket, PaymentAccount } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -47,9 +47,14 @@ import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 
+interface AccountWithBranch extends PaymentAccount {
+    branch?: { name: string } | null
+}
+
 interface Props {
     expenseTickets: ExpenseTicket[]
     branches: Branch[]
+    accounts: AccountWithBranch[]
 }
 
 const CATEGORIES = [
@@ -65,9 +70,10 @@ const emptyForm = {
     category: CATEGORIES[0],
     description: '',
     branch_id: '',
+    payment_account_id: '',
 }
 
-export function EgresosClient({ expenseTickets, branches }: Props) {
+export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
     const { selectedBranchId } = useBranchStore()
 
     // Form state
@@ -82,6 +88,11 @@ export function EgresosClient({ expenseTickets, branches }: Props) {
     const filteredTickets = selectedBranchId
         ? expenseTickets.filter((t) => t.branch_id === selectedBranchId)
         : expenseTickets
+
+    // Filter active accounts by selected branch
+    const filteredAccounts = accounts.filter(a =>
+        a.is_active && (form.branch_id ? a.branch_id === form.branch_id : true)
+    )
 
     function openAdd() {
         setForm({
@@ -100,6 +111,7 @@ export function EgresosClient({ expenseTickets, branches }: Props) {
             category: form.category,
             description: form.description,
             branch_id: form.branch_id,
+            payment_account_id: form.payment_account_id || null,
         })
 
         if (result.error) {
@@ -128,6 +140,15 @@ export function EgresosClient({ expenseTickets, branches }: Props) {
         return branches.find((b) => b.id === id)?.name ?? 'Desconocida'
     }
 
+    const getAccountName = (ticket: ExpenseTicket) => {
+        if (!ticket.payment_account_id) return '-'
+        const acc = ticket.payment_account
+        if (acc) return acc.name
+        // Fallback: look up from accounts prop
+        const found = accounts.find(a => a.id === ticket.payment_account_id)
+        return found?.name ?? '-'
+    }
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -149,6 +170,7 @@ export function EgresosClient({ expenseTickets, branches }: Props) {
                         <TableRow>
                             <TableHead>Fecha</TableHead>
                             <TableHead>Sucursal</TableHead>
+                            <TableHead>Cuenta</TableHead>
                             <TableHead>Vendedor/Registrado Por</TableHead>
                             <TableHead>Categoría</TableHead>
                             <TableHead>Descripción</TableHead>
@@ -159,7 +181,7 @@ export function EgresosClient({ expenseTickets, branches }: Props) {
                     <TableBody>
                         {filteredTickets.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                                <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                                     No hay egresos registrados en esta sucursal
                                 </TableCell>
                             </TableRow>
@@ -170,6 +192,16 @@ export function EgresosClient({ expenseTickets, branches }: Props) {
                                         {format(new Date(t.expense_date), "d 'de' MMMM", { locale: es })}
                                     </TableCell>
                                     <TableCell>{getBranchName(t.branch_id)}</TableCell>
+                                    <TableCell>
+                                        {t.payment_account_id ? (
+                                            <div className="flex items-center gap-1.5">
+                                                <Wallet className="size-3 text-muted-foreground" />
+                                                <span className="text-sm">{getAccountName(t)}</span>
+                                            </div>
+                                        ) : (
+                                            <span className="text-muted-foreground">-</span>
+                                        )}
+                                    </TableCell>
                                     <TableCell>{t.created_by_staff?.full_name || 'Admin'}</TableCell>
                                     <TableCell>
                                         <Badge variant="outline">{t.category}</Badge>
@@ -204,13 +236,34 @@ export function EgresosClient({ expenseTickets, branches }: Props) {
                     <div className="grid gap-4 py-4">
                         <div className="grid gap-2">
                             <Label>Sucursal *</Label>
-                            <Select value={form.branch_id} onValueChange={(v) => setForm({ ...form, branch_id: v })}>
+                            <Select value={form.branch_id} onValueChange={(v) => setForm({ ...form, branch_id: v, payment_account_id: '' })}>
                                 <SelectTrigger>
                                     <SelectValue placeholder="Seleccionar sucursal" />
                                 </SelectTrigger>
                                 <SelectContent>
                                     {branches.map(b => (
                                         <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        <div className="grid gap-2">
+                            <Label className="flex items-center gap-1.5">
+                                <Wallet className="size-3.5" />
+                                Cuenta / Alias <span className="text-muted-foreground">(opcional)</span>
+                            </Label>
+                            <Select value={form.payment_account_id} onValueChange={(v) => setForm({ ...form, payment_account_id: v === '__none__' ? '' : v })}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Sin cuenta asociada" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="__none__">Sin cuenta asociada</SelectItem>
+                                    {filteredAccounts.map(acc => (
+                                        <SelectItem key={acc.id} value={acc.id}>
+                                            {acc.name}
+                                            {acc.alias_or_cbu ? ` · ${acc.alias_or_cbu}` : ''}
+                                        </SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>

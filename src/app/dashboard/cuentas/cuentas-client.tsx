@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { upsertPaymentAccount, togglePaymentAccount, deletePaymentAccount } from '@/lib/actions/paymentAccounts'
+import { upsertPaymentAccount, togglePaymentAccount, deletePaymentAccount, getAccountBalanceSummary } from '@/lib/actions/paymentAccounts'
 import type { Branch, PaymentAccount } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,7 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Plus, Pencil, Trash2, Wallet } from 'lucide-react'
+import { Plus, Pencil, Trash2, Wallet, Eye, ArrowDownRight, ArrowUpRight, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency } from '@/lib/format'
 
@@ -46,12 +46,20 @@ interface Props {
   branches: Branch[]
 }
 
+type BalanceSummary = Awaited<ReturnType<typeof getAccountBalanceSummary>>
+
 const EMPTY_FORM = { id: '', branch_id: '', name: '', alias_or_cbu: '', daily_limit: '', sort_order: '0' }
 
 export function CuentasClient({ accounts, branches }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [, startTransition] = useTransition()
+
+  // Balance dialog state
+  const [balanceDialogOpen, setBalanceDialogOpen] = useState(false)
+  const [balanceAccount, setBalanceAccount] = useState<AccountWithBranch | null>(null)
+  const [balanceData, setBalanceData] = useState<BalanceSummary | null>(null)
+  const [balanceLoading, setBalanceLoading] = useState(false)
 
   function openCreate() {
     setForm({ ...EMPTY_FORM, branch_id: branches[0]?.id ?? '' })
@@ -68,6 +76,20 @@ export function CuentasClient({ accounts, branches }: Props) {
       sort_order: String(acc.sort_order ?? 0)
     })
     setDialogOpen(true)
+  }
+
+  async function openBalance(acc: AccountWithBranch) {
+    setBalanceAccount(acc)
+    setBalanceData(null)
+    setBalanceDialogOpen(true)
+    setBalanceLoading(true)
+    try {
+      const data = await getAccountBalanceSummary(acc.id)
+      setBalanceData(data)
+    } catch {
+      toast.error('Error al cargar el balance')
+    }
+    setBalanceLoading(false)
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -172,6 +194,9 @@ export function CuentasClient({ accounts, branches }: Props) {
                 )}
               </div>
               <div className="flex items-center gap-3 shrink-0">
+                <Button variant="ghost" size="icon" onClick={() => openBalance(acc)} title="Ver balance">
+                  <Eye className="size-4" />
+                </Button>
                 <Switch
                   checked={acc.is_active}
                   onCheckedChange={() => handleToggle(acc.id, acc.is_active)}
@@ -209,6 +234,7 @@ export function CuentasClient({ accounts, branches }: Props) {
         </div>
       )}
 
+      {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -281,6 +307,117 @@ export function CuentasClient({ accounts, branches }: Props) {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Balance Dialog */}
+      <Dialog open={balanceDialogOpen} onOpenChange={setBalanceDialogOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Wallet className="size-5" />
+              Balance: {balanceAccount?.name}
+            </DialogTitle>
+            {balanceAccount?.alias_or_cbu && (
+              <p className="text-sm text-muted-foreground font-mono">{balanceAccount.alias_or_cbu}</p>
+            )}
+          </DialogHeader>
+
+          {balanceLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="size-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : balanceData ? (
+            <div className="space-y-5">
+              {/* Summary cards */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-lg border bg-emerald-500/10 border-emerald-500/20 p-3 text-center">
+                  <ArrowDownRight className="size-4 mx-auto mb-1 text-emerald-500" />
+                  <p className="text-xs text-muted-foreground">Ingresos hoy</p>
+                  <p className="text-lg font-bold text-emerald-500">{formatCurrency(balanceData.totalIncome)}</p>
+                </div>
+                <div className="rounded-lg border bg-red-500/10 border-red-500/20 p-3 text-center">
+                  <ArrowUpRight className="size-4 mx-auto mb-1 text-red-500" />
+                  <p className="text-xs text-muted-foreground">Egresos hoy</p>
+                  <p className="text-lg font-bold text-red-500">{formatCurrency(balanceData.totalExpenses)}</p>
+                </div>
+                <div className="rounded-lg border p-3 text-center">
+                  <Wallet className="size-4 mx-auto mb-1 text-primary" />
+                  <p className="text-xs text-muted-foreground">Saldo est.</p>
+                  <p className="text-lg font-bold">{formatCurrency(balanceData.estimatedBalance)}</p>
+                </div>
+              </div>
+
+              {/* Daily limit progress */}
+              {balanceAccount?.daily_limit !== null && balanceAccount?.daily_limit !== undefined && (
+                <div className="rounded-lg border p-3">
+                  <div className="flex justify-between text-sm mb-2">
+                    <span className="text-muted-foreground">Tope diario</span>
+                    <span className="font-medium">{formatCurrency(balanceData.totalIncome)} / {formatCurrency(balanceAccount.daily_limit)}</span>
+                  </div>
+                  <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all ${(balanceData.totalIncome / balanceAccount.daily_limit) >= 1 ? 'bg-destructive' : (balanceData.totalIncome / balanceAccount.daily_limit) >= 0.8 ? 'bg-yellow-500' : 'bg-primary'}`}
+                      style={{ width: `${Math.min((balanceData.totalIncome / balanceAccount.daily_limit) * 100, 100)}%` }}
+                    />
+                  </div>
+                  {(balanceData.totalIncome / balanceAccount.daily_limit) >= 0.8 && (
+                    <p className="text-xs text-yellow-500 mt-1.5">
+                      {(balanceData.totalIncome / balanceAccount.daily_limit) >= 1
+                        ? '⚠️ Tope diario alcanzado'
+                        : '⚠️ Próximo al tope diario'}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Recent movements */}
+              <div>
+                <p className="text-sm font-medium mb-2">Movimientos del día</p>
+                {balanceData.transfers.length === 0 && balanceData.expenses.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-6">No hay movimientos hoy</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-[250px] overflow-y-auto">
+                    {balanceData.transfers.map((t) => {
+                      const visit = t.visit as { client?: { name: string } | null; barber?: { full_name: string } | null } | null
+                      return (
+                      <div key={`t-${t.id}`} className="flex items-center justify-between rounded-lg border px-3 py-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <ArrowDownRight className="size-4 text-emerald-500 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">
+                              {visit?.client?.name ?? 'Cliente'}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {visit?.barber?.full_name ?? 'Barbero'} · {new Date(t.transferred_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-sm font-medium text-emerald-500 shrink-0">+{formatCurrency(t.amount)}</span>
+                      </div>
+                      )
+                    })}
+                    {balanceData.expenses.map((e) => (
+                      <div key={`e-${e.id}`} className="flex items-center justify-between rounded-lg border px-3 py-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <ArrowUpRight className="size-4 text-red-500 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">
+                              {e.category}
+                            </p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {e.description ?? 'Sin descripción'}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-sm font-medium text-red-500 shrink-0">-{formatCurrency(e.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>

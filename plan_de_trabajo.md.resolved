@@ -1,0 +1,107 @@
+# Plan de Desarrollo y Refactorización - Monaco Smart Barber
+
+Este documento organiza los requerimientos en base a su nivel de urgencia o complejidad y define una arquitectura de responsabilidades dividida entre dos desarrolladores, con un contexto detallado de módulos del proyecto para su ágil implementación.
+
+---
+
+## 👨‍💻 División Estratégica del Trabajo (2 Devs)
+
+Para asegurar el balance y agilidad, dividiremos las tareas basándonos en si el foco principal del flujo es interfaz, experiencia de usuario rápida y componentes web (**Frontend / UX Barbero & Cliente**) o bases de datos, lógica financiera y paneles de control complejos (**Backend, Finanzas & Core Admin**).
+
+**Dev 1 (Foco Frontend, UX/UI, Check-in y Experiencia)**:
+- Trabajará en refinar el Panel de Barberos en tiempo real (Cola, notificaciones, UX del cliente durante el corte).
+- Intervenciones en el Check-in terminal (Tablet) y automatización de reseñas al cliente.
+
+**Dev 2 (Foco Backend, Finanzas, DB y Core Admin Panel)**:
+- Trabajará en desarrollar los Sistemas Financieros nuevos (Transferencias complejas, Egresos, Cuentas).
+- Modificación del esquema de cobro y rendición del panel de barberos.
+- Creación de módulos de Productos y Comisiones y Lógica de asignación de Descansos.
+
+---
+
+## 📋 Resumen de Prioridades
+
+1. **🔴 ALTA PRIORIDAD**: Bloqueos críticos de uso y UX confusa/financiera errónea (se hace primero).
+2. **🟡 MEDIA PRIORIDAD**: Mejoras interactivas en la operativa diaria de la cola y fidelización.
+3. **🟢 BAJA PRIORIDAD / ALTA COMPLEJIDAD**: Nuevos sistemas complejos enteros (Finanzas integrales, Cuentas e Inventario/Comisiones).
+
+---
+
+## 🔴 Prioridad Alta (Resolución Inmediata)
+
+### 1. Quitar Cancelación Durante el Corte (Bug Fix)
+- **Responsable:** Dev 1
+- **Descripción Contextual:** Si el barbero ya presionó "Comenzar el corte", cancelar el turno rompe el ciclo de vida del ticket en el sistema. Debe deshabilitarse/ocultarse directamente este botón de acción.
+- **Módulos Implicados:**
+  - `src/app/barbero/cola/`: Componente de tarjeta de turno y opciones del modal.
+  - Lógica de UI: Si `estado_turno === 'cortando'`, ocultar el botón/menú para "Cancelar turno".
+
+### 2. Vista de Rendición de Efectivo del Barbero (Tweak Financiero)
+- **Responsable:** Dev 2
+- **Descripción Contextual:** El panel de facturación del barbero actualmente dice el total facturado, lo cual confunde con el total operado por cobros de tarjetas/otros. Modificar para que la métrica visual indique solo "Efectivo a rendir".
+- **Módulos Implicados:**
+  - `src/app/barbero/facturacion/` (o Dashboard del barbero).
+  - Consulta Supabase: Traer métricas filtrando cobros por método `efectivo`. Ocultar query del monto bruto total y exponer este campo.
+
+---
+
+## 🟡 Prioridad Media (Eficiencia Operativa en el Local)
+
+### 3. Notas y Perfil Desplegable del Cliente en la Cola
+- **Responsable:** Dev 1
+- **Descripción Contextual:** Una vez iniciado el corte, expandir funcionalidades. Añadir un contenedor o panel deslizante para poder sumar notas rápidas y sacar o buscar fotos vinculadas al cliente (aplicable como portafolio del corte). *Regla:* No mostrar en esta vista ni quién es el barbero habitual, ni historial de todos los cortes (puede ir encapsulado dentro del área de notas únicamente).
+- **Módulos Implicados:**
+  - `src/app/barbero/cola/`: Al dar tap sobre un cliente en proceso, abrir un sheet/drawer lateral.
+  - Base de Datos (Supabase): Almacenamiento/Bucket para las fotos de resultados atadas al `id_cliente` e `id_corte`. Columna `notas` en cliente o ticket.
+
+### 4. Badge / Indicador de "Primer Corte"
+- **Responsable:** Dev 1
+- **Descripción Contextual:** Darle un insight valioso al barbero remarcando visiblemente y con un estilo propio en su Dashboard de cola aquellos clientes que asisten al local por primera vez.
+- **Módulos Implicados:**
+  - `src/app/barbero/cola/`: Modificar el renderizado de lista de la cola.
+  - Consulta: Revisar log de historiales, calcular si `visitas == 1` o traer el flag `nuevo_cliente` de la DB y renderizar un Chip descriptivo de color.
+
+### 5. Gestión Administrativa de Descansos
+- **Responsable:** Dev 2 (Backend / Admin UI) & Dev 1 (Reflejo Visual Cola)
+- **Descripción Contextual:** Quitar botones de pausa manual en el panel del barbero. Los descansos se solicitan con el encargado y él los "asigna como en un servicio fantasma" en las posiciones de la cola.
+- **Módulos Implicados:**
+  - `src/app/dashboard/cola` o `src/app/dashboard/descansos`: Crear flujo para que el admin asigne un bloque de descanso a Barbero "X" a cumplimentar en "N" cortes.
+  - `src/app/barbero/cola/`: Eliminar botón "Pausarme". Agregar visualizador de tiempo: "Te tocan X clientes para tu descanso" o renderizar el descanso intermedio como una "card" en la cola cronológica. 
+  - Validar esto no interfiera o compute como ticket a facturar.
+
+### 6. Fidelización y Review Flow Vía WhatsApp Integrado
+- **Responsable:** Dev 1
+- **Descripción Contextual:** Lógica automatizada manual para reviews al final del turno. Mapear qué envía un clic en WhatsApp.
+- **Módulos / Flujo Implicado:**
+  - `src/app/dashboard/clientes/`: Lógica de botones de comunicación.
+  - Al generar web de calificación o bot automático: Si el score es 5 estrellas -> Push Link Google Maps directo. Si el score es < 5, mensaje de disculpas con feedback privado interno sin exponerse en internet.
+
+---
+
+## 🟢 Prioridad Baja (Nuevos Sistemas Arquitectónicos Complejos)
+
+### 7. Sistema Dinámico de Servicios (Check-in + Venta Adicional)
+- **Responsable:** Dev 1 & Dev 2 (Módulo Compartido)
+- **Descripción Contextual:** Separar lo que un cliente se selecciona autónomamente vs lo que el barbero "logra sumar" en su butaca (cafetería, bebida, adicionales faciales).
+- **Módulos Implicados:**
+  - `src/app/dashboard/servicios` **(Dev 2)**: Agregar un flag a servicios para setear si es de `CheckIn_Tablet` o si es un `Upsell_Barbero` (o ambos).
+  - `src/app/(tablet)/...` **(Dev 1)**: Permitir a clientes en Self Check-In seleccionar servicio base antes de enlistarse.
+  - `src/app/barbero/cola` **(Dev 1)**: Añadir en la sesión del corte la opción para el Barbero de **"+" Añadir Servicio o Producto extra** (como una bebida). Este cálculo actualiza el ticket de cierre real de ese turno en BD.
+
+### 8. Sistema de Productos y Comisión Unilateral
+- **Responsable:** Dev 2
+- **Descripción Contextual:** Modulo completo administrativo para inventario de productos cosméticos de barbería y ganancia limpia (100% de la ganancia) al barbero o calculada por una tarifa fijada.
+- **Módulos Implicados:**
+  - `src/app/dashboard/productos/`: (Nuevo) CRUD para productos. Fijar `Coste`, `Precio de Venta Pública`, `Monto Comisionable al Barbero`.
+  - Check-Out (Panel Barbero): Poder linkear este producto al ticket con un ID vinculado a él.
+  - Lógica Financiera / Facturación: Computar "Ventas en Productos" en sus saldos e internamente descontar el costo operativo del local.
+
+### 9. Sistema Inteligente de Cuentas, Transferencias Remesas y Egresos
+- **Responsable:** Dev 2
+- **Descripción Contextual:** Orquestador de caja financiera. Control de topes de montos en cuentas alias de bancos. Cuando una cuenta llenó su límite asignado, muta automáticamente para indicarle al barbero/cliente depositar a la "cuenta 2" y así susesivamente asignadas por el dueño. Log para ingreso de egresos (compras, reparaciones locale).
+- **Módulos Implicados:**
+  - `src/app/dashboard/cuentas/` & `src/app/dashboard/finanzas`:
+    - Generar tabla de `Bancos_Receptores`: `alias`, `tope_diario`, `orden`. 
+    - Crear UI para ver cuánta plata fue derivada por transferencias a qué cuenta.
+    - Carga manual de Tickets de Egreso.
+  - En interfaz de Barbero Check-out: Mostrar dinámicamente alias dependiendo del limite restante verificado en backend antes de cobrar por transferencia.
