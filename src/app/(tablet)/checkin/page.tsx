@@ -797,7 +797,7 @@ export default function CheckinPage() {
 
       {minWaitBarber && (
         <button
-          onClick={() => onSelect(minWaitBarber.id)}
+          onClick={() => onSelect(null as unknown as string)}
           disabled={submitting}
           className="w-full flex items-center gap-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5 text-left transition-all duration-200 hover:bg-emerald-500/10 hover:border-emerald-500/50 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
         >
