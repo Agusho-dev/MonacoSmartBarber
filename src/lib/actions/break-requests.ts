@@ -256,13 +256,10 @@ export async function completeBreakRequest(queueEntryId: string) {
 
     if (!entry) return { error: 'Descanso no encontrado o no activo' }
 
-    // Mark ghost entry as completed
+    // Delete ghost entry to avoid triggering on_queue_completed insert on visits table
     const { error: errorQueue } = await supabase
         .from('queue_entries')
-        .update({
-            status: 'completed',
-            completed_at: new Date().toISOString(),
-        })
+        .delete()
         .eq('id', queueEntryId)
 
     if (errorQueue) return { error: errorQueue.message }
