@@ -7,11 +7,10 @@ import {
 } from '@/lib/actions/visit-history'
 import { createClient } from '@/lib/supabase/client'
 import { formatDate } from '@/lib/format'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
-import { History, Star } from 'lucide-react'
+import { History } from 'lucide-react'
 
 interface ClientHistoryProps {
   clientId: string
@@ -21,6 +20,7 @@ export function ClientHistory({ clientId }: ClientHistoryProps) {
   const supabase = useMemo(() => createClient(), [])
   const [profile, setProfile] = useState<ClientProfileData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [expandedPhoto, setExpandedPhoto] = useState<string | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -47,60 +47,60 @@ export function ClientHistory({ clientId }: ClientHistoryProps) {
     )
   }
 
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 mb-3 text-sm font-medium text-muted-foreground">
-        <History className="size-4" />
-        {profile.totalVisits} visitas registradas
-      </div>
+  const visitsWithPhotos = profile.visits.filter((v) => v.photos.length > 0)
 
-      <ScrollArea className="max-h-[300px]">
-        <div className="space-y-3 pr-2">
-          {profile.visits.slice(0, 10).map((visit) => (
-            <div key={visit.id} className="space-y-2 rounded-lg border p-3">
-              <div className="flex items-center justify-between">
+  if (visitsWithPhotos.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed px-4 py-3 text-center text-sm text-muted-foreground">
+        No hay fotos aún
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="space-y-4">
+        <ScrollArea className="max-h-[300px]">
+          <div className="space-y-3 pr-2">
+            {visitsWithPhotos.slice(0, 10).map((visit) => (
+              <div key={visit.id} className="space-y-2 rounded-lg border p-3">
                 <div>
                   <p className="text-sm font-medium">
                     {visit.service_name ?? 'Servicio'}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {visit.barber_name} &middot;{' '}
                     {formatDate(visit.completed_at)}
                   </p>
                 </div>
-              </div>
-              {visit.notes && (
-                <p className="text-xs text-muted-foreground">{visit.notes}</p>
-              )}
-              {visit.tags && visit.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {visit.tags.map((tag) => (
-                    <Badge
-                      key={tag}
-                      variant="secondary"
-                      className="text-xs"
-                    >
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-              {visit.photos.length > 0 && (
                 <div className="flex gap-2 overflow-x-auto">
                   {visit.photos.map((photo) => (
                     <img
                       key={photo.id}
                       src={getUrl(photo.storage_path)}
                       alt="Corte"
-                      className="size-16 rounded-md border object-cover"
+                      className="size-20 rounded-md border object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                      onClick={() => setExpandedPhoto(getUrl(photo.storage_path))}
                     />
                   ))}
                 </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </ScrollArea>
-    </div>
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
+      </div>
+
+      <Dialog open={!!expandedPhoto} onOpenChange={(open) => !open && setExpandedPhoto(null)}>
+        <DialogContent className="max-w-3xl border-none bg-transparent p-0 shadow-none">
+          <DialogTitle className="sr-only">Foto ampliada</DialogTitle>
+          {expandedPhoto && (
+            <img
+              src={expandedPhoto}
+              alt="Corte ampliado"
+              className="max-h-[85vh] w-full rounded-md object-contain"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

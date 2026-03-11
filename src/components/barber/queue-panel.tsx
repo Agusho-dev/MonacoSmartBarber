@@ -51,11 +51,19 @@ import {
   Coffee,
   CheckCircle2,
   XCircle,
+  Instagram,
 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
 import { ClientProfileSheet } from './client-profile-sheet'
+import { ClientHistory } from './client-history'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import {
   Dialog,
   DialogContent,
@@ -794,31 +802,76 @@ export function QueuePanel({
                     </div>
                   </div>
 
-                  {myActiveEntry.client?.notes && (
-                    <div className="rounded-lg bg-muted/50 p-4 border border-border/50">
-                      <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1.5">
-                        <User className="size-3.5" />
-                        Observaciones del cliente
-                      </p>
-                      <p className="text-sm font-medium italic text-foreground whitespace-pre-wrap">
-                        {myActiveEntry.client.notes}
-                      </p>
-                    </div>
-                  )}
+                  {/* Desktop view (sm and up) */}
+                  <div className="hidden sm:block space-y-4">
+                    {myActiveEntry.client?.notes && (
+                      <div className="rounded-lg bg-muted/50 p-4 border border-border/50">
+                        <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1.5">
+                          <User className="size-3.5" />
+                          Observaciones del cliente
+                        </p>
+                        <p className="text-sm font-medium italic text-foreground whitespace-pre-wrap">
+                          {myActiveEntry.client.notes}
+                        </p>
+                      </div>
+                    )}
 
-                  <div className="flex gap-4">
-                    <Button
-                      variant="outline"
-                      className="h-14 w-full bg-card text-lg hover:bg-accent flex-1"
-                      onClick={() => {
-                        if (myActiveEntry?.client) {
-                          setProfileClient(myActiveEntry.client)
-                        }
-                      }}
-                    >
-                      <User className="mr-2 size-5" />
-                      Ver Historial y Fotos
-                    </Button>
+                    <div className="flex gap-4">
+                      <Button
+                        variant="outline"
+                        className="h-14 w-full bg-card text-lg hover:bg-accent flex-1"
+                        onClick={() => {
+                          if (myActiveEntry?.client) {
+                            setProfileClient(myActiveEntry.client)
+                          }
+                        }}
+                      >
+                        <User className="mr-2 size-5" />
+                        Ver Historial y Fotos
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Mobile view (under sm) */}
+                  <div className="sm:hidden -mx-2">
+                    <Accordion type="single" collapsible className="w-full">
+                      <AccordionItem value="history" className="border-none px-2">
+                        <AccordionTrigger className="flex h-14 items-center justify-between rounded-lg border bg-card px-4 py-0 hover:bg-accent hover:no-underline [&[data-state=open]>svg]:rotate-180">
+                          <div className="flex items-center gap-2">
+                            <User className="size-5" />
+                            <span className="text-lg font-medium">Historial y Fotos</span>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="pt-4 pb-2">
+                          <div className="space-y-4 rounded-lg border bg-card/30 p-4 mb-4">
+                            <div>
+                              <label className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
+                                <Instagram className="size-4" />
+                                Instagram
+                              </label>
+                              <div className="text-sm font-medium mt-1">
+                                {myActiveEntry.client?.instagram ? myActiveEntry.client.instagram : <span className="text-muted-foreground font-normal">No especificado</span>}
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="mb-1.5 block text-sm font-medium">
+                                Observaciones internas
+                              </label>
+                              <div className="w-full rounded-md border bg-transparent px-3 py-2 text-sm text-foreground min-h-[80px]">
+                                {myActiveEntry.client?.notes ? myActiveEntry.client.notes : <span className="text-muted-foreground">Ninguna</span>}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="px-1">
+                            {myActiveEntry.client && (
+                              <ClientHistory clientId={myActiveEntry.client.id} />
+                            )}
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
                   </div>
 
                   <div className="flex gap-4">
