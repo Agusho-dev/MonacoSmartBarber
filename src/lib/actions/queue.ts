@@ -261,43 +261,47 @@ export async function completeService(
   }
 
   // 6. Check if the barber's next waiting entry is a ghost break → auto-start it
-  const { data: nextGhost } = await supabase
+  const { data: nextGhosts } = await supabase
     .from('queue_entries')
-    .select('id')
+    .select('id, position')
     .eq('barber_id', visit.barber_id)
     .eq('branch_id', visit.branch_id)
     .eq('status', 'waiting')
     .eq('is_break', true)
     .order('position', { ascending: true })
     .limit(1)
-    .maybeSingle()
 
   let breakAutoStarted = false
-  if (nextGhost) {
-    // Check that there are no real waiting clients before the ghost
-    const { data: realWaiting } = await supabase
+  if (nextGhosts && nextGhosts.length > 0) {
+    const nextGhost = nextGhosts[0]
+
+    // Check if there are any real waiting clients BEFORE the ghost
+    const { data: realWaitingBeforeBreak } = await supabase
       .from('queue_entries')
       .select('id')
       .eq('barber_id', visit.barber_id)
       .eq('branch_id', visit.branch_id)
       .eq('status', 'waiting')
       .eq('is_break', false)
+      .lt('position', nextGhost.position)
       .limit(1)
-      .maybeSingle()
 
-    // Also check unassigned waiting clients
-    const { data: unassignedWaiting } = await supabase
+    // Also check unassigned waiting clients BEFORE the ghost
+    const { data: unassignedWaitingBeforeBreak } = await supabase
       .from('queue_entries')
-      .select('id, position')
+      .select('id')
       .eq('branch_id', visit.branch_id)
       .eq('status', 'waiting')
       .eq('is_break', false)
       .is('barber_id', null)
+      .lt('position', nextGhost.position)
       .limit(1)
-      .maybeSingle()
 
-    // Only auto-start if no real clients are waiting for this barber
-    if (!realWaiting && !unassignedWaiting) {
+    // Auto-start only if there are no clients waiting BEFORE the break ghost
+    const hasRealClientsBefore = (realWaitingBeforeBreak && realWaitingBeforeBreak.length > 0) || 
+                                 (unassignedWaitingBeforeBreak && unassignedWaitingBeforeBreak.length > 0)
+
+    if (!hasRealClientsBefore) {
       await supabase
         .from('queue_entries')
         .update({

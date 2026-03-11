@@ -29,7 +29,7 @@ async function getApproverStaffId(supabase: ReturnType<typeof createAdminClient>
  * Barber requests a break. Creates a pending break_request.
  */
 export async function requestBreak(staffId: string, branchId: string, breakConfigId: string) {
-    const supabase = await createClient()
+    const supabase = await createAdminClient()
 
     // Check for existing pending/approved request
     const { data: existing } = await supabase
@@ -91,17 +91,28 @@ export async function approveBreak(requestId: string, cutsBeforeBreak: number) {
     // Calculate ghost position: find the barber's current waiting entries, then insert after N
     const ghostPosition = await calculateGhostPosition(supabase, req.staff_id, req.branch_id, cutsBeforeBreak)
 
+    // Check if barber has an active service
+    const { data: currentService } = await supabase
+        .from('queue_entries')
+        .select('id')
+        .eq('barber_id', req.staff_id)
+        .eq('status', 'in_progress')
+        .eq('is_break', false)
+        .maybeSingle()
+
+    const shouldStartImmediately = cutsBeforeBreak === 0 && !currentService
+
     // Insert the ghost break entry into the queue
     const { error: insertErr } = await supabase.from('queue_entries').insert({
         branch_id: req.branch_id,
         client_id: null,
         barber_id: req.staff_id,
-        status: cutsBeforeBreak === 0 ? 'in_progress' : 'waiting',
+        status: shouldStartImmediately ? 'in_progress' : 'waiting',
         position: ghostPosition,
         is_break: true,
         break_request_id: req.id,
         checked_in_at: new Date().toISOString(),
-        started_at: cutsBeforeBreak === 0 ? new Date().toISOString() : null,
+        started_at: shouldStartImmediately ? new Date().toISOString() : null,
     })
 
     if (insertErr) return { error: insertErr.message }
@@ -143,10 +154,16 @@ async function calculateGhostPosition(
             e => e.status === 'in_progress' && e.barber_id === staffId && !e.is_break
         )
         if (barberInProgress) {
+            if (cutsBeforeBreak === 0 && barberWaiting.length > 0) {
+                return barberWaiting[0].position
+            }
             return barberInProgress.position + 1
         }
         // Otherwise at the end
-        return Math.max(...entries.map(e => e.position)) + 1
+        if (entries.length > 0) {
+            return Math.max(...entries.map(e => e.position)) + 1
+        }
+        return 1
     }
 
     // Place after the Nth waiting client of this barber
@@ -186,7 +203,7 @@ export async function rejectBreak(requestId: string, notes?: string) {
  * Also removes the ghost entry if the request was already approved.
  */
 export async function cancelBreakRequest(requestId: string) {
-    const supabase = await createClient()
+    const supabase = await createAdminClient()
 
     // Get request status
     const { data: req } = await supabase
@@ -226,7 +243,7 @@ export async function cancelBreakRequest(requestId: string) {
  * Marks the ghost queue entry as completed and the break_request as completed.
  */
 export async function completeBreakRequest(queueEntryId: string) {
-    const supabase = await createClient()
+    const supabase = await createAdminClient()
 
     // Get the ghost entry
     const { data: entry } = await supabase
@@ -240,7 +257,7 @@ export async function completeBreakRequest(queueEntryId: string) {
     if (!entry) return { error: 'Descanso no encontrado o no activo' }
 
     // Mark ghost entry as completed
-    await supabase
+    const { error: errorQueue } = await supabase
         .from('queue_entries')
         .update({
             status: 'completed',
@@ -248,12 +265,16 @@ export async function completeBreakRequest(queueEntryId: string) {
         })
         .eq('id', queueEntryId)
 
+    if (errorQueue) return { error: errorQueue.message }
+
     // Mark break_request as completed
     if (entry.break_request_id) {
-        await supabase
+        const { error: errorBreak } = await supabase
             .from('break_requests')
             .update({ status: 'completed' })
             .eq('id', entry.break_request_id)
+
+        if (errorBreak) return { error: errorBreak.message }
     }
 
     revalidatePath('/dashboard/descansos')
