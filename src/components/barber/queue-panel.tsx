@@ -134,7 +134,7 @@ export function QueuePanel({
   const fetchQueue = useCallback(async () => {
     const { data } = await supabase
       .from('queue_entries')
-      .select('*, client:clients(*, loyalty:client_loyalty_state(total_visits)), barber:staff(*), service:services(*)')
+      .select('*, client:clients(*, loyalty:client_loyalty_state(total_visits), visits(count)), barber:staff(*), service:services(*)')
       .eq('branch_id', session.branch_id)
       .in('status', ['waiting', 'in_progress'])
       .order('position')
@@ -428,15 +428,27 @@ export function QueuePanel({
                 <p className="truncate text-lg font-semibold">
                   {entry.client?.name ?? 'Cliente'}
                 </p>
-                {(!entry.client?.loyalty?.length || entry.client.loyalty[0]?.total_visits === 0) && (
-                  <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-emerald-500/15 text-emerald-500 border-emerald-500/30">
-                    Primer Corte
-                  </Badge>
+                {(() => {
+                  const realVisits = entry.client?.visits?.[0]?.count ?? 0
+                  const loyaltyVisits = entry.client?.loyalty?.[0]?.total_visits ?? 0
+                  return Math.max(realVisits, loyaltyVisits) === 0
+                })() && (
+                    <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-emerald-500/15 text-emerald-500 border-emerald-500/30">
+                      Primer Corte
+                    </Badge>
+                  )}
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span>{entry.client?.phone}</span>
+                {entry.service && (
+                  <>
+                    <span className="text-muted-foreground/40">·</span>
+                    <span className="font-medium text-foreground/70">
+                      {entry.service.name}
+                    </span>
+                  </>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground">
-                {entry.client?.phone}
-              </p>
               {entry.reward_claimed && (
                 <Badge variant="secondary" className="mt-1 gap-1 text-xs bg-purple-500/15 text-purple-500 hover:bg-purple-500/25 border-purple-500/20">
                   <Gift className="size-3" />

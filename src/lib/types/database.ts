@@ -102,6 +102,7 @@ export interface Client {
   created_at: string
   updated_at: string
   loyalty?: { total_visits: number }[]
+  visits?: { count: number }[]
 }
 
 export interface ClientFaceDescriptor {
