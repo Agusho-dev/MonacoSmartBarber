@@ -1130,7 +1130,6 @@ export default function CheckinPage() {
           <div className="w-full grid gap-3 md:gap-4">
             <button
               onClick={() => {
-                setWantsEnrollment(false)
                 setPhone('')
                 setName('')
                 goTo('phone')
@@ -1143,27 +1142,7 @@ export default function CheckinPage() {
               <div>
                 <p className="text-lg md:text-xl font-semibold">Ingresar con teléfono</p>
                 <p className="text-sm md:text-base text-muted-foreground mt-1">
-                  Ingresá tu número para entrar a la cola
-                </p>
-              </div>
-            </button>
-
-            <button
-              onClick={() => {
-                setWantsEnrollment(true)
-                setPhone('')
-                setName('')
-                goTo('face_enroll')
-              }}
-              className="group flex items-center gap-4 md:gap-5 w-full rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4 md:p-6 text-left transition-all duration-200 hover:bg-blue-500/10 hover:border-blue-500/30 active:scale-[0.98]"
-            >
-              <div className="shrink-0 size-12 md:size-16 rounded-xl bg-blue-500/10 flex items-center justify-center group-hover:bg-blue-500/15 transition-colors">
-                <ScanFace className="size-6 md:size-7 text-blue-400" />
-              </div>
-              <div>
-                <p className="text-lg md:text-xl font-semibold text-blue-300">Registrar mi rostro</p>
-                <p className="text-sm md:text-base text-blue-400/70 mt-1">
-                  La próxima vez ingresás solo con mirarte
+                  Ingresá tu número para registrarte y entrar a la cola
                 </p>
               </div>
             </button>
@@ -1179,7 +1158,7 @@ export default function CheckinPage() {
         >
           {backButton(() => {
             setPhone('')
-            goTo('no_match_options')
+            goTo('home')
           })}
 
           <div className="text-center mt-2">
@@ -1294,7 +1273,7 @@ export default function CheckinPage() {
           className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto py-6 md:py-8"
         >
           {backButton(() => {
-            if (isReturning) goTo('phone')
+            if (!isReturning && !hasExistingFace) goTo('face_enroll')
             else goTo('name')
           })}
 
