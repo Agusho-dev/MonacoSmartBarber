@@ -472,20 +472,7 @@ export function QueuePanel({
                   <span className="hidden xl:inline">Atender</span>
                 </Button>
               )}
-              {isMyEntry && entry.status === 'waiting' && otherBarbers.length > 0 && (
-                <Button
-                  variant="outline"
-                  size="lg"
-                  className="h-14 px-5 text-base text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10"
-                  onClick={() =>
-                    setReassigningEntryId(isReassigning ? null : entry.id)
-                  }
-                  disabled={actionLoading === entry.id}
-                >
-                  <ArrowRightLeft className="size-5 md:mr-2" />
-                  <span className="hidden xl:inline">Reasignar</span>
-                </Button>
-              )}
+
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button
@@ -520,56 +507,7 @@ export function QueuePanel({
           </CardContent>
         </Card>
 
-        {isReassigning && (
-          <Card className="gap-0 border-yellow-500/20 bg-yellow-500/3 py-0 animate-in fade-in slide-in-from-top-2 duration-200">
-            <CardContent className="p-3 space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">
-                Reasignar a:
-              </p>
-              <div className="grid gap-1.5">
-                {otherBarbers
-                  .map((barber) => {
-                    const waitCount = entries.filter(
-                      (e) => e.status === 'waiting' && e.barber_id === barber.id && !e.is_break
-                    ).length
-                    return { ...barber, waitCount }
-                  })
-                  .sort((a, b) => a.waitCount - b.waitCount)
-                  .map((barber) => (
-                    <button
-                      key={barber.id}
-                      onClick={() => handleReassign(entry.id, barber.id)}
-                      disabled={actionLoading === entry.id}
-                      className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-accent active:bg-accent/80 disabled:opacity-50"
-                    >
-                      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
-                        {barber.full_name.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium truncate">
-                          {barber.full_name}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {barber.waitCount === 0
-                            ? 'Sin clientes'
-                            : `${barber.waitCount} en espera`}
-                        </p>
-                      </div>
-                      {actionLoading === entry.id && (
-                        <div className="size-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-                      )}
-                    </button>
-                  ))}
-              </div>
-              <button
-                onClick={() => setReassigningEntryId(null)}
-                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
-              >
-                Cancelar
-              </button>
-            </CardContent>
-          </Card>
-        )}
+
       </div>
     )
   }

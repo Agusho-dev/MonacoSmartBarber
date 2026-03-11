@@ -1,6 +1,6 @@
 import { BarberNav } from '@/components/barber/barber-nav'
 import { getBarberSession } from '@/lib/actions/auth'
-import { BarberFaceCheck } from '@/components/barber/barber-face-check'
+
 import { FullscreenButton } from '@/components/ui/fullscreen-button'
 import { WakeLock } from '@/components/ui/wake-lock'
 
@@ -18,13 +18,7 @@ export default async function BarberLayout({
       <BarberThemeClient />
       <WakeLock />
       {children}
-      <BarberNav />
-      {session && (
-        <BarberFaceCheck
-          staffId={session.staff_id}
-          staffName={session.full_name}
-        />
-      )}
+      {session && <BarberNav />}
       <FullscreenButton />
     </div>
   )
