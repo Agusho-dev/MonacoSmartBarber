@@ -957,7 +957,7 @@ export default function CheckinPage() {
   // ── Render ──
 
   return (
-    <div className="min-h-dvh flex flex-col items-center justify-center select-none bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)]">
+    <div className="h-dvh flex flex-col items-center justify-center select-none overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)]">
       {/* ═══════════════ BRANCH SELECTION ═══════════════ */}
       {step === 'branch' && (
         <div
@@ -1020,37 +1020,37 @@ export default function CheckinPage() {
       {step === 'home' && selectedBranch && (
         <div
           key={`home-${animKey}`}
-          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-8 md:gap-10 px-4 md:px-8 animate-in fade-in zoom-in-95 duration-500"
+          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center justify-center gap-4 md:gap-6 px-4 md:px-8 animate-in fade-in zoom-in-95 duration-500"
         >
-          <div className="flex flex-col items-center gap-4 md:gap-5">
-            <div className="size-20 md:size-24 rounded-[1.5rem] md:rounded-3xl bg-white/4 border border-white/10 flex items-center justify-center">
-              <Scissors className="size-10 md:size-12 text-white" strokeWidth={1.5} />
+          <div className="flex flex-col items-center gap-2 md:gap-3">
+            <div className="size-16 md:size-20 rounded-[1.25rem] md:rounded-3xl overflow-hidden flex items-center justify-center">
+              <img src="/logo-monaco.png" alt="Monaco Smart Barber" className="w-full h-full object-contain" />
             </div>
             <div className="text-center">
-              <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
+              <h1 className="text-3xl md:text-5xl font-bold tracking-tight">
                 Monaco Smart Barber
               </h1>
-              <div className="flex items-center justify-center gap-2 mt-2 md:mt-3">
+              <div className="flex items-center justify-center gap-2 mt-1.5 md:mt-3">
                 <MapPin className="size-4 md:size-5 text-muted-foreground" />
-                <p className="text-lg md:text-xl text-muted-foreground">{selectedBranch.name}</p>
+                <p className="text-base md:text-xl text-muted-foreground">{selectedBranch.name}</p>
               </div>
             </div>
           </div>
 
           <Button
             onClick={() => goTo('face_scan')}
-            className="w-full max-w-xs md:max-w-md h-16 md:h-24 text-xl md:text-3xl rounded-2xl md:rounded-3xl font-bold tracking-wide gap-3 md:gap-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+            className="w-full max-w-xs md:max-w-md h-12 md:h-16 text-lg md:text-2xl rounded-2xl md:rounded-3xl font-bold tracking-wide gap-3 md:gap-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
             size="lg"
           >
-            <ScanFace className="size-7 md:size-9" strokeWidth={1.5} />
+            <ScanFace className="size-6 md:size-9" strokeWidth={1.5} />
             INGRESAR
           </Button>
 
-          <div className="flex flex-col items-center gap-6 justify-center">
+          <div className="flex flex-col items-center gap-3 justify-center">
             <div className="flex items-center gap-6 justify-center">
               <button
                 onClick={() => goTo('phone')}
-                className="flex items-center gap-2 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-2 md:py-3"
+                className="flex items-center gap-2 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-2"
               >
                 <Search className="size-4 md:size-5" />
                 <span className="text-base md:text-lg">Registrar</span>
@@ -1058,7 +1058,7 @@ export default function CheckinPage() {
               <span className="text-white/20">·</span>
               <button
                 onClick={() => goTo('staff_face_scan')}
-                className="flex items-center gap-2 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-2 md:py-3"
+                className="flex items-center gap-2 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-2"
               >
                 <LogIn className="size-4 md:size-5" />
                 <span className="text-base md:text-lg">Soy barbero</span>
@@ -1067,7 +1067,7 @@ export default function CheckinPage() {
 
             <button
               onClick={changeBranch}
-              className="flex items-center gap-2 text-sm text-muted-foreground/60 hover:text-muted-foreground transition-colors py-2"
+              className="flex items-center gap-2 text-sm text-muted-foreground/60 hover:text-muted-foreground transition-colors py-1"
             >
               <Settings2 className="size-4" />
               Cambiar sucursal
