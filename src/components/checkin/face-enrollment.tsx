@@ -42,6 +42,8 @@ export function FaceEnrollment({
   const [state, setState] = useState<EnrollState>('loading')
   const [capturedCount, setCapturedCount] = useState(0)
   const [faceDetected, setFaceDetected] = useState(false)
+  const autoCaptureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleCaptureRef = useRef<(() => void) | null>(null)
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -113,12 +115,36 @@ export function FaceEnrollment({
 
       setFaceDetected(!!detection && isFaceValid && detection.score > 0.6)
 
-      setTimeout(checkFace, 300)
+      if (!cancelled) setTimeout(checkFace, 300)
     }
 
     checkFace()
     return () => { cancelled = true }
   }, [state])
+
+  // Auto-capture: when face is detected for 1.5s, trigger capture automatically
+  useEffect(() => {
+    handleCaptureRef.current = handleCapture
+  })
+
+  useEffect(() => {
+    if (state === 'positioning' && faceDetected) {
+      autoCaptureTimerRef.current = setTimeout(() => {
+        handleCaptureRef.current?.()
+      }, 1500)
+    } else {
+      if (autoCaptureTimerRef.current) {
+        clearTimeout(autoCaptureTimerRef.current)
+        autoCaptureTimerRef.current = null
+      }
+    }
+    return () => {
+      if (autoCaptureTimerRef.current) {
+        clearTimeout(autoCaptureTimerRef.current)
+        autoCaptureTimerRef.current = null
+      }
+    }
+  }, [state, faceDetected])
 
   const handleCapture = useCallback(async () => {
     if (!videoRef.current || !areModelsLoaded()) return
@@ -229,7 +255,7 @@ export function FaceEnrollment({
         {(state === 'positioning' || state === 'capturing') && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div
-              className={`w-48 h-64 rounded-full border-2 border-dashed transition-colors duration-300 ${faceDetected ? 'border-emerald-400/60' : 'border-white/20'
+              className={`w-56 h-72 md:w-64 md:h-80 rounded-full border-2 border-dashed transition-colors duration-300 ${faceDetected ? 'border-emerald-400 shadow-[0_0_30px_rgba(34,197,94,0.3)]' : 'border-white/20'
                 }`}
             />
           </div>
@@ -289,27 +315,17 @@ export function FaceEnrollment({
       {state === 'positioning' && (
         <div className="text-center space-y-2">
           <p className={`text-base md:text-lg font-medium ${faceDetected ? 'text-emerald-400' : 'text-muted-foreground'}`}>
-            {faceDetected ? '¡Perfecto! Tu cara está bien posicionada' : 'Posicioná tu cara dentro del óvalo'}
+            {faceDetected ? '¡Perfecto! Capturando automáticamente...' : 'Posicioná tu cara dentro del óvalo'}
           </p>
           {faceDetected && (
-            <p className="text-xs md:text-sm text-muted-foreground">
-              Quedate quieto un momento
-            </p>
+            <div className="flex items-center justify-center gap-2">
+              <Loader2 className="size-4 animate-spin text-emerald-400" />
+              <p className="text-xs md:text-sm text-emerald-400/80">
+                Quedate quieto un momento
+              </p>
+            </div>
           )}
         </div>
-      )}
-
-      {/* Capture button */}
-      {state === 'positioning' && (
-        <Button
-          onClick={handleCapture}
-          disabled={!faceDetected}
-          className="w-full h-14 md:h-16 text-lg md:text-xl rounded-2xl font-semibold"
-          size="lg"
-        >
-          <Camera className="size-5 mr-2" />
-          Capturar
-        </Button>
       )}
 
       {/* Skip button */}

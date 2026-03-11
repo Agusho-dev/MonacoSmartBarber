@@ -261,7 +261,7 @@ export function FaceCamera({
         {(state === 'scanning' || state === 'matching') && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div
-              className={`w-44 h-60 md:w-52 md:h-72 rounded-full border-2 border-dashed transition-colors duration-300 ${faceBox ? 'border-emerald-400/60' : 'border-white/20'
+              className={`w-56 h-72 md:w-64 md:h-80 rounded-full border-2 border-dashed transition-colors duration-300 ${faceBox ? 'border-emerald-400 shadow-[0_0_30px_rgba(34,197,94,0.3)]' : 'border-white/20'
                 }`}
             />
           </div>

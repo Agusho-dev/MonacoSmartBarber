@@ -16,14 +16,12 @@ import {
   Smartphone,
   Zap,
   User,
-  AlertTriangle,
   RefreshCw,
   Search,
   LogIn,
   LogOut,
   Coffee,
   ScanFace,
-  Keyboard,
   Settings2,
 } from 'lucide-react'
 import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule } from '@/lib/types/database'
@@ -45,7 +43,6 @@ type Step =
   | 'branch'
   | 'home'
   | 'face_scan'
-  | 'no_match_options'
   | 'phone'
   | 'name'
   | 'face_enroll'
@@ -89,8 +86,7 @@ export default function CheckinPage() {
   const [queueEntries, setQueueEntries] = useState<QueueEntry[]>([])
   const [barberAvgMinutes, setBarberAvgMinutes] = useState<Record<string, number>>({})
   const [loadingBarbers, setLoadingBarbers] = useState(false)
-  const [expandedPausedBarber, setExpandedPausedBarber] = useState<string | null>(null)
-  const [availableTodayIds, setAvailableTodayIds] = useState<Set<string>>(new Set())
+
   const [branchIsOpen, setBranchIsOpen] = useState(true)
   const [branchHours, setBranchHours] = useState<{ opens: string; closes: string } | null>(null)
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
@@ -226,12 +222,9 @@ export default function CheckinPage() {
           })
         }
 
-        const availIds = new Set<string>(
-          (availableRes.data ?? []).map((r: { staff_id: string }) => r.staff_id)
-        )
-        setAvailableTodayIds(availIds)
 
-        const filtered = !branchOpen ? [] : staffRes.data.filter((s) => {
+
+        const filtered = staffRes.data.filter((s) => {
           if (s.status === 'blocked') return false
           if (latestAttendance[s.id] === 'clock_out') return false
           return true
@@ -346,7 +339,7 @@ export default function CheckinPage() {
     setQueueEntries([])
     setBarberAvgMinutes({})
     setLoadingBarbers(false)
-    setExpandedPausedBarber(null)
+
     setQueueEntryId(null)
     setChangingBarberInSuccess(false)
     setMyQueueEntry(null)
@@ -526,13 +519,17 @@ export default function CheckinPage() {
   const handleFaceNoMatch = useCallback(
     (descriptor: Float32Array) => {
       setFaceDescriptor(descriptor)
-      goTo('no_match_options')
+      setPhone('')
+      setName('')
+      goTo('phone')
     },
     []
   )
 
   const handleFaceManualEntry = useCallback(() => {
-    goTo('no_match_options')
+    setPhone('')
+    setName('')
+    goTo('phone')
   }, [])
 
   const handleFaceConfirmBarber = useCallback(
@@ -715,10 +712,10 @@ export default function CheckinPage() {
   const backButton = (onBack: () => void) => (
     <button
       onClick={onBack}
-      className="self-start flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-2 -ml-1"
+      className="fixed top-4 left-4 md:top-6 md:left-6 z-50 flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 backdrop-blur-sm"
     >
       <ArrowLeft className="size-5" />
-      <span className="text-lg">Atrás</span>
+      <span className="text-base">Atrás</span>
     </button>
   )
 
@@ -730,23 +727,14 @@ export default function CheckinPage() {
     const stats = getBarberStats(barber, dynamicEntries, barberAvgMinutes)
     const cfg = statusConfig[stats.status]
     const loadPct = Math.min(100, (stats.totalLoad / Math.max(maxLoad, 4)) * 100)
-    const isExpanded = showExpand
-    const isAbsentToday = availableTodayIds.size > 0 && !availableTodayIds.has(barber.id)
 
     return (
       <div
         key={barber.id}
-        className={`w-full rounded-2xl border text-left transition-all duration-200 overflow-hidden ${isAbsentToday ? 'border-yellow-500/20 bg-yellow-500/3 opacity-70' : 'border-white/8 bg-white/2'
-          }`}
+        className="w-full rounded-2xl border border-white/8 bg-white/2 text-left transition-all duration-200 overflow-hidden"
       >
         <button
-          onClick={() => {
-            if (isAbsentToday && showExpand) {
-              setExpandedPausedBarber((prev) => (prev === barber.id ? null : barber.id))
-            } else {
-              onSelect(barber.id)
-            }
-          }}
+          onClick={() => onSelect(barber.id)}
           disabled={submitting}
           className="w-full p-5 text-left hover:bg-white/6 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none space-y-3"
         >
@@ -758,112 +746,44 @@ export default function CheckinPage() {
               <div>
                 <p className="text-xl font-semibold">{barber.full_name}</p>
                 <p className="text-base text-muted-foreground mt-0.5">
-                  {isAbsentToday ? (
-                    <span className="text-yellow-400">⚠️ No trabaja hoy</span>
-                  ) : (
-                    <>
-                      {stats.attending && 'Atendiendo 1 persona'}
-                      {stats.attending && stats.waiting > 0 && ' · '}
-                      {stats.waiting > 0 &&
-                        `${stats.waiting} ${stats.waiting === 1 ? 'persona espera' : 'personas esperan'}`}
-                      {!stats.attending && stats.waiting === 0 && 'Sin espera'}
-                    </>
-                  )}
+                  {stats.attending && 'Atendiendo 1 persona'}
+                  {stats.attending && stats.waiting > 0 && ' · '}
+                  {stats.waiting > 0 &&
+                    `${stats.waiting} ${stats.waiting === 1 ? 'persona espera' : 'personas esperan'}`}
+                  {!stats.attending && stats.waiting === 0 && 'Sin espera'}
                 </p>
               </div>
             </div>
-            {isAbsentToday ? (
-              <span className="shrink-0 inline-flex items-center rounded-full border border-yellow-500/30 bg-yellow-500/10 text-yellow-400 px-3 py-1 text-sm font-medium">
-                Ausente
-              </span>
-            ) : (
-              <span
-                className={`shrink-0 inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium ${cfg.className}`}
-              >
-                {cfg.label}
-              </span>
-            )}
+            <span
+              className={`shrink-0 inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium ${cfg.className}`}
+            >
+              {cfg.label}
+            </span>
           </div>
 
-          {!isAbsentToday && (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-sm text-muted-foreground">
-                <span>
-                  {stats.totalLoad} {stats.totalLoad === 1 ? 'persona' : 'personas'} en total
-                </span>
-                <span className="font-medium text-foreground">
-                  {formatWaitTime(stats.eta)}
-                </span>
-              </div>
-              <div className="h-2.5 w-full rounded-full bg-white/6 overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${getLoadColor(stats.totalLoad)}`}
-                  style={{ width: `${loadPct}%` }}
-                />
-              </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-sm text-muted-foreground">
+              <span>
+                {stats.totalLoad} {stats.totalLoad === 1 ? 'persona' : 'personas'} en total
+              </span>
+              <span className="font-medium text-foreground">
+                {formatWaitTime(stats.eta)}
+              </span>
             </div>
-          )}
+            <div className="h-2.5 w-full rounded-full bg-white/6 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${getLoadColor(stats.totalLoad)}`}
+                style={{ width: `${loadPct}%` }}
+              />
+            </div>
+          </div>
         </button>
-
-        {/* Expanded absent warning */}
-        {isExpanded && isAbsentToday && (
-          <div className="border-t border-yellow-500/20 p-5 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-            <div className="flex items-start gap-3 rounded-xl border border-yellow-500/30 bg-yellow-500/5 p-4">
-              <AlertTriangle className="size-5 text-yellow-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-medium text-yellow-300">
-                  Este barbero no trabaja hoy
-                </p>
-                <p className="text-sm text-yellow-400/70 mt-1">
-                  Puede que no esté disponible para atenderte. ¿Querés esperarlo de todas formas?
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <Button
-                onClick={() => onSelect(barber.id)}
-                disabled={submitting}
-                className="flex-1 h-14 text-base rounded-xl font-semibold"
-                variant="default"
-              >
-                {submitting ? (
-                  <Loader2 className="size-5 animate-spin" />
-                ) : (
-                  `Esperar igual`
-                )}
-              </Button>
-              <Button
-                onClick={() => setExpandedPausedBarber(null)}
-                variant="outline"
-                className="h-14 text-base rounded-xl px-6"
-              >
-                Elegir otro
-              </Button>
-            </div>
-          </div>
-        )}
       </div>
     )
   }
 
   const renderBarberList = (onSelect: (barberId: string) => void, showExpand = true) => (
     <div className="w-full space-y-4">
-      {/* Branch closed warning */}
-      {!branchIsOpen && (
-        <div className="flex items-start gap-3 rounded-2xl border border-red-500/30 bg-red-500/5 p-5">
-          <AlertTriangle className="size-6 text-red-400 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-lg font-semibold text-red-300">
-              La sucursal está cerrada
-            </p>
-            <p className="text-base text-red-400/70 mt-1">
-              {branchHours
-                ? `Horario: ${branchHours.opens.slice(0, 5)} - ${branchHours.closes.slice(0, 5)}`
-                : 'Fuera de horario comercial'}
-            </p>
-          </div>
-        </div>
-      )}
 
       {minWaitBarber && (
         <button
@@ -957,12 +877,12 @@ export default function CheckinPage() {
   // ── Render ──
 
   return (
-    <div className="h-dvh flex flex-col items-center justify-center select-none overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)]">
+    <div className="h-dvh flex flex-col items-center select-none overflow-y-auto overflow-x-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)] py-6 md:py-8">
       {/* ═══════════════ BRANCH SELECTION ═══════════════ */}
       {step === 'branch' && (
         <div
           key={`branch-${animKey}`}
-          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-6 md:gap-10 px-4 md:px-8 animate-in fade-in zoom-in-95 duration-500"
+          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-6 md:gap-8 px-4 md:px-8 my-auto animate-in fade-in zoom-in-95 duration-500"
         >
           <div className="flex flex-col items-center gap-4 md:gap-5">
             <div className="size-20 md:size-24 rounded-[1.5rem] md:rounded-3xl bg-white/4 border border-white/10 flex items-center justify-center">
@@ -1020,37 +940,37 @@ export default function CheckinPage() {
       {step === 'home' && selectedBranch && (
         <div
           key={`home-${animKey}`}
-          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center justify-center gap-4 md:gap-6 px-4 md:px-8 animate-in fade-in zoom-in-95 duration-500"
+          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center justify-center gap-3 md:gap-4 px-4 md:px-8 py-4 md:py-6 my-auto animate-in fade-in zoom-in-95 duration-500"
         >
-          <div className="flex flex-col items-center gap-2 md:gap-3">
-            <div className="size-16 md:size-20 rounded-[1.25rem] md:rounded-3xl overflow-hidden flex items-center justify-center">
+          <div className="flex flex-col items-center gap-2">
+            <div className="size-14 md:size-16 rounded-[1.25rem] md:rounded-2xl overflow-hidden flex items-center justify-center">
               <img src="/logo-monaco.png" alt="Monaco Smart Barber" className="w-full h-full object-contain" />
             </div>
             <div className="text-center">
-              <h1 className="text-3xl md:text-5xl font-bold tracking-tight">
+              <h1 className="text-2xl md:text-4xl font-bold tracking-tight">
                 Monaco Smart Barber
               </h1>
-              <div className="flex items-center justify-center gap-2 mt-1.5 md:mt-3">
-                <MapPin className="size-4 md:size-5 text-muted-foreground" />
-                <p className="text-base md:text-xl text-muted-foreground">{selectedBranch.name}</p>
+              <div className="flex items-center justify-center gap-2 mt-1 md:mt-2">
+                <MapPin className="size-4 text-muted-foreground" />
+                <p className="text-sm md:text-lg text-muted-foreground">{selectedBranch.name}</p>
               </div>
             </div>
           </div>
 
           <Button
             onClick={() => goTo('face_scan')}
-            className="w-full max-w-xs md:max-w-md h-12 md:h-16 text-lg md:text-2xl rounded-2xl md:rounded-3xl font-bold tracking-wide gap-3 md:gap-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+            className="w-full max-w-xs md:max-w-md h-12 md:h-14 text-lg md:text-2xl rounded-2xl md:rounded-3xl font-bold tracking-wide gap-3 md:gap-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
             size="lg"
           >
-            <ScanFace className="size-6 md:size-9" strokeWidth={1.5} />
+            <ScanFace className="size-6 md:size-8" strokeWidth={1.5} />
             INGRESAR
           </Button>
 
-          <div className="flex flex-col items-center gap-3 justify-center">
+          <div className="flex flex-col items-center gap-2 justify-center">
             <div className="flex items-center gap-6 justify-center">
               <button
                 onClick={() => goTo('phone')}
-                className="flex items-center gap-2 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-2"
+                className="flex items-center gap-2 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-1.5"
               >
                 <Search className="size-4 md:size-5" />
                 <span className="text-base md:text-lg">Registrar</span>
@@ -1058,7 +978,7 @@ export default function CheckinPage() {
               <span className="text-white/20">·</span>
               <button
                 onClick={() => goTo('staff_face_scan')}
-                className="flex items-center gap-2 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-2"
+                className="flex items-center gap-2 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-1.5"
               >
                 <LogIn className="size-4 md:size-5" />
                 <span className="text-base md:text-lg">Soy barbero</span>
@@ -1080,7 +1000,7 @@ export default function CheckinPage() {
       {step === 'face_scan' && (
         <div
           key={`face-scan-${animKey}`}
-          className="w-full max-w-lg flex flex-col items-center gap-5 px-6 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-4 px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => goTo('home'))}
 
@@ -1093,57 +1013,26 @@ export default function CheckinPage() {
         </div>
       )}
 
-      {/* ═══════════════ NO MATCH OPTIONS ═══════════════ */}
-      {step === 'no_match_options' && (
-        <div
-          key={`no-match-opts-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-6 md:gap-8 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400"
-        >
-          {backButton(() => goTo('face_scan'))}
-
-          <div className="text-center mt-2 md:mt-4">
-            <div className="size-16 md:size-20 rounded-full bg-white/4 border border-white/10 flex items-center justify-center mx-auto mb-4 md:mb-5">
-              <User className="size-8 md:size-10 text-white/60" />
-            </div>
-            <h2 className="text-2xl md:text-3xl font-bold">No te reconocemos</h2>
-            <p className="text-base md:text-lg text-muted-foreground mt-2 md:mt-3">
-              ¿Cómo querés ingresar?
-            </p>
-          </div>
-
-          <div className="w-full grid gap-3 md:gap-4">
-            <button
-              onClick={() => {
-                setPhone('')
-                setName('')
-                goTo('phone')
-              }}
-              className="group flex items-center gap-4 md:gap-5 w-full rounded-2xl border border-white/8 bg-white/2 p-4 md:p-6 text-left transition-all duration-200 hover:bg-white/6 hover:border-white/20 active:scale-[0.98]"
-            >
-              <div className="shrink-0 size-12 md:size-16 rounded-xl bg-white/4 flex items-center justify-center group-hover:bg-white/8 transition-colors">
-                <Keyboard className="size-6 md:size-7 text-white/60 group-hover:text-white/80 transition-colors" />
-              </div>
-              <div>
-                <p className="text-lg md:text-xl font-semibold">Ingresar con teléfono</p>
-                <p className="text-sm md:text-base text-muted-foreground mt-1">
-                  Ingresá tu número para registrarte y entrar a la cola
-                </p>
-              </div>
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* ═══════════════ PHONE ENTRY ═══════════════ */}
       {step === 'phone' && (
         <div
           key={`phone-${animKey}`}
-          className="w-full max-w-sm md:max-w-md flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             setPhone('')
             goTo('home')
           })}
+
+          {/* Show no-match header if coming from face scan */}
+          {faceDescriptor && (
+            <div className="flex flex-col items-center gap-2 mb-2">
+              <div className="size-12 md:size-14 rounded-full bg-white/4 border border-white/10 flex items-center justify-center">
+                <User className="size-6 md:size-7 text-white/60" />
+              </div>
+              <p className="text-base text-muted-foreground">No te reconocemos · ingresá tu número</p>
+            </div>
+          )}
 
           <div className="text-center mt-2">
             <h2 className="text-2xl md:text-3xl font-bold">Ingresá tu número</h2>
@@ -1160,7 +1049,7 @@ export default function CheckinPage() {
       {step === 'name' && (
         <div
           key={`name-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             setPhone('')
@@ -1226,7 +1115,7 @@ export default function CheckinPage() {
       {step === 'face_enroll' && (
         <div
           key={`face-enroll-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             goTo('name')
@@ -1254,7 +1143,7 @@ export default function CheckinPage() {
       {step === 'service_selection' && (
         <div
           key={`service-${animKey}`}
-          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto py-6 md:py-8"
+          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto"
         >
           {backButton(() => {
             if (!isReturning && !hasExistingFace) goTo('face_enroll')
@@ -1299,10 +1188,10 @@ export default function CheckinPage() {
       {step === 'barber' && (
         <div
           key={`barber-${animKey}`}
-          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto py-6 md:py-8"
+          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto"
         >
           {backButton(() => {
-            setExpandedPausedBarber(null)
+
             goTo('service_selection')
           })}
 
@@ -1321,13 +1210,8 @@ export default function CheckinPage() {
             <div className="text-center py-10 md:py-16">
               <User className="size-10 md:size-12 text-muted-foreground mx-auto mb-3 md:mb-4" />
               <p className="text-base md:text-lg text-muted-foreground">
-                {!branchIsOpen ? 'La sucursal está cerrada' : 'No hay barberos disponibles en este momento'}
+                No hay barberos disponibles en este momento
               </p>
-              {!branchIsOpen && branchHours && (
-                <p className="text-sm mt-3 text-muted-foreground font-medium">
-                  Horario: {branchHours.opens.slice(0, 5)} - {branchHours.closes.slice(0, 5)}
-                </p>
-              )}
             </div>
           ) : (
             renderBarberList((barberId) => handleConfirm(barberId))
@@ -1350,67 +1234,69 @@ export default function CheckinPage() {
       {step === 'success' && (
         <div
           key={`success-${animKey}`}
-          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-6 md:gap-8 px-4 md:px-6 animate-in fade-in zoom-in-95 duration-500 max-h-dvh overflow-y-auto py-6 md:py-8"
+          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in zoom-in-95 duration-500 max-h-dvh overflow-y-auto"
         >
           {!changingBarberInSuccess ? (
             <>
-              <div className="size-20 md:size-28 rounded-full bg-white/4 border border-white/10 flex items-center justify-center animate-in zoom-in-50 duration-700">
-                <CheckCircle2 className="size-12 md:size-16 text-white" strokeWidth={1.5} />
+              <div className="size-16 md:size-20 rounded-full bg-white/4 border border-white/10 flex items-center justify-center animate-in zoom-in-50 duration-700">
+                <CheckCircle2 className="size-9 md:size-12 text-white" strokeWidth={1.5} />
               </div>
 
               <div className="text-center">
-                <h2 className="text-3xl md:text-4xl font-bold">¡Estás en la fila!</h2>
-                <div className="mt-4 md:mt-6 py-6 md:py-8 px-8 md:px-12 rounded-3xl border border-white/10 bg-white/3">
-                  <p className="text-muted-foreground text-base md:text-lg">Tu turno</p>
-                  <p className="text-6xl md:text-8xl font-bold mt-2 tabular-nums">
+                <h2 className="text-2xl md:text-3xl font-bold">¡Estás en la fila!</h2>
+                <div className="mt-3 md:mt-4 py-4 md:py-5 px-6 md:px-10 rounded-2xl border border-white/10 bg-white/3">
+                  <p className="text-muted-foreground text-sm md:text-base">Tu turno</p>
+                  <p className="text-5xl md:text-6xl font-bold mt-1 tabular-nums">
                     #{position}
                   </p>
                 </div>
               </div>
 
-              {queueEntryId && (
-                <button
-                  onClick={() => {
-                    if (resetTimer.current) clearTimeout(resetTimer.current)
-                    setChangingBarberInSuccess(true)
-                  }}
-                  className="flex items-center gap-3 rounded-2xl border border-white/8 bg-white/2 p-4 md:p-5 w-full max-w-lg transition-all hover:bg-white/6 hover:border-white/20 active:scale-[0.98]"
-                >
-                  <RefreshCw className="size-5 md:size-6 text-muted-foreground shrink-0" />
-                  <div className="text-left">
-                    <p className="text-sm md:text-base font-medium">Cambiar barbero</p>
-                    <p className="text-xs md:text-sm text-muted-foreground mt-0.5">
-                      Si cambiaste de idea, podés elegir otro
-                    </p>
-                  </div>
-                </button>
-              )}
+              <div className="w-full max-w-lg grid gap-2 md:grid-cols-2">
+                {queueEntryId && (
+                  <button
+                    onClick={() => {
+                      if (resetTimer.current) clearTimeout(resetTimer.current)
+                      setChangingBarberInSuccess(true)
+                    }}
+                    className="flex items-center gap-3 rounded-2xl border border-white/8 bg-white/2 p-3 md:p-4 w-full transition-all hover:bg-white/6 hover:border-white/20 active:scale-[0.98]"
+                  >
+                    <RefreshCw className="size-5 text-muted-foreground shrink-0" />
+                    <div className="text-left">
+                      <p className="text-sm font-medium">Cambiar barbero</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Podés elegir otro
+                      </p>
+                    </div>
+                  </button>
+                )}
 
-              {/* Face enrollment offer */}
-              {!hasExistingFace && faceClientId && (
-                <button
-                  onClick={() => {
-                    if (resetTimer.current) clearTimeout(resetTimer.current)
-                    goTo('face_enroll')
-                  }}
-                  className="flex items-center gap-3 md:gap-4 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4 md:p-5 w-full max-w-lg transition-all hover:bg-blue-500/10 hover:border-blue-500/30 active:scale-[0.98]"
-                >
-                  <div className="shrink-0 size-10 md:size-12 rounded-xl bg-blue-500/10 flex items-center justify-center">
-                    <User className="size-5 md:size-6 text-blue-400" />
-                  </div>
-                  <div className="text-left">
-                    <p className="text-sm md:text-base font-medium text-blue-300">Registrar tu cara</p>
-                    <p className="text-xs md:text-sm text-blue-400/70 mt-0.5">
-                      La próxima vez hacé check-in solo con mirarte
-                    </p>
-                  </div>
-                </button>
-              )}
+                {/* Face enrollment offer */}
+                {!hasExistingFace && faceClientId && (
+                  <button
+                    onClick={() => {
+                      if (resetTimer.current) clearTimeout(resetTimer.current)
+                      goTo('face_enroll')
+                    }}
+                    className="flex items-center gap-3 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-3 md:p-4 w-full transition-all hover:bg-blue-500/10 hover:border-blue-500/30 active:scale-[0.98]"
+                  >
+                    <div className="shrink-0 size-8 md:size-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
+                      <User className="size-4 md:size-5 text-blue-400" />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-sm font-medium text-blue-300">Registrar tu cara</p>
+                      <p className="text-xs text-blue-400/70 mt-0.5">
+                        Hacé check-in solo con mirarte
+                      </p>
+                    </div>
+                  </button>
+                )}
+              </div>
 
               {/* App promo */}
-              <div className="flex items-center gap-3 md:gap-4 rounded-2xl border border-white/6 bg-white/2 p-4 md:p-5 mt-2">
-                <Smartphone className="size-6 md:size-8 text-muted-foreground shrink-0" />
-                <p className="text-sm md:text-base text-muted-foreground leading-relaxed">
+              <div className="flex items-center gap-3 rounded-xl border border-white/6 bg-white/2 p-3 md:p-4 w-full max-w-lg">
+                <Smartphone className="size-5 md:size-6 text-muted-foreground shrink-0" />
+                <p className="text-xs md:text-sm text-muted-foreground leading-relaxed">
                   ¿Sabías que podés ver la ocupación en tiempo real?{' '}
                   <span className="text-foreground font-medium">
                     Descargá nuestra app
@@ -1419,7 +1305,7 @@ export default function CheckinPage() {
               </div>
 
               {/* Countdown bar */}
-              <div className="w-full max-w-xs h-1 rounded-full bg-white/10 overflow-hidden mt-2">
+              <div className="w-full max-w-xs h-1 rounded-full bg-white/10 overflow-hidden">
                 <div
                   className="h-full bg-white/40 rounded-full origin-left"
                   style={{
@@ -1427,7 +1313,7 @@ export default function CheckinPage() {
                   }}
                 />
               </div>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Volviendo al inicio...
               </p>
 
@@ -1459,7 +1345,7 @@ export default function CheckinPage() {
               ) : barbers.length === 0 ? (
                 <div className="text-center py-10 md:py-16">
                   <p className="text-base md:text-lg text-muted-foreground">
-                    {!branchIsOpen ? 'La sucursal está cerrada' : 'No hay barberos disponibles'}
+                    No hay barberos disponibles
                   </p>
                 </div>
               ) : (
@@ -1488,9 +1374,9 @@ export default function CheckinPage() {
       {step === 'staff_face_scan' && (
         <div
           key={`staff-face-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          {backButton(() => goTo('branch'))}
+          {backButton(() => goTo('home'))}
           <div className="text-center mt-2">
             <h2 className="text-2xl md:text-3xl font-bold">Identificación barbero</h2>
             <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">Mirá la cámara para identificarte</p>
@@ -1515,7 +1401,7 @@ export default function CheckinPage() {
       {step === 'staff_action_confirm' && staffFaceMatch && (
         <div
           key={`staff-action-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-6 md:gap-8 px-4 md:px-6 animate-in fade-in zoom-in-95 duration-500"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-6 md:gap-8 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in zoom-in-95 duration-500"
         >
           {!staffActionDone ? (
             <>
@@ -1627,7 +1513,7 @@ export default function CheckinPage() {
       {step === 'manage_turn' && myQueueEntry && (
         <div
           key={`manage-turn-${animKey}`}
-          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto py-6 md:py-8"
+          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto"
         >
           {backButton(() => {
             setMyQueueEntry(null)
@@ -1642,53 +1528,57 @@ export default function CheckinPage() {
                 <h2 className="text-2xl md:text-3xl font-bold">Tu turno</h2>
               </div>
 
-              <div className="py-6 md:py-8 px-8 md:px-12 rounded-3xl border border-white/10 bg-white/3 text-center">
-                <p className="text-muted-foreground text-base md:text-lg">Posición</p>
-                <p className="text-6xl md:text-8xl font-bold mt-2 tabular-nums">
-                  #{myQueueEntry.position}
-                </p>
-                {myQueueEntry.status === 'in_progress' && (
-                  <p className="text-emerald-400 font-medium mt-2 md:mt-3 text-base md:text-lg">
-                    Te están atendiendo
+              <div className="w-full md:flex md:gap-6 md:items-start">
+                <div className="py-4 md:py-5 px-6 md:px-10 rounded-2xl border border-white/10 bg-white/3 text-center md:shrink-0">
+                  <p className="text-muted-foreground text-sm md:text-base">Posición</p>
+                  <p className="text-5xl md:text-6xl font-bold mt-1 tabular-nums">
+                    #{myQueueEntry.position}
                   </p>
-                )}
-              </div>
-
-              {myQueueEntry.barber && (
-                <div className="w-full max-w-lg rounded-2xl border border-white/8 bg-white/2 p-5">
-                  <div className="flex items-center gap-4">
-                    <div className="flex size-14 items-center justify-center rounded-full bg-white/6 border border-white/10 text-lg font-bold">
-                      {(myQueueEntry.barber as Staff).full_name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <p className="text-xl font-semibold">
-                        {(myQueueEntry.barber as Staff).full_name}
-                      </p>
-                      <p className="text-base text-muted-foreground">
-                        Tu barbero asignado
-                      </p>
-                    </div>
-                  </div>
+                  {myQueueEntry.status === 'in_progress' && (
+                    <p className="text-emerald-400 font-medium mt-2 text-sm md:text-base">
+                      Te están atendiendo
+                    </p>
+                  )}
                 </div>
-              )}
 
-              {myQueueEntry.status === 'waiting' && (
-                <Button
-                  onClick={() => setChangingBarberInManage(true)}
-                  variant="outline"
-                  className="h-12 md:h-14 text-base md:text-lg rounded-2xl px-6 md:px-8"
-                >
-                  <RefreshCw className="size-4 md:size-5 mr-2" />
-                  Cambiar barbero
-                </Button>
-              )}
+                <div className="flex-1 space-y-3 mt-3 md:mt-0">
+                  {myQueueEntry.barber && (
+                    <div className="w-full rounded-2xl border border-white/8 bg-white/2 p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex size-12 items-center justify-center rounded-full bg-white/6 border border-white/10 text-base font-bold">
+                          {(myQueueEntry.barber as Staff).full_name.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="text-lg font-semibold">
+                            {(myQueueEntry.barber as Staff).full_name}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            Tu barbero asignado
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-              <button
-                onClick={reset}
-                className="text-muted-foreground hover:text-foreground transition-colors py-2 md:py-3 text-base md:text-lg"
-              >
-                Volver al inicio
-              </button>
+                  {myQueueEntry.status === 'waiting' && (
+                    <Button
+                      onClick={() => setChangingBarberInManage(true)}
+                      variant="outline"
+                      className="h-11 md:h-12 text-sm md:text-base rounded-xl px-5 w-full"
+                    >
+                      <RefreshCw className="size-4 mr-2" />
+                      Cambiar barbero
+                    </Button>
+                  )}
+
+                  <button
+                    onClick={reset}
+                    className="text-muted-foreground hover:text-foreground transition-colors py-2 text-sm md:text-base w-full text-center"
+                  >
+                    Volver al inicio
+                  </button>
+                </div>
+              </div>
             </>
           ) : (
             <>
