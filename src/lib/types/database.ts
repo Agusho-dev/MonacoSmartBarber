@@ -129,9 +129,21 @@ export interface Service {
   price: number
   duration_minutes: number | null
   availability: ServiceAvailability
+  default_commission_pct: number
   is_active: boolean
   created_at: string
   updated_at: string
+}
+
+export interface StaffServiceCommission {
+  id: string
+  staff_id: string
+  service_id: string
+  commission_pct: number
+  created_at: string
+  updated_at: string
+  staff?: Staff
+  service?: Service
 }
 
 export interface Product {
@@ -509,6 +521,7 @@ export interface Database {
       staff: { Row: Staff; Insert: Partial<Staff> & Pick<Staff, 'role' | 'full_name'>; Update: Partial<Staff> }
       clients: { Row: Client; Insert: Partial<Client> & Pick<Client, 'phone' | 'name'>; Update: Partial<Client> }
       services: { Row: Service; Insert: Partial<Service> & Pick<Service, 'name' | 'price'>; Update: Partial<Service> }
+      staff_service_commissions: { Row: StaffServiceCommission; Insert: Partial<StaffServiceCommission> & Pick<StaffServiceCommission, 'staff_id' | 'service_id' | 'commission_pct'>; Update: Partial<StaffServiceCommission> }
       products: { Row: Product; Insert: Partial<Product> & Pick<Product, 'branch_id' | 'name'>; Update: Partial<Product> }
       product_sales: { Row: ProductSale; Insert: Partial<ProductSale> & Pick<ProductSale, 'product_id' | 'barber_id' | 'branch_id' | 'unit_price'>; Update: Partial<ProductSale> }
       queue_entries: { Row: QueueEntry; Insert: Partial<QueueEntry> & Pick<QueueEntry, 'branch_id' | 'client_id' | 'position'>; Update: Partial<QueueEntry> }

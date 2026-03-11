@@ -553,7 +553,7 @@ export default function CheckinPage() {
         setSubmitting(false)
       }
     },
-    [selectedBranch, faceClientId, submitting]
+    [selectedBranch, faceClientId, submitting, selectedServiceId]
   )
 
   // ── Confirm ──
@@ -634,7 +634,7 @@ export default function CheckinPage() {
         setSubmitting(false)
       }
     },
-    [selectedBranch, name, phone, submitting, faceClientId, handleFaceConfirmBarber, wantsEnrollment, capturedFaceDescriptors, capturedFacePhoto]
+    [selectedBranch, name, phone, submitting, faceClientId, handleFaceConfirmBarber, wantsEnrollment, capturedFaceDescriptors, capturedFacePhoto, selectedServiceId]
   )
 
   const handleBarberClick = (barber: Staff) => {
@@ -679,7 +679,13 @@ export default function CheckinPage() {
 
   const goToBarberStep = () => {
     if (!name.trim()) return
-    goTo('service_selection')
+    // New clients: go to face enrollment first
+    if (!isReturning && !hasExistingFace) {
+      setWantsEnrollment(true)
+      goTo('face_enroll')
+    } else {
+      goTo('service_selection')
+    }
   }
 
   // ── Shared UI pieces ──
@@ -1063,7 +1069,7 @@ export default function CheckinPage() {
                 className="flex items-center gap-2 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-2 md:py-3"
               >
                 <Search className="size-4 md:size-5" />
-                <span className="text-base md:text-lg">Ya tengo turno</span>
+                <span className="text-base md:text-lg">Registrar</span>
               </button>
               <span className="text-white/20">·</span>
               <button
@@ -1260,11 +1266,7 @@ export default function CheckinPage() {
           className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
-            if (wantsEnrollment && capturedFaceDescriptors.length === 0) {
-              goTo('no_match_options')
-            } else {
-              goTo('home')
-            }
+            goTo('name')
           })}
 
           <FaceEnrollment
@@ -1275,15 +1277,11 @@ export default function CheckinPage() {
             onCapture={(descriptors, photo) => {
               setCapturedFaceDescriptors(descriptors)
               setCapturedFacePhoto(photo)
-              goTo('phone')
+              goTo('service_selection')
             }}
-            onComplete={reset}
+            onComplete={() => goTo('service_selection')}
             onSkip={() => {
-              if (wantsEnrollment && capturedFaceDescriptors.length === 0) {
-                goTo('no_match_options')
-              } else {
-                reset()
-              }
+              goTo('service_selection')
             }}
           />
         </div>
@@ -1331,17 +1329,6 @@ export default function CheckinPage() {
               </button>
             ))}
           </div>
-
-          <Button
-            variant="ghost"
-            onClick={() => {
-              setSelectedServiceId(null)
-              goTo('barber')
-            }}
-            className="mt-4 text-muted-foreground hover:text-white"
-          >
-            Omitir o no estoy seguro
-          </Button>
         </div>
       )}
 

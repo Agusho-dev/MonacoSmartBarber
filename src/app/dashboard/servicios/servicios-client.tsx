@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Power, Trash2, Tag } from 'lucide-react'
+import { Plus, Pencil, Power, Trash2, Tag, ChevronDown, ChevronUp, Percent } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
 import { formatCurrency } from '@/lib/format'
@@ -10,7 +10,7 @@ import {
   upsertServiceTag,
   deleteServiceTag,
 } from '@/lib/actions/tags'
-import type { Service, Branch, ServiceTag, ServiceAvailability } from '@/lib/types/database'
+import type { Service, Branch, ServiceTag, ServiceAvailability, Staff, StaffServiceCommission } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -45,10 +45,19 @@ interface ServiceWithBranch extends Service {
   branch?: Branch | null
 }
 
+interface BarberMinimal {
+  id: string
+  full_name: string
+  branch_id: string | null
+  is_active: boolean
+}
+
 interface Props {
   services: ServiceWithBranch[]
   branches: Branch[]
   tags: ServiceTag[]
+  barbers: BarberMinimal[]
+  commissions: StaffServiceCommission[]
 }
 
 const emptyForm = {
@@ -57,9 +66,10 @@ const emptyForm = {
   duration_minutes: '',
   branch_id: '',
   availability: 'both' as ServiceAvailability,
+  default_commission_pct: '',
 }
 
-export function ServiciosClient({ services, branches, tags }: Props) {
+export function ServiciosClient({ services, branches, tags, barbers, commissions }: Props) {
   const router = useRouter()
   const supabase = createClient()
   const { selectedBranchId } = useBranchStore()
@@ -76,6 +86,10 @@ export function ServiciosClient({ services, branches, tags }: Props) {
   const [tagName, setTagName] = useState('')
   const [tagSaving, setTagSaving] = useState(false)
 
+  // Commission overrides state
+  const [showOverrides, setShowOverrides] = useState(false)
+  const [barberOverrides, setBarberOverrides] = useState<Record<string, string>>({})
+
   const filtered = selectedBranchId
     ? services.filter(
       (s) => s.branch_id === selectedBranchId || s.branch_id === null
@@ -89,6 +103,8 @@ export function ServiciosClient({ services, branches, tags }: Props) {
       ...emptyForm,
       branch_id: selectedBranchId ?? '',
     })
+    setBarberOverrides({})
+    setShowOverrides(false)
     setDialogOpen(true)
   }
 
@@ -102,7 +118,19 @@ export function ServiciosClient({ services, branches, tags }: Props) {
         : '',
       branch_id: service.branch_id ?? '',
       availability: service.availability ?? 'both',
+      default_commission_pct: service.default_commission_pct
+        ? String(service.default_commission_pct)
+        : '',
     })
+    // Load existing barber overrides for this service
+    const overrides: Record<string, string> = {}
+    commissions
+      .filter((c) => c.service_id === service.id)
+      .forEach((c) => {
+        overrides[c.staff_id] = String(c.commission_pct)
+      })
+    setBarberOverrides(overrides)
+    setShowOverrides(Object.keys(overrides).length > 0)
     setDialogOpen(true)
   }
 
@@ -116,12 +144,44 @@ export function ServiciosClient({ services, branches, tags }: Props) {
         : null,
       branch_id: form.branch_id || null,
       availability: form.availability,
+      default_commission_pct: form.default_commission_pct
+        ? Number(form.default_commission_pct)
+        : 0,
     }
+
+    let serviceId = editingId
 
     if (editingId) {
       await supabase.from('services').update(data).eq('id', editingId)
     } else {
-      await supabase.from('services').insert(data)
+      const { data: inserted } = await supabase
+        .from('services')
+        .insert(data)
+        .select('id')
+        .single()
+      if (inserted) serviceId = inserted.id
+    }
+
+    // Save barber commission overrides
+    if (serviceId) {
+      // Delete existing overrides for this service
+      await supabase
+        .from('staff_service_commissions')
+        .delete()
+        .eq('service_id', serviceId)
+
+      // Insert non-empty overrides
+      const rows = Object.entries(barberOverrides)
+        .filter(([, val]) => val !== '' && Number(val) >= 0)
+        .map(([staffId, val]) => ({
+          staff_id: staffId,
+          service_id: serviceId!,
+          commission_pct: Number(val),
+        }))
+
+      if (rows.length > 0) {
+        await supabase.from('staff_service_commissions').insert(rows)
+      }
     }
 
     setSaving(false)
@@ -196,6 +256,7 @@ export function ServiciosClient({ services, branches, tags }: Props) {
               <TableRow>
                 <TableHead>Nombre</TableHead>
                 <TableHead className="text-right">Precio</TableHead>
+                <TableHead className="text-right">Comisión %</TableHead>
                 <TableHead className="text-right">Duración</TableHead>
                 <TableHead>Disponibilidad</TableHead>
                 <TableHead>Sucursal</TableHead>
@@ -219,6 +280,11 @@ export function ServiciosClient({ services, branches, tags }: Props) {
                   <TableCell className="font-medium">{service.name}</TableCell>
                   <TableCell className="text-right">
                     {formatCurrency(service.price)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {service.default_commission_pct > 0
+                      ? `${service.default_commission_pct}%`
+                      : <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell className="text-right">
                     {service.duration_minutes
@@ -405,6 +471,75 @@ export function ServiciosClient({ services, branches, tags }: Props) {
                 </Select>
               </div>
             </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Comisión barbero % (default)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={form.default_commission_pct}
+                  onChange={(e) =>
+                    setForm({ ...form, default_commission_pct: e.target.value })
+                  }
+                  placeholder="Ej: 40"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Se usa si no hay un override por barbero
+                </p>
+              </div>
+            </div>
+
+            {/* Per-barber commission overrides */}
+            {barbers.length > 0 && (
+              <div className="rounded-lg border">
+                <button
+                  type="button"
+                  onClick={() => setShowOverrides(!showOverrides)}
+                  className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/50 transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    <Percent className="size-4" />
+                    Comisiones por barbero
+                    {Object.values(barberOverrides).filter(v => v !== '').length > 0 && (
+                      <Badge variant="secondary" className="text-xs">
+                        {Object.values(barberOverrides).filter(v => v !== '').length} personalizadas
+                      </Badge>
+                    )}
+                  </span>
+                  {showOverrides ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+                </button>
+                {showOverrides && (
+                  <div className="border-t px-4 py-3 space-y-2">
+                    <p className="text-xs text-muted-foreground mb-3">
+                      Dejá vacío para usar la comisión default del servicio
+                    </p>
+                    {barbers.map((barber) => (
+                      <div key={barber.id} className="flex items-center gap-3">
+                        <span className="text-sm flex-1 truncate">{barber.full_name}</span>
+                        <div className="flex items-center gap-1 w-24">
+                          <Input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={barberOverrides[barber.id] ?? ''}
+                            onChange={(e) =>
+                              setBarberOverrides({
+                                ...barberOverrides,
+                                [barber.id]: e.target.value,
+                              })
+                            }
+                            placeholder="—"
+                            className="h-8 text-sm"
+                          />
+                          <span className="text-xs text-muted-foreground">%</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <DialogFooter>
