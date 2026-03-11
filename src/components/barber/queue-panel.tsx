@@ -134,7 +134,7 @@ export function QueuePanel({
   const fetchQueue = useCallback(async () => {
     const { data } = await supabase
       .from('queue_entries')
-      .select('*, client:clients(*, loyalty:client_loyalty_state(total_visits)), barber:staff(*)')
+      .select('*, client:clients(*, loyalty:client_loyalty_state(total_visits)), barber:staff(*), service:services(*)')
       .eq('branch_id', session.branch_id)
       .in('status', ['waiting', 'in_progress'])
       .order('position')
@@ -810,6 +810,11 @@ export function QueuePanel({
                       <CardTitle className="text-2xl md:text-3xl">
                         {myActiveEntry.client?.name ?? 'Cliente'}
                       </CardTitle>
+                      {myActiveEntry.service && (
+                        <p className="mt-1 font-medium text-primary">
+                          {myActiveEntry.service.name}
+                        </p>
+                      )}
                       <p className="mt-1.5 text-base text-muted-foreground">
                         {myActiveEntry.client?.phone}
                       </p>

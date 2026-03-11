@@ -123,6 +123,7 @@ export function CompleteServiceDialog({
       .from('services')
       .select('*')
       .eq('is_active', true)
+      .in('availability', ['upsell', 'both'])
       .or(`branch_id.eq.${branchId},branch_id.is.null`)
       .then(({ data }) => {
         if (data) setServices(data as Service[])
@@ -221,6 +222,18 @@ export function CompleteServiceDialog({
     onClose()
   }
 
+  const mainService = selectedService === entry?.service_id && entry?.service
+    ? entry.service
+    : services.find((s) => s.id === selectedService)
+
+  const mainServicePrice = mainService?.price ?? 0
+
+  const extrasPrice = extraServices.reduce((total, id) => {
+    return total + (services.find(s => s.id === id)?.price ?? 0)
+  }, 0)
+
+  const totalPrice = mainServicePrice + extrasPrice
+
   return (
     <Dialog open={!!entry} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
@@ -262,10 +275,10 @@ export function CompleteServiceDialog({
                   {entry?.service_id ? (
                     <div className="flex items-center gap-2 rounded-lg border bg-muted/50 px-4 py-3">
                       <span className="text-base font-medium">
-                        {services.find((s) => s.id === selectedService)?.name ?? 'Servicio seleccionado'}
+                        {mainService?.name ?? 'Servicio seleccionado'}
                       </span>
                       <span className="text-sm text-muted-foreground">
-                        — ${services.find((s) => s.id === selectedService)?.price ?? 0}
+                        — ${mainServicePrice}
                       </span>
                       <Badge variant="outline" className="ml-auto text-xs">
                         Pre-seleccionado
@@ -412,6 +425,12 @@ export function CompleteServiceDialog({
                 />
               </div>
 
+              {/* Subtotal */}
+              <div className="flex justify-between items-center py-2 px-1 border-t mt-4">
+                <span className="font-semibold text-lg">Subtotal</span>
+                <span className="font-bold text-xl">${totalPrice}</span>
+              </div>
+
               <Button
                 className="h-14 w-full text-lg"
                 size="lg"
@@ -423,6 +442,12 @@ export function CompleteServiceDialog({
             </div>
           ) : (
             <div className="space-y-6">
+
+              <div className="pb-4 border-b text-center mb-6 mt-[-1rem]">
+                <p className="text-sm font-medium text-muted-foreground mb-1">Monto Total</p>
+                <p className="text-5xl font-black">${totalPrice}</p>
+              </div>
+
               {/* Payment method */}
               <div>
                 <p className="mb-3 text-sm font-medium">Método de pago</p>

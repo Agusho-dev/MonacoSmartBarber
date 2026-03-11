@@ -201,6 +201,7 @@ export default function CheckinPage() {
           .from('services')
           .select('*')
           .eq('is_active', true)
+          .in('availability', ['checkin', 'both'])
           .or(`branch_id.eq.${branchId},branch_id.is.null`)
           .order('name'),
         supabase
