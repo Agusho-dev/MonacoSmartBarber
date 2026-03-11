@@ -26,13 +26,15 @@ import {
   Keyboard,
   Settings2,
 } from 'lucide-react'
-import type { Branch, Staff, QueueEntry, Visit, Service } from '@/lib/types/database'
+import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule } from '@/lib/types/database'
 import {
   buildBarberAvgMinutes,
   getBarberStats,
   formatWaitTime,
   statusConfig,
   getLoadColor,
+  assignDynamicBarbers,
+  isBarberBlockedByShiftEnd,
 } from '@/lib/barber-utils'
 import { FaceCamera } from '@/components/checkin/face-camera'
 import { FaceEnrollment } from '@/components/checkin/face-enrollment'
@@ -91,6 +93,13 @@ export default function CheckinPage() {
   const [availableTodayIds, setAvailableTodayIds] = useState<Set<string>>(new Set())
   const [branchIsOpen, setBranchIsOpen] = useState(true)
   const [branchHours, setBranchHours] = useState<{ opens: string; closes: string } | null>(null)
+  const [schedules, setSchedules] = useState<StaffSchedule[]>([])
+  const [now, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [])
 
   const [queueEntryId, setQueueEntryId] = useState<string | null>(null)
   const [changingBarberInSuccess, setChangingBarberInSuccess] = useState(false)
@@ -157,7 +166,7 @@ export default function CheckinPage() {
       const supabase = createClient()
       setLoadingBarbers(true)
 
-      const [staffRes, queueRes, visitsRes, availableRes, openRes, attendanceRes, servicesRes] = await Promise.all([
+      const [staffRes, queueRes, visitsRes, availableRes, openRes, attendanceRes, servicesRes, schedulesRes] = await Promise.all([
         supabase
           .from('staff')
           .select('*')
@@ -190,6 +199,11 @@ export default function CheckinPage() {
           .eq('is_active', true)
           .or(`branch_id.eq.${branchId},branch_id.is.null`)
           .order('name'),
+        supabase
+          .from('staff_schedules')
+          .select('*')
+          .eq('day_of_week', new Date().getDay())
+          .eq('is_active', true),
       ])
 
       let branchOpen = true
@@ -235,6 +249,9 @@ export default function CheckinPage() {
       }
       if (servicesRes?.data) {
         setServices(servicesRes.data as Service[])
+      }
+      if (schedulesRes?.data) {
+        setSchedules(schedulesRes.data as StaffSchedule[])
       }
       setLoadingBarbers(false)
     },
@@ -435,34 +452,44 @@ export default function CheckinPage() {
     setPhone((p) => p.slice(0, -1))
   }
 
+  const dynamicEntries = useMemo(() => {
+    return assignDynamicBarbers(queueEntries, barbers, schedules, now)
+  }, [queueEntries, barbers, schedules, now])
+
   const maxLoad = useMemo(
     () =>
       Math.max(
         1,
-        ...barbers.map((b) => getBarberStats(b, queueEntries, barberAvgMinutes).totalLoad)
+        ...barbers.map((b) => getBarberStats(b, dynamicEntries, barberAvgMinutes).totalLoad)
       ),
-    [barbers, queueEntries, barberAvgMinutes]
+    [barbers, dynamicEntries, barberAvgMinutes]
   )
 
   const minWaitBarber = useMemo(() => {
-    const active = barbers
+    const active = barbers.filter(b => !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now))
     if (active.length === 0) return null
-    let best: Staff | null = null
-    let bestEta = Infinity
-    for (const b of active) {
-      const stats = getBarberStats(b, queueEntries, barberAvgMinutes)
-      if (stats.eta < bestEta) {
-        bestEta = stats.eta
-        best = b
+    let best = active[0]
+    let bestLoad = getBarberStats(active[0], dynamicEntries, barberAvgMinutes).totalLoad
+    for (let i = 1; i < active.length; i++) {
+      const load = getBarberStats(active[i], dynamicEntries, barberAvgMinutes).totalLoad
+      if (load < bestLoad) {
+        bestLoad = load
+        best = active[i]
+      } else if (load === bestLoad) {
+        const nameCmp = (active[i].full_name || '').localeCompare(best.full_name || '')
+        if (nameCmp < 0 || (nameCmp === 0 && active[i].id < best.id)) {
+          best = active[i]
+          bestLoad = load
+        }
       }
     }
     return best
-  }, [barbers, queueEntries, barberAvgMinutes])
+  }, [barbers, dynamicEntries, schedules, barberAvgMinutes, now])
 
   const minWaitEta = useMemo(() => {
     if (!minWaitBarber) return 0
-    return getBarberStats(minWaitBarber, queueEntries, barberAvgMinutes).eta
-  }, [minWaitBarber, queueEntries, barberAvgMinutes])
+    return getBarberStats(minWaitBarber, dynamicEntries, barberAvgMinutes).eta
+  }, [minWaitBarber, dynamicEntries, barberAvgMinutes])
 
   // ── Face ID handlers ──
 
@@ -694,7 +721,7 @@ export default function CheckinPage() {
     onSelect: (barberId: string) => void,
     showExpand = true
   ) => {
-    const stats = getBarberStats(barber, queueEntries, barberAvgMinutes)
+    const stats = getBarberStats(barber, dynamicEntries, barberAvgMinutes)
     const cfg = statusConfig[stats.status]
     const loadPct = Math.min(100, (stats.totalLoad / Math.max(maxLoad, 4)) * 100)
     const isExpanded = showExpand
@@ -858,7 +885,9 @@ export default function CheckinPage() {
       <div className="w-full h-px bg-white/8" />
 
       <div className="grid gap-3">
-        {barbers.map((barber) => renderBarberCard(barber, onSelect, showExpand))}
+        {barbers
+          .filter(b => !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now))
+          .map((barber) => renderBarberCard(barber, onSelect, showExpand))}
       </div>
     </div>
   )

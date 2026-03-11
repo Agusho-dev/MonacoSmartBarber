@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { cancelQueueEntry, reassignBarber } from '@/lib/actions/queue'
 import { useBranchStore } from '@/stores/branch-store'
-import type { QueueEntry, StaffStatus } from '@/lib/types/database'
+import type { QueueEntry, StaffStatus, StaffSchedule, Staff } from '@/lib/types/database'
+import { assignDynamicBarbers } from '@/lib/barber-utils'
 import {
   Card,
   CardContent,
@@ -62,6 +63,7 @@ export function ColaClient({
   const [entries, setEntries] = useState<QueueEntry[]>(initialEntries)
   const [liveBarbers, setLiveBarbers] = useState<BarberRow[]>(barbers)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [now, setNow] = useState(Date.now())
 
   const supabase = useMemo(() => createClient(), [])
@@ -88,9 +90,20 @@ export function ColaClient({
     if (data) setLiveBarbers(data as BarberRow[])
   }, [supabase])
 
+  const fetchSchedules = useCallback(async () => {
+    const todayDow = new Date().getDay()
+    const { data } = await supabase
+      .from('staff_schedules')
+      .select('*')
+      .eq('day_of_week', todayDow)
+      .eq('is_active', true)
+    if (data) setSchedules(data as StaffSchedule[])
+  }, [supabase])
+
   useEffect(() => {
     fetchQueue()
     fetchBarbers()
+    fetchSchedules()
 
     const channel = supabase
       .channel('admin-queue')
@@ -117,17 +130,21 @@ export function ColaClient({
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, fetchQueue, fetchBarbers])
+  }, [supabase, fetchQueue, fetchBarbers, fetchSchedules])
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(interval)
   }, [])
 
+  const dynamicEntries = useMemo(() => {
+    return assignDynamicBarbers(entries, liveBarbers as unknown as Staff[], schedules, now)
+  }, [entries, liveBarbers, schedules, now])
+
   // Filter by selected branch
   const filteredEntries = selectedBranchId
-    ? entries.filter((e) => e.branch_id === selectedBranchId)
-    : entries
+    ? dynamicEntries.filter((e) => e.branch_id === selectedBranchId)
+    : dynamicEntries
 
   const waitingEntries = filteredEntries.filter((e) => e.status === 'waiting')
   const inProgressEntries = filteredEntries.filter(

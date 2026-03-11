@@ -14,7 +14,6 @@ import { cn } from '@/lib/utils'
 
 const navItems = [
     { href: '/barbero/cola', label: 'Cola', icon: ListOrdered },
-    { href: '/barbero/rendimiento', label: 'Stats', icon: TrendingUp },
     { href: '/barbero/metas', label: 'Metas', icon: Target },
     { href: '/barbero/asistencia', label: 'Asistencia', icon: ClipboardCheck },
     { href: '/barbero/historial', label: 'Historial', icon: History },

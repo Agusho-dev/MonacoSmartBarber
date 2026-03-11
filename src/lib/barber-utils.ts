@@ -1,5 +1,4 @@
-import type { Staff, QueueEntry, Visit } from '@/lib/types/database'
-
+import type { Staff, QueueEntry, Visit, StaffSchedule } from '@/lib/types/database'
 export function buildBarberAvgMinutes(
   visits: Pick<Visit, 'barber_id' | 'started_at' | 'completed_at'>[],
   fallback: number
@@ -93,4 +92,99 @@ export function getLoadColor(totalLoad: number): string {
   if (totalLoad === 0) return 'bg-emerald-500'
   if (totalLoad <= 2) return 'bg-amber-500'
   return 'bg-red-500'
+}
+
+export type DynamicQueueEntry = QueueEntry & { _is_dynamically_assigned?: boolean }
+
+export function isBarberBlockedByShiftEnd(
+  barber: Staff,
+  entries: QueueEntry[],
+  schedules: StaffSchedule[],
+  currentTime: number
+): boolean {
+  const hasActiveService = entries.some(
+    (e) => e.barber_id === barber.id && e.status === 'in_progress'
+  )
+
+  if (!hasActiveService) return false
+
+  const today = new Date(currentTime)
+
+  const barberSchedule = schedules.find(s => s.staff_id === barber.id)
+  if (!barberSchedule) return false
+
+  const [hours, minutes] = barberSchedule.end_time.split(':').map(Number)
+  const shiftEnd = new Date(today)
+  shiftEnd.setHours(hours, minutes, 0, 0)
+
+  if (shiftEnd.getTime() < currentTime - 12 * 60 * 60 * 1000) {
+    shiftEnd.setDate(shiftEnd.getDate() + 1)
+  }
+
+  const msRemaining = shiftEnd.getTime() - currentTime
+
+  return msRemaining <= 35 * 60 * 1000
+}
+
+export function assignDynamicBarbers(
+  entries: QueueEntry[],
+  barbers: Staff[],
+  schedules: StaffSchedule[],
+  currentTime: number
+): DynamicQueueEntry[] {
+  const result: DynamicQueueEntry[] = []
+
+  const barberLoad = new Map<string, number>()
+  const unassigned: QueueEntry[] = []
+
+  for (const entry of entries) {
+    if (entry.status === 'waiting' && !entry.barber_id) {
+      unassigned.push(entry)
+    } else {
+      result.push(entry)
+      if (entry.barber_id && (entry.status === 'waiting' || entry.status === 'in_progress')) {
+        barberLoad.set(entry.barber_id, (barberLoad.get(entry.barber_id) || 0) + 1)
+      }
+    }
+  }
+
+  for (const b of barbers) {
+    if (!barberLoad.has(b.id)) {
+      barberLoad.set(b.id, 0)
+    }
+  }
+
+  unassigned.sort((a, b) => a.position - b.position)
+
+  for (const u of unassigned) {
+    const eligibleBarbers = barbers.filter(b => !isBarberBlockedByShiftEnd(b, result, schedules, currentTime))
+
+    if (eligibleBarbers.length === 0) {
+      result.push(u)
+      continue
+    }
+
+    eligibleBarbers.sort((a, b) => {
+      const loadA = barberLoad.get(a.id) || 0
+      const loadB = barberLoad.get(b.id) || 0
+      if (loadA !== loadB) return loadA - loadB
+
+      const nameCmp = (a.full_name || '').localeCompare(b.full_name || '')
+      if (nameCmp !== 0) return nameCmp
+      return a.id.localeCompare(b.id)
+    })
+
+    const selectedBarber = eligibleBarbers[0]
+
+    result.push({
+      ...u,
+      barber_id: selectedBarber.id,
+      barber: selectedBarber,
+      _is_dynamically_assigned: true
+    })
+
+    barberLoad.set(selectedBarber.id, (barberLoad.get(selectedBarber.id) || 0) + 1)
+  }
+
+  return result
 }

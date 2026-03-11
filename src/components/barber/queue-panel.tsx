@@ -15,7 +15,8 @@ import {
   getPendingBreakRequests,
 } from '@/lib/actions/break-requests'
 import { formatCurrency } from '@/lib/format'
-import type { QueueEntry, Staff, Client, BreakConfig } from '@/lib/types/database'
+import type { QueueEntry, Staff, Client, BreakConfig, StaffSchedule } from '@/lib/types/database'
+import { assignDynamicBarbers } from '@/lib/barber-utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -109,6 +110,8 @@ export function QueuePanel({
   const [now, setNow] = useState(Date.now())
   const [dayStats, setDayStats] = useState({ servicesCount: 0, revenue: 0 })
   const [otherBarbers, setOtherBarbers] = useState<Staff[]>([])
+  const [allBarbers, setAllBarbers] = useState<Staff[]>([])
+  const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [reassigningEntryId, setReassigningEntryId] = useState<string | null>(null)
   const [profileClient, setProfileClient] = useState<Client | null>(null)
   // Break request state
@@ -145,17 +148,30 @@ export function QueuePanel({
     setDayStats(stats)
   }, [session.staff_id, session.branch_id])
 
-  const fetchOtherBarbers = useCallback(async () => {
+  const fetchBarbersAndSchedules = useCallback(async () => {
     const { data } = await supabase
       .from('staff')
       .select('*')
       .eq('branch_id', session.branch_id)
       .eq('role', 'barber')
       .eq('is_active', true)
-      .neq('id', session.staff_id)
       .order('full_name')
 
-    if (data) setOtherBarbers(data as Staff[])
+    if (data) {
+      setAllBarbers(data as Staff[])
+      setOtherBarbers((data as Staff[]).filter(b => b.id !== session.staff_id))
+    }
+
+    const todayDow = new Date().getDay()
+    const { data: schedData } = await supabase
+      .from('staff_schedules')
+      .select('*')
+      .eq('day_of_week', todayDow)
+      .eq('is_active', true)
+
+    if (schedData) {
+      setSchedules(schedData as StaffSchedule[])
+    }
   }, [supabase, session.branch_id, session.staff_id])
 
   const fetchBreakRequestStatus = useCallback(async () => {
@@ -183,7 +199,7 @@ export function QueuePanel({
   useEffect(() => {
     fetchQueue()
     refreshStats()
-    fetchOtherBarbers()
+    fetchBarbersAndSchedules()
     fetchBreakRequestStatus()
     fetchPendingBreakRequests()
 
@@ -211,7 +227,7 @@ export function QueuePanel({
           filter: `branch_id=eq.${session.branch_id}`,
         },
         () => {
-          fetchOtherBarbers()
+          fetchBarbersAndSchedules()
         }
       )
       .on(
@@ -232,33 +248,37 @@ export function QueuePanel({
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, session.branch_id, session.staff_id, fetchQueue, refreshStats, fetchOtherBarbers, fetchBreakRequestStatus, fetchPendingBreakRequests])
+  }, [supabase, session.branch_id, session.staff_id, fetchQueue, refreshStats, fetchBarbersAndSchedules, fetchBreakRequestStatus, fetchPendingBreakRequests])
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(interval)
   }, [])
 
+  const dynamicEntries = useMemo(() => {
+    return assignDynamicBarbers(entries, allBarbers, schedules, now)
+  }, [entries, allBarbers, schedules, now])
+
   // My active break (ghost entry that is in_progress)
-  const myActiveBreak = entries.find(
+  const myActiveBreak = dynamicEntries.find(
     (e) => e.barber_id === session.staff_id && e.status === 'in_progress' && e.is_break
   )
 
-  const myActiveEntry = entries.find(
+  const myActiveEntry = dynamicEntries.find(
     (e) => e.barber_id === session.staff_id && e.status === 'in_progress' && !e.is_break
   )
 
   // "Mi cola": clients that have no barber assigned or are assigned to me (including ghost breaks)
-  const myWaitingEntries = entries.filter(
+  const myWaitingEntries = dynamicEntries.filter(
     (e) =>
       e.status === 'waiting' &&
       (!e.barber_id || e.barber_id === session.staff_id)
   )
 
   // "Cola general": ALL waiting clients
-  const allWaitingEntries = entries.filter((e) => e.status === 'waiting')
+  const allWaitingEntries = dynamicEntries.filter((e) => e.status === 'waiting')
 
-  const otherInProgress = entries.filter(
+  const otherInProgress = dynamicEntries.filter(
     (e) => e.status === 'in_progress' && e.barber_id !== session.staff_id && !e.is_break
   )
 
@@ -663,18 +683,6 @@ export function QueuePanel({
         </div>
       </header>
 
-      {/* Day stats bar */}
-      <div className="flex items-center gap-4 md:gap-6 border-b px-3 py-2 md:px-5 bg-muted/20">
-        <div className="flex items-center gap-1.5 md:gap-2 text-sm">
-          <Scissors className="size-3.5 text-muted-foreground" />
-          <span className="text-muted-foreground">Hoy:</span>
-          <span className="font-semibold">{dayStats.servicesCount} serv.</span>
-        </div>
-        <div className="flex items-center gap-1.5 md:gap-2 text-sm">
-          <DollarSign className="size-3.5 text-muted-foreground" />
-          <span className="font-semibold">{formatCurrency(dayStats.revenue)}</span>
-        </div>
-      </div>
 
       <main className="flex flex-1 flex-col overflow-hidden sm:flex-row">
         {/* Queue list */}
