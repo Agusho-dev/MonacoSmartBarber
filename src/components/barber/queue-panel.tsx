@@ -592,11 +592,10 @@ export function QueuePanel({
       </div>
     )
   }
-
   return (
-    <div className="flex h-dvh flex-col bg-background">
+    <div className="flex h-[calc(100dvh-4rem)] flex-col bg-background">
       {/* Top bar */}
-      <header className="flex items-center justify-between border-b px-4 py-3 md:px-6">
+      <header className="sticky top-0 z-20 flex items-center justify-between border-b bg-background/95 backdrop-blur px-3 py-2.5 md:px-5">
         <div className="flex items-center gap-3">
           <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <Scissors className="size-4" />
@@ -665,35 +664,31 @@ export function QueuePanel({
       </header>
 
       {/* Day stats bar */}
-      <div className="flex items-center gap-6 border-b px-4 py-2 md:px-6">
-        <div className="flex items-center gap-2 text-sm">
+      <div className="flex items-center gap-4 md:gap-6 border-b px-3 py-2 md:px-5 bg-muted/20">
+        <div className="flex items-center gap-1.5 md:gap-2 text-sm">
           <Scissors className="size-3.5 text-muted-foreground" />
           <span className="text-muted-foreground">Hoy:</span>
-          <span className="font-semibold">{dayStats.servicesCount} servicios</span>
+          <span className="font-semibold">{dayStats.servicesCount} serv.</span>
         </div>
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex items-center gap-1.5 md:gap-2 text-sm">
           <DollarSign className="size-3.5 text-muted-foreground" />
           <span className="font-semibold">{formatCurrency(dayStats.revenue)}</span>
         </div>
-        <Link href="/barbero/facturacion" className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
-          <Receipt className="size-3.5" />
-          <span className="hidden sm:inline">Ver detalle</span>
-        </Link>
       </div>
 
       <main className="flex flex-1 flex-col overflow-hidden sm:flex-row">
         {/* Queue list */}
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b sm:border-b-0 sm:border-r">
           <Tabs defaultValue="my-queue" className="flex flex-1 flex-col overflow-hidden">
-            <div className="px-4 py-3 md:px-6">
+            <div className="px-3 py-2 md:px-5">
               <TabsList className="w-full">
-                <TabsTrigger value="my-queue" className="flex-1 py-3 text-lg">
+                <TabsTrigger value="my-queue" className="flex-1 py-2 md:py-3 text-base md:text-lg">
                   Mi cola
                   <Badge variant="secondary" className="ml-2 px-2 text-base">
                     {myWaitingEntries.filter(e => !e.is_break).length}
                   </Badge>
                 </TabsTrigger>
-                <TabsTrigger value="general-queue" className="flex-1 py-3 text-lg">
+                <TabsTrigger value="general-queue" className="flex-1 py-2 md:py-3 text-base md:text-lg">
                   Cola general
                   <Badge variant="secondary" className="ml-2 px-2 text-base">
                     {allWaitingEntries.filter(e => !e.is_break).length}
@@ -746,14 +741,14 @@ export function QueuePanel({
         </section>
 
         {/* Current client / Active break */}
-        <section className="flex shrink-0 flex-col sm:w-[280px] md:w-[340px] lg:w-[420px]">
-          <div className="px-4 py-4 md:px-6">
-            <h2 className="text-xl font-semibold">
+        <section className="flex shrink-0 flex-col sm:w-[300px] md:w-[360px] lg:w-[420px]">
+          <div className="px-4 py-3 md:px-5 md:py-4">
+            <h2 className="text-lg md:text-xl font-semibold">
               {myActiveBreak ? 'En descanso' : 'Tu cliente actual'}
             </h2>
           </div>
           <Separator />
-          <div className="flex flex-1 flex-col p-4 md:p-6">
+          <div className="flex flex-1 flex-col p-3 md:p-5">
             {myActiveBreak ? (
               /* Active break panel */
               <Card className="border-amber-500/20 bg-amber-500/5">

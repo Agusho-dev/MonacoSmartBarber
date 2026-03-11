@@ -58,7 +58,7 @@ export function ClientProfileSheet({
                     </div>
 
                     <div className="pt-2">
-                        <h3 className="mb-4 text-sm font-semibold">Historial del Cliente</h3>
+                        <h3 className="mb-2 text-sm font-semibold">Historial del Cliente</h3>
                         <ClientHistory clientId={client.id} />
                     </div>
                 </div>

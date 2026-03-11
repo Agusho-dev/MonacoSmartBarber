@@ -5,27 +5,7 @@ import { revalidatePath } from 'next/cache'
 import type { StaffStatus } from '@/lib/types/database'
 
 export async function toggleBarberStatus(staffId: string) {
-  const supabase = createAdminClient()
-
-  const { data: staff } = await supabase
-    .from('staff')
-    .select('status')
-    .eq('id', staffId)
-    .single()
-
-  if (!staff) return { error: 'Barbero no encontrado' }
-
-  const newStatus: StaffStatus = staff.status === 'available' ? 'paused' : 'available'
-
-  const { error } = await supabase
-    .from('staff')
-    .update({ status: newStatus })
-    .eq('id', staffId)
-
-  if (error) return { error: 'Error al cambiar estado' }
-
-  revalidatePath('/barbero/cola')
-  return { success: true, status: newStatus }
+  return { error: 'El estado de los barberos ahora se gestiona mediante el sistema de descansos.' }
 }
 
 export async function fetchBarberDayStats(staffId: string, branchId: string) {

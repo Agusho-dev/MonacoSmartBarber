@@ -24,12 +24,11 @@ const navItems = [
 export function BarberNav() {
     const pathname = usePathname()
 
-    // Only show nav bar on the queue (attention) panel
-    if (pathname !== '/barbero/cola') return null
+    // Nav bar is persistent across all barber routes
 
     return (
         <nav className="fixed bottom-0 left-0 right-0 z-50 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 safe-area-pb">
-            <div className="flex items-center justify-around px-1 py-1">
+            <div className="flex items-center justify-around md:justify-center md:gap-8 px-2 py-2 md:py-3">
                 {navItems.map((item) => {
                     const isActive = pathname === item.href
                     return (
@@ -37,7 +36,7 @@ export function BarberNav() {
                             key={item.href}
                             href={item.href}
                             className={cn(
-                                'flex flex-col items-center gap-0.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors min-w-[3.5rem]',
+                                'flex flex-col items-center gap-1 rounded-xl px-3 py-2 text-xs font-medium transition-colors min-w-[4rem] hover:bg-muted/50',
                                 isActive
                                     ? 'text-primary'
                                     : 'text-muted-foreground hover:text-foreground'

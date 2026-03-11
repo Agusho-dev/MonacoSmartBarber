@@ -188,22 +188,20 @@ export function ColaClient({
           const activeEntry = inProgressEntries.find(
             (e) => e.barber_id === barber.id
           )
-          const isPaused = barber.status === 'paused'
+          const isPaused = false
 
           return (
             <Card key={barber.id} className="gap-0 py-0">
               <CardContent className="flex items-center gap-3 p-4">
                 <div
                   className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${isPaused
-                      ? 'bg-yellow-500/15'
-                      : activeEntry
-                        ? 'bg-primary/10'
-                        : 'bg-muted'
+                    ? 'bg-yellow-500/15'
+                    : activeEntry
+                      ? 'bg-primary/10'
+                      : 'bg-muted'
                     }`}
                 >
-                  {isPaused ? (
-                    <Pause className="size-4 text-yellow-400" />
-                  ) : activeEntry ? (
+                  {activeEntry ? (
                     <Scissors className="size-4 text-primary" />
                   ) : (
                     <CircleDot className="size-4 text-green-400" />
@@ -214,11 +212,9 @@ export function ColaClient({
                     {barber.full_name}
                   </p>
                   <p className="truncate text-xs text-muted-foreground">
-                    {isPaused
-                      ? 'En pausa'
-                      : activeEntry
-                        ? `Atendiendo a ${activeEntry.client?.name ?? 'cliente'}`
-                        : 'Disponible'}
+                    {activeEntry
+                      ? `Atendiendo a ${activeEntry.client?.name ?? 'cliente'}`
+                      : 'Disponible'}
                   </p>
                 </div>
                 {activeEntry?.started_at && (
