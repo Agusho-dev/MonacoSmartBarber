@@ -957,7 +957,7 @@ export default function CheckinPage() {
   // ── Render ──
 
   return (
-    <div className="min-h-dvh flex flex-col items-center justify-center select-none bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)]">
+    <div className="h-dvh flex flex-col items-center justify-center select-none overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)]">
       {/* ═══════════════ BRANCH SELECTION ═══════════════ */}
       {step === 'branch' && (
         <div
@@ -1020,11 +1020,11 @@ export default function CheckinPage() {
       {step === 'home' && selectedBranch && (
         <div
           key={`home-${animKey}`}
-          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center justify-center gap-6 md:gap-8 px-4 md:px-8 animate-in fade-in zoom-in-95 duration-500"
+          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center justify-center gap-4 md:gap-6 px-4 md:px-8 animate-in fade-in zoom-in-95 duration-500"
         >
-          <div className="flex flex-col items-center gap-3 md:gap-4">
-            <div className="size-20 md:size-24 rounded-[1.25rem] md:rounded-3xl overflow-hidden flex items-center justify-center">
-              <img src="/logo-monaco.webp" alt="Monaco Smart Barber" className="w-full h-full object-contain" />
+          <div className="flex flex-col items-center gap-2 md:gap-3">
+            <div className="size-16 md:size-20 rounded-[1.25rem] md:rounded-3xl overflow-hidden flex items-center justify-center">
+              <img src="/logo-monaco.png" alt="Monaco Smart Barber" className="w-full h-full object-contain" />
             </div>
             <div className="text-center">
               <h1 className="text-3xl md:text-5xl font-bold tracking-tight">
@@ -1039,14 +1039,14 @@ export default function CheckinPage() {
 
           <Button
             onClick={() => goTo('face_scan')}
-            className="w-full max-w-xs md:max-w-md h-14 md:h-20 text-xl md:text-3xl rounded-2xl md:rounded-3xl font-bold tracking-wide gap-3 md:gap-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+            className="w-full max-w-xs md:max-w-md h-12 md:h-16 text-lg md:text-2xl rounded-2xl md:rounded-3xl font-bold tracking-wide gap-3 md:gap-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
             size="lg"
           >
             <ScanFace className="size-6 md:size-9" strokeWidth={1.5} />
             INGRESAR
           </Button>
 
-          <div className="flex flex-col items-center gap-4 justify-center">
+          <div className="flex flex-col items-center gap-3 justify-center">
             <div className="flex items-center gap-6 justify-center">
               <button
                 onClick={() => goTo('phone')}
