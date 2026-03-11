@@ -66,7 +66,7 @@ export function FaceCamera({
     setState('requesting_camera')
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 1280 } },
         audio: false,
       })
       if (!mountedRef.current) {
@@ -243,7 +243,7 @@ export function FaceCamera({
       </div>
 
       {/* Camera viewport */}
-      <div className="relative w-full aspect-[4/3] rounded-3xl overflow-hidden bg-black/50 border border-white/10">
+      <div className="relative w-full aspect-[3/4] max-h-[70vh] rounded-3xl overflow-hidden bg-black/50 border border-white/10">
         <video
           ref={videoRef}
           className="absolute inset-0 w-full h-full object-cover mirror"
@@ -261,7 +261,7 @@ export function FaceCamera({
         {(state === 'scanning' || state === 'matching') && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div
-              className={`w-48 h-64 rounded-full border-2 border-dashed transition-colors duration-300 ${faceBox ? 'border-emerald-400/60' : 'border-white/20'
+              className={`w-44 h-60 md:w-52 md:h-72 rounded-full border-2 border-dashed transition-colors duration-300 ${faceBox ? 'border-emerald-400/60' : 'border-white/20'
                 }`}
             />
           </div>

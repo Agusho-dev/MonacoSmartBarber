@@ -151,7 +151,8 @@ export async function completeService(
     return { error: 'Error: visita no encontrada tras completar' }
   }
 
-  // 3. Calculate proper amount and commission from the selected service
+  // 3. Calculate proper amount and commission from the selected service(s)
+  //    Commission priority: staff_service_commissions → services.default_commission_pct → staff.commission_pct
   let amount = 0
   let commissionAmount = 0
   const allServiceIds = [
@@ -160,16 +161,43 @@ export async function completeService(
   ]
 
   if (allServiceIds.length > 0) {
+    // Fetch service prices and default commissions
     const { data: activeServices } = await supabase
       .from('services')
-      .select('id, price')
+      .select('id, price, default_commission_pct')
       .in('id', allServiceIds)
+
+    // Fetch per-barber commission overrides for these services
+    const { data: barberOverrides } = await supabase
+      .from('staff_service_commissions')
+      .select('service_id, commission_pct')
+      .eq('staff_id', visit.barber_id)
+      .in('service_id', allServiceIds)
+
+    const overrideMap = new Map<string, number>()
+    if (barberOverrides) {
+      for (const o of barberOverrides) {
+        overrideMap.set(o.service_id, Number(o.commission_pct))
+      }
+    }
 
     if (activeServices) {
       for (const s of activeServices) {
-        amount += Number(s.price)
+        const price = Number(s.price)
+        amount += price
+
+        // Resolve commission: barber override → service default → staff global
+        let commPct: number
+        if (overrideMap.has(s.id)) {
+          commPct = overrideMap.get(s.id)!
+        } else if (Number(s.default_commission_pct) > 0) {
+          commPct = Number(s.default_commission_pct)
+        } else {
+          commPct = Number(visit.commission_pct)
+        }
+
+        commissionAmount += price * (commPct / 100)
       }
-      commissionAmount = amount * (Number(visit.commission_pct) / 100)
     }
   }
 

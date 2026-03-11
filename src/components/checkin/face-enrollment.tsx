@@ -60,7 +60,7 @@ export function FaceEnrollment({
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 1280 } },
           audio: false,
         })
         if (cancelled) {
@@ -216,7 +216,7 @@ export function FaceEnrollment({
       </div>
 
       {/* Camera viewport */}
-      <div className="relative w-full aspect-[4/3] rounded-3xl overflow-hidden bg-black/50 border border-white/10">
+      <div className="relative w-full aspect-[3/4] max-h-[70vh] rounded-3xl overflow-hidden bg-black/50 border border-white/10">
         <video
           ref={videoRef}
           className="absolute inset-0 w-full h-full object-cover"

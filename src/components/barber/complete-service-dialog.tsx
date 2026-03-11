@@ -253,22 +253,39 @@ export function CompleteServiceDialog({
               {/* Service */}
               {services.length > 0 && (
                 <div>
+                  {/* Service label */}
                   <p className="mb-2 text-sm font-medium">
                     Servicio principal{' '}
-                    <span className="text-muted-foreground">(opcional)</span>
+                    {!entry?.service_id && <span className="text-muted-foreground">(opcional)</span>}
                   </p>
-                  <Select value={selectedService} onValueChange={setSelectedService}>
-                    <SelectTrigger className="h-14 w-full text-lg">
-                      <SelectValue placeholder="Seleccionar servicio principal" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {services.map((service) => (
-                        <SelectItem key={service.id} value={service.id}>
-                          {service.name} — ${service.price}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {/* Locked service from terminal */}
+                  {entry?.service_id ? (
+                    <div className="flex items-center gap-2 rounded-lg border bg-muted/50 px-4 py-3">
+                      <span className="text-base font-medium">
+                        {services.find((s) => s.id === selectedService)?.name ?? 'Servicio seleccionado'}
+                      </span>
+                      <span className="text-sm text-muted-foreground">
+                        — ${services.find((s) => s.id === selectedService)?.price ?? 0}
+                      </span>
+                      <Badge variant="outline" className="ml-auto text-xs">
+                        Pre-seleccionado
+                      </Badge>
+                    </div>
+                  ) : (
+                    /* Editable dropdown when no service was pre-selected */
+                    <Select value={selectedService} onValueChange={setSelectedService}>
+                      <SelectTrigger className="h-14 w-full text-lg">
+                        <SelectValue placeholder="Seleccionar servicio principal" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {services.map((service) => (
+                          <SelectItem key={service.id} value={service.id}>
+                            {service.name} — ${service.price}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               )}
 
@@ -486,6 +503,6 @@ export function CompleteServiceDialog({
           )}
         </>
       </DialogContent>
-    </Dialog>
+    </Dialog >
   )
 }
