@@ -592,9 +592,8 @@ export function QueuePanel({
       </div>
     )
   }
-
   return (
-    <div className="flex h-dvh flex-col bg-background">
+    <div className="flex h-[calc(100dvh-4rem)] flex-col bg-background">
       {/* Top bar */}
       <header className="sticky top-0 z-20 flex items-center justify-between border-b bg-background/95 backdrop-blur px-3 py-2.5 md:px-5">
         <div className="flex items-center gap-3">
