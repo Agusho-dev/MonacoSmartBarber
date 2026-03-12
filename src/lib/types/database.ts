@@ -185,6 +185,7 @@ export interface QueueEntry {
   position: number
   reward_claimed: boolean
   is_break: boolean
+  is_dynamic: boolean
   break_request_id: string | null
   checked_in_at: string
   started_at: string | null
