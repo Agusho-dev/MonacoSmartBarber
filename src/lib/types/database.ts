@@ -284,6 +284,7 @@ export interface AppSettings {
   business_hours_open: string
   business_hours_close: string
   business_days: number[]
+  shift_end_margin_minutes: number
   updated_at: string
 }
 

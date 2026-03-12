@@ -136,6 +136,7 @@ export function QueuePanel({
   const [pendingBreakRequests, setPendingBreakRequests] = useState<BreakRequestRow[]>([])
   const [approveLoading, setApproveLoading] = useState<string | null>(null)
   const [approveCutsInputs, setApproveCutsInputs] = useState<Record<string, string>>({})
+  const [shiftEndMargin, setShiftEndMargin] = useState(35)
 
   const supabase = useMemo(() => createClient(), [])
   const canManageBreaks = session.role === 'admin' || session.role === 'owner' || session.permissions?.['breaks.grant'] === true
@@ -158,28 +159,39 @@ export function QueuePanel({
   }, [session.staff_id, session.branch_id])
 
   const fetchBarbersAndSchedules = useCallback(async () => {
-    const { data } = await supabase
-      .from('staff')
-      .select('*')
-      .eq('branch_id', session.branch_id)
-      .eq('role', 'barber')
-      .eq('is_active', true)
-      .order('full_name')
+    const [barbersRes, schedRes, settingsRes] = await Promise.all([
+      supabase
+        .from('staff')
+        .select('*')
+        .eq('branch_id', session.branch_id)
+        .eq('role', 'barber')
+        .eq('is_active', true)
+        .order('full_name'),
+      supabase
+        .from('staff_schedules')
+        .select('*')
+        .eq('day_of_week', new Date().getDay())
+        .eq('is_active', true),
+      supabase
+        .from('app_settings')
+        .select('shift_end_margin_minutes')
+        .maybeSingle(),
+    ])
 
-    if (data) {
-      setAllBarbers(data as Staff[])
-      setOtherBarbers((data as Staff[]).filter(b => b.id !== session.staff_id))
+    if (barbersRes.data) {
+      setAllBarbers(barbersRes.data as Staff[])
+      setOtherBarbers((barbersRes.data as Staff[]).filter(b => b.id !== session.staff_id))
     }
 
-    const todayDow = new Date().getDay()
-    const { data: schedData } = await supabase
-      .from('staff_schedules')
-      .select('*')
-      .eq('day_of_week', todayDow)
-      .eq('is_active', true)
+    if (schedRes.data) {
+      setSchedules(schedRes.data as StaffSchedule[])
+    }
 
-    if (schedData) {
-      setSchedules(schedData as StaffSchedule[])
+    if (settingsRes.data) {
+      const margin = (settingsRes.data as { shift_end_margin_minutes?: number }).shift_end_margin_minutes
+      if (typeof margin === 'number' && margin >= 0) {
+        setShiftEndMargin(margin)
+      }
     }
   }, [supabase, session.branch_id, session.staff_id])
 
@@ -266,8 +278,8 @@ export function QueuePanel({
   }, [])
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(entries, allBarbers, schedules, now)
-  }, [entries, allBarbers, schedules, now])
+    return assignDynamicBarbers(entries, allBarbers, schedules, now, shiftEndMargin)
+  }, [entries, allBarbers, schedules, now, shiftEndMargin])
 
   // My active break (ghost entry that is in_progress)
   const myActiveBreak = dynamicEntries.find(

@@ -65,6 +65,7 @@ export function ColaClient({
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [now, setNow] = useState(Date.now())
+  const [shiftEndMargin, setShiftEndMargin] = useState(35)
 
   const supabase = useMemo(() => createClient(), [])
 
@@ -91,13 +92,22 @@ export function ColaClient({
   }, [supabase])
 
   const fetchSchedules = useCallback(async () => {
-    const todayDow = new Date().getDay()
-    const { data } = await supabase
-      .from('staff_schedules')
-      .select('*')
-      .eq('day_of_week', todayDow)
-      .eq('is_active', true)
-    if (data) setSchedules(data as StaffSchedule[])
+    const [schedRes, settingsRes] = await Promise.all([
+      supabase
+        .from('staff_schedules')
+        .select('*')
+        .eq('day_of_week', new Date().getDay())
+        .eq('is_active', true),
+      supabase
+        .from('app_settings')
+        .select('shift_end_margin_minutes')
+        .maybeSingle(),
+    ])
+    if (schedRes.data) setSchedules(schedRes.data as StaffSchedule[])
+    if (settingsRes.data) {
+      const margin = (settingsRes.data as { shift_end_margin_minutes?: number }).shift_end_margin_minutes
+      if (typeof margin === 'number' && margin >= 0) setShiftEndMargin(margin)
+    }
   }, [supabase])
 
   useEffect(() => {
@@ -138,8 +148,8 @@ export function ColaClient({
   }, [])
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(entries, liveBarbers as unknown as Staff[], schedules, now)
-  }, [entries, liveBarbers, schedules, now])
+    return assignDynamicBarbers(entries, liveBarbers as unknown as Staff[], schedules, now, shiftEndMargin)
+  }, [entries, liveBarbers, schedules, now, shiftEndMargin])
 
   // Filter by selected branch
   const filteredEntries = selectedBranchId

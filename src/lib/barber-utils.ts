@@ -100,18 +100,13 @@ export function isBarberBlockedByShiftEnd(
   barber: Staff,
   entries: QueueEntry[],
   schedules: StaffSchedule[],
-  currentTime: number
+  currentTime: number,
+  marginMinutes = 35
 ): boolean {
-  const hasActiveService = entries.some(
-    (e) => e.barber_id === barber.id && e.status === 'in_progress'
-  )
-
-  if (!hasActiveService) return false
-
-  const today = new Date(currentTime)
-
   const barberSchedule = schedules.find(s => s.staff_id === barber.id)
   if (!barberSchedule) return false
+
+  const today = new Date(currentTime)
 
   const [hours, minutes] = barberSchedule.end_time.split(':').map(Number)
   const shiftEnd = new Date(today)
@@ -123,14 +118,17 @@ export function isBarberBlockedByShiftEnd(
 
   const msRemaining = shiftEnd.getTime() - currentTime
 
-  return msRemaining <= 35 * 60 * 1000
+  if (msRemaining <= 0) return true
+
+  return msRemaining <= marginMinutes * 60 * 1000
 }
 
 export function assignDynamicBarbers(
   entries: QueueEntry[],
   barbers: Staff[],
   schedules: StaffSchedule[],
-  currentTime: number
+  currentTime: number,
+  marginMinutes = 35
 ): DynamicQueueEntry[] {
   const result: DynamicQueueEntry[] = []
 
@@ -159,7 +157,7 @@ export function assignDynamicBarbers(
   unassigned.sort((a, b) => a.position - b.position)
 
   for (const u of unassigned) {
-    const eligibleBarbers = barbers.filter(b => !isBarberBlockedByShiftEnd(b, result, schedules, currentTime))
+    const eligibleBarbers = barbers.filter(b => !isBarberBlockedByShiftEnd(b, result, schedules, currentTime, marginMinutes))
 
     if (eligibleBarbers.length === 0) {
       result.push(u)

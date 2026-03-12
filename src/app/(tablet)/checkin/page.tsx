@@ -24,7 +24,7 @@ import {
   ScanFace,
   Settings2,
 } from 'lucide-react'
-import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule } from '@/lib/types/database'
+import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule, AppSettings } from '@/lib/types/database'
 import {
   buildBarberAvgMinutes,
   getBarberStats,
@@ -91,6 +91,8 @@ export default function CheckinPage() {
   const [branchHours, setBranchHours] = useState<{ opens: string; closes: string } | null>(null)
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [now, setNow] = useState(Date.now())
+  const [shiftEndMargin, setShiftEndMargin] = useState(35)
+  const [notClockedInBarbers, setNotClockedInBarbers] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)
@@ -170,7 +172,7 @@ export default function CheckinPage() {
       const supabase = createClient()
       setLoadingBarbers(true)
 
-      const [staffRes, queueRes, visitsRes, availableRes, openRes, attendanceRes, servicesRes, schedulesRes] = await Promise.all([
+      const [staffRes, queueRes, visitsRes, availableRes, openRes, attendanceRes, servicesRes, schedulesRes, settingsRes] = await Promise.all([
         supabase
           .from('staff')
           .select('*')
@@ -209,6 +211,10 @@ export default function CheckinPage() {
           .select('*')
           .eq('day_of_week', new Date().getDay())
           .eq('is_active', true),
+        supabase
+          .from('app_settings')
+          .select('shift_end_margin_minutes')
+          .maybeSingle(),
       ])
 
       let branchOpen = true
@@ -221,6 +227,13 @@ export default function CheckinPage() {
         setBranchHours({ opens: status.opens_at, closes: status.closes_at })
       }
 
+      if (settingsRes?.data) {
+        const margin = (settingsRes.data as { shift_end_margin_minutes?: number }).shift_end_margin_minutes
+        if (typeof margin === 'number' && margin >= 0) {
+          setShiftEndMargin(margin)
+        }
+      }
+
       if (staffRes.data) {
         const latestAttendance: Record<string, string> = {}
         if (attendanceRes.data) {
@@ -231,25 +244,25 @@ export default function CheckinPage() {
           })
         }
 
-
+        const notClocked = new Set<string>()
 
         const filtered = staffRes.data.filter((s) => {
           if (s.status === 'blocked') return false
 
           const lastAction = latestAttendance[s.id]
-          // 1. Si hizo clock in hoy, mostrarlo
           if (lastAction === 'clock_in') return true
-          // 2. Si hizo clock out hoy, ocultarlo
           if (lastAction === 'clock_out') return false
 
-          // 3. Si no tiene registros hoy, verificar si tiene horario
           const hasScheduleToday = schedulesRes?.data?.some(sched => sched.staff_id === s.id)
-          if (hasScheduleToday) return true
+          if (hasScheduleToday) {
+            notClocked.add(s.id)
+            return true
+          }
 
-          // 4. Si no tiene horario y no hizo clock in, ocultarlo
           return false
         })
         setBarbers(filtered)
+        setNotClockedInBarbers(notClocked)
       }
       if (queueRes.data) setQueueEntries(queueRes.data)
       if (visitsRes.data) {
@@ -479,8 +492,8 @@ export default function CheckinPage() {
   }
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(queueEntries, barbers, schedules, now)
-  }, [queueEntries, barbers, schedules, now])
+    return assignDynamicBarbers(queueEntries, barbers, schedules, now, shiftEndMargin)
+  }, [queueEntries, barbers, schedules, now, shiftEndMargin])
 
   const maxLoad = useMemo(
     () =>
@@ -492,7 +505,10 @@ export default function CheckinPage() {
   )
 
   const minWaitBarber = useMemo(() => {
-    const active = barbers.filter(b => !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now))
+    const active = barbers.filter(b =>
+      !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now, shiftEndMargin) &&
+      !notClockedInBarbers.has(b.id)
+    )
     if (active.length === 0) return null
     let best = active[0]
     let bestLoad = getBarberStats(active[0], dynamicEntries, barberAvgMinutes).totalLoad
@@ -510,7 +526,7 @@ export default function CheckinPage() {
       }
     }
     return best
-  }, [barbers, dynamicEntries, schedules, barberAvgMinutes, now])
+  }, [barbers, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers])
 
   const minWaitEta = useMemo(() => {
     if (!minWaitBarber) return 0
@@ -760,12 +776,14 @@ export default function CheckinPage() {
     onSelect: (barberId: string) => void,
     showExpand = true
   ) => {
+    const isNotClockedIn = notClockedInBarbers.has(barber.id)
     const stats = getBarberStats(barber, dynamicEntries, barberAvgMinutes)
     const cfg = statusConfig[stats.status]
     const loadPct = Math.min(100, (stats.totalLoad / Math.max(maxLoad, 4)) * 100)
 
-    const ringColor =
-      stats.status === 'available'
+    const ringColor = isNotClockedIn
+      ? 'ring-orange-500/60'
+      : stats.status === 'available'
         ? 'ring-emerald-500/60'
         : stats.status === 'occupied'
           ? 'ring-blue-500/60'
@@ -782,7 +800,6 @@ export default function CheckinPage() {
           className="w-full p-5 text-left hover:bg-white/6 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
         >
           <div className="flex items-center gap-5">
-            {/* Avatar grande con anillo de estado */}
             <div className={`shrink-0 rounded-full ring-2 ring-offset-2 ring-offset-black ${ringColor}`}>
               {barber.avatar_url ? (
                 <img
@@ -797,41 +814,54 @@ export default function CheckinPage() {
               )}
             </div>
 
-            {/* Info */}
             <div className="flex-1 min-w-0 space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-2xl font-bold truncate">{barber.full_name}</p>
-                <span
-                  className={`shrink-0 inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium ${cfg.className}`}
-                >
-                  {cfg.label}
-                </span>
+                {isNotClockedIn ? (
+                  <span className="shrink-0 inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium bg-orange-500/15 text-orange-400 border-orange-500/30">
+                    Aún no llegó
+                  </span>
+                ) : (
+                  <span
+                    className={`shrink-0 inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium ${cfg.className}`}
+                  >
+                    {cfg.label}
+                  </span>
+                )}
               </div>
 
-              <p className="text-base text-muted-foreground">
-                {stats.attending && 'Atendiendo 1 persona'}
-                {stats.attending && stats.waiting > 0 && ' · '}
-                {stats.waiting > 0 &&
-                  `${stats.waiting} ${stats.waiting === 1 ? 'persona espera' : 'personas esperan'}`}
-                {!stats.attending && stats.waiting === 0 && 'Sin espera'}
-              </p>
+              {isNotClockedIn ? (
+                <p className="text-base text-orange-400/70">
+                  Este barbero aún no registró su entrada
+                </p>
+              ) : (
+                <>
+                  <p className="text-base text-muted-foreground">
+                    {stats.attending && 'Atendiendo 1 persona'}
+                    {stats.attending && stats.waiting > 0 && ' · '}
+                    {stats.waiting > 0 &&
+                      `${stats.waiting} ${stats.waiting === 1 ? 'persona espera' : 'personas esperan'}`}
+                    {!stats.attending && stats.waiting === 0 && 'Sin espera'}
+                  </p>
 
-              <div className="space-y-1.5 pt-1">
-                <div className="flex items-center justify-between text-sm text-muted-foreground">
-                  <span>
-                    {stats.totalLoad} {stats.totalLoad === 1 ? 'persona' : 'personas'} en total
-                  </span>
-                  <span className="font-semibold text-foreground text-base">
-                    {formatWaitTime(stats.eta)}
-                  </span>
-                </div>
-                <div className="h-2.5 w-full rounded-full bg-white/6 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${getLoadColor(stats.totalLoad)}`}
-                    style={{ width: `${loadPct}%` }}
-                  />
-                </div>
-              </div>
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between text-sm text-muted-foreground">
+                      <span>
+                        {stats.totalLoad} {stats.totalLoad === 1 ? 'persona' : 'personas'} en total
+                      </span>
+                      <span className="font-semibold text-foreground text-base">
+                        {formatWaitTime(stats.eta)}
+                      </span>
+                    </div>
+                    <div className="h-2.5 w-full rounded-full bg-white/6 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${getLoadColor(stats.totalLoad)}`}
+                        style={{ width: `${loadPct}%` }}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </button>
@@ -839,41 +869,59 @@ export default function CheckinPage() {
     )
   }
 
-  const renderBarberList = (onSelect: (barberId: string) => void, showExpand = true) => (
-    <div className="w-full space-y-4 overflow-y-auto min-h-0 flex-1">
+  const renderBarberList = (onSelect: (barberId: string) => void, showExpand = true) => {
+    const availableBarbers = barbers.filter(b =>
+      !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now, shiftEndMargin) &&
+      !notClockedInBarbers.has(b.id)
+    )
+    const notArrivedBarbers = barbers.filter(b =>
+      !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now, shiftEndMargin) &&
+      notClockedInBarbers.has(b.id)
+    )
 
-      {minWaitBarber && (
-        <button
-          onClick={() => onSelect(null as unknown as string)}
-          disabled={submitting}
-          className="w-full flex items-center gap-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5 text-left transition-all duration-200 hover:bg-emerald-500/10 hover:border-emerald-500/50 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
-        >
-          <div className="shrink-0 size-14 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-            <Zap className="size-7 text-emerald-400" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xl font-semibold text-emerald-300">Menor espera</p>
-            <p className="text-base text-emerald-400/70 mt-0.5">
-              Te atiende el barbero con menos cola
-            </p>
-          </div>
-          <div className="text-right shrink-0">
-            <p className="text-2xl font-bold text-emerald-400">
-              {formatWaitTime(minWaitEta)}
-            </p>
-          </div>
-        </button>
-      )}
+    return (
+      <div className="w-full space-y-4 overflow-y-auto min-h-0 flex-1">
 
-      <div className="w-full h-px bg-white/8" />
+        {minWaitBarber && (
+          <button
+            onClick={() => onSelect(null as unknown as string)}
+            disabled={submitting}
+            className="w-full flex items-center gap-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5 text-left transition-all duration-200 hover:bg-emerald-500/10 hover:border-emerald-500/50 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
+          >
+            <div className="shrink-0 size-14 rounded-xl bg-emerald-500/10 flex items-center justify-center">
+              <Zap className="size-7 text-emerald-400" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xl font-semibold text-emerald-300">Menor espera</p>
+              <p className="text-base text-emerald-400/70 mt-0.5">
+                Te atiende el barbero con menos cola
+              </p>
+            </div>
+            <div className="text-right shrink-0">
+              <p className="text-2xl font-bold text-emerald-400">
+                {formatWaitTime(minWaitEta)}
+              </p>
+            </div>
+          </button>
+        )}
 
-      <div className="grid gap-3">
-        {barbers
-          .filter(b => !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now))
-          .map((barber) => renderBarberCard(barber, onSelect, showExpand))}
+        <div className="w-full h-px bg-white/8" />
+
+        <div className="grid gap-3">
+          {availableBarbers.map((barber) => renderBarberCard(barber, onSelect, showExpand))}
+        </div>
+
+        {notArrivedBarbers.length > 0 && (
+          <>
+            <div className="w-full h-px bg-white/8" />
+            <div className="grid gap-3">
+              {notArrivedBarbers.map((barber) => renderBarberCard(barber, onSelect, showExpand))}
+            </div>
+          </>
+        )}
       </div>
-    </div>
-  )
+    )
+  }
 
   const renderPhoneKeypad = (
     currentPhone: string,

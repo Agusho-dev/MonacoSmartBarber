@@ -22,6 +22,7 @@ export async function updateAppSettings(formData: FormData) {
     business_hours_open: formData.get('business_hours_open') as string,
     business_hours_close: formData.get('business_hours_close') as string,
     business_days: businessDays,
+    shift_end_margin_minutes: Number(formData.get('shift_end_margin_minutes') || 35),
   }
 
   let opError

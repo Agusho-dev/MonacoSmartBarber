@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Clock, UserX, Gift, Save } from 'lucide-react'
+import { Clock, UserX, Gift, Save, Timer } from 'lucide-react'
 
 const DAY_OPTIONS = [
   { value: 1, label: 'Lun' },
@@ -41,6 +41,7 @@ export function ConfiguracionClient({ appSettings, rewardsConfig }: Props) {
       <div className="grid gap-6 lg:grid-cols-2">
         <BusinessHoursCard settings={appSettings} />
         <ThresholdsCard settings={appSettings} />
+        <ShiftEndMarginCard settings={appSettings} />
       </div>
 
       <RewardsSection configs={rewardsConfig} />
@@ -217,6 +218,83 @@ function ThresholdsCard({ settings }: { settings: AppSettings | null }) {
         <Button onClick={handleSave} disabled={isPending}>
           <Save className="mr-2 size-4" />
           {isPending ? 'Guardando...' : 'Guardar umbrales'}
+        </Button>
+      </CardFooter>
+    </Card>
+  )
+}
+
+/* ─── Shift End Margin ─── */
+
+function ShiftEndMarginCard({ settings }: { settings: AppSettings | null }) {
+  const [margin, setMargin] = useState(settings?.shift_end_margin_minutes ?? 35)
+  const [isPending, startTransition] = useTransition()
+
+  const handleSave = () => {
+    const fd = new FormData()
+    fd.set('shift_end_margin_minutes', String(margin))
+    fd.set('lost_client_days', String(settings?.lost_client_days ?? 40))
+    fd.set('at_risk_client_days', String(settings?.at_risk_client_days ?? 25))
+    fd.set('business_hours_open', settings?.business_hours_open ?? '09:00')
+    fd.set('business_hours_close', settings?.business_hours_close ?? '21:00')
+    fd.set(
+      'business_days',
+      (settings?.business_days ?? [1, 2, 3, 4, 5, 6]).join(',')
+    )
+
+    startTransition(async () => {
+      const result = await updateAppSettings(fd)
+      if (result.error) toast.error(result.error)
+      else toast.success('Margen de cierre actualizado')
+    })
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Timer className="size-5 text-muted-foreground" />
+          <CardTitle>Margen de cierre de turno</CardTitle>
+        </div>
+        <CardDescription>
+          Minutos antes del fin de turno en que el barbero deja de recibir nuevos clientes en la tablet
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="margin-minutes">Margen (minutos)</Label>
+          <div className="flex items-center gap-3">
+            <Input
+              id="margin-minutes"
+              type="number"
+              min={0}
+              max={120}
+              value={margin}
+              onChange={(e) => setMargin(Number(e.target.value))}
+              className="w-24"
+            />
+            <span className="text-sm text-muted-foreground">
+              minutos antes de que termine el turno
+            </span>
+          </div>
+        </div>
+        <div className="rounded-lg bg-muted/50 p-3">
+          <p className="text-xs text-muted-foreground">
+            Si un barbero termina a las 21:00 y el margen es {margin} min, no recibirá
+            clientes nuevos a partir de las{' '}
+            {(() => {
+              const d = new Date()
+              d.setHours(21, 0, 0, 0)
+              d.setMinutes(d.getMinutes() - margin)
+              return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+            })()}
+          </p>
+        </div>
+      </CardContent>
+      <CardFooter>
+        <Button onClick={handleSave} disabled={isPending}>
+          <Save className="mr-2 size-4" />
+          {isPending ? 'Guardando...' : 'Guardar margen'}
         </Button>
       </CardFooter>
     </Card>
