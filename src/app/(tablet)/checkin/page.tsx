@@ -88,6 +88,7 @@ export default function CheckinPage() {
   const [barbers, setBarbers] = useState<Staff[]>([])
   const [queueEntries, setQueueEntries] = useState<QueueEntry[]>([])
   const [barberAvgMinutes, setBarberAvgMinutes] = useState<Record<string, number>>({})
+  const [monthlyServiceCounts, setMonthlyServiceCounts] = useState<Record<string, number>>({})
   const [loadingBarbers, setLoadingBarbers] = useState(false)
 
   const [branchIsOpen, setBranchIsOpen] = useState(true)
@@ -185,7 +186,11 @@ export default function CheckinPage() {
       const supabase = createClient()
       setLoadingBarbers(true)
 
-      const [staffRes, queueRes, visitsRes, availableRes, openRes, attendanceRes, servicesRes, schedulesRes, settingsRes] = await Promise.all([
+      const monthStart = new Date()
+      monthStart.setDate(1)
+      monthStart.setHours(0, 0, 0, 0)
+
+      const [staffRes, queueRes, visitsRes, availableRes, openRes, attendanceRes, servicesRes, schedulesRes, settingsRes, monthlyVisitsRes] = await Promise.all([
         supabase
           .from('staff')
           .select('*')
@@ -228,6 +233,12 @@ export default function CheckinPage() {
           .from('app_settings')
           .select('shift_end_margin_minutes')
           .maybeSingle(),
+        supabase
+          .from('visits')
+          .select('barber_id')
+          .eq('branch_id', branchId)
+          .gte('completed_at', monthStart.toISOString())
+          .not('barber_id', 'is', null),
       ])
 
       let branchOpen = true
@@ -291,6 +302,13 @@ export default function CheckinPage() {
       }
       if (schedulesRes?.data) {
         setSchedules(schedulesRes.data as StaffSchedule[])
+      }
+      if (monthlyVisitsRes?.data) {
+        const counts: Record<string, number> = {}
+        for (const v of monthlyVisitsRes.data as { barber_id: string }[]) {
+          counts[v.barber_id] = (counts[v.barber_id] || 0) + 1
+        }
+        setMonthlyServiceCounts(counts)
       }
       setLoadingBarbers(false)
     },
@@ -401,6 +419,7 @@ export default function CheckinPage() {
     setBarbers([])
     setQueueEntries([])
     setBarberAvgMinutes({})
+    setMonthlyServiceCounts({})
     setLoadingBarbers(false)
 
     setQueueEntryId(null)
@@ -529,8 +548,8 @@ export default function CheckinPage() {
   }
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(queueEntries, barbers, schedules, now, shiftEndMargin)
-  }, [queueEntries, barbers, schedules, now, shiftEndMargin])
+    return assignDynamicBarbers(queueEntries, barbers, schedules, now, shiftEndMargin, monthlyServiceCounts)
+  }, [queueEntries, barbers, schedules, now, shiftEndMargin, monthlyServiceCounts])
 
   const maxLoad = useMemo(
     () =>
@@ -555,15 +574,19 @@ export default function CheckinPage() {
         bestLoad = load
         best = active[i]
       } else if (load === bestLoad) {
-        const nameCmp = (active[i].full_name || '').localeCompare(best.full_name || '')
-        if (nameCmp < 0 || (nameCmp === 0 && active[i].id < best.id)) {
+        const countI = monthlyServiceCounts[active[i].id] || 0
+        const countBest = monthlyServiceCounts[best.id] || 0
+        if (countI < countBest) {
+          best = active[i]
+          bestLoad = load
+        } else if (countI === countBest && Math.random() < 0.5) {
           best = active[i]
           bestLoad = load
         }
       }
     }
     return best
-  }, [barbers, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers])
+  }, [barbers, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers, monthlyServiceCounts])
 
   const minWaitEta = useMemo(() => {
     if (!minWaitBarber) return 0
@@ -784,9 +807,9 @@ export default function CheckinPage() {
 
   const goToBarberStep = () => {
     if (!name.trim()) return
-    
+
     const isChildVirtualPhone = phone.startsWith('00') && phone.length === 10
-    
+
     // New clients: go to face enrollment first (unless it's a child profile)
     if (!isReturning && !hasExistingFace && !isChildVirtualPhone) {
       setWantsEnrollment(true)
@@ -1115,7 +1138,7 @@ export default function CheckinPage() {
                 className="flex items-center gap-2 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-1.5"
               >
                 <Search className="size-4 md:size-5" />
-                <span className="text-base md:text-lg">Registrar</span>
+                <span className="text-base md:text-lg">Soy Nuevo</span>
               </button>
               <span className="text-white/20">·</span>
               <button
@@ -1708,11 +1731,10 @@ export default function CheckinPage() {
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div
                     key={i}
-                    className={`size-4 rounded-full border-2 transition-colors ${
-                      i < staffPinValue.length
+                    className={`size-4 rounded-full border-2 transition-colors ${i < staffPinValue.length
                         ? 'border-white bg-white'
                         : 'border-white/30'
-                    }`}
+                      }`}
                   />
                 ))}
               </div>

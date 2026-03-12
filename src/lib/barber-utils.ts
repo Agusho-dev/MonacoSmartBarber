@@ -149,7 +149,8 @@ export function assignDynamicBarbers(
   barbers: Staff[],
   schedules: StaffSchedule[],
   currentTime: number,
-  marginMinutes = 35
+  marginMinutes = 35,
+  monthlyServiceCounts: Record<string, number> = {}
 ): DynamicQueueEntry[] {
   const result: DynamicQueueEntry[] = []
 
@@ -190,9 +191,11 @@ export function assignDynamicBarbers(
       const loadB = barberLoad.get(b.id) || 0
       if (loadA !== loadB) return loadA - loadB
 
-      const nameCmp = (a.full_name || '').localeCompare(b.full_name || '')
-      if (nameCmp !== 0) return nameCmp
-      return a.id.localeCompare(b.id)
+      const countA = monthlyServiceCounts[a.id] || 0
+      const countB = monthlyServiceCounts[b.id] || 0
+      if (countA !== countB) return countA - countB
+
+      return Math.random() - 0.5
     })
 
     const selectedBarber = eligibleBarbers[0]

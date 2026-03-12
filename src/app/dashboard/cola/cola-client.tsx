@@ -66,6 +66,7 @@ export function ColaClient({
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [now, setNow] = useState(Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
+  const [monthlyServiceCounts, setMonthlyServiceCounts] = useState<Record<string, number>>({})
 
   const supabase = useMemo(() => createClient(), [])
 
@@ -92,7 +93,11 @@ export function ColaClient({
   }, [supabase])
 
   const fetchSchedules = useCallback(async () => {
-    const [schedRes, settingsRes] = await Promise.all([
+    const monthStart = new Date()
+    monthStart.setDate(1)
+    monthStart.setHours(0, 0, 0, 0)
+
+    const [schedRes, settingsRes, monthlyVisitsRes] = await Promise.all([
       supabase
         .from('staff_schedules')
         .select('*')
@@ -102,11 +107,23 @@ export function ColaClient({
         .from('app_settings')
         .select('shift_end_margin_minutes')
         .maybeSingle(),
+      supabase
+        .from('visits')
+        .select('barber_id')
+        .gte('completed_at', monthStart.toISOString())
+        .not('barber_id', 'is', null),
     ])
     if (schedRes.data) setSchedules(schedRes.data as StaffSchedule[])
     if (settingsRes.data) {
       const margin = (settingsRes.data as { shift_end_margin_minutes?: number }).shift_end_margin_minutes
       if (typeof margin === 'number' && margin >= 0) setShiftEndMargin(margin)
+    }
+    if (monthlyVisitsRes?.data) {
+      const counts: Record<string, number> = {}
+      for (const v of monthlyVisitsRes.data as { barber_id: string }[]) {
+        counts[v.barber_id] = (counts[v.barber_id] || 0) + 1
+      }
+      setMonthlyServiceCounts(counts)
     }
   }, [supabase])
 
@@ -148,8 +165,8 @@ export function ColaClient({
   }, [])
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(entries, liveBarbers as unknown as Staff[], schedules, now, shiftEndMargin)
-  }, [entries, liveBarbers, schedules, now, shiftEndMargin])
+    return assignDynamicBarbers(entries, liveBarbers as unknown as Staff[], schedules, now, shiftEndMargin, monthlyServiceCounts)
+  }, [entries, liveBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts])
 
   // Filter by selected branch
   const filteredEntries = selectedBranchId

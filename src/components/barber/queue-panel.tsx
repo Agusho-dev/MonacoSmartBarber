@@ -117,6 +117,7 @@ export function QueuePanel({
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
   const [now, setNow] = useState(Date.now())
+  const [monthlyServiceCounts, setMonthlyServiceCounts] = useState<Record<string, number>>({})
   const [dayStats, setDayStats] = useState({ servicesCount: 0, revenue: 0 })
   const [otherBarbers, setOtherBarbers] = useState<Staff[]>([])
   const [allBarbers, setAllBarbers] = useState<Staff[]>([])
@@ -164,7 +165,11 @@ export function QueuePanel({
   }, [session.staff_id, session.branch_id])
 
   const fetchBarbersAndSchedules = useCallback(async () => {
-    const [barbersRes, schedRes, settingsRes] = await Promise.all([
+    const monthStart = new Date()
+    monthStart.setDate(1)
+    monthStart.setHours(0, 0, 0, 0)
+
+    const [barbersRes, schedRes, settingsRes, monthlyVisitsRes] = await Promise.all([
       supabase
         .from('staff')
         .select('*')
@@ -181,6 +186,12 @@ export function QueuePanel({
         .from('app_settings')
         .select('shift_end_margin_minutes')
         .maybeSingle(),
+      supabase
+        .from('visits')
+        .select('barber_id')
+        .eq('branch_id', session.branch_id)
+        .gte('completed_at', monthStart.toISOString())
+        .not('barber_id', 'is', null),
     ])
 
     if (barbersRes.data) {
@@ -197,6 +208,14 @@ export function QueuePanel({
       if (typeof margin === 'number' && margin >= 0) {
         setShiftEndMargin(margin)
       }
+    }
+
+    if (monthlyVisitsRes?.data) {
+      const counts: Record<string, number> = {}
+      for (const v of monthlyVisitsRes.data as { barber_id: string }[]) {
+        counts[v.barber_id] = (counts[v.barber_id] || 0) + 1
+      }
+      setMonthlyServiceCounts(counts)
     }
   }, [supabase, session.branch_id, session.staff_id])
 
@@ -283,8 +302,8 @@ export function QueuePanel({
   }, [])
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(entries, allBarbers, schedules, now, shiftEndMargin)
-  }, [entries, allBarbers, schedules, now, shiftEndMargin])
+    return assignDynamicBarbers(entries, allBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts)
+  }, [entries, allBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts])
 
   // My active break (ghost entry that is in_progress)
   const myActiveBreak = dynamicEntries.find(

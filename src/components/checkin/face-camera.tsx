@@ -332,7 +332,7 @@ export function FaceCamera({
         className="w-full h-11 md:h-12 text-sm md:text-base rounded-xl gap-2 md:gap-3 shrink-0"
       >
         <KeyboardIcon className="size-5" />
-        Registrar
+        Soy Nuevo
       </Button>
     </div>
   )
