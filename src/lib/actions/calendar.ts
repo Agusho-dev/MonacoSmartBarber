@@ -10,20 +10,54 @@ export async function getStaffSchedules(staffId: string) {
     .select('*')
     .eq('staff_id', staffId)
     .order('day_of_week')
+    .order('block_index')
   return { data: data ?? [], error }
 }
 
-export async function upsertSchedule(staffId: string, dayOfWeek: number, startTime: string, endTime: string, isActive: boolean) {
+export interface ScheduleBlock {
+  start_time: string
+  end_time: string
+}
+
+export async function saveScheduleBlocks(
+  staffId: string,
+  dayOfWeek: number,
+  blocks: ScheduleBlock[]
+) {
   const supabase = await createClient()
-  const { error } = await supabase
+
+  const { error: delError } = await supabase
     .from('staff_schedules')
-    .upsert(
-      { staff_id: staffId, day_of_week: dayOfWeek, start_time: startTime, end_time: endTime, is_active: isActive },
-      { onConflict: 'staff_id,day_of_week' }
-    )
-  if (error) return { error: error.message }
+    .delete()
+    .eq('staff_id', staffId)
+    .eq('day_of_week', dayOfWeek)
+
+  if (delError) return { error: delError.message }
+
+  if (blocks.length > 0) {
+    const rows = blocks.map((b, i) => ({
+      staff_id: staffId,
+      day_of_week: dayOfWeek,
+      block_index: i,
+      start_time: b.start_time,
+      end_time: b.end_time,
+      is_active: true,
+    }))
+
+    const { error: insError } = await supabase
+      .from('staff_schedules')
+      .insert(rows)
+
+    if (insError) return { error: insError.message }
+  }
+
   revalidatePath('/dashboard/calendario')
   return { success: true }
+}
+
+/** @deprecated Use saveScheduleBlocks instead */
+export async function upsertSchedule(staffId: string, dayOfWeek: number, startTime: string, endTime: string, isActive: boolean) {
+  return saveScheduleBlocks(staffId, dayOfWeek, [{ start_time: startTime, end_time: endTime }])
 }
 
 export async function deleteSchedule(staffId: string, dayOfWeek: number) {

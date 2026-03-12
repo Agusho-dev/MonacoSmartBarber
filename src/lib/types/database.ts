@@ -414,6 +414,7 @@ export interface StaffSchedule {
   id: string
   staff_id: string
   day_of_week: number
+  block_index: number
   start_time: string
   end_time: string
   is_active: boolean
@@ -548,7 +549,7 @@ export interface Database {
       staff_face_descriptors: { Row: StaffFaceDescriptor; Insert: Partial<StaffFaceDescriptor> & Pick<StaffFaceDescriptor, 'staff_id' | 'descriptor'>; Update: Partial<StaffFaceDescriptor> }
       break_configs: { Row: BreakConfig; Insert: Partial<BreakConfig> & Pick<BreakConfig, 'branch_id' | 'name'>; Update: Partial<BreakConfig> }
       break_requests: { Row: BreakRequest; Insert: Partial<BreakRequest> & Pick<BreakRequest, 'staff_id' | 'branch_id' | 'break_config_id'>; Update: Partial<BreakRequest> }
-      staff_schedules: { Row: StaffSchedule; Insert: Partial<StaffSchedule> & Pick<StaffSchedule, 'staff_id' | 'day_of_week' | 'start_time' | 'end_time'>; Update: Partial<StaffSchedule> }
+      staff_schedules: { Row: StaffSchedule; Insert: Partial<StaffSchedule> & Pick<StaffSchedule, 'staff_id' | 'day_of_week' | 'start_time' | 'end_time'> & { block_index?: number }; Update: Partial<StaffSchedule> }
       staff_schedule_exceptions: { Row: StaffScheduleException; Insert: Partial<StaffScheduleException> & Pick<StaffScheduleException, 'staff_id' | 'exception_date'>; Update: Partial<StaffScheduleException> }
       attendance_logs: { Row: AttendanceLog; Insert: Partial<AttendanceLog> & Pick<AttendanceLog, 'staff_id' | 'branch_id' | 'action_type'>; Update: Partial<AttendanceLog> }
       salary_configs: { Row: SalaryConfig; Insert: Partial<SalaryConfig> & Pick<SalaryConfig, 'staff_id' | 'scheme'>; Update: Partial<SalaryConfig> }

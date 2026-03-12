@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { upsertSchedule, deleteSchedule, upsertException, deleteException } from '@/lib/actions/calendar'
+import { saveScheduleBlocks, deleteSchedule, upsertException, deleteException } from '@/lib/actions/calendar'
+import type { ScheduleBlock } from '@/lib/actions/calendar'
 import type { Branch, StaffSchedule, StaffScheduleException } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -22,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { CalendarDays, Plus, X, AlertTriangle } from 'lucide-react'
+import { Plus, X, AlertTriangle, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -48,7 +49,7 @@ export function CalendarioClient({ branches, barbers }: Props) {
   const [exceptionDialog, setExceptionDialog] = useState(false)
   const [exceptionForm, setExceptionForm] = useState({ date: '', is_absent: true, reason: '' })
   const [scheduleDialog, setScheduleDialog] = useState<{ dayOfWeek: number } | null>(null)
-  const [scheduleForm, setScheduleForm] = useState({ start_time: '09:00', end_time: '18:00' })
+  const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlock[]>([])
   const [, startTransition] = useTransition()
 
   const branchBarbers = barbers.filter((b) => b.branch_id === selectedBranchId)
@@ -56,8 +57,10 @@ export function CalendarioClient({ branches, barbers }: Props) {
 
   const today = new Date().toISOString().slice(0, 10)
 
-  function getScheduleForDay(dayOfWeek: number) {
-    return selectedBarber?.staff_schedules.find((s) => s.day_of_week === dayOfWeek)
+  function getSchedulesForDay(dayOfWeek: number): StaffSchedule[] {
+    return (selectedBarber?.staff_schedules ?? [])
+      .filter((s) => s.day_of_week === dayOfWeek && s.is_active)
+      .sort((a, b) => (a.block_index ?? 0) - (b.block_index ?? 0))
   }
 
   function handleDayToggle(dayOfWeek: number, currentlyActive: boolean) {
@@ -68,20 +71,58 @@ export function CalendarioClient({ branches, barbers }: Props) {
         if (r.error) toast.error(r.error)
       })
     } else {
+      setScheduleBlocks([{ start_time: '09:00', end_time: '18:00' }])
       setScheduleDialog({ dayOfWeek })
     }
+  }
+
+  function openEditDialog(dayOfWeek: number) {
+    const existing = getSchedulesForDay(dayOfWeek)
+    if (existing.length > 0) {
+      setScheduleBlocks(existing.map((s) => ({ start_time: s.start_time, end_time: s.end_time })))
+    } else {
+      setScheduleBlocks([{ start_time: '09:00', end_time: '18:00' }])
+    }
+    setScheduleDialog({ dayOfWeek })
+  }
+
+  function addBlock() {
+    const last = scheduleBlocks[scheduleBlocks.length - 1]
+    const [h, m] = last.end_time.split(':').map(Number)
+    const newStart = `${String(h + 1).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    const newEnd = `${String(Math.min(h + 5, 23)).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    setScheduleBlocks([...scheduleBlocks, { start_time: newStart, end_time: newEnd }])
+  }
+
+  function removeBlock(index: number) {
+    setScheduleBlocks(scheduleBlocks.filter((_, i) => i !== index))
+  }
+
+  function updateBlock(index: number, field: 'start_time' | 'end_time', value: string) {
+    setScheduleBlocks(scheduleBlocks.map((b, i) => i === index ? { ...b, [field]: value } : b))
   }
 
   function handleScheduleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!selectedBarber || !scheduleDialog) return
+
+    for (let i = 0; i < scheduleBlocks.length; i++) {
+      const block = scheduleBlocks[i]
+      if (block.start_time >= block.end_time) {
+        toast.error(`Bloque ${i + 1}: la entrada debe ser anterior a la salida`)
+        return
+      }
+      if (i > 0 && scheduleBlocks[i - 1].end_time > block.start_time) {
+        toast.error(`Bloque ${i + 1}: se superpone con el bloque anterior`)
+        return
+      }
+    }
+
     startTransition(async () => {
-      const r = await upsertSchedule(
+      const r = await saveScheduleBlocks(
         selectedBarber.id,
         scheduleDialog.dayOfWeek,
-        scheduleForm.start_time,
-        scheduleForm.end_time,
-        true
+        scheduleBlocks
       )
       if (r.error) toast.error(r.error)
       else { toast.success('Horario guardado'); setScheduleDialog(null) }
@@ -110,6 +151,10 @@ export function CalendarioClient({ branches, barbers }: Props) {
       if (r.error) toast.error(r.error)
       else toast.success('Excepción eliminada')
     })
+  }
+
+  function formatDaySchedule(schedules: StaffSchedule[]): string {
+    return schedules.map((s) => `${s.start_time} – ${s.end_time}`).join('  ·  ')
   }
 
   return (
@@ -166,8 +211,8 @@ export function CalendarioClient({ branches, barbers }: Props) {
               </p>
               <div className="divide-y rounded-xl border bg-card">
                 {[1, 2, 3, 4, 5, 6, 0].map((day) => {
-                  const schedule = getScheduleForDay(day)
-                  const isActive = !!schedule?.is_active
+                  const daySchedules = getSchedulesForDay(day)
+                  const isActive = daySchedules.length > 0
                   return (
                     <div key={day} className="flex items-center gap-4 px-4 py-3">
                       <span className="w-8 text-sm font-medium">{DAYS[day]}</span>
@@ -175,16 +220,18 @@ export function CalendarioClient({ branches, barbers }: Props) {
                         checked={isActive}
                         onCheckedChange={() => handleDayToggle(day, isActive)}
                       />
-                      {isActive && schedule ? (
+                      {isActive ? (
                         <button
-                          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-                          onClick={() => {
-                            setScheduleForm({ start_time: schedule.start_time, end_time: schedule.end_time })
-                            setScheduleDialog({ dayOfWeek: day })
-                          }}
+                          className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-2 flex-wrap"
+                          onClick={() => openEditDialog(day)}
                         >
-                          {schedule.start_time} – {schedule.end_time}
-                          <span className="ml-2 text-xs text-primary">(editar)</span>
+                          <span>{formatDaySchedule(daySchedules)}</span>
+                          {daySchedules.length > 1 && (
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                              cortado
+                            </Badge>
+                          )}
+                          <span className="text-xs text-primary">(editar)</span>
                         </button>
                       ) : (
                         <span className="text-sm text-muted-foreground">No trabaja</span>
@@ -250,37 +297,71 @@ export function CalendarioClient({ branches, barbers }: Props) {
         )}
       </div>
 
-      {/* Schedule time dialog */}
+      {/* Schedule blocks dialog */}
       <Dialog open={!!scheduleDialog} onOpenChange={(o) => !o && setScheduleDialog(null)}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
               Horario del {scheduleDialog ? DAYS_FULL[scheduleDialog.dayOfWeek] : ''}
             </DialogTitle>
           </DialogHeader>
           <form onSubmit={handleScheduleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Entrada</Label>
-                <Input
-                  type="time"
-                  className="mt-1.5"
-                  value={scheduleForm.start_time}
-                  onChange={(e) => setScheduleForm((f) => ({ ...f, start_time: e.target.value }))}
-                  required
-                />
-              </div>
-              <div>
-                <Label>Salida</Label>
-                <Input
-                  type="time"
-                  className="mt-1.5"
-                  value={scheduleForm.end_time}
-                  onChange={(e) => setScheduleForm((f) => ({ ...f, end_time: e.target.value }))}
-                  required
-                />
-              </div>
+            <div className="space-y-3">
+              {scheduleBlocks.map((block, idx) => (
+                <div key={idx} className="space-y-2">
+                  {scheduleBlocks.length > 1 && (
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Bloque {idx + 1}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-6 text-muted-foreground hover:text-destructive"
+                        onClick={() => removeBlock(idx)}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs">Entrada</Label>
+                      <Input
+                        type="time"
+                        className="mt-1"
+                        value={block.start_time}
+                        onChange={(e) => updateBlock(idx, 'start_time', e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Salida</Label>
+                      <Input
+                        type="time"
+                        className="mt-1"
+                        value={block.end_time}
+                        onChange={(e) => updateBlock(idx, 'end_time', e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={addBlock}
+            >
+              <Plus className="size-4 mr-1.5" />
+              Agregar bloque (horario cortado)
+            </Button>
+
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setScheduleDialog(null)}>Cancelar</Button>
               <Button type="submit">Guardar horario</Button>

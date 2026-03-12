@@ -103,24 +103,45 @@ export function isBarberBlockedByShiftEnd(
   currentTime: number,
   marginMinutes = 35
 ): boolean {
-  const barberSchedule = schedules.find(s => s.staff_id === barber.id)
-  if (!barberSchedule) return false
+  const barberSchedules = schedules
+    .filter(s => s.staff_id === barber.id)
+    .sort((a, b) => a.start_time.localeCompare(b.start_time))
+
+  if (barberSchedules.length === 0) return false
 
   const today = new Date(currentTime)
 
-  const [hours, minutes] = barberSchedule.end_time.split(':').map(Number)
-  const shiftEnd = new Date(today)
-  shiftEnd.setHours(hours, minutes, 0, 0)
-
-  if (shiftEnd.getTime() < currentTime - 12 * 60 * 60 * 1000) {
-    shiftEnd.setDate(shiftEnd.getDate() + 1)
+  function timeToMs(timeStr: string): number {
+    const [h, m] = timeStr.split(':').map(Number)
+    const d = new Date(today)
+    d.setHours(h, m, 0, 0)
+    return d.getTime()
   }
 
-  const msRemaining = shiftEnd.getTime() - currentTime
+  const lastBlock = barberSchedules[barberSchedules.length - 1]
+  const lastEndMs = timeToMs(lastBlock.end_time)
 
-  if (msRemaining <= 0) return true
+  if (currentTime >= lastEndMs) return true
 
-  return msRemaining <= marginMinutes * 60 * 1000
+  for (let i = 0; i < barberSchedules.length; i++) {
+    const blockEndMs = timeToMs(barberSchedules[i].end_time)
+    const msToBlockEnd = blockEndMs - currentTime
+
+    if (msToBlockEnd <= 0) continue
+
+    if (msToBlockEnd <= marginMinutes * 60 * 1000) {
+      const nextBlock = barberSchedules[i + 1]
+      if (!nextBlock) return true
+
+      const nextStartMs = timeToMs(nextBlock.start_time)
+      const gapMinutes = (nextStartMs - blockEndMs) / 60_000
+      if (gapMinutes > marginMinutes) return true
+    }
+
+    return false
+  }
+
+  return true
 }
 
 export function assignDynamicBarbers(

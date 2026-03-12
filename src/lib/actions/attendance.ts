@@ -45,13 +45,15 @@ export async function registerBarberClockIn(staffId: string, branchId: string, f
     const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' })
     const ymdFormat = formatter.format(now) // YYYY-MM-DD
 
-    // 3. Find if the staff has a schedule for today
+    // 3. Find the earliest schedule block for today
     const { data: schedule } = await supabase
         .from('staff_schedules')
         .select('start_time')
         .eq('staff_id', staffId)
         .eq('day_of_week', dow)
         .eq('is_active', true)
+        .order('block_index', { ascending: true })
+        .limit(1)
         .maybeSingle()
 
     if (schedule && schedule.start_time) {
