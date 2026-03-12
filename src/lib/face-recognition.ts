@@ -7,8 +7,8 @@ let modelsLoaded = false
 let modelsLoading: Promise<void> | null = null
 
 const MODEL_URL = '/models'
-const DETECTION_SCORE_THRESHOLD = 0.55 // lowered slightly for lower-res inputs
-const MATCH_THRESHOLD = 0.52 // lowered slightly to accommodate lower quality descriptor
+const DETECTION_SCORE_THRESHOLD = 0.60 // lowered slightly for lower-res inputs
+const MATCH_THRESHOLD = 0.45 // lowered threshold to prevent false positives (confusing faces)
 
 async function loadFaceApi(): Promise<FaceApiModule> {
   if (faceapi) return faceapi
