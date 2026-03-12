@@ -45,33 +45,35 @@ export async function loginWithPin(formData: FormData) {
     return { error: 'PIN incorrecto' }
   }
 
-  // Check attendance status for today
-  // We use createAdminClient because RLS on attendance_logs might block anonymous access
   const adminSupabase = createAdminClient()
-  
-  // Verify if the barber has a registered Face ID
+
   const { count: faceCount } = await adminSupabase
     .from('staff_face_descriptors')
     .select('*', { count: 'exact', head: true })
     .eq('staff_id', staff.id)
 
-  // If Face ID is registered, enforce clock-in check
-  if (faceCount !== null && faceCount > 0) {
-    // Get start and end of today in local timezone (America/Argentina/Buenos_Aires expected, but assuming server local for now)
-    // To avoid timezone edge bugs, we just look for the *last* log within the last 18 hours
-    const eighteenHoursAgo = new Date(Date.now() - 18 * 60 * 60 * 1000).toISOString()
-    
-    const { data: lastLog } = await adminSupabase
-      .from('attendance_logs')
-      .select('action_type')
-      .eq('staff_id', staff.id)
-      .gte('recorded_at', eighteenHoursAgo)
-      .order('recorded_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
+  if (faceCount === null || faceCount === 0) {
+    return {
+      error: 'Es tu primera vez. Registrá tu rostro en la tablet de check-in antes de ingresar.',
+      needsFaceRegistration: true,
+    }
+  }
 
-    if (!lastLog || lastLog.action_type !== 'clock_in') {
-      return { error: 'Debes marcar el ingreso en el checkin' }
+  const eighteenHoursAgo = new Date(Date.now() - 18 * 60 * 60 * 1000).toISOString()
+
+  const { data: lastLog } = await adminSupabase
+    .from('attendance_logs')
+    .select('action_type')
+    .eq('staff_id', staff.id)
+    .gte('recorded_at', eighteenHoursAgo)
+    .order('recorded_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!lastLog || lastLog.action_type !== 'clock_in') {
+    return {
+      error: 'No hiciste el check-in. Registrá tu entrada en la tablet de check-in.',
+      needsClockIn: true,
     }
   }
 
