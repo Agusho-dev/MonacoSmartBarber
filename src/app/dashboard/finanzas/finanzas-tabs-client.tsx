@@ -20,7 +20,6 @@ type TabId = (typeof TABS)[number]['id']
 
 interface FinanzasTabsClientProps {
     initialData: Parameters<typeof FinanzasClient>[0]['initialData']
-    initialExpenses: Parameters<typeof FinanzasClient>[0]['initialExpenses']
     branches: Parameters<typeof FinanzasClient>[0]['branches']
     accounts: Parameters<typeof CuentasClient>[0]['accounts']
     barbers: Parameters<typeof SueldosClient>[0]['barbers']
@@ -31,7 +30,6 @@ interface FinanzasTabsClientProps {
 
 export function FinanzasTabsClient({
     initialData,
-    initialExpenses,
     branches,
     accounts,
     barbers,
@@ -101,8 +99,9 @@ export function FinanzasTabsClient({
                 {activeTab === 'resumen' && (
                     <FinanzasClient
                         initialData={initialData}
-                        initialExpenses={initialExpenses}
                         branches={branches}
+                        accounts={accounts}
+                        expenseTickets={expenseTickets}
                     />
                 )}
                 {activeTab === 'cuentas' && (

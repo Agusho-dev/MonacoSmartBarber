@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useTransition, useEffect, useCallback } from 'react'
-import { toast } from 'sonner'
+import { useState, useTransition, useEffect, useCallback, useMemo } from 'react'
 import {
   ComposedChart,
   Bar,
@@ -12,28 +11,25 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
 } from 'recharts'
 import { useBranchStore } from '@/stores/branch-store'
 import {
   fetchFinancialData,
-  getFixedExpenses,
-  upsertFixedExpense,
-  deleteFixedExpense,
   type FinancialSummary,
 } from '@/lib/actions/finances'
+import { getAllAccountBalanceTotals } from '@/lib/actions/paymentAccounts'
 import { formatCurrency } from '@/lib/format'
-import type { Branch, FixedExpense } from '@/lib/types/database'
+import type { Branch, PaymentAccount, ExpenseTicket } from '@/lib/types/database'
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
   CardDescription,
-  CardFooter,
 } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -42,30 +38,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { Badge } from '@/components/ui/badge'
-import {
   DollarSign,
   TrendingUp,
   TrendingDown,
   Receipt,
   Target,
-  Plus,
-  Pencil,
-  Trash2,
   Scissors,
 } from 'lucide-react'
 
@@ -74,17 +51,6 @@ const PERIOD_OPTIONS = [
   { value: '6', label: '6 meses' },
   { value: '12', label: '12 meses' },
   { value: '24', label: '24 meses' },
-]
-
-const CATEGORY_OPTIONS = [
-  'Alquiler',
-  'Servicios',
-  'Stock / Insumos',
-  'Seguros',
-  'Impuestos',
-  'Personal',
-  'Mantenimiento',
-  'Otro',
 ]
 
 const COLORS = {
@@ -96,37 +62,44 @@ const COLORS = {
   axis: '#737373',
 }
 
+const PIE_COLORS = ['#a78bfa', '#22d3ee', '#fbbf24', '#f87171', '#34d399', '#f472b6', '#818cf8', '#2dd4bf']
+
+interface AccountWithBranch extends PaymentAccount {
+  branch?: { name: string } | null
+}
+
 interface Props {
   initialData: FinancialSummary
-  initialExpenses: (FixedExpense & { branch?: { name: string } | null })[]
   branches: Branch[]
+  accounts: AccountWithBranch[]
+  expenseTickets: ExpenseTicket[]
 }
+
+type AccountBalance = { id: string; name: string; balance: number; income: number; expenses: number }
 
 export function FinanzasClient({
   initialData,
-  initialExpenses,
   branches,
+  accounts,
+  expenseTickets,
 }: Props) {
   const { selectedBranchId } = useBranchStore()
   const [data, setData] = useState(initialData)
-  const [expenses, setExpenses] = useState(initialExpenses)
   const [period, setPeriod] = useState('6')
   const [isPending, startTransition] = useTransition()
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingExpense, setEditingExpense] = useState<
-    (FixedExpense & { branch?: { name: string } | null }) | null
-  >(null)
+  const [accountBalances, setAccountBalances] = useState<AccountBalance[]>([])
+  const [expenseAccountFilter, setExpenseAccountFilter] = useState<string>('__all__')
 
   const refresh = useCallback(
     (p?: string) => {
       const months = Number(p ?? period)
       startTransition(async () => {
-        const [newData, newExpenses] = await Promise.all([
+        const [newData, newBalances] = await Promise.all([
           fetchFinancialData(months, selectedBranchId),
-          getFixedExpenses(selectedBranchId),
+          getAllAccountBalanceTotals(selectedBranchId),
         ])
         setData(newData)
-        setExpenses(newExpenses)
+        setAccountBalances(newBalances)
       })
     },
     [period, selectedBranchId]
@@ -142,31 +115,34 @@ export function FinanzasClient({
     refresh(v)
   }
 
-  const handleDeleteExpense = (id: string) => {
-    startTransition(async () => {
-      const result = await deleteFixedExpense(id)
-      if (result.error) toast.error(result.error)
-      else {
-        toast.success('Gasto eliminado')
-        refresh()
-      }
-    })
-  }
+  const expensesByCategory = useMemo(() => {
+    const filtered = expenseAccountFilter === '__all__'
+      ? expenseTickets
+      : expenseTickets.filter(t => t.payment_account_id === expenseAccountFilter)
 
-  const openNew = () => {
-    setEditingExpense(null)
-    setDialogOpen(true)
-  }
+    const branchFiltered = selectedBranchId
+      ? filtered.filter(t => t.branch_id === selectedBranchId)
+      : filtered
 
-  const openEdit = (
-    exp: FixedExpense & { branch?: { name: string } | null }
-  ) => {
-    setEditingExpense(exp)
-    setDialogOpen(true)
-  }
+    const map = new Map<string, number>()
+    for (const t of branchFiltered) {
+      map.set(t.category, (map.get(t.category) ?? 0) + Number(t.amount))
+    }
+    return Array.from(map.entries())
+      .map(([category, amount]) => ({ category, amount }))
+      .sort((a, b) => b.amount - a.amount)
+  }, [expenseTickets, expenseAccountFilter, selectedBranchId])
+
+  const filteredAccounts = useMemo(() => {
+    if (!selectedBranchId) return accounts
+    return accounts.filter(a => a.branch_id === selectedBranchId)
+  }, [accounts, selectedBranchId])
 
   const { totals, breakEven } = data
   const isPositive = totals.netProfit >= 0
+
+  const balancePieData = accountBalances.filter(a => a.balance > 0)
+  const totalExpensesPie = expensesByCategory.reduce((s, e) => s + e.amount, 0)
 
   return (
     <div className="space-y-6">
@@ -303,104 +279,134 @@ export function FinanzasClient({
           </CardContent>
         </Card>
 
-        {/* Bottom section: Expenses List + Break-Even */}
+        {/* Bottom section: Pie Charts + Break-Even */}
         <div className="grid gap-6 lg:grid-cols-3">
-          {/* Fixed Expenses List */}
-          <div className="lg:col-span-2">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Gastos fijos mensuales</CardTitle>
-                    <CardDescription>
-                      Total:{' '}
-                      {formatCurrency(breakEven.monthlyFixedExpenses)}/mes
-                    </CardDescription>
-                  </div>
-                  <Button size="sm" onClick={openNew}>
-                    <Plus className="mr-2 size-4" /> Agregar
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {expenses.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-muted-foreground">
-                    No hay gastos fijos registrados
+          {/* Pie Chart 1: Account Balances */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Saldo por cuenta</CardTitle>
+              <CardDescription>Dinero acumulado en cada cuenta</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {balancePieData.length === 0 ? (
+                <div className="flex h-[220px] items-center justify-center">
+                  <p className="text-sm text-muted-foreground text-center">
+                    Sin saldo disponible
                   </p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Nombre</TableHead>
-                        <TableHead>Categoría</TableHead>
-                        {!selectedBranchId && (
-                          <TableHead>Sucursal</TableHead>
-                        )}
-                        <TableHead className="text-right">Monto</TableHead>
-                        <TableHead>Estado</TableHead>
-                        <TableHead className="w-20" />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {expenses.map((exp) => (
-                        <TableRow key={exp.id}>
-                          <TableCell className="font-medium">
-                            {exp.name}
-                          </TableCell>
-                          <TableCell>
-                            {exp.category ? (
-                              <Badge variant="secondary">
-                                {exp.category}
-                              </Badge>
-                            ) : (
-                              <span className="text-muted-foreground">–</span>
-                            )}
-                          </TableCell>
-                          {!selectedBranchId && (
-                            <TableCell className="text-muted-foreground">
-                              {(
-                                exp.branch as { name: string } | null
-                              )?.name ?? '–'}
-                            </TableCell>
-                          )}
-                          <TableCell className="text-right font-medium">
-                            {formatCurrency(exp.amount)}
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant={
-                                exp.is_active ? 'default' : 'secondary'
-                              }
-                            >
-                              {exp.is_active ? 'Activo' : 'Inactivo'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => openEdit(exp)}
-                              >
-                                <Pencil className="size-3.5" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDeleteExpense(exp.id)}
-                              >
-                                <Trash2 className="size-3.5 text-destructive" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+                </div>
+              ) : (
+                <>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <PieChart>
+                      <Pie
+                        data={balancePieData}
+                        dataKey="balance"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
+                        innerRadius={40}
+                        paddingAngle={3}
+                        animationDuration={800}
+                      >
+                        {balancePieData.map((_, i) => (
+                          <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip content={<PieTooltip />} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="mt-3 space-y-1.5">
+                    {balancePieData.map((item, i) => (
+                      <div key={item.id} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="size-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
+                          />
+                          <span className="truncate">{item.name}</span>
+                        </div>
+                        <span className="font-medium shrink-0 ml-2">{formatCurrency(item.balance)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Pie Chart 2: Expenses by Category */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <CardTitle className="text-base">Egresos por categoría</CardTitle>
+                  <CardDescription>
+                    {totalExpensesPie > 0 ? `Total: ${formatCurrency(totalExpensesPie)}` : 'Sin egresos'}
+                  </CardDescription>
+                </div>
+              </div>
+              <Select value={expenseAccountFilter} onValueChange={setExpenseAccountFilter}>
+                <SelectTrigger className="mt-2 h-8 text-xs">
+                  <SelectValue placeholder="Filtrar por cuenta" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">Todas las cuentas</SelectItem>
+                  {filteredAccounts.map((acc) => (
+                    <SelectItem key={acc.id} value={acc.id}>
+                      {acc.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CardHeader>
+            <CardContent>
+              {expensesByCategory.length === 0 ? (
+                <div className="flex h-[220px] items-center justify-center">
+                  <p className="text-sm text-muted-foreground text-center">
+                    Sin egresos registrados
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <PieChart>
+                      <Pie
+                        data={expensesByCategory}
+                        dataKey="amount"
+                        nameKey="category"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
+                        innerRadius={40}
+                        paddingAngle={3}
+                        animationDuration={800}
+                      >
+                        {expensesByCategory.map((_, i) => (
+                          <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip content={<PieTooltip />} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="mt-3 space-y-1.5">
+                    {expensesByCategory.map((item, i) => (
+                      <div key={item.category} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="size-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
+                          />
+                          <span className="truncate">{item.category}</span>
+                        </div>
+                        <span className="font-medium shrink-0 ml-2">{formatCurrency(item.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Break-Even Card */}
           <Card>
@@ -470,18 +476,6 @@ export function FinanzasClient({
           </Card>
         </div>
       </div>
-
-      <ExpenseDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        expense={editingExpense}
-        branches={branches}
-        selectedBranchId={selectedBranchId}
-        onSaved={() => {
-          setDialogOpen(false)
-          refresh()
-        }}
-      />
     </div>
   )
 }
@@ -545,7 +539,7 @@ function SummaryCard({
   )
 }
 
-/* ─── Chart Tooltip ─── */
+/* ─── Chart Tooltips ─── */
 
 function FinanceTooltip({
   active,
@@ -565,154 +559,18 @@ function FinanceTooltip({
   )
 }
 
-/* ─── Expense Dialog ─── */
-
-function ExpenseDialog({
-  open,
-  onOpenChange,
-  expense,
-  branches,
-  selectedBranchId,
-  onSaved,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  expense: (FixedExpense & { branch?: { name: string } | null }) | null
-  branches: Branch[]
-  selectedBranchId: string | null
-  onSaved: () => void
-}) {
-  const isEdit = !!expense
-  const [name, setName] = useState(expense?.name ?? '')
-  const [category, setCategory] = useState(expense?.category ?? '')
-  const [amount, setAmount] = useState(expense?.amount ?? 0)
-  const [branchId, setBranchId] = useState(
-    expense?.branch_id ?? selectedBranchId ?? ''
-  )
-  const [active, setActive] = useState(expense?.is_active ?? true)
-  const [isPending, startTransition] = useTransition()
-
-  useEffect(() => {
-    if (expense) {
-      setName(expense.name)
-      setCategory(expense.category ?? '')
-      setAmount(expense.amount)
-      setBranchId(expense.branch_id)
-      setActive(expense.is_active)
-    } else {
-      setName('')
-      setCategory('')
-      setAmount(0)
-      setBranchId(selectedBranchId ?? branches[0]?.id ?? '')
-      setActive(true)
-    }
-  }, [expense, open, selectedBranchId, branches])
-
-  const handleSave = () => {
-    if (!name.trim() || !branchId) return
-    startTransition(async () => {
-      const result = await upsertFixedExpense({
-        id: expense?.id,
-        branch_id: branchId,
-        name: name.trim(),
-        category: category || null,
-        amount,
-        is_active: active,
-      })
-      if (result.error) toast.error(result.error)
-      else {
-        toast.success(isEdit ? 'Gasto actualizado' : 'Gasto creado')
-        onSaved()
-      }
-    })
-  }
-
+function PieTooltip({
+  active,
+  payload,
+}: Record<string, unknown>) {
+  if (!active || !Array.isArray(payload) || payload.length === 0) return null
+  const entry = payload[0] as Record<string, unknown>
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            {isEdit ? 'Editar gasto fijo' : 'Nuevo gasto fijo'}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 py-4">
-          <div className="space-y-2">
-            <Label>Sucursal</Label>
-            <Select value={branchId} onValueChange={setBranchId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Seleccionar sucursal" />
-              </SelectTrigger>
-              <SelectContent>
-                {branches.map((b) => (
-                  <SelectItem key={b.id} value={b.id}>
-                    {b.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Nombre</Label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Ej: Alquiler, Luz, Internet..."
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Categoría</Label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger>
-                <SelectValue placeholder="Seleccionar categoría" />
-              </SelectTrigger>
-              <SelectContent>
-                {CATEGORY_OPTIONS.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Monto mensual ($)</Label>
-            <Input
-              type="number"
-              min={0}
-              value={amount}
-              onChange={(e) => setAmount(Number(e.target.value))}
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant={active ? 'default' : 'outline'}
-              onClick={() => setActive(!active)}
-            >
-              {active ? 'Activo' : 'Inactivo'}
-            </Button>
-            <span className="text-xs text-muted-foreground">
-              Los inactivos no se computan en el cálculo
-            </span>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancelar
-          </Button>
-          <Button
-            onClick={handleSave}
-            disabled={isPending || !name.trim() || !branchId}
-          >
-            {isPending ? 'Guardando...' : 'Guardar'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <div className="rounded-lg border bg-card px-3 py-2 shadow-md">
+      <p className="text-sm font-medium">{String(entry.name)}</p>
+      <p className="text-sm text-muted-foreground">
+        {formatCurrency(Number(entry.value))}
+      </p>
+    </div>
   )
 }

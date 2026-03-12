@@ -58,6 +58,7 @@ export default async function EquipoPage() {
         { data: breakRequests },
         { data: activeBreakEntries },
         { data: breakOvertimeHistory },
+        { data: serviceHistory },
     ] = await Promise.all([
         supabase.from('staff').select('*, branch:branches(*)').order('full_name'),
         supabase.from('branches').select('*').eq('is_active', true).order('name'),
@@ -103,6 +104,12 @@ export default async function EquipoPage() {
             .gt('overtime_seconds', 0)
             .gte('actual_completed_at', thirtyDaysAgoStr)
             .order('actual_completed_at', { ascending: false }),
+        supabase
+            .from('visits')
+            .select('id, amount, payment_method, commission_amount, started_at, completed_at, service:services(name), client:clients(name), barber:staff(id, full_name)')
+            .gte('completed_at', fromDate)
+            .order('completed_at', { ascending: false })
+            .limit(500),
     ])
 
     // Get user permissions
@@ -144,6 +151,7 @@ export default async function EquipoPage() {
             roles={(roles as Role[]) ?? []}
             isOwner={isOwner}
             permissions={userPermissions}
+            serviceHistory={serviceHistory ?? []}
         />
     )
 }

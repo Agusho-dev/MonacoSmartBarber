@@ -2,19 +2,20 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
-import { Scissors, Coffee, Trophy, AlertTriangle, Shield } from 'lucide-react'
+import { Scissors, Coffee, Trophy, AlertTriangle, Shield, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-// Re-use existing client components
 import { BarberosClient } from '../barberos/barberos-client'
 import { DescansosDashboard } from '../descansos/descansos-client'
 import { IncentivosClient } from '../incentivos/incentivos-client'
 import { DisciplinaClient } from '../disciplina/disciplina-client'
 import { RolesClient } from './roles-client'
+import { HistorialServiciosClient } from './historial-servicios-client'
 import type { Role, Branch } from '@/lib/types/database'
 
 const TABS = [
     { id: 'barberos', label: 'Barberos', icon: Scissors, permission: 'staff.view' },
+    { id: 'historial-servicios', label: 'Historial de Servicios', icon: ClipboardList, permission: 'staff.view' },
     { id: 'descansos', label: 'Descansos', icon: Coffee, permission: 'breaks.view' },
     { id: 'incentivos', label: 'Incentivos', icon: Trophy, permission: 'incentives.view' },
     { id: 'disciplina', label: 'Disciplina', icon: AlertTriangle, permission: 'discipline.view' },
@@ -47,6 +48,8 @@ interface EquipoClientProps {
     roles: Role[]
     isOwner: boolean
     permissions: Record<string, boolean>
+    // Historial de servicios
+    serviceHistory: unknown[]
 }
 
 export function EquipoClient({
@@ -66,6 +69,7 @@ export function EquipoClient({
     roles,
     isOwner,
     permissions,
+    serviceHistory,
 }: EquipoClientProps) {
     const searchParams = useSearchParams()
     const router = useRouter()
@@ -166,6 +170,22 @@ export function EquipoClient({
                         branches={branches as Parameters<typeof BarberosClient>[0]['branches']}
                         todayVisits={todayVisits as Parameters<typeof BarberosClient>[0]['todayVisits']}
                         roles={roles}
+                    />
+                )}
+                {activeTab === 'historial-servicios' && (
+                    <HistorialServiciosClient
+                        visits={serviceHistory as Parameters<typeof HistorialServiciosClient>[0]['visits']}
+                        barbers={
+                            (barbers as unknown[])
+                                .filter((b: unknown) => (b as { role: string }).role === 'barber' && (b as { is_active: boolean }).is_active)
+                                .map((b: unknown) => ({
+                                    id: (b as { id: string }).id,
+                                    full_name: (b as { full_name: string }).full_name,
+                                })) as Parameters<typeof HistorialServiciosClient>[0]['barbers']
+                        }
+                        selectedBranchId={selectedBranchId}
+                        branches={branches as { id: string; name: string }[]}
+                        onBranchChange={handleBranchChange}
                     />
                 )}
                 {activeTab === 'descansos' && (

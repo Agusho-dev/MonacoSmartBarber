@@ -48,7 +48,7 @@ interface Props {
 
 type BalanceSummary = Awaited<ReturnType<typeof getAccountBalanceSummary>>
 
-const EMPTY_FORM = { id: '', branch_id: '', name: '', alias_or_cbu: '', daily_limit: '', sort_order: '0' }
+const EMPTY_FORM = { id: '', branch_id: '', name: '', alias_or_cbu: '', daily_limit: '', sort_order: '0', is_active: true }
 
 export function CuentasClient({ accounts, branches }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -73,7 +73,8 @@ export function CuentasClient({ accounts, branches }: Props) {
       name: acc.name,
       alias_or_cbu: acc.alias_or_cbu ?? '',
       daily_limit: acc.daily_limit ? String(acc.daily_limit) : '',
-      sort_order: String(acc.sort_order ?? 0)
+      sort_order: String(acc.sort_order ?? 0),
+      is_active: acc.is_active,
     })
     setDialogOpen(true)
   }
@@ -101,6 +102,7 @@ export function CuentasClient({ accounts, branches }: Props) {
     fd.append('alias_or_cbu', form.alias_or_cbu)
     if (form.daily_limit) fd.append('daily_limit', form.daily_limit)
     fd.append('sort_order', form.sort_order)
+    fd.append('is_active', String(form.is_active))
 
     startTransition(async () => {
       const result = await upsertPaymentAccount(fd)
@@ -298,6 +300,18 @@ export function CuentasClient({ accounts, branches }: Props) {
                 />
               </div>
             </div>
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div>
+                <Label>Estado de la cuenta</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {form.is_active ? 'Activa — visible para barberos' : 'Inactiva — oculta para barberos'}
+                </p>
+              </div>
+              <Switch
+                checked={form.is_active}
+                onCheckedChange={(checked) => setForm((f) => ({ ...f, is_active: checked }))}
+              />
+            </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
                 Cancelar
@@ -397,7 +411,10 @@ export function CuentasClient({ accounts, branches }: Props) {
                       </div>
                       )
                     })}
-                    {balanceData.expenses.map((e) => (
+                    {balanceData.expenses.map((e) => {
+                      const staffRaw = e.created_by_staff as unknown
+                      const staff = (Array.isArray(staffRaw) ? staffRaw[0] : staffRaw) as { full_name: string } | null | undefined
+                      return (
                       <div key={`e-${e.id}`} className="flex items-center justify-between rounded-lg border px-3 py-2">
                         <div className="flex items-center gap-2 min-w-0">
                           <ArrowUpRight className="size-4 text-red-500 shrink-0" />
@@ -406,13 +423,14 @@ export function CuentasClient({ accounts, branches }: Props) {
                               {e.category}
                             </p>
                             <p className="text-xs text-muted-foreground truncate">
-                              {e.description ?? 'Sin descripción'}
+                              {staff?.full_name ?? 'Admin'} · {e.description ?? 'Sin descripción'}
                             </p>
                           </div>
                         </div>
                         <span className="text-sm font-medium text-red-500 shrink-0">-{formatCurrency(e.amount)}</span>
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </div>

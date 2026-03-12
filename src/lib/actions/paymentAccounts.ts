@@ -24,9 +24,11 @@ export async function upsertPaymentAccount(formData: FormData) {
   const aliasOrCbu = (formData.get('alias_or_cbu') as string | null)?.trim() || null
   const dailyLimitStr = formData.get('daily_limit') as string | null
   const sortOrderStr = formData.get('sort_order') as string | null
+  const isActiveStr = formData.get('is_active') as string | null
 
   const dailyLimit = dailyLimitStr && dailyLimitStr !== '' ? Number(dailyLimitStr) : null
   const sortOrder = sortOrderStr && sortOrderStr !== '' ? Number(sortOrderStr) : 0
+  const isActive = isActiveStr !== null ? isActiveStr === 'true' : true
 
   if (!branchId || !name) return { error: 'Nombre y sucursal son obligatorios' }
 
@@ -34,15 +36,16 @@ export async function upsertPaymentAccount(formData: FormData) {
     const { error } = await supabase
       .from('payment_accounts')
       .update({
+        branch_id: branchId,
         name,
         alias_or_cbu: aliasOrCbu,
         daily_limit: dailyLimit,
-        sort_order: sortOrder
+        sort_order: sortOrder,
+        is_active: isActive,
       })
       .eq('id', id)
     if (error) return { error: error.message }
   } else {
-    // If it's a new account, last_reset_date defaults to today via DB.
     const { error } = await supabase
       .from('payment_accounts')
       .insert({
@@ -50,12 +53,14 @@ export async function upsertPaymentAccount(formData: FormData) {
         name,
         alias_or_cbu: aliasOrCbu,
         daily_limit: dailyLimit,
-        sort_order: sortOrder
+        sort_order: sortOrder,
+        is_active: isActive,
       })
     if (error) return { error: error.message }
   }
 
   revalidatePath('/dashboard/cuentas')
+  revalidatePath('/dashboard/finanzas')
   return { success: true }
 }
 
@@ -171,6 +176,52 @@ export async function recordTransfer(visitId: string, accountId: string, amount:
   }
 
   return { success: true }
+}
+
+export async function getAllAccountBalanceTotals(branchId?: string | null) {
+  const supabase = await createClient()
+
+  let accountsQuery = supabase
+    .from('payment_accounts')
+    .select('id, name')
+    .eq('is_active', true)
+    .order('sort_order')
+
+  if (branchId) {
+    accountsQuery = accountsQuery.eq('branch_id', branchId)
+  }
+
+  const { data: accounts } = await accountsQuery
+  if (!accounts?.length) return []
+
+  const accountIds = accounts.map(a => a.id)
+
+  const [{ data: allTransfers }, { data: allExpenses }] = await Promise.all([
+    supabase
+      .from('transfer_logs')
+      .select('payment_account_id, amount')
+      .in('payment_account_id', accountIds),
+    supabase
+      .from('expense_tickets')
+      .select('payment_account_id, amount')
+      .in('payment_account_id', accountIds),
+  ])
+
+  return accounts.map(acc => {
+    const income = (allTransfers ?? [])
+      .filter(t => t.payment_account_id === acc.id)
+      .reduce((s, t) => s + Number(t.amount), 0)
+    const expenses = (allExpenses ?? [])
+      .filter(e => e.payment_account_id === acc.id)
+      .reduce((s, e) => s + Number(e.amount), 0)
+    return {
+      id: acc.id,
+      name: acc.name,
+      balance: income - expenses,
+      income,
+      expenses,
+    }
+  })
 }
 
 export async function getAccountBalanceSummary(accountId: string) {

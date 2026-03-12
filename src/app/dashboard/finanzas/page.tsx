@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { fetchFinancialData, getFixedExpenses } from '@/lib/actions/finances'
+import { fetchFinancialData } from '@/lib/actions/finances'
 import { FinanzasTabsClient } from './finanzas-tabs-client'
 import type { Metadata } from 'next'
 
@@ -42,7 +42,6 @@ export default async function FinanzasPage() {
   )
 
   const financialData = await fetchFinancialData(6)
-  const expenses = await getFixedExpenses()
 
   const [{ data: branches }, { data: accounts }, { data: barbersRaw }, { data: payments }, { data: expenseTickets }] =
     await Promise.all([
@@ -72,7 +71,6 @@ export default async function FinanzasPage() {
   return (
     <FinanzasTabsClient
       initialData={financialData}
-      initialExpenses={expenses}
       branches={branches ?? []}
       accounts={accounts ?? []}
       barbers={barbersRaw ?? []}
