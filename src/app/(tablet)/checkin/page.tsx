@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { checkinClient, checkinClientByFace, reassignMyBarber } from '@/lib/actions/queue'
-import { registerBarberClockIn } from '@/lib/actions/attendance'
+import { registerBarberClockIn, registerBarberClockOut } from '@/lib/actions/attendance'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -235,9 +235,19 @@ export default function CheckinPage() {
 
         const filtered = staffRes.data.filter((s) => {
           if (s.status === 'blocked') return false
-          // Only show barbers who have clocked in today
-          if (latestAttendance[s.id] !== 'clock_in') return false
-          return true
+
+          const lastAction = latestAttendance[s.id]
+          // 1. Si hizo clock in hoy, mostrarlo
+          if (lastAction === 'clock_in') return true
+          // 2. Si hizo clock out hoy, ocultarlo
+          if (lastAction === 'clock_out') return false
+
+          // 3. Si no tiene registros hoy, verificar si tiene horario
+          const hasScheduleToday = schedulesRes?.data?.some(sched => sched.staff_id === s.id)
+          if (hasScheduleToday) return true
+
+          // 4. Si no tiene horario y no hizo clock in, ocultarlo
+          return false
         })
         setBarbers(filtered)
       }
@@ -1446,17 +1456,14 @@ export default function CheckinPage() {
 
                 <button
                   onClick={async () => {
-                    const supabase = createClient()
                     const branchId = selectedBranch?.id
                     if (!branchId) return
                     const staffId = staffFaceMatch.clientId
                     if (!staffId) { setError('Barbero no encontrado'); return }
-                    await supabase.from('attendance_logs').insert({
-                      staff_id: staffId,
-                      branch_id: branchId,
-                      action_type: 'clock_out',
-                      face_verified: true,
-                    })
+
+                    const res = await registerBarberClockOut(staffId, branchId, true)
+                    if (res.error) { setError(res.error); return }
+
                     setStaffAction('clock_out')
                     setStaffActionDone(true)
                     resetTimer.current = setTimeout(reset, RESET_DELAY_MS)

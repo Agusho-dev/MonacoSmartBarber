@@ -85,3 +85,21 @@ export async function registerBarberClockIn(staffId: string, branchId: string, f
     revalidatePath('/checkin')
     return { success: true }
 }
+
+export async function registerBarberClockOut(staffId: string, branchId: string, faceVerified: boolean) {
+    const supabase = await createClient()
+
+    const { error: logError } = await supabase.from('attendance_logs').insert({
+        staff_id: staffId,
+        branch_id: branchId,
+        action_type: 'clock_out',
+        face_verified: faceVerified,
+    })
+
+    if (logError) {
+        return { error: 'Error al registrar salida: ' + logError.message }
+    }
+
+    revalidatePath('/checkin')
+    return { success: true }
+}
