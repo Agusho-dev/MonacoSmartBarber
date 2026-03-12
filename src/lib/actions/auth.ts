@@ -163,6 +163,23 @@ export async function getBarberSession() {
   }
 }
 
+export async function verifyBarberPin(staffId: string, pin: string) {
+  const supabase = createAdminClient()
+
+  const { data: staff, error } = await supabase
+    .from('staff')
+    .select('id, pin, full_name, branch_id, role')
+    .eq('id', staffId)
+    .eq('is_active', true)
+    .single()
+
+  if (error || !staff || staff.pin !== pin) {
+    return { error: 'PIN incorrecto' }
+  }
+
+  return { success: true as const, staffId: staff.id, staffName: staff.full_name }
+}
+
 export async function logoutBarber() {
   const cookieStore = await cookies()
   cookieStore.delete('barber_session')

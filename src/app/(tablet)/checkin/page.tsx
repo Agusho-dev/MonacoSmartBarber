@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { checkinClient, checkinClientByFace, reassignMyBarber } from '@/lib/actions/queue'
 import { registerBarberClockIn, registerBarberClockOut } from '@/lib/actions/attendance'
+import { verifyBarberPin } from '@/lib/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -37,7 +38,7 @@ import {
 import { FaceCamera } from '@/components/checkin/face-camera'
 import { FaceEnrollment } from '@/components/checkin/face-enrollment'
 import type { FaceMatchResult } from '@/lib/face-recognition'
-import { saveFacePhoto, enrollFaceDescriptor } from '@/lib/face-recognition'
+import { saveFacePhoto, enrollFaceDescriptor, enrollStaffFaceDescriptor, saveStaffFacePhoto } from '@/lib/face-recognition'
 
 type Step =
   | 'branch'
@@ -52,6 +53,8 @@ type Step =
   | 'manage_turn'
   | 'staff_face_scan'
   | 'staff_action_confirm'
+  | 'staff_pin'
+  | 'staff_face_enroll'
 
 type AttendanceActionType = 'clock_in' | 'clock_out'
 
@@ -117,6 +120,16 @@ export default function CheckinPage() {
   const [staffFaceMatch, setStaffFaceMatch] = useState<FaceMatchResult | null>(null)
   const [staffAction, setStaffAction] = useState<AttendanceActionType | null>(null)
   const [staffActionDone, setStaffActionDone] = useState(false)
+
+  // Staff PIN + face enrollment state
+  const [staffPinBarbers, setStaffPinBarbers] = useState<Staff[]>([])
+  const [staffPinLoading, setStaffPinLoading] = useState(false)
+  const [staffPinSelected, setStaffPinSelected] = useState<Staff | null>(null)
+  const [staffPinValue, setStaffPinValue] = useState('')
+  const [staffPinError, setStaffPinError] = useState('')
+  const [staffPinSubmitting, setStaffPinSubmitting] = useState(false)
+  const [staffEnrollId, setStaffEnrollId] = useState<string | null>(null)
+  const [staffEnrollName, setStaffEnrollName] = useState('')
 
   const [services, setServices] = useState<Service[]>([])
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null)
@@ -353,6 +366,23 @@ export default function CheckinPage() {
     }
   }, [needsBarbers, selectedBranch?.id, myQueueEntry?.branch_id, loadBarberData])
 
+  useEffect(() => {
+    if (step !== 'staff_pin' || !selectedBranch) return
+    setStaffPinLoading(true)
+    const supabase = createClient()
+    supabase
+      .from('staff')
+      .select('*')
+      .eq('branch_id', selectedBranch.id)
+      .eq('role', 'barber')
+      .eq('is_active', true)
+      .order('full_name')
+      .then(({ data }) => {
+        setStaffPinBarbers(data ?? [])
+        setStaffPinLoading(false)
+      })
+  }, [step, selectedBranch])
+
   const goTo = (next: Step) => {
     setAnimKey((k) => k + 1)
     setStep(next)
@@ -388,6 +418,13 @@ export default function CheckinPage() {
     setStaffAction(null)
     setStaffActionDone(false)
     setSelectedServiceId(null)
+    setStaffPinBarbers([])
+    setStaffPinSelected(null)
+    setStaffPinValue('')
+    setStaffPinError('')
+    setStaffPinSubmitting(false)
+    setStaffEnrollId(null)
+    setStaffEnrollName('')
     // Keep selectedBranch — go back to home, not branch
     goTo('home')
   }
@@ -1479,9 +1516,11 @@ export default function CheckinPage() {
               goTo('staff_action_confirm')
             }}
             onNoMatch={() => {
-              setError('No se reconoció tu cara. Pedí ayuda al administrador.')
+              goTo('staff_pin')
             }}
-            onManualEntry={() => setError('El ingreso manual no está disponible en modo barbero.')}
+            onManualEntry={() => {
+              goTo('staff_pin')
+            }}
           />
           {error && <p className="text-destructive text-center text-lg">{error}</p>}
         </div>
@@ -1580,6 +1619,242 @@ export default function CheckinPage() {
               <p className="text-sm text-muted-foreground">Volviendo al inicio...</p>
             </>
           )}
+        </div>
+      )}
+
+      {/* ═══════════════ STAFF PIN (face not recognized) ═══════════════ */}
+      {step === 'staff_pin' && (
+        <div
+          key={`staff-pin-${animKey}`}
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+        >
+          {backButton(() => {
+            setStaffPinSelected(null)
+            setStaffPinValue('')
+            setStaffPinError('')
+            goTo('staff_face_scan')
+          })}
+
+          {!staffPinSelected ? (
+            <>
+              <div className="text-center mt-2">
+                <div className="size-14 md:size-16 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-3">
+                  <ScanFace className="size-7 md:size-8 text-amber-400" strokeWidth={1.5} />
+                </div>
+                <h2 className="text-2xl md:text-3xl font-bold">No te reconocimos</h2>
+                <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
+                  Ingresá tu PIN para registrar tu rostro
+                </p>
+              </div>
+
+              {staffPinLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="size-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : staffPinBarbers.length === 0 ? (
+                <p className="text-center text-base text-muted-foreground py-10">
+                  No hay barberos en esta sucursal
+                </p>
+              ) : (
+                <div className="w-full grid grid-cols-2 md:grid-cols-3 gap-3 overflow-y-auto min-h-0 flex-1">
+                  {staffPinBarbers.map((barber) => (
+                    <button
+                      key={barber.id}
+                      onClick={() => {
+                        setStaffPinSelected(barber)
+                        setStaffPinValue('')
+                        setStaffPinError('')
+                      }}
+                      className="flex flex-col items-center gap-3 rounded-2xl border border-white/8 bg-white/2 p-5 transition-all hover:bg-white/6 active:scale-[0.98]"
+                    >
+                      {barber.avatar_url ? (
+                        <img
+                          src={barber.avatar_url}
+                          alt={barber.full_name}
+                          className="size-16 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex size-16 items-center justify-center rounded-full bg-white/8 text-xl font-bold">
+                          {barber.full_name.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <span className="text-center text-sm font-medium leading-tight">
+                        {barber.full_name}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="flex flex-col items-center gap-2 mt-2">
+                {staffPinSelected.avatar_url ? (
+                  <img
+                    src={staffPinSelected.avatar_url}
+                    alt={staffPinSelected.full_name}
+                    className="size-20 rounded-full object-cover border-2 border-white/10"
+                  />
+                ) : (
+                  <div className="flex size-20 items-center justify-center rounded-full bg-white/8 border-2 border-white/10 text-2xl font-bold">
+                    {staffPinSelected.full_name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <h2 className="text-xl md:text-2xl font-bold">{staffPinSelected.full_name}</h2>
+                <p className="text-muted-foreground text-base">Ingresá tu PIN</p>
+              </div>
+
+              <div className="flex gap-3 my-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className={`size-4 rounded-full border-2 transition-colors ${
+                      i < staffPinValue.length
+                        ? 'border-white bg-white'
+                        : 'border-white/30'
+                    }`}
+                  />
+                ))}
+              </div>
+
+              {staffPinError && (
+                <p className="text-destructive text-center text-base">{staffPinError}</p>
+              )}
+
+              {staffPinSubmitting && (
+                <Loader2 className="size-5 animate-spin text-muted-foreground" />
+              )}
+
+              <div className="w-full max-w-[280px] grid grid-cols-3 gap-3">
+                {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
+                  <button
+                    key={d}
+                    disabled={staffPinSubmitting}
+                    onClick={() => {
+                      if (staffPinValue.length >= 4 || staffPinSubmitting) return
+                      const next = staffPinValue + d
+                      setStaffPinValue(next)
+                      setStaffPinError('')
+                      if (next.length === 4) {
+                        setStaffPinSubmitting(true)
+                        verifyBarberPin(staffPinSelected.id, next).then((res) => {
+                          if (res.error) {
+                            setStaffPinError(res.error)
+                            setStaffPinValue('')
+                            setStaffPinSubmitting(false)
+                          } else if ('success' in res && res.success) {
+                            setStaffEnrollId(res.staffId)
+                            setStaffEnrollName(res.staffName)
+                            setStaffPinSubmitting(false)
+                            goTo('staff_face_enroll')
+                          }
+                        })
+                      }
+                    }}
+                    className="h-14 rounded-2xl bg-white/4 border border-white/6 text-2xl font-semibold transition-all hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40"
+                  >
+                    {d}
+                  </button>
+                ))}
+                <button
+                  onClick={() => {
+                    if (!staffPinSubmitting) {
+                      setStaffPinValue((p) => p.slice(0, -1))
+                      setStaffPinError('')
+                    }
+                  }}
+                  disabled={staffPinSubmitting || staffPinValue.length === 0}
+                  className="h-14 rounded-2xl bg-white/4 border border-white/6 flex items-center justify-center transition-all hover:bg-white/8 active:scale-95 disabled:opacity-40"
+                >
+                  <Delete className="size-6" />
+                </button>
+                <button
+                  disabled={staffPinSubmitting}
+                  onClick={() => {
+                    if (staffPinValue.length >= 4 || staffPinSubmitting) return
+                    const next = staffPinValue + '0'
+                    setStaffPinValue(next)
+                    setStaffPinError('')
+                    if (next.length === 4) {
+                      setStaffPinSubmitting(true)
+                      verifyBarberPin(staffPinSelected.id, next).then((res) => {
+                        if (res.error) {
+                          setStaffPinError(res.error)
+                          setStaffPinValue('')
+                          setStaffPinSubmitting(false)
+                        } else if ('success' in res && res.success) {
+                          setStaffEnrollId(res.staffId)
+                          setStaffEnrollName(res.staffName)
+                          setStaffPinSubmitting(false)
+                          goTo('staff_face_enroll')
+                        }
+                      })
+                    }
+                  }}
+                  className="h-14 rounded-2xl bg-white/4 border border-white/6 text-2xl font-semibold transition-all hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40"
+                >
+                  0
+                </button>
+                <div />
+              </div>
+
+              <button
+                onClick={() => {
+                  setStaffPinSelected(null)
+                  setStaffPinValue('')
+                  setStaffPinError('')
+                }}
+                className="text-muted-foreground hover:text-foreground transition-colors py-2 text-sm"
+              >
+                Elegir otro barbero
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════ STAFF FACE ENROLL ═══════════════ */}
+      {step === 'staff_face_enroll' && staffEnrollId && (
+        <div
+          key={`staff-enroll-${animKey}`}
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+        >
+          {backButton(() => goTo('staff_pin'))}
+
+          <FaceEnrollment
+            clientName={staffEnrollName}
+            source="checkin"
+            captureOnly
+            onCapture={async (descriptors, photo) => {
+              const saves = descriptors.map((d, i) =>
+                enrollStaffFaceDescriptor(staffEnrollId!, d, 'checkin', i === 0 ? 0.99 : 0)
+              )
+              if (photo) {
+                saves.push(saveStaffFacePhoto(staffEnrollId!, photo).then(() => true))
+              }
+              await Promise.all(saves)
+
+              setStaffFaceMatch({
+                clientId: staffEnrollId!,
+                clientName: staffEnrollName,
+                clientPhone: '',
+                confidence: 1,
+              })
+              goTo('staff_action_confirm')
+            }}
+            onComplete={() => {
+              setStaffFaceMatch({
+                clientId: staffEnrollId!,
+                clientName: staffEnrollName,
+                clientPhone: '',
+                confidence: 1,
+              })
+              goTo('staff_action_confirm')
+            }}
+            onSkip={() => {
+              goTo('home')
+            }}
+          />
         </div>
       )}
 
