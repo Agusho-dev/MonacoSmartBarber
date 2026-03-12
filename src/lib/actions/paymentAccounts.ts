@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 
 export async function getPaymentAccounts(branchId: string) {
@@ -17,7 +17,7 @@ export async function getPaymentAccounts(branchId: string) {
 }
 
 export async function upsertPaymentAccount(formData: FormData) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const id = formData.get('id') as string | null
   const branchId = formData.get('branch_id') as string
   const name = (formData.get('name') as string).trim()
@@ -65,7 +65,7 @@ export async function upsertPaymentAccount(formData: FormData) {
 }
 
 export async function togglePaymentAccount(id: string, isActive: boolean) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { error } = await supabase
     .from('payment_accounts')
     .update({ is_active: isActive })
@@ -76,7 +76,7 @@ export async function togglePaymentAccount(id: string, isActive: boolean) {
 }
 
 export async function deletePaymentAccount(id: string) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { error } = await supabase
     .from('payment_accounts')
     .delete()
@@ -87,7 +87,7 @@ export async function deletePaymentAccount(id: string) {
 }
 
 export async function resetDailyAccumulation() {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   // DB side, we update all accounts whose last_reset_date is less than current date
   const todayDate = new Date().toISOString().split('T')[0]
 
@@ -145,7 +145,7 @@ export async function getActiveAccountForTransfer(branchId: string, transferAmou
 }
 
 export async function recordTransfer(visitId: string, accountId: string, amount: number, branchId: string) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // 1. Log the transfer
   const { error: logError } = await supabase
