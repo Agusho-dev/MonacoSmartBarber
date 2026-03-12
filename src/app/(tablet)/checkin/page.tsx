@@ -1270,41 +1270,37 @@ export default function CheckinPage() {
       {step === 'success' && (
         <div
           key={`success-${animKey}`}
-          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
+          className="w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
         >
           {!changingBarberInSuccess ? (
             <>
-              <div className="size-16 md:size-20 rounded-full bg-white/4 border border-white/10 flex items-center justify-center animate-in zoom-in-50 duration-700">
-                <CheckCircle2 className="size-9 md:size-12 text-white" strokeWidth={1.5} />
-              </div>
+              <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/3 p-8 md:p-10 flex flex-col items-center gap-5 animate-in zoom-in-50 duration-700">
+                <div className="size-14 md:size-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                  <CheckCircle2 className="size-8 md:size-9 text-emerald-400" strokeWidth={1.5} />
+                </div>
 
-              <div className="text-center">
-                <h2 className="text-2xl md:text-3xl font-bold">¡Estás en la fila!</h2>
-                <div className="mt-3 md:mt-4 py-4 md:py-5 px-6 md:px-10 rounded-2xl border border-white/10 bg-white/3">
-                  <p className="text-muted-foreground text-sm md:text-base">Tu turno</p>
-                  <p className="text-5xl md:text-6xl font-bold mt-1 tabular-nums">
+                <h2 className="text-xl md:text-2xl font-bold text-muted-foreground">¡Estás en la fila!</h2>
+
+                <div className="text-center">
+                  <p className="text-8xl md:text-9xl font-bold tabular-nums leading-none">
                     #{position}
                   </p>
                 </div>
               </div>
 
-              <div className="w-full max-w-lg grid gap-2 md:grid-cols-2">
+              <div className="w-full max-w-xl flex flex-col items-center gap-2">
                 {queueEntryId && (
-                  <button
+                  <Button
                     onClick={() => {
                       if (resetTimer.current) clearTimeout(resetTimer.current)
                       setChangingBarberInSuccess(true)
                     }}
-                    className="flex items-center gap-3 rounded-2xl border border-white/8 bg-white/2 p-3 md:p-4 w-full transition-all hover:bg-white/6 hover:border-white/20 active:scale-[0.98]"
+                    variant="outline"
+                    className="h-11 md:h-12 text-sm md:text-base rounded-xl w-full max-w-xs"
                   >
-                    <RefreshCw className="size-5 text-muted-foreground shrink-0" />
-                    <div className="text-left">
-                      <p className="text-sm font-medium">Cambiar barbero</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Podés elegir otro
-                      </p>
-                    </div>
-                  </button>
+                    <RefreshCw className="size-4 mr-2" />
+                    Cambiar barbero
+                  </Button>
                 )}
 
                 {/* Face enrollment offer */}
@@ -1314,10 +1310,10 @@ export default function CheckinPage() {
                       if (resetTimer.current) clearTimeout(resetTimer.current)
                       goTo('face_enroll')
                     }}
-                    className="flex items-center gap-3 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-3 md:p-4 w-full transition-all hover:bg-blue-500/10 hover:border-blue-500/30 active:scale-[0.98]"
+                    className="flex items-center gap-3 rounded-xl border border-blue-500/20 bg-blue-500/5 p-3 w-full max-w-xs transition-all hover:bg-blue-500/10 hover:border-blue-500/30 active:scale-[0.98]"
                   >
-                    <div className="shrink-0 size-8 md:size-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
-                      <User className="size-4 md:size-5 text-blue-400" />
+                    <div className="shrink-0 size-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                      <User className="size-4 text-blue-400" />
                     </div>
                     <div className="text-left">
                       <p className="text-sm font-medium text-blue-300">Registrar tu cara</p>
@@ -1329,19 +1325,8 @@ export default function CheckinPage() {
                 )}
               </div>
 
-              {/* App promo */}
-              <div className="flex items-center gap-3 rounded-xl border border-white/6 bg-white/2 p-3 md:p-4 w-full max-w-lg">
-                <Smartphone className="size-5 md:size-6 text-muted-foreground shrink-0" />
-                <p className="text-xs md:text-sm text-muted-foreground leading-relaxed">
-                  ¿Sabías que podés ver la ocupación en tiempo real?{' '}
-                  <span className="text-foreground font-medium">
-                    Descargá nuestra app
-                  </span>
-                </p>
-              </div>
-
               {/* Countdown bar */}
-              <div className="w-full max-w-xs h-1 rounded-full bg-white/10 overflow-hidden">
+              <div className="w-full max-w-xs h-1 rounded-full bg-white/10 overflow-hidden mt-2">
                 <div
                   className="h-full bg-white/40 rounded-full origin-left"
                   style={{
