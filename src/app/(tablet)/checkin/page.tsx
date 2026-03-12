@@ -1838,7 +1838,8 @@ export default function CheckinPage() {
                 clientId: staffEnrollId!,
                 clientName: staffEnrollName,
                 clientPhone: '',
-                confidence: 1,
+                facePhotoUrl: null,
+                distance: 0,
               })
               goTo('staff_action_confirm')
             }}
@@ -1847,7 +1848,8 @@ export default function CheckinPage() {
                 clientId: staffEnrollId!,
                 clientName: staffEnrollName,
                 clientPhone: '',
-                confidence: 1,
+                facePhotoUrl: null,
+                distance: 0,
               })
               goTo('staff_action_confirm')
             }}
