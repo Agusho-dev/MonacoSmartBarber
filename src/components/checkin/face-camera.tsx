@@ -234,7 +234,7 @@ export function FaceCamera({
   }
 
   return (
-    <div className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6">
+    <div className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 flex-1 min-h-0">
       <div className="text-center">
         <h2 className="text-2xl md:text-3xl font-bold">Check-in</h2>
         {branchName && (
@@ -243,7 +243,7 @@ export function FaceCamera({
       </div>
 
       {/* Camera viewport */}
-      <div className="relative w-full aspect-[3/4] max-h-[70vh] rounded-3xl overflow-hidden bg-black/50 border border-white/10">
+      <div className="relative w-full flex-1 min-h-0 rounded-3xl overflow-hidden bg-black/50 border border-white/10">
         <video
           ref={videoRef}
           className="absolute inset-0 w-full h-full object-cover mirror"
@@ -321,7 +321,7 @@ export function FaceCamera({
       </div>
 
       {/* Status text */}
-      <p className={`text-base md:text-lg font-medium text-center transition-colors ${statusColor()}`}>
+      <p className={`text-base md:text-lg font-medium text-center transition-colors shrink-0 ${statusColor()}`}>
         {statusLabel()}
       </p>
 
@@ -329,10 +329,10 @@ export function FaceCamera({
       <Button
         onClick={state === 'no_match' ? handleManualNoMatch : onManualEntry}
         variant="outline"
-        className="w-full h-14 md:h-16 text-base md:text-lg rounded-2xl gap-2 md:gap-3"
+        className="w-full h-12 md:h-14 text-base md:text-lg rounded-2xl gap-2 md:gap-3 shrink-0"
       >
         <KeyboardIcon className="size-5" />
-        Ingresar manualmente
+        Registrar
       </Button>
     </div>
   )

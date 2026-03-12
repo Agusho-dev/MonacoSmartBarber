@@ -400,6 +400,19 @@ export default function CheckinPage() {
   // ── Phone keypad ──
 
   const lookupPhone = async (ph: string) => {
+    // Si es el código genérico de niño
+    if (ph === '0000000000') {
+      const randomId = Math.floor(Math.random() * 100000000).toString().padStart(8, '0')
+      const virtualPhone = `00${randomId}`
+      setPhone(virtualPhone)
+      setName('')
+      setFaceClientId(null)
+      setIsReturning(false)
+      setHasExistingFace(false)
+      goTo('name')
+      return
+    }
+
     setLookingUp(true)
     try {
       const supabase = createClient()
@@ -718,8 +731,11 @@ export default function CheckinPage() {
 
   const goToBarberStep = () => {
     if (!name.trim()) return
-    // New clients: go to face enrollment first
-    if (!isReturning && !hasExistingFace) {
+    
+    const isChildVirtualPhone = phone.startsWith('00') && phone.length === 10
+    
+    // New clients: go to face enrollment first (unless it's a child profile)
+    if (!isReturning && !hasExistingFace && !isChildVirtualPhone) {
       setWantsEnrollment(true)
       goTo('face_enroll')
     } else {
@@ -803,7 +819,7 @@ export default function CheckinPage() {
   }
 
   const renderBarberList = (onSelect: (barberId: string) => void, showExpand = true) => (
-    <div className="w-full space-y-4">
+    <div className="w-full space-y-4 overflow-y-auto min-h-0 flex-1">
 
       {minWaitBarber && (
         <button
@@ -897,7 +913,7 @@ export default function CheckinPage() {
   // ── Render ──
 
   return (
-    <div className="h-dvh flex flex-col items-center select-none overflow-y-auto overflow-x-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)] py-6 md:py-8">
+    <div className="h-dvh flex flex-col items-center select-none overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)] py-6 md:py-8">
       {/* ═══════════════ BRANCH SELECTION ═══════════════ */}
       {step === 'branch' && (
         <div
@@ -1020,7 +1036,7 @@ export default function CheckinPage() {
       {step === 'face_scan' && (
         <div
           key={`face-scan-${animKey}`}
-          className="w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-4 px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => goTo('home'))}
 
@@ -1037,7 +1053,7 @@ export default function CheckinPage() {
       {step === 'phone' && (
         <div
           key={`phone-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             setPhone('')
@@ -1069,7 +1085,7 @@ export default function CheckinPage() {
       {step === 'name' && (
         <div
           key={`name-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             setPhone('')
@@ -1135,7 +1151,7 @@ export default function CheckinPage() {
       {step === 'face_enroll' && (
         <div
           key={`face-enroll-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             goTo('name')
@@ -1163,7 +1179,7 @@ export default function CheckinPage() {
       {step === 'service_selection' && (
         <div
           key={`service-${animKey}`}
-          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto"
+          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             if (!isReturning && !hasExistingFace) goTo('face_enroll')
@@ -1177,7 +1193,7 @@ export default function CheckinPage() {
             </p>
           </div>
 
-          <div className="w-full grid gap-3 md:gap-4 mt-2">
+          <div className="w-full grid gap-3 md:gap-4 mt-2 overflow-y-auto min-h-0 flex-1">
             {services.map(s => (
               <button
                 key={s.id}
@@ -1208,7 +1224,7 @@ export default function CheckinPage() {
       {step === 'barber' && (
         <div
           key={`barber-${animKey}`}
-          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto"
+          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
 
@@ -1254,7 +1270,7 @@ export default function CheckinPage() {
       {step === 'success' && (
         <div
           key={`success-${animKey}`}
-          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in zoom-in-95 duration-500 max-h-dvh overflow-y-auto"
+          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
         >
           {!changingBarberInSuccess ? (
             <>
@@ -1394,7 +1410,7 @@ export default function CheckinPage() {
       {step === 'staff_face_scan' && (
         <div
           key={`staff-face-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => goTo('home'))}
           <div className="text-center mt-2">
@@ -1421,7 +1437,7 @@ export default function CheckinPage() {
       {step === 'staff_action_confirm' && staffFaceMatch && (
         <div
           key={`staff-action-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-6 md:gap-8 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in zoom-in-95 duration-500"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
         >
           {!staffActionDone ? (
             <>
@@ -1517,7 +1533,7 @@ export default function CheckinPage() {
       {step === 'manage_turn' && myQueueEntry && (
         <div
           key={`manage-turn-${animKey}`}
-          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-14 md:pt-16 animate-in fade-in slide-in-from-right-4 duration-400 max-h-dvh overflow-y-auto"
+          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             setMyQueueEntry(null)
