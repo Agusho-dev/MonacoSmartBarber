@@ -359,6 +359,9 @@ export interface BreakRequest {
   requested_at: string
   approved_by: string | null
   approved_at: string | null
+  actual_started_at: string | null
+  actual_completed_at: string | null
+  overtime_seconds: number | null
   notes: string | null
   created_at: string
   staff?: Staff

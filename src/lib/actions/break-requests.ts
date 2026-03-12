@@ -240,21 +240,42 @@ export async function cancelBreakRequest(requestId: string) {
 
 /**
  * Complete a break (the barber finishes their break).
- * Marks the ghost queue entry as completed and the break_request as completed.
+ * Marks the ghost queue entry as completed and the break_request as completed,
+ * recording actual start/end times and any overtime.
  */
 export async function completeBreakRequest(queueEntryId: string) {
     const supabase = await createAdminClient()
 
-    // Get the ghost entry
+    // Get the ghost entry including started_at to compute overtime
     const { data: entry } = await supabase
         .from('queue_entries')
-        .select('id, break_request_id')
+        .select('id, break_request_id, started_at')
         .eq('id', queueEntryId)
         .eq('is_break', true)
         .eq('status', 'in_progress')
         .single()
 
     if (!entry) return { error: 'Descanso no encontrado o no activo' }
+
+    const completedAt = new Date()
+    let overtimeSeconds = 0
+
+    // Calculate overtime if we have a start time and a duration
+    if (entry.started_at && entry.break_request_id) {
+        const { data: breakReq } = await supabase
+            .from('break_requests')
+            .select('break_config:break_config_id(duration_minutes)')
+            .eq('id', entry.break_request_id)
+            .single()
+
+        const durationMinutes = (breakReq?.break_config as { duration_minutes?: number } | null)?.duration_minutes
+        if (durationMinutes != null) {
+            const elapsedSeconds = Math.round(
+                (completedAt.getTime() - new Date(entry.started_at).getTime()) / 1000
+            )
+            overtimeSeconds = Math.max(0, elapsedSeconds - durationMinutes * 60)
+        }
+    }
 
     // Delete ghost entry to avoid triggering on_queue_completed insert on visits table
     const { error: errorQueue } = await supabase
@@ -264,11 +285,16 @@ export async function completeBreakRequest(queueEntryId: string) {
 
     if (errorQueue) return { error: errorQueue.message }
 
-    // Mark break_request as completed
+    // Mark break_request as completed with timing data
     if (entry.break_request_id) {
         const { error: errorBreak } = await supabase
             .from('break_requests')
-            .update({ status: 'completed' })
+            .update({
+                status: 'completed',
+                actual_started_at: entry.started_at,
+                actual_completed_at: completedAt.toISOString(),
+                overtime_seconds: overtimeSeconds,
+            })
             .eq('id', entry.break_request_id)
 
         if (errorBreak) return { error: errorBreak.message }

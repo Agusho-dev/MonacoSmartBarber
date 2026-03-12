@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect } from 'react'
 import { upsertDisciplinaryRule, deleteDisciplinaryRule, createDisciplinaryEvent } from '@/lib/actions/disciplinary'
 import { formatCurrency } from '@/lib/format'
 import type { Branch, DisciplinaryRule, DisciplinaryEvent, DisciplinaryEventType, ConsequenceType } from '@/lib/types/database'
@@ -35,7 +35,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { AlertTriangle, Plus, Trash2, Pencil, Clock, UserX } from 'lucide-react'
+import { AlertTriangle, Plus, Trash2, Pencil, Clock, UserX, Coffee } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface BarberBasic {
@@ -48,12 +48,42 @@ interface EventWithStaff extends Omit<DisciplinaryEvent, 'staff'> {
   staff?: { id: string; full_name: string; branch_id: string | null } | null
 }
 
+interface ActiveBreakEntry {
+  id: string
+  barber_id: string | null
+  branch_id: string | null
+  started_at: string | null
+  barber?: { id: string; full_name: string; branch_id: string | null } | null
+  break_request?: {
+    id: string
+    branch_id: string
+    break_config?: { name: string; duration_minutes: number } | null
+  } | null
+}
+
+interface BreakOvertimeRecord {
+  id: string
+  staff_id: string
+  branch_id: string
+  actual_started_at: string | null
+  actual_completed_at: string | null
+  overtime_seconds: number | null
+  staff?: { id: string; full_name: string; branch_id: string | null } | null
+  break_config?: { name: string; duration_minutes: number } | null
+}
+
+type OvertimeFilter = 'day' | 'week' | 'month'
+
 interface Props {
   branches: Branch[]
   rules: DisciplinaryRule[]
   barbers: BarberBasic[]
   events: EventWithStaff[]
   fromDate: string
+  activeBreakEntries?: ActiveBreakEntry[]
+  breakOvertimeHistory?: BreakOvertimeRecord[]
+  selectedBranchId?: string
+  onBranchChange?: (id: string) => void
 }
 
 const EVENT_LABELS: Record<DisciplinaryEventType, string> = {
@@ -69,8 +99,22 @@ const CONSEQUENCE_LABELS: Record<ConsequenceType, string> = {
   salary_deduction: 'Descuento de sueldo',
 }
 
-export function DisciplinaClient({ branches, rules, barbers, events, fromDate }: Props) {
-  const [selectedBranchId, setSelectedBranchId] = useState(branches[0]?.id ?? '')
+export function DisciplinaClient({
+  branches,
+  rules,
+  barbers,
+  events,
+  fromDate,
+  activeBreakEntries = [],
+  breakOvertimeHistory = [],
+  selectedBranchId: selectedBranchIdProp,
+  onBranchChange,
+}: Props) {
+  const [internalBranchId, setInternalBranchId] = useState(branches[0]?.id ?? '')
+  const selectedBranchId = selectedBranchIdProp ?? internalBranchId
+  const setSelectedBranchId = onBranchChange ?? setInternalBranchId
+  const [overtimeFilter, setOvertimeFilter] = useState<OvertimeFilter>('week')
+  const [now, setNow] = useState(Date.now())
   const [ruleDialog, setRuleDialog] = useState(false)
   const [ruleForm, setRuleForm] = useState({
     id: '', event_type: 'absence' as DisciplinaryEventType,
@@ -84,12 +128,76 @@ export function DisciplinaClient({ branches, rules, barbers, events, fromDate }:
   })
   const [, startTransition] = useTransition()
 
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [])
+
   const branchRules = rules.filter((r) => r.branch_id === selectedBranchId)
   const branchBarbers = barbers.filter((b) => b.branch_id === selectedBranchId)
   const branchEvents = events.filter((e) => {
     const staff = e.staff as { branch_id: string | null } | null
     return staff?.branch_id === selectedBranchId
   })
+
+  // Compute currently overdue breaks for the selected branch
+  const overdueBreaks = activeBreakEntries
+    .filter((entry) => {
+      const entryBranchId = entry.branch_id ?? entry.break_request?.branch_id ?? entry.barber?.branch_id
+      return entryBranchId === selectedBranchId && entry.started_at
+    })
+    .map((entry) => {
+      const durationMs = (entry.break_request?.break_config?.duration_minutes ?? 0) * 60_000
+      const elapsedMs = now - new Date(entry.started_at!).getTime()
+      const overdueMs = elapsedMs - durationMs
+      return { entry, overdueMs }
+    })
+    .filter(({ overdueMs }) => overdueMs > 0)
+
+  function formatOverdue(ms: number) {
+    const totalSeconds = Math.floor(ms / 1000)
+    const m = Math.floor(totalSeconds / 60)
+    const s = totalSeconds % 60
+    return `${m}m ${s}s`
+  }
+
+  function formatOvertimeSeconds(seconds: number) {
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return m > 0 ? `${m}m ${s}s` : `${s}s`
+  }
+
+  // Filter overtime history by branch and time period
+  const overtimeCutoff = (() => {
+    const d = new Date()
+    if (overtimeFilter === 'day') { d.setHours(0, 0, 0, 0); return d }
+    if (overtimeFilter === 'week') { d.setDate(d.getDate() - 7); return d }
+    d.setDate(d.getDate() - 30)
+    return d
+  })()
+
+  const filteredOvertimeHistory = breakOvertimeHistory.filter((r) => {
+    const staffBranchId = (r.staff as { branch_id?: string | null } | null)?.branch_id ?? r.branch_id
+    if (staffBranchId !== selectedBranchId) return false
+    if (!r.actual_completed_at) return false
+    return new Date(r.actual_completed_at) >= overtimeCutoff
+  })
+
+  // Per-barber summary for overtime
+  const overtimeSummary = (() => {
+    const map = new Map<string, { barber: BreakOvertimeRecord['staff']; count: number; totalSeconds: number }>()
+    for (const r of filteredOvertimeHistory) {
+      const key = r.staff_id
+      const existing = map.get(key)
+      if (existing) {
+        existing.count += 1
+        existing.totalSeconds += r.overtime_seconds ?? 0
+      } else {
+        map.set(key, { barber: r.staff, count: 1, totalSeconds: r.overtime_seconds ?? 0 })
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.totalSeconds - a.totalSeconds)
+  })()
 
   const barberSummary = branchBarbers.map((b) => {
     const barberEvents = branchEvents.filter((e) => e.staff_id === b.id)
@@ -193,10 +301,56 @@ export function DisciplinaClient({ branches, rules, barbers, events, fromDate }:
         </div>
       </div>
 
+      {/* Overdue breaks section — only shown when there are active overruns */}
+      {overdueBreaks.length > 0 && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <Coffee className="size-5 text-red-500 shrink-0" />
+            <h2 className="font-semibold text-red-500">Tiempos de descanso excedidos</h2>
+            <Badge variant="outline" className="ml-auto border-red-500/30 text-red-500 text-xs">
+              {overdueBreaks.length} {overdueBreaks.length === 1 ? 'barbero' : 'barberos'}
+            </Badge>
+          </div>
+          <div className="divide-y divide-red-500/10 rounded-lg border border-red-500/20 bg-background">
+            {overdueBreaks.map(({ entry, overdueMs }) => (
+              <div key={entry.id} className="flex items-center gap-4 px-4 py-3">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-500 font-semibold text-sm">
+                  {(entry.barber?.full_name ?? 'B').charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium">{entry.barber?.full_name ?? 'Barbero'}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {entry.break_request?.break_config?.name ?? 'Descanso'}
+                    {entry.break_request?.break_config?.duration_minutes
+                      ? ` · ${entry.break_request.break_config.duration_minutes} min estipulados`
+                      : ''}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Clock className="size-4 text-red-500" />
+                  <span className="text-sm font-bold tabular-nums text-red-500">
+                    +{formatOverdue(overdueMs)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <Tabs defaultValue="eventos">
         <TabsList>
           <TabsTrigger value="eventos">Eventos del mes</TabsTrigger>
           <TabsTrigger value="resumen">Resumen por barbero</TabsTrigger>
+          <TabsTrigger value="descansos" className="flex items-center gap-1.5">
+            <Coffee className="size-3.5" />
+            Descansos excedidos
+            {filteredOvertimeHistory.length > 0 && (
+              <Badge variant="secondary" className="ml-1 px-1.5 text-xs bg-red-500/15 text-red-500">
+                {filteredOvertimeHistory.length}
+              </Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="reglas">Reglas disciplinarias</TabsTrigger>
         </TabsList>
 
@@ -269,6 +423,91 @@ export function DisciplinaClient({ branches, rules, barbers, events, fromDate }:
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* Descansos excedidos */}
+        <TabsContent value="descansos" className="mt-4 space-y-4">
+          {/* Period filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Ver:</span>
+            <div className="flex rounded-lg border bg-muted/50 p-0.5 gap-0.5">
+              {(['day', 'week', 'month'] as OvertimeFilter[]).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setOvertimeFilter(f)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all ${overtimeFilter === f ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {f === 'day' ? 'Hoy' : f === 'week' ? 'Última semana' : 'Último mes'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredOvertimeHistory.length === 0 ? (
+            <div className="rounded-xl border bg-card p-8 text-center text-muted-foreground">
+              <Coffee className="size-8 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">Sin tiempos de descanso excedidos en este período.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Per-barber summary */}
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                  Resumen por barbero
+                </p>
+                <div className="divide-y rounded-xl border bg-card">
+                  {overtimeSummary.map(({ barber, count, totalSeconds }) => (
+                    <div key={(barber as { id?: string } | null)?.id ?? 'unknown'} className="flex items-center gap-4 px-5 py-3">
+                      <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-500 font-semibold text-sm">
+                        {((barber as { full_name?: string } | null)?.full_name ?? 'B').charAt(0).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium">{(barber as { full_name?: string } | null)?.full_name ?? 'Barbero'}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {count} {count === 1 ? 'vez excedido' : 'veces excedido'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-sm font-bold text-red-500 shrink-0">
+                        <Clock className="size-4" />
+                        +{formatOvertimeSeconds(totalSeconds)} total
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Detailed history */}
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                  Detalle de registros
+                </p>
+                <div className="divide-y rounded-xl border bg-card">
+                  {filteredOvertimeHistory.map((r) => (
+                    <div key={r.id} className="flex items-center gap-4 px-5 py-4">
+                      <Coffee className="size-4 text-red-500 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium">
+                          {(r.staff as { full_name?: string } | null)?.full_name ?? 'Barbero'}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {(r.break_config as { name?: string } | null)?.name ?? 'Descanso'}
+                          {(r.break_config as { duration_minutes?: number } | null)?.duration_minutes
+                            ? ` · ${(r.break_config as { duration_minutes: number }).duration_minutes} min estipulados`
+                            : ''}
+                          {r.actual_completed_at
+                            ? ` · ${new Date(r.actual_completed_at).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })} ${new Date(r.actual_completed_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`
+                            : ''}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="border-red-500/30 text-red-500 font-bold tabular-nums shrink-0">
+                        +{formatOvertimeSeconds(r.overtime_seconds ?? 0)}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </TabsContent>

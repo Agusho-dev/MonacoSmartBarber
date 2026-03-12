@@ -55,6 +55,8 @@ interface Props {
   barbers: BarberBasic[]
   achievements: AchievementWithRule[]
   defaultPeriod: string
+  selectedBranchId?: string
+  onBranchChange?: (id: string) => void
 }
 
 const METRIC_LABELS: Record<IncentiveMetric, string> = {
@@ -75,8 +77,10 @@ const EMPTY_FORM = {
   period: 'monthly' as IncentivePeriod,
 }
 
-export function IncentivosClient({ branches, rules, barbers, achievements, defaultPeriod }: Props) {
-  const [selectedBranchId, setSelectedBranchId] = useState(branches[0]?.id ?? '')
+export function IncentivosClient({ branches, rules, barbers, achievements, defaultPeriod, selectedBranchId: selectedBranchIdProp, onBranchChange }: Props) {
+  const [internalBranchId, setInternalBranchId] = useState(branches[0]?.id ?? '')
+  const selectedBranchId = selectedBranchIdProp ?? internalBranchId
+  const setSelectedBranchId = onBranchChange ?? setInternalBranchId
   const [selectedPeriod, setSelectedPeriod] = useState(defaultPeriod)
   const [ruleDialog, setRuleDialog] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)

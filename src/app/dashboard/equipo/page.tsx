@@ -20,6 +20,10 @@ export default async function EquipoPage() {
     startOfMonth.setDate(1)
     const fromDate = startOfMonth.toISOString().slice(0, 10)
 
+    const thirtyDaysAgo = new Date(now)
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString()
+
     const today = new Date()
     const defaultPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
 
@@ -52,6 +56,8 @@ export default async function EquipoPage() {
         { data: disciplinaryEvents },
         { data: roles },
         { data: breakRequests },
+        { data: activeBreakEntries },
+        { data: breakOvertimeHistory },
     ] = await Promise.all([
         supabase.from('staff').select('*, branch:branches(*)').order('full_name'),
         supabase.from('branches').select('*').eq('is_active', true).order('name'),
@@ -85,6 +91,18 @@ export default async function EquipoPage() {
             .select('*, staff:staff_id(id, full_name), break_config:break_config_id(name, duration_minutes)')
             .in('status', ['pending', 'approved'])
             .order('requested_at', { ascending: true }),
+        supabase
+            .from('queue_entries')
+            .select('id, barber_id, branch_id, started_at, break_request_id, barber:staff(id, full_name, branch_id), break_request:break_requests(id, branch_id, break_config:break_configs(name, duration_minutes))')
+            .eq('is_break', true)
+            .eq('status', 'in_progress'),
+        supabase
+            .from('break_requests')
+            .select('*, staff:staff_id(id, full_name, branch_id), break_config:break_config_id(name, duration_minutes)')
+            .eq('status', 'completed')
+            .gt('overtime_seconds', 0)
+            .gte('actual_completed_at', thirtyDaysAgoStr)
+            .order('actual_completed_at', { ascending: false }),
     ])
 
     // Get user permissions
@@ -113,6 +131,10 @@ export default async function EquipoPage() {
             breakConfigs={breakConfigs ?? []}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             breakRequests={(breakRequests ?? []) as any}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            activeBreakEntries={(activeBreakEntries ?? []) as any}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            breakOvertimeHistory={(breakOvertimeHistory ?? []) as any}
             incentiveRules={incentiveRules ?? []}
             incentiveAchievements={incentiveAchievements ?? []}
             disciplinaryRules={disciplinaryRules ?? []}

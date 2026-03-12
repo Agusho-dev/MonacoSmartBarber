@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { Scissors, Coffee, Trophy, AlertTriangle, Shield } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -31,6 +31,10 @@ interface EquipoClientProps {
     // Descansos
     breakConfigs: unknown[]
     breakRequests: unknown[]
+    // Active break entries (currently in-progress breaks)
+    activeBreakEntries: unknown[]
+    // Completed breaks with overtime (last 30 days)
+    breakOvertimeHistory: unknown[]
     // Incentivos
     incentiveRules: unknown[]
     incentiveAchievements: unknown[]
@@ -51,6 +55,8 @@ export function EquipoClient({
     todayVisits,
     breakConfigs,
     breakRequests,
+    activeBreakEntries,
+    breakOvertimeHistory,
     incentiveRules,
     incentiveAchievements,
     disciplinaryRules,
@@ -62,6 +68,8 @@ export function EquipoClient({
     permissions,
 }: EquipoClientProps) {
     const searchParams = useSearchParams()
+    const router = useRouter()
+    const pathname = usePathname()
 
     // Filter tabs based on permissions
     const visibleTabs = TABS.filter(tab => {
@@ -69,15 +77,29 @@ export function EquipoClient({
         return permissions[tab.permission]
     })
 
+    const branchList = branches as { id: string; name: string }[]
+    const firstBranchId = branchList[0]?.id ?? ''
+
     const initialTabId = searchParams.get('tab') as TabId
+    const initialBranchId = searchParams.get('branch') ?? firstBranchId
     const firstAvailableTab = visibleTabs.length > 0 ? visibleTabs[0].id : null
 
-    // If requested tab is not visible or no tab requested, use the first available one
     const defaultTab = visibleTabs.some(t => t.id === initialTabId)
         ? initialTabId
         : firstAvailableTab
 
     const [activeTab, setActiveTab] = useState<TabId | null>(defaultTab || null)
+    const [selectedBranchId, setSelectedBranchId] = useState(
+        branchList.some(b => b.id === initialBranchId) ? initialBranchId : firstBranchId
+    )
+
+    // Update URL whenever tab or branch changes
+    const updateUrl = useCallback((tab: string | null, branch: string) => {
+        const params = new URLSearchParams()
+        if (tab) params.set('tab', tab)
+        if (branch) params.set('branch', branch)
+        router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+    }, [router, pathname])
 
     // Force activeTab to be valid if permissions change or state is stale
     useEffect(() => {
@@ -87,6 +109,16 @@ export function EquipoClient({
             setActiveTab(visibleTabs[0].id)
         }
     }, [activeTab, visibleTabs])
+
+    const handleTabChange = (tab: TabId) => {
+        setActiveTab(tab)
+        updateUrl(tab, selectedBranchId)
+    }
+
+    const handleBranchChange = (branchId: string) => {
+        setSelectedBranchId(branchId)
+        updateUrl(activeTab, branchId)
+    }
 
     if (visibleTabs.length === 0) {
         return (
@@ -111,7 +143,7 @@ export function EquipoClient({
                     return (
                         <button
                             key={tab.id}
-                            onClick={() => setActiveTab(tab.id)}
+                            onClick={() => handleTabChange(tab.id)}
                             className={cn(
                                 'flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all',
                                 activeTab === tab.id
@@ -141,6 +173,8 @@ export function EquipoClient({
                         breakConfigs={breakConfigs as Parameters<typeof DescansosDashboard>[0]['breakConfigs']}
                         branches={branches as Parameters<typeof DescansosDashboard>[0]['branches']}
                         breakRequests={breakRequests as Parameters<typeof DescansosDashboard>[0]['breakRequests']}
+                        selectedBranchId={selectedBranchId}
+                        onBranchChange={handleBranchChange}
                     />
                 )}
                 {activeTab === 'incentivos' && (
@@ -158,6 +192,8 @@ export function EquipoClient({
                         }
                         achievements={incentiveAchievements as Parameters<typeof IncentivosClient>[0]['achievements']}
                         defaultPeriod={defaultPeriod}
+                        selectedBranchId={selectedBranchId}
+                        onBranchChange={handleBranchChange}
                     />
                 )}
                 {activeTab === 'disciplina' && (
@@ -175,6 +211,10 @@ export function EquipoClient({
                         }
                         events={disciplinaryEvents as Parameters<typeof DisciplinaClient>[0]['events']}
                         fromDate={fromDate}
+                        activeBreakEntries={activeBreakEntries as Parameters<typeof DisciplinaClient>[0]['activeBreakEntries']}
+                        breakOvertimeHistory={breakOvertimeHistory as Parameters<typeof DisciplinaClient>[0]['breakOvertimeHistory']}
+                        selectedBranchId={selectedBranchId}
+                        onBranchChange={handleBranchChange}
                     />
                 )}
                 {activeTab === 'roles' && isOwner && (

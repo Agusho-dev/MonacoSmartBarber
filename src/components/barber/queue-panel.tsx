@@ -128,6 +128,7 @@ export function QueuePanel({
   const [breakRequestStatus, setBreakRequestStatus] = useState<string | null>(null)
   const [breakRequestId, setBreakRequestId] = useState<string | null>(null)
   const [breakRequestLoading, setBreakRequestLoading] = useState(false)
+  const [breakDurationMinutes, setBreakDurationMinutes] = useState<number | null>(null)
   // Self-approve cuts
   const [selfApproveCuts, setSelfApproveCuts] = useState('0')
   // Break requests management (for barbers with breaks.grant)
@@ -187,9 +188,11 @@ export function QueuePanel({
     if (data) {
       setBreakRequestStatus(data.status)
       setBreakRequestId(data.id)
+      setBreakDurationMinutes((data.break_config as { duration_minutes?: number } | null)?.duration_minutes ?? null)
     } else {
       setBreakRequestStatus(null)
       setBreakRequestId(null)
+      setBreakDurationMinutes(null)
     }
   }, [session.staff_id])
 
@@ -716,47 +719,65 @@ export function QueuePanel({
           <div className="flex flex-1 flex-col p-3 md:p-5">
             {myActiveBreak ? (
               /* Active break panel */
-              <Card className="border-amber-500/20 bg-amber-500/5">
-                <CardHeader className="p-5 md:p-6">
-                  <div className="flex items-center gap-4">
-                    <div className="flex size-16 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600">
-                      <Coffee className="size-8" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-2xl md:text-3xl text-amber-600">
-                        Descanso
-                      </CardTitle>
-                      <p className="mt-1.5 text-base text-muted-foreground">
-                        Disfrutá tu descanso ☕
-                      </p>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-5 p-5 pt-0 md:p-6 md:pt-0">
-                  <div className="flex items-center gap-4 rounded-xl bg-secondary px-5 py-4">
-                    <Clock className="size-6 shrink-0 text-muted-foreground" />
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">
-                        Tiempo de descanso
-                      </p>
-                      <p className="text-4xl font-bold tabular-nums tracking-tight">
-                        {myActiveBreak.started_at
-                          ? formatElapsed(myActiveBreak.started_at)
-                          : '—'}
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    className="h-16 w-full text-xl"
-                    size="lg"
-                    onClick={handleCompleteBreak}
-                    disabled={actionLoading === myActiveBreak.id}
-                  >
-                    <Check className="mr-2 size-6" />
-                    Finalizar descanso
-                  </Button>
-                </CardContent>
-              </Card>
+              (() => {
+                const breakElapsedMs = myActiveBreak.started_at
+                  ? now - new Date(myActiveBreak.started_at).getTime()
+                  : 0
+                const breakDurationMs = (breakDurationMinutes ?? 0) * 60_000
+                const isBreakOverdue = breakDurationMinutes !== null && breakDurationMinutes > 0 && breakElapsedMs > breakDurationMs
+                const overdueMs = Math.max(0, breakElapsedMs - breakDurationMs)
+                const formatOverdue = (ms: number) => {
+                  const totalSeconds = Math.floor(ms / 1000)
+                  const m = Math.floor(totalSeconds / 60)
+                  const s = totalSeconds % 60
+                  return `${m}m ${s}s`
+                }
+                return (
+                  <Card className={isBreakOverdue ? 'border-red-500/20 bg-red-500/5' : 'border-amber-500/20 bg-amber-500/5'}>
+                    <CardHeader className="p-5 md:p-6">
+                      <div className="flex items-center gap-4">
+                        <div className={`flex size-16 shrink-0 items-center justify-center rounded-xl ${isBreakOverdue ? 'bg-red-500/15 text-red-500' : 'bg-amber-500/15 text-amber-600'}`}>
+                          <Coffee className="size-8" />
+                        </div>
+                        <div>
+                          <CardTitle className={`text-2xl md:text-3xl ${isBreakOverdue ? 'text-red-500' : 'text-amber-600'}`}>
+                            {isBreakOverdue ? 'Tiempo de demora' : 'Descanso'}
+                          </CardTitle>
+                          <p className="mt-1.5 text-base text-muted-foreground">
+                            {isBreakOverdue ? 'Superaste el tiempo de descanso ⚠️' : 'Disfrutá tu descanso ☕'}
+                          </p>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-5 p-5 pt-0 md:p-6 md:pt-0">
+                      <div className={`flex items-center gap-4 rounded-xl px-5 py-4 ${isBreakOverdue ? 'bg-red-500/10 border border-red-500/20' : 'bg-secondary'}`}>
+                        <Clock className={`size-6 shrink-0 ${isBreakOverdue ? 'text-red-500' : 'text-muted-foreground'}`} />
+                        <div>
+                          <p className={`text-sm font-medium ${isBreakOverdue ? 'text-red-500' : 'text-muted-foreground'}`}>
+                            {isBreakOverdue ? 'Tiempo de demora' : 'Tiempo de descanso'}
+                          </p>
+                          <p className={`text-4xl font-bold tabular-nums tracking-tight ${isBreakOverdue ? 'text-red-500' : ''}`}>
+                            {myActiveBreak.started_at
+                              ? isBreakOverdue
+                                ? formatOverdue(overdueMs)
+                                : formatElapsed(myActiveBreak.started_at)
+                              : '—'}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        className="h-16 w-full text-xl"
+                        size="lg"
+                        onClick={handleCompleteBreak}
+                        disabled={actionLoading === myActiveBreak.id}
+                      >
+                        <Check className="mr-2 size-6" />
+                        Finalizar descanso
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )
+              })()
             ) : myActiveEntry ? (
               <Card className="border-primary/20 bg-primary/3">
                 <CardHeader className="p-5 md:p-6">

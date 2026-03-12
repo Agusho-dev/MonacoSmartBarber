@@ -58,6 +58,8 @@ interface Props {
   breakConfigs: BreakConfig[]
   branches: Branch[]
   breakRequests: BreakRequestRow[]
+  selectedBranchId?: string
+  onBranchChange?: (id: string) => void
 }
 
 const EMPTY_FORM = { id: '', branch_id: '', name: '', duration_minutes: '30' }
@@ -149,11 +151,13 @@ function BreakRequestCard({ request }: { request: BreakRequestRow }) {
   )
 }
 
-export function DescansosDashboard({ breakConfigs, branches, breakRequests }: Props) {
+export function DescansosDashboard({ breakConfigs, branches, breakRequests, selectedBranchId: selectedBranchIdProp, onBranchChange }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [, startTransition] = useTransition()
-  const [selectedBranchId, setSelectedBranchId] = useState(branches[0]?.id ?? '')
+  const [internalBranchId, setInternalBranchId] = useState(branches[0]?.id ?? '')
+  const selectedBranchId = selectedBranchIdProp ?? internalBranchId
+  const setSelectedBranchId = onBranchChange ?? setInternalBranchId
 
   const branchConfigs = breakConfigs.filter((bc) => bc.branch_id === selectedBranchId)
 
