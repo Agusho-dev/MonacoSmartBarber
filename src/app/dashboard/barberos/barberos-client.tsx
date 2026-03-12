@@ -193,9 +193,10 @@ export function BarberosClient({ barbers, branches, todayVisits, roles }: Props)
     if (savedStaffId && avatarFile) {
       try {
         const { uploadStaffAvatar } = await import('@/lib/image-utils')
+        const { updateBarberAvatar } = await import('@/lib/actions/barber')
         const avatarUrl = await uploadStaffAvatar(supabase, savedStaffId, avatarFile)
         if (avatarUrl) {
-          await supabase.from('staff').update({ avatar_url: avatarUrl }).eq('id', savedStaffId)
+          await updateBarberAvatar(savedStaffId, avatarUrl)
         }
       } catch (err) {
         console.error('Failed to upload avatar', err)
