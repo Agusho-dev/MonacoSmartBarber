@@ -859,8 +859,8 @@ export default function CheckinPage() {
     isLooking: boolean
   ) => (
     <>
-      <div className="w-full rounded-2xl border border-white/8 bg-white/2 p-6 text-center relative overflow-hidden">
-        <p className="text-4xl font-mono font-bold tracking-[0.15em] min-h-12 flex items-center justify-center">
+      <div className="w-full rounded-2xl border border-white/8 bg-white/2 p-4 text-center relative overflow-hidden">
+        <p className="text-3xl font-mono font-bold tracking-[0.15em] min-h-10 flex items-center justify-center">
           {currentPhone ? (
             formatPhone(currentPhone)
           ) : (
@@ -885,7 +885,7 @@ export default function CheckinPage() {
             key={d}
             onClick={() => pressDigit(d)}
             disabled={isLooking}
-            className="h-[72px] rounded-2xl bg-white/4 border border-white/6 text-2xl font-semibold transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+            className="h-[56px] rounded-2xl bg-white/4 border border-white/6 text-2xl font-semibold transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
           >
             {d}
           </button>
@@ -894,14 +894,14 @@ export default function CheckinPage() {
         <button
           onClick={() => pressDelete()}
           disabled={isLooking || currentPhone.length === 0}
-          className="h-[72px] rounded-2xl bg-white/4 border border-white/6 flex items-center justify-center transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+          className="h-[56px] rounded-2xl bg-white/4 border border-white/6 flex items-center justify-center transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
         >
           <Delete className="size-6" />
         </button>
         <button
           onClick={() => pressDigit('0')}
           disabled={isLooking}
-          className="h-[72px] rounded-2xl bg-white/4 border border-white/6 text-2xl font-semibold transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+          className="h-[56px] rounded-2xl bg-white/4 border border-white/6 text-2xl font-semibold transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
         >
           0
         </button>
@@ -913,7 +913,7 @@ export default function CheckinPage() {
   // ── Render ──
 
   return (
-    <div className="h-dvh flex flex-col items-center select-none overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)] py-6 md:py-8">
+    <div className="h-dvh flex flex-col items-center select-none overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)] py-3 md:py-4">
       {/* ═══════════════ BRANCH SELECTION ═══════════════ */}
       {step === 'branch' && (
         <div
@@ -1036,7 +1036,7 @@ export default function CheckinPage() {
       {step === 'face_scan' && (
         <div
           key={`face-scan-${animKey}`}
-          className="w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => goTo('home'))}
 
@@ -1053,7 +1053,7 @@ export default function CheckinPage() {
       {step === 'phone' && (
         <div
           key={`phone-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             setPhone('')
@@ -1085,7 +1085,7 @@ export default function CheckinPage() {
       {step === 'name' && (
         <div
           key={`name-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             setPhone('')
@@ -1151,7 +1151,7 @@ export default function CheckinPage() {
       {step === 'face_enroll' && (
         <div
           key={`face-enroll-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             goTo('name')
@@ -1179,7 +1179,7 @@ export default function CheckinPage() {
       {step === 'service_selection' && (
         <div
           key={`service-${animKey}`}
-          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             if (!isReturning && !hasExistingFace) goTo('face_enroll')
@@ -1224,7 +1224,7 @@ export default function CheckinPage() {
       {step === 'barber' && (
         <div
           key={`barber-${animKey}`}
-          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
 
@@ -1270,7 +1270,7 @@ export default function CheckinPage() {
       {step === 'success' && (
         <div
           key={`success-${animKey}`}
-          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
+          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
         >
           {!changingBarberInSuccess ? (
             <>
@@ -1410,7 +1410,7 @@ export default function CheckinPage() {
       {step === 'staff_face_scan' && (
         <div
           key={`staff-face-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => goTo('home'))}
           <div className="text-center mt-2">
@@ -1437,7 +1437,7 @@ export default function CheckinPage() {
       {step === 'staff_action_confirm' && staffFaceMatch && (
         <div
           key={`staff-action-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
+          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
         >
           {!staffActionDone ? (
             <>
@@ -1533,7 +1533,7 @@ export default function CheckinPage() {
       {step === 'manage_turn' && myQueueEntry && (
         <div
           key={`manage-turn-${animKey}`}
-          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-14 md:pt-16 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           {backButton(() => {
             setMyQueueEntry(null)
