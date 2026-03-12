@@ -66,6 +66,7 @@ export async function checkinClient(formData: FormData) {
       service_id: serviceId,
       position: position ?? 1,
       status: 'waiting',
+      is_dynamic: !barberId,
     })
     .select('id')
     .single()
@@ -100,6 +101,7 @@ export async function startService(queueEntryId: string, barberId: string) {
       barber_id: barberId,
       status: 'in_progress',
       started_at: new Date().toISOString(),
+      is_dynamic: false,
     })
     .eq('id', queueEntryId)
     .eq('status', 'waiting')
@@ -298,8 +300,8 @@ export async function completeService(
       .limit(1)
 
     // Auto-start only if there are no clients waiting BEFORE the break ghost
-    const hasRealClientsBefore = (realWaitingBeforeBreak && realWaitingBeforeBreak.length > 0) || 
-                                 (unassignedWaitingBeforeBreak && unassignedWaitingBeforeBreak.length > 0)
+    const hasRealClientsBefore = (realWaitingBeforeBreak && realWaitingBeforeBreak.length > 0) ||
+      (unassignedWaitingBeforeBreak && unassignedWaitingBeforeBreak.length > 0)
 
     if (!hasRealClientsBefore) {
       await supabase
@@ -347,7 +349,7 @@ export async function reassignBarber(
 
   const { error } = await supabase
     .from('queue_entries')
-    .update({ barber_id: newBarberId })
+    .update({ barber_id: newBarberId, is_dynamic: !newBarberId })
     .eq('id', queueEntryId)
     .eq('status', 'waiting')
 
@@ -404,6 +406,7 @@ export async function checkinClientByFace(
       service_id: serviceId,
       position: position ?? 1,
       status: 'waiting',
+      is_dynamic: !barberId,
     })
     .select('id')
     .single()
@@ -435,7 +438,7 @@ export async function reassignMyBarber(
 
   const { error } = await supabase
     .from('queue_entries')
-    .update({ barber_id: newBarberId })
+    .update({ barber_id: newBarberId, is_dynamic: !newBarberId })
     .eq('id', queueEntryId)
     .eq('status', 'waiting')
 
