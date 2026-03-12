@@ -208,10 +208,24 @@ export function BarberosClient({ barbers, branches, todayVisits, roles }: Props)
   }
 
   async function toggleActive(barber: Staff) {
-    await supabase
-      .from('staff')
-      .update({ is_active: !barber.is_active })
-      .eq('id', barber.id)
+    if (barber.is_active) {
+      const { deactivateBarber } = await import('@/lib/actions/barber')
+      const result = await deactivateBarber(barber.id)
+      if (result.error) {
+        alert(result.error)
+        return
+      }
+      if (result.reassignedCount && result.reassignedCount > 0) {
+        alert(`Barbero desactivado. ${result.reassignedCount} cliente(s) fueron reasignados automáticamente.`)
+      }
+    } else {
+      const { activateBarber } = await import('@/lib/actions/barber')
+      const result = await activateBarber(barber.id)
+      if (result.error) {
+        alert(result.error)
+        return
+      }
+    }
     router.refresh()
   }
 

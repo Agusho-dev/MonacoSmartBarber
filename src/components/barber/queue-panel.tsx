@@ -52,6 +52,7 @@ import {
   CheckCircle2,
   XCircle,
   Instagram,
+  Power,
 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -138,8 +139,12 @@ export function QueuePanel({
   const [approveCutsInputs, setApproveCutsInputs] = useState<Record<string, string>>({})
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
 
+  const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false)
+  const [deactivateLoading, setDeactivateLoading] = useState<string | null>(null)
+
   const supabase = useMemo(() => createClient(), [])
   const canManageBreaks = session.role === 'admin' || session.role === 'owner' || session.permissions?.['breaks.grant'] === true
+  const canDeactivateStaff = session.role === 'admin' || session.role === 'owner' || session.permissions?.['staff.deactivate'] === true
 
   const fetchQueue = useCallback(async () => {
     const { data } = await supabase
@@ -389,6 +394,23 @@ export function QueuePanel({
       fetchPendingBreakRequests()
     }
     setApproveLoading(null)
+  }
+
+  async function handleDeactivateBarber(barberId: string) {
+    setDeactivateLoading(barberId)
+    const { deactivateBarber } = await import('@/lib/actions/barber')
+    const result = await deactivateBarber(barberId)
+    if (result.error) {
+      toast.error(result.error)
+    } else {
+      const msg = result.reassignedCount && result.reassignedCount > 0
+        ? `Barbero desactivado. ${result.reassignedCount} cliente(s) reasignados.`
+        : 'Barbero desactivado'
+      toast.success(msg)
+      fetchBarbersAndSchedules()
+      fetchQueue()
+    }
+    setDeactivateLoading(null)
   }
 
   function formatElapsed(timestamp: string) {
@@ -654,6 +676,17 @@ export function QueuePanel({
                   {pendingBreakRequests.length}
                 </span>
               )}
+            </Button>
+          )}
+
+          {canDeactivateStaff && otherBarbers.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDeactivateDialogOpen(true)}
+            >
+              <Power className="size-4" />
+              <span className="hidden sm:inline">Barberos</span>
             </Button>
           )}
 
@@ -1111,6 +1144,77 @@ export function QueuePanel({
                         </Button>
                       </div>
                     )}
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Deactivate barbers dialog (for barbers with staff.deactivate) */}
+      <Dialog open={deactivateDialogOpen} onOpenChange={setDeactivateDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Gestionar barberos</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto">
+            {otherBarbers.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No hay otros barberos activos.
+              </p>
+            ) : (
+              otherBarbers.map((barber) => {
+                const barberWaiting = dynamicEntries.filter(
+                  (e) => e.barber_id === barber.id && e.status === 'waiting' && !e.is_break
+                ).length
+                return (
+                  <div key={barber.id} className="rounded-lg border p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary font-semibold text-sm">
+                        {barber.full_name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium truncate">{barber.full_name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {barberWaiting > 0
+                            ? `${barberWaiting} cliente(s) en espera — serán reasignados`
+                            : 'Sin clientes en espera'}
+                        </p>
+                      </div>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-500 border-red-500/30 hover:bg-red-500/10"
+                            disabled={deactivateLoading === barber.id}
+                          >
+                            <Power className="size-3.5 mr-1" />
+                            Desactivar
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>¿Desactivar a {barber.full_name}?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              {barberWaiting > 0
+                                ? `Este barbero tiene ${barberWaiting} cliente(s) en espera. Serán reasignados automáticamente al barbero con menor carga.`
+                                : 'Este barbero no aparecerá como opción para nuevos clientes hasta que sea reactivado.'}
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                            <AlertDialogAction
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              onClick={() => handleDeactivateBarber(barber.id)}
+                            >
+                              Sí, desactivar
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </div>
                 )
               })

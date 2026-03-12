@@ -8,6 +8,77 @@ export async function toggleBarberStatus(staffId: string) {
   return { error: 'El estado de los barberos ahora se gestiona mediante el sistema de descansos.' }
 }
 
+export async function deactivateBarber(staffId: string) {
+  const supabase = createAdminClient()
+
+  const { error: updateError } = await supabase
+    .from('staff')
+    .update({ is_active: false })
+    .eq('id', staffId)
+
+  if (updateError) {
+    return { error: 'Error al desactivar barbero: ' + updateError.message }
+  }
+
+  const { data: waitingEntries, error: queueError } = await supabase
+    .from('queue_entries')
+    .select('id')
+    .eq('barber_id', staffId)
+    .eq('status', 'waiting')
+    .eq('is_break', false)
+
+  if (queueError) {
+    return { error: 'Barbero desactivado, pero error al reasignar clientes: ' + queueError.message }
+  }
+
+  const reassignedCount = waitingEntries?.length ?? 0
+
+  if (reassignedCount > 0) {
+    const ids = waitingEntries!.map((e) => e.id)
+    const { error: reassignError } = await supabase
+      .from('queue_entries')
+      .update({ barber_id: null, is_dynamic: true })
+      .in('id', ids)
+
+    if (reassignError) {
+      return { error: 'Barbero desactivado, pero error al reasignar clientes: ' + reassignError.message }
+    }
+  }
+
+  // Cancel any break-related ghost entries for the deactivated barber
+  await supabase
+    .from('queue_entries')
+    .update({ status: 'cancelled' })
+    .eq('barber_id', staffId)
+    .eq('is_break', true)
+    .in('status', ['waiting', 'in_progress'])
+
+  revalidatePath('/barbero/cola')
+  revalidatePath('/dashboard/cola')
+  revalidatePath('/dashboard/barberos')
+  revalidatePath('/checkin')
+  return { success: true, reassignedCount }
+}
+
+export async function activateBarber(staffId: string) {
+  const supabase = createAdminClient()
+
+  const { error } = await supabase
+    .from('staff')
+    .update({ is_active: true })
+    .eq('id', staffId)
+
+  if (error) {
+    return { error: 'Error al activar barbero: ' + error.message }
+  }
+
+  revalidatePath('/barbero/cola')
+  revalidatePath('/dashboard/cola')
+  revalidatePath('/dashboard/barberos')
+  revalidatePath('/checkin')
+  return { success: true }
+}
+
 export async function fetchBarberDayStats(staffId: string, branchId: string) {
   const supabase = await createClient()
 
