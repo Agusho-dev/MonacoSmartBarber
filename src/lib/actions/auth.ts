@@ -111,19 +111,53 @@ export async function loginWithPin(formData: FormData) {
 
 export async function getBarberSession() {
   const cookieStore = await cookies()
-  const session = cookieStore.get('barber_session')
-  if (!session) return null
+  const sessionCookie = cookieStore.get('barber_session')
+  if (!sessionCookie) return null
+
+  let parsed: {
+    staff_id: string
+    full_name: string
+    branch_id: string
+    role: string
+    role_id: string | null
+    permissions: Record<string, boolean>
+  }
+
   try {
-    return JSON.parse(session.value) as {
-      staff_id: string
-      full_name: string
-      branch_id: string
-      role: string
-      role_id: string | null
-      permissions: Record<string, boolean>
-    }
+    parsed = JSON.parse(sessionCookie.value)
   } catch {
     return null
+  }
+
+  const supabase = createAdminClient()
+
+  const { data: staff } = await supabase
+    .from('staff')
+    .select('full_name, branch_id, role, role_id, is_active')
+    .eq('id', parsed.staff_id)
+    .single()
+
+  if (!staff || !staff.is_active) return null
+
+  let permissions: Record<string, boolean> = {}
+  if (staff.role_id) {
+    const { data: customRole } = await supabase
+      .from('roles')
+      .select('permissions')
+      .eq('id', staff.role_id)
+      .single()
+    if (customRole) {
+      permissions = customRole.permissions as Record<string, boolean>
+    }
+  }
+
+  return {
+    staff_id: parsed.staff_id,
+    full_name: staff.full_name,
+    branch_id: staff.branch_id,
+    role: staff.role,
+    role_id: staff.role_id,
+    permissions,
   }
 }
 
