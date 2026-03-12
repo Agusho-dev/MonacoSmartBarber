@@ -181,3 +181,19 @@ export async function manageStaffAccess(
 
   return { success: true }
 }
+
+export async function updateBarberAvatar(staffId: string, avatarUrl: string) {
+  const supabase = createAdminClient()
+
+  const { error } = await supabase
+    .from('staff')
+    .update({ avatar_url: avatarUrl })
+    .eq('id', staffId)
+
+  if (error) {
+    return { error: 'Error al actualizar el avatar: ' + error.message }
+  }
+
+  revalidatePath('/dashboard/barberos')
+  return { success: true }
+}
