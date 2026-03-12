@@ -764,6 +764,13 @@ export default function CheckinPage() {
     const cfg = statusConfig[stats.status]
     const loadPct = Math.min(100, (stats.totalLoad / Math.max(maxLoad, 4)) * 100)
 
+    const ringColor =
+      stats.status === 'available'
+        ? 'ring-emerald-500/60'
+        : stats.status === 'occupied'
+          ? 'ring-blue-500/60'
+          : 'ring-amber-500/60'
+
     return (
       <div
         key={barber.id}
@@ -772,45 +779,59 @@ export default function CheckinPage() {
         <button
           onClick={() => onSelect(barber.id)}
           disabled={submitting}
-          className="w-full p-5 text-left hover:bg-white/6 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none space-y-3"
+          className="w-full p-5 text-left hover:bg-white/6 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
         >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex size-14 items-center justify-center rounded-full bg-white/6 border border-white/10 text-lg font-bold">
-                {barber.full_name.charAt(0).toUpperCase()}
-              </div>
-              <div>
-                <p className="text-xl font-semibold">{barber.full_name}</p>
-                <p className="text-base text-muted-foreground mt-0.5">
-                  {stats.attending && 'Atendiendo 1 persona'}
-                  {stats.attending && stats.waiting > 0 && ' · '}
-                  {stats.waiting > 0 &&
-                    `${stats.waiting} ${stats.waiting === 1 ? 'persona espera' : 'personas esperan'}`}
-                  {!stats.attending && stats.waiting === 0 && 'Sin espera'}
-                </p>
-              </div>
+          <div className="flex items-center gap-5">
+            {/* Avatar grande con anillo de estado */}
+            <div className={`shrink-0 rounded-full ring-2 ring-offset-2 ring-offset-black ${ringColor}`}>
+              {barber.avatar_url ? (
+                <img
+                  src={barber.avatar_url}
+                  alt={barber.full_name}
+                  className="size-24 rounded-full object-cover"
+                />
+              ) : (
+                <div className="flex size-24 items-center justify-center rounded-full bg-white/8 text-3xl font-bold">
+                  {barber.full_name.charAt(0).toUpperCase()}
+                </div>
+              )}
             </div>
-            <span
-              className={`shrink-0 inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium ${cfg.className}`}
-            >
-              {cfg.label}
-            </span>
-          </div>
 
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-sm text-muted-foreground">
-              <span>
-                {stats.totalLoad} {stats.totalLoad === 1 ? 'persona' : 'personas'} en total
-              </span>
-              <span className="font-medium text-foreground">
-                {formatWaitTime(stats.eta)}
-              </span>
-            </div>
-            <div className="h-2.5 w-full rounded-full bg-white/6 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${getLoadColor(stats.totalLoad)}`}
-                style={{ width: `${loadPct}%` }}
-              />
+            {/* Info */}
+            <div className="flex-1 min-w-0 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-2xl font-bold truncate">{barber.full_name}</p>
+                <span
+                  className={`shrink-0 inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium ${cfg.className}`}
+                >
+                  {cfg.label}
+                </span>
+              </div>
+
+              <p className="text-base text-muted-foreground">
+                {stats.attending && 'Atendiendo 1 persona'}
+                {stats.attending && stats.waiting > 0 && ' · '}
+                {stats.waiting > 0 &&
+                  `${stats.waiting} ${stats.waiting === 1 ? 'persona espera' : 'personas esperan'}`}
+                {!stats.attending && stats.waiting === 0 && 'Sin espera'}
+              </p>
+
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                  <span>
+                    {stats.totalLoad} {stats.totalLoad === 1 ? 'persona' : 'personas'} en total
+                  </span>
+                  <span className="font-semibold text-foreground text-base">
+                    {formatWaitTime(stats.eta)}
+                  </span>
+                </div>
+                <div className="h-2.5 w-full rounded-full bg-white/6 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${getLoadColor(stats.totalLoad)}`}
+                    style={{ width: `${loadPct}%` }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </button>

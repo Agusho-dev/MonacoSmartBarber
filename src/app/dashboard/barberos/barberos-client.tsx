@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Power, Trash2 } from 'lucide-react'
+import { Plus, Pencil, Power, Trash2, Camera } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
 import { formatCurrency } from '@/lib/format'
@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import {
   Table,
   TableBody,
@@ -74,6 +75,9 @@ export function BarberosClient({ barbers, branches, todayVisits, roles }: Props)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState({ ...emptyForm, password: '', hasAuth: false })
   const [saving, setSaving] = useState(false)
+  const [avatarFile, setAvatarFile] = useState<File | null>(null)
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
 
   const filtered = selectedBranchId
     ? barbers.filter((b) => b.branch_id === selectedBranchId)
@@ -91,6 +95,8 @@ export function BarberosClient({ barbers, branches, todayVisits, roles }: Props)
   function openAdd() {
     setEditingId(null)
     setForm({ ...emptyForm, password: '', hasAuth: false })
+    setAvatarFile(null)
+    setAvatarPreview(null)
     setDialogOpen(true)
   }
 
@@ -106,10 +112,19 @@ export function BarberosClient({ barbers, branches, todayVisits, roles }: Props)
       email: barber.email ?? '',
       phone: barber.phone ?? '',
       password: '',
-      // @ts-ignore: Assuming auth_user_id exists on Staff type locally since we just added the concept, we'll cast or just check its truthiness
-      hasAuth: !!(barber as any).auth_user_id,
+      hasAuth: !!barber.auth_user_id,
     })
+    setAvatarFile(null)
+    setAvatarPreview(barber.avatar_url ?? null)
     setDialogOpen(true)
+  }
+
+  function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setAvatarFile(file)
+    const url = URL.createObjectURL(file)
+    setAvatarPreview(url)
   }
 
   async function handleSave() {
@@ -161,22 +176,29 @@ export function BarberosClient({ barbers, branches, todayVisits, roles }: Props)
       if (inserted) savedStaffId = inserted.id
     }
 
-    // Now handle auth linkage if email is provided and they want to set/update a password
-    // or if they are creating a new mapped account
-    if (savedStaffId && form.email && (form.password || (!form.hasAuth && form.password))) {
-      // We only trigger auth management if there's a password being set, 
-      // to avoid implicitly creating accounts just because an email was added.
-      if (form.password) {
-        try {
-          const { manageStaffAccess } = await import('@/lib/actions/barber')
-          const authResult = await manageStaffAccess(savedStaffId, form.email, form.password)
-          if (authResult?.error) {
-            alert(authResult.error)
-            // We don't return here so the dialog can still close, the staff *was* saved.
-          }
-        } catch (err) {
-          console.error('Failed to update staff access', err)
+    // Handle auth linkage if email and password provided
+    if (savedStaffId && form.email && form.password) {
+      try {
+        const { manageStaffAccess } = await import('@/lib/actions/barber')
+        const authResult = await manageStaffAccess(savedStaffId, form.email, form.password)
+        if (authResult?.error) {
+          alert(authResult.error)
         }
+      } catch (err) {
+        console.error('Failed to update staff access', err)
+      }
+    }
+
+    // Upload avatar if a new file was selected
+    if (savedStaffId && avatarFile) {
+      try {
+        const { uploadStaffAvatar } = await import('@/lib/image-utils')
+        const avatarUrl = await uploadStaffAvatar(supabase, savedStaffId, avatarFile)
+        if (avatarUrl) {
+          await supabase.from('staff').update({ avatar_url: avatarUrl }).eq('id', savedStaffId)
+        }
+      } catch (err) {
+        console.error('Failed to upload avatar', err)
       }
     }
 
@@ -246,7 +268,17 @@ export function BarberosClient({ barbers, branches, todayVisits, roles }: Props)
               const stats = barberStats.get(barber.id)
               return (
                 <TableRow key={barber.id}>
-                  <TableCell>{barber.full_name}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2.5">
+                      <Avatar className="size-7 shrink-0">
+                        <AvatarImage src={barber.avatar_url ?? undefined} alt={barber.full_name} />
+                        <AvatarFallback className="text-xs">
+                          {barber.full_name.charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span>{barber.full_name}</span>
+                    </div>
+                  </TableCell>
                   <TableCell>{barber.branch?.name ?? '—'}</TableCell>
                   <TableCell>
                     {barber.custom_role?.name ?? barber.role_id
@@ -306,6 +338,37 @@ export function BarberosClient({ barbers, branches, todayVisits, roles }: Props)
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto pr-4 -mr-4 py-2 space-y-4">
+            {/* Avatar upload */}
+            <div className="flex flex-col items-center gap-2 pb-2">
+              <div
+                className="relative group cursor-pointer"
+                onClick={() => avatarInputRef.current?.click()}
+              >
+                <Avatar className="size-20">
+                  <AvatarImage src={avatarPreview ?? undefined} alt="Foto de perfil" />
+                  <AvatarFallback className="text-2xl bg-muted">
+                    {form.full_name
+                      ? form.full_name.charAt(0).toUpperCase()
+                      : <Camera className="size-7 text-muted-foreground" />
+                    }
+                  </AvatarFallback>
+                </Avatar>
+                <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Camera className="size-5 text-white" />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {avatarFile ? avatarFile.name : 'Clic para cambiar foto de perfil'}
+              </p>
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleAvatarChange}
+              />
+            </div>
+
             <div className="grid gap-2">
               <Label>Nombre completo</Label>
               <Input

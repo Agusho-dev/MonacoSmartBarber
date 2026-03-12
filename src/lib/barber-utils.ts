@@ -142,7 +142,9 @@ export function assignDynamicBarbers(
       unassigned.push(entry)
     } else {
       result.push(entry)
-      if (entry.barber_id && (entry.status === 'waiting' || entry.status === 'in_progress')) {
+      // Exclude break ghost entries from load so they don't cause dynamic clients to be
+      // redirected to other barbers when a break is scheduled for this barber.
+      if (entry.barber_id && (entry.status === 'waiting' || entry.status === 'in_progress') && !entry.is_break) {
         barberLoad.set(entry.barber_id, (barberLoad.get(entry.barber_id) || 0) + 1)
       }
     }
@@ -186,5 +188,7 @@ export function assignDynamicBarbers(
     barberLoad.set(selectedBarber.id, (barberLoad.get(selectedBarber.id) || 0) + 1)
   }
 
-  return result
+  // Sort by position so that a "cualquiera" client with an earlier turn number always
+  // appears before a later-arriving assigned client, regardless of assignment order.
+  return result.sort((a, b) => a.position - b.position)
 }

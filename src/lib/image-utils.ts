@@ -57,3 +57,23 @@ export function getPhotoUrl(
   const { data } = supabase.storage.from('visit-photos').getPublicUrl(path)
   return data.publicUrl
 }
+
+export async function uploadStaffAvatar(
+  supabase: SupabaseClient,
+  staffId: string,
+  file: File
+): Promise<string | null> {
+  const blob = await compressToWebP(file, 400, 0.85)
+  const path = `${staffId}/avatar.webp`
+  const { error } = await supabase.storage
+    .from('staff-avatars')
+    .upload(path, blob, {
+      contentType: 'image/webp',
+      cacheControl: '31536000',
+      upsert: true,
+    })
+  if (error) return null
+  const { data } = supabase.storage.from('staff-avatars').getPublicUrl(path)
+  // Add cache-busting timestamp so the browser picks up the new image
+  return `${data.publicUrl}?t=${Date.now()}`
+}

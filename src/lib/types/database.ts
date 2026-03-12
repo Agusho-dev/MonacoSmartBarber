@@ -68,6 +68,7 @@ export interface Staff {
   commission_pct: number
   status: StaffStatus
   is_active: boolean
+  avatar_url: string | null
   created_at: string
   updated_at: string
   branch?: Branch
