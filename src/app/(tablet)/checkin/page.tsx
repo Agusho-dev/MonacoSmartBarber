@@ -1539,20 +1539,20 @@ export default function CheckinPage() {
 
           {!changingBarberInManage ? (
             <>
-              <div className="w-full rounded-2xl border border-white/10 bg-white/3 p-6 md:p-8 flex flex-col items-center gap-4">
+              <div className="w-full rounded-3xl border border-white/10 bg-white/3 p-8 md:p-10 flex flex-col items-center gap-5">
                 <h2 className="text-xl md:text-2xl font-bold text-muted-foreground">Tu turno</h2>
 
                 <div className="text-center">
-                  <p className="text-6xl md:text-7xl font-bold tabular-nums">
+                  <p className="text-8xl md:text-9xl font-bold tabular-nums leading-none">
                     #{myQueueEntry.position}
                   </p>
                   {myQueueEntry.status === 'in_progress' && (
-                    <p className="text-emerald-400 font-medium mt-2 text-base">
+                    <p className="text-emerald-400 font-medium mt-3 text-lg">
                       Te están atendiendo
                     </p>
                   )}
                   {myQueueEntry.status === 'waiting' && (
-                    <p className="text-muted-foreground mt-2 text-base">
+                    <p className="text-muted-foreground mt-3 text-lg">
                       Esperando...
                     </p>
                   )}
@@ -1560,7 +1560,7 @@ export default function CheckinPage() {
 
                 {myQueueEntry.barber && (
                   <div className="w-full rounded-xl border border-white/8 bg-white/3 p-3 md:p-4">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 justify-center">
                       <div className="flex size-10 md:size-12 items-center justify-center rounded-full bg-white/6 border border-white/10 text-sm md:text-base font-bold shrink-0">
                         {(myQueueEntry.barber as Staff).full_name.charAt(0).toUpperCase()}
                       </div>
@@ -1577,12 +1577,12 @@ export default function CheckinPage() {
                 )}
               </div>
 
-              <div className="w-full flex flex-col gap-2">
+              <div className="w-full flex flex-col items-center gap-2">
                 {myQueueEntry.status === 'waiting' && (
                   <Button
                     onClick={() => setChangingBarberInManage(true)}
                     variant="outline"
-                    className="h-11 md:h-12 text-sm md:text-base rounded-xl w-full"
+                    className="h-11 md:h-12 text-sm md:text-base rounded-xl w-full max-w-xs"
                   >
                     <RefreshCw className="size-4 mr-2" />
                     Cambiar barbero
@@ -1591,7 +1591,7 @@ export default function CheckinPage() {
 
                 <button
                   onClick={reset}
-                  className="text-muted-foreground hover:text-foreground transition-colors py-2 text-sm md:text-base w-full text-center"
+                  className="text-muted-foreground hover:text-foreground transition-colors py-2 text-sm md:text-base text-center"
                 >
                   Volver al inicio
                 </button>
