@@ -412,7 +412,7 @@ export function QueuePanel({
     )
   }
 
-  function renderQueueEntry(entry: QueueEntry) {
+  function renderQueueEntry(entry: QueueEntry, isGeneralQueue: boolean = false) {
     // Render ghost break entries differently
     if (entry.is_break) {
       if (entry.barber_id === session.staff_id) {
@@ -445,6 +445,11 @@ export function QueuePanel({
                       Primer Corte
                     </Badge>
                   )}
+                {entry.is_dynamic && (
+                  <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-blue-500/15 text-blue-500 border-blue-500/30">
+                    ⚡️ Menor Espera
+                  </Badge>
+                )}
               </div>
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <span>{entry.client?.phone}</span>
@@ -467,9 +472,15 @@ export function QueuePanel({
                 <Clock className="size-3" />
                 <span>{formatElapsed(entry.checked_in_at)} esperando</span>
               </div>
+              {isGeneralQueue && entry.barber && (
+                <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                  <User className="size-3" />
+                  <span>Se atiende con <span className="font-medium text-foreground/70">{entry.barber.full_name}</span></span>
+                </div>
+              )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              {!myActiveEntry && !myActiveBreak && (
+              {(!myActiveEntry && !myActiveBreak && entry.id === myWaitingEntries[0]?.id) && (
                 <Button
                   size="lg"
                   className="h-14 px-6 text-lg"
@@ -676,7 +687,7 @@ export function QueuePanel({
                   ) : myWaitingEntries.length === 0 ? (
                     renderEmptyQueue()
                   ) : (
-                    myWaitingEntries.map(renderQueueEntry)
+                    myWaitingEntries.map((e) => renderQueueEntry(e, false))
                   )}
                   {!loading && renderInProgressOthers()}
                 </div>
@@ -696,7 +707,7 @@ export function QueuePanel({
                   ) : allWaitingEntries.length === 0 ? (
                     renderEmptyQueue()
                   ) : (
-                    allWaitingEntries.map(renderQueueEntry)
+                    allWaitingEntries.map((e) => renderQueueEntry(e, true))
                   )}
                   {!loading && renderInProgressOthers()}
                 </div>
