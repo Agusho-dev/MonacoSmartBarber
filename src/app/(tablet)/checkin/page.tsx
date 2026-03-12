@@ -748,10 +748,10 @@ export default function CheckinPage() {
   const backButton = (onBack: () => void) => (
     <button
       onClick={onBack}
-      className="fixed top-4 left-4 md:top-6 md:left-6 z-50 flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 backdrop-blur-sm"
+      className="absolute top-3 left-3 md:top-4 md:left-4 z-50 flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 backdrop-blur-sm"
     >
       <ArrowLeft className="size-5" />
-      <span className="text-base">Atrás</span>
+      <span className="text-sm md:text-base">Atrás</span>
     </button>
   )
 
@@ -1533,71 +1533,68 @@ export default function CheckinPage() {
       {step === 'manage_turn' && myQueueEntry && (
         <div
           key={`manage-turn-${animKey}`}
-          className="w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-4 md:gap-5 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          {backButton(() => {
-            setMyQueueEntry(null)
-            setChangingBarberInManage(false)
-            setError('')
-            goTo('home')
-          })}
+          {backButton(reset)}
 
           {!changingBarberInManage ? (
             <>
-              <div className="text-center">
-                <h2 className="text-2xl md:text-3xl font-bold">Tu turno</h2>
-              </div>
+              <div className="w-full rounded-2xl border border-white/10 bg-white/3 p-6 md:p-8 flex flex-col items-center gap-4">
+                <h2 className="text-xl md:text-2xl font-bold text-muted-foreground">Tu turno</h2>
 
-              <div className="w-full md:flex md:gap-6 md:items-start">
-                <div className="py-4 md:py-5 px-6 md:px-10 rounded-2xl border border-white/10 bg-white/3 text-center md:shrink-0">
-                  <p className="text-muted-foreground text-sm md:text-base">Posición</p>
-                  <p className="text-5xl md:text-6xl font-bold mt-1 tabular-nums">
+                <div className="text-center">
+                  <p className="text-6xl md:text-7xl font-bold tabular-nums">
                     #{myQueueEntry.position}
                   </p>
                   {myQueueEntry.status === 'in_progress' && (
-                    <p className="text-emerald-400 font-medium mt-2 text-sm md:text-base">
+                    <p className="text-emerald-400 font-medium mt-2 text-base">
                       Te están atendiendo
+                    </p>
+                  )}
+                  {myQueueEntry.status === 'waiting' && (
+                    <p className="text-muted-foreground mt-2 text-base">
+                      Esperando...
                     </p>
                   )}
                 </div>
 
-                <div className="flex-1 space-y-3 mt-3 md:mt-0">
-                  {myQueueEntry.barber && (
-                    <div className="w-full rounded-2xl border border-white/8 bg-white/2 p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex size-12 items-center justify-center rounded-full bg-white/6 border border-white/10 text-base font-bold">
-                          {(myQueueEntry.barber as Staff).full_name.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="text-lg font-semibold">
-                            {(myQueueEntry.barber as Staff).full_name}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            Tu barbero asignado
-                          </p>
-                        </div>
+                {myQueueEntry.barber && (
+                  <div className="w-full rounded-xl border border-white/8 bg-white/3 p-3 md:p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex size-10 md:size-12 items-center justify-center rounded-full bg-white/6 border border-white/10 text-sm md:text-base font-bold shrink-0">
+                        {(myQueueEntry.barber as Staff).full_name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-base md:text-lg font-semibold truncate">
+                          {(myQueueEntry.barber as Staff).full_name}
+                        </p>
+                        <p className="text-xs md:text-sm text-muted-foreground">
+                          Tu barbero asignado
+                        </p>
                       </div>
                     </div>
-                  )}
+                  </div>
+                )}
+              </div>
 
-                  {myQueueEntry.status === 'waiting' && (
-                    <Button
-                      onClick={() => setChangingBarberInManage(true)}
-                      variant="outline"
-                      className="h-11 md:h-12 text-sm md:text-base rounded-xl px-5 w-full"
-                    >
-                      <RefreshCw className="size-4 mr-2" />
-                      Cambiar barbero
-                    </Button>
-                  )}
-
-                  <button
-                    onClick={reset}
-                    className="text-muted-foreground hover:text-foreground transition-colors py-2 text-sm md:text-base w-full text-center"
+              <div className="w-full flex flex-col gap-2">
+                {myQueueEntry.status === 'waiting' && (
+                  <Button
+                    onClick={() => setChangingBarberInManage(true)}
+                    variant="outline"
+                    className="h-11 md:h-12 text-sm md:text-base rounded-xl w-full"
                   >
-                    Volver al inicio
-                  </button>
-                </div>
+                    <RefreshCw className="size-4 mr-2" />
+                    Cambiar barbero
+                  </Button>
+                )}
+
+                <button
+                  onClick={reset}
+                  className="text-muted-foreground hover:text-foreground transition-colors py-2 text-sm md:text-base w-full text-center"
+                >
+                  Volver al inicio
+                </button>
               </div>
             </>
           ) : (
@@ -1632,7 +1629,7 @@ export default function CheckinPage() {
 
               <button
                 onClick={() => setChangingBarberInManage(false)}
-                className="text-muted-foreground hover:text-foreground transition-colors py-3 text-lg"
+                className="text-muted-foreground hover:text-foreground transition-colors py-3 text-base md:text-lg"
               >
                 Cancelar
               </button>
