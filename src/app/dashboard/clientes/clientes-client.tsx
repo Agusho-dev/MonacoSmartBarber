@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, useEffect, useCallback, useTransition } from 'react'
-import { Search, Eye, Star, Tag, Camera, Save, MessageCircle, Instagram, Plus } from 'lucide-react'
+import { Search, Eye, Star, Tag, Camera, Save, MessageCircle, Instagram, Plus, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
@@ -94,6 +94,9 @@ export function ClientesClient({ clients, visits, points }: Props) {
   const { selectedBranchId } = useBranchStore()
   const supabase = useMemo(() => createClient(), [])
   const [search, setSearch] = useState('')
+  const [segmentFilter, setSegmentFilter] = useState<Segment | 'all'>('all')
+  const [sortBy, setSortBy] = useState<'lastVisit' | 'totalVisits' | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [detailClient, setDetailClient] = useState<Client | null>(null)
   const [photos, setPhotos] = useState<PhotoRow[]>([])
   const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null)
@@ -199,13 +202,48 @@ export function ClientesClient({ clients, visits, points }: Props) {
   }
 
   const searchLower = search.toLowerCase()
-  const filteredClients = clients.filter((c) => {
-    if (!searchLower) return true
-    return (
-      c.name.toLowerCase().includes(searchLower) ||
-      c.phone.includes(searchLower)
-    )
-  })
+
+  function toggleSort(field: 'lastVisit' | 'totalVisits') {
+    if (sortBy === field) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortBy(field)
+      setSortDir('desc')
+    }
+  }
+
+  function SortIcon({ field }: { field: 'lastVisit' | 'totalVisits' }) {
+    if (sortBy !== field) return <ArrowUpDown className="ml-1.5 size-3 opacity-40" />
+    return sortDir === 'asc'
+      ? <ArrowUp className="ml-1.5 size-3" />
+      : <ArrowDown className="ml-1.5 size-3" />
+  }
+
+  const filteredClients = useMemo(() => {
+    let list = clients.filter((c) => {
+      if (searchLower && !c.name.toLowerCase().includes(searchLower) && !c.phone.includes(searchLower)) return false
+      if (segmentFilter !== 'all' && getSegment(c) !== segmentFilter) return false
+      return true
+    })
+
+    if (sortBy) {
+      list = [...list].sort((a, b) => {
+        let valA: number, valB: number
+        if (sortBy === 'lastVisit') {
+          const dA = branchClientStats.get(a.id)?.lastVisitDate
+          const dB = branchClientStats.get(b.id)?.lastVisitDate
+          valA = dA ? new Date(dA).getTime() : 0
+          valB = dB ? new Date(dB).getTime() : 0
+        } else {
+          valA = branchClientStats.get(a.id)?.totalVisits ?? 0
+          valB = branchClientStats.get(b.id)?.totalVisits ?? 0
+        }
+        return sortDir === 'asc' ? valA - valB : valB - valA
+      })
+    }
+
+    return list
+  }, [clients, searchLower, segmentFilter, sortBy, sortDir, branchClientStats])
 
   const clientVisitHistory = useMemo(
     () =>
@@ -284,14 +322,49 @@ export function ClientesClient({ clients, visits, points }: Props) {
         </p>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          className="pl-9"
-          placeholder="Buscar por nombre o teléfono..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative max-w-sm flex-1">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-9"
+            placeholder="Buscar por nombre o teléfono..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          {(['all', 'nuevo', 'regular', 'vip', 'en_riesgo', 'perdido'] as const).map((seg) => {
+            const isActive = segmentFilter === seg
+            if (seg === 'all') {
+              return (
+                <button
+                  key="all"
+                  onClick={() => setSegmentFilter('all')}
+                  className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                    isActive
+                      ? 'border-foreground/30 bg-foreground/10 text-foreground'
+                      : 'border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground'
+                  }`}
+                >
+                  Todos
+                </button>
+              )
+            }
+            const cfg = segmentConfig[seg]
+            return (
+              <button
+                key={seg}
+                onClick={() => setSegmentFilter(seg)}
+                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                  isActive ? cfg.className : 'border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground'
+                }`}
+              >
+                {cfg.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       <div className="rounded-lg border">
@@ -300,8 +373,24 @@ export function ClientesClient({ clients, visits, points }: Props) {
             <TableRow>
               <TableHead>Nombre</TableHead>
               <TableHead className="hidden sm:table-cell">Teléfono</TableHead>
-              <TableHead className="text-right hidden md:table-cell">Total visitas</TableHead>
-              <TableHead className="hidden md:table-cell">Última visita</TableHead>
+              <TableHead className="text-right hidden md:table-cell">
+                <button
+                  onClick={() => toggleSort('totalVisits')}
+                  className="inline-flex items-center justify-end w-full hover:text-foreground transition-colors"
+                >
+                  Total visitas
+                  <SortIcon field="totalVisits" />
+                </button>
+              </TableHead>
+              <TableHead className="hidden md:table-cell">
+                <button
+                  onClick={() => toggleSort('lastVisit')}
+                  className="inline-flex items-center hover:text-foreground transition-colors"
+                >
+                  Última visita
+                  <SortIcon field="lastVisit" />
+                </button>
+              </TableHead>
               <TableHead className="hidden lg:table-cell">Segmento</TableHead>
               <TableHead className="text-right hidden sm:table-cell">Puntos</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
@@ -338,7 +427,7 @@ export function ClientesClient({ clients, visits, points }: Props) {
                   <TableCell className="hidden md:table-cell">
                     {displayStats?.lastVisitDate
                       ? formatDate(displayStats.lastVisitDate)
-                      : '—'}
+                      : <span className="text-xs italic text-muted-foreground/60">Se retiró antes del servicio</span>}
                   </TableCell>
                   <TableCell className="hidden lg:table-cell">
                     <Badge variant="outline" className={segCfg.className}>
