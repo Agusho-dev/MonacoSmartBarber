@@ -195,7 +195,7 @@ export function assignDynamicBarbers(
       const countB = monthlyServiceCounts[b.id] || 0
       if (countA !== countB) return countA - countB
 
-      return Math.random() - 0.5
+      return a.id.localeCompare(b.id)
     })
 
     const selectedBarber = eligibleBarbers[0]
