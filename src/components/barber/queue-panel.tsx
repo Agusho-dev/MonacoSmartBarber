@@ -578,14 +578,26 @@ export function QueuePanel({
                   {entry.client?.name ?? 'Cliente'}
                 </p>
                 {(() => {
+                  const phone = entry.client?.phone ?? ''
+                  const isKid = phone.startsWith('00') && phone.length === 10
+                  if (isKid) {
+                    return (
+                      <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-amber-500/15 text-amber-500 border-amber-500/30">
+                        Especial
+                      </Badge>
+                    )
+                  }
                   const realVisits = entry.client?.visits?.[0]?.count ?? 0
                   const loyaltyVisits = entry.client?.loyalty?.[0]?.total_visits ?? 0
-                  return Math.max(realVisits, loyaltyVisits) === 0
-                })() && (
-                    <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-emerald-500/15 text-emerald-500 border-emerald-500/30">
-                      Primer Corte
-                    </Badge>
-                  )}
+                  if (Math.max(realVisits, loyaltyVisits) === 0) {
+                    return (
+                      <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-emerald-500/15 text-emerald-500 border-emerald-500/30">
+                        Primer Corte
+                      </Badge>
+                    )
+                  }
+                  return null
+                })()}
                 {entry.is_dynamic && (
                   <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-blue-500/15 text-blue-500 border-blue-500/30">
                     ⚡️ Menor Espera
