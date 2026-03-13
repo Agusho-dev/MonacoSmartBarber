@@ -583,8 +583,8 @@ export default function CheckinPage() {
   }
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(queueEntries, barbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt)
-  }, [queueEntries, barbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt])
+    return assignDynamicBarbers(queueEntries, barbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt, notClockedInBarbers)
+  }, [queueEntries, barbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt, notClockedInBarbers])
 
   const maxLoad = useMemo(
     () =>

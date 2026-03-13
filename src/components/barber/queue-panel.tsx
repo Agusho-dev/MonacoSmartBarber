@@ -122,6 +122,7 @@ export function QueuePanel({
   const [dayStats, setDayStats] = useState({ servicesCount: 0, revenue: 0 })
   const [otherBarbers, setOtherBarbers] = useState<Staff[]>([])
   const [allBarbers, setAllBarbers] = useState<Staff[]>([])
+  const [notClockedInBarbers, setNotClockedInBarbers] = useState<Set<string>>(new Set())
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [reassigningEntryId, setReassigningEntryId] = useState<string | null>(null)
   const [profileClient, setProfileClient] = useState<Client | null>(null)
@@ -170,7 +171,7 @@ export function QueuePanel({
     monthStart.setDate(1)
     monthStart.setHours(0, 0, 0, 0)
 
-    const [barbersRes, schedRes, settingsRes, monthlyVisitsRes, lastVisitsRes] = await Promise.all([
+    const [barbersRes, schedRes, settingsRes, monthlyVisitsRes, lastVisitsRes, attendanceRes] = await Promise.all([
       supabase
         .from('staff')
         .select('*')
@@ -200,11 +201,33 @@ export function QueuePanel({
         .not('barber_id', 'is', null)
         .order('completed_at', { ascending: false })
         .limit(200),
+      supabase
+        .from('attendance_logs')
+        .select('staff_id, action_type')
+        .eq('branch_id', session.branch_id)
+        .gte('recorded_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
+        .order('recorded_at', { ascending: false }),
     ])
 
     if (barbersRes.data) {
       setAllBarbers(barbersRes.data as Staff[])
       setOtherBarbers((barbersRes.data as Staff[]).filter(b => b.id !== session.staff_id))
+
+      const latestAttendance: Record<string, string> = {}
+      if (attendanceRes.data) {
+        attendanceRes.data.forEach((log: { staff_id: string; action_type: string }) => {
+          if (!latestAttendance[log.staff_id]) {
+            latestAttendance[log.staff_id] = log.action_type
+          }
+        })
+      }
+      const notClocked = new Set<string>()
+      for (const b of barbersRes.data as Staff[]) {
+        if (latestAttendance[b.id] !== 'clock_in') {
+          notClocked.add(b.id)
+        }
+      }
+      setNotClockedInBarbers(notClocked)
     }
 
     if (schedRes.data) {
@@ -305,6 +328,17 @@ export function QueuePanel({
           fetchPendingBreakRequests()
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'attendance_logs',
+        },
+        () => {
+          fetchBarbersAndSchedules()
+        }
+      )
       .subscribe((status, err) => {
         console.log('Realtime channel status:', status, err)
       })
@@ -320,8 +354,8 @@ export function QueuePanel({
   }, [])
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(entries, allBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt)
-  }, [entries, allBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt])
+    return assignDynamicBarbers(entries, allBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt, notClockedInBarbers)
+  }, [entries, allBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt, notClockedInBarbers])
 
   // My active break (ghost entry that is in_progress)
   const myActiveBreak = dynamicEntries.find(

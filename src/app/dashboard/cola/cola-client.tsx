@@ -68,6 +68,7 @@ export function ColaClient({
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
   const [monthlyServiceCounts, setMonthlyServiceCounts] = useState<Record<string, number>>({})
   const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
+  const [latestAttendance, setLatestAttendance] = useState<Record<string, string>>({})
 
   const supabase = useMemo(() => createClient(), [])
 
@@ -98,7 +99,7 @@ export function ColaClient({
     monthStart.setDate(1)
     monthStart.setHours(0, 0, 0, 0)
 
-    const [schedRes, settingsRes, monthlyVisitsRes, lastVisitsRes] = await Promise.all([
+    const [schedRes, settingsRes, monthlyVisitsRes, lastVisitsRes, attendanceRes] = await Promise.all([
       supabase
         .from('staff_schedules')
         .select('*')
@@ -119,6 +120,11 @@ export function ColaClient({
         .not('barber_id', 'is', null)
         .order('completed_at', { ascending: false })
         .limit(200),
+      supabase
+        .from('attendance_logs')
+        .select('staff_id, action_type')
+        .gte('recorded_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
+        .order('recorded_at', { ascending: false }),
     ])
     if (schedRes.data) setSchedules(schedRes.data as StaffSchedule[])
     if (settingsRes.data) {
@@ -140,6 +146,15 @@ export function ColaClient({
         }
       }
       setLastCompletedAt(lastMap)
+    }
+    if (attendanceRes.data) {
+      const latest: Record<string, string> = {}
+      attendanceRes.data.forEach((log: { staff_id: string; action_type: string }) => {
+        if (!latest[log.staff_id]) {
+          latest[log.staff_id] = log.action_type
+        }
+      })
+      setLatestAttendance(latest)
     }
   }, [supabase])
 
@@ -168,6 +183,15 @@ export function ColaClient({
         },
         () => fetchBarbers()
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'attendance_logs',
+        },
+        () => fetchSchedules()
+      )
       .subscribe()
 
     return () => {
@@ -180,9 +204,17 @@ export function ColaClient({
     return () => clearInterval(interval)
   }, [])
 
+  const notClockedInBarbers = useMemo(() => {
+    const notClocked = new Set<string>()
+    for (const b of liveBarbers) {
+      if (latestAttendance[b.id] !== 'clock_in') notClocked.add(b.id)
+    }
+    return notClocked
+  }, [liveBarbers, latestAttendance])
+
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(entries, liveBarbers as unknown as Staff[], schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt)
-  }, [entries, liveBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt])
+    return assignDynamicBarbers(entries, liveBarbers as unknown as Staff[], schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt, notClockedInBarbers)
+  }, [entries, liveBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt, notClockedInBarbers])
 
   // Filter by selected branch
   const filteredEntries = selectedBranchId

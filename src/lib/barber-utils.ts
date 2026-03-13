@@ -151,7 +151,8 @@ export function assignDynamicBarbers(
   currentTime: number,
   marginMinutes = 35,
   monthlyServiceCounts: Record<string, number> = {},
-  lastCompletedAt: Record<string, string> = {}
+  lastCompletedAt: Record<string, string> = {},
+  notClockedInIds: Set<string> = new Set()
 ): DynamicQueueEntry[] {
   const result: DynamicQueueEntry[] = []
 
@@ -180,7 +181,10 @@ export function assignDynamicBarbers(
   unassigned.sort((a, b) => a.position - b.position)
 
   for (const u of unassigned) {
-    const eligibleBarbers = barbers.filter(b => !isBarberBlockedByShiftEnd(b, result, schedules, currentTime, marginMinutes))
+    const eligibleBarbers = barbers.filter(b =>
+      !isBarberBlockedByShiftEnd(b, result, schedules, currentTime, marginMinutes) &&
+      !notClockedInIds.has(b.id)
+    )
 
     if (eligibleBarbers.length === 0) {
       result.push(u)
