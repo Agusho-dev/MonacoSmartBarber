@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Clock, UserX, Gift, Save, Timer } from 'lucide-react'
+import { Clock, UserX, Gift, Save, Timer, AlertTriangle } from 'lucide-react'
 
 const DAY_OPTIONS = [
   { value: 1, label: 'Lun' },
@@ -42,6 +42,7 @@ export function ConfiguracionClient({ appSettings, rewardsConfig }: Props) {
         <BusinessHoursCard settings={appSettings} />
         <ThresholdsCard settings={appSettings} />
         <ShiftEndMarginCard settings={appSettings} />
+        <NextClientAlertCard settings={appSettings} />
       </div>
 
       <RewardsSection configs={rewardsConfig} />
@@ -295,6 +296,78 @@ function ShiftEndMarginCard({ settings }: { settings: AppSettings | null }) {
         <Button onClick={handleSave} disabled={isPending}>
           <Save className="mr-2 size-4" />
           {isPending ? 'Guardando...' : 'Guardar margen'}
+        </Button>
+      </CardFooter>
+    </Card>
+  )
+}
+
+/* ─── Next Client Alert ─── */
+
+function NextClientAlertCard({ settings }: { settings: AppSettings | null }) {
+  const [minutes, setMinutes] = useState(settings?.next_client_alert_minutes ?? 5)
+  const [isPending, startTransition] = useTransition()
+
+  const handleSave = () => {
+    const fd = new FormData()
+    fd.set('next_client_alert_minutes', String(minutes))
+    fd.set('lost_client_days', String(settings?.lost_client_days ?? 40))
+    fd.set('at_risk_client_days', String(settings?.at_risk_client_days ?? 25))
+    fd.set('business_hours_open', settings?.business_hours_open ?? '09:00')
+    fd.set('business_hours_close', settings?.business_hours_close ?? '21:00')
+    fd.set(
+      'business_days',
+      (settings?.business_days ?? [1, 2, 3, 4, 5, 6]).join(',')
+    )
+
+    startTransition(async () => {
+      const result = await updateAppSettings(fd)
+      if (result.error) toast.error(result.error)
+      else toast.success('Alerta entre clientes actualizada')
+    })
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="size-5 text-muted-foreground" />
+          <CardTitle>Alerta entre clientes</CardTitle>
+        </div>
+        <CardDescription>
+          Tiempo máximo que un barbero puede estar sin atender al siguiente cliente antes de recibir una alerta
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="alert-minutes">Tiempo de gracia (minutos)</Label>
+          <div className="flex items-center gap-3">
+            <Input
+              id="alert-minutes"
+              type="number"
+              min={1}
+              max={30}
+              value={minutes}
+              onChange={(e) => setMinutes(Number(e.target.value))}
+              className="w-24"
+            />
+            <span className="text-sm text-muted-foreground">
+              minutos antes de la alerta
+            </span>
+          </div>
+        </div>
+        <div className="rounded-lg bg-muted/50 p-3">
+          <p className="text-xs text-muted-foreground">
+            Si el barbero termina un corte y tiene clientes esperando, se le dará{' '}
+            <strong>{minutes} minuto{minutes !== 1 ? 's' : ''}</strong> antes de mostrar
+            una alerta con sonido y vibración para que comience a atender.
+          </p>
+        </div>
+      </CardContent>
+      <CardFooter>
+        <Button onClick={handleSave} disabled={isPending}>
+          <Save className="mr-2 size-4" />
+          {isPending ? 'Guardando...' : 'Guardar alerta'}
         </Button>
       </CardFooter>
     </Card>

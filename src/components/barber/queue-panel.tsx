@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { startService, cancelQueueEntry, reassignBarber } from '@/lib/actions/queue'
 import { fetchBarberDayStats } from '@/lib/actions/barber'
@@ -55,6 +55,7 @@ import {
   Power,
   EyeOff,
   Eye,
+  AlertTriangle,
 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -153,6 +154,14 @@ export function QueuePanel({
 
   const [directSaleOpen, setDirectSaleOpen] = useState(false)
 
+  // Next client alert state
+  const [nextClientAlertMinutes, setNextClientAlertMinutes] = useState(5)
+  const [idleSince, setIdleSince] = useState<number | null>(null)
+  const [showWaitWarning, setShowWaitWarning] = useState(false)
+  const [warningStarting, setWarningStarting] = useState(false)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const beepIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
   const supabase = useMemo(() => createClient(), [])
   const canManageBreaks = session.role === 'admin' || session.role === 'owner' || session.permissions?.['breaks.grant'] === true
   const canDeactivateStaff = session.role === 'admin' || session.role === 'owner' || session.permissions?.['staff.deactivate'] === true
@@ -195,7 +204,7 @@ export function QueuePanel({
         .eq('is_active', true),
       supabase
         .from('app_settings')
-        .select('shift_end_margin_minutes')
+        .select('shift_end_margin_minutes, next_client_alert_minutes')
         .maybeSingle(),
       supabase
         .from('visits')
@@ -244,9 +253,14 @@ export function QueuePanel({
     }
 
     if (settingsRes.data) {
-      const margin = (settingsRes.data as { shift_end_margin_minutes?: number }).shift_end_margin_minutes
+      const settingsData = settingsRes.data as { shift_end_margin_minutes?: number; next_client_alert_minutes?: number }
+      const margin = settingsData.shift_end_margin_minutes
       if (typeof margin === 'number' && margin >= 0) {
         setShiftEndMargin(margin)
+      }
+      const alertMin = settingsData.next_client_alert_minutes
+      if (typeof alertMin === 'number' && alertMin > 0) {
+        setNextClientAlertMinutes(alertMin)
       }
     }
 
@@ -395,6 +409,109 @@ export function QueuePanel({
 
   // "Cola general": ALL waiting clients
   const allWaitingEntries = dynamicEntries.filter((e) => e.status === 'waiting')
+
+  // Real waiting clients for this barber (non-break)
+  const myRealWaitingEntries = myWaitingEntries.filter(e => !e.is_break)
+
+  // ── Next client alert logic ──
+  // Track when barber becomes idle with clients waiting
+  useEffect(() => {
+    const isIdle = !myActiveEntry && !myActiveBreak
+    const hasWaiting = myRealWaitingEntries.length > 0
+
+    if (isIdle && hasWaiting) {
+      // Start tracking idle time if not already
+      setIdleSince(prev => prev ?? Date.now())
+    } else {
+      // Reset when barber is busy, on break, or no clients waiting
+      setIdleSince(null)
+      setShowWaitWarning(false)
+    }
+  }, [myActiveEntry, myActiveBreak, myRealWaitingEntries.length])
+
+  // Check if countdown has expired
+  useEffect(() => {
+    if (!idleSince || showWaitWarning) return
+
+    const thresholdMs = nextClientAlertMinutes * 60_000
+    const elapsed = now - idleSince
+
+    if (elapsed >= thresholdMs) {
+      setShowWaitWarning(true)
+      // Vibrate if supported
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate([200, 100, 200, 100, 200])
+      }
+    }
+  }, [now, idleSince, nextClientAlertMinutes, showWaitWarning])
+
+  // Play beep sound when warning is active
+  useEffect(() => {
+    if (!showWaitWarning) {
+      // Stop beep
+      if (beepIntervalRef.current) {
+        clearInterval(beepIntervalRef.current)
+        beepIntervalRef.current = null
+      }
+      return
+    }
+
+    const playBeep = () => {
+      try {
+        if (!audioContextRef.current) {
+          audioContextRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+        }
+        const ctx = audioContextRef.current
+        if (ctx.state === 'suspended') ctx.resume()
+
+        const oscillator = ctx.createOscillator()
+        const gainNode = ctx.createGain()
+        oscillator.connect(gainNode)
+        gainNode.connect(ctx.destination)
+
+        oscillator.frequency.value = 880
+        oscillator.type = 'sine'
+        gainNode.gain.setValueAtTime(0.15, ctx.currentTime)
+        gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4)
+
+        oscillator.start(ctx.currentTime)
+        oscillator.stop(ctx.currentTime + 0.4)
+      } catch {
+        // Audio not available
+      }
+    }
+
+    // Play immediately + every 3 seconds
+    playBeep()
+    beepIntervalRef.current = setInterval(playBeep, 3000)
+
+    return () => {
+      if (beepIntervalRef.current) {
+        clearInterval(beepIntervalRef.current)
+        beepIntervalRef.current = null
+      }
+    }
+  }, [showWaitWarning])
+
+  // Cleanup audio context on unmount
+  useEffect(() => {
+    return () => {
+      if (beepIntervalRef.current) clearInterval(beepIntervalRef.current)
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {})
+      }
+    }
+  }, [])
+
+  async function handleWarningStartService() {
+    const firstEntry = myRealWaitingEntries[0]
+    if (!firstEntry || warningStarting) return
+    setWarningStarting(true)
+    await handleStartService(firstEntry.id)
+    setShowWaitWarning(false)
+    setIdleSince(null)
+    setWarningStarting(false)
+  }
 
   const otherInProgress = dynamicEntries.filter(
     (e) => e.status === 'in_progress' && e.barber_id !== session.staff_id && !e.is_break
@@ -1122,6 +1239,38 @@ export function QueuePanel({
           </div>
         </section>
       </main>
+
+      {/* Next client waiting warning overlay */}
+      {showWaitWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="mx-4 w-full max-w-md space-y-6 rounded-2xl border-2 border-amber-500/50 bg-amber-500/10 p-8 shadow-2xl shadow-amber-500/20 backdrop-blur-xl animate-in zoom-in-95 duration-300">
+            <div className="flex flex-col items-center gap-4 text-center">
+              <div className="flex size-20 items-center justify-center rounded-full bg-amber-500/20 animate-pulse">
+                <AlertTriangle className="size-10 text-amber-500" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-bold text-amber-500">
+                  ¡Tu cliente te está esperando!
+                </h2>
+                <p className="mt-2 text-base text-amber-200/80">
+                  {myRealWaitingEntries[0]?.client?.name
+                    ? <><strong>{myRealWaitingEntries[0].client.name}</strong> está en la cola</>
+                    : 'Tenés clientes en espera'}
+                </p>
+              </div>
+            </div>
+            <Button
+              size="lg"
+              className="h-16 w-full text-xl bg-amber-500 hover:bg-amber-600 text-black font-bold"
+              onClick={handleWarningStartService}
+              disabled={warningStarting}
+            >
+              <Scissors className="mr-3 size-6" />
+              {warningStarting ? 'Iniciando...' : 'Empezar a cortar'}
+            </Button>
+          </div>
+        </div>
+      )}
 
       <CompleteServiceDialog
         entry={completingEntry}
