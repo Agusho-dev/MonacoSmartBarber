@@ -59,6 +59,7 @@ import {
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
+import { DirectSaleDialog } from './direct-sale-dialog'
 import { ClientProfileSheet } from './client-profile-sheet'
 import { ClientHistory } from './client-history'
 import {
@@ -149,6 +150,8 @@ export function QueuePanel({
 
   const [hiddenFromCheckin, setHiddenFromCheckin] = useState(false)
   const [hiddenLoading, setHiddenLoading] = useState(false)
+
+  const [directSaleOpen, setDirectSaleOpen] = useState(false)
 
   const supabase = useMemo(() => createClient(), [])
   const canManageBreaks = session.role === 'admin' || session.role === 'owner' || session.permissions?.['breaks.grant'] === true
@@ -788,6 +791,16 @@ export function QueuePanel({
             </Button>
           )}
 
+          {/* Venta Directa */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setDirectSaleOpen(true)}
+          >
+            <Gift className="size-4" />
+            <span className="hidden sm:inline">Vender</span>
+          </Button>
+
           {canHideSelf && (
             <Button
               variant="ghost"
@@ -1103,6 +1116,16 @@ export function QueuePanel({
         branchId={session.branch_id}
         onClose={() => setCompletingEntry(null)}
         onCompleted={fetchQueue}
+      />
+
+      <DirectSaleDialog
+        open={directSaleOpen}
+        branchId={session.branch_id}
+        barberId={session.staff_id}
+        onClose={() => setDirectSaleOpen(false)}
+        onCompleted={() => {
+          refreshStats()
+        }}
       />
 
       <ClientProfileSheet

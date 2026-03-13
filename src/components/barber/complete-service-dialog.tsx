@@ -6,7 +6,7 @@ import { completeService } from '@/lib/actions/queue'
 import { saveVisitDetails } from '@/lib/actions/visit-history'
 import { updateClientNotes } from '@/lib/actions/clients'
 import { compressToWebP, uploadVisitPhotos } from '@/lib/image-utils'
-import type { QueueEntry, Service, ServiceTag, PaymentMethod, PaymentAccount } from '@/lib/types/database'
+import type { QueueEntry, Service, ServiceTag, PaymentMethod, PaymentAccount, Product } from '@/lib/types/database'
 import {
   Dialog,
   DialogContent,
@@ -68,6 +68,7 @@ export function CompleteServiceDialog({
   const supabase = useMemo(() => createClient(), [])
 
   const [services, setServices] = useState<Service[]>([])
+  const [products, setProducts] = useState<Product[]>([])
   const [tags, setTags] = useState<ServiceTag[]>([])
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([])
   const [step, setStep] = useState<1 | 2>(1)
@@ -76,6 +77,7 @@ export function CompleteServiceDialog({
   // Step 1 — service details
   const [selectedService, setSelectedService] = useState<string>('')
   const [extraServices, setExtraServices] = useState<string[]>([])
+  const [selectedProducts, setSelectedProducts] = useState<{ id: string, quantity: number }[]>([])
   const [photoFiles, setPhotoFiles] = useState<File[]>([])
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -93,6 +95,7 @@ export function CompleteServiceDialog({
       setSelectedPayment(null)
       setSelectedService('')
       setExtraServices([])
+      setSelectedProducts([])
       setPhotoFiles([])
       photoPreviews.forEach(URL.revokeObjectURL)
       setPhotoPreviews([])
@@ -127,6 +130,16 @@ export function CompleteServiceDialog({
       .or(`branch_id.eq.${branchId},branch_id.is.null`)
       .then(({ data }) => {
         if (data) setServices(data as Service[])
+      })
+
+    supabase
+      .from('products')
+      .select('*')
+      .eq('branch_id', branchId)
+      .eq('is_active', true)
+      .order('name')
+      .then(({ data }) => {
+        if (data) setProducts(data as Product[])
       })
 
     supabase
@@ -183,7 +196,8 @@ export function CompleteServiceDialog({
         selectedService || undefined,
         selectedPayment === 'points',
         selectedAccountId || null,
-        extraServices.length > 0 ? extraServices : undefined
+        extraServices.length > 0 ? extraServices : undefined,
+        selectedProducts.length > 0 ? selectedProducts : undefined
       )
 
       if ('error' in result) {
@@ -232,7 +246,11 @@ export function CompleteServiceDialog({
     return total + (services.find(s => s.id === id)?.price ?? 0)
   }, 0)
 
-  const totalPrice = mainServicePrice + extrasPrice
+  const productsPrice = selectedProducts.reduce((total, p) => {
+    return total + ((products.find(x => x.id === p.id)?.sale_price ?? 0) * p.quantity)
+  }, 0)
+
+  const totalPrice = mainServicePrice + extrasPrice + productsPrice
 
   return (
     <Dialog open={!!entry} onOpenChange={(open) => !open && onClose()}>
@@ -342,6 +360,60 @@ export function CompleteServiceDialog({
                         .map((service) => (
                           <SelectItem key={service.id} value={service.id}>
                             {service.name} — +${service.price}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {/* Products */}
+              {products.length > 0 && (
+                <div>
+                  <p className="mb-2 text-sm font-medium">
+                    Productos <span className="text-muted-foreground">(opcional)</span>
+                  </p>
+                  {selectedProducts.length > 0 && (
+                    <div className="mb-2 space-y-2">
+                      {selectedProducts.map((p) => {
+                        const prod = products.find((x) => x.id === p.id)
+                        if (!prod) return null
+                        return (
+                          <div key={p.id} className="flex items-center justify-between rounded-lg border bg-white/5 border-white/10 p-2">
+                            <span className="text-sm font-medium">{prod.name} (+${prod.sale_price * p.quantity})</span>
+                            <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-2 rounded-md bg-black/20 px-2 py-1">
+                                <button type="button" onClick={() => setSelectedProducts(prev => prev.map(x => x.id === p.id ? { ...x, quantity: Math.max(1, x.quantity - 1) } : x))} className="text-muted-foreground hover:text-white">-</button>
+                                <span className="text-sm w-4 text-center">{p.quantity}</span>
+                                <button type="button" onClick={() => setSelectedProducts(prev => prev.map(x => x.id === p.id ? { ...x, quantity: x.quantity + 1 } : x))} className="text-muted-foreground hover:text-white">+</button>
+                              </div>
+                              <button type="button" onClick={() => setSelectedProducts((prev) => prev.filter((x) => x.id !== p.id))} className="text-red-400 hover:text-red-300 p-1">
+                                <X className="size-4" />
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                  <Select
+                    value=""
+                    onValueChange={(id) => {
+                      if (id && !selectedProducts.find(x => x.id === id)) {
+                        setSelectedProducts((prev) => [...prev, { id, quantity: 1 }])
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="h-14 w-full text-lg">
+                      <SelectValue placeholder="Agregar producto..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {products
+                        .filter((p) => !selectedProducts.find(x => x.id === p.id))
+                        .map((product) => (
+                          <SelectItem key={product.id} value={product.id}>
+                            {product.name} — ${product.sale_price} 
+                            {product.stock !== null ? ` (Stock: ${product.stock})` : ''}
                           </SelectItem>
                         ))}
                     </SelectContent>

@@ -67,7 +67,7 @@ export async function fetchFinancialData(
   // Visits in range
   let vq = supabase
     .from('visits')
-    .select('amount, commission_amount, completed_at, branch_id')
+    .select('amount, commission_amount, completed_at, branch_id, service_id, queue_entry_id')
     .gte('completed_at', startDate.toISOString())
     .lte('completed_at', endDate.toISOString())
   if (branchId) vq = vq.eq('branch_id', branchId)
@@ -97,7 +97,10 @@ export async function fetchFinancialData(
     if (m) {
       m.revenue += Number(v.amount)
       m.commissions += Number(v.commission_amount)
-      m.cuts++
+      // Only count as a "cut" if it was tied to a service or queue entry
+      if (v.service_id || v.queue_entry_id) {
+        m.cuts++
+      }
     }
   }
 

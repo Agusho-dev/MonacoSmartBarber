@@ -120,7 +120,8 @@ export async function completeService(
   serviceId?: string,
   isRewardClaim: boolean = false,
   paymentAccountId?: string | null,
-  extraServiceIds?: string[]
+  extraServiceIds?: string[],
+  productsToSell?: { id: string; quantity: number }[]
 ) {
   // Use admin client because barber pin authentications do not set a Supabase Auth session
   // This causes RLS on visits and client_points to fail when the queue trigger fires using SECURITY INVOKER
@@ -199,6 +200,56 @@ export async function completeService(
         }
 
         commissionAmount += price * (commPct / 100)
+      }
+    }
+  }
+
+  // 3.5 Calculate product prices and commissions
+  if (productsToSell && productsToSell.length > 0) {
+    const productIds = productsToSell.map(p => p.id)
+    const { data: dbProducts } = await supabase
+      .from('products')
+      .select('id, sale_price, barber_commission, stock')
+      .in('id', productIds)
+
+    if (dbProducts) {
+      const productSales = []
+      
+      for (const p of productsToSell) {
+        const dbp = dbProducts.find((x: any) => x.id === p.id)
+        if (!dbp) continue
+        
+        const qty = p.quantity
+        const price = Number(dbp.sale_price)
+        const comm = Number(dbp.barber_commission)
+        
+        amount += price * qty
+        commissionAmount += comm * qty
+        
+        productSales.push({
+          visit_id: visit.id,
+          product_id: p.id,
+          barber_id: visit.barber_id,
+          branch_id: visit.branch_id,
+          quantity: qty,
+          unit_price: price,
+          commission_amount: comm * qty,
+        })
+        
+        // Decrement stock if stock is not null
+        if (dbp.stock !== null) {
+          // A simple update since this happens in an administrative context
+          await supabase.from('products').update({
+            stock: dbp.stock - qty
+          }).eq('id', p.id)
+        }
+      }
+      
+      if (productSales.length > 0) {
+        const { error: salesError } = await supabase.from('product_sales').insert(productSales)
+        if (salesError) {
+          console.error('Error inserting product_sales:', salesError)
+        }
       }
     }
   }
