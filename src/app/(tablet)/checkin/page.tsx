@@ -280,6 +280,7 @@ export default function CheckinPage() {
 
         const filtered = staffRes.data.filter((s) => {
           if (s.status === 'blocked') return false
+          if (s.hidden_from_checkin) return false
 
           const lastAction = latestAttendance[s.id]
           if (lastAction === 'clock_in') return true

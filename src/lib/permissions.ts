@@ -25,6 +25,7 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
             'queue.view': 'Ver cola',
             'queue.manage': 'Gestionar cola (iniciar, completar)',
             'queue.reassign': 'Reasignar clientes entre barberos',
+            'queue.hide_self': 'Ocultarse del check-in de clientes',
         },
     },
     staff: {

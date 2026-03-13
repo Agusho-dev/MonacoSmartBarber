@@ -182,6 +182,7 @@ export function assignDynamicBarbers(
 
   for (const u of unassigned) {
     const eligibleBarbers = barbers.filter(b =>
+      !b.hidden_from_checkin &&
       !isBarberBlockedByShiftEnd(b, result, schedules, currentTime, marginMinutes) &&
       !notClockedInIds.has(b.id)
     )

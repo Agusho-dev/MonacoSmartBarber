@@ -53,6 +53,8 @@ import {
   XCircle,
   Instagram,
   Power,
+  EyeOff,
+  Eye,
 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -145,9 +147,13 @@ export function QueuePanel({
   const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false)
   const [deactivateLoading, setDeactivateLoading] = useState<string | null>(null)
 
+  const [hiddenFromCheckin, setHiddenFromCheckin] = useState(false)
+  const [hiddenLoading, setHiddenLoading] = useState(false)
+
   const supabase = useMemo(() => createClient(), [])
   const canManageBreaks = session.role === 'admin' || session.role === 'owner' || session.permissions?.['breaks.grant'] === true
   const canDeactivateStaff = session.role === 'admin' || session.role === 'owner' || session.permissions?.['staff.deactivate'] === true
+  const canHideSelf = session.role === 'admin' || session.role === 'owner' || session.permissions?.['queue.hide_self'] === true
 
   const fetchQueue = useCallback(async () => {
     const { data } = await supabase
@@ -284,12 +290,22 @@ export function QueuePanel({
     }
   }, [canManageBreaks, session.branch_id, session.staff_id])
 
+  const fetchHiddenStatus = useCallback(async () => {
+    const { data } = await supabase
+      .from('staff')
+      .select('hidden_from_checkin')
+      .eq('id', session.staff_id)
+      .single()
+    if (data) setHiddenFromCheckin(data.hidden_from_checkin ?? false)
+  }, [supabase, session.staff_id])
+
   useEffect(() => {
     fetchQueue()
     refreshStats()
     fetchBarbersAndSchedules()
     fetchBreakRequestStatus()
     fetchPendingBreakRequests()
+    fetchHiddenStatus()
 
     const channel = supabase
       .channel(`barber-queue-${session.branch_id}-${session.staff_id}`)
@@ -314,6 +330,7 @@ export function QueuePanel({
         },
         () => {
           fetchBarbersAndSchedules()
+          fetchHiddenStatus()
         }
       )
       .on(
@@ -346,7 +363,7 @@ export function QueuePanel({
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, session.branch_id, session.staff_id, fetchQueue, refreshStats, fetchBarbersAndSchedules, fetchBreakRequestStatus, fetchPendingBreakRequests])
+  }, [supabase, session.branch_id, session.staff_id, fetchQueue, refreshStats, fetchBarbersAndSchedules, fetchBreakRequestStatus, fetchPendingBreakRequests, fetchHiddenStatus])
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)
@@ -482,6 +499,19 @@ export function QueuePanel({
       fetchQueue()
     }
     setDeactivateLoading(null)
+  }
+
+  async function handleToggleVisibility() {
+    setHiddenLoading(true)
+    const { toggleBarberVisibility } = await import('@/lib/actions/barber')
+    const result = await toggleBarberVisibility(session.staff_id)
+    if (result.error) {
+      toast.error(result.error)
+    } else {
+      setHiddenFromCheckin(result.hidden ?? false)
+      toast.success(result.hidden ? 'Te ocultaste del check-in' : 'Volviste a ser visible en el check-in')
+    }
+    setHiddenLoading(false)
   }
 
   function formatElapsed(timestamp: string) {
@@ -697,7 +727,15 @@ export function QueuePanel({
             <Scissors className="size-4" />
           </div>
           <div>
-            <p className="font-semibold leading-none">{session.full_name}</p>
+            <div className="flex items-center gap-2">
+              <p className="font-semibold leading-none">{session.full_name}</p>
+              {hiddenFromCheckin && (
+                <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-amber-500/15 text-amber-500 border-amber-500/30">
+                  <EyeOff className="size-3 mr-0.5" />
+                  Oculto
+                </Badge>
+              )}
+            </div>
             <p className="mt-0.5 text-sm text-muted-foreground">{branchName}</p>
           </div>
         </div>
@@ -747,6 +785,19 @@ export function QueuePanel({
                   {pendingBreakRequests.length}
                 </span>
               )}
+            </Button>
+          )}
+
+          {canHideSelf && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleToggleVisibility}
+              disabled={hiddenLoading}
+              className={hiddenFromCheckin ? 'text-amber-500' : ''}
+            >
+              {hiddenFromCheckin ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              <span className="hidden sm:inline">{hiddenFromCheckin ? 'Oculto' : 'Visible'}</span>
             </Button>
           )}
 

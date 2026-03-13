@@ -69,6 +69,7 @@ export interface Staff {
   status: StaffStatus
   is_active: boolean
   avatar_url: string | null
+  hidden_from_checkin: boolean
   created_at: string
   updated_at: string
   branch?: Branch

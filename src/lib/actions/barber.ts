@@ -79,6 +79,36 @@ export async function activateBarber(staffId: string) {
   return { success: true }
 }
 
+export async function toggleBarberVisibility(staffId: string) {
+  const supabase = createAdminClient()
+
+  const { data: staff, error: fetchError } = await supabase
+    .from('staff')
+    .select('hidden_from_checkin')
+    .eq('id', staffId)
+    .single()
+
+  if (fetchError || !staff) {
+    return { error: 'Error al obtener el estado del barbero.' }
+  }
+
+  const newValue = !staff.hidden_from_checkin
+
+  const { error } = await supabase
+    .from('staff')
+    .update({ hidden_from_checkin: newValue })
+    .eq('id', staffId)
+
+  if (error) {
+    return { error: 'Error al cambiar visibilidad: ' + error.message }
+  }
+
+  revalidatePath('/barbero/cola')
+  revalidatePath('/dashboard/cola')
+  revalidatePath('/checkin')
+  return { success: true, hidden: newValue }
+}
+
 export async function fetchBarberDayStats(staffId: string, branchId: string) {
   const supabase = await createClient()
 
