@@ -493,7 +493,7 @@ export function CompleteServiceDialog({
                         <SelectItem key={acc.id} value={acc.id}>
                           <span className="font-medium">{acc.name}</span>
                           {acc.alias_or_cbu && (
-                            <span className="ml-2 text-muted-foreground text-xs">
+                            <span className="ml-2 text-muted-foreground text-sm">
                               {acc.alias_or_cbu}
                             </span>
                           )}
