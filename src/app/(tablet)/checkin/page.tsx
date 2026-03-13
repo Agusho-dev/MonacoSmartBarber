@@ -864,15 +864,59 @@ export default function CheckinPage() {
 
   // ── Shared UI pieces ──
 
-  const backButton = (onBack: () => void) => (
+    const getBackAction = () => {
+    switch (step) {
+      case 'face_scan':
+      case 'staff_face_scan':
+        return () => goTo('home')
+      case 'phone':
+        return () => { setPhone(''); goTo('home') }
+      case 'name':
+        return () => { setPhone(''); setName(''); setIsReturning(false); goTo('phone') }
+      case 'service_selection':
+        return () => {
+          if (!isReturning && !hasExistingFace) goTo('face_enroll')
+          else goTo('name')
+        }
+      case 'barber':
+        return () => goTo('service_selection')
+      case 'face_enroll':
+        return () => goTo('name')
+      case 'success':
+        if (changingBarberInSuccess) {
+          return () => {
+            setChangingBarberInSuccess(false)
+            resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
+          }
+        }
+        return null
+      case 'staff_pin':
+        return () => {
+          setStaffPinSelected(null)
+          setStaffPinValue('')
+          setStaffPinError('')
+          goTo('staff_face_scan')
+        }
+      case 'staff_face_enroll':
+        return () => goTo('staff_pin')
+      case 'manage_turn':
+        return reset
+      default:
+        return null
+    }
+  }
+
+  const handleBack = getBackAction()
+
+  const backButton = handleBack ? (
     <button
-      onClick={onBack}
-      className="absolute top-3 left-3 md:top-4 md:left-4 z-50 flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 backdrop-blur-sm"
+      onClick={handleBack}
+      className="fixed top-3 left-3 md:top-6 md:left-6 z-50 flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 backdrop-blur-sm"
     >
       <ArrowLeft className="size-5" />
       <span className="text-sm md:text-base">Atrás</span>
     </button>
-  )
+  ) : null
 
   const renderBarberCard = (
     barber: Staff,
@@ -1084,6 +1128,7 @@ export default function CheckinPage() {
 
   return (
     <div className="h-dvh flex flex-col items-center select-none overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)] py-3 md:py-4">
+      {backButton}
       {/* ═══════════════ BRANCH SELECTION ═══════════════ */}
       {step === 'branch' && (
         <div
@@ -1208,7 +1253,6 @@ export default function CheckinPage() {
           key={`face-scan-${animKey}`}
           className="relative w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          {backButton(() => goTo('home'))}
 
           <FaceCamera
             branchName={selectedBranch?.name}
@@ -1225,10 +1269,6 @@ export default function CheckinPage() {
           key={`phone-${animKey}`}
           className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          {backButton(() => {
-            setPhone('')
-            goTo('home')
-          })}
 
           {/* Show no-match header if coming from face scan */}
           {faceDescriptor && (
@@ -1257,12 +1297,6 @@ export default function CheckinPage() {
           key={`name-${animKey}`}
           className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          {backButton(() => {
-            setPhone('')
-            setName('')
-            setIsReturning(false)
-            goTo('phone')
-          })}
 
           {isReturning ? (
             <div className="flex flex-col items-center gap-4 md:gap-6 mt-4 md:mt-6">
@@ -1323,9 +1357,6 @@ export default function CheckinPage() {
           key={`face-enroll-${animKey}`}
           className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          {backButton(() => {
-            goTo('name')
-          })}
 
           <FaceEnrollment
             clientId={faceClientId || undefined}
@@ -1351,10 +1382,6 @@ export default function CheckinPage() {
           key={`service-${animKey}`}
           className="relative w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          {backButton(() => {
-            if (!isReturning && !hasExistingFace) goTo('face_enroll')
-            else goTo('name')
-          })}
 
           <div className="text-center">
             <h2 className="text-2xl md:text-3xl font-bold">¿Qué te vas a hacer?</h2>
@@ -1396,10 +1423,6 @@ export default function CheckinPage() {
           key={`barber-${animKey}`}
           className="relative w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          {backButton(() => {
-
-            goTo('service_selection')
-          })}
 
           <div className="text-center">
             <h2 className="text-2xl md:text-3xl font-bold">Elegí tu barbero</h2>
@@ -1517,10 +1540,6 @@ export default function CheckinPage() {
             </>
           ) : (
             <>
-              {backButton(() => {
-                setChangingBarberInSuccess(false)
-                resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
-              })}
 
               <div className="text-center">
                 <h2 className="text-2xl md:text-3xl font-bold">Cambiar barbero</h2>
@@ -1567,7 +1586,6 @@ export default function CheckinPage() {
           key={`staff-face-${animKey}`}
           className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          {backButton(() => goTo('home'))}
           <div className="text-center mt-2">
             <h2 className="text-2xl md:text-3xl font-bold">Identificación barbero</h2>
             <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">Mirá la cámara para identificarte</p>
@@ -1692,12 +1710,6 @@ export default function CheckinPage() {
           key={`staff-pin-${animKey}`}
           className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          {backButton(() => {
-            setStaffPinSelected(null)
-            setStaffPinValue('')
-            setStaffPinError('')
-            goTo('staff_face_scan')
-          })}
 
           {!staffPinSelected ? (
             <>
@@ -1882,7 +1894,6 @@ export default function CheckinPage() {
           key={`staff-enroll-${animKey}`}
           className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          {backButton(() => goTo('staff_pin'))}
 
           <FaceEnrollment
             clientName={staffEnrollName}
@@ -1929,7 +1940,6 @@ export default function CheckinPage() {
           key={`manage-turn-${animKey}`}
           className="relative w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-4 md:gap-5 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          {backButton(reset)}
 
           {!changingBarberInManage ? (
             <>
