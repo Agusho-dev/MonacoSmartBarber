@@ -899,66 +899,61 @@ export default function CheckinPage() {
         <button
           onClick={() => onSelect(barber.id)}
           disabled={submitting}
-          className="w-full p-5 text-left hover:bg-white/6 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
+          className="w-full p-4 text-left hover:bg-white/6 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
         >
-          <div className="flex items-center gap-5">
+          <div className="flex flex-col items-center gap-3">
             <div className={`shrink-0 rounded-full ring-2 ring-offset-2 ring-offset-black ${ringColor}`}>
               {barber.avatar_url ? (
                 <img
                   src={barber.avatar_url}
                   alt={barber.full_name}
-                  className="size-24 rounded-full object-cover"
+                  className="size-20 rounded-full object-cover"
                 />
               ) : (
-                <div className="flex size-24 items-center justify-center rounded-full bg-white/8 text-3xl font-bold">
+                <div className="flex size-20 items-center justify-center rounded-full bg-white/8 text-2xl font-bold">
                   {barber.full_name.charAt(0).toUpperCase()}
                 </div>
               )}
             </div>
 
-            <div className="flex-1 min-w-0 space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-2xl font-bold truncate">{barber.full_name}</p>
-                {isNotClockedIn ? (
-                  <span className="shrink-0 inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium bg-orange-500/15 text-orange-400 border-orange-500/30">
+            <div className="w-full text-center space-y-1.5">
+              <p className="text-lg font-bold truncate">{barber.full_name}</p>
+              {isNotClockedIn ? (
+                <>
+                  <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium bg-orange-500/15 text-orange-400 border-orange-500/30">
                     Aún no llegó
                   </span>
-                ) : (
+                  <p className="text-sm text-orange-400/70">
+                    {barberNextArrival[barber.id]
+                      ? `Ingresa a las ${barberNextArrival[barber.id].slice(0, 5)}`
+                      : 'Todavía no llegó'}
+                  </p>
+                </>
+              ) : (
+                <>
                   <span
-                    className={`shrink-0 inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium ${cfg.className}`}
+                    className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${cfg.className}`}
                   >
                     {cfg.label}
                   </span>
-                )}
-              </div>
-
-              {isNotClockedIn ? (
-                <p className="text-base text-orange-400/70">
-                  Todavía no llegó
-                  {barberNextArrival[barber.id]
-                    ? ` · Ingresa a las ${barberNextArrival[barber.id].slice(0, 5)}`
-                    : ''}
-                </p>
-              ) : (
-                <>
-                  <p className="text-base text-muted-foreground">
-                    {stats.attending && 'Atendiendo 1 persona'}
+                  <p className="text-sm text-muted-foreground">
+                    {stats.attending && 'Atendiendo 1'}
                     {stats.attending && stats.waiting > 0 && ' · '}
                     {stats.waiting > 0 &&
-                      `${stats.waiting} ${stats.waiting === 1 ? 'persona espera' : 'personas esperan'}`}
+                      `${stats.waiting} ${stats.waiting === 1 ? 'espera' : 'esperan'}`}
                     {!stats.attending && stats.waiting === 0 && 'Sin espera'}
                   </p>
 
-                  <div className="space-y-1.5 pt-1">
-                    <div className="flex items-center justify-between text-sm text-muted-foreground">
+                  <div className="space-y-1 pt-0.5">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>
-                        {stats.totalLoad} {stats.totalLoad === 1 ? 'persona' : 'personas'} en total
+                        {stats.totalLoad} {stats.totalLoad === 1 ? 'persona' : 'personas'}
                       </span>
-                      <span className="font-semibold text-foreground text-base">
+                      <span className="font-semibold text-foreground text-sm">
                         {formatWaitTime(stats.eta)}
                       </span>
                     </div>
-                    <div className="h-2.5 w-full rounded-full bg-white/6 overflow-hidden">
+                    <div className="h-2 w-full rounded-full bg-white/6 overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-all duration-500 ${getLoadColor(stats.totalLoad)}`}
                         style={{ width: `${loadPct}%` }}
@@ -1012,14 +1007,14 @@ export default function CheckinPage() {
 
         <div className="w-full h-px bg-white/8" />
 
-        <div className="grid gap-3">
+        <div className="grid grid-cols-2 gap-3">
           {availableBarbers.map((barber) => renderBarberCard(barber, onSelect, showExpand))}
         </div>
 
         {notArrivedBarbers.length > 0 && (
           <>
             <div className="w-full h-px bg-white/8" />
-            <div className="grid gap-3">
+            <div className="grid grid-cols-2 gap-3">
               {notArrivedBarbers.map((barber) => renderBarberCard(barber, onSelect, showExpand))}
             </div>
           </>
