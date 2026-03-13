@@ -89,6 +89,7 @@ export default function CheckinPage() {
   const [queueEntries, setQueueEntries] = useState<QueueEntry[]>([])
   const [barberAvgMinutes, setBarberAvgMinutes] = useState<Record<string, number>>({})
   const [monthlyServiceCounts, setMonthlyServiceCounts] = useState<Record<string, number>>({})
+  const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
   const [loadingBarbers, setLoadingBarbers] = useState(false)
 
   const [branchIsOpen, setBranchIsOpen] = useState(true)
@@ -320,6 +321,14 @@ export default function CheckinPage() {
             25
           )
         )
+        // Derive last completed per barber (visits already sorted by completed_at desc)
+        const lastMap: Record<string, string> = {}
+        for (const v of visitsRes.data as { barber_id: string; completed_at: string }[]) {
+          if (v.completed_at && !lastMap[v.barber_id]) {
+            lastMap[v.barber_id] = v.completed_at
+          }
+        }
+        setLastCompletedAt(lastMap)
       }
       if (servicesRes?.data) {
         setServices(servicesRes.data as Service[])
@@ -444,6 +453,7 @@ export default function CheckinPage() {
     setQueueEntries([])
     setBarberAvgMinutes({})
     setMonthlyServiceCounts({})
+    setLastCompletedAt({})
     setLoadingBarbers(false)
 
     setQueueEntryId(null)
@@ -573,8 +583,8 @@ export default function CheckinPage() {
   }
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(queueEntries, barbers, schedules, now, shiftEndMargin, monthlyServiceCounts)
-  }, [queueEntries, barbers, schedules, now, shiftEndMargin, monthlyServiceCounts])
+    return assignDynamicBarbers(queueEntries, barbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt)
+  }, [queueEntries, barbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt])
 
   const maxLoad = useMemo(
     () =>
@@ -604,14 +614,21 @@ export default function CheckinPage() {
         if (countI < countBest) {
           best = active[i]
           bestLoad = load
-        } else if (countI === countBest && Math.random() < 0.5) {
-          best = active[i]
-          bestLoad = load
+        } else if (countI === countBest) {
+          const lastI = lastCompletedAt[active[i].id] || ''
+          const lastBest = lastCompletedAt[best.id] || ''
+          if (lastI < lastBest) {
+            best = active[i]
+            bestLoad = load
+          } else if (lastI === lastBest && active[i].id < best.id) {
+            best = active[i]
+            bestLoad = load
+          }
         }
       }
     }
     return best
-  }, [barbers, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers, monthlyServiceCounts])
+  }, [barbers, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers, monthlyServiceCounts, lastCompletedAt])
 
   const minWaitEta = useMemo(() => {
     if (!minWaitBarber) return 0

@@ -150,7 +150,8 @@ export function assignDynamicBarbers(
   schedules: StaffSchedule[],
   currentTime: number,
   marginMinutes = 35,
-  monthlyServiceCounts: Record<string, number> = {}
+  monthlyServiceCounts: Record<string, number> = {},
+  lastCompletedAt: Record<string, string> = {}
 ): DynamicQueueEntry[] {
   const result: DynamicQueueEntry[] = []
 
@@ -194,6 +195,11 @@ export function assignDynamicBarbers(
       const countA = monthlyServiceCounts[a.id] || 0
       const countB = monthlyServiceCounts[b.id] || 0
       if (countA !== countB) return countA - countB
+
+      // Prefer the barber who has been idle the longest (earliest completed_at)
+      const lastA = lastCompletedAt[a.id] || ''
+      const lastB = lastCompletedAt[b.id] || ''
+      if (lastA !== lastB) return lastA.localeCompare(lastB)
 
       return a.id.localeCompare(b.id)
     })

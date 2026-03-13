@@ -118,6 +118,7 @@ export function QueuePanel({
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
   const [now, setNow] = useState(Date.now())
   const [monthlyServiceCounts, setMonthlyServiceCounts] = useState<Record<string, number>>({})
+  const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
   const [dayStats, setDayStats] = useState({ servicesCount: 0, revenue: 0 })
   const [otherBarbers, setOtherBarbers] = useState<Staff[]>([])
   const [allBarbers, setAllBarbers] = useState<Staff[]>([])
@@ -169,7 +170,7 @@ export function QueuePanel({
     monthStart.setDate(1)
     monthStart.setHours(0, 0, 0, 0)
 
-    const [barbersRes, schedRes, settingsRes, monthlyVisitsRes] = await Promise.all([
+    const [barbersRes, schedRes, settingsRes, monthlyVisitsRes, lastVisitsRes] = await Promise.all([
       supabase
         .from('staff')
         .select('*')
@@ -192,6 +193,13 @@ export function QueuePanel({
         .eq('branch_id', session.branch_id)
         .gte('completed_at', monthStart.toISOString())
         .not('barber_id', 'is', null),
+      supabase
+        .from('visits')
+        .select('barber_id, completed_at')
+        .eq('branch_id', session.branch_id)
+        .not('barber_id', 'is', null)
+        .order('completed_at', { ascending: false })
+        .limit(200),
     ])
 
     if (barbersRes.data) {
@@ -216,6 +224,16 @@ export function QueuePanel({
         counts[v.barber_id] = (counts[v.barber_id] || 0) + 1
       }
       setMonthlyServiceCounts(counts)
+    }
+
+    if (lastVisitsRes?.data) {
+      const lastMap: Record<string, string> = {}
+      for (const v of lastVisitsRes.data as { barber_id: string; completed_at: string }[]) {
+        if (!lastMap[v.barber_id]) {
+          lastMap[v.barber_id] = v.completed_at
+        }
+      }
+      setLastCompletedAt(lastMap)
     }
   }, [supabase, session.branch_id, session.staff_id])
 
@@ -302,8 +320,8 @@ export function QueuePanel({
   }, [])
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(entries, allBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts)
-  }, [entries, allBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts])
+    return assignDynamicBarbers(entries, allBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt)
+  }, [entries, allBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt])
 
   // My active break (ghost entry that is in_progress)
   const myActiveBreak = dynamicEntries.find(
