@@ -97,6 +97,7 @@ export default function CheckinPage() {
   const [now, setNow] = useState(Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
   const [notClockedInBarbers, setNotClockedInBarbers] = useState<Set<string>>(new Set())
+  const [barberNextArrival, setBarberNextArrival] = useState<Record<string, string>>({})
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)
@@ -269,17 +270,39 @@ export default function CheckinPage() {
         }
 
         const notClocked = new Set<string>()
+        const nextArrivals: Record<string, string> = {}
+
+        const currentTimeStr = (() => {
+          const n = new Date()
+          return `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}:00`
+        })()
 
         const filtered = staffRes.data.filter((s) => {
           if (s.status === 'blocked') return false
 
           const lastAction = latestAttendance[s.id]
           if (lastAction === 'clock_in') return true
-          if (lastAction === 'clock_out') return false
 
-          const hasScheduleToday = schedulesRes?.data?.some(sched => sched.staff_id === s.id)
-          if (hasScheduleToday) {
+          const barberBlocks = (schedulesRes?.data || [])
+            .filter((sched: StaffSchedule) => sched.staff_id === s.id)
+            .sort((a: StaffSchedule, b: StaffSchedule) => a.start_time.localeCompare(b.start_time))
+
+          if (lastAction === 'clock_out') {
+            const nextBlock = barberBlocks.find((block: StaffSchedule) => block.start_time > currentTimeStr)
+            if (nextBlock) {
+              notClocked.add(s.id)
+              nextArrivals[s.id] = nextBlock.start_time
+              return true
+            }
+            return false
+          }
+
+          if (barberBlocks.length > 0) {
             notClocked.add(s.id)
+            const nextBlock = barberBlocks.find((block: StaffSchedule) => block.end_time > currentTimeStr)
+            if (nextBlock) {
+              nextArrivals[s.id] = nextBlock.start_time
+            }
             return true
           }
 
@@ -287,6 +310,7 @@ export default function CheckinPage() {
         })
         setBarbers(filtered)
         setNotClockedInBarbers(notClocked)
+        setBarberNextArrival(nextArrivals)
       }
       if (queueRes.data) setQueueEntries(queueRes.data)
       if (visitsRes.data) {
@@ -444,6 +468,7 @@ export default function CheckinPage() {
     setStaffPinSubmitting(false)
     setStaffEnrollId(null)
     setStaffEnrollName('')
+    setBarberNextArrival({})
     // Keep selectedBranch — go back to home, not branch
     goTo('home')
   }
@@ -892,7 +917,10 @@ export default function CheckinPage() {
 
               {isNotClockedIn ? (
                 <p className="text-base text-orange-400/70">
-                  Este barbero aún no registró su entrada
+                  Todavía no llegó
+                  {barberNextArrival[barber.id]
+                    ? ` · Ingresa a las ${barberNextArrival[barber.id].slice(0, 5)}`
+                    : ''}
                 </p>
               ) : (
                 <>

@@ -141,6 +141,22 @@ export async function getBarberSession() {
 
   if (!staff || !staff.is_active) return null
 
+  // Verify barber still has an active clock-in
+  const eighteenHoursAgo = new Date(Date.now() - 18 * 60 * 60 * 1000).toISOString()
+  const { data: lastLog } = await supabase
+    .from('attendance_logs')
+    .select('action_type')
+    .eq('staff_id', parsed.staff_id)
+    .gte('recorded_at', eighteenHoursAgo)
+    .order('recorded_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!lastLog || lastLog.action_type !== 'clock_in') {
+    cookieStore.delete('barber_session')
+    return null
+  }
+
   let permissions: Record<string, boolean> = {}
   if (staff.role_id) {
     const { data: customRole } = await supabase
