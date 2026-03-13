@@ -1295,7 +1295,7 @@ export default function CheckinPage() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && name.trim()) goToBarberStep()
                 }}
-                placeholder="Tu nombre"
+                placeholder="Nombre y apellido"
                 className="h-14 md:h-16 text-xl md:text-2xl text-center rounded-2xl border-white/10 bg-white/3"
                 autoComplete="off"
               />
@@ -1773,8 +1773,8 @@ export default function CheckinPage() {
                   <div
                     key={i}
                     className={`size-4 rounded-full border-2 transition-colors ${i < staffPinValue.length
-                        ? 'border-white bg-white'
-                        : 'border-white/30'
+                      ? 'border-white bg-white'
+                      : 'border-white/30'
                       }`}
                   />
                 ))}
