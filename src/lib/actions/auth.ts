@@ -153,7 +153,6 @@ export async function getBarberSession() {
     .maybeSingle()
 
   if (!lastLog || lastLog.action_type !== 'clock_in') {
-    cookieStore.delete('barber_session')
     return null
   }
 
