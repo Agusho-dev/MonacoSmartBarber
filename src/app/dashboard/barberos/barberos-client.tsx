@@ -443,7 +443,8 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
                 radius={[0, 4, 4, 0]}
                 label={{
                   position: 'right',
-                  formatter: (v: number) => `${v} min`,
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  formatter: (v: any) => `${v} min`,
                   fontSize: 11,
                   fill: 'hsl(var(--muted-foreground))',
                 }}
