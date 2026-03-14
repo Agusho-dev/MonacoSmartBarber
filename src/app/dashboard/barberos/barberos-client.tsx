@@ -435,18 +435,18 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
                 formatter={(value: any) => [`${value} min`, 'Promedio inactivo']}
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 labelFormatter={(label: any) => label}
-                cursor={{ fill: 'hsl(var(--muted))' }}
+                cursor={{ fill: 'var(--muted)' }}
               />
               <Bar
                 dataKey="avgIdleMin"
-                fill="hsl(var(--chart-4))"
+                fill="var(--chart-1)"
                 radius={[0, 4, 4, 0]}
                 label={{
                   position: 'right',
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   formatter: (v: any) => `${v} min`,
                   fontSize: 11,
-                  fill: 'hsl(var(--muted-foreground))',
+                  fill: 'var(--muted-foreground)',
                 }}
               />
             </BarChart>
