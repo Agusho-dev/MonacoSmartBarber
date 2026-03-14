@@ -431,7 +431,8 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
                 tickLine={false}
               />
               <Tooltip
-                formatter={(value: number | string) => [`${value} min`, 'Promedio inactivo']}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                formatter={(value: any) => [`${value} min`, 'Promedio inactivo']}
                 labelFormatter={(label: string) => label}
                 cursor={{ fill: 'hsl(var(--muted))' }}
               />
