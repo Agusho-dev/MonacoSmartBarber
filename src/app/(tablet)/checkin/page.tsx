@@ -1277,12 +1277,12 @@ export default function CheckinPage() {
               <div className="size-12 md:size-14 rounded-full bg-white/4 border border-white/10 flex items-center justify-center">
                 <User className="size-6 md:size-7 text-white/60" />
               </div>
-              <p className="text-base text-muted-foreground">No te reconocemos · ingresá tu número</p>
+              <p className="text-base text-muted-foreground">No te reconocemos · número de teléfono</p>
             </div>
           )}
 
           <div className="text-center mt-2">
-            <h2 className="text-2xl md:text-3xl font-bold">Ingresá tu número</h2>
+            <h2 className="text-2xl md:text-3xl font-bold">Número de teléfono</h2>
             <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
               {selectedBranch?.name}
             </p>
