@@ -431,7 +431,7 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
                 tickLine={false}
               />
               <Tooltip
-                formatter={(value: number) => [`${value} min`, 'Promedio inactivo']}
+                formatter={(value: number | string) => [`${value} min`, 'Promedio inactivo']}
                 labelFormatter={(label: string) => label}
                 cursor={{ fill: 'hsl(var(--muted))' }}
               />
