@@ -170,6 +170,7 @@ export function EquipoClient({
                         branches={branches as Parameters<typeof BarberosClient>[0]['branches']}
                         todayVisits={todayVisits as Parameters<typeof BarberosClient>[0]['todayVisits']}
                         roles={roles}
+                        serviceHistory={serviceHistory as Parameters<typeof BarberosClient>[0]['serviceHistory']}
                     />
                 )}
                 {activeTab === 'historial-servicios' && (

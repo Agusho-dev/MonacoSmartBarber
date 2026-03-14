@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Power, Trash2, Camera } from 'lucide-react'
+import { Plus, Pencil, Power, Trash2, Camera, Clock } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
 import { formatCurrency } from '@/lib/format'
@@ -35,10 +35,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from 'recharts'
 
 interface BarberVisitRow {
   barber_id: string
   amount: number
+}
+
+interface ServiceHistoryItem {
+  barber: { id: string; full_name: string } | null
+  started_at: string | null
+  completed_at: string | null
 }
 
 interface Props {
@@ -46,6 +61,44 @@ interface Props {
   branches: Branch[]
   todayVisits: BarberVisitRow[]
   roles: Role[]
+  serviceHistory?: ServiceHistoryItem[]
+}
+
+function computeIdleTimes(visits: ServiceHistoryItem[]) {
+  const byBarber = new Map<string, { name: string; sessions: Array<{ start: Date; end: Date }> }>()
+
+  for (const v of visits) {
+    if (!v.barber || !v.started_at || !v.completed_at) continue
+    const start = new Date(v.started_at)
+    const end = new Date(v.completed_at)
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) continue
+
+    const entry = byBarber.get(v.barber.id) ?? { name: v.barber.full_name, sessions: [] }
+    entry.sessions.push({ start, end })
+    byBarber.set(v.barber.id, entry)
+  }
+
+  const result: Array<{ name: string; avgIdleMin: number; gapCount: number }> = []
+
+  for (const { name, sessions } of byBarber.values()) {
+    sessions.sort((a, b) => a.start.getTime() - b.start.getTime())
+
+    const gaps: number[] = []
+    for (let i = 1; i < sessions.length; i++) {
+      const gapMin = (sessions[i].start.getTime() - sessions[i - 1].end.getTime()) / 60_000
+      // Only count gaps that are positive and under 2 hours (exclude end-of-day / overnight gaps)
+      if (gapMin > 0 && gapMin < 120) {
+        gaps.push(gapMin)
+      }
+    }
+
+    if (gaps.length === 0) continue
+
+    const avg = gaps.reduce((a, b) => a + b, 0) / gaps.length
+    result.push({ name, avgIdleMin: Math.round(avg * 10) / 10, gapCount: gaps.length })
+  }
+
+  return result.sort((a, b) => b.avgIdleMin - a.avgIdleMin)
 }
 
 const roleLabels: Record<UserRole, string> = {
@@ -66,10 +119,15 @@ const emptyForm = {
   phone: '',
 }
 
-export function BarberosClient({ barbers, branches, todayVisits, roles }: Props) {
+export function BarberosClient({ barbers, branches, todayVisits, roles, serviceHistory }: Props) {
   const router = useRouter()
   const supabase = createClient()
   const { selectedBranchId } = useBranchStore()
+
+  const idleTimeData = useMemo(
+    () => computeIdleTimes(serviceHistory ?? []),
+    [serviceHistory]
+  )
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -338,6 +396,60 @@ export function BarberosClient({ barbers, branches, todayVisits, roles }: Props)
           </TableBody>
         </Table>
       </div>
+
+      {idleTimeData.length > 0 && (
+        <div className="rounded-lg border p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <Clock className="size-4 text-muted-foreground" />
+            <div>
+              <h3 className="text-sm font-semibold">Tiempo promedio sin atención</h3>
+              <p className="text-xs text-muted-foreground">
+                Promedio de minutos entre clientes · mes actual
+              </p>
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={Math.max(100, idleTimeData.length * 48)}>
+            <BarChart
+              data={idleTimeData}
+              layout="vertical"
+              margin={{ top: 0, right: 48, bottom: 0, left: 0 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+              <XAxis
+                type="number"
+                tickFormatter={(v: number) => `${v} min`}
+                tick={{ fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                type="category"
+                dataKey="name"
+                width={130}
+                tick={{ fontSize: 13 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                formatter={(value: number) => [`${value} min`, 'Promedio inactivo']}
+                labelFormatter={(label: string) => label}
+                cursor={{ fill: 'hsl(var(--muted))' }}
+              />
+              <Bar
+                dataKey="avgIdleMin"
+                fill="hsl(var(--chart-4))"
+                radius={[0, 4, 4, 0]}
+                label={{
+                  position: 'right',
+                  formatter: (v: number) => `${v} min`,
+                  fontSize: 11,
+                  fill: 'hsl(var(--muted-foreground))',
+                }}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90vh] flex flex-col sm:max-w-[550px]">
