@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { getLocalDateStr } from '@/lib/time-utils'
 
 export async function getExpenseTickets(branchId: string, startDate?: string, endDate?: string) {
     const supabase = await createClient()
@@ -44,7 +45,7 @@ export async function createExpenseTicket(data: {
             description: data.description || null,
             receipt_url: data.receipt_url || null,
             created_by: data.created_by || null,
-            expense_date: data.expense_date || new Date().toISOString().split('T')[0],
+            expense_date: data.expense_date || getLocalDateStr(),
             payment_account_id: data.payment_account_id || null,
         },
     ])

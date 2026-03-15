@@ -2,6 +2,7 @@
 
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { getLocalDateStr, getLocalDayBounds } from '@/lib/time-utils'
 
 export async function getPaymentAccounts(branchId: string) {
   const supabase = await createClient()
@@ -89,7 +90,7 @@ export async function deletePaymentAccount(id: string) {
 export async function resetDailyAccumulation() {
   const supabase = createAdminClient()
   // DB side, we update all accounts whose last_reset_date is less than current date
-  const todayDate = new Date().toISOString().split('T')[0]
+  const todayDate = getLocalDateStr()
 
   const { error } = await supabase
     .from('payment_accounts')
@@ -226,14 +227,16 @@ export async function getAllAccountBalanceTotals(branchId?: string | null) {
 
 export async function getAccountBalanceSummary(accountId: string) {
   const supabase = await createClient()
-  const today = new Date().toISOString().split('T')[0]
+  const today = getLocalDateStr()
+  const { start: todayStart, end: todayEnd } = getLocalDayBounds()
 
   // Get income (transfer_logs) for this account today
   const { data: todayTransfers } = await supabase
     .from('transfer_logs')
     .select('id, amount, transferred_at, visit:visits(client:clients(name), barber:staff(full_name))')
     .eq('payment_account_id', accountId)
-    .gte('transferred_at', `${today}T00:00:00`)
+    .gte('transferred_at', todayStart)
+    .lte('transferred_at', todayEnd)
     .order('transferred_at', { ascending: false })
 
   // Get expenses (expense_tickets) associated with this account today

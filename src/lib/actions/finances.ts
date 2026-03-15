@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { getMonthBoundsStr, getLocalNow } from '@/lib/time-utils'
 
 export interface MonthlyFinancial {
   month: string
@@ -60,16 +61,15 @@ export async function fetchFinancialData(
 ): Promise<FinancialSummary> {
   const supabase = await createClient()
 
-  const now = new Date()
-  const startDate = new Date(now.getFullYear(), now.getMonth() - monthsBack + 1, 1)
-  const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
+  const { start: startDateStr, end: endDateStr } = getMonthBoundsStr(monthsBack)
+  const localNow = getLocalNow()
 
   // Visits in range
   let vq = supabase
     .from('visits')
     .select('amount, commission_amount, completed_at, branch_id, service_id, queue_entry_id')
-    .gte('completed_at', startDate.toISOString())
-    .lte('completed_at', endDate.toISOString())
+    .gte('completed_at', startDateStr)
+    .lte('completed_at', endDateStr)
   if (branchId) vq = vq.eq('branch_id', branchId)
   const { data: visits } = await vq
 
@@ -83,16 +83,30 @@ export async function fetchFinancialData(
 
   const monthlyFixed = (expenses ?? []).reduce((s, e) => s + Number(e.amount), 0)
 
-  // Initialize all months
+  // Initialize all months using local time to group
   const monthMap = new Map<string, { revenue: number; commissions: number; cuts: number }>()
   for (let i = 0; i < monthsBack; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    let year = localNow.getFullYear()
+    let monthIndex = localNow.getMonth() - i
+    while (monthIndex < 0) {
+      monthIndex += 12
+      year -= 1
+    }
+    const d = new Date(year, monthIndex, 1)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     monthMap.set(key, { revenue: 0, commissions: 0, cuts: 0 })
   }
 
+  const TZ = 'America/Argentina/Buenos_Aires'
+  // Group visits by local month using Intl
   for (const v of visits ?? []) {
-    const key = v.completed_at.slice(0, 7)
+    // Convert UTC timestamp to local "YYYY-MM"
+    const localMonth = new Intl.DateTimeFormat('en-CA', {
+      timeZone: TZ,
+      year: 'numeric',
+      month: '2-digit',
+    }).format(new Date(v.completed_at)) // returns "YYYY-MM"
+    const key = localMonth
     const m = monthMap.get(key)
     if (m) {
       m.revenue += Number(v.amount)

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { OverviewClient } from './overview-client'
 import { redirect } from 'next/navigation'
+import { getLocalDayBounds, getLocalNow } from '@/lib/time-utils'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -61,12 +62,9 @@ export default async function DashboardPage() {
     }
   }
 
-  const now = new Date()
-  const todayStr = now.toISOString().slice(0, 10)
-  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-  const tomorrowStr = tomorrow.toISOString().slice(0, 10)
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const monthStartStr = monthStart.toISOString().slice(0, 10)
+  const { start: todayStart, end: todayEnd } = getLocalDayBounds()
+  const localNow = getLocalNow()
+  const monthStartStr = `${localNow.getFullYear()}-${String(localNow.getMonth() + 1).padStart(2, '0')}-01`
 
   const [
     { data: todayVisits },
@@ -78,8 +76,8 @@ export default async function DashboardPage() {
     supabase
       .from('visits')
       .select('*, client:clients(*), barber:staff(*), service:services(*)')
-      .gte('completed_at', todayStr)
-      .lt('completed_at', tomorrowStr)
+      .gte('completed_at', todayStart)
+      .lte('completed_at', todayEnd)
       .order('completed_at', { ascending: false }),
     supabase.from('branch_occupancy').select('*'),
     supabase
@@ -94,7 +92,7 @@ export default async function DashboardPage() {
     supabase
       .from('visits')
       .select('client_id, branch_id, completed_at')
-      .gte('completed_at', new Date(now.getTime() - 40 * 86400000).toISOString()),
+      .gte('completed_at', new Date(localNow.getTime() - 40 * 86400000).toISOString()),
   ])
 
   return (
