@@ -23,6 +23,7 @@ import {
   Trophy,
   AlertTriangle,
   Package,
+  MessageSquare,
 } from 'lucide-react'
 import { logout } from '@/lib/actions/auth'
 import { useBranchStore } from '@/stores/branch-store'
@@ -61,6 +62,7 @@ const navItems = [
   { href: '/dashboard/servicios', label: 'Servicios', icon: Sparkles, requiredPermissions: ['services.view'] },
   { href: '/dashboard/productos', label: 'Productos', icon: Package, requiredPermissions: ['services.view'] },
   { href: '/dashboard/clientes', label: 'Clientes', icon: Users, requiredPermissions: ['clients.view'] },
+  { href: '/dashboard/mensajeria', label: 'Mensajería', icon: MessageSquare, requiredPermissions: ['clients.view'] },
   { href: '/dashboard/fidelizacion', label: 'Fidelización', icon: Gift, requiredPermissions: ['rewards.view'] },
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3, requiredPermissions: ['stats.view'] },
   { href: '/dashboard/finanzas', label: 'Finanzas', icon: DollarSign, requiredPermissions: ['finances.view', 'salary.view'] },

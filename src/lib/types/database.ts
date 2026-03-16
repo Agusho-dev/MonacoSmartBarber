@@ -13,6 +13,14 @@ export type ReviewRequestStatus = 'pending' | 'completed' | 'expired'
 export type ReviewRatingCategory = 'high' | 'improvement' | 'low'
 export type BreakRequestStatus = 'pending' | 'approved' | 'rejected' | 'completed'
 export type ServiceAvailability = 'checkin' | 'upsell' | 'both'
+export type MessagePlatform = 'whatsapp' | 'facebook' | 'instagram'
+export type MessageDirection = 'inbound' | 'outbound'
+export type MessageContentType = 'text' | 'image' | 'video' | 'audio' | 'document' | 'template' | 'location'
+export type MessageStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'failed'
+export type ConversationStatus = 'open' | 'closed' | 'archived'
+export type TemplateCategory = 'marketing' | 'utility' | 'authentication'
+export type TemplateStatus = 'pending' | 'approved' | 'rejected'
+export type ScheduledMessageStatus = 'pending' | 'sent' | 'failed' | 'cancelled'
 
 export interface Branch {
   id: string
@@ -525,6 +533,85 @@ export interface DisciplinaryEvent {
   staff?: Staff
 }
 
+export interface SocialChannel {
+  id: string
+  branch_id: string
+  platform: MessagePlatform
+  platform_account_id: string
+  display_name: string
+  webhook_verify_token: string | null
+  is_active: boolean
+  config: Record<string, unknown>
+  created_at: string
+  updated_at: string
+  branch?: Branch
+}
+
+export interface Conversation {
+  id: string
+  channel_id: string
+  client_id: string | null
+  platform_conversation_id: string | null
+  platform_user_id: string
+  platform_user_name: string | null
+  status: ConversationStatus
+  last_message_at: string | null
+  unread_count: number
+  can_reply_until: string | null
+  created_at: string
+  updated_at: string
+  channel?: SocialChannel
+  client?: Client
+}
+
+export interface Message {
+  id: string
+  conversation_id: string
+  direction: MessageDirection
+  content_type: MessageContentType
+  content: string | null
+  media_url: string | null
+  template_name: string | null
+  template_params: Record<string, unknown> | null
+  platform_message_id: string | null
+  status: MessageStatus
+  sent_by_staff_id: string | null
+  error_message: string | null
+  created_at: string
+  sent_by?: Staff
+}
+
+export interface MessageTemplate {
+  id: string
+  channel_id: string
+  name: string
+  language: string
+  category: TemplateCategory | null
+  status: TemplateStatus
+  components: Record<string, unknown> | null
+  created_at: string
+  channel?: SocialChannel
+}
+
+export interface ScheduledMessage {
+  id: string
+  channel_id: string
+  client_id: string
+  template_id: string | null
+  content: string | null
+  template_params: Record<string, unknown> | null
+  scheduled_for: string
+  status: ScheduledMessageStatus
+  sent_at: string | null
+  error_message: string | null
+  created_by: string | null
+  created_at: string
+  channel?: SocialChannel
+  client?: Client
+  template?: MessageTemplate
+  created_by_staff?: Staff
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -562,6 +649,11 @@ export interface Database {
       disciplinary_events: { Row: DisciplinaryEvent; Insert: Partial<DisciplinaryEvent> & Pick<DisciplinaryEvent, 'staff_id' | 'branch_id' | 'event_type'>; Update: Partial<DisciplinaryEvent> }
       roles: { Row: Role; Insert: Partial<Role> & Pick<Role, 'name'>; Update: Partial<Role> }
       role_branch_scope: { Row: RoleBranchScope; Insert: Partial<RoleBranchScope> & Pick<RoleBranchScope, 'role_id' | 'branch_id'>; Update: Partial<RoleBranchScope> }
+      social_channels: { Row: SocialChannel; Insert: Partial<SocialChannel> & Pick<SocialChannel, 'branch_id' | 'platform' | 'platform_account_id' | 'display_name'>; Update: Partial<SocialChannel> }
+      conversations: { Row: Conversation; Insert: Partial<Conversation> & Pick<Conversation, 'channel_id' | 'platform_user_id'>; Update: Partial<Conversation> }
+      messages: { Row: Message; Insert: Partial<Message> & Pick<Message, 'conversation_id' | 'direction'>; Update: Partial<Message> }
+      message_templates: { Row: MessageTemplate; Insert: Partial<MessageTemplate> & Pick<MessageTemplate, 'channel_id' | 'name'>; Update: Partial<MessageTemplate> }
+      scheduled_messages: { Row: ScheduledMessage; Insert: Partial<ScheduledMessage> & Pick<ScheduledMessage, 'channel_id' | 'client_id' | 'scheduled_for'>; Update: Partial<ScheduledMessage> }
     }
     Views: {
       branch_occupancy: { Row: BranchOccupancy }
