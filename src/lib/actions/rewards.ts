@@ -51,5 +51,6 @@ export async function updateRewardConfig(
   }
 
   revalidatePath('/dashboard/fidelizacion')
+  revalidatePath('/dashboard/app-movil')
   return { success: true }
 }

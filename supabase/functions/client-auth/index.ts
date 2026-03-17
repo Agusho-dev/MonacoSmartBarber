@@ -97,24 +97,44 @@ Deno.serve(async (req) => {
     if (existingClient?.auth_user_id) {
       // --- CLIENTE EXISTENTE CON CUENTA AUTH ---
       // Intentar login con device_secret
-      const { data: signInData, error: signInError } = await adminClient.auth.signInWithPassword({
+      let { data: signInData, error: signInError } = await adminClient.auth.signInWithPassword({
         email,
         password: device_secret,
       })
 
-      if (signInError || !signInData.session) {
-        // El device_secret no coincide → podría ser un dispositivo nuevo
-        // Verificar si el cliente existe pero intenta desde otro dispositivo
-        return new Response(
-          JSON.stringify({
-            error: 'Autenticación fallida. Si cambiaste de dispositivo, contacta al local.',
-            code: 'INVALID_DEVICE_SECRET'
-          }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      if (signInError || !signInData?.session) {
+        // device_secret no coincide → dispositivo nuevo o reinstalación
+        // Auto-resetear password para permitir login desde nuevo dispositivo
+        const { error: updateError } = await adminClient.auth.admin.updateUserById(
+          existingClient.auth_user_id,
+          { password: device_secret }
         )
+
+        if (updateError) {
+          console.error('[client-auth] Error updating password:', updateError)
+          return new Response(
+            JSON.stringify({ error: 'Error actualizando credenciales', code: 'UPDATE_FAILED' }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        // Reintentar login con la nueva password
+        const { data: retryData, error: retryError } = await adminClient.auth.signInWithPassword({
+          email,
+          password: device_secret,
+        })
+
+        if (retryError || !retryData?.session) {
+          return new Response(
+            JSON.stringify({ error: 'Autenticación fallida tras actualización', code: 'RETRY_FAILED' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        signInData = retryData
       }
 
-      authUserId = signInData.session.user.id
+      authUserId = signInData.session!.user.id
       clientId = existingClient.id
 
       // Actualizar last_login_at
@@ -125,8 +145,8 @@ Deno.serve(async (req) => {
 
       return new Response(
         JSON.stringify({
-          access_token:  signInData.session.access_token,
-          refresh_token: signInData.session.refresh_token,
+          access_token:  signInData.session!.access_token,
+          refresh_token: signInData.session!.refresh_token,
           client_id:     clientId,
           is_new_client: false,
         } satisfies AuthResponse),
