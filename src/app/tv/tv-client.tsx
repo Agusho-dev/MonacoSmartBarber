@@ -233,11 +233,11 @@ export function TvClient({
           <img 
             src="/logo-monaco.png" 
             alt="Monaco Logo" 
-            style={{ height: '120px', width: 'auto', objectFit: 'contain' }}
+            style={{ height: '160px', width: 'auto', objectFit: 'contain' }}
           />
-          <div className="ml-4">
-            <h1 className="text-3xl font-semibold tracking-tight">Monaco</h1>
-            <p className="text-zinc-500 text-lg font-medium uppercase tracking-widest">Smart Barber</p>
+          <div className="ml-6">
+            <h1 className="text-5xl font-semibold tracking-tight">Monaco</h1>
+            <p className="text-zinc-500 text-2xl font-medium uppercase tracking-widest mt-1">Smart Barber</p>
           </div>
         </div>
 
@@ -259,47 +259,47 @@ export function TvClient({
         
         {/* En Atención (In Progress) */}
         <section className="flex flex-col gap-6">
-          <div className="flex items-center gap-3 px-2">
-            <div className="flex items-center justify-center size-8 rounded-full bg-green-500/20 text-green-400">
-              <Scissors className="size-4" />
+          <div className="flex items-center gap-4 px-4 pb-4">
+            <div className="flex items-center justify-center size-12 rounded-full bg-green-500/20 text-green-400">
+              <Scissors className="size-6" />
             </div>
-            <h2 className="text-3xl font-medium tracking-tight">En Atención</h2>
-            <span className="ml-2 bg-white/10 px-3 py-1 rounded-full text-sm font-medium">{inProgressEntries.length}</span>
+            <h2 className="text-5xl font-medium tracking-tight">En Atención</h2>
+            <span className="ml-4 bg-white/10 px-5 py-2 rounded-full text-2xl font-medium">{inProgressEntries.length}</span>
           </div>
 
           <div className="flex-1 overflow-hidden relative rounded-3xl border border-white/5 bg-white/[0.02]">
-            <div className="absolute inset-0 p-6 space-y-4 overflow-y-auto no-scrollbar">
+            <div className="absolute inset-0 p-8 space-y-6 overflow-y-auto no-scrollbar">
               {inProgressEntries.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-4">
-                  <Scissors className="size-16 opacity-20" />
-                  <p className="text-xl font-medium">No hay servicios activos</p>
+                <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-6">
+                  <Scissors className="size-24 opacity-20" />
+                  <p className="text-3xl font-medium">No hay servicios activos</p>
                 </div>
               ) : (
                 inProgressEntries.map((entry) => (
                   <div 
                     key={entry.id}
-                    className="group relative flex items-center p-6 gap-6 rounded-2xl bg-gradient-to-r from-white/[0.05] to-transparent border border-white/5 overflow-hidden transition-all duration-500"
+                    className="group relative flex items-center p-8 gap-8 rounded-[2rem] bg-gradient-to-r from-white/[0.05] to-transparent border border-white/5 overflow-hidden transition-all duration-500"
                   >
                     <div className="absolute inset-0 bg-gradient-to-r from-green-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"/>
                     
                     {/* Avatar Barber */}
                     <div className="relative shrink-0">
-                      <div className="size-20 rounded-2xl bg-zinc-800 flex items-center justify-center overflow-hidden border border-white/10 shadow-xl">
+                      <div className="size-32 rounded-3xl bg-zinc-800 flex items-center justify-center overflow-hidden border border-white/10 shadow-2xl">
                         {entry.barber?.avatar_url ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={entry.barber.avatar_url} alt="Barber" className="w-full h-full object-cover" />
                         ) : (
-                          <User className="size-8 text-zinc-500" />
+                          <User className="size-12 text-zinc-500" />
                         )}
                       </div>
-                      <div className="absolute -bottom-2 -right-2 bg-green-500 size-5 rounded-full border-4 border-black"/>
+                      <div className="absolute -bottom-2 -right-2 bg-green-500 size-8 rounded-full border-[6px] border-black"/>
                     </div>
 
                     <div className="flex-1 min-w-0 z-10">
-                      <p className="text-3xl font-semibold truncate tracking-tight text-white mb-1">
+                      <p className="text-5xl font-semibold truncate tracking-tight text-white mb-3">
                         {entry.client?.name ?? 'Cliente'}
                       </p>
-                      <p className="text-zinc-400 text-lg flex items-center gap-2">
+                      <p className="text-zinc-400 text-2xl flex items-center gap-3">
                         <span>con</span>
                         <span className="font-medium text-zinc-200">{entry.barber?.full_name ?? 'Barbero'}</span>
                       </p>
@@ -307,8 +307,8 @@ export function TvClient({
 
                     <div className="shrink-0 text-right z-10">
                       <div className="inline-flex flex-col items-end">
-                        <span className="text-zinc-500 text-sm uppercase tracking-widest font-medium mb-1">Tiempo</span>
-                        <span className="text-4xl font-light tabular-nums text-green-400">
+                        <span className="text-zinc-500 text-xl uppercase tracking-widest font-medium mb-2">Tiempo</span>
+                        <span className="text-7xl font-light tabular-nums text-green-400">
                           {entry.started_at ? formatElapsed(entry.started_at) : '0m'}
                         </span>
                       </div>
@@ -322,49 +322,49 @@ export function TvClient({
 
         {/* Cola de Espera (Waiting) */}
         <section className="flex flex-col gap-6">
-          <div className="flex items-center gap-3 px-2">
-            <div className="flex items-center justify-center size-8 rounded-full bg-blue-500/20 text-blue-400">
-              <Clock className="size-4" />
+          <div className="flex items-center gap-4 px-4 pb-4">
+            <div className="flex items-center justify-center size-12 rounded-full bg-blue-500/20 text-blue-400">
+              <Clock className="size-6" />
             </div>
-            <h2 className="text-3xl font-medium tracking-tight">Próximos Turnos</h2>
-            <span className="ml-2 bg-white/10 px-3 py-1 rounded-full text-sm font-medium">{waitingEntries.length}</span>
+            <h2 className="text-5xl font-medium tracking-tight">Próximos Turnos</h2>
+            <span className="ml-4 bg-white/10 px-5 py-2 rounded-full text-2xl font-medium">{waitingEntries.length}</span>
           </div>
 
           <div className="flex-1 overflow-hidden relative rounded-3xl border border-white/5 bg-white/[0.02]">
-            <div className="absolute inset-0 p-6 space-y-3 overflow-y-auto no-scrollbar">
+            <div className="absolute inset-0 p-8 space-y-5 overflow-y-auto no-scrollbar">
               {waitingEntries.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-4">
-                  <User className="size-16 opacity-20" />
-                  <p className="text-xl font-medium">La sala está libre</p>
+                <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-6">
+                  <User className="size-24 opacity-20" />
+                  <p className="text-3xl font-medium">La sala está libre</p>
                 </div>
               ) : (
                 waitingEntries.map((entry, index) => (
                   <div 
                     key={entry.id}
-                    className={`flex items-center p-5 gap-6 rounded-2xl border border-white/5 transition-all duration-300 ${
-                      index === 0 ? 'bg-white/10 shadow-lg scale-[1.02] origin-left' : 'bg-white/[0.03]'
+                    className={`flex items-center p-8 gap-8 rounded-3xl border border-white/5 transition-all duration-300 ${
+                      index === 0 ? 'bg-white/10 shadow-2xl scale-[1.02] origin-left' : 'bg-white/[0.03]'
                     }`}
                   >
-                    <div className={`flex items-center justify-center size-14 shrink-0 rounded-xl font-bold text-2xl ${
+                    <div className={`flex items-center justify-center size-20 shrink-0 rounded-2xl font-bold text-4xl ${
                       index === 0 ? 'bg-white text-black' : 'bg-zinc-800 text-zinc-400'
                     }`}>
                       {entry.position}
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <p className={`text-2xl font-medium truncate ${index === 0 ? 'text-white' : 'text-zinc-300'}`}>
+                      <p className={`text-4xl font-medium truncate ${index === 0 ? 'text-white' : 'text-zinc-300'}`}>
                         {entry.client?.name ?? 'Cliente'}
                       </p>
                       {entry.barber_id && entry.barber && (
-                        <p className="text-zinc-500 text-sm mt-1 flex items-center gap-1.5">
-                          <ChevronRight className="size-3" />
+                        <p className="text-zinc-500 text-2xl mt-3 flex items-center gap-2">
+                          <ChevronRight className="size-5" />
                           <span>Se corta con <span className="font-medium text-zinc-300">{entry.barber.full_name}</span></span>
                         </p>
                       )}
                     </div>
 
                     <div className="shrink-0 text-right">
-                      <span className={`text-xl font-light tabular-nums ${index === 0 ? 'text-blue-300' : 'text-zinc-500'}`}>
+                      <span className={`text-5xl font-light tabular-nums ${index === 0 ? 'text-blue-300' : 'text-zinc-500'}`}>
                         {formatElapsed(entry.checked_in_at)}
                       </span>
                     </div>
@@ -378,7 +378,7 @@ export function TvClient({
       </main>
 
       {/* Footer minimalista */}
-      <footer className="py-4 text-center text-zinc-500 text-sm font-medium tracking-widest uppercase">
+      <footer className="py-6 text-center text-zinc-500 text-lg font-medium tracking-[0.2em] uppercase">
         Powered By: Barber.OS
       </footer>
     </div>
