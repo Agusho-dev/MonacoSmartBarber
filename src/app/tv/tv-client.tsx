@@ -5,7 +5,13 @@ import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
 import type { QueueEntry, StaffStatus, StaffSchedule, Staff } from '@/lib/types/database'
 import { assignDynamicBarbers } from '@/lib/barber-utils'
-
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Scissors, Clock, User, ChevronRight } from 'lucide-react'
 
 interface BarberRow {
@@ -235,11 +241,20 @@ export function TvClient({
           </div>
         </div>
 
-        {selectedBranchId && branches.length > 0 && (
-          <div className="text-white/40 text-2xl font-medium tracking-wide">
-            {branches.find(b => b.id === selectedBranchId)?.name}
-          </div>
-        )}
+        <div className="flex items-center">
+          <Select value={selectedBranchId || ''} onValueChange={setSelectedBranchId}>
+            <SelectTrigger className="text-white/40 hover:text-white/80 text-lg lg:text-2xl font-medium tracking-wide border-none bg-transparent shadow-none focus:ring-0 [&>svg]:hidden px-0 h-auto cursor-pointer transition-colors">
+              <SelectValue placeholder="Seleccionar sucursal" />
+            </SelectTrigger>
+            <SelectContent className="bg-zinc-900 border-white/10 text-white">
+              {branches.map(b => (
+                <SelectItem key={b.id} value={b.id} className="focus:bg-zinc-800 focus:text-white cursor-pointer text-base">
+                  {b.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </header>
 
       <main className="flex-1 min-h-0 grid grid-cols-2 gap-6 lg:gap-8 p-6 lg:p-8 pt-0 lg:pt-0">
