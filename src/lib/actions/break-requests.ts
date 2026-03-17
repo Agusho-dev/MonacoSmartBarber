@@ -61,8 +61,9 @@ export async function requestBreak(staffId: string, branchId: string, breakConfi
  * cutsBeforeBreak: how many cuts the barber should complete before the break (0 = immediate)
  */
 export async function approveBreak(requestId: string, cutsBeforeBreak: number) {
+    const supabaseAuth = await createClient()
+    const approverId = await getApproverStaffId(supabaseAuth)
     const supabase = createAdminClient()
-    const approverId = await getApproverStaffId(supabase)
     if (!approverId) return { error: 'No autorizado' }
 
     // Get request details
