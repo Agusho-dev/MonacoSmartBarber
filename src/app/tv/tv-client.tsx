@@ -202,27 +202,17 @@ export function TvClient({
   }, [liveBarbers, latestAttendance])
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(entries, liveBarbers as unknown as Staff[], schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt, notClockedInBarbers)
-  }, [entries, liveBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt, notClockedInBarbers])
+    const branchEntries = selectedBranchId ? entries.filter(e => e.branch_id === selectedBranchId) : entries
+    const branchBarbers = selectedBranchId ? liveBarbers.filter(b => b.branch_id === selectedBranchId) : liveBarbers
+    return assignDynamicBarbers(branchEntries, branchBarbers as unknown as Staff[], schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt, notClockedInBarbers)
+  }, [entries, liveBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt, notClockedInBarbers, selectedBranchId])
 
-  const filteredEntries = selectedBranchId
-    ? dynamicEntries.filter((e) => e.branch_id === selectedBranchId)
-    : dynamicEntries
+  const filteredEntries = dynamicEntries
 
   const waitingEntries = filteredEntries.filter((e) => e.status === 'waiting')
   const inProgressEntries = filteredEntries.filter(
     (e) => e.status === 'in_progress'
   )
-
-  function formatElapsed(timestamp: string) {
-    const elapsed = now - new Date(timestamp).getTime()
-    if (isNaN(elapsed) || elapsed < 0) return '0m'
-    const totalSeconds = Math.floor(elapsed / 1000)
-    const hours = Math.floor(totalSeconds / 3600)
-    const minutes = Math.floor((totalSeconds % 3600) / 60)
-    if (hours > 0) return `${hours}h ${minutes}m`
-    return `${minutes}m`
-  }
 
   return (
     <div className="h-screen max-h-screen w-screen bg-black text-white font-sans selection:bg-primary/30 flex flex-col overflow-hidden">
@@ -306,15 +296,6 @@ export function TvClient({
                         <span className="font-medium text-zinc-200">{entry.barber?.full_name ?? 'Barbero'}</span>
                       </p>
                     </div>
-
-                    <div className="shrink-0 text-right z-10">
-                      <div className="inline-flex flex-col items-end">
-                        <span className="text-zinc-500 text-sm lg:text-base uppercase tracking-widest font-medium mb-1 lg:mb-2">Tiempo</span>
-                        <span className="text-4xl lg:text-5xl font-light tabular-nums text-green-400">
-                          {entry.started_at ? formatElapsed(entry.started_at) : '0m'}
-                        </span>
-                      </div>
-                    </div>
                   </div>
                 ))
               )}
@@ -360,15 +341,15 @@ export function TvClient({
                       {entry.barber_id && entry.barber && (
                         <p className="text-zinc-500 text-lg lg:text-xl mt-1 lg:mt-2 flex items-center gap-2">
                           <ChevronRight className="size-4 lg:size-5" />
-                          <span>Se corta con <span className="font-medium text-zinc-300">{entry.barber.full_name}</span></span>
+                          <span>
+                            {(entry as any)._is_dynamically_assigned ? (
+                              <span className="font-medium text-amber-400">⚡️ Dinámico</span>
+                            ) : (
+                              <>Se corta con <span className="font-medium text-zinc-300">{entry.barber.full_name}</span></>
+                            )}
+                          </span>
                         </p>
                       )}
-                    </div>
-
-                    <div className="shrink-0 text-right">
-                      <span className={`text-3xl lg:text-4xl font-light tabular-nums ${index === 0 ? 'text-blue-300' : 'text-zinc-500'}`}>
-                        {formatElapsed(entry.checked_in_at)}
-                      </span>
                     </div>
                   </div>
                 ))
