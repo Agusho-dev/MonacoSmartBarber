@@ -450,16 +450,28 @@ export function ColaClient({
                     </p>
                   </div>
 
-                  {entry.started_at && (
-                    <div className="shrink-0 text-right">
-                      <p className="text-xs text-muted-foreground">
-                        Tiempo de servicio
-                      </p>
-                      <p className="text-lg font-semibold tabular-nums">
-                        {formatElapsed(entry.started_at)}
-                      </p>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-4">
+                    {entry.started_at && (
+                      <div className="shrink-0 text-right">
+                        <p className="text-xs text-muted-foreground">
+                          Tiempo de servicio
+                        </p>
+                        <p className="text-lg font-semibold tabular-nums">
+                          {formatElapsed(entry.started_at)}
+                        </p>
+                      </div>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleCancel(entry.id)}
+                      disabled={actionLoading === entry.id}
+                      className="shrink-0 text-muted-foreground hover:text-destructive"
+                      title="Cancelar servicio"
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
