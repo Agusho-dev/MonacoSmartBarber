@@ -386,9 +386,9 @@ export function TvClient({
   const ips = inProgressStyles[ipMode === 'large' ? 'large' : 'compact']
   const ws = waitingStyles[wMode === 'large' ? 'large' : 'compact']
 
-  // --- Auto-scroll independiente por columna ---
-  const ipScroll = useAutoScroll(ipMode === 'scroll', 0.4)
-  const wScroll = useAutoScroll(wMode === 'scroll', 0.5)
+  // --- Auto-scroll independiente por columna (siempre habilitado, el ResizeObserver decide si hace falta) ---
+  const ipScroll = useAutoScroll(inProgressEntries.length > 0, 0.4)
+  const wScroll = useAutoScroll(waitingEntries.length > 0, 0.5)
 
   // --- Render helpers ---
   const renderInProgressCard = (entry: QueueEntry, key: string) => (
