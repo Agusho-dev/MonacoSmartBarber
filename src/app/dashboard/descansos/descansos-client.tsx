@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect } from 'react'
 import {
   upsertBreakConfig,
   deleteBreakConfig,
@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/select'
 import { Coffee, Plus, Pencil, Trash2, CheckCircle2, XCircle, HandMetal } from 'lucide-react'
 import { toast } from 'sonner'
+import { useBranchStore } from '@/stores/branch-store'
 
 interface BreakRequestRow {
   id: string
@@ -155,9 +156,17 @@ export function DescansosDashboard({ breakConfigs, branches, breakRequests, sele
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [, startTransition] = useTransition()
-  const [internalBranchId, setInternalBranchId] = useState(branches[0]?.id ?? '')
-  const selectedBranchId = selectedBranchIdProp ?? internalBranchId
-  const setSelectedBranchId = onBranchChange ?? setInternalBranchId
+  const { selectedBranchId: storeBranchId, setSelectedBranchId: setStoreBranchId } = useBranchStore()
+
+  // Initialize branch in store if not set
+  useEffect(() => {
+    if (!storeBranchId && branches.length > 0) {
+      setStoreBranchId(branches[0].id)
+    }
+  }, [storeBranchId, branches, setStoreBranchId])
+
+  const selectedBranchId = selectedBranchIdProp ?? storeBranchId ?? (branches[0]?.id ?? '')
+  const setSelectedBranchId = onBranchChange ?? setStoreBranchId
 
   const branchConfigs = breakConfigs.filter((bc) => bc.branch_id === selectedBranchId)
 

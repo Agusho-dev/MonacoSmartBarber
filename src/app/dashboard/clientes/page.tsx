@@ -4,7 +4,7 @@ import { ClientesClient } from './clientes-client'
 export default async function ClientesPage() {
   const supabase = await createClient()
 
-  const [{ data: clients }, { data: visits }, { data: points }] =
+  const [{ data: clients }, { data: visits }, { data: points }, { data: branches }] =
     await Promise.all([
       supabase.from('clients').select('*').order('name'),
       supabase
@@ -14,6 +14,11 @@ export default async function ClientesPage() {
         )
         .order('completed_at', { ascending: false }),
       supabase.from('client_points').select('client_id, points_balance'),
+      supabase
+        .from('branches')
+        .select('id, name')
+        .eq('is_active', true)
+        .order('name'),
     ])
 
   return (
@@ -21,6 +26,7 @@ export default async function ClientesPage() {
       clients={clients ?? []}
       visits={(visits as any) ?? []}
       points={points ?? []}
+      branches={branches ?? []}
     />
   )
 }

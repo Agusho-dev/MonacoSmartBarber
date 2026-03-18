@@ -1,6 +1,7 @@
 'use client'
 
 import { useBranchStore } from '@/stores/branch-store'
+import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { formatCurrency, formatDateTime } from '@/lib/format'
 import type { Visit, BranchOccupancy } from '@/lib/types/database'
 import {
@@ -34,6 +35,7 @@ interface OverviewProps {
   newClientsCount: number
   recentVisits: Visit[]
   clientVisitData: ClientVisitRow[]
+  branches: { id: string; name: string }[]
 }
 
 export function OverviewClient({
@@ -42,6 +44,7 @@ export function OverviewClient({
   newClientsCount,
   recentVisits,
   clientVisitData,
+  branches,
 }: OverviewProps) {
   const { selectedBranchId } = useBranchStore()
 
@@ -95,7 +98,10 @@ export function OverviewClient({
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold tracking-tight">Inicio</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold tracking-tight">Inicio</h2>
+        <BranchSelector branches={branches} />
+      </div>
 
       {atRiskClients > 0 && (
         <Link href="/dashboard/estadisticas">

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { cancelQueueEntry, reassignBarber } from '@/lib/actions/queue'
 import { useBranchStore } from '@/stores/branch-store'
+import { BranchSelector } from '@/components/dashboard/branch-selector'
 import type { QueueEntry, StaffStatus, StaffSchedule, Staff } from '@/lib/types/database'
 import { assignDynamicBarbers } from '@/lib/barber-utils'
 import {
@@ -267,11 +268,14 @@ export function ColaClient({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Cola en vivo</h2>
-        <p className="text-sm text-muted-foreground">
-          Gestión de la cola de espera en tiempo real
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Cola en vivo</h2>
+          <p className="text-sm text-muted-foreground">
+            Gestión de la cola de espera en tiempo real
+          </p>
+        </div>
+        <BranchSelector branches={branches} />
       </div>
 
       {/* Barber status summary */}

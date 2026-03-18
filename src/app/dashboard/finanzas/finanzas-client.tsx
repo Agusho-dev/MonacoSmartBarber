@@ -16,6 +16,7 @@ import {
   Cell,
 } from 'recharts'
 import { useBranchStore } from '@/stores/branch-store'
+import { BranchSelector } from '@/components/dashboard/branch-selector'
 import {
   fetchFinancialData,
   type FinancialSummary,
@@ -148,18 +149,21 @@ export function FinanzasClient({
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-2xl font-bold tracking-tight">Finanzas</h2>
-        <Select value={period} onValueChange={handlePeriodChange}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PERIOD_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2">
+          <BranchSelector branches={branches} />
+          <Select value={period} onValueChange={handlePeriodChange}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PERIOD_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {isPending && (

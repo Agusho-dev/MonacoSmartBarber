@@ -3,6 +3,7 @@
 import { useMemo, useState, useEffect, useCallback, useTransition } from 'react'
 import { Search, Eye, Star, Tag, Camera, Save, MessageCircle, Instagram, Plus, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
+import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
 import { updateClientNotes } from '@/lib/actions/clients'
@@ -88,9 +89,10 @@ interface Props {
   clients: Client[]
   visits: VisitRow[]
   points: PointsRow[]
+  branches: { id: string; name: string }[]
 }
 
-export function ClientesClient({ clients, visits, points }: Props) {
+export function ClientesClient({ clients, visits, points, branches }: Props) {
   const { selectedBranchId } = useBranchStore()
   const supabase = useMemo(() => createClient(), [])
   const [search, setSearch] = useState('')
@@ -315,11 +317,14 @@ export function ClientesClient({ clients, visits, points }: Props) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Clientes</h2>
-        <p className="text-sm text-muted-foreground">
-          Base de datos y segmentación de clientes
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Clientes</h2>
+          <p className="text-sm text-muted-foreground">
+            Base de datos y segmentación de clientes
+          </p>
+        </div>
+        <BranchSelector branches={branches} />
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">

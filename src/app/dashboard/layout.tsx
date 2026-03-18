@@ -63,16 +63,10 @@ export default async function DashboardLayout({
     redirect('/login')
   }
 
-  const { data: branches } = await supabase
-    .from('branches')
-    .select('*')
-    .eq('is_active', true)
-    .order('name')
 
   return (
     <DashboardShell
       user={{ full_name: staff.full_name, email: staff.email, role: staff.role }}
-      branches={branches ?? []}
       permissions={userPermissions}
     >
       {children}

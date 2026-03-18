@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Plus, Pencil, Power, Trash2, Tag, ChevronDown, ChevronUp, Percent } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
+import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { formatCurrency } from '@/lib/format'
 import {
   upsertServiceTag,
@@ -244,10 +245,13 @@ export function ServiciosClient({ services, branches, tags, barbers, commissions
               Catálogo de servicios y precios
             </p>
           </div>
-          <Button onClick={openAdd}>
-            <Plus className="size-4" />
-            Agregar servicio
-          </Button>
+          <div className="flex items-center gap-2">
+            <BranchSelector branches={branches} />
+            <Button onClick={openAdd}>
+              <Plus className="size-4" />
+              Agregar servicio
+            </Button>
+          </div>
         </div>
 
         <div className="rounded-lg border">

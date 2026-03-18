@@ -38,6 +38,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Trophy, Plus, Pencil, Trash2, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useBranchStore } from '@/stores/branch-store'
 
 interface BarberBasic {
   id: string
@@ -78,9 +79,9 @@ const EMPTY_FORM = {
 }
 
 export function IncentivosClient({ branches, rules, barbers, achievements, defaultPeriod, selectedBranchId: selectedBranchIdProp, onBranchChange }: Props) {
-  const [internalBranchId, setInternalBranchId] = useState(branches[0]?.id ?? '')
-  const selectedBranchId = selectedBranchIdProp ?? internalBranchId
-  const setSelectedBranchId = onBranchChange ?? setInternalBranchId
+  const { selectedBranchId: storeBranchId, setSelectedBranchId: setStoreBranchId } = useBranchStore()
+  const selectedBranchId = selectedBranchIdProp ?? storeBranchId ?? (branches[0]?.id ?? '')
+  const setSelectedBranchId = onBranchChange ?? setStoreBranchId
   const [selectedPeriod, setSelectedPeriod] = useState(defaultPeriod)
   const [ruleDialog, setRuleDialog] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)

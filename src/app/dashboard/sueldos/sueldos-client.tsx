@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect } from 'react'
 import { upsertSalaryConfig, calculateAndSaveSalary, markSalaryAsPaid, previewSalary } from '@/lib/actions/salary'
 import { formatCurrency } from '@/lib/format'
 import type { Branch, SalaryConfig, SalaryScheme, SalaryPayment } from '@/lib/types/database'
@@ -26,6 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Banknote, Settings2, CheckCircle2, Calculator } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { useBranchStore } from '@/stores/branch-store'
 
 interface BarberWithConfig {
   id: string
@@ -58,7 +59,17 @@ const SCHEME_DESCRIPTIONS: Record<SalaryScheme, string> = {
 }
 
 export function SueldosClient({ branches, barbers, payments }: Props) {
-  const [selectedBranchId, setSelectedBranchId] = useState(branches[0]?.id ?? '')
+  const { selectedBranchId: storeBranchId, setSelectedBranchId: setStoreBranchId } = useBranchStore()
+
+  // Initialize branch in store if not set
+  useEffect(() => {
+    if (!storeBranchId && branches.length > 0) {
+      setStoreBranchId(branches[0].id)
+    }
+  }, [storeBranchId, branches, setStoreBranchId])
+
+  const selectedBranchId = storeBranchId ?? (branches[0]?.id ?? '')
+  const setSelectedBranchId = setStoreBranchId
   const [configDialog, setConfigDialog] = useState<BarberWithConfig | null>(null)
   const [calcDialog, setCalcDialog] = useState<BarberWithConfig | null>(null)
   const [configForm, setConfigForm] = useState({ scheme: 'fixed' as SalaryScheme, base_amount: '0', commission_pct: '0' })

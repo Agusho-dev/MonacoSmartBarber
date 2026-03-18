@@ -72,6 +72,7 @@ export default async function DashboardPage() {
     { count: newClientsCount },
     { data: recentVisits },
     { data: clientVisitData },
+    { data: branches },
   ] = await Promise.all([
     supabase
       .from('visits')
@@ -93,6 +94,11 @@ export default async function DashboardPage() {
       .from('visits')
       .select('client_id, branch_id, completed_at')
       .gte('completed_at', new Date(localNow.getTime() - 40 * 86400000).toISOString()),
+    supabase
+      .from('branches')
+      .select('id, name')
+      .eq('is_active', true)
+      .order('name'),
   ])
 
   return (
@@ -102,6 +108,7 @@ export default async function DashboardPage() {
       newClientsCount={newClientsCount ?? 0}
       recentVisits={recentVisits ?? []}
       clientVisitData={clientVisitData ?? []}
+      branches={branches ?? []}
     />
   )
 }

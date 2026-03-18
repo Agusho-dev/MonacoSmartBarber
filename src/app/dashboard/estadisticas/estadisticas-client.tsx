@@ -17,6 +17,7 @@ import {
   Cell,
 } from 'recharts'
 import { useBranchStore } from '@/stores/branch-store'
+import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { fetchStats, type StatsData } from '@/lib/actions/stats'
 import { exportCSV, exportPDF } from '@/lib/export'
 import { formatCurrency } from '@/lib/format'
@@ -77,9 +78,10 @@ const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 
 interface Props {
   initialData: StatsData
+  branches: { id: string; name: string }[]
 }
 
-export function EstadisticasClient({ initialData }: Props) {
+export function EstadisticasClient({ initialData, branches }: Props) {
   const { selectedBranchId } = useBranchStore()
   const [data, setData] = useState(initialData)
   const [from, setFrom] = useState(() => startOfMonth(new Date()))
@@ -147,6 +149,7 @@ export function EstadisticasClient({ initialData }: Props) {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-2xl font-bold tracking-tight">Estadísticas</h2>
         <div className="flex items-center gap-2">
+          <BranchSelector branches={branches} />
           <Button variant="outline" size="sm" onClick={handleExportCSV}>
             <FileDown className="mr-2 size-4" /> CSV
           </Button>

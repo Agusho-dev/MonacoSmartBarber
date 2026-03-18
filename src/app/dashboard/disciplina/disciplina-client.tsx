@@ -37,6 +37,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AlertTriangle, Plus, Trash2, Pencil, Clock, UserX, Coffee } from 'lucide-react'
 import { toast } from 'sonner'
+import { useBranchStore } from '@/stores/branch-store'
 
 interface BarberBasic {
   id: string
@@ -110,9 +111,9 @@ export function DisciplinaClient({
   selectedBranchId: selectedBranchIdProp,
   onBranchChange,
 }: Props) {
-  const [internalBranchId, setInternalBranchId] = useState(branches[0]?.id ?? '')
-  const selectedBranchId = selectedBranchIdProp ?? internalBranchId
-  const setSelectedBranchId = onBranchChange ?? setInternalBranchId
+  const { selectedBranchId: storeBranchId, setSelectedBranchId: setStoreBranchId } = useBranchStore()
+  const selectedBranchId = selectedBranchIdProp ?? storeBranchId ?? (branches[0]?.id ?? '')
+  const setSelectedBranchId = onBranchChange ?? setStoreBranchId
   const [overtimeFilter, setOvertimeFilter] = useState<OvertimeFilter>('week')
   const [now, setNow] = useState(Date.now())
   const [ruleDialog, setRuleDialog] = useState(false)

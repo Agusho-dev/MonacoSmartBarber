@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Plus, Pencil, Power, Trash2, Camera, Clock } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
+import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { formatCurrency } from '@/lib/format'
 import type { Staff, Branch, UserRole, Role } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
@@ -308,10 +309,13 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
             Gestión del equipo de trabajo
           </p>
         </div>
-        <Button onClick={openAdd}>
-          <Plus className="size-4" />
-          Agregar barbero
-        </Button>
+        <div className="flex items-center gap-2">
+          <BranchSelector branches={branches} />
+          <Button onClick={openAdd}>
+            <Plus className="size-4" />
+            Agregar barbero
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-lg border">

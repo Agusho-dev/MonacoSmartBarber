@@ -6,6 +6,7 @@ import { Plus, Pencil, Power, Trash2, Package, TrendingUp } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
 import { upsertProduct, toggleProduct, deleteProduct } from '@/lib/actions/products'
 import { useBranchStore } from '@/stores/branch-store'
+import { BranchSelector } from '@/components/dashboard/branch-selector'
 import type { Product, Branch, ProductSale } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -162,10 +163,13 @@ export function ProductosClient({ products, branches, sales }: Props) {
                         Gestión de inventario y ventas
                     </p>
                 </div>
-                <Button onClick={openAdd}>
-                    <Plus className="mr-2 size-4" />
-                    Agregar producto
-                </Button>
+                <div className="flex items-center gap-2">
+                    <BranchSelector branches={branches} />
+                    <Button onClick={openAdd}>
+                        <Plus className="mr-2 size-4" />
+                        Agregar producto
+                    </Button>
+                </div>
             </div>
 
             <Tabs defaultValue="inventory" className="w-full">

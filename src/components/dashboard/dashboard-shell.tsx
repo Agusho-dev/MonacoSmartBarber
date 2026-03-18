@@ -27,8 +27,6 @@ import {
   Smartphone,
 } from 'lucide-react'
 import { logout } from '@/lib/actions/auth'
-import { useBranchStore } from '@/stores/branch-store'
-import type { Branch } from '@/lib/types/database'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -39,13 +37,6 @@ import {
 } from '@/components/ui/sheet'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -75,15 +66,13 @@ const navItems = [
 
 interface DashboardShellProps {
   user: { full_name: string; email: string | null; role: string }
-  branches: Branch[]
   permissions: Record<string, boolean>
   children: React.ReactNode
 }
 
-export function DashboardShell({ user, branches, permissions, children }: DashboardShellProps) {
+export function DashboardShell({ user, permissions, children }: DashboardShellProps) {
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
-  const { selectedBranchId, setSelectedBranchId } = useBranchStore()
   const [, startTransition] = useTransition()
 
   const handleLogout = () => startTransition(() => logout())
@@ -182,23 +171,6 @@ export function DashboardShell({ user, branches, permissions, children }: Dashbo
           </div>
 
           <div className="flex-1" />
-
-          <Select
-            value={selectedBranchId ?? 'all'}
-            onValueChange={(v) => setSelectedBranchId(v === 'all' ? null : v)}
-          >
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Todas las sucursales" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas las sucursales</SelectItem>
-              {branches.map((b) => (
-                <SelectItem key={b.id} value={b.id}>
-                  {b.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

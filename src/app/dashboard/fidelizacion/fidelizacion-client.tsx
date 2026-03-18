@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect } from 'react'
 import { Gift, Save, Trophy, Users, AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,7 @@ import { Separator } from '@/components/ui/separator'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { updateRewardConfig } from '@/lib/actions/rewards'
+import { useBranchStore } from '@/stores/branch-store'
 
 interface Branch {
   id: string
@@ -47,7 +48,16 @@ interface Props {
 }
 
 export function FidelizacionClient({ branches, initialConfigs, topClients }: Props) {
-  const [selectedBranchId, setSelectedBranchId] = useState<string>(branches[0]?.id || '')
+  const { selectedBranchId: storeBranchId, setSelectedBranchId: setStoreBranchId } = useBranchStore()
+
+  // Initialize branch in store if not set
+  useEffect(() => {
+    if (!storeBranchId && branches.length > 0) {
+      setStoreBranchId(branches[0].id)
+    }
+  }, [storeBranchId, branches, setStoreBranchId])
+
+  const selectedBranchId = storeBranchId ?? (branches[0]?.id || '')
   
   const currentConfig = initialConfigs.find((c) => c.branch_id === selectedBranchId) || {
     id: 'new',
@@ -68,7 +78,7 @@ export function FidelizacionClient({ branches, initialConfigs, topClients }: Pro
   const [isPending, startTransition] = useTransition()
 
   function handleBranchChange(branchId: string) {
-    setSelectedBranchId(branchId)
+    setStoreBranchId(branchId)
     const config = initialConfigs.find((c) => c.branch_id === branchId)
     if (config) {
       setFormData({

@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { Scissors, Coffee, Trophy, AlertTriangle, Shield, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useBranchStore } from '@/stores/branch-store'
+import { BranchSelector } from '@/components/dashboard/branch-selector'
 
 import { BarberosClient } from '../barberos/barberos-client'
 import { DescansosDashboard } from '../descansos/descansos-client'
@@ -85,7 +87,6 @@ export function EquipoClient({
     const firstBranchId = branchList[0]?.id ?? ''
 
     const initialTabId = searchParams.get('tab') as TabId
-    const initialBranchId = searchParams.get('branch') ?? firstBranchId
     const firstAvailableTab = visibleTabs.length > 0 ? visibleTabs[0].id : null
 
     const defaultTab = visibleTabs.some(t => t.id === initialTabId)
@@ -93,15 +94,21 @@ export function EquipoClient({
         : firstAvailableTab
 
     const [activeTab, setActiveTab] = useState<TabId | null>(defaultTab || null)
-    const [selectedBranchId, setSelectedBranchId] = useState(
-        branchList.some(b => b.id === initialBranchId) ? initialBranchId : firstBranchId
-    )
+    const { selectedBranchId, setSelectedBranchId } = useBranchStore()
 
-    // Update URL whenever tab or branch changes
-    const updateUrl = useCallback((tab: string | null, branch: string) => {
+    // Initialize branch in store if not set
+    useEffect(() => {
+        if (!selectedBranchId && firstBranchId) {
+            setSelectedBranchId(firstBranchId)
+        }
+    }, [selectedBranchId, firstBranchId, setSelectedBranchId])
+
+    const effectiveBranchId = selectedBranchId ?? firstBranchId
+
+    // Update URL whenever tab changes
+    const updateUrl = useCallback((tab: string | null) => {
         const params = new URLSearchParams()
         if (tab) params.set('tab', tab)
-        if (branch) params.set('branch', branch)
         router.replace(`${pathname}?${params.toString()}`, { scroll: false })
     }, [router, pathname])
 
@@ -116,12 +123,11 @@ export function EquipoClient({
 
     const handleTabChange = (tab: TabId) => {
         setActiveTab(tab)
-        updateUrl(tab, selectedBranchId)
+        updateUrl(tab)
     }
 
     const handleBranchChange = (branchId: string) => {
         setSelectedBranchId(branchId)
-        updateUrl(activeTab, branchId)
     }
 
     if (visibleTabs.length === 0) {
@@ -134,11 +140,14 @@ export function EquipoClient({
 
     return (
         <div className="space-y-6">
-            <div>
-                <h1 className="text-2xl font-bold tracking-tight">Equipo</h1>
-                <p className="text-muted-foreground">
-                    Gestión de barberos, descansos, incentivos y disciplina
-                </p>
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-2xl font-bold tracking-tight">Equipo</h1>
+                    <p className="text-muted-foreground">
+                        Gestión de barberos, descansos, incentivos y disciplina
+                    </p>
+                </div>
+                <BranchSelector branches={branches as { id: string; name: string }[]} />
             </div>
 
             {/* Tab navigation */}
@@ -184,7 +193,7 @@ export function EquipoClient({
                                     full_name: (b as { full_name: string }).full_name,
                                 })) as Parameters<typeof HistorialServiciosClient>[0]['barbers']
                         }
-                        selectedBranchId={selectedBranchId}
+                        selectedBranchId={effectiveBranchId}
                         branches={branches as { id: string; name: string }[]}
                         onBranchChange={handleBranchChange}
                     />
@@ -194,7 +203,7 @@ export function EquipoClient({
                         breakConfigs={breakConfigs as Parameters<typeof DescansosDashboard>[0]['breakConfigs']}
                         branches={branches as Parameters<typeof DescansosDashboard>[0]['branches']}
                         breakRequests={breakRequests as Parameters<typeof DescansosDashboard>[0]['breakRequests']}
-                        selectedBranchId={selectedBranchId}
+                        selectedBranchId={effectiveBranchId}
                         onBranchChange={handleBranchChange}
                     />
                 )}
@@ -213,7 +222,7 @@ export function EquipoClient({
                         }
                         achievements={incentiveAchievements as Parameters<typeof IncentivosClient>[0]['achievements']}
                         defaultPeriod={defaultPeriod}
-                        selectedBranchId={selectedBranchId}
+                        selectedBranchId={effectiveBranchId}
                         onBranchChange={handleBranchChange}
                     />
                 )}
@@ -234,7 +243,7 @@ export function EquipoClient({
                         fromDate={fromDate}
                         activeBreakEntries={activeBreakEntries as Parameters<typeof DisciplinaClient>[0]['activeBreakEntries']}
                         breakOvertimeHistory={breakOvertimeHistory as Parameters<typeof DisciplinaClient>[0]['breakOvertimeHistory']}
-                        selectedBranchId={selectedBranchId}
+                        selectedBranchId={effectiveBranchId}
                         onBranchChange={handleBranchChange}
                     />
                 )}
