@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect, useMemo, useCallback } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -46,6 +46,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { BranchScopeProvider } from '@/components/dashboard/branch-scope-provider'
+import { useBranchStore } from '@/stores/branch-store'
+import { createClient } from '@/lib/supabase/client'
 
 const navItems = [
   { href: '/dashboard', label: 'Inicio', icon: LayoutDashboard, requiredPermissions: ['dashboard.home'] },
@@ -76,6 +78,9 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [, startTransition] = useTransition()
+  const [pendingBreakCount, setPendingBreakCount] = useState(0)
+  const { selectedBranchId } = useBranchStore()
+  const supabase = useMemo(() => createClient(), [])
 
   const handleLogout = () => startTransition(() => logout())
 
@@ -85,6 +90,28 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
     .join('')
     .toUpperCase()
     .slice(0, 2)
+
+  // Fetch pending break requests count
+  const fetchPendingBreakCount = useCallback(async () => {
+    if (!selectedBranchId) { setPendingBreakCount(0); return }
+    const { count } = await supabase
+      .from('break_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('branch_id', selectedBranchId)
+      .eq('status', 'pending')
+    setPendingBreakCount(count ?? 0)
+  }, [supabase, selectedBranchId])
+
+  useEffect(() => {
+    fetchPendingBreakCount()
+    const channel = supabase
+      .channel('dashboard-break-requests')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'break_requests' }, () => {
+        fetchPendingBreakCount()
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [supabase, fetchPendingBreakCount])
 
   function NavLinks() {
     return (
@@ -110,6 +137,11 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
               >
                 <item.icon className="size-4 shrink-0" />
                 {item.label}
+                {item.href === '/dashboard/equipo' && pendingBreakCount > 0 && (
+                  <span className="ml-auto flex size-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
+                    {pendingBreakCount}
+                  </span>
+                )}
               </Link>
             )
           })}

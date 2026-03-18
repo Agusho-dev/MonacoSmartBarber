@@ -161,6 +161,7 @@ export function QueuePanel({
   const [warningStarting, setWarningStarting] = useState(false)
   const audioContextRef = useRef<AudioContext | null>(null)
   const beepIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const prevBreakRequestCountRef = useRef<number>(0)
 
   const supabase = useMemo(() => createClient(), [])
   const canManageBreaks = session.role === 'admin' || session.role === 'owner' || session.permissions?.['breaks.grant'] === true
@@ -502,6 +503,43 @@ export function QueuePanel({
       }
     }
   }, [])
+
+  // Bell sound when a new break request arrives (for managers)
+  useEffect(() => {
+    const currentCount = pendingBreakRequests.length
+    if (canManageBreaks && currentCount > prevBreakRequestCountRef.current && prevBreakRequestCountRef.current >= 0) {
+      // Only play if we had a previous count (not initial load when ref is 0 and count > 0 on first real change)
+      if (prevBreakRequestCountRef.current > 0 || currentCount > 0) {
+        try {
+          if (!audioContextRef.current) {
+            audioContextRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+          }
+          const ctx = audioContextRef.current
+          if (ctx.state === 'suspended') ctx.resume()
+
+          // Bell-like tone: two harmonics for a richer "ding"
+          const playTone = (freq: number, delay: number) => {
+            const osc = ctx.createOscillator()
+            const gain = ctx.createGain()
+            osc.connect(gain)
+            gain.connect(ctx.destination)
+            osc.frequency.value = freq
+            osc.type = 'sine'
+            gain.gain.setValueAtTime(0.2, ctx.currentTime + delay)
+            gain.gain.exponentialRampToValueAtTime(0.005, ctx.currentTime + delay + 0.6)
+            osc.start(ctx.currentTime + delay)
+            osc.stop(ctx.currentTime + delay + 0.6)
+          }
+          playTone(523, 0)     // C5
+          playTone(659, 0)     // E5 - harmony
+          playTone(784, 0.15)  // G5 - second ding
+        } catch {
+          // Audio not available
+        }
+      }
+    }
+    prevBreakRequestCountRef.current = currentCount
+  }, [pendingBreakRequests.length, canManageBreaks])
 
   async function handleWarningStartService() {
     const firstEntry = myRealWaitingEntries[0]

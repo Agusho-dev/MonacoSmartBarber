@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useEffect } from 'react'
+import { useState, useTransition, useEffect, useRef, useCallback } from 'react'
 import {
   upsertBreakConfig,
   deleteBreakConfig,
@@ -9,6 +9,7 @@ import {
   approveBreak,
   rejectBreak,
 } from '@/lib/actions/break-requests'
+import { createScheduledBreakRequests } from '@/lib/actions/scheduled-breaks'
 import type { Branch, BreakConfig } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -39,7 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Coffee, Plus, Pencil, Trash2, CheckCircle2, XCircle, HandMetal } from 'lucide-react'
+import { Coffee, Plus, Pencil, Trash2, CheckCircle2, XCircle, HandMetal, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import { useBranchStore } from '@/stores/branch-store'
 
@@ -60,7 +61,7 @@ interface Props {
   breakRequests: BreakRequestRow[]
 }
 
-const EMPTY_FORM = { id: '', branch_id: '', name: '', duration_minutes: '30' }
+const EMPTY_FORM = { id: '', branch_id: '', name: '', duration_minutes: '30', scheduled_time: '' }
 
 function BreakRequestCard({ request }: { request: BreakRequestRow }) {
   const [, startTransition] = useTransition()
@@ -155,6 +156,9 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
   const [, startTransition] = useTransition()
   const { selectedBranchId } = useBranchStore()
 
+  // Track fired scheduled break configs to prevent double-firing
+  const firedScheduledRef = useRef<Set<string>>(new Set())
+
   const branchConfigs = breakConfigs.filter((bc) => bc.branch_id === selectedBranchId)
 
   function openCreate() {
@@ -168,6 +172,7 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
       branch_id: bc.branch_id,
       name: bc.name,
       duration_minutes: String(bc.duration_minutes),
+      scheduled_time: bc.scheduled_time ?? '',
     })
     setDialogOpen(true)
   }
@@ -190,6 +195,45 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
       else toast.success('Configuración eliminada')
     })
   }
+
+  // Auto-fire scheduled break requests
+  const checkScheduledBreaks = useCallback(async () => {
+    if (!selectedBranchId) return
+    const now = new Date()
+    const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+
+    for (const bc of branchConfigs) {
+      if (!bc.scheduled_time) continue
+      // Compare HH:MM portion only
+      const scheduledHHMM = bc.scheduled_time.substring(0, 5)
+      if (scheduledHHMM !== currentHHMM) continue
+      // Build a daily key so it only fires once per day per config
+      const dailyKey = `${bc.id}-${now.toISOString().substring(0, 10)}`
+      if (firedScheduledRef.current.has(dailyKey)) continue
+
+      // Mark as fired immediately to prevent double-firing
+      firedScheduledRef.current.add(dailyKey)
+
+      try {
+        const result = await createScheduledBreakRequests(selectedBranchId, bc.id)
+        if (result.error) {
+          toast.error(`Error generando descansos: ${result.error}`)
+        } else if (result.created > 0) {
+          toast.success(`🔔 Se crearon ${result.created} solicitud(es) de descanso automáticas para "${bc.name}"`)
+        }
+      } catch {
+        // Remove from fired so it can retry next interval
+        firedScheduledRef.current.delete(dailyKey)
+      }
+    }
+  }, [selectedBranchId, branchConfigs])
+
+  useEffect(() => {
+    // Check immediately and then every 30 seconds
+    checkScheduledBreaks()
+    const interval = setInterval(checkScheduledBreaks, 30_000)
+    return () => clearInterval(interval)
+  }, [checkScheduledBreaks])
 
   return (
     <div className="space-y-8">
@@ -225,9 +269,17 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
                 <Coffee className="size-5 text-muted-foreground shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="font-medium">{bc.name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {bc.duration_minutes} min
-                  </p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-sm text-muted-foreground">
+                      {bc.duration_minutes} min
+                    </span>
+                    {bc.scheduled_time && (
+                      <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-500 border-blue-500/25">
+                        <Clock className="size-3 mr-1" />
+                        {bc.scheduled_time.substring(0, 5)}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <Button variant="ghost" size="icon" onClick={() => openEdit(bc)}>
@@ -312,6 +364,18 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
                 value={form.duration_minutes}
                 onChange={(e) => setForm((f) => ({ ...f, duration_minutes: e.target.value }))}
                 required
+              />
+            </div>
+            <div>
+              <Label>Hora programada (opcional)</Label>
+              <p className="text-xs text-muted-foreground mt-0.5 mb-1.5">
+                A esta hora se crearán solicitudes automáticas para todos los barberos activos.
+              </p>
+              <Input
+                type="time"
+                className="mt-1.5 w-40"
+                value={form.scheduled_time}
+                onChange={(e) => setForm((f) => ({ ...f, scheduled_time: e.target.value }))}
               />
             </div>
             <DialogFooter>

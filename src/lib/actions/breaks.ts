@@ -19,6 +19,8 @@ export async function upsertBreakConfig(formData: FormData) {
   const branchId = formData.get('branch_id') as string
   const name = (formData.get('name') as string).trim()
   const durationMinutes = parseInt(formData.get('duration_minutes') as string, 10)
+  const scheduledTimeRaw = formData.get('scheduled_time') as string | null
+  const scheduledTime = scheduledTimeRaw?.trim() || null
 
   if (!branchId || !name || isNaN(durationMinutes)) {
     return { error: 'Datos incompletos' }
@@ -27,13 +29,13 @@ export async function upsertBreakConfig(formData: FormData) {
   if (id) {
     const { error } = await supabase
       .from('break_configs')
-      .update({ name, duration_minutes: durationMinutes })
+      .update({ name, duration_minutes: durationMinutes, scheduled_time: scheduledTime })
       .eq('id', id)
     if (error) return { error: error.message }
   } else {
     const { error } = await supabase
       .from('break_configs')
-      .insert({ branch_id: branchId, name, duration_minutes: durationMinutes })
+      .insert({ branch_id: branchId, name, duration_minutes: durationMinutes, scheduled_time: scheduledTime })
     if (error) return { error: error.message }
   }
 

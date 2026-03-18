@@ -356,6 +356,7 @@ export interface BreakConfig {
   branch_id: string
   name: string
   duration_minutes: number
+  scheduled_time: string | null
   is_active: boolean
   created_at: string
   updated_at: string
