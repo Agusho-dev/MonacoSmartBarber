@@ -68,6 +68,7 @@ const CATEGORIES = [
 const emptyForm = {
     amount: '',
     category: CATEGORIES[0],
+    customCategory: '',
     description: '',
     branch_id: '',
     payment_account_id: '',
@@ -85,9 +86,25 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
     const [deleteId, setDeleteId] = useState<string | null>(null)
     const [deleting, setDeleting] = useState(false)
 
-    const filteredTickets = selectedBranchId
-        ? expenseTickets.filter((t) => t.branch_id === selectedBranchId)
-        : expenseTickets
+    // Filter state
+    const [filterAccount, setFilterAccount] = useState<string>('__all__')
+
+    const filteredTickets = expenseTickets.filter((t) => {
+        if (selectedBranchId && t.branch_id !== selectedBranchId) return false
+        if (filterAccount !== '__all__') {
+            if (filterAccount === '__cash__') return !t.payment_account_id
+            return t.payment_account_id === filterAccount
+        }
+        return true
+    })
+
+    // Prepare unique categories for the select, combinding base categories and existing ones
+    const availableCategories = Array.from(
+        new Set([
+            ...CATEGORIES,
+            ...expenseTickets.map(t => t.category).filter(Boolean)
+        ])
+    ).sort()
 
     // Filter active accounts by selected branch
     const filteredAccounts = accounts.filter(a =>
@@ -103,12 +120,13 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
     }
 
     async function handleSave() {
-        if (!form.amount || !form.category || !form.branch_id) return
+        const finalCategory = form.category === '__other__' ? form.customCategory.trim() : form.category
+        if (!form.amount || !finalCategory || !form.branch_id) return
         setSaving(true)
 
         const result = await createExpenseTicket({
             amount: Number(form.amount) || 0,
-            category: form.category,
+            category: finalCategory,
             description: form.description,
             branch_id: form.branch_id,
             payment_account_id: form.payment_account_id || null,
@@ -151,17 +169,33 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 className="text-xl font-bold tracking-tight">Registro de Egresos</h2>
                     <p className="text-sm text-muted-foreground">
                         Registrá la salida de dinero para gastos e insumos
                     </p>
                 </div>
-                <Button onClick={openAdd}>
-                    <Plus className="mr-2 size-4" />
-                    Registrar egreso
-                </Button>
+                <div className="flex items-center gap-2">
+                    <Select value={filterAccount} onValueChange={setFilterAccount}>
+                        <SelectTrigger className="w-[160px] h-9">
+                            <SelectValue placeholder="Todas las cuentas" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="__all__">Todas las cuentas</SelectItem>
+                            <SelectItem value="__cash__">Efectivo</SelectItem>
+                            {accounts.map((acc) => (
+                                <SelectItem key={acc.id} value={acc.id}>
+                                    {acc.name}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <Button onClick={openAdd}>
+                        <Plus className="mr-2 size-4" />
+                        Registrar egreso
+                    </Button>
+                </div>
             </div>
 
             <div className="rounded-md border bg-card">
@@ -199,7 +233,10 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                                                 <span className="text-sm">{getAccountName(t)}</span>
                                             </div>
                                         ) : (
-                                            <span className="text-muted-foreground">-</span>
+                                            <div className="flex items-center gap-1.5">
+                                                <Wallet className="size-3 text-muted-foreground" />
+                                                <span className="text-sm">Efectivo</span>
+                                            </div>
                                         )}
                                     </TableCell>
                                     <TableCell>{t.created_by_staff?.full_name || 'Admin'}</TableCell>
@@ -251,14 +288,14 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                         <div className="grid gap-2">
                             <Label className="flex items-center gap-1.5">
                                 <Wallet className="size-3.5" />
-                                Cuenta / Alias <span className="text-muted-foreground">(opcional)</span>
+                                Medio de pago / Cuenta
                             </Label>
                             <Select value={form.payment_account_id} onValueChange={(v) => setForm({ ...form, payment_account_id: v === '__none__' ? '' : v })}>
                                 <SelectTrigger>
-                                    <SelectValue placeholder="Sin cuenta asociada" />
+                                    <SelectValue placeholder="Efectivo" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="__none__">Sin cuenta asociada</SelectItem>
+                                    <SelectItem value="__none__">Efectivo</SelectItem>
                                     {filteredAccounts.map(acc => (
                                         <SelectItem key={acc.id} value={acc.id}>
                                             {acc.name}
@@ -282,17 +319,30 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
 
                         <div className="grid gap-2">
                             <Label>Categoría *</Label>
-                            <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
+                            <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v, customCategory: '' })}>
                                 <SelectTrigger>
                                     <SelectValue placeholder="Seleccionar categoría" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {CATEGORIES.map(c => (
+                                    {availableCategories.map(c => (
                                         <SelectItem key={c} value={c}>{c}</SelectItem>
                                     ))}
+                                    <SelectItem value="__other__">Otro (crear nueva)</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
+                        
+                        {form.category === '__other__' && (
+                            <div className="grid gap-2">
+                                <Label>Nueva Categoría *</Label>
+                                <Input
+                                    value={form.customCategory}
+                                    onChange={(e) => setForm({ ...form, customCategory: e.target.value })}
+                                    placeholder="Ej: Suscripciones"
+                                    autoFocus
+                                />
+                            </div>
+                        )}
 
                         <div className="grid gap-2">
                             <Label>Descripción / Motivo (opcional)</Label>
@@ -305,7 +355,10 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-                        <Button onClick={handleSave} disabled={saving || !form.amount || !form.branch_id || !form.category}>
+                        <Button 
+                            onClick={handleSave} 
+                            disabled={saving || !form.amount || !form.branch_id || (form.category === '__other__' ? !form.customCategory.trim() : !form.category)}
+                        >
                             {saving ? 'Guardando...' : 'Guardar'}
                         </Button>
                     </DialogFooter>
