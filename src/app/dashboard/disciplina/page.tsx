@@ -26,7 +26,6 @@ export default async function DisciplinaPage() {
 
   return (
     <DisciplinaClient
-      branches={branches ?? []}
       rules={rules ?? []}
       barbers={barbers ?? []}
       events={events ?? []}

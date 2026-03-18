@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Clock, Banknote, CreditCard, ArrowRightLeft, Search } from 'lucide-react'
 import {
     Select,
@@ -11,6 +11,8 @@ import {
 } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 
+import { useBranchStore } from '@/stores/branch-store'
+
 interface ServiceVisit {
     id: string
     amount: number
@@ -18,6 +20,7 @@ interface ServiceVisit {
     commission_amount: number
     started_at: string | null
     completed_at: string
+    branch_id: string
     service: { name: string } | null
     client: { name: string } | null
     barber: { id: string; full_name: string } | null
@@ -25,10 +28,7 @@ interface ServiceVisit {
 
 interface HistorialServiciosClientProps {
     visits: ServiceVisit[]
-    barbers: { id: string; full_name: string }[]
-    selectedBranchId: string
-    branches: { id: string; name: string }[]
-    onBranchChange: (branchId: string) => void
+    barbers: { id: string; full_name: string; branch_id: string }[]
 }
 
 const PAYMENT_ICONS: Record<string, React.ElementType> = {
@@ -65,15 +65,22 @@ function formatDuration(minutes: number): string {
 export function HistorialServiciosClient({
     visits,
     barbers,
-    selectedBranchId,
-    branches,
-    onBranchChange,
 }: HistorialServiciosClientProps) {
+    const { selectedBranchId } = useBranchStore()
     const [selectedBarberId, setSelectedBarberId] = useState<string>('all')
     const [searchQuery, setSearchQuery] = useState('')
+    const [isMounted, setIsMounted] = useState(false)
+
+    useEffect(() => {
+        setIsMounted(true)
+    }, [])
 
     const filtered = useMemo(() => {
-        let result = visits
+        // Return unfiltered on server/first-render to match SSR
+        if (!isMounted) return visits
+
+        let result = selectedBranchId ? visits.filter((v) => v.branch_id === selectedBranchId) : visits
+        
         if (selectedBarberId !== 'all') {
             result = result.filter((v) => v.barber?.id === selectedBarberId)
         }
@@ -117,25 +124,15 @@ export function HistorialServiciosClient({
         <div className="space-y-4">
             {/* Filters */}
             <div className="flex flex-wrap items-center gap-3">
-                {branches.length > 1 && (
-                    <Select value={selectedBranchId} onValueChange={onBranchChange}>
-                        <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="Sucursal" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {branches.map((b) => (
-                                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                )}
                 <Select value={selectedBarberId} onValueChange={setSelectedBarberId}>
                     <SelectTrigger className="w-[200px]">
                         <SelectValue placeholder="Filtrar barbero" />
                     </SelectTrigger>
                     <SelectContent>
                         <SelectItem value="all">Todos los barberos</SelectItem>
-                        {barbers.map((b) => (
+                        {barbers
+                            .filter((b) => !selectedBranchId || b.branch_id === selectedBranchId)
+                            .map((b) => (
                             <SelectItem key={b.id} value={b.id}>{b.full_name}</SelectItem>
                         ))}
                     </SelectContent>

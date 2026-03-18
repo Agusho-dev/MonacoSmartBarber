@@ -20,7 +20,6 @@ export default async function DescansosPage() {
   return (
     <DescansosDashboard
       breakConfigs={breakConfigs ?? []}
-      branches={branches ?? []}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       breakRequests={(breakRequests ?? []) as any}
     />

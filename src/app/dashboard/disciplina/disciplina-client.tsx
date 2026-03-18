@@ -76,15 +76,12 @@ interface BreakOvertimeRecord {
 type OvertimeFilter = 'day' | 'week' | 'month'
 
 interface Props {
-  branches: Branch[]
   rules: DisciplinaryRule[]
   barbers: BarberBasic[]
   events: EventWithStaff[]
   fromDate: string
   activeBreakEntries?: ActiveBreakEntry[]
   breakOvertimeHistory?: BreakOvertimeRecord[]
-  selectedBranchId?: string
-  onBranchChange?: (id: string) => void
 }
 
 const EVENT_LABELS: Record<DisciplinaryEventType, string> = {
@@ -101,19 +98,14 @@ const CONSEQUENCE_LABELS: Record<ConsequenceType, string> = {
 }
 
 export function DisciplinaClient({
-  branches,
   rules,
   barbers,
   events,
   fromDate,
   activeBreakEntries = [],
   breakOvertimeHistory = [],
-  selectedBranchId: selectedBranchIdProp,
-  onBranchChange,
 }: Props) {
-  const { selectedBranchId: storeBranchId, setSelectedBranchId: setStoreBranchId } = useBranchStore()
-  const selectedBranchId = selectedBranchIdProp ?? storeBranchId ?? (branches[0]?.id ?? '')
-  const setSelectedBranchId = onBranchChange ?? setStoreBranchId
+  const { selectedBranchId } = useBranchStore()
   const [overtimeFilter, setOvertimeFilter] = useState<OvertimeFilter>('week')
   const [now, setNow] = useState(Date.now())
   const [ruleDialog, setRuleDialog] = useState(false)
@@ -230,7 +222,7 @@ export function DisciplinaClient({
     e.preventDefault()
     startTransition(async () => {
       const r = await upsertDisciplinaryRule(
-        selectedBranchId,
+        selectedBranchId || '',
         ruleForm.event_type,
         parseInt(ruleForm.occurrence_number),
         ruleForm.consequence,
@@ -255,7 +247,7 @@ export function DisciplinaClient({
     startTransition(async () => {
       const r = await createDisciplinaryEvent(
         eventForm.staff_id,
-        selectedBranchId,
+        selectedBranchId || '',
         eventForm.event_type,
         eventForm.event_date,
         eventForm.notes || null,
@@ -285,16 +277,6 @@ export function DisciplinaClient({
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="Sucursal" />
-            </SelectTrigger>
-            <SelectContent>
-              {branches.map((b) => (
-                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           <Button onClick={() => { setEventForm({ staff_id: '', event_type: 'absence', event_date: new Date().toISOString().slice(0, 10), notes: '' }); setEventDialog(true) }}>
             <Plus className="size-4 mr-2" />
             Registrar evento

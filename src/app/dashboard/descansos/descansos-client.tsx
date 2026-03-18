@@ -57,10 +57,7 @@ interface BreakRequestRow {
 
 interface Props {
   breakConfigs: BreakConfig[]
-  branches: Branch[]
   breakRequests: BreakRequestRow[]
-  selectedBranchId?: string
-  onBranchChange?: (id: string) => void
 }
 
 const EMPTY_FORM = { id: '', branch_id: '', name: '', duration_minutes: '30' }
@@ -152,26 +149,16 @@ function BreakRequestCard({ request }: { request: BreakRequestRow }) {
   )
 }
 
-export function DescansosDashboard({ breakConfigs, branches, breakRequests, selectedBranchId: selectedBranchIdProp, onBranchChange }: Props) {
+export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [, startTransition] = useTransition()
-  const { selectedBranchId: storeBranchId, setSelectedBranchId: setStoreBranchId } = useBranchStore()
-
-  // Initialize branch in store if not set
-  useEffect(() => {
-    if (!storeBranchId && branches.length > 0) {
-      setStoreBranchId(branches[0].id)
-    }
-  }, [storeBranchId, branches, setStoreBranchId])
-
-  const selectedBranchId = selectedBranchIdProp ?? storeBranchId ?? (branches[0]?.id ?? '')
-  const setSelectedBranchId = onBranchChange ?? setStoreBranchId
+  const { selectedBranchId } = useBranchStore()
 
   const branchConfigs = breakConfigs.filter((bc) => bc.branch_id === selectedBranchId)
 
   function openCreate() {
-    setForm({ ...EMPTY_FORM, branch_id: selectedBranchId })
+    setForm({ ...EMPTY_FORM, branch_id: selectedBranchId || '' })
     setDialogOpen(true)
   }
 
@@ -214,16 +201,6 @@ export function DescansosDashboard({ breakConfigs, branches, breakRequests, sele
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="Sucursal" />
-            </SelectTrigger>
-            <SelectContent>
-              {branches.map((b) => (
-                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           <Button onClick={openCreate}>
             <Plus className="size-4 mr-2" />
             Nuevo tipo
@@ -315,19 +292,6 @@ export function DescansosDashboard({ breakConfigs, branches, breakRequests, sele
             <DialogTitle>{form.id ? 'Editar descanso' : 'Nuevo tipo de descanso'}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <Label>Sucursal</Label>
-              <Select value={form.branch_id} onValueChange={(v) => setForm((f) => ({ ...f, branch_id: v }))}>
-                <SelectTrigger className="mt-1.5">
-                  <SelectValue placeholder="Seleccionar sucursal" />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             <div>
               <Label>Nombre</Label>
               <Input

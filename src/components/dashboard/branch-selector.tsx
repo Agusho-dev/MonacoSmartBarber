@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useBranchStore } from '@/stores/branch-store'
 import {
   Select,
@@ -21,18 +21,33 @@ interface Props {
 }
 
 export function BranchSelector({ branches, className }: Props) {
-  const { selectedBranchId, setSelectedBranchId } = useBranchStore()
+  const { selectedBranchId, setSelectedBranchId, allowedBranchIds } = useBranchStore()
 
-  // Initialize branch in store if not set
+  const [isMounted, setIsMounted] = useState(false)
+
+  // Filter branches by allowed scope
+  const visibleBranches = allowedBranchIds
+    ? branches.filter((b) => allowedBranchIds.includes(b.id))
+    : branches
+
   useEffect(() => {
-    if (!selectedBranchId && branches.length > 0) {
-      setSelectedBranchId(branches[0].id)
+    setIsMounted(true)
+    // Initialize branch in store if not set
+    if (!selectedBranchId && visibleBranches.length > 0) {
+      setSelectedBranchId(visibleBranches[0].id)
     }
-  }, [selectedBranchId, branches, setSelectedBranchId])
+  }, [selectedBranchId, visibleBranches, setSelectedBranchId])
 
-  const effectiveValue = selectedBranchId ?? (branches[0]?.id ?? '')
+  if (!isMounted) {
+    return (
+      <div className={className ?? 'w-[200px] h-10 rounded-md border bg-transparent opacity-50'} />
+    )
+  }
 
-  if (branches.length <= 1) return null
+  const effectiveValue = selectedBranchId ?? (visibleBranches[0]?.id ?? '')
+
+  // Hide selector if only 1 visible branch (or none)
+  if (visibleBranches.length <= 1) return null
 
   return (
     <Select value={effectiveValue} onValueChange={setSelectedBranchId}>
@@ -40,7 +55,7 @@ export function BranchSelector({ branches, className }: Props) {
         <SelectValue placeholder="Seleccionar sucursal" />
       </SelectTrigger>
       <SelectContent>
-        {branches.map((b) => (
+        {visibleBranches.map((b) => (
           <SelectItem key={b.id} value={b.id}>
             {b.name}
           </SelectItem>

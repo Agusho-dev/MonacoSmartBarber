@@ -45,6 +45,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { BranchScopeProvider } from '@/components/dashboard/branch-scope-provider'
 
 const navItems = [
   { href: '/dashboard', label: 'Inicio', icon: LayoutDashboard, requiredPermissions: ['dashboard.home'] },
@@ -67,10 +68,11 @@ const navItems = [
 interface DashboardShellProps {
   user: { full_name: string; email: string | null; role: string }
   permissions: Record<string, boolean>
+  allowedBranchIds: string[] | null
   children: React.ReactNode
 }
 
-export function DashboardShell({ user, permissions, children }: DashboardShellProps) {
+export function DashboardShell({ user, permissions, allowedBranchIds, children }: DashboardShellProps) {
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [, startTransition] = useTransition()
@@ -198,7 +200,11 @@ export function DashboardShell({ user, permissions, children }: DashboardShellPr
           </DropdownMenu>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+          <BranchScopeProvider allowedBranchIds={allowedBranchIds}>
+            {children}
+          </BranchScopeProvider>
+        </main>
       </div>
     </div>
   )

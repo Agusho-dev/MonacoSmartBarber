@@ -5,9 +5,8 @@ import { useRouter } from 'next/navigation'
 import { Plus, Pencil, Power, Trash2, Camera, Clock } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
-import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { formatCurrency } from '@/lib/format'
-import type { Staff, Branch, UserRole, Role } from '@/lib/types/database'
+import type { Staff, UserRole, Role } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -59,7 +58,6 @@ interface ServiceHistoryItem {
 
 interface Props {
   barbers: Staff[]
-  branches: Branch[]
   todayVisits: BarberVisitRow[]
   roles: Role[]
   serviceHistory?: ServiceHistoryItem[]
@@ -120,15 +118,23 @@ const emptyForm = {
   phone: '',
 }
 
-export function BarberosClient({ barbers, branches, todayVisits, roles, serviceHistory }: Props) {
+export function BarberosClient({ barbers, todayVisits, roles, serviceHistory }: Props) {
   const router = useRouter()
   const supabase = createClient()
   const { selectedBranchId } = useBranchStore()
 
-  const idleTimeData = useMemo(
-    () => computeIdleTimes(serviceHistory ?? []),
-    [serviceHistory]
-  )
+  const filtered = selectedBranchId
+    ? barbers.filter((b) => b.branch_id === selectedBranchId)
+    : barbers
+
+  const idleTimeData = useMemo(() => {
+    // Only compute idle times for barbers that belong to the active branch
+    const branchBarberIds = new Set(filtered.map((b) => b.id))
+    const validVisits = (serviceHistory ?? []).filter(
+      (v) => v.barber && branchBarberIds.has(v.barber.id)
+    )
+    return computeIdleTimes(validVisits)
+  }, [serviceHistory, filtered])
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -137,10 +143,6 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const avatarInputRef = useRef<HTMLInputElement>(null)
-
-  const filtered = selectedBranchId
-    ? barbers.filter((b) => b.branch_id === selectedBranchId)
-    : barbers
 
   const barberStats = new Map<string, { cuts: number; revenue: number }>()
   todayVisits.forEach((v) => {
@@ -302,20 +304,11 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Barberos</h2>
-          <p className="text-sm text-muted-foreground">
-            Gestión del equipo de trabajo
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <BranchSelector branches={branches} />
-          <Button onClick={openAdd}>
-            <Plus className="size-4" />
-            Agregar barbero
-          </Button>
-        </div>
+      <div className="flex items-center justify-between sm:justify-end">
+        <Button onClick={openAdd}>
+          <Plus className="size-4 mr-2" />
+          Agregar barbero
+        </Button>
       </div>
 
       <div className="rounded-lg border">
@@ -532,24 +525,6 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Sucursal</Label>
-                <Select
-                  value={form.branch_id}
-                  onValueChange={(v) => setForm({ ...form, branch_id: v })}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Seleccionar" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {branches.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
               <div className="grid gap-2">
                 <Label>Rol base</Label>
                 <Select

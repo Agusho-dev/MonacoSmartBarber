@@ -43,6 +43,7 @@ export default async function DashboardLayout({
   }
 
   let roleData = null
+  let allowedBranchIds: string[] | null = null
   if (staff.role_id) {
     const { data: role } = await supabase
       .from('roles')
@@ -50,6 +51,18 @@ export default async function DashboardLayout({
       .eq('id', staff.role_id)
       .single()
     roleData = role
+
+    // Fetch branch scope for this role
+    if (!isOwnerOrAdmin) {
+      const { data: scopeRows } = await supabase
+        .from('role_branch_scope')
+        .select('branch_id')
+        .eq('role_id', staff.role_id)
+
+      if (scopeRows && scopeRows.length > 0) {
+        allowedBranchIds = scopeRows.map((s) => s.branch_id)
+      }
+    }
   }
 
   // Get effective permissions
@@ -68,6 +81,7 @@ export default async function DashboardLayout({
     <DashboardShell
       user={{ full_name: staff.full_name, email: staff.email, role: staff.role }}
       permissions={userPermissions}
+      allowedBranchIds={allowedBranchIds}
     >
       {children}
     </DashboardShell>

@@ -106,7 +106,7 @@ export default async function EquipoPage() {
             .order('actual_completed_at', { ascending: false }),
         supabase
             .from('visits')
-            .select('id, amount, payment_method, commission_amount, started_at, completed_at, service:services(name), client:clients(name), barber:staff(id, full_name)')
+            .select('id, amount, payment_method, commission_amount, started_at, completed_at, branch_id, service:services(name), client:clients(name), barber:staff(id, full_name)')
             .gte('completed_at', fromDate)
             .order('completed_at', { ascending: false })
             .limit(500),

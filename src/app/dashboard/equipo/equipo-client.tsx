@@ -89,11 +89,15 @@ export function EquipoClient({
     const initialTabId = searchParams.get('tab') as TabId
     const firstAvailableTab = visibleTabs.length > 0 ? visibleTabs[0].id : null
 
-    const defaultTab = visibleTabs.some(t => t.id === initialTabId)
-        ? initialTabId
-        : firstAvailableTab
+    // Always initialize with first available tab to prevent SSR hydration mismatch.
+    const [activeTab, setActiveTab] = useState<TabId | null>(firstAvailableTab || null)
 
-    const [activeTab, setActiveTab] = useState<TabId | null>(defaultTab || null)
+    // Sync activeTab with URL params after hydration
+    useEffect(() => {
+        if (initialTabId && visibleTabs.some(t => t.id === initialTabId)) {
+            setActiveTab(initialTabId)
+        }
+    }, [initialTabId, visibleTabs])
     const { selectedBranchId, setSelectedBranchId } = useBranchStore()
 
     // Initialize branch in store if not set
@@ -151,24 +155,26 @@ export function EquipoClient({
             </div>
 
             {/* Tab navigation */}
-            <div className="flex gap-1 rounded-lg border bg-muted/50 p-1">
-                {visibleTabs.map((tab) => {
-                    return (
-                        <button
-                            key={tab.id}
-                            onClick={() => handleTabChange(tab.id)}
-                            className={cn(
-                                'flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all',
-                                activeTab === tab.id
-                                    ? 'bg-background text-foreground shadow-sm'
-                                    : 'text-muted-foreground hover:text-foreground'
-                            )}
-                        >
-                            <tab.icon className="size-4" />
-                            {tab.label}
-                        </button>
-                    )
-                })}
+            <div className="flex gap-1 overflow-x-auto pb-2 scrollbar-hide">
+                <div className="flex gap-1 rounded-lg border bg-muted/50 p-1 flex-nowrap min-w-max">
+                    {visibleTabs.map((tab) => {
+                        return (
+                            <button
+                                key={tab.id}
+                                onClick={() => handleTabChange(tab.id)}
+                                className={cn(
+                                    'flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all whitespace-nowrap',
+                                    activeTab === tab.id
+                                        ? 'bg-background text-foreground shadow-sm'
+                                        : 'text-muted-foreground hover:text-foreground'
+                                )}
+                            >
+                                <tab.icon className="size-4 shrink-0" />
+                                {tab.label}
+                            </button>
+                        )
+                    })}
+                </div>
             </div>
 
             {/* Tab content */}
@@ -176,7 +182,6 @@ export function EquipoClient({
                 {activeTab === 'barberos' && (
                     <BarberosClient
                         barbers={barbers as Parameters<typeof BarberosClient>[0]['barbers']}
-                        branches={branches as Parameters<typeof BarberosClient>[0]['branches']}
                         todayVisits={todayVisits as Parameters<typeof BarberosClient>[0]['todayVisits']}
                         roles={roles}
                         serviceHistory={serviceHistory as Parameters<typeof BarberosClient>[0]['serviceHistory']}
@@ -191,25 +196,19 @@ export function EquipoClient({
                                 .map((b: unknown) => ({
                                     id: (b as { id: string }).id,
                                     full_name: (b as { full_name: string }).full_name,
+                                    branch_id: (b as { branch_id: string }).branch_id,
                                 })) as Parameters<typeof HistorialServiciosClient>[0]['barbers']
                         }
-                        selectedBranchId={effectiveBranchId}
-                        branches={branches as { id: string; name: string }[]}
-                        onBranchChange={handleBranchChange}
                     />
                 )}
                 {activeTab === 'descansos' && (
                     <DescansosDashboard
                         breakConfigs={breakConfigs as Parameters<typeof DescansosDashboard>[0]['breakConfigs']}
-                        branches={branches as Parameters<typeof DescansosDashboard>[0]['branches']}
                         breakRequests={breakRequests as Parameters<typeof DescansosDashboard>[0]['breakRequests']}
-                        selectedBranchId={effectiveBranchId}
-                        onBranchChange={handleBranchChange}
                     />
                 )}
                 {activeTab === 'incentivos' && (
                     <IncentivosClient
-                        branches={branches as Parameters<typeof IncentivosClient>[0]['branches']}
                         rules={incentiveRules as Parameters<typeof IncentivosClient>[0]['rules']}
                         barbers={
                             (barbers as unknown[])
@@ -222,13 +221,10 @@ export function EquipoClient({
                         }
                         achievements={incentiveAchievements as Parameters<typeof IncentivosClient>[0]['achievements']}
                         defaultPeriod={defaultPeriod}
-                        selectedBranchId={effectiveBranchId}
-                        onBranchChange={handleBranchChange}
                     />
                 )}
                 {activeTab === 'disciplina' && (
                     <DisciplinaClient
-                        branches={branches as Parameters<typeof DisciplinaClient>[0]['branches']}
                         rules={disciplinaryRules as Parameters<typeof DisciplinaClient>[0]['rules']}
                         barbers={
                             (barbers as unknown[])
@@ -243,8 +239,6 @@ export function EquipoClient({
                         fromDate={fromDate}
                         activeBreakEntries={activeBreakEntries as Parameters<typeof DisciplinaClient>[0]['activeBreakEntries']}
                         breakOvertimeHistory={breakOvertimeHistory as Parameters<typeof DisciplinaClient>[0]['breakOvertimeHistory']}
-                        selectedBranchId={effectiveBranchId}
-                        onBranchChange={handleBranchChange}
                     />
                 )}
                 {activeTab === 'roles' && isOwner && (

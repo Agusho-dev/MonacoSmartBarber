@@ -20,10 +20,15 @@ export default async function IncentivosPage() {
 
   return (
     <IncentivosClient
-      branches={branches ?? []}
       rules={rules ?? []}
-      barbers={barbers ?? []}
-      achievements={achievements ?? []}
+      barbers={
+        (barbers ?? []).map((b) => ({
+          id: b.id,
+          full_name: b.full_name,
+          branch_id: b.branch_id,
+        }))
+      }
+      achievements={(achievements ?? []) as any}
       defaultPeriod={defaultPeriod}
     />
   )

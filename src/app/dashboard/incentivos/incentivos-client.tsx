@@ -51,13 +51,10 @@ interface AchievementWithRule extends Omit<IncentiveAchievement, 'rule'> {
 }
 
 interface Props {
-  branches: Branch[]
   rules: IncentiveRule[]
   barbers: BarberBasic[]
   achievements: AchievementWithRule[]
   defaultPeriod: string
-  selectedBranchId?: string
-  onBranchChange?: (id: string) => void
 }
 
 const METRIC_LABELS: Record<IncentiveMetric, string> = {
@@ -78,10 +75,8 @@ const EMPTY_FORM = {
   period: 'monthly' as IncentivePeriod,
 }
 
-export function IncentivosClient({ branches, rules, barbers, achievements, defaultPeriod, selectedBranchId: selectedBranchIdProp, onBranchChange }: Props) {
-  const { selectedBranchId: storeBranchId, setSelectedBranchId: setStoreBranchId } = useBranchStore()
-  const selectedBranchId = selectedBranchIdProp ?? storeBranchId ?? (branches[0]?.id ?? '')
-  const setSelectedBranchId = onBranchChange ?? setStoreBranchId
+export function IncentivosClient({ rules, barbers, achievements, defaultPeriod }: Props) {
+  const { selectedBranchId } = useBranchStore()
   const [selectedPeriod, setSelectedPeriod] = useState(defaultPeriod)
   const [ruleDialog, setRuleDialog] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
@@ -93,7 +88,7 @@ export function IncentivosClient({ branches, rules, barbers, achievements, defau
   const branchBarbers = barbers.filter((b) => b.branch_id === selectedBranchId)
 
   function openCreate() {
-    setForm({ ...EMPTY_FORM, branch_id: selectedBranchId })
+    setForm({ ...EMPTY_FORM, branch_id: selectedBranchId || '' })
     setRuleDialog(true)
   }
 
@@ -166,16 +161,6 @@ export function IncentivosClient({ branches, rules, barbers, achievements, defau
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="Sucursal" />
-            </SelectTrigger>
-            <SelectContent>
-              {branches.map((b) => (
-                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           <Button onClick={openCreate}>
             <Plus className="size-4 mr-2" />
             Nueva regla
@@ -293,15 +278,6 @@ export function IncentivosClient({ branches, rules, barbers, achievements, defau
           </DialogHeader>
           <form onSubmit={handleRuleSubmit} className="space-y-4">
             <div>
-              <Label>Sucursal</Label>
-              <Select value={form.branch_id} onValueChange={(v) => setForm((f) => ({ ...f, branch_id: v }))}>
-                <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
               <Label>Nombre</Label>
               <Input className="mt-1.5" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required />
             </div>
@@ -358,15 +334,19 @@ export function IncentivosClient({ branches, rules, barbers, achievements, defau
             <DialogTitle>Registrar logro — {selectedPeriod}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleAchieve} className="space-y-4">
-            <div>
-              <Label>Barbero</Label>
-              <Select value={achieveForm.staff_id} onValueChange={(v) => setAchieveForm((f) => ({ ...f, staff_id: v }))}>
-                <SelectTrigger className="mt-1.5"><SelectValue placeholder="Seleccionar barbero" /></SelectTrigger>
-                <SelectContent>
-                  {branchBarbers.map((b) => <SelectItem key={b.id} value={b.id}>{b.full_name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+              <div className="grid gap-2">
+                <Label>Aplica a...</Label>
+                <Select value={achieveForm.staff_id} onValueChange={(v) => setAchieveForm({ ...achieveForm, staff_id: v })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar barbero" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {branchBarbers.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>{b.full_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             <div>
               <Label>Incentivo alcanzado</Label>
               <Select value={achieveForm.rule_id} onValueChange={(v) => setAchieveForm((f) => ({ ...f, rule_id: v }))}>
