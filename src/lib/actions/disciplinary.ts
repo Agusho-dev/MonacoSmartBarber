@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { DisciplinaryEventType, ConsequenceType } from '@/lib/types/database'
 
@@ -66,7 +66,7 @@ export async function createDisciplinaryEvent(
   createdBy: string | null,
   source: string = 'manual'
 ) {
-  const supabase = await createClient()
+  const supabase = source === 'system' ? createAdminClient() : await createClient()
 
   // Count previous occurrences this month
   const startOfMonth = eventDate.slice(0, 7) + '-01'
