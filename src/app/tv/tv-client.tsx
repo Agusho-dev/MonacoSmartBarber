@@ -66,7 +66,7 @@ const waitingStyles = {
   },
 }
 
-// --- Hook de auto-scroll para TV ---
+// --- Hook de auto-scroll ping-pong para TV ---
 
 function useAutoScroll(enabled: boolean, speed: number = 0.5) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -76,6 +76,7 @@ function useAutoScroll(enabled: boolean, speed: number = 0.5) {
   const rafId = useRef(0)
   const pausedRef = useRef(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>(null)
+  const directionRef = useRef<'down' | 'up'>('down')
 
   // Detectar overflow
   useEffect(() => {
@@ -104,10 +105,11 @@ function useAutoScroll(enabled: boolean, speed: number = 0.5) {
     if (!needsScroll && containerRef.current) {
       containerRef.current.scrollTop = 0
       scrollPos.current = 0
+      directionRef.current = 'down'
     }
   }, [needsScroll])
 
-  // Animar scroll
+  // Animar scroll (ping-pong: baja → pausa → sube → pausa → repite)
   useEffect(() => {
     if (!needsScroll) return
     const container = containerRef.current
@@ -116,30 +118,48 @@ function useAutoScroll(enabled: boolean, speed: number = 0.5) {
 
     const animate = () => {
       if (pausedRef.current) return
-      const currentContent = contentRef.current
-      if (!currentContent) return
+      const el = containerRef.current
+      const contentEl = contentRef.current
+      if (!el || !contentEl) return
 
-      const singleHeight = currentContent.scrollHeight / 2
+      const maxScroll = contentEl.scrollHeight - el.clientHeight
 
-      scrollPos.current += speed
-
-      if (scrollPos.current >= singleHeight) {
-        scrollPos.current = 0
-        container.scrollTop = 0
-        pausedRef.current = true
-        timeoutRef.current = setTimeout(() => {
-          pausedRef.current = false
-          rafId.current = requestAnimationFrame(animate)
-        }, 3000)
-        return
+      if (directionRef.current === 'down') {
+        scrollPos.current += speed
+        if (scrollPos.current >= maxScroll) {
+          scrollPos.current = maxScroll
+          el.scrollTop = maxScroll
+          directionRef.current = 'up'
+          pausedRef.current = true
+          timeoutRef.current = setTimeout(() => {
+            pausedRef.current = false
+            rafId.current = requestAnimationFrame(animate)
+          }, 3000)
+          return
+        }
+      } else {
+        scrollPos.current -= speed
+        if (scrollPos.current <= 0) {
+          scrollPos.current = 0
+          el.scrollTop = 0
+          directionRef.current = 'down'
+          pausedRef.current = true
+          timeoutRef.current = setTimeout(() => {
+            pausedRef.current = false
+            rafId.current = requestAnimationFrame(animate)
+          }, 3000)
+          return
+        }
       }
 
-      container.scrollTop = scrollPos.current
+      el.scrollTop = scrollPos.current
       rafId.current = requestAnimationFrame(animate)
     }
 
     // Pausa inicial antes de empezar
     pausedRef.current = true
+    directionRef.current = 'down'
+    scrollPos.current = 0
     timeoutRef.current = setTimeout(() => {
       pausedRef.current = false
       rafId.current = requestAnimationFrame(animate)
@@ -505,13 +525,6 @@ export function TvClient({
               ) : (
                 <>
                   {inProgressEntries.map((entry) => renderInProgressCard(entry, entry.id))}
-                  {/* Duplicado para loop continuo */}
-                  {ipScroll.needsScroll && (
-                    <>
-                      <div className="h-8 2xl:h-12 shrink-0" />
-                      {inProgressEntries.map((entry) => renderInProgressCard(entry, `dup-${entry.id}`))}
-                    </>
-                  )}
                 </>
               )}
             </div>
@@ -552,13 +565,6 @@ export function TvClient({
               ) : (
                 <>
                   {waitingEntries.map((entry, index) => renderWaitingCard(entry, index, entry.id))}
-                  {/* Duplicado para loop continuo */}
-                  {wScroll.needsScroll && (
-                    <>
-                      <div className="h-8 2xl:h-12 shrink-0" />
-                      {waitingEntries.map((entry, index) => renderWaitingCard(entry, index, `dup-${entry.id}`))}
-                    </>
-                  )}
                 </>
               )}
             </div>
