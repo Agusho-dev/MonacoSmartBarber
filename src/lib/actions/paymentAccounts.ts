@@ -193,22 +193,45 @@ export async function getAllAccountBalanceTotals(branchId?: string | null) {
   }
 
   const { data: accounts } = await accountsQuery
-  if (!accounts?.length) return []
+  const accountIds = accounts?.map(a => a.id) || []
 
-  const accountIds = accounts.map(a => a.id)
+  // Fetch transfers and expenses for real accounts
+  const [
+    { data: allTransfers },
+    { data: allExpenses },
+  ] = await Promise.all([
+    accountIds.length > 0
+      ? supabase.from('transfer_logs').select('payment_account_id, amount').in('payment_account_id', accountIds)
+      : Promise.resolve({ data: [] }),
+    accountIds.length > 0
+      ? supabase.from('expense_tickets').select('payment_account_id, amount').in('payment_account_id', accountIds)
+      : Promise.resolve({ data: [] }),
+  ])
+  
+  // Calculate cash balance
+  // Income from cash visits
+  let cashVisitsQuery = supabase
+    .from('visits')
+    .select('amount')
+    .eq('payment_method', 'cash')
+  if (branchId) cashVisitsQuery = cashVisitsQuery.eq('branch_id', branchId)
+  
+  // Expenses in cash (no payment account)
+  let cashExpensesQuery = supabase
+    .from('expense_tickets')
+    .select('amount')
+    .is('payment_account_id', null)
+  if (branchId) cashExpensesQuery = cashExpensesQuery.eq('branch_id', branchId)
 
-  const [{ data: allTransfers }, { data: allExpenses }] = await Promise.all([
-    supabase
-      .from('transfer_logs')
-      .select('payment_account_id, amount')
-      .in('payment_account_id', accountIds),
-    supabase
-      .from('expense_tickets')
-      .select('payment_account_id, amount')
-      .in('payment_account_id', accountIds),
+  const [{ data: cashVisits }, { data: cashExpenses }] = await Promise.all([
+    cashVisitsQuery,
+    cashExpensesQuery
   ])
 
-  return accounts.map(acc => {
+  const cashIncome = (cashVisits ?? []).reduce((s, v) => s + Number(v.amount), 0)
+  const cashTotalExpenses = (cashExpenses ?? []).reduce((s, e) => s + Number(e.amount), 0)
+
+  const balances = (accounts || []).map(acc => {
     const income = (allTransfers ?? [])
       .filter(t => t.payment_account_id === acc.id)
       .reduce((s, t) => s + Number(t.amount), 0)
@@ -223,6 +246,17 @@ export async function getAllAccountBalanceTotals(branchId?: string | null) {
       expenses,
     }
   })
+
+  // Add virtual cash account
+  balances.push({
+    id: 'cash_virtual_id',
+    name: 'Efectivo en caja',
+    balance: cashIncome - cashTotalExpenses,
+    income: cashIncome,
+    expenses: cashTotalExpenses
+  })
+
+  return balances
 }
 
 export async function getAccountBalanceSummary(accountId: string) {

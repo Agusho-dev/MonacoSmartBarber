@@ -117,9 +117,14 @@ export function FinanzasClient({
   }
 
   const expensesByCategory = useMemo(() => {
-    const filtered = expenseAccountFilter === '__all__'
-      ? expenseTickets
-      : expenseTickets.filter(t => t.payment_account_id === expenseAccountFilter)
+    let filtered = expenseTickets
+    if (expenseAccountFilter !== '__all__') {
+      if (expenseAccountFilter === '__cash__') {
+        filtered = filtered.filter(t => !t.payment_account_id)
+      } else {
+        filtered = filtered.filter(t => t.payment_account_id === expenseAccountFilter)
+      }
+    }
 
     const branchFiltered = selectedBranchId
       ? filtered.filter(t => t.branch_id === selectedBranchId)
@@ -356,6 +361,7 @@ export function FinanzasClient({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__all__">Todas las cuentas</SelectItem>
+                  <SelectItem value="__cash__">Efectivo</SelectItem>
                   {filteredAccounts.map((acc) => (
                     <SelectItem key={acc.id} value={acc.id}>
                       {acc.name}
