@@ -89,7 +89,7 @@ export default function CheckinPage() {
   const [barbers, setBarbers] = useState<Staff[]>([])
   const [queueEntries, setQueueEntries] = useState<QueueEntry[]>([])
   const [barberAvgMinutes, setBarberAvgMinutes] = useState<Record<string, number>>({})
-  const [monthlyServiceCounts, setMonthlyServiceCounts] = useState<Record<string, number>>({})
+  const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
   const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
   const [loadingBarbers, setLoadingBarbers] = useState(false)
 
@@ -189,9 +189,8 @@ export default function CheckinPage() {
       const supabase = createClient()
       setLoadingBarbers(true)
 
-      const monthStart = new Date()
-      monthStart.setDate(1)
-      monthStart.setHours(0, 0, 0, 0)
+      const dayStart = new Date()
+      dayStart.setHours(0, 0, 0, 0)
 
       const [staffRes, queueRes, visitsRes, availableRes, openRes, attendanceRes, servicesRes, schedulesRes, settingsRes, monthlyVisitsRes] = await Promise.all([
         supabase
@@ -240,7 +239,7 @@ export default function CheckinPage() {
           .from('visits')
           .select('barber_id')
           .eq('branch_id', branchId)
-          .gte('completed_at', monthStart.toISOString())
+          .gte('completed_at', dayStart.toISOString())
           .not('barber_id', 'is', null),
       ])
 
@@ -343,7 +342,7 @@ export default function CheckinPage() {
         for (const v of monthlyVisitsRes.data as { barber_id: string }[]) {
           counts[v.barber_id] = (counts[v.barber_id] || 0) + 1
         }
-        setMonthlyServiceCounts(counts)
+        setDailyServiceCounts(counts)
       }
       setLoadingBarbers(false)
     },
@@ -454,7 +453,7 @@ export default function CheckinPage() {
     setBarbers([])
     setQueueEntries([])
     setBarberAvgMinutes({})
-    setMonthlyServiceCounts({})
+    setDailyServiceCounts({})
     setLastCompletedAt({})
     setLoadingBarbers(false)
 
@@ -585,8 +584,8 @@ export default function CheckinPage() {
   }
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(queueEntries, barbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt, notClockedInBarbers)
-  }, [queueEntries, barbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt, notClockedInBarbers])
+    return assignDynamicBarbers(queueEntries, barbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers)
+  }, [queueEntries, barbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
 
   const maxLoad = useMemo(
     () =>
@@ -611,8 +610,8 @@ export default function CheckinPage() {
         bestLoad = load
         best = active[i]
       } else if (load === bestLoad) {
-        const countI = monthlyServiceCounts[active[i].id] || 0
-        const countBest = monthlyServiceCounts[best.id] || 0
+        const countI = dailyServiceCounts[active[i].id] || 0
+        const countBest = dailyServiceCounts[best.id] || 0
         if (countI < countBest) {
           best = active[i]
           bestLoad = load
@@ -630,7 +629,7 @@ export default function CheckinPage() {
       }
     }
     return best
-  }, [barbers, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers, monthlyServiceCounts, lastCompletedAt])
+  }, [barbers, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers, dailyServiceCounts, lastCompletedAt])
 
   const minWaitEta = useMemo(() => {
     if (!minWaitBarber) return 0

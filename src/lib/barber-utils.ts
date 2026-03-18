@@ -150,7 +150,7 @@ export function assignDynamicBarbers(
   schedules: StaffSchedule[],
   currentTime: number,
   marginMinutes = 35,
-  monthlyServiceCounts: Record<string, number> = {},
+  dailyServiceCounts: Record<string, number> = {},
   lastCompletedAt: Record<string, string> = {},
   notClockedInIds: Set<string> = new Set()
 ): DynamicQueueEntry[] {
@@ -176,6 +176,14 @@ export function assignDynamicBarbers(
     if (!barberLoad.has(b.id)) {
       barberLoad.set(b.id, 0)
     }
+    const lastCompleted = lastCompletedAt[b.id]
+    if (lastCompleted) {
+      const elapsedMs = currentTime - new Date(lastCompleted).getTime()
+      // Cooldown de 1 min: tratar temporalmente como ocupado sumándole +1 carga para no robar clientes en camino
+      if (elapsedMs > 0 && elapsedMs < 60000) {
+        barberLoad.set(b.id, barberLoad.get(b.id)! + 1)
+      }
+    }
   }
 
   unassigned.sort((a, b) => a.position - b.position)
@@ -197,8 +205,8 @@ export function assignDynamicBarbers(
       const loadB = barberLoad.get(b.id) || 0
       if (loadA !== loadB) return loadA - loadB
 
-      const countA = monthlyServiceCounts[a.id] || 0
-      const countB = monthlyServiceCounts[b.id] || 0
+      const countA = dailyServiceCounts[a.id] || 0
+      const countB = dailyServiceCounts[b.id] || 0
       if (countA !== countB) return countA - countB
 
       // Prefer the barber who has been idle the longest (earliest completed_at)

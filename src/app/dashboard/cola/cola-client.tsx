@@ -67,7 +67,7 @@ export function ColaClient({
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [now, setNow] = useState(Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
-  const [monthlyServiceCounts, setMonthlyServiceCounts] = useState<Record<string, number>>({})
+  const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
   const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
   const [latestAttendance, setLatestAttendance] = useState<Record<string, string>>({})
 
@@ -96,9 +96,8 @@ export function ColaClient({
   }, [supabase])
 
   const fetchSchedules = useCallback(async () => {
-    const monthStart = new Date()
-    monthStart.setDate(1)
-    monthStart.setHours(0, 0, 0, 0)
+    const dayStart = new Date()
+    dayStart.setHours(0, 0, 0, 0)
 
     const [schedRes, settingsRes, monthlyVisitsRes, lastVisitsRes, attendanceRes] = await Promise.all([
       supabase
@@ -113,7 +112,7 @@ export function ColaClient({
       supabase
         .from('visits')
         .select('barber_id')
-        .gte('completed_at', monthStart.toISOString())
+        .gte('completed_at', dayStart.toISOString())
         .not('barber_id', 'is', null),
       supabase
         .from('visits')
@@ -137,7 +136,7 @@ export function ColaClient({
       for (const v of monthlyVisitsRes.data as { barber_id: string }[]) {
         counts[v.barber_id] = (counts[v.barber_id] || 0) + 1
       }
-      setMonthlyServiceCounts(counts)
+      setDailyServiceCounts(counts)
     }
     if (lastVisitsRes?.data) {
       const lastMap: Record<string, string> = {}
@@ -214,8 +213,8 @@ export function ColaClient({
   }, [liveBarbers, latestAttendance])
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(entries, liveBarbers as unknown as Staff[], schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt, notClockedInBarbers)
-  }, [entries, liveBarbers, schedules, now, shiftEndMargin, monthlyServiceCounts, lastCompletedAt, notClockedInBarbers])
+    return assignDynamicBarbers(entries, liveBarbers as unknown as Staff[], schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers)
+  }, [entries, liveBarbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
 
   // Filter by selected branch
   const filteredEntries = selectedBranchId
