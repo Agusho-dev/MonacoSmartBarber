@@ -26,6 +26,7 @@ export interface TrendPoint {
 export interface MethodRevenue {
   method: string
   amount: number
+  cuts: number
 }
 
 export interface Segmentation {
@@ -152,12 +153,15 @@ export async function fetchStats(
     .sort((a, b) => a.date.localeCompare(b.date))
 
   // Revenue by payment method
-  const methodAgg = new Map<string, number>()
+  const methodAgg = new Map<string, { amount: number; cuts: number }>()
   for (const v of safe) {
-    methodAgg.set(v.payment_method, (methodAgg.get(v.payment_method) || 0) + v.amount)
+    const d = methodAgg.get(v.payment_method) || { amount: 0, cuts: 0 }
+    d.amount += v.amount
+    d.cuts++
+    methodAgg.set(v.payment_method, d)
   }
   const revenueByMethod: MethodRevenue[] = [...methodAgg.entries()].map(
-    ([method, amount]) => ({ method, amount })
+    ([method, d]) => ({ method, amount: d.amount, cuts: d.cuts })
   )
 
   // Segmentation

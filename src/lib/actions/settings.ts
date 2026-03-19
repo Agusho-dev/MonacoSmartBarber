@@ -58,6 +58,92 @@ export async function updateAppSettings(formData: FormData) {
   return { success: true }
 }
 
+function validateHttpsUrl(url: string): boolean {
+  try {
+    return new URL(url).protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+export async function updateWaApiUrl(waApiUrl: string) {
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const value = waApiUrl.trim() || null
+
+  if (value && !validateHttpsUrl(value)) {
+    return { error: 'La URL del microservicio debe usar HTTPS' }
+  }
+
+  const { data: existing } = await supabase
+    .from('app_settings')
+    .select('id')
+    .maybeSingle()
+
+  let opError
+  if (existing) {
+    const { error } = await supabase
+      .from('app_settings')
+      .update({ wa_api_url: value })
+      .eq('id', existing.id)
+    opError = error
+  } else {
+    const { error } = await supabase
+      .from('app_settings')
+      .insert([{ wa_api_url: value }])
+    opError = error
+  }
+
+  if (opError) return { error: opError.message }
+  revalidatePath('/dashboard/configuracion')
+  return { success: true }
+}
+
+export async function updateReviewAutoConfig(data: {
+  reviewAutoSend: boolean
+  reviewDelayMinutes: number
+  reviewMessageTemplate: string
+  waApiUrl: string
+}) {
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const { data: existing } = await supabase
+    .from('app_settings')
+    .select('id')
+    .maybeSingle()
+
+  const updateData = {
+    review_auto_send: data.reviewAutoSend,
+    review_delay_minutes: data.reviewDelayMinutes,
+    review_message_template: data.reviewMessageTemplate || null,
+    wa_api_url: data.waApiUrl.trim() || null,
+  }
+
+  let opError
+  if (existing) {
+    const { error } = await supabase
+      .from('app_settings')
+      .update(updateData)
+      .eq('id', existing.id)
+    opError = error
+  } else {
+    const { error } = await supabase
+      .from('app_settings')
+      .insert([updateData])
+    opError = error
+  }
+
+  if (opError) return { error: opError.message }
+  revalidatePath('/dashboard/configuracion')
+  return { success: true }
+}
+
 export async function updateRewardsConfig(formData: FormData) {
   const supabase = await createClient()
 

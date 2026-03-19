@@ -295,6 +295,10 @@ export interface AppSettings {
   business_days: number[]
   shift_end_margin_minutes: number
   next_client_alert_minutes: number
+  review_auto_send: boolean
+  review_delay_minutes: number
+  review_message_template: string | null
+  wa_api_url: string | null
   updated_at: string
 }
 
@@ -596,7 +600,7 @@ export interface MessageTemplate {
 
 export interface ScheduledMessage {
   id: string
-  channel_id: string
+  channel_id: string | null  // nullable — mensajes vía WA Microservice no usan canal Meta
   client_id: string
   template_id: string | null
   content: string | null
@@ -606,6 +610,7 @@ export interface ScheduledMessage {
   sent_at: string | null
   error_message: string | null
   created_by: string | null
+  phone: string | null       // teléfono directo para envío por WA Microservice
   created_at: string
   channel?: SocialChannel
   client?: Client

@@ -4,7 +4,8 @@ import { useState, useEffect, useMemo, useRef, useCallback, useTransition } from
 import {
   MessageSquare, Search, Send, Phone, Instagram, Clock,
   Calendar, X, Plus, Filter, ArrowLeft,
-  CheckCheck, Check, AlertCircle, Image as ImageIcon
+  CheckCheck, Check, AlertCircle, Image as ImageIcon,
+  Settings, Smartphone, Wifi, WifiOff, QrCode, RefreshCw, LogOut, Star, Save,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -13,9 +14,14 @@ import {
   scheduleMessage,
   cancelScheduledMessage,
 } from '@/lib/actions/messaging'
+import { updateWaApiUrl, updateReviewAutoConfig } from '@/lib/actions/settings'
+import { getWhatsAppStatus, getWhatsAppQR, logoutWhatsApp } from '@/lib/actions/whatsapp'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -32,7 +38,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { toast } from 'sonner'
-import type { Conversation, Message, SocialChannel, ScheduledMessage, Client } from '@/lib/types/database'
+import type { AppSettings, Conversation, Message, SocialChannel, ScheduledMessage, Client } from '@/lib/types/database'
 
 // ============================================
 // Platform icons and colors
@@ -144,6 +150,7 @@ interface Props {
   scheduledMessages: ScheduledWithRelations[]
   templates: any[]
   clients: Pick<Client, 'id' | 'name' | 'phone'>[]
+  appSettings: AppSettings | null
 }
 
 type TabView = 'inbox' | 'scheduled'
@@ -153,7 +160,8 @@ export function MensajeriaClient({
   channels,
   scheduledMessages: initialScheduled,
   templates,
-  clients
+  clients,
+  appSettings,
 }: Props) {
   const supabase = useMemo(() => createClient(), [])
   const [conversations, setConversations] = useState(initialConversations)
@@ -174,6 +182,7 @@ export function MensajeriaClient({
     scheduledFor: '',
   })
   const [showMobileChat, setShowMobileChat] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Load messages when active conversation changes
@@ -353,7 +362,7 @@ export function MensajeriaClient({
         {/* Header */}
         <div className="flex items-center justify-between p-4 pb-3">
           <h2 className="text-lg font-bold tracking-tight">Mensajería</h2>
-          <div className="flex gap-1">
+          <div className="flex items-center gap-1">
             <Button
               variant={activeTab === 'inbox' ? 'default' : 'ghost'}
               size="sm"
@@ -371,6 +380,15 @@ export function MensajeriaClient({
             >
               <Calendar className="mr-1 size-3" />
               Programados
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowSettings(true)}
+              className="h-7 w-7 ml-1"
+              title="Configuración de WhatsApp"
+            >
+              <Settings className="size-3.5" />
             </Button>
           </div>
         </div>
@@ -858,6 +876,272 @@ export function MensajeriaClient({
 
       {/* Schedule dialog */}
       <ScheduleDialog />
+
+      {/* Settings sheet — WhatsApp + Reseña automática */}
+      <Sheet open={showSettings} onOpenChange={setShowSettings}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader className="pb-4">
+            <SheetTitle className="flex items-center gap-2">
+              <Settings className="size-4" />
+              Configuración de mensajería
+            </SheetTitle>
+          </SheetHeader>
+          <div className="space-y-6">
+            <WaConfigSection settings={appSettings} />
+            <Separator />
+            <ReviewAutoSection settings={appSettings} />
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  )
+}
+
+// ============================================
+// WA Config Section — dentro del Sheet de configuración
+// ============================================
+
+type WaStatus = 'connected' | 'disconnected' | 'qr_pending' | 'not_configured' | 'loading'
+
+function WaConfigSection({ settings }: { settings: AppSettings | null }) {
+  const [waUrl, setWaUrl] = useState(settings?.wa_api_url ?? '')
+  const [status, setStatus] = useState<WaStatus>('loading')
+  const [qrCode, setQrCode] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  const checkStatus = async () => {
+    const result = await getWhatsAppStatus()
+    setStatus(result.status)
+    if (result.status === 'qr_pending') {
+      const qrResult = await getWhatsAppQR()
+      setQrCode(qrResult.qr)
+    } else {
+      setQrCode(null)
+    }
+  }
+
+  useEffect(() => {
+    checkStatus()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (status !== 'qr_pending') return
+    const interval = setInterval(checkStatus, 5000)
+    return () => clearInterval(interval)
+  }, [status]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSaveUrl = () => {
+    startTransition(async () => {
+      const result = await updateWaApiUrl(waUrl)
+      if (result.error) toast.error(result.error)
+      else {
+        toast.success('URL guardada')
+        await checkStatus()
+      }
+    })
+  }
+
+  const handleLogout = () => {
+    startTransition(async () => {
+      const result = await logoutWhatsApp()
+      if (result.error) toast.error(result.error)
+      else {
+        toast.success('WhatsApp desconectado')
+        setStatus('disconnected')
+        setQrCode(null)
+      }
+    })
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Título + estado */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Smartphone className="size-4 text-muted-foreground" />
+          <span className="text-sm font-semibold">WhatsApp de la barbería</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {status === 'connected' && (
+            <Badge className="h-5 gap-1 bg-green-500/15 text-green-400 border-green-500/25 text-[10px]">
+              <Wifi className="size-2.5" /> Conectado
+            </Badge>
+          )}
+          {status === 'disconnected' && (
+            <Badge variant="outline" className="h-5 text-[10px] text-muted-foreground">
+              <WifiOff className="mr-1 size-2.5" /> Desconectado
+            </Badge>
+          )}
+          {status === 'qr_pending' && (
+            <Badge className="h-5 gap-1 bg-yellow-500/15 text-yellow-400 border-yellow-500/25 text-[10px]">
+              <QrCode className="size-2.5" /> Esperando QR
+            </Badge>
+          )}
+          {status === 'not_configured' && (
+            <Badge variant="outline" className="h-5 text-[10px] text-muted-foreground">
+              Sin configurar
+            </Badge>
+          )}
+          {status === 'loading' && (
+            <div className="size-3.5 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground" />
+          )}
+        </div>
+      </div>
+
+      {/* URL del microservicio */}
+      <div className="space-y-1.5">
+        <Label className="text-xs">URL del microservicio</Label>
+        <div className="flex gap-2">
+          <Input
+            value={waUrl}
+            onChange={(e) => setWaUrl(e.target.value)}
+            placeholder="https://msb-wa.up.railway.app"
+            className="h-8 text-xs"
+          />
+          <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={handleSaveUrl} disabled={isPending}>
+            <Save className="size-3.5" />
+          </Button>
+        </div>
+        <p className="text-[11px] text-muted-foreground">Railway/Render donde corre Baileys</p>
+      </div>
+
+      {/* QR code */}
+      {status === 'qr_pending' && qrCode && (
+        <div className="flex flex-col items-center gap-3 rounded-lg border bg-white p-4">
+          <p className="text-sm font-medium text-black">Escaneá con WhatsApp</p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={qrCode} alt="Código QR de WhatsApp" className="size-44" />
+          <p className="text-center text-[11px] text-gray-500">
+            WhatsApp → Dispositivos vinculados → Vincular dispositivo
+          </p>
+        </div>
+      )}
+
+      {/* Acciones */}
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" onClick={checkStatus} disabled={isPending} className="flex-1 h-8 text-xs">
+          <RefreshCw className="mr-1.5 size-3" />
+          Actualizar
+        </Button>
+        {status === 'connected' && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleLogout}
+            disabled={isPending}
+            className="h-8 text-xs text-red-400 border-red-500/30 hover:bg-red-500/10"
+          >
+            <LogOut className="mr-1.5 size-3" />
+            Desconectar
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ============================================
+// Review Auto Section — dentro del Sheet de configuración
+// ============================================
+
+const REVIEW_VARIABLES = ['{nombre}', '{barbero}', '{servicio}', '{link_resena}']
+const DEFAULT_TEMPLATE =
+  '¡Hola {nombre}! Gracias por visitarnos en Monaco Smart Barber 💈. Nos encantaría saber qué te pareció tu experiencia. Dejanos tu opinión acá: {link_resena} ⭐'
+
+function ReviewAutoSection({ settings }: { settings: AppSettings | null }) {
+  const [autoSend, setAutoSend] = useState(settings?.review_auto_send ?? false)
+  const [delayMinutes, setDelayMinutes] = useState(settings?.review_delay_minutes ?? 15)
+  const [template, setTemplate] = useState(settings?.review_message_template ?? DEFAULT_TEMPLATE)
+  const [isPending, startTransition] = useTransition()
+
+  const preview = template
+    .replaceAll('{nombre}', 'Juan')
+    .replaceAll('{barbero}', 'Carlos')
+    .replaceAll('{servicio}', 'Corte de cabello')
+    .replaceAll('{link_resena}', 'https://monaco.app/review/abc123')
+
+  const handleSave = () => {
+    startTransition(async () => {
+      const result = await updateReviewAutoConfig({
+        reviewAutoSend: autoSend,
+        reviewDelayMinutes: delayMinutes,
+        reviewMessageTemplate: template,
+        waApiUrl: settings?.wa_api_url ?? '',
+      })
+      if (result.error) toast.error(result.error)
+      else toast.success('Configuración de reseña guardada')
+    })
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Título + toggle */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Star className="size-4 text-muted-foreground" />
+          <span className="text-sm font-semibold">Reseña automática</span>
+        </div>
+        <Switch checked={autoSend} onCheckedChange={setAutoSend} />
+      </div>
+
+      <p className="text-[11px] text-muted-foreground -mt-2">
+        Enviá un mensaje de WhatsApp pidiendo reseña al finalizar el servicio
+      </p>
+
+      {/* Delay */}
+      <div className="space-y-1.5">
+        <Label className="text-xs">Enviar a los</Label>
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            min={1}
+            max={120}
+            value={delayMinutes}
+            onChange={(e) => setDelayMinutes(Number(e.target.value))}
+            className="h-8 w-20 text-xs"
+          />
+          <span className="text-xs text-muted-foreground">minutos de finalizar</span>
+        </div>
+      </div>
+
+      {/* Template */}
+      <div className="space-y-1.5">
+        <Label className="text-xs">Mensaje</Label>
+        <div className="flex flex-wrap gap-1">
+          {REVIEW_VARIABLES.map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setTemplate((prev) => prev + v)}
+              className="rounded border bg-muted px-1.5 py-0.5 text-[11px] font-mono hover:bg-muted/70 transition-colors"
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+        <Textarea
+          value={template}
+          onChange={(e) => setTemplate(e.target.value)}
+          rows={4}
+          placeholder="Escribí el mensaje..."
+          className="text-xs resize-none"
+        />
+      </div>
+
+      {/* Preview */}
+      <div className="rounded-lg bg-muted/50 p-3">
+        <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          Vista previa
+        </p>
+        <p className="text-[11px] text-muted-foreground whitespace-pre-wrap break-words leading-relaxed">
+          {preview}
+        </p>
+      </div>
+
+      <Button onClick={handleSave} disabled={isPending} size="sm" className="w-full">
+        <Save className="mr-2 size-3.5" />
+        {isPending ? 'Guardando...' : 'Guardar configuración'}
+      </Button>
     </div>
   )
 }

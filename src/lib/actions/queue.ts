@@ -146,7 +146,7 @@ export async function completeService(
   // 2. Get the visit created by the trigger
   const { data: visit } = await supabase
     .from('visits')
-    .select('id, client_id, branch_id, barber_id, commission_pct')
+    .select('id, client_id, branch_id, barber_id, commission_pct, service_id')
     .eq('queue_entry_id', queueEntryId)
     .single()
 
@@ -363,6 +363,86 @@ export async function completeService(
         })
         .eq('id', nextGhost.id)
       breakAutoStarted = true
+    }
+  }
+
+  // 7. Envío automático de mensaje de reseña por WhatsApp
+  //    Lee la config, crea review_request y programa el mensaje para enviarse después del delay
+  if (visit.client_id) {
+    const { data: settings } = await supabase
+      .from('app_settings')
+      .select('review_auto_send, review_delay_minutes, review_message_template, wa_api_url')
+      .maybeSingle()
+
+    if (settings?.review_auto_send && settings?.wa_api_url) {
+      const { data: client } = await supabase
+        .from('clients')
+        .select('name, phone')
+        .eq('id', visit.client_id)
+        .single()
+
+      if (client?.phone) {
+        // Crear review_request para generar el token de reseña
+        const token = crypto.randomUUID()
+        const expiresAt = new Date()
+        expiresAt.setDate(expiresAt.getDate() + 7)
+
+        const { data: reviewRequest } = await supabase
+          .from('review_requests')
+          .insert({
+            client_id: visit.client_id,
+            branch_id: visit.branch_id,
+            visit_id: visit.id,
+            barber_id: visit.barber_id,
+            token,
+            status: 'pending',
+            expires_at: expiresAt.toISOString(),
+          })
+          .select('token')
+          .single()
+
+        if (reviewRequest) {
+          const effectiveServiceId = serviceId || visit.service_id
+
+          const [{ data: barber }, { data: service }] = await Promise.all([
+            visit.barber_id
+              ? supabase.from('staff').select('full_name').eq('id', visit.barber_id).single()
+              : Promise.resolve({ data: null }),
+            effectiveServiceId
+              ? supabase.from('services').select('name').eq('id', effectiveServiceId).single()
+              : Promise.resolve({ data: null }),
+          ])
+
+          const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://monaco.app'
+          const reviewUrl = `${appUrl}/review/${reviewRequest.token}`
+
+          const template = settings?.review_message_template ||
+            '¡Hola {nombre}! Gracias por visitarnos 💈. Dejanos tu reseña: {link_resena}'
+
+          // Formatear nombre: primera palabra, primera letra mayúscula y resto minúscula
+          // Ej: "JUAN PEREZ" → "Juan", "jUan" → "Juan", "martin soba" → "Martin"
+          const firstName = client.name.trim().split(/\s+/)[0]
+          const formattedName = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase()
+
+          const message = template
+            .replaceAll('{nombre}', formattedName)
+            .replaceAll('{barbero}', barber?.full_name || 'tu barbero')
+            .replaceAll('{servicio}', service?.name || 'el servicio')
+            .replaceAll('{link_resena}', reviewUrl)
+
+          const delayMinutes = settings?.review_delay_minutes ?? 15
+          const scheduledFor = new Date()
+          scheduledFor.setMinutes(scheduledFor.getMinutes() + delayMinutes)
+
+          await supabase.from('scheduled_messages').insert({
+            client_id: visit.client_id,
+            content: message,
+            scheduled_for: scheduledFor.toISOString(),
+            phone: client.phone,
+            status: 'pending',
+          })
+        }
+      }
     }
   }
 

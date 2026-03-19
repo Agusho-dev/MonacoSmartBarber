@@ -247,6 +247,7 @@ function SummaryCard({
 
 function ChartTooltip({ active, payload, label }: Record<string, unknown>) {
   if (!active || !Array.isArray(payload) || payload.length === 0) return null
+  const item = payload[0].payload as Record<string, unknown>
   return (
     <div className="rounded-lg border bg-card p-3 shadow-md">
       <p className="mb-1 text-sm font-medium text-foreground">{String(label)}</p>
@@ -258,6 +259,11 @@ function ChartTooltip({ active, payload, label }: Record<string, unknown>) {
             : String(p.value)}
         </p>
       ))}
+      {item.cuts !== undefined && typeof item.amount !== 'undefined' && (
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Cortes: {String(item.cuts)}
+        </p>
+      )}
     </div>
   )
 }
@@ -273,6 +279,7 @@ function TrendsTab({ data }: { data: StatsData }) {
   const methodData = data.revenueByMethod.map((m) => ({
     name: METHOD_LABELS[m.method] ?? m.method,
     amount: m.amount,
+    cuts: m.cuts,
   }))
 
   return (

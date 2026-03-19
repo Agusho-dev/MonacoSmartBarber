@@ -11,6 +11,7 @@ import {
   upsertServiceTag,
   deleteServiceTag,
 } from '@/lib/actions/tags'
+import { HistorialServicios } from './historial-servicios'
 import type { Service, Branch, ServiceTag, ServiceAvailability, Staff, StaffServiceCommission } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -606,6 +607,11 @@ export function ServiciosClient({ services, branches, tags, barbers, commissions
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Separator />
+
+      {/* History section */}
+      <HistorialServicios branches={branches} barbers={barbers} />
     </div>
   )
 }
