@@ -2,9 +2,9 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Power, Trash2, Package, TrendingUp } from 'lucide-react'
+import { Plus, Pencil, Power, Trash2, Package, TrendingUp, ShoppingCart } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
-import { upsertProduct, toggleProduct, deleteProduct } from '@/lib/actions/products'
+import { upsertProduct, toggleProduct, deleteProduct, sellProduct } from '@/lib/actions/products'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import type { Product, Branch, ProductSale } from '@/lib/types/database'
@@ -50,10 +50,17 @@ import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 
+interface BarberMinimal {
+    id: string
+    full_name: string
+    branch_id: string | null
+}
+
 interface Props {
     products: Product[]
     branches: Branch[]
     sales: ProductSale[]
+    barbers: BarberMinimal[]
 }
 
 const emptyForm = {
@@ -65,7 +72,7 @@ const emptyForm = {
     branch_id: '',
 }
 
-export function ProductosClient({ products, branches, sales }: Props) {
+export function ProductosClient({ products, branches, sales, barbers }: Props) {
     const router = useRouter()
     const { selectedBranchId } = useBranchStore()
 
@@ -78,6 +85,12 @@ export function ProductosClient({ products, branches, sales }: Props) {
     // Delete state
     const [deleteId, setDeleteId] = useState<string | null>(null)
     const [deleting, setDeleting] = useState(false)
+
+    // Sell state
+    const [sellDialogOpen, setSellDialogOpen] = useState(false)
+    const [sellingProduct, setSellingProduct] = useState<Product | null>(null)
+    const [sellForm, setSellForm] = useState({ barber_id: '', quantity: '1' })
+    const [selling, setSelling] = useState(false)
 
     const filteredProducts = selectedBranchId
         ? products.filter((p) => p.branch_id === selectedBranchId)
@@ -153,6 +166,40 @@ export function ProductosClient({ products, branches, sales }: Props) {
     const getBranchName = (id: string) => {
         return branches.find((b) => b.id === id)?.name ?? 'Desconocida'
     }
+
+    function openSell(product: Product) {
+        setSellingProduct(product)
+        setSellForm({ barber_id: '', quantity: '1' })
+        setSellDialogOpen(true)
+    }
+
+    async function handleSell() {
+        if (!sellingProduct || !sellForm.barber_id) return
+        setSelling(true)
+        const qty = Number(sellForm.quantity) || 1
+        const commission = sellingProduct.barber_commission * qty
+        const result = await sellProduct({
+            product_id: sellingProduct.id,
+            barber_id: sellForm.barber_id,
+            branch_id: sellingProduct.branch_id,
+            quantity: qty,
+            unit_price: sellingProduct.sale_price,
+            commission_amount: commission,
+        })
+        if (result.error) {
+            toast.error(result.error)
+        } else {
+            toast.success(`Venta registrada: ${qty}x ${sellingProduct.name}`)
+            setSellDialogOpen(false)
+            router.refresh()
+        }
+        setSelling(false)
+    }
+
+    // Barbers filtered by product's branch
+    const sellableBarbers = sellingProduct
+        ? barbers.filter(b => b.branch_id === sellingProduct.branch_id)
+        : []
 
     return (
         <div className="space-y-6">
@@ -237,6 +284,17 @@ export function ProductosClient({ products, branches, sales }: Props) {
                                                     <Button variant="ghost" size="icon-xs" onClick={() => setDeleteId(p.id)}>
                                                         <Trash2 className="size-3" />
                                                     </Button>
+                                                    {p.is_active && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon-xs"
+                                                            className="text-emerald-600 hover:text-emerald-500"
+                                                            onClick={() => openSell(p)}
+                                                            title="Registrar venta"
+                                                        >
+                                                            <ShoppingCart className="size-3" />
+                                                        </Button>
+                                                    )}
                                                 </div>
                                             </TableCell>
                                         </TableRow>
@@ -402,6 +460,67 @@ export function ProductosClient({ products, branches, sales }: Props) {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            {/* Sell Dialog */}
+            <Dialog open={sellDialogOpen} onOpenChange={setSellDialogOpen}>
+                <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle>Registrar venta</DialogTitle>
+                        <DialogDescription>
+                            {sellingProduct?.name} — Precio: {sellingProduct ? formatCurrency(sellingProduct.sale_price) : ''}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-2">
+                        <div className="grid gap-2">
+                            <Label>Barbero *</Label>
+                            <Select value={sellForm.barber_id} onValueChange={(v) => setSellForm({ ...sellForm, barber_id: v })}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Seleccionar barbero" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {sellableBarbers.length === 0 ? (
+                                        <SelectItem value="-" disabled>No hay barberos en esta sucursal</SelectItem>
+                                    ) : (
+                                        sellableBarbers.map(b => (
+                                            <SelectItem key={b.id} value={b.id}>{b.full_name}</SelectItem>
+                                        ))
+                                    )}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="grid gap-2">
+                            <Label>Cantidad</Label>
+                            <Input
+                                type="number"
+                                min="1"
+                                value={sellForm.quantity}
+                                onChange={(e) => setSellForm({ ...sellForm, quantity: e.target.value })}
+                            />
+                        </div>
+                        {sellingProduct && (
+                            <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">
+                                <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Total venta</span>
+                                    <span className="font-semibold">{formatCurrency(sellingProduct.sale_price * (Number(sellForm.quantity) || 1))}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Comisión barbero</span>
+                                    <span className="text-blue-500">{formatCurrency(sellingProduct.barber_commission * (Number(sellForm.quantity) || 1))}</span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setSellDialogOpen(false)}>Cancelar</Button>
+                        <Button
+                            onClick={handleSell}
+                            disabled={selling || !sellForm.barber_id || Number(sellForm.quantity) < 1}
+                        >
+                            {selling ? 'Registrando...' : 'Confirmar venta'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }
