@@ -185,6 +185,7 @@ export function EquipoClient({
                         todayVisits={todayVisits as Parameters<typeof BarberosClient>[0]['todayVisits']}
                         roles={roles}
                         serviceHistory={serviceHistory as Parameters<typeof BarberosClient>[0]['serviceHistory']}
+                        canHideStaff={isOwner || !!permissions['staff.hide']}
                     />
                 )}
                 {activeTab === 'historial-servicios' && (

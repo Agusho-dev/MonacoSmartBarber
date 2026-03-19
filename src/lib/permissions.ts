@@ -35,6 +35,7 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
             'staff.create': 'Crear miembros del staff',
             'staff.edit': 'Editar miembros del staff',
             'staff.deactivate': 'Activar/Desactivar miembros',
+            'staff.hide': 'Ocultar/Mostrar miembros en check-in',
         },
     },
     breaks: {

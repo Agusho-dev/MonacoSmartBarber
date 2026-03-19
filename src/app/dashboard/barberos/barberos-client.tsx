@@ -2,7 +2,7 @@
 
 import { useState, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Power, Trash2, Camera, Clock } from 'lucide-react'
+import { Plus, Pencil, Power, Trash2, Camera, Clock, Eye, EyeOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
 import { formatCurrency } from '@/lib/format'
@@ -61,6 +61,7 @@ interface Props {
   todayVisits: BarberVisitRow[]
   roles: Role[]
   serviceHistory?: ServiceHistoryItem[]
+  canHideStaff?: boolean
 }
 
 function computeIdleTimes(visits: ServiceHistoryItem[]) {
@@ -118,7 +119,7 @@ const emptyForm = {
   phone: '',
 }
 
-export function BarberosClient({ barbers, todayVisits, roles, serviceHistory }: Props) {
+export function BarberosClient({ barbers, todayVisits, roles, serviceHistory, canHideStaff }: Props) {
   const router = useRouter()
   const supabase = createClient()
   const { selectedBranchId } = useBranchStore()
@@ -291,6 +292,16 @@ export function BarberosClient({ barbers, todayVisits, roles, serviceHistory }: 
     router.refresh()
   }
 
+  async function toggleVisibility(barber: Staff) {
+    const { toggleBarberVisibility } = await import('@/lib/actions/barber')
+    const result = await toggleBarberVisibility(barber.id)
+    if (result.error) {
+      alert(result.error)
+      return
+    }
+    router.refresh()
+  }
+
   async function handleDelete(id: string) {
     if (!confirm('¿Estás seguro de que querés eliminar a este miembro del equipo? Esta acción no se puede revertir.')) return
 
@@ -382,6 +393,11 @@ export function BarberosClient({ barbers, todayVisits, roles, serviceHistory }: 
                       <Button variant="ghost" size="icon-xs" title="Activar/Desactivar" onClick={() => toggleActive(barber)}>
                         <Power className="size-3" />
                       </Button>
+                      {canHideStaff && (
+                        <Button variant="ghost" size="icon-xs" title="Ocultar del check-in" onClick={() => toggleVisibility(barber)}>
+                          {barber.hidden_from_checkin ? <EyeOff className="size-3 text-amber-500" /> : <Eye className="size-3" />}
+                        </Button>
+                      )}
                       <Button variant="ghost" size="icon-xs" className="text-destructive hover:text-destructive hover:bg-destructive/10" title="Eliminar" onClick={() => handleDelete(barber.id)}>
                         <Trash2 className="size-3" />
                       </Button>
