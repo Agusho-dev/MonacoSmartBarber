@@ -89,7 +89,11 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
     // Sell state
     const [sellDialogOpen, setSellDialogOpen] = useState(false)
     const [sellingProduct, setSellingProduct] = useState<Product | null>(null)
-    const [sellForm, setSellForm] = useState({ barber_id: '', quantity: '1' })
+    const [sellForm, setSellForm] = useState<{ barber_id: string; quantity: string; payment_method: 'cash' | 'transfer' | 'card' }>({
+        barber_id: '',
+        quantity: '1',
+        payment_method: 'cash',
+    })
     const [selling, setSelling] = useState(false)
 
     const filteredProducts = selectedBranchId
@@ -169,7 +173,7 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
 
     function openSell(product: Product) {
         setSellingProduct(product)
-        setSellForm({ barber_id: '', quantity: '1' })
+        setSellForm({ barber_id: '', quantity: '1', payment_method: 'cash' })
         setSellDialogOpen(true)
     }
 
@@ -185,6 +189,7 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
             quantity: qty,
             unit_price: sellingProduct.sale_price,
             commission_amount: commission,
+            payment_method: sellForm.payment_method,
         })
         if (result.error) {
             toast.error(result.error)
@@ -200,6 +205,12 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
     const sellableBarbers = sellingProduct
         ? barbers.filter(b => b.branch_id === sellingProduct.branch_id)
         : []
+
+    const paymentMethodMap: Record<string, string> = {
+        cash: 'Efectivo',
+        transfer: 'Transferencia',
+        card: 'Tarjeta',
+    }
 
     return (
         <div className="space-y-6">
@@ -314,6 +325,7 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
                                     <TableHead>Barbero</TableHead>
                                     <TableHead>Producto</TableHead>
                                     <TableHead className="text-center">Cant.</TableHead>
+                                    <TableHead>Método</TableHead>
                                     <TableHead className="text-right">Precio U.</TableHead>
                                     <TableHead className="text-right">Comisión</TableHead>
                                     <TableHead className="text-right">Total Venta</TableHead>
@@ -335,6 +347,11 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
                                             <TableCell className="font-medium">{s.barber?.full_name}</TableCell>
                                             <TableCell>{s.product?.name}</TableCell>
                                             <TableCell className="text-center">{s.quantity}</TableCell>
+                                            <TableCell>
+                                                <Badge variant="outline" className="font-normal text-xs">
+                                                    {paymentMethodMap[s.payment_method] || s.payment_method}
+                                                </Badge>
+                                            </TableCell>
                                             <TableCell className="text-right">{formatCurrency(s.unit_price)}</TableCell>
                                             <TableCell className="text-right text-blue-600 dark:text-blue-400">
                                                 {formatCurrency(s.commission_amount)}
@@ -485,14 +502,32 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="grid gap-2">
-                            <Label>Cantidad</Label>
-                            <Input
-                                type="number"
-                                min="1"
-                                value={sellForm.quantity}
-                                onChange={(e) => setSellForm({ ...sellForm, quantity: e.target.value })}
-                            />
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="grid gap-2">
+                                <Label>Cantidad</Label>
+                                <Input
+                                    type="number"
+                                    min="1"
+                                    value={sellForm.quantity}
+                                    onChange={(e) => setSellForm({ ...sellForm, quantity: e.target.value })}
+                                />
+                            </div>
+                            <div className="grid gap-2">
+                                <Label>Método de pago</Label>
+                                <Select
+                                    value={sellForm.payment_method}
+                                    onValueChange={(v: 'cash' | 'transfer' | 'card') => setSellForm({ ...sellForm, payment_method: v })}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Método de pago" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="cash">Efectivo 💵</SelectItem>
+                                        <SelectItem value="transfer">Transferencia 📱</SelectItem>
+                                        <SelectItem value="card">Tarjeta 💳</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
                         </div>
                         {sellingProduct && (
                             <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">

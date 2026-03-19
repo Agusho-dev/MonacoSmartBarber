@@ -126,6 +126,7 @@ export async function sellProduct(data: {
     quantity: number
     unit_price: number
     commission_amount: number
+    payment_method: 'cash' | 'transfer' | 'card'
 }) {
     const supabase = await createClient()
 
@@ -150,6 +151,7 @@ export async function sellProduct(data: {
         quantity: data.quantity,
         unit_price: data.unit_price,
         commission_amount: data.commission_amount,
+        payment_method: data.payment_method,
     }])
 
     if (error) return { error: error.message }

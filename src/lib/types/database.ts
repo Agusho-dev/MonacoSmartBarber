@@ -179,6 +179,7 @@ export interface ProductSale {
   quantity: number
   unit_price: number
   commission_amount: number
+  payment_method: 'cash' | 'transfer' | 'card'
   sold_at: string
   product?: Product
   barber?: Staff
