@@ -174,13 +174,13 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
     }
 
     async function handleSell() {
-        if (!sellingProduct || !sellForm.barber_id) return
+        if (!sellingProduct) return
         setSelling(true)
         const qty = Number(sellForm.quantity) || 1
         const commission = sellingProduct.barber_commission * qty
         const result = await sellProduct({
             product_id: sellingProduct.id,
-            barber_id: sellForm.barber_id,
+            barber_id: sellForm.barber_id || undefined,   // undefined → action resolves current user
             branch_id: sellingProduct.branch_id,
             quantity: qty,
             unit_price: sellingProduct.sale_price,
@@ -472,19 +472,16 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
                     </DialogHeader>
                     <div className="grid gap-4 py-2">
                         <div className="grid gap-2">
-                            <Label>Barbero *</Label>
-                            <Select value={sellForm.barber_id} onValueChange={(v) => setSellForm({ ...sellForm, barber_id: v })}>
+                            <Label>Barbero <span className="text-muted-foreground text-xs">(opcional — si no elegís ninguno, se asigna a tu usuario)</span></Label>
+                            <Select value={sellForm.barber_id} onValueChange={(v) => setSellForm({ ...sellForm, barber_id: v === '__self__' ? '' : v })}>
                                 <SelectTrigger>
-                                    <SelectValue placeholder="Seleccionar barbero" />
+                                    <SelectValue placeholder="Yo (usuario actual)" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {sellableBarbers.length === 0 ? (
-                                        <SelectItem value="-" disabled>No hay barberos en esta sucursal</SelectItem>
-                                    ) : (
-                                        sellableBarbers.map(b => (
-                                            <SelectItem key={b.id} value={b.id}>{b.full_name}</SelectItem>
-                                        ))
-                                    )}
+                                    <SelectItem value="__self__">— Yo (usuario actual) —</SelectItem>
+                                    {sellableBarbers.map(b => (
+                                        <SelectItem key={b.id} value={b.id}>{b.full_name}</SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>
@@ -514,7 +511,7 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
                         <Button variant="outline" onClick={() => setSellDialogOpen(false)}>Cancelar</Button>
                         <Button
                             onClick={handleSell}
-                            disabled={selling || !sellForm.barber_id || Number(sellForm.quantity) < 1}
+                            disabled={selling || Number(sellForm.quantity) < 1}
                         >
                             {selling ? 'Registrando...' : 'Confirmar venta'}
                         </Button>

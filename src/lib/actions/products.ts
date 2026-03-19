@@ -121,7 +121,7 @@ export async function getProductSales(branchId: string, startDate?: string, endD
 
 export async function sellProduct(data: {
     product_id: string
-    barber_id: string
+    barber_id?: string          // optional: defaults to logged-in staff
     branch_id: string
     quantity: number
     unit_price: number
@@ -129,9 +129,23 @@ export async function sellProduct(data: {
 }) {
     const supabase = await createClient()
 
+    // Resolve seller: use passed barber_id or fall back to current user's staff record
+    let sellerId = data.barber_id
+    if (!sellerId) {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return { error: 'Usuario no autenticado' }
+        const { data: staffRow } = await supabase
+            .from('staff')
+            .select('id')
+            .eq('auth_user_id', user.id)
+            .maybeSingle()
+        if (!staffRow) return { error: 'No se encontró el perfil de staff del usuario actual' }
+        sellerId = staffRow.id
+    }
+
     const { error } = await supabase.from('product_sales').insert([{
         product_id: data.product_id,
-        barber_id: data.barber_id,
+        barber_id: sellerId,
         branch_id: data.branch_id,
         quantity: data.quantity,
         unit_price: data.unit_price,
