@@ -6,6 +6,7 @@ import { completeService } from '@/lib/actions/queue'
 import { saveVisitDetails } from '@/lib/actions/visit-history'
 import { updateClientNotes } from '@/lib/actions/clients'
 import { compressToWebP, uploadVisitPhotos } from '@/lib/image-utils'
+import { QrPhotoButton } from '@/components/barber/qr-photo-button'
 import type { QueueEntry, Service, ServiceTag, PaymentMethod, PaymentAccount, Product } from '@/lib/types/database'
 import {
   Dialog,
@@ -28,7 +29,6 @@ import {
   Banknote,
   CreditCard,
   ArrowRightLeft,
-  Camera,
   ImagePlus,
   X,
   ArrowRight,
@@ -81,7 +81,9 @@ export function CompleteServiceDialog({
   const [photoFiles, setPhotoFiles] = useState<File[]>([])
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const cameraInputRef = useRef<HTMLInputElement>(null)
+  // QR photo paths (already uploaded to storage from mobile)
+  const [qrPhotoPaths, setQrPhotoPaths] = useState<string[]>([])
+  const [qrPhotoPreviews, setQrPhotoPreviews] = useState<string[]>([])
   const [clientNotes, setClientNotes] = useState('')
   const [originalClientNotes, setOriginalClientNotes] = useState('')
 
@@ -97,6 +99,8 @@ export function CompleteServiceDialog({
       setExtraServices([])
       setSelectedProducts([])
       setPhotoFiles([])
+      setQrPhotoPaths([])
+      setQrPhotoPreviews([])
       photoPreviews.forEach(URL.revokeObjectURL)
       setPhotoPreviews([])
       setClientNotes('')
@@ -207,10 +211,11 @@ export function CompleteServiceDialog({
       }
 
       if (result.visitId) {
-        let paths: string[] = []
+        let paths: string[] = [...qrPhotoPaths]
         if (photoFiles.length > 0) {
           const blobs = await Promise.all(photoFiles.map((f) => compressToWebP(f)))
-          paths = await uploadVisitPhotos(supabase, result.visitId, blobs)
+          const galleryPaths = await uploadVisitPhotos(supabase, result.visitId, blobs)
+          paths = [...paths, ...galleryPaths]
         }
 
         const detailResult = await saveVisitDetails(
@@ -444,16 +449,31 @@ export function CompleteServiceDialog({
                     ))}
                   </div>
                 )}
+                {/* QR photo previews */}
+                {qrPhotoPreviews.length > 0 && (
+                  <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+                    {qrPhotoPreviews.map((url, i) => (
+                      <div key={`qr-${i}`} className="group relative shrink-0">
+                        <img
+                          src={url}
+                          alt={`QR Foto ${i + 1}`}
+                          className="size-20 rounded-lg border border-emerald-500/30 object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQrPhotoPaths((prev) => prev.filter((_, idx) => idx !== i))
+                            setQrPhotoPreviews((prev) => prev.filter((_, idx) => idx !== i))
+                          }}
+                          className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="flex gap-2">
-                  <input
-                    ref={cameraInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => handlePhotos(e.target.files)}
-                  />
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -462,16 +482,12 @@ export function CompleteServiceDialog({
                     className="hidden"
                     onChange={(e) => handlePhotos(e.target.files)}
                   />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="lg"
-                    className="h-14 flex-1 text-base"
-                    onClick={() => cameraInputRef.current?.click()}
-                  >
-                    <Camera className="mr-2 size-5" />
-                    Cámara
-                  </Button>
+                  <QrPhotoButton
+                    onPhotoReceived={(photo) => {
+                      setQrPhotoPaths((prev) => [...prev, photo.storagePath])
+                      setQrPhotoPreviews((prev) => [...prev, photo.publicUrl])
+                    }}
+                  />
                   <Button
                     type="button"
                     variant="outline"
