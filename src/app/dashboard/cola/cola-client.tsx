@@ -343,7 +343,7 @@ export function ColaClient({
               <p className="text-sm">No hay clientes en espera</p>
             </div>
           ) : (
-            <ScrollArea className="max-h-[600px]">
+            <ScrollArea className="h-[calc(100vh-340px)] min-h-[300px] pr-4">
               <div className="space-y-3">
                 {waitingEntries.map((entry) => (
                   <div
