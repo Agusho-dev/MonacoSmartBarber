@@ -275,18 +275,18 @@ export function HistorialServicios({ branches, barbers }: Props) {
                   const dayStr = isToday ? `Hoy (${group.dateKey})` : group.dateKey
                   return (
                     <Fragment key={group.dateKey}>
-                      <TableRow className="bg-muted/40 hover:bg-muted/40">
+                      <TableRow className="bg-white hover:bg-white">
                         <TableCell colSpan={8} className="py-2.5">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                            <span className="font-semibold text-foreground">{dayStr}</span>
-                            <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-sm text-muted-foreground">
+                            <span className="font-semibold text-black">{dayStr}</span>
+                            <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-sm text-neutral-600">
                               <span><strong>{group.totalCuts}</strong> {group.totalCuts === 1 ? 'corte' : 'cortes'}</span>
-                              <span className="px-1 text-border">•</span>
-                              <span className="font-semibold text-foreground">{formatCurrency(group.totalAmount)}</span>
-                              <div className="flex gap-2 border-l pl-3 sm:pl-4">
-                                <Badge variant="secondary" className="text-[11px] font-normal px-1.5 py-0 bg-background">Efe: {group.cashCuts}</Badge>
-                                <Badge variant="secondary" className="text-[11px] font-normal px-1.5 py-0 bg-background">Tra: {group.transferCuts}</Badge>
-                                <Badge variant="secondary" className="text-[11px] font-normal px-1.5 py-0 bg-background">Tar: {group.cardCuts}</Badge>
+                              <span className="px-1">•</span>
+                              <span className="font-semibold text-black">{formatCurrency(group.totalAmount)}</span>
+                              <div className="flex gap-2 border-l border-neutral-300 pl-3 sm:pl-4">
+                                <Badge variant="secondary" className="text-[11px] font-normal px-1.5 py-0 bg-neutral-100 text-neutral-700">Efe: {group.cashCuts}</Badge>
+                                <Badge variant="secondary" className="text-[11px] font-normal px-1.5 py-0 bg-neutral-100 text-neutral-700">Tra: {group.transferCuts}</Badge>
+                                <Badge variant="secondary" className="text-[11px] font-normal px-1.5 py-0 bg-neutral-100 text-neutral-700">Tar: {group.cardCuts}</Badge>
                               </div>
                             </div>
                           </div>

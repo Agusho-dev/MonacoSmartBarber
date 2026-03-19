@@ -522,9 +522,9 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
                                         <SelectValue placeholder="Método de pago" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="cash">Efectivo 💵</SelectItem>
-                                        <SelectItem value="transfer">Transferencia 📱</SelectItem>
-                                        <SelectItem value="card">Tarjeta 💳</SelectItem>
+                                        <SelectItem value="cash">Efectivo</SelectItem>
+                                        <SelectItem value="transfer">Transferencia</SelectItem>
+                                        <SelectItem value="card">Tarjeta</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
