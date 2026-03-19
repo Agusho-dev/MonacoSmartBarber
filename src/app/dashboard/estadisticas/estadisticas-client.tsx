@@ -59,9 +59,9 @@ import {
 } from 'lucide-react'
 
 const COLORS = {
-  primary: '#e5e5e5',
-  secondary: '#a3a3a3',
-  tertiary: '#6e6e6e',
+  primary: 'var(--chart-2)',
+  secondary: 'var(--chart-3)',
+  tertiary: 'var(--chart-4)',
   grid: '#262626',
   axis: '#737373',
 }
@@ -72,7 +72,7 @@ const METHOD_LABELS: Record<string, string> = {
   transfer: 'Transferencia',
 }
 
-const METHOD_COLORS = ['#e5e5e5', '#a3a3a3', '#6e6e6e']
+const METHOD_COLORS = ['var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)']
 
 const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 
@@ -249,7 +249,7 @@ function ChartTooltip({ active, payload, label }: Record<string, unknown>) {
   if (!active || !Array.isArray(payload) || payload.length === 0) return null
   return (
     <div className="rounded-lg border bg-card p-3 shadow-md">
-      <p className="mb-1 text-sm font-medium">{String(label)}</p>
+      <p className="mb-1 text-sm font-medium text-foreground">{String(label)}</p>
       {payload.map((p: Record<string, unknown>, i: number) => (
         <p key={i} className="text-sm text-muted-foreground">
           {String(p.name)}:{' '}
@@ -305,7 +305,7 @@ function TrendsTab({ data }: { data: StatsData }) {
                   tickLine={false}
                   tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                 />
-                <Tooltip content={<ChartTooltip />} />
+                <Tooltip content={<ChartTooltip />} cursor={{ stroke: 'var(--muted)', strokeWidth: 1 }} />
                 <Area
                   type="monotone"
                   dataKey="revenue"
@@ -350,13 +350,14 @@ function TrendsTab({ data }: { data: StatsData }) {
                   tickLine={false}
                   allowDecimals={false}
                 />
-                <Tooltip content={<ChartTooltip />} />
+                <Tooltip content={<ChartTooltip />} cursor={{ fill: 'transparent' }} />
                 <Bar
                   dataKey="cuts"
                   name="Cortes"
                   fill={COLORS.secondary}
                   radius={[4, 4, 0, 0]}
                   animationDuration={800}
+                  activeBar={{ stroke: 'var(--foreground)', strokeWidth: 1, fillOpacity: 0.8 }}
                 />
               </BarChart>
             </ResponsiveContainer>
@@ -394,12 +395,13 @@ function TrendsTab({ data }: { data: StatsData }) {
                   tickLine={false}
                   width={110}
                 />
-                <Tooltip content={<ChartTooltip />} />
+                <Tooltip content={<ChartTooltip />} cursor={{ fill: 'transparent' }} />
                 <Bar
                   dataKey="amount"
                   name="Ingresos"
                   radius={[0, 4, 4, 0]}
                   animationDuration={800}
+                  activeBar={{ stroke: 'var(--foreground)', strokeWidth: 1, fillOpacity: 0.8 }}
                 >
                   {methodData.map((_, i) => (
                     <Cell

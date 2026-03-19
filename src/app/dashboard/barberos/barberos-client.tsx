@@ -411,11 +411,11 @@ export function BarberosClient({ barbers, todayVisits, roles, serviceHistory }: 
               layout="vertical"
               margin={{ top: 0, right: 48, bottom: 0, left: 0 }}
             >
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border)" />
               <XAxis
                 type="number"
                 tickFormatter={(v: number) => `${v} min`}
-                tick={{ fontSize: 11 }}
+                tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
                 axisLine={false}
                 tickLine={false}
               />
@@ -423,21 +423,31 @@ export function BarberosClient({ barbers, todayVisits, roles, serviceHistory }: 
                 type="category"
                 dataKey="name"
                 width={130}
-                tick={{ fontSize: 13 }}
+                tick={{ fontSize: 13, fill: 'var(--muted-foreground)' }}
                 axisLine={false}
                 tickLine={false}
               />
               <Tooltip
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                formatter={(value: any) => [`${value} min`, 'Promedio inactivo']}
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                labelFormatter={(label: any) => label}
-                cursor={{ fill: 'var(--muted)' }}
+                cursor={{ fill: 'transparent' }}
+                content={({ active, payload, label }) => {
+                  if (!active || !Array.isArray(payload) || payload.length === 0) return null
+                  return (
+                    <div className="rounded-lg border bg-card p-3 shadow-md">
+                      <p className="mb-1 text-sm font-medium text-foreground">{String(label)}</p>
+                      {payload.map((p: any, i: number) => (
+                        <p key={i} className="text-sm text-muted-foreground">
+                          Promedio inactivo: {String(p.value)} min
+                        </p>
+                      ))}
+                    </div>
+                  )
+                }}
               />
               <Bar
                 dataKey="avgIdleMin"
-                fill="var(--chart-1)"
+                fill="var(--chart-2)"
                 radius={[0, 4, 4, 0]}
+                activeBar={{ stroke: 'var(--foreground)', strokeWidth: 1, fillOpacity: 0.8 }}
                 label={{
                   position: 'right',
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
