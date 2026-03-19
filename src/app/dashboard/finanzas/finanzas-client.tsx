@@ -55,10 +55,10 @@ const PERIOD_OPTIONS = [
 ]
 
 const COLORS = {
-  revenue: '#d4d4d4',
-  fixed: '#737373',
-  commissions: '#404040',
-  netProfit: '#ffffff',
+  revenue: 'var(--chart-2)',
+  fixed: 'var(--chart-3)',
+  commissions: 'var(--chart-4)',
+  netProfit: 'var(--primary)',
   grid: '#262626',
   axis: '#737373',
 }
@@ -246,7 +246,7 @@ export function FinanzasClient({
                         : `$${(v / 1000).toFixed(0)}k`
                     }
                   />
-                  <Tooltip content={<FinanceTooltip />} />
+                  <Tooltip content={<FinanceTooltip />} cursor={{ fill: 'transparent' }} />
                   <Legend
                     wrapperStyle={{ fontSize: 12, color: COLORS.axis }}
                   />
@@ -519,25 +519,23 @@ function SummaryCard({
         <CardDescription>{title}</CardDescription>
         <div className="absolute right-6 top-6">
           <Icon
-            className={`size-4 ${
-              highlight === 'positive'
+            className={`size-4 ${highlight === 'positive'
                 ? 'text-green-400'
                 : highlight === 'negative'
                   ? 'text-red-400'
                   : 'text-muted-foreground'
-            }`}
+              }`}
           />
         </div>
       </CardHeader>
       <CardContent>
         <p
-          className={`text-2xl font-bold ${
-            highlight === 'positive'
+          className={`text-2xl font-bold ${highlight === 'positive'
               ? 'text-green-400'
               : highlight === 'negative'
                 ? 'text-red-400'
                 : ''
-          }`}
+            }`}
         >
           {value}
         </p>
@@ -559,7 +557,7 @@ function FinanceTooltip({
   if (!active || !Array.isArray(payload) || payload.length === 0) return null
   return (
     <div className="rounded-lg border bg-card p-3 shadow-md">
-      <p className="mb-2 text-sm font-medium">{String(label)}</p>
+      <p className="mb-2 text-sm font-medium text-foreground">{String(label)}</p>
       {payload.map((p: Record<string, unknown>, i: number) => (
         <p key={i} className="text-sm text-muted-foreground">
           {String(p.name)}: {formatCurrency(Number(p.value))}
@@ -577,7 +575,7 @@ function PieTooltip({
   const entry = payload[0] as Record<string, unknown>
   return (
     <div className="rounded-lg border bg-card px-3 py-2 shadow-md">
-      <p className="text-sm font-medium">{String(entry.name)}</p>
+      <p className="text-sm font-medium text-foreground">{String(entry.name)}</p>
       <p className="text-sm text-muted-foreground">
         {formatCurrency(Number(entry.value))}
       </p>
