@@ -76,6 +76,7 @@ interface CatalogItem {
   valid_from: string | null
   valid_until: string | null
   points_cost: number
+  image_url: string | null
   created_at: string
 }
 
@@ -337,6 +338,7 @@ const emptyCatalogForm = {
   valid_from: '',
   valid_until: '',
   is_active: true,
+  image_url: '',
 }
 
 function CatalogoTab({ initialCatalog }: { initialCatalog: CatalogItem[] }) {
@@ -368,6 +370,7 @@ function CatalogoTab({ initialCatalog }: { initialCatalog: CatalogItem[] }) {
       valid_from: item.valid_from ? item.valid_from.slice(0, 10) : '',
       valid_until: item.valid_until ? item.valid_until.slice(0, 10) : '',
       is_active: item.is_active,
+      image_url: item.image_url || '',
     })
     setDialogOpen(true)
   }
@@ -391,6 +394,7 @@ function CatalogoTab({ initialCatalog }: { initialCatalog: CatalogItem[] }) {
       valid_from: form.valid_from || null,
       valid_until: form.valid_until || null,
       is_active: form.is_active,
+      image_url: form.image_url.trim() || null,
     }
 
     let error
@@ -593,6 +597,15 @@ function CatalogoTab({ initialCatalog }: { initialCatalog: CatalogItem[] }) {
                   onChange={(e) => setForm({ ...form, valid_until: e.target.value })}
                 />
               </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>URL de imagen (app móvil)</Label>
+              <Input
+                value={form.image_url}
+                onChange={(e) => setForm({ ...form, image_url: e.target.value })}
+                placeholder="https://..."
+              />
             </div>
 
             <div className="flex items-center justify-between rounded-lg border p-3">
