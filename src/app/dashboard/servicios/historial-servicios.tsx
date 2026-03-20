@@ -111,10 +111,10 @@ export function HistorialServicios({ branches, barbers }: Props) {
         q = q.eq('barber_id', barberId)
       }
       if (dateFrom) {
-        q = q.gte('completed_at', dateFrom + 'T00:00:00')
+        q = q.gte('completed_at', dateFrom + 'T00:00:00-03:00')
       }
       if (dateTo) {
-        q = q.lte('completed_at', dateTo + 'T23:59:59')
+        q = q.lte('completed_at', dateTo + 'T23:59:59.999-03:00')
       }
 
       const { data, error } = await q

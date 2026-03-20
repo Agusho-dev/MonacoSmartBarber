@@ -2,6 +2,25 @@
 
 import { createClient } from '@/lib/supabase/server'
 
+const ARG_TZ = 'America/Argentina/Buenos_Aires'
+
+function toArgLocalDate(isoString: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: ARG_TZ }).format(new Date(isoString))
+}
+
+function toArgDayHour(isoString: string): { day: number; hour: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: ARG_TZ,
+    weekday: 'short',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(isoString))
+  const p: Record<string, string> = {}
+  for (const part of parts) p[part.type] = part.value
+  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  return { day: dayMap[p.weekday] ?? 0, hour: parseInt(p.hour) }
+}
+
 export interface HeatmapCell {
   day: number
   hour: number
@@ -58,6 +77,9 @@ export async function fetchStats(
 ): Promise<StatsData> {
   const supabase = await createClient()
 
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError || !user) throw new Error('No autorizado')
+
   let vq = supabase
     .from('visits')
     .select(
@@ -100,8 +122,8 @@ export async function fetchStats(
   // Heatmap
   const heatMap = new Map<string, number>()
   for (const v of safe) {
-    const d = new Date(v.completed_at)
-    const key = `${d.getDay()}-${d.getHours()}`
+    const { day, hour } = toArgDayHour(v.completed_at)
+    const key = `${day}-${hour}`
     heatMap.set(key, (heatMap.get(key) || 0) + 1)
   }
   const heatmap: HeatmapCell[] = [...heatMap.entries()].map(([k, count]) => {
@@ -142,7 +164,7 @@ export async function fetchStats(
   // Daily trends
   const dailyAgg = new Map<string, { revenue: number; cuts: number }>()
   for (const v of safe) {
-    const day = v.completed_at.slice(0, 10)
+    const day = toArgLocalDate(v.completed_at)
     const d = dailyAgg.get(day) || { revenue: 0, cuts: 0 }
     d.revenue += v.amount
     d.cuts++
@@ -209,4 +231,34 @@ export async function fetchStats(
       clients: uniqueClients,
     },
   }
+}
+
+export async function fetchWeekHeatmap(
+  weekStartISO: string,
+  weekEndISO: string,
+  branchId?: string | null
+): Promise<HeatmapCell[]> {
+  const supabase = await createClient()
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError || !user) throw new Error('No autorizado')
+
+  let q = supabase
+    .from('visits')
+    .select('completed_at')
+    .gte('completed_at', weekStartISO)
+    .lte('completed_at', weekEndISO)
+  if (branchId) q = q.eq('branch_id', branchId)
+  const { data } = await q
+
+  const heatMap = new Map<string, number>()
+  for (const v of data ?? []) {
+    const { day, hour } = toArgDayHour(v.completed_at)
+    const key = `${day}-${hour}`
+    heatMap.set(key, (heatMap.get(key) || 0) + 1)
+  }
+
+  return [...heatMap.entries()].map(([k, count]) => {
+    const [day, hour] = k.split('-').map(Number)
+    return { day, hour, count }
+  })
 }

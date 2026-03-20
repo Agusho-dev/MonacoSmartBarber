@@ -18,7 +18,7 @@ import {
 } from 'recharts'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
-import { fetchStats, type StatsData } from '@/lib/actions/stats'
+import { fetchStats, fetchWeekHeatmap, type StatsData, type HeatmapCell } from '@/lib/actions/stats'
 import { exportCSV, exportPDF } from '@/lib/export'
 import { formatCurrency } from '@/lib/format'
 import { DateRangePicker } from '@/components/dashboard/date-range-picker'
@@ -56,6 +56,8 @@ import {
   AlertTriangle,
   UserX,
   Trophy,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 
 const COLORS = {
@@ -74,7 +76,6 @@ const METHOD_LABELS: Record<string, string> = {
 
 const METHOD_COLORS = ['var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)']
 
-const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 
 interface Props {
   initialData: StatsData
@@ -203,7 +204,7 @@ export function EstadisticasClient({ initialData, branches }: Props) {
             <TrendsTab data={data} />
           </TabsContent>
           <TabsContent value="ocupacion">
-            <HeatmapTab data={data} />
+            <HeatmapTab />
           </TabsContent>
           <TabsContent value="barberos">
             <RankingTab data={data} />
@@ -428,78 +429,153 @@ function TrendsTab({ data }: { data: StatsData }) {
 
 /* ─── Heatmap Tab ─── */
 
-function HeatmapTab({ data }: { data: StatsData }) {
-  const hours = Array.from({ length: 14 }, (_, i) => i + 8)
-  const maxCount = Math.max(...data.heatmap.map((d) => d.count), 1)
+function getArgWeekBounds(weekOffset: number) {
+  const todayArgStr = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+  }).format(new Date())
+  const [y, m, d] = todayArgStr.split('-').map(Number)
+  const today = new Date(y, m - 1, d)
+  const dow = today.getDay()
+  const daysFromMonday = dow === 0 ? 6 : dow - 1
+  const monday = new Date(today)
+  monday.setDate(today.getDate() - daysFromMonday + weekOffset * 7)
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const dt = new Date(monday)
+    dt.setDate(monday.getDate() + i)
+    return dt
+  })
+  const fmt = (dt: Date) =>
+    `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+  return {
+    start: fmt(monday) + 'T00:00:00-03:00',
+    end: fmt(days[6]) + 'T23:59:59.999-03:00',
+    days,
+  }
+}
 
-  const getCount = (day: number, hour: number) =>
-    data.heatmap.find((d) => d.day === day && d.hour === hour)?.count || 0
+function HeatmapTab() {
+  const { selectedBranchId } = useBranchStore()
+  const [weekOffset, setWeekOffset] = useState(0)
+  const [heatmap, setHeatmap] = useState<HeatmapCell[]>([])
+  const [isPending, startTransition] = useTransition()
+
+  const { start, end, days } = getArgWeekBounds(weekOffset)
+
+  useEffect(() => {
+    startTransition(async () => {
+      const result = await fetchWeekHeatmap(start, end, selectedBranchId)
+      setHeatmap(result)
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [start, end, selectedBranchId])
+
+  const hours = Array.from({ length: 14 }, (_, i) => i + 8)
+  const maxCount = Math.max(...heatmap.map((d) => d.count), 1)
+  const getCount = (dayIdx: number, hour: number) =>
+    heatmap.find((d) => d.day === dayIdx && d.hour === hour)?.count || 0
+
+  const weekLabel = `${format(days[0], 'dd MMM', { locale: es })} – ${format(days[6], 'dd MMM', { locale: es })}`
+  const DAY_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+  const dayRows = [1, 2, 3, 4, 5, 6, 0].map((dayIdx, i) => ({
+    dayIdx,
+    label: `${DAY_SHORT[dayIdx]} ${days[i].getDate()}`,
+  }))
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Mapa de calor de ocupación</CardTitle>
-        <CardDescription>
-          Intensidad de visitas por día y hora
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="overflow-x-auto">
-          <div className="min-w-[600px]">
-            <div className="mb-2 flex">
-              <div className="w-12 shrink-0" />
-              {hours.map((h) => (
-                <div
-                  key={h}
-                  className="flex-1 text-center text-xs text-muted-foreground"
-                >
-                  {h}h
-                </div>
-              ))}
-            </div>
-            {[1, 2, 3, 4, 5, 6, 0].map((dayIdx) => (
-              <div key={dayIdx} className="mb-1 flex items-center">
-                <div className="w-12 shrink-0 text-xs text-muted-foreground">
-                  {DAY_LABELS[dayIdx]}
-                </div>
-                {hours.map((hour) => {
-                  const count = getCount(dayIdx, hour)
-                  const intensity = count / maxCount
-                  return (
-                    <div key={hour} className="flex-1 px-0.5">
-                      <div
-                        className="aspect-square rounded-sm border border-border transition-colors"
-                        style={{
-                          backgroundColor:
-                            count === 0
-                              ? 'transparent'
-                              : `rgba(229, 229, 229, ${0.15 + intensity * 0.85})`,
-                        }}
-                        title={`${DAY_LABELS[dayIdx]} ${hour}:00 – ${count} visitas`}
-                      />
-                    </div>
-                  )
-                })}
-              </div>
-            ))}
-            <div className="mt-4 flex items-center justify-end gap-2 text-xs text-muted-foreground">
-              <span>Menos</span>
-              {[0, 0.25, 0.5, 0.75, 1].map((v) => (
-                <div
-                  key={v}
-                  className="size-4 rounded-sm border border-border"
-                  style={{
-                    backgroundColor:
-                      v === 0
-                        ? 'transparent'
-                        : `rgba(229, 229, 229, ${0.15 + v * 0.85})`,
-                  }}
-                />
-              ))}
-              <span>Más</span>
-            </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle>Mapa de calor de ocupación</CardTitle>
+            <CardDescription>Intensidad de visitas por día y hora</CardDescription>
+          </div>
+          <div className="flex items-center gap-2 self-start">
+            <Button
+              variant="outline"
+              size="icon"
+              className="size-8"
+              onClick={() => setWeekOffset((o) => o - 1)}
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+            <span className="min-w-[150px] text-center text-sm font-medium">
+              {weekLabel}
+            </span>
+            <Button
+              variant="outline"
+              size="icon"
+              className="size-8"
+              onClick={() => setWeekOffset((o) => o + 1)}
+              disabled={weekOffset >= 0}
+            >
+              <ChevronRight className="size-4" />
+            </Button>
           </div>
         </div>
+      </CardHeader>
+      <CardContent>
+        {isPending ? (
+          <div className="flex h-[200px] items-center justify-center">
+            <div className="size-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <div className="min-w-[600px]">
+              <div className="mb-2 flex">
+                <div className="w-16 shrink-0" />
+                {hours.map((h) => (
+                  <div
+                    key={h}
+                    className="flex-1 text-center text-xs text-muted-foreground"
+                  >
+                    {h}h
+                  </div>
+                ))}
+              </div>
+              {dayRows.map(({ dayIdx, label }) => (
+                <div key={dayIdx} className="mb-1 flex items-center">
+                  <div className="w-16 shrink-0 text-xs text-muted-foreground">
+                    {label}
+                  </div>
+                  {hours.map((hour) => {
+                    const count = getCount(dayIdx, hour)
+                    const intensity = count / maxCount
+                    return (
+                      <div key={hour} className="flex-1 px-0.5">
+                        <div
+                          className="aspect-square rounded-sm border border-border transition-colors"
+                          style={{
+                            backgroundColor:
+                              count === 0
+                                ? 'transparent'
+                                : `rgba(229, 229, 229, ${0.15 + intensity * 0.85})`,
+                          }}
+                          title={`${label} ${hour}:00 – ${count} visita${count !== 1 ? 's' : ''}`}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
+              <div className="mt-4 flex items-center justify-end gap-2 text-xs text-muted-foreground">
+                <span>Menos</span>
+                {[0, 0.25, 0.5, 0.75, 1].map((v) => (
+                  <div
+                    key={v}
+                    className="size-4 rounded-sm border border-border"
+                    style={{
+                      backgroundColor:
+                        v === 0
+                          ? 'transparent'
+                          : `rgba(229, 229, 229, ${0.15 + v * 0.85})`,
+                    }}
+                  />
+                ))}
+                <span>Más</span>
+              </div>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )
