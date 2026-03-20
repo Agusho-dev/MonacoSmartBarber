@@ -296,6 +296,7 @@ export interface AppSettings {
   business_days: number[]
   shift_end_margin_minutes: number
   next_client_alert_minutes: number
+  dynamic_cooldown_seconds: number
   review_auto_send: boolean
   review_delay_minutes: number
   review_message_template: string | null

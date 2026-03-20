@@ -98,6 +98,7 @@ export default function CheckinPage() {
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [now, setNow] = useState(Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
+  const [dynamicCooldownMs, setDynamicCooldownMs] = useState(60_000)
   const [notClockedInBarbers, setNotClockedInBarbers] = useState<Set<string>>(new Set())
   const [barberNextArrival, setBarberNextArrival] = useState<Record<string, string>>({})
 
@@ -233,7 +234,7 @@ export default function CheckinPage() {
           .eq('is_active', true),
         supabase
           .from('app_settings')
-          .select('shift_end_margin_minutes')
+          .select('shift_end_margin_minutes, dynamic_cooldown_seconds')
           .maybeSingle(),
         supabase
           .from('visits')
@@ -254,9 +255,12 @@ export default function CheckinPage() {
       }
 
       if (settingsRes?.data) {
-        const margin = (settingsRes.data as { shift_end_margin_minutes?: number }).shift_end_margin_minutes
-        if (typeof margin === 'number' && margin >= 0) {
-          setShiftEndMargin(margin)
+        const sd = settingsRes.data as { shift_end_margin_minutes?: number; dynamic_cooldown_seconds?: number }
+        if (typeof sd.shift_end_margin_minutes === 'number' && sd.shift_end_margin_minutes >= 0) {
+          setShiftEndMargin(sd.shift_end_margin_minutes)
+        }
+        if (typeof sd.dynamic_cooldown_seconds === 'number' && sd.dynamic_cooldown_seconds >= 0) {
+          setDynamicCooldownMs(sd.dynamic_cooldown_seconds * 1000)
         }
       }
 
@@ -384,6 +388,8 @@ export default function CheckinPage() {
             .then(({ data }) => {
               if (data && !cancelled) setQueueEntries(data)
             })
+          // Refresca conteos y tiempos de finalización para que el tiebreaker use datos actuales
+          if (!cancelled) loadBarberData(branchId)
         }
       )
       .on(
@@ -584,8 +590,8 @@ export default function CheckinPage() {
   }
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(queueEntries, barbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers)
-  }, [queueEntries, barbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
+    return assignDynamicBarbers(queueEntries, barbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs)
+  }, [queueEntries, barbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs])
 
   const maxLoad = useMemo(
     () =>

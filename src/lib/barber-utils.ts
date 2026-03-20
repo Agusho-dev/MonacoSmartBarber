@@ -152,7 +152,8 @@ export function assignDynamicBarbers(
   marginMinutes = 35,
   dailyServiceCounts: Record<string, number> = {},
   lastCompletedAt: Record<string, string> = {},
-  notClockedInIds: Set<string> = new Set()
+  notClockedInIds: Set<string> = new Set(),
+  cooldownMs = 60_000
 ): DynamicQueueEntry[] {
   const result: DynamicQueueEntry[] = []
 
@@ -179,8 +180,8 @@ export function assignDynamicBarbers(
     const lastCompleted = lastCompletedAt[b.id]
     if (lastCompleted) {
       const elapsedMs = currentTime - new Date(lastCompleted).getTime()
-      // Cooldown de 1 min: tratar temporalmente como ocupado sumándole +1 carga para no robar clientes en camino
-      if (elapsedMs > 0 && elapsedMs < 60000) {
+      // Cooldown configurable: tratar temporalmente como ocupado sumándole +1 carga para no robar clientes en camino
+      if (elapsedMs > 0 && elapsedMs < cooldownMs) {
         barberLoad.set(b.id, barberLoad.get(b.id)! + 1)
       }
     }

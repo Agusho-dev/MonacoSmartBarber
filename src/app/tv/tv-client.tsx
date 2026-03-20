@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Scissors, Clock, User, ChevronRight } from 'lucide-react'
+import { Scissors, Clock, User, ChevronRight, Zap } from 'lucide-react'
 
 // --- Tipos y utilidades de sizing ---
 
@@ -208,6 +208,7 @@ export function TvClient({
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [now, setNow] = useState(() => Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
+  const [dynamicCooldownMs, setDynamicCooldownMs] = useState(60_000)
   const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
   const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
   const [latestAttendance, setLatestAttendance] = useState<Record<string, string>>({})
@@ -255,7 +256,7 @@ export function TvClient({
         .eq('is_active', true),
       supabase
         .from('app_settings')
-        .select('shift_end_margin_minutes')
+        .select('shift_end_margin_minutes, dynamic_cooldown_seconds')
         .maybeSingle(),
       supabase
         .from('visits')
@@ -276,8 +277,9 @@ export function TvClient({
     ])
     if (schedRes.data) setSchedules(schedRes.data as StaffSchedule[])
     if (settingsRes.data) {
-      const margin = (settingsRes.data as { shift_end_margin_minutes?: number }).shift_end_margin_minutes
-      if (typeof margin === 'number' && margin >= 0) setShiftEndMargin(margin)
+      const sd = settingsRes.data as { shift_end_margin_minutes?: number; dynamic_cooldown_seconds?: number }
+      if (typeof sd.shift_end_margin_minutes === 'number' && sd.shift_end_margin_minutes >= 0) setShiftEndMargin(sd.shift_end_margin_minutes)
+      if (typeof sd.dynamic_cooldown_seconds === 'number' && sd.dynamic_cooldown_seconds >= 0) setDynamicCooldownMs(sd.dynamic_cooldown_seconds * 1000)
     }
     if (monthlyVisitsRes?.data) {
       const counts: Record<string, number> = {}
@@ -323,7 +325,10 @@ export function TvClient({
           schema: 'public',
           table: 'queue_entries',
         },
-        () => fetchQueue()
+        () => {
+          fetchQueue()
+          fetchSchedules()
+        }
       )
       .on(
         'postgres_changes',
@@ -366,8 +371,8 @@ export function TvClient({
   const dynamicEntries = useMemo(() => {
     const branchEntries = selectedBranchId ? entries.filter(e => e.branch_id === selectedBranchId) : entries
     const branchBarbers = selectedBranchId ? liveBarbers.filter(b => b.branch_id === selectedBranchId) : liveBarbers
-    return assignDynamicBarbers(branchEntries, branchBarbers as unknown as Staff[], schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers)
-  }, [entries, liveBarbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, selectedBranchId])
+    return assignDynamicBarbers(branchEntries, branchBarbers as unknown as Staff[], schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs)
+  }, [entries, liveBarbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, selectedBranchId, dynamicCooldownMs])
 
   const waitingEntries = useMemo(
     () => dynamicEntries.filter((e) => e.status === 'waiting'),
@@ -439,18 +444,24 @@ export function TvClient({
         <p className={`${ws.clientName} font-medium truncate ${index === 0 ? 'text-white' : 'text-zinc-300'}`}>
           {entry.client?.name ?? 'Cliente'}
         </p>
-        {entry.barber_id && entry.barber && (
+        {(entry as any)._is_dynamically_assigned ? (
+          <p className={`text-emerald-400 ${ws.barberInfo} flex items-center`}>
+            <Zap className={ws.chevronSize} />
+            <span className="font-medium">Menor espera</span>
+            <ChevronRight className={ws.chevronSize} />
+            <span className="font-medium text-zinc-300">{entry.barber?.full_name}</span>
+          </p>
+        ) : entry.is_dynamic && !entry.barber_id ? (
+          <p className={`text-emerald-400/70 ${ws.barberInfo} flex items-center`}>
+            <Zap className={ws.chevronSize} />
+            <span className="font-medium">Menor espera</span>
+          </p>
+        ) : entry.barber_id && entry.barber ? (
           <p className={`text-zinc-500 ${ws.barberInfo} flex items-center`}>
             <ChevronRight className={ws.chevronSize} />
-            <span>
-              {(entry as any)._is_dynamically_assigned ? (
-                <span className="font-medium text-amber-400">Automatico</span>
-              ) : (
-                <>Se corta con <span className="font-medium text-zinc-300">{entry.barber.full_name}</span></>
-              )}
-            </span>
+            <span>Se corta con <span className="font-medium text-zinc-300">{entry.barber.full_name}</span></span>
           </p>
-        )}
+        ) : null}
       </div>
     </div>
   )

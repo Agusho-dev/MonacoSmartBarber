@@ -145,6 +145,7 @@ export function QueuePanel({
   const [approveLoading, setApproveLoading] = useState<string | null>(null)
   const [approveCutsInputs, setApproveCutsInputs] = useState<Record<string, string>>({})
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
+  const [dynamicCooldownMs, setDynamicCooldownMs] = useState(60_000)
 
   const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false)
   const [deactivateLoading, setDeactivateLoading] = useState<string | null>(null)
@@ -204,7 +205,7 @@ export function QueuePanel({
         .eq('is_active', true),
       supabase
         .from('app_settings')
-        .select('shift_end_margin_minutes, next_client_alert_minutes')
+        .select('shift_end_margin_minutes, next_client_alert_minutes, dynamic_cooldown_seconds')
         .maybeSingle(),
       supabase
         .from('visits')
@@ -253,7 +254,7 @@ export function QueuePanel({
     }
 
     if (settingsRes.data) {
-      const settingsData = settingsRes.data as { shift_end_margin_minutes?: number; next_client_alert_minutes?: number }
+      const settingsData = settingsRes.data as { shift_end_margin_minutes?: number; next_client_alert_minutes?: number; dynamic_cooldown_seconds?: number }
       const margin = settingsData.shift_end_margin_minutes
       if (typeof margin === 'number' && margin >= 0) {
         setShiftEndMargin(margin)
@@ -261,6 +262,10 @@ export function QueuePanel({
       const alertMin = settingsData.next_client_alert_minutes
       if (typeof alertMin === 'number' && alertMin > 0) {
         setNextClientAlertMinutes(alertMin)
+      }
+      const cooldownSec = settingsData.dynamic_cooldown_seconds
+      if (typeof cooldownSec === 'number' && cooldownSec >= 0) {
+        setDynamicCooldownMs(cooldownSec * 1000)
       }
     }
 
@@ -336,6 +341,7 @@ export function QueuePanel({
         () => {
           fetchQueue()
           refreshStats()
+          fetchBarbersAndSchedules()
         }
       )
       .on(
@@ -388,8 +394,8 @@ export function QueuePanel({
   }, [])
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(entries, allBarbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers)
-  }, [entries, allBarbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
+    return assignDynamicBarbers(entries, allBarbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs)
+  }, [entries, allBarbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs])
 
   // My active break (ghost entry that is in_progress)
   const myActiveBreak = dynamicEntries.find(

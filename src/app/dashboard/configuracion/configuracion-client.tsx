@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Clock, UserX, Gift, Save, Timer, AlertTriangle } from 'lucide-react'
+import { Clock, UserX, Gift, Save, Timer, AlertTriangle, Zap } from 'lucide-react'
 
 const DAY_OPTIONS = [
   { value: 1, label: 'Lun' },
@@ -43,6 +43,7 @@ export function ConfiguracionClient({ appSettings, rewardsConfig }: Props) {
         <ThresholdsCard settings={appSettings} />
         <ShiftEndMarginCard settings={appSettings} />
         <NextClientAlertCard settings={appSettings} />
+        <DynamicCooldownCard settings={appSettings} />
       </div>
 
       <RewardsSection configs={rewardsConfig} />
@@ -368,6 +369,80 @@ function NextClientAlertCard({ settings }: { settings: AppSettings | null }) {
         <Button onClick={handleSave} disabled={isPending}>
           <Save className="mr-2 size-4" />
           {isPending ? 'Guardando...' : 'Guardar alerta'}
+        </Button>
+      </CardFooter>
+    </Card>
+  )
+}
+
+/* ─── Dynamic Cooldown ─── */
+
+function DynamicCooldownCard({ settings }: { settings: AppSettings | null }) {
+  const [seconds, setSeconds] = useState(settings?.dynamic_cooldown_seconds ?? 60)
+  const [isPending, startTransition] = useTransition()
+
+  const handleSave = () => {
+    const fd = new FormData()
+    fd.set('dynamic_cooldown_seconds', String(seconds))
+    fd.set('shift_end_margin_minutes', String(settings?.shift_end_margin_minutes ?? 35))
+    fd.set('next_client_alert_minutes', String(settings?.next_client_alert_minutes ?? 5))
+    fd.set('lost_client_days', String(settings?.lost_client_days ?? 40))
+    fd.set('at_risk_client_days', String(settings?.at_risk_client_days ?? 25))
+    fd.set('business_hours_open', settings?.business_hours_open ?? '09:00')
+    fd.set('business_hours_close', settings?.business_hours_close ?? '21:00')
+    fd.set(
+      'business_days',
+      (settings?.business_days ?? [1, 2, 3, 4, 5, 6]).join(',')
+    )
+
+    startTransition(async () => {
+      const result = await updateAppSettings(fd)
+      if (result.error) toast.error(result.error)
+      else toast.success('Cooldown dinámico actualizado')
+    })
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Zap className="size-5 text-muted-foreground" />
+          <CardTitle>Cooldown de cliente dinámico</CardTitle>
+        </div>
+        <CardDescription>
+          Segundos que un barbero queda "bloqueado" para recibir clientes dinámicos tras finalizar un servicio, evitando que se le asigne un cliente que aún está caminando hacia su silla
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="cooldown-seconds">Cooldown (segundos)</Label>
+          <div className="flex items-center gap-3">
+            <Input
+              id="cooldown-seconds"
+              type="number"
+              min={0}
+              max={300}
+              value={seconds}
+              onChange={(e) => setSeconds(Number(e.target.value))}
+              className="w-24"
+            />
+            <span className="text-sm text-muted-foreground">
+              segundos de bloqueo post-servicio
+            </span>
+          </div>
+        </div>
+        <div className="rounded-lg bg-muted/50 p-3">
+          <p className="text-xs text-muted-foreground">
+            Con {seconds}s de cooldown, si un barbero termina un corte, el sistema
+            esperará {seconds} segundo{seconds !== 1 ? 's' : ''} antes de asignarle
+            un nuevo cliente dinámico. Poner en 0 desactiva el cooldown.
+          </p>
+        </div>
+      </CardContent>
+      <CardFooter>
+        <Button onClick={handleSave} disabled={isPending}>
+          <Save className="mr-2 size-4" />
+          {isPending ? 'Guardando...' : 'Guardar cooldown'}
         </Button>
       </CardFooter>
     </Card>
