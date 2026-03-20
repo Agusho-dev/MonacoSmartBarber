@@ -400,14 +400,14 @@ export function QueuePanel({
     (e) => e.barber_id === session.staff_id && e.status === 'in_progress' && !e.is_break
   )
 
-  // "Mi cola": clients that have no barber assigned or are assigned to me (including ghost breaks)
+  // "Mi fila": clients that have no barber assigned or are assigned to me (including ghost breaks)
   const myWaitingEntries = dynamicEntries.filter(
     (e) =>
       e.status === 'waiting' &&
       (!e.barber_id || e.barber_id === session.staff_id)
   )
 
-  // "Cola general": ALL waiting clients
+  // "Fila general": ALL waiting clients
   const allWaitingEntries = dynamicEntries.filter((e) => e.status === 'waiting')
 
   // Real waiting clients for this barber (non-break)
@@ -815,7 +815,7 @@ export function QueuePanel({
                   <AlertDialogHeader>
                     <AlertDialogTitle>¿El cliente no se presentó?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      Esto marcará a <strong>{entry.client?.name ?? 'Cliente'}</strong> como Ausente y lo quitará de la cola de espera de forma permanente.
+                      Esto marcará a <strong>{entry.client?.name ?? 'Cliente'}</strong> como Ausente y lo quitará de la fila de espera de forma permanente.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -1008,13 +1008,13 @@ export function QueuePanel({
             <div className="px-3 py-2 md:px-5">
               <TabsList className="w-full">
                 <TabsTrigger value="my-queue" className="flex-1 py-2 md:py-3 text-base md:text-lg">
-                  Mi cola
+                  Mi fila
                   <Badge variant="secondary" className="ml-2 px-2 text-base">
                     {myWaitingEntries.filter(e => !e.is_break).length}
                   </Badge>
                 </TabsTrigger>
                 <TabsTrigger value="general-queue" className="flex-1 py-2 md:py-3 text-base md:text-lg">
-                  Cola general
+                  Fila general
                   <Badge variant="secondary" className="ml-2 px-2 text-base">
                     {allWaitingEntries.filter(e => !e.is_break).length}
                   </Badge>
@@ -1269,7 +1269,7 @@ export function QueuePanel({
                 <Scissors className="mb-3 size-12 opacity-15" />
                 <p className="font-medium">Sin cliente en atención</p>
                 <p className="mt-1 max-w-[220px] text-xs opacity-60">
-                  Selecciona un cliente de la cola para comenzar
+                  Selecciona un cliente de la fila para comenzar
                 </p>
               </div>
             )}
@@ -1291,7 +1291,7 @@ export function QueuePanel({
                 </h2>
                 <p className="mt-2 text-base text-amber-200/80">
                   {myRealWaitingEntries[0]?.client?.name
-                    ? <><strong>{myRealWaitingEntries[0].client.name}</strong> está en la cola</>
+                    ? <><strong>{myRealWaitingEntries[0].client.name}</strong> está en la fila</>
                     : 'Tenés clientes en espera'}
                 </p>
               </div>

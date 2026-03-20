@@ -123,7 +123,7 @@ export function OverviewClient({
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard title="Clientes hoy" value={uniqueClientsToday} icon={Users} />
-        <StatCard title="En cola" value={clientsWaiting} icon={Clock} />
+        <StatCard title="En fila" value={clientsWaiting} icon={Clock} />
         <StatCard title="En atención" value={clientsInProgress} icon={Scissors} />
         <StatCard title="Cortes completados" value={completedToday} icon={CircleCheck} />
       </div>

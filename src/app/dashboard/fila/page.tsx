@@ -1,12 +1,12 @@
 import type { Metadata } from 'next'
 import { createClient } from '@/lib/supabase/server'
-import { ColaClient } from './cola-client'
+import { FilaClient } from './fila-client'
 
 export const metadata: Metadata = {
-  title: 'Cola | Monaco Smart Barber',
+  title: 'Fila | Monaco Smart Barber',
 }
 
-export default async function ColaAdminPage() {
+export default async function FilaAdminPage() {
   const supabase = await createClient()
 
   const [
@@ -32,7 +32,7 @@ export default async function ColaAdminPage() {
   ])
 
   return (
-    <ColaClient
+    <FilaClient
       initialEntries={entries ?? []}
       barbers={barbers ?? []}
       branches={branches ?? []}

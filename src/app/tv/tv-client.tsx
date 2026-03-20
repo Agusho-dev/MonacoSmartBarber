@@ -530,7 +530,7 @@ export function TvClient({
           </div>
         </section>
 
-        {/* Cola de Espera (Waiting) */}
+        {/* Fila de Espera (Waiting) */}
         <section className="flex flex-col gap-4 lg:gap-6 2xl:gap-10 min-h-0">
           <div className="flex items-center gap-3 2xl:gap-6 px-2 lg:px-4 2xl:px-6 pb-2 2xl:pb-4">
             <div className="flex items-center justify-center size-10 lg:size-12 2xl:size-20 rounded-full bg-blue-500/20 text-blue-400">

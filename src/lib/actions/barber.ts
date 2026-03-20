@@ -53,8 +53,8 @@ export async function deactivateBarber(staffId: string) {
     .eq('is_break', true)
     .in('status', ['waiting', 'in_progress'])
 
-  revalidatePath('/barbero/cola')
-  revalidatePath('/dashboard/cola')
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
   revalidatePath('/dashboard/barberos')
   revalidatePath('/checkin')
   return { success: true, reassignedCount }
@@ -72,8 +72,8 @@ export async function activateBarber(staffId: string) {
     return { error: 'Error al activar barbero: ' + error.message }
   }
 
-  revalidatePath('/barbero/cola')
-  revalidatePath('/dashboard/cola')
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
   revalidatePath('/dashboard/barberos')
   revalidatePath('/checkin')
   return { success: true }
@@ -103,8 +103,8 @@ export async function toggleBarberVisibility(staffId: string) {
     return { error: 'Error al cambiar visibilidad: ' + error.message }
   }
 
-  revalidatePath('/barbero/cola')
-  revalidatePath('/dashboard/cola')
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
   revalidatePath('/checkin')
   return { success: true, hidden: newValue }
 }

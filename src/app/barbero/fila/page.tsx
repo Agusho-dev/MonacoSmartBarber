@@ -5,10 +5,10 @@ import { createClient } from '@/lib/supabase/server'
 import { QueuePanel } from '@/components/barber/queue-panel'
 
 export const metadata: Metadata = {
-  title: 'Cola | Monaco Smart Barber',
+  title: 'Fila | Monaco Smart Barber',
 }
 
-export default async function ColaPage() {
+export default async function FilaPage() {
   const session = await getBarberSession()
   if (!session) redirect('/barbero/login')
 

@@ -1039,7 +1039,7 @@ export default function CheckinPage() {
             <div className="min-w-0 flex-1">
               <p className="text-xl font-semibold text-emerald-300">Menor espera</p>
               <p className="text-base text-emerald-400/70 mt-0.5">
-                Te atiende el barbero con menos cola
+                Te atiende el barbero con menos fila
               </p>
             </div>
             <div className="text-right shrink-0">

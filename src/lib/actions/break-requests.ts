@@ -52,7 +52,7 @@ export async function requestBreak(staffId: string, branchId: string, breakConfi
     if (error) return { error: error.message }
     revalidatePath('/dashboard/descansos')
     revalidatePath('/dashboard/equipo')
-    revalidatePath('/barbero/cola')
+    revalidatePath('/barbero/fila')
     return { success: true }
 }
 
@@ -120,7 +120,7 @@ export async function approveBreak(requestId: string, cutsBeforeBreak: number) {
 
     revalidatePath('/dashboard/descansos')
     revalidatePath('/dashboard/equipo')
-    revalidatePath('/barbero/cola')
+    revalidatePath('/barbero/fila')
     return { success: true }
 }
 
@@ -195,7 +195,7 @@ export async function rejectBreak(requestId: string, notes?: string) {
     if (error) return { error: error.message }
     revalidatePath('/dashboard/descansos')
     revalidatePath('/dashboard/equipo')
-    revalidatePath('/barbero/cola')
+    revalidatePath('/barbero/fila')
     return { success: true }
 }
 
@@ -235,7 +235,7 @@ export async function cancelBreakRequest(requestId: string) {
     if (error) return { error: error.message }
     revalidatePath('/dashboard/descansos')
     revalidatePath('/dashboard/equipo')
-    revalidatePath('/barbero/cola')
+    revalidatePath('/barbero/fila')
     return { success: true }
 }
 
@@ -303,7 +303,7 @@ export async function completeBreakRequest(queueEntryId: string) {
 
     revalidatePath('/dashboard/descansos')
     revalidatePath('/dashboard/equipo')
-    revalidatePath('/barbero/cola')
+    revalidatePath('/barbero/fila')
     return { success: true }
 }
 

@@ -13,7 +13,7 @@ import {
 import { cn } from '@/lib/utils'
 
 const navItems = [
-    { href: '/barbero/cola', label: 'Cola', icon: ListOrdered },
+    { href: '/barbero/fila', label: 'Fila', icon: ListOrdered },
     { href: '/barbero/metas', label: 'Metas', icon: Target },
     { href: '/barbero/asistencia', label: 'Asistencia', icon: ClipboardCheck },
     { href: '/barbero/historial', label: 'Historial', icon: History },

@@ -109,7 +109,7 @@ export async function directProductSale(
     await recordTransfer(visit.id, paymentAccountId, amount, branchId)
   }
 
-  revalidatePath('/barbero/cola')
+  revalidatePath('/barbero/fila')
   revalidatePath('/barbero/facturacion')
   revalidatePath('/barbero/rendimiento')
   revalidatePath('/dashboard')

@@ -108,7 +108,7 @@ export async function loginWithPin(formData: FormData) {
     path: '/',
   })
 
-  redirect('/barbero/cola')
+  redirect('/barbero/fila')
 }
 
 export async function getBarberSession() {

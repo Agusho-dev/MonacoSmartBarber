@@ -168,7 +168,7 @@ export function SucursalesClient({ branches, staff, todayVisits, occupancy }: Pr
                 <div className="grid grid-cols-2 gap-3">
                   <MiniStat icon={Users} label="Barberos" value={stats.barberCount} />
                   <MiniStat icon={Scissors} label="Cortes hoy" value={stats.visitsToday} />
-                  <MiniStat icon={Clock} label="En cola" value={stats.waiting} />
+                  <MiniStat icon={Clock} label="En fila" value={stats.waiting} />
                   <MiniStat
                     icon={DollarSign}
                     label="Ingresos hoy"

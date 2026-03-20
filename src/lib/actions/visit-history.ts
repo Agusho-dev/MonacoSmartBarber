@@ -31,7 +31,7 @@ export async function saveVisitDetails(
     if (photoError) return { error: photoError.message }
   }
 
-  revalidatePath('/barbero/cola')
+  revalidatePath('/barbero/fila')
   revalidatePath('/dashboard/clientes')
   return { success: true }
 }

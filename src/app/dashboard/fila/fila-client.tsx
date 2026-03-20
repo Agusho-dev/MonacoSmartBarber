@@ -49,17 +49,17 @@ interface BranchRow {
   name: string
 }
 
-interface ColaClientProps {
+interface FilaClientProps {
   initialEntries: QueueEntry[]
   barbers: BarberRow[]
   branches: BranchRow[]
 }
 
-export function ColaClient({
+export function FilaClient({
   initialEntries,
   barbers,
   branches,
-}: ColaClientProps) {
+}: FilaClientProps) {
   const { selectedBranchId } = useBranchStore()
   const [entries, setEntries] = useState<QueueEntry[]>(initialEntries)
   const [liveBarbers, setLiveBarbers] = useState<BarberRow[]>(barbers)
@@ -216,7 +216,7 @@ export function ColaClient({
     return assignDynamicBarbers(entries, liveBarbers as unknown as Staff[], schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers)
   }, [entries, liveBarbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
 
-  // Filter by selected branch
+  // Filtrar por sucursal seleccionada
   const filteredEntries = selectedBranchId
     ? dynamicEntries.filter((e) => e.branch_id === selectedBranchId)
     : dynamicEntries
@@ -269,15 +269,15 @@ export function ColaClient({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Cola en vivo</h2>
+          <h2 className="text-2xl font-bold tracking-tight">Fila en vivo</h2>
           <p className="text-sm text-muted-foreground">
-            Gestión de la cola de espera en tiempo real
+            Gestión de la fila de espera en tiempo real
           </p>
         </div>
         <BranchSelector branches={branches} />
       </div>
 
-      {/* Barber status summary */}
+      {/* Resumen de estado de barberos */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {filteredBarbers.map((barber) => {
           const activeEntry = inProgressEntries.find(
@@ -323,12 +323,12 @@ export function ColaClient({
         })}
       </div>
 
-      {/* Queue entries */}
+      {/* Entradas de la fila */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Cola de espera</CardTitle>
+              <CardTitle>Fila de espera</CardTitle>
               <CardDescription>
                 {waitingEntries.length} cliente
                 {waitingEntries.length !== 1 ? 's' : ''} esperando
@@ -372,7 +372,7 @@ export function ColaClient({
                       </div>
                     </div>
 
-                    {/* Reassign barber */}
+                    {/* Reasignar barbero */}
                     <div className="shrink-0">
                       <Select
                         value={entry.barber_id ?? '__none__'}
@@ -401,7 +401,7 @@ export function ColaClient({
                       </Select>
                     </div>
 
-                    {/* Cancel */}
+                    {/* Cancelar */}
                     <Button
                       variant="ghost"
                       size="icon"
@@ -419,7 +419,7 @@ export function ColaClient({
         </CardContent>
       </Card>
 
-      {/* In progress */}
+      {/* En atención */}
       {inProgressEntries.length > 0 && (
         <Card>
           <CardHeader>

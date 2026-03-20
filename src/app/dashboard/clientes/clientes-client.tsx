@@ -524,7 +524,7 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
                       className="h-9 transition-colors"
                       onClick={async () => {
                         if (!selectedBranchId) {
-                          toast.error('Seleccioná una sucursal para añadir a la cola.')
+                          toast.error('Seleccioná una sucursal para añadir a la fila.')
                           return
                         }
                         const formData = new FormData()
@@ -535,12 +535,12 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
                         if (res?.error) {
                           toast.error(res.error)
                         } else {
-                          toast.success(`${detailClient.name} añadido a la cola`)
+                          toast.success(`${detailClient.name} añadido a la fila`)
                         }
                       }}
                     >
                       <Plus className="mr-2 size-4" />
-                      Añadir a cola
+                      Añadir a fila
                     </Button>
                   </div>
 

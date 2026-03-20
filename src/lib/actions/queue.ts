@@ -84,11 +84,11 @@ export async function checkinClient(formData: FormData) {
       return { alreadyInQueue: true, position: existing?.position ?? 1, queueEntryId: existing?.id ?? '' }
     }
     console.error('Insert queue entry error:', queueError)
-    return { error: 'Error al agregar a la cola: ' + (queueError?.message || 'Error desconocido') }
+    return { error: 'Error al agregar a la fila: ' + (queueError?.message || 'Error desconocido') }
   }
 
   revalidatePath('/checkin')
-  revalidatePath('/barbero/cola')
+  revalidatePath('/barbero/fila')
   return { success: true, position, queueEntryId: queueEntry.id, clientId }
 }
 
@@ -110,7 +110,7 @@ export async function startService(queueEntryId: string, barberId: string) {
     return { error: 'Error al iniciar servicio' }
   }
 
-  revalidatePath('/barbero/cola')
+  revalidatePath('/barbero/fila')
   return { success: true }
 }
 
@@ -446,7 +446,7 @@ export async function completeService(
     }
   }
 
-  revalidatePath('/barbero/cola')
+  revalidatePath('/barbero/fila')
   revalidatePath('/barbero/facturacion')
   revalidatePath('/barbero/rendimiento')
   revalidatePath('/dashboard')
@@ -467,8 +467,8 @@ export async function cancelQueueEntry(queueEntryId: string) {
     return { error: 'Error al cancelar' }
   }
 
-  revalidatePath('/barbero/cola')
-  revalidatePath('/dashboard/cola')
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
   return { success: true }
 }
 
@@ -488,8 +488,8 @@ export async function reassignBarber(
     return { error: 'Error al reasignar barbero' }
   }
 
-  revalidatePath('/barbero/cola')
-  revalidatePath('/dashboard/cola')
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
   return { success: true }
 }
 
@@ -553,11 +553,11 @@ export async function checkinClientByFace(
         .single()
       return { alreadyInQueue: true, position: existing?.position ?? 1, queueEntryId: existing?.id ?? '' }
     }
-    return { error: 'Error al agregar a la cola' }
+    return { error: 'Error al agregar a la fila' }
   }
 
   revalidatePath('/checkin')
-  revalidatePath('/barbero/cola')
+  revalidatePath('/barbero/fila')
   return { success: true, position, queueEntryId: queueEntry.id }
 }
 
@@ -578,7 +578,7 @@ export async function reassignMyBarber(
   }
 
   revalidatePath('/checkin')
-  revalidatePath('/barbero/cola')
-  revalidatePath('/dashboard/cola')
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
   return { success: true }
 }
