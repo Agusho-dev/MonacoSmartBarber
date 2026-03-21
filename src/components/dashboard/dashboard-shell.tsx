@@ -16,16 +16,31 @@ import {
   LogOut,
   ListOrdered,
   Gift,
-  Coffee,
-  Wallet,
   CalendarDays,
-  Banknote,
-  Trophy,
-  AlertTriangle,
   Package,
   MessageSquare,
   Smartphone,
+  GripVertical,
+  Check,
 } from 'lucide-react'
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  TouchSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { logout } from '@/lib/actions/auth'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -66,6 +81,143 @@ const navItems = [
   { href: '/dashboard/configuracion', label: 'Configuración', icon: Settings, requiredPermissions: ['settings.view'] },
 ]
 
+// Tipo para cada ítem de navegación
+interface NavItem {
+  href: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  requiredPermissions: string[]
+}
+
+// Props para el componente de ítem sorteable — debe estar fuera de DashboardShell
+// para evitar violaciones de las reglas de hooks (hooks dentro de funciones anidadas)
+interface SortableNavItemProps {
+  item: NavItem
+  isActive: boolean
+  isEditMode: boolean
+  pendingBreakCount: number
+  onNavigate: () => void
+}
+
+function SortableNavItem({
+  item,
+  isActive,
+  isEditMode,
+  pendingBreakCount,
+  onNavigate,
+}: SortableNavItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: item.href })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
+  if (isEditMode) {
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        className={cn(
+          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium',
+          'bg-sidebar-accent/30 text-sidebar-foreground/60 select-none',
+          isDragging && 'opacity-50 shadow-lg z-50 relative'
+        )}
+      >
+        {/* Manejador de arrastre — objetivo táctil mínimo 44x44px */}
+        <button
+          {...attributes}
+          {...listeners}
+          className="touch-none flex items-center justify-center min-w-[44px] min-h-[44px] -ml-2 -my-2 text-muted-foreground hover:text-sidebar-foreground cursor-grab active:cursor-grabbing"
+          aria-label={`Arrastrar para reordenar ${item.label}`}
+        >
+          <GripVertical className="size-4 shrink-0" />
+        </button>
+        <item.icon className="size-4 shrink-0 text-muted-foreground" />
+        <span>{item.label}</span>
+        {item.href === '/dashboard/equipo' && pendingBreakCount > 0 && (
+          <span className="ml-auto flex size-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
+            {pendingBreakCount}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  // Modo normal — comportamiento de link igual al original
+  return (
+    <div ref={setNodeRef} style={style}>
+      <Link
+        href={item.href}
+        onClick={onNavigate}
+        className={cn(
+          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+          isActive
+            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+            : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+        )}
+      >
+        <item.icon className="size-4 shrink-0" />
+        {item.label}
+        {item.href === '/dashboard/equipo' && pendingBreakCount > 0 && (
+          <span className="ml-auto flex size-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
+            {pendingBreakCount}
+          </span>
+        )}
+      </Link>
+    </div>
+  )
+}
+
+// FIX 1 — SidebarContent extraído a módulo para evitar remount por nueva referencia en cada render
+interface SidebarContentProps {
+  isEditMode: boolean
+  onToggleEditMode: () => void
+  userRole: string
+  userFullName: string
+  children: React.ReactNode
+}
+
+function SidebarContent({ isEditMode, onToggleEditMode, userRole, userFullName, children }: SidebarContentProps) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex h-14 items-center gap-2 px-6">
+        <Scissors className="size-5" />
+        <span className="text-lg font-bold tracking-tight">Monaco</span>
+      </div>
+      <Separator className="bg-sidebar-border" />
+      <ScrollArea className="flex-1 py-4">
+        {children}
+        {/* Botón para activar/desactivar modo edición de orden */}
+        <div className="px-3 pb-2 pt-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 text-xs text-sidebar-foreground/40 hover:text-sidebar-foreground/70"
+            onClick={onToggleEditMode}
+          >
+            {isEditMode ? <Check className="size-3 shrink-0" /> : <GripVertical className="size-3 shrink-0" />}
+            {isEditMode ? 'Listo' : 'Personalizar orden'}
+          </Button>
+        </div>
+      </ScrollArea>
+      <Separator className="bg-sidebar-border" />
+      <div className="p-4">
+        <p className="text-xs text-sidebar-foreground/50">
+          {userRole === 'owner' ? 'Propietario' : 'Administrador'}
+        </p>
+        <p className="truncate text-sm font-medium">{userFullName}</p>
+      </div>
+    </div>
+  )
+}
 
 interface DashboardShellProps {
   user: { full_name: string; email: string | null; role: string }
@@ -82,6 +234,79 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
   const { selectedBranchId } = useBranchStore()
   const supabase = useMemo(() => createClient(), [])
 
+  // --- Estado de ordenamiento personalizado por usuario ---
+  const storageKey = `nav-order-${user.full_name}`
+
+  // FIX 3 — Inicializar siempre con el orden por defecto para evitar mismatch de hidratación SSR/cliente.
+  // El orden guardado se lee en useEffect, únicamente en el cliente.
+  const [navOrder, setNavOrder] = useState<string[]>(() => navItems.map(i => i.href))
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed) && parsed.every((v): v is string => typeof v === 'string')) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setNavOrder(parsed)
+        }
+      }
+    } catch {
+      // localStorage no disponible (modo privado, cuota excedida)
+    }
+  }, [storageKey])
+
+  const [isEditMode, setIsEditMode] = useState(false)
+
+  // --- Sensores dnd-kit: puntero (mouse) + táctil + teclado ---
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      // Requiere 5px de movimiento antes de activar el arrastre,
+      // para no interferir con clics normales
+      activationConstraint: { distance: 5 },
+    }),
+    useSensor(TouchSensor, {
+      // Demora de 250ms en touch para distinguir arrastre de scroll
+      activationConstraint: { delay: 250, tolerance: 5 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+
+  // Ítems filtrados por permisos y ordenados según preferencia del usuario
+  const orderedItems = useMemo(() => {
+    const filtered = navItems.filter(item =>
+      item.requiredPermissions.some(p => permissions[p])
+    )
+    return [...filtered].sort((a, b) => {
+      const ai = navOrder.indexOf(a.href)
+      const bi = navOrder.indexOf(b.href)
+      if (ai === -1 && bi === -1) return 0
+      if (ai === -1) return 1
+      if (bi === -1) return -1
+      return ai - bi
+    })
+  }, [navOrder, permissions])
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (over && active.id !== over.id) {
+      const oldIndex = orderedItems.findIndex(i => i.href === active.id)
+      const newIndex = orderedItems.findIndex(i => i.href === over.id)
+      const newOrder = arrayMove(orderedItems, oldIndex, newIndex).map(i => i.href)
+      setNavOrder(newOrder)
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(newOrder))
+      } catch {
+        // Ignorar errores de localStorage (modo privado, cuota excedida, etc.)
+      }
+    }
+  }
+
+  // FIX 5 — Callback estable para evitar nuevas closures en cada render
+  const handleMobileClose = useCallback(() => setMobileOpen(false), [])
+
   const handleLogout = () => startTransition(() => logout())
 
   const initials = user.full_name
@@ -91,7 +316,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
     .toUpperCase()
     .slice(0, 2)
 
-  // Fetch pending break requests count
+  // Obtener conteo de solicitudes de descanso pendientes
   const fetchPendingBreakCount = useCallback(async () => {
     if (!selectedBranchId) { setPendingBreakCount(0); return }
     const { count } = await supabase
@@ -103,6 +328,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
   }, [supabase, selectedBranchId])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPendingBreakCount()
     const channel = supabase
       .channel('dashboard-break-requests')
@@ -113,68 +339,47 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
     return () => { supabase.removeChannel(channel) }
   }, [supabase, fetchPendingBreakCount])
 
-  function NavLinks() {
+  // FIX 2 — Renombrado a renderNavLinks (minúscula) para que React lo trate como
+  // llamada de función plana y no como un componente nuevo en cada render,
+  // evitando que DndContext pierda estado durante el arrastre.
+  function renderNavLinks() {
     return (
       <nav className="flex flex-col gap-1 px-3">
-        {navItems
-          .filter(item => item.requiredPermissions.some(pred => permissions[pred]))
-          .map((item) => {
-            const isActive =
-              item.href === '/dashboard'
-                ? pathname === '/dashboard'
-                : pathname.startsWith(item.href)
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setMobileOpen(false)}
-                className={cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                    : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-                )}
-              >
-                <item.icon className="size-4 shrink-0" />
-                {item.label}
-                {item.href === '/dashboard/equipo' && pendingBreakCount > 0 && (
-                  <span className="ml-auto flex size-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
-                    {pendingBreakCount}
-                  </span>
-                )}
-              </Link>
-            )
-          })}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={orderedItems.map(i => i.href)} strategy={verticalListSortingStrategy}>
+            {orderedItems.map((item) => {
+              const isActive =
+                item.href === '/dashboard'
+                  ? pathname === '/dashboard'
+                  : pathname.startsWith(item.href)
+              return (
+                <SortableNavItem
+                  key={item.href}
+                  item={item}
+                  isActive={isActive}
+                  isEditMode={isEditMode}
+                  pendingBreakCount={pendingBreakCount}
+                  onNavigate={handleMobileClose}
+                />
+              )
+            })}
+          </SortableContext>
+        </DndContext>
       </nav>
-    )
-  }
-
-  function SidebarContent() {
-    return (
-      <div className="flex h-full flex-col">
-        <div className="flex h-14 items-center gap-2 px-6">
-          <Scissors className="size-5" />
-          <span className="text-lg font-bold tracking-tight">Monaco</span>
-        </div>
-        <Separator className="bg-sidebar-border" />
-        <ScrollArea className="flex-1 py-4">
-          <NavLinks />
-        </ScrollArea>
-        <Separator className="bg-sidebar-border" />
-        <div className="p-4">
-          <p className="text-xs text-sidebar-foreground/50">
-            {user.role === 'owner' ? 'Propietario' : 'Administrador'}
-          </p>
-          <p className="truncate text-sm font-medium">{user.full_name}</p>
-        </div>
-      </div>
     )
   }
 
   return (
     <div className="flex h-screen overflow-hidden">
       <aside className="hidden w-64 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
-        <SidebarContent />
+        <SidebarContent
+          isEditMode={isEditMode}
+          onToggleEditMode={() => setIsEditMode(p => !p)}
+          userRole={user.role}
+          userFullName={user.full_name}
+        >
+          {renderNavLinks()}
+        </SidebarContent>
       </aside>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -184,7 +389,14 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
           showCloseButton={false}
         >
           <SheetTitle className="sr-only">Menú de navegación</SheetTitle>
-          <SidebarContent />
+          <SidebarContent
+            isEditMode={isEditMode}
+            onToggleEditMode={() => setIsEditMode(p => !p)}
+            userRole={user.role}
+            userFullName={user.full_name}
+          >
+            {renderNavLinks()}
+          </SidebarContent>
         </SheetContent>
       </Sheet>
 
