@@ -21,7 +21,7 @@ export default async function FilaAdminPage() {
       .order('position'),
     supabase
       .from('staff')
-      .select('id, full_name, branch_id, status, is_active')
+      .select('id, full_name, branch_id, status, is_active, hidden_from_checkin')
       .eq('role', 'barber')
       .eq('is_active', true)
       .order('full_name'),

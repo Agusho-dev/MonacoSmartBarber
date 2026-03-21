@@ -6,7 +6,7 @@ import { cancelQueueEntry, reassignBarber } from '@/lib/actions/queue'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import type { QueueEntry, StaffStatus, StaffSchedule, Staff } from '@/lib/types/database'
-import { assignDynamicBarbers } from '@/lib/barber-utils'
+import { assignDynamicBarbers, isBarberBlockedByShiftEnd } from '@/lib/barber-utils'
 import {
   Card,
   CardContent,
@@ -33,6 +33,7 @@ import {
   UserCog,
   Pause,
   CircleDot,
+  EyeOff,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -42,6 +43,7 @@ interface BarberRow {
   branch_id: string | null
   status: StaffStatus
   is_active: boolean
+  hidden_from_checkin: boolean
 }
 
 interface BranchRow {
@@ -87,7 +89,7 @@ export function FilaClient({
   const fetchBarbers = useCallback(async () => {
     const { data } = await supabase
       .from('staff')
-      .select('id, full_name, branch_id, status, is_active')
+      .select('id, full_name, branch_id, status, is_active, hidden_from_checkin')
       .eq('role', 'barber')
       .eq('is_active', true)
       .order('full_name')
@@ -283,36 +285,60 @@ export function FilaClient({
           const activeEntry = inProgressEntries.find(
             (e) => e.barber_id === barber.id
           )
-          const isPaused = false
+          const isNotClocked = notClockedInBarbers.has(barber.id)
+          const isHidden = barber.hidden_from_checkin
+          const isShiftEnd = !isNotClocked && isBarberBlockedByShiftEnd(
+            barber as unknown as Staff,
+            inProgressEntries,
+            schedules,
+            now,
+            shiftEndMargin
+          )
+
+          // Determinar estado de visualización (prioridad: oculto > sin entrada > fin turno > atendiendo > disponible)
+          let iconBg: string
+          let icon: React.ReactNode
+          let statusText: string
+
+          if (isHidden) {
+            iconBg = 'bg-muted'
+            icon = <EyeOff className="size-4 text-muted-foreground/50" />
+            statusText = 'Oculto en check-in'
+          } else if (isNotClocked) {
+            iconBg = 'bg-muted'
+            icon = <Clock className="size-4 text-muted-foreground/50" />
+            statusText = 'Sin entrada'
+          } else if (isShiftEnd) {
+            iconBg = 'bg-amber-500/15'
+            icon = <Clock className="size-4 text-amber-400" />
+            statusText = 'Fin de turno'
+          } else if (activeEntry) {
+            iconBg = 'bg-primary/10'
+            icon = <Scissors className="size-4 text-primary" />
+            statusText = `Atendiendo a ${activeEntry.client?.name ?? 'cliente'}`
+          } else {
+            iconBg = 'bg-muted'
+            icon = <CircleDot className="size-4 text-green-400" />
+            statusText = 'Disponible'
+          }
+
+          const isUnavailable = isHidden || isNotClocked || isShiftEnd
 
           return (
-            <Card key={barber.id} className="gap-0 py-0">
+            <Card key={barber.id} className={`gap-0 py-0 ${isUnavailable ? 'opacity-60' : ''}`}>
               <CardContent className="flex items-center gap-3 p-4">
-                <div
-                  className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${isPaused
-                    ? 'bg-yellow-500/15'
-                    : activeEntry
-                      ? 'bg-primary/10'
-                      : 'bg-muted'
-                    }`}
-                >
-                  {activeEntry ? (
-                    <Scissors className="size-4 text-primary" />
-                  ) : (
-                    <CircleDot className="size-4 text-green-400" />
-                  )}
+                <div className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${iconBg}`}>
+                  {icon}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">
                     {barber.full_name}
                   </p>
                   <p className="truncate text-xs text-muted-foreground">
-                    {activeEntry
-                      ? `Atendiendo a ${activeEntry.client?.name ?? 'cliente'}`
-                      : 'Disponible'}
+                    {statusText}
                   </p>
                 </div>
-                {activeEntry?.started_at && (
+                {activeEntry?.started_at && !isUnavailable && (
                   <Badge variant="outline" className="shrink-0 text-xs">
                     {formatElapsed(activeEntry.started_at)}
                   </Badge>
