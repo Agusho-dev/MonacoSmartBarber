@@ -2,17 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Power, Trash2, Tag, ChevronDown, ChevronUp, Percent } from 'lucide-react'
+import { Plus, Pencil, Power, ChevronDown, ChevronUp, Percent } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { formatCurrency } from '@/lib/format'
-import {
-  upsertServiceTag,
-  deleteServiceTag,
-} from '@/lib/actions/tags'
 import { HistorialServicios } from './historial-servicios'
-import type { Service, Branch, ServiceTag, ServiceAvailability, Staff, StaffServiceCommission } from '@/lib/types/database'
+import type { Service, Branch, ServiceAvailability, Staff, StaffServiceCommission } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -57,7 +53,6 @@ interface BarberMinimal {
 interface Props {
   services: ServiceWithBranch[]
   branches: Branch[]
-  tags: ServiceTag[]
   barbers: BarberMinimal[]
   commissions: StaffServiceCommission[]
 }
@@ -71,7 +66,7 @@ const emptyForm = {
   default_commission_pct: '',
 }
 
-export function ServiciosClient({ services, branches, tags, barbers, commissions }: Props) {
+export function ServiciosClient({ services, branches, barbers, commissions }: Props) {
   const router = useRouter()
   const supabase = createClient()
   const { selectedBranchId } = useBranchStore()
@@ -81,12 +76,6 @@ export function ServiciosClient({ services, branches, tags, barbers, commissions
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
-
-  // Tag state
-  const [tagDialogOpen, setTagDialogOpen] = useState(false)
-  const [editingTagId, setEditingTagId] = useState<string | null>(null)
-  const [tagName, setTagName] = useState('')
-  const [tagSaving, setTagSaving] = useState(false)
 
   // Commission overrides state
   const [showOverrides, setShowOverrides] = useState(false)
@@ -199,42 +188,6 @@ export function ServiciosClient({ services, branches, tags, barbers, commissions
     router.refresh()
   }
 
-  // --- Tag CRUD ---
-  function openAddTag() {
-    setEditingTagId(null)
-    setTagName('')
-    setTagDialogOpen(true)
-  }
-
-  function openEditTag(tag: ServiceTag) {
-    setEditingTagId(tag.id)
-    setTagName(tag.name)
-    setTagDialogOpen(true)
-  }
-
-  async function handleSaveTag() {
-    if (!tagName.trim()) return
-    setTagSaving(true)
-    const result = await upsertServiceTag(
-      tagName.trim(),
-      editingTagId ?? undefined
-    )
-    if (result.error) {
-      toast.error(result.error)
-    }
-    setTagSaving(false)
-    setTagDialogOpen(false)
-    router.refresh()
-  }
-
-  async function handleDeleteTag(id: string) {
-    const result = await deleteServiceTag(id)
-    if (result.error) {
-      toast.error(result.error)
-    }
-    router.refresh()
-  }
-
   return (
     <div className="space-y-8">
       {/* Services section */}
@@ -332,62 +285,6 @@ export function ServiciosClient({ services, branches, tags, barbers, commissions
             </TableBody>
           </Table>
         </div>
-      </div>
-
-      <Separator />
-
-      {/* Tags section */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold tracking-tight">
-              Etiquetas de servicio
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Etiquetas disponibles para describir los cortes realizados
-            </p>
-          </div>
-          <Button size="sm" onClick={openAddTag}>
-            <Plus className="size-4" />
-            Agregar etiqueta
-          </Button>
-        </div>
-
-        {tags.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-8 text-center text-muted-foreground">
-            <Tag className="mb-2 size-8 opacity-30" />
-            <p className="text-sm">No hay etiquetas configuradas</p>
-            <p className="mt-1 text-xs">
-              Las etiquetas ayudan a los barberos a categorizar los cortes
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {tags.map((tag) => (
-              <div
-                key={tag.id}
-                className="group flex items-center gap-1.5 rounded-lg border bg-secondary/50 px-3 py-1.5"
-              >
-                <Tag className="size-3 text-muted-foreground" />
-                <span className="text-sm">{tag.name}</span>
-                <button
-                  type="button"
-                  onClick={() => openEditTag(tag)}
-                  className="ml-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-                >
-                  <Pencil className="size-3" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteTag(tag.id)}
-                  className="text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                >
-                  <Trash2 className="size-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Service dialog */}
@@ -559,49 +456,6 @@ export function ServiciosClient({ services, branches, tags, barbers, commissions
                 ? 'Guardando...'
                 : editingId
                   ? 'Guardar cambios'
-                  : 'Agregar'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Tag dialog */}
-      <Dialog open={tagDialogOpen} onOpenChange={setTagDialogOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>
-              {editingTagId ? 'Editar etiqueta' : 'Nueva etiqueta'}
-            </DialogTitle>
-            <DialogDescription>
-              Las etiquetas se usan para describir los cortes realizados.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2 py-2">
-            <Label>Nombre de la etiqueta</Label>
-            <Input
-              value={tagName}
-              onChange={(e) => setTagName(e.target.value)}
-              placeholder="Ej: Degradé"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSaveTag()
-              }}
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setTagDialogOpen(false)}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleSaveTag}
-              disabled={tagSaving || !tagName.trim()}
-            >
-              {tagSaving
-                ? 'Guardando...'
-                : editingTagId
-                  ? 'Guardar'
                   : 'Agregar'}
             </Button>
           </DialogFooter>
