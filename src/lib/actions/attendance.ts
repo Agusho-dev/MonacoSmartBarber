@@ -21,12 +21,12 @@ export async function registerBarberClockIn(staffId: string, branchId: string, f
 
     // 2. Determine current time and day of week in Argentina timezone
     const now = new Date()
-    const argTimeOptions = { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }
+    const argTimeOptions = { timeZone: 'America/Argentina/Buenos_Aires', hour12: false } as const
 
     // Get time string "HH:MM:SS"
     const currentTimeStr = now.toLocaleTimeString('en-US', argTimeOptions)
 
-    // Get day of week (0-6, where 0 is Sunday, which matches PostgreSQL EXTRACT(DOW))
+    // Get day of week (0-6, where 0 is Sunday, matches PostgreSQL EXTRACT(DOW))
     const parts = new Intl.DateTimeFormat('en-US', {
         timeZone: 'America/Argentina/Buenos_Aires',
         weekday: 'short'
@@ -36,51 +36,81 @@ export async function registerBarberClockIn(staffId: string, branchId: string, f
     const dow = dowMap[argDayStr] ?? now.getDay()
 
     // Today's date string "YYYY-MM-DD"
-    const dateStr = [
-        now.toLocaleDateString('en-US', { ...argTimeOptions, year: 'numeric' }),
-        now.toLocaleDateString('en-US', { ...argTimeOptions, month: '2-digit' }),
-        now.toLocaleDateString('en-US', { ...argTimeOptions, day: '2-digit' })
-    ].join('-')
-    // Note: the above format might be MM-DD-YYYY depending on locale, safer way:
     const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' })
-    const ymdFormat = formatter.format(now) // YYYY-MM-DD
+    const ymdFormat = formatter.format(now)
 
-    // 3. Find the earliest schedule block for today
-    const { data: schedule } = await supabase
+    // 3. Get ALL schedule blocks for today (handles split shifts)
+    const { data: schedules } = await supabase
         .from('staff_schedules')
-        .select('start_time')
+        .select('start_time, end_time, block_index')
         .eq('staff_id', staffId)
         .eq('day_of_week', dow)
         .eq('is_active', true)
         .order('block_index', { ascending: true })
-        .limit(1)
-        .maybeSingle()
 
-    if (schedule && schedule.start_time) {
-        // 4. Compare current time with start time
-        // Optionally add a grace period (e.g. 5 minutes)
-        const [h1, m1, s1] = currentTimeStr.split(':').map(Number)
-        const currentMins = h1 * 60 + m1
+    if (!schedules || schedules.length === 0) {
+        // Sin horario configurado — no se puede detectar tardanza
+        revalidatePath('/checkin')
+        return { success: true }
+    }
 
-        const [h2, m2, s2] = schedule.start_time.split(':').map(Number)
-        const gracePeriodMins = 0 // Assuming 0 minutes grace period
-        const startMins = h2 * 60 + m2 + gracePeriodMins
+    // 4. Parse current time to minutes
+    const [h1, m1] = currentTimeStr.split(':').map(Number)
+    const currentMins = h1 * 60 + m1
+
+    // 5. Find the relevant schedule block for this clock-in
+    //    - If current time falls within a block [start, end] → late for that block
+    //    - If current time is between blocks → early for the next one, no tardanza
+    //    - If before all blocks → early, no tardanza
+    let relevantBlock: { start_time: string; end_time: string } | null = null
+
+    for (const block of schedules) {
+        const [sh, sm] = block.start_time.split(':').map(Number)
+        const [eh, em] = block.end_time.split(':').map(Number)
+        const blockStart = sh * 60 + sm
+        const blockEnd = eh * 60 + em
+
+        if (currentMins < blockStart) {
+            // Current time is before this block starts — clocking in early, no tardanza
+            break
+        }
+
+        if (currentMins >= blockStart && currentMins <= blockEnd) {
+            // Current time is within this block — should have started at blockStart
+            relevantBlock = block
+            break
+        }
+
+        // Current time is after this block's end — check next block
+    }
+
+    if (relevantBlock) {
+        const [sh, sm] = relevantBlock.start_time.split(':').map(Number)
+        const startMins = sh * 60 + sm
 
         if (currentMins > startMins) {
-            // Barber is late!
-            // 5. Create a disciplinary event
-            const lateMins = currentMins - startMins
-            const notes = `Llegada tarde a las ${currentTimeStr} (Horario: ${schedule.start_time})`
+            // 6. Verify no tardanza already registered today for this staff
+            const { count } = await supabase
+                .from('disciplinary_events')
+                .select('id', { count: 'exact', head: true })
+                .eq('staff_id', staffId)
+                .eq('branch_id', branchId)
+                .eq('event_type', 'late')
+                .eq('event_date', ymdFormat)
 
-            await createDisciplinaryEvent(
-                staffId,
-                branchId,
-                'late',
-                ymdFormat,
-                notes,
-                null, // automatically created by system,
-                'system'
-            )
+            if (!count || count === 0) {
+                const notes = `Llegada tarde a las ${currentTimeStr} (Horario: ${relevantBlock.start_time})`
+
+                await createDisciplinaryEvent(
+                    staffId,
+                    branchId,
+                    'late',
+                    ymdFormat,
+                    notes,
+                    null,
+                    'system'
+                )
+            }
         }
     }
 

@@ -59,6 +59,7 @@ export default async function EquipoPage() {
         { data: activeBreakEntries },
         { data: breakOvertimeHistory },
         { data: serviceHistory },
+        { data: attendanceLogs },
     ] = await Promise.all([
         supabase.from('staff').select('*, branch:branches(*)').order('full_name'),
         supabase.from('branches').select('*').eq('is_active', true).order('name'),
@@ -110,6 +111,11 @@ export default async function EquipoPage() {
             .gte('completed_at', fromDate)
             .order('completed_at', { ascending: false })
             .limit(500),
+        supabase
+            .from('attendance_logs')
+            .select('id, staff_id, branch_id, action_type, recorded_at, face_verified')
+            .gte('recorded_at', fromDate)
+            .order('recorded_at', { ascending: false }),
     ])
 
     // Get user permissions
@@ -146,6 +152,7 @@ export default async function EquipoPage() {
             incentiveAchievements={incentiveAchievements ?? []}
             disciplinaryRules={disciplinaryRules ?? []}
             disciplinaryEvents={disciplinaryEvents ?? []}
+            attendanceLogs={attendanceLogs ?? []}
             defaultPeriod={defaultPeriod}
             fromDate={fromDate}
             roles={(roles as Role[]) ?? []}

@@ -44,6 +44,7 @@ interface EquipoClientProps {
     // Disciplina
     disciplinaryRules: unknown[]
     disciplinaryEvents: unknown[]
+    attendanceLogs: unknown[]
     defaultPeriod: string
     fromDate: string
     // Roles
@@ -66,6 +67,7 @@ export function EquipoClient({
     incentiveAchievements,
     disciplinaryRules,
     disciplinaryEvents,
+    attendanceLogs,
     defaultPeriod,
     fromDate,
     roles,
@@ -229,17 +231,19 @@ export function EquipoClient({
                         rules={disciplinaryRules as Parameters<typeof DisciplinaClient>[0]['rules']}
                         barbers={
                             (barbers as unknown[])
-                                .filter((b: unknown) => (b as { role: string }).role === 'barber' && (b as { is_active: boolean }).is_active)
+                                .filter((b: unknown) => (b as { is_active: boolean }).is_active)
                                 .map((b: unknown) => ({
                                     id: (b as { id: string }).id,
                                     full_name: (b as { full_name: string }).full_name,
                                     branch_id: (b as { branch_id: string }).branch_id,
+                                    role: (b as { role: string }).role,
                                 })) as Parameters<typeof DisciplinaClient>[0]['barbers']
                         }
                         events={disciplinaryEvents as Parameters<typeof DisciplinaClient>[0]['events']}
                         fromDate={fromDate}
                         activeBreakEntries={activeBreakEntries as Parameters<typeof DisciplinaClient>[0]['activeBreakEntries']}
                         breakOvertimeHistory={breakOvertimeHistory as Parameters<typeof DisciplinaClient>[0]['breakOvertimeHistory']}
+                        attendanceLogs={attendanceLogs as Parameters<typeof DisciplinaClient>[0]['attendanceLogs']}
                     />
                 )}
                 {activeTab === 'roles' && isOwner && (

@@ -25,6 +25,8 @@ import {
   Coffee,
   ScanFace,
   Settings2,
+  ChevronDown,
+  Sparkles,
 } from 'lucide-react'
 import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule, AppSettings } from '@/lib/types/database'
 import {
@@ -137,6 +139,7 @@ export default function CheckinPage() {
 
   const [services, setServices] = useState<Service[]>([])
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null)
+  const [showBarberPreference, setShowBarberPreference] = useState(false)
 
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -426,7 +429,7 @@ export default function CheckinPage() {
       .from('staff')
       .select('*')
       .eq('branch_id', selectedBranch.id)
-      .eq('role', 'barber')
+      .in('role', ['barber', 'admin', 'owner'])
       .eq('is_active', true)
       .order('full_name')
       .then(({ data }) => {
@@ -439,6 +442,7 @@ export default function CheckinPage() {
     setAnimKey((k) => k + 1)
     setStep(next)
     setError('')
+    setShowBarberPreference(false)
   }
 
   const reset = () => {
@@ -1025,44 +1029,92 @@ export default function CheckinPage() {
     )
 
     return (
-      <div className="w-full space-y-4 overflow-y-auto min-h-0 flex-1">
+      <div className="w-full space-y-5 overflow-y-auto min-h-0 flex-1">
 
+        {/* ── HERO: Menor Espera CTA ── */}
         {minWaitBarber && (
-          <button
-            onClick={() => onSelect(null as unknown as string)}
-            disabled={submitting}
-            className="w-full flex items-center gap-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5 text-left transition-all duration-200 hover:bg-emerald-500/10 hover:border-emerald-500/50 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
-          >
-            <div className="shrink-0 size-14 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-              <Zap className="size-7 text-emerald-400" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-xl font-semibold text-emerald-300">Menor espera</p>
-              <p className="text-base text-emerald-400/70 mt-0.5">
-                Te atiende el barbero con menos fila
-              </p>
-            </div>
-            <div className="text-right shrink-0">
-              <p className="text-2xl font-bold text-emerald-400">
-                {formatWaitTime(minWaitEta)}
-              </p>
-            </div>
-          </button>
+          <div className="relative">
+            {/* Animated glow background */}
+            <div className="absolute -inset-1 rounded-[1.75rem] bg-gradient-to-r from-emerald-500/40 via-cyan-400/40 to-emerald-500/40 blur-xl opacity-60" style={{ animation: 'checkin-pulse-glow 3s ease-in-out infinite' }} />
+            
+            <button
+              onClick={() => onSelect(null as unknown as string)}
+              disabled={submitting}
+              className="relative w-full flex flex-col items-center gap-4 rounded-3xl border-2 border-emerald-400/50 bg-gradient-to-br from-emerald-950/80 via-emerald-900/60 to-cyan-950/80 p-7 md:p-8 text-center transition-all duration-300 hover:border-emerald-400/80 hover:shadow-[0_0_40px_rgba(16,185,129,0.3)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
+            >
+              {/* Floating particles */}
+              <div className="absolute inset-0 overflow-hidden rounded-3xl pointer-events-none">
+                <div className="absolute top-4 left-[15%] size-1.5 rounded-full bg-emerald-400/40" style={{ animation: 'checkin-float-particle 4s ease-in-out infinite' }} />
+                <div className="absolute top-8 right-[20%] size-1 rounded-full bg-cyan-400/50" style={{ animation: 'checkin-float-particle 5s ease-in-out infinite 1s' }} />
+                <div className="absolute bottom-6 left-[30%] size-1 rounded-full bg-emerald-300/30" style={{ animation: 'checkin-float-particle 3.5s ease-in-out infinite 0.5s' }} />
+                <div className="absolute bottom-4 right-[25%] size-1.5 rounded-full bg-cyan-300/40" style={{ animation: 'checkin-float-particle 4.5s ease-in-out infinite 1.5s' }} />
+              </div>
+
+              {/* Icon + AI Badge */}
+              <div className="flex flex-col items-center gap-3">
+                <div className="relative">
+                  <div className="size-16 md:size-20 rounded-2xl bg-gradient-to-br from-emerald-400/20 to-cyan-400/20 border border-emerald-400/30 flex items-center justify-center" style={{ animation: 'checkin-pulse-glow 2.5s ease-in-out infinite' }}>
+                    <Zap className="size-9 md:size-11 text-emerald-300" fill="currentColor" />
+                  </div>
+                </div>
+
+                {/* AI Badge with shimmer */}
+                <div className="relative inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold uppercase tracking-widest overflow-hidden" style={{ background: 'linear-gradient(135deg, rgba(16,185,129,0.15), rgba(34,211,238,0.15))' }}>
+                  <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%)', animation: 'checkin-shimmer 2.5s ease-in-out infinite' }} />
+                  <Sparkles className="size-3.5 text-cyan-300 relative z-10" />
+                  <span className="relative z-10 bg-gradient-to-r from-emerald-300 to-cyan-300 bg-clip-text text-transparent">Propulsado por IA</span>
+                </div>
+              </div>
+
+              {/* Main text */}
+              <div className="space-y-1">
+                <h3 className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-emerald-200 via-white to-cyan-200 bg-clip-text text-transparent">
+                  Menor espera
+                </h3>
+                <p className="text-base md:text-lg text-emerald-300/80">
+                  Te asignamos automáticamente al barbero con menos fila
+                </p>
+              </div>
+
+              {/* Wait time */}
+              <div className="flex items-center gap-2 bg-emerald-400/10 border border-emerald-400/20 rounded-2xl px-6 py-3">
+                <span className="text-3xl md:text-4xl font-black text-emerald-300 tabular-nums">
+                  {formatWaitTime(minWaitEta)}
+                </span>
+                <span className="text-sm text-emerald-400/70 text-left leading-tight">de espera<br/>estimada</span>
+              </div>
+            </button>
+          </div>
         )}
 
-        <div className="w-full h-px bg-white/8" />
+        {/* ── Secondary: Barber preference toggle ── */}
+        <button
+          onClick={() => setShowBarberPreference(!showBarberPreference)}
+          className="w-full flex items-center justify-center gap-2.5 rounded-2xl border border-white/10 bg-white/3 px-5 py-4 text-center transition-all duration-200 hover:bg-white/6 hover:border-white/20 active:scale-[0.98]"
+        >
+          <User className="size-5 text-muted-foreground" />
+          <span className="text-base md:text-lg font-medium text-muted-foreground">
+            {showBarberPreference ? 'Ocultar barberos' : '¿Tenés preferencia? Elegí tu barbero'}
+          </span>
+          <ChevronDown className={`size-5 text-muted-foreground transition-transform duration-300 ${showBarberPreference ? 'rotate-180' : ''}`} />
+        </button>
 
-        <div className="grid grid-cols-2 gap-3">
-          {availableBarbers.map((barber) => renderBarberCard(barber, onSelect, showExpand))}
-        </div>
-
-        {notArrivedBarbers.length > 0 && (
-          <>
-            <div className="w-full h-px bg-white/8" />
+        {/* ── Collapsible barberbList ── */}
+        {showBarberPreference && (
+          <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
             <div className="grid grid-cols-2 gap-3">
-              {notArrivedBarbers.map((barber) => renderBarberCard(barber, onSelect, showExpand))}
+              {availableBarbers.map((barber) => renderBarberCard(barber, onSelect, showExpand))}
             </div>
-          </>
+
+            {notArrivedBarbers.length > 0 && (
+              <>
+                <div className="w-full h-px bg-white/8" />
+                <div className="grid grid-cols-2 gap-3">
+                  {notArrivedBarbers.map((barber) => renderBarberCard(barber, onSelect, showExpand))}
+                </div>
+              </>
+            )}
+          </div>
         )}
       </div>
     )
@@ -1421,12 +1473,11 @@ export default function CheckinPage() {
       {step === 'barber' && (
         <div
           key={`barber-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 pt-8 md:pt-10 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
 
           <div className="text-center">
-            <h2 className="text-2xl md:text-3xl font-bold">Elegí tu barbero</h2>
-            <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
+            <p className="text-muted-foreground text-base md:text-lg">
               {name} · {selectedBranch?.name}
             </p>
           </div>
@@ -1456,6 +1507,22 @@ export default function CheckinPage() {
               <span className="text-lg">Registrando...</span>
             </div>
           )}
+
+          {/* CSS Animations for barber selection */}
+          <style>{`
+            @keyframes checkin-pulse-glow {
+              0%, 100% { opacity: 0.6; transform: scale(1); }
+              50% { opacity: 1; transform: scale(1.03); }
+            }
+            @keyframes checkin-shimmer {
+              0% { transform: translateX(-100%); }
+              100% { transform: translateX(200%); }
+            }
+            @keyframes checkin-float-particle {
+              0%, 100% { transform: translateY(0) scale(1); opacity: 0.4; }
+              50% { transform: translateY(-12px) scale(1.3); opacity: 0.8; }
+            }
+          `}</style>
         </div>
       )}
 
