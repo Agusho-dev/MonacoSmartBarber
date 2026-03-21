@@ -192,23 +192,24 @@ export function ServiciosClient({ services, branches, barbers, commissions }: Pr
     <div className="space-y-8">
       {/* Services section */}
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight">Servicios</h2>
+            <h2 className="text-xl font-bold tracking-tight lg:text-2xl">Servicios</h2>
             <p className="text-sm text-muted-foreground">
               Catálogo de servicios y precios
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <BranchSelector branches={branches} />
-            <Button onClick={openAdd}>
+            <Button onClick={openAdd} size="sm" className="w-full sm:w-auto">
               <Plus className="size-4" />
               Agregar servicio
             </Button>
           </div>
         </div>
 
-        <div className="rounded-lg border">
+        {/* Vista tabla — solo en desktop */}
+        <div className="hidden md:block rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -226,7 +227,7 @@ export function ServiciosClient({ services, branches, barbers, commissions }: Pr
               {filtered.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={8}
                     className="h-24 text-center text-muted-foreground"
                   >
                     No hay servicios registrados
@@ -285,6 +286,66 @@ export function ServiciosClient({ services, branches, barbers, commissions }: Pr
             </TableBody>
           </Table>
         </div>
+
+        {/* Vista cards — solo en mobile */}
+        <div className="md:hidden space-y-3">
+          {filtered.length === 0 && (
+            <div className="rounded-lg border py-10 text-center text-sm text-muted-foreground">
+              No hay servicios registrados
+            </div>
+          )}
+          {filtered.map((service) => (
+            <div key={service.id} className="rounded-lg border p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium truncate">{service.name}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {service.branch?.name ?? 'Todas las sucursales'}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Badge variant={service.is_active ? 'default' : 'secondary'} className="text-[10px]">
+                    {service.is_active ? 'Activo' : 'Inactivo'}
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => openEdit(service)}
+                  >
+                    <Pencil className="size-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => toggleActive(service)}
+                  >
+                    <Power className="size-3" />
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
+                <span className="text-base font-semibold text-foreground">
+                  {formatCurrency(service.price)}
+                </span>
+                {service.duration_minutes && (
+                  <span className="text-muted-foreground">
+                    {service.duration_minutes} min
+                  </span>
+                )}
+                {service.default_commission_pct > 0 && (
+                  <span className="text-muted-foreground">
+                    Comisión: {service.default_commission_pct}%
+                  </span>
+                )}
+                <div>
+                  {service.availability === 'checkin' && <Badge variant="outline" className="text-[10px]">Totem</Badge>}
+                  {service.availability === 'upsell' && <Badge variant="outline" className="text-[10px]">Adicionales</Badge>}
+                  {service.availability === 'both' && <Badge variant="outline" className="text-[10px]">Ambos</Badge>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Service dialog */}
@@ -310,7 +371,7 @@ export function ServiciosClient({ services, branches, barbers, commissions }: Pr
                 placeholder="Corte clásico"
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Precio (ARS)</Label>
                 <Input
@@ -334,7 +395,7 @@ export function ServiciosClient({ services, branches, barbers, commissions }: Pr
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Disponibilidad</Label>
                 <Select
@@ -373,7 +434,7 @@ export function ServiciosClient({ services, branches, barbers, commissions }: Pr
                 </Select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Comisión barbero % (default)</Label>
                 <Input

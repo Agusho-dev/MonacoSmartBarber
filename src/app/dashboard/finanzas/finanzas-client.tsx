@@ -152,9 +152,9 @@ export function FinanzasClient({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-2xl font-bold tracking-tight">Finanzas</h2>
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <h2 className="text-xl font-bold tracking-tight lg:text-2xl">Finanzas</h2>
+        <div className="flex flex-wrap items-center gap-2">
           <BranchSelector branches={branches} />
           <Select value={period} onValueChange={handlePeriodChange}>
             <SelectTrigger className="w-[140px]">
@@ -179,7 +179,7 @@ export function FinanzasClient({
 
       <div className={isPending ? 'pointer-events-none opacity-50' : ''}>
         {/* Summary Cards */}
-        <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <SummaryCard
             title="Ingresos brutos"
             value={formatCurrency(totals.revenue)}
@@ -217,13 +217,13 @@ export function FinanzasClient({
           </CardHeader>
           <CardContent>
             {data.months.length === 0 ? (
-              <div className="flex h-[350px] items-center justify-center">
+              <div className="flex h-[250px] items-center justify-center md:h-[350px]">
                 <p className="text-sm text-muted-foreground">
                   Sin datos para el período
                 </p>
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={350}>
+              <ResponsiveContainer width="100%" height={280} className="md:!h-[350px]">
                 <ComposedChart data={data.months} barGap={0}>
                   <CartesianGrid
                     strokeDasharray="3 3"
@@ -289,7 +289,7 @@ export function FinanzasClient({
         </Card>
 
         {/* Bottom section: Pie Charts + Break-Even */}
-        <div className="grid gap-6 lg:grid-cols-3">
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {/* Pie Chart 1: Account Balances */}
           <Card>
             <CardHeader>
@@ -530,7 +530,7 @@ function SummaryCard({
       </CardHeader>
       <CardContent>
         <p
-          className={`text-2xl font-bold ${highlight === 'positive'
+          className={`text-xl font-bold lg:text-2xl ${highlight === 'positive'
               ? 'text-green-400'
               : highlight === 'negative'
                 ? 'text-red-400'

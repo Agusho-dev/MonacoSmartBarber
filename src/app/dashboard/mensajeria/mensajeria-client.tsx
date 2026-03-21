@@ -367,19 +367,19 @@ export function MensajeriaClient({
               variant={activeTab === 'inbox' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => setActiveTab('inbox')}
-              className="h-7 text-xs"
+              className="h-7 px-2 text-xs"
             >
-              <MessageSquare className="mr-1 size-3" />
-              Inbox
+              <MessageSquare className="size-3 sm:mr-1" />
+              <span className="hidden sm:inline">Inbox</span>
             </Button>
             <Button
               variant={activeTab === 'scheduled' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => setActiveTab('scheduled')}
-              className="h-7 text-xs"
+              className="h-7 px-2 text-xs"
             >
-              <Calendar className="mr-1 size-3" />
-              Programados
+              <Calendar className="size-3 sm:mr-1" />
+              <span className="hidden sm:inline">Programados</span>
             </Button>
             <Button
               variant="ghost"

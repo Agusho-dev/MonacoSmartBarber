@@ -315,14 +315,15 @@ export function BarberosClient({ barbers, todayVisits, roles, serviceHistory, ca
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between sm:justify-end">
-        <Button onClick={openAdd}>
+      <div className="flex items-center justify-end">
+        <Button onClick={openAdd} size="sm">
           <Plus className="size-4 mr-2" />
           Agregar barbero
         </Button>
       </div>
 
-      <div className="rounded-lg border">
+      {/* Vista desktop: tabla */}
+      <div className="hidden md:block rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>
@@ -340,7 +341,7 @@ export function BarberosClient({ barbers, todayVisits, roles, serviceHistory, ca
           <TableBody>
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">
                   No hay barberos registrados
                 </TableCell>
               </TableRow>
@@ -408,6 +409,112 @@ export function BarberosClient({ barbers, todayVisits, roles, serviceHistory, ca
             })}
           </TableBody>
         </Table>
+      </div>
+
+      {/* Vista mobile: cards */}
+      <div className="md:hidden space-y-3">
+        {filtered.length === 0 && (
+          <div className="py-10 text-center text-sm text-muted-foreground">
+            No hay barberos registrados
+          </div>
+        )}
+        {filtered.map((barber) => {
+          const stats = barberStats.get(barber.id)
+          const roleName = barber.custom_role?.name ?? barber.role_id
+            ? roles.find((r) => r.id === barber.role_id)?.name ?? roleLabels[barber.role]
+            : roleLabels[barber.role]
+          return (
+            <div key={barber.id} className="rounded-lg border p-4">
+              {/* Encabezado de la card */}
+              <div className="flex items-center gap-3">
+                <Avatar className="size-10 shrink-0">
+                  <AvatarImage src={barber.avatar_url ?? undefined} alt={barber.full_name} />
+                  <AvatarFallback className="text-sm">
+                    {barber.full_name.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium leading-tight truncate">{barber.full_name}</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {roleName} · {barber.branch?.name ?? 'Sin sucursal'}
+                  </p>
+                </div>
+                <Badge variant={barber.is_active ? 'default' : 'secondary'} className="shrink-0 text-xs">
+                  {barber.is_active ? 'Activo' : 'Inactivo'}
+                </Badge>
+              </div>
+
+              {/* Detalles */}
+              <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                <div>
+                  <p className="font-medium text-foreground">{barber.commission_pct}%</p>
+                  <p>Comisión</p>
+                </div>
+                <div>
+                  <p className="font-mono font-medium text-foreground">{barber.pin ? '••••' : '—'}</p>
+                  <p>PIN</p>
+                </div>
+                <div>
+                  {stats ? (
+                    <>
+                      <p className="font-medium text-foreground">{stats.cuts} cortes</p>
+                      <p>{formatCurrency(stats.revenue)}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-medium text-foreground">—</p>
+                      <p>Hoy</p>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {barber.phone && (
+                <p className="mt-2 text-xs text-muted-foreground font-mono">{barber.phone}</p>
+              )}
+
+              {/* Acciones */}
+              <div className="mt-3 pt-3 border-t flex gap-2">
+                <Button variant="outline" size="sm" className="flex-1 h-8" onClick={() => openEdit(barber)}>
+                  <Pencil className="size-3 mr-1.5" />
+                  Editar
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3"
+                  title="Activar/Desactivar"
+                  onClick={() => toggleActive(barber)}
+                >
+                  <Power className="size-3" />
+                </Button>
+                {canHideStaff && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-3"
+                    title={barber.hidden_from_checkin ? 'Mostrar en check-in' : 'Ocultar del check-in'}
+                    onClick={() => toggleVisibility(barber)}
+                  >
+                    {barber.hidden_from_checkin
+                      ? <EyeOff className="size-3 text-amber-500" />
+                      : <Eye className="size-3" />
+                    }
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3 text-destructive hover:text-destructive hover:bg-destructive/10 hover:border-destructive/30"
+                  title="Eliminar"
+                  onClick={() => handleDelete(barber.id)}
+                >
+                  <Trash2 className="size-3" />
+                </Button>
+              </div>
+            </div>
+          )
+        })}
       </div>
 
       {idleTimeData.length > 0 && (
@@ -530,7 +637,7 @@ export function BarberosClient({ barbers, todayVisits, roles, serviceHistory, ca
                 placeholder="Juan Pérez"
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Email</Label>
                 <Input
@@ -550,7 +657,7 @@ export function BarberosClient({ barbers, todayVisits, roles, serviceHistory, ca
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Rol base</Label>
                 <Select
@@ -587,7 +694,7 @@ export function BarberosClient({ barbers, todayVisits, roles, serviceHistory, ca
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Comisión %</Label>
                 <Input

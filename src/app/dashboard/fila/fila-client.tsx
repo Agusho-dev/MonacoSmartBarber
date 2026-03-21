@@ -269,7 +269,7 @@ export function FilaClient({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Fila en vivo</h2>
           <p className="text-sm text-muted-foreground">
@@ -374,38 +374,52 @@ export function FilaClient({
                 {waitingEntries.map((entry) => (
                   <div
                     key={entry.id}
-                    className="flex items-center gap-4 rounded-xl border p-4"
+                    className="rounded-xl border p-4"
                   >
-                    <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-secondary text-lg font-bold">
-                      #{entry.position}
+                    {/* Fila superior: posición + datos del cliente + botón cancelar */}
+                    <div className="flex items-start gap-3">
+                      <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-sm font-bold">
+                        #{entry.position}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium">
+                          {entry.client?.name ?? 'Cliente'}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+                          <span>{entry.client?.phone}</span>
+                          {!selectedBranchId && (
+                            <Badge variant="outline" className="text-xs">
+                              {getBranchName(entry.branch_id)}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                          <Clock className="size-3" />
+                          <span>{formatElapsed(entry.checked_in_at)} esperando</span>
+                        </div>
+                      </div>
+
+                      {/* Cancelar */}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleCancel(entry.id)}
+                        disabled={actionLoading === entry.id}
+                        className="shrink-0 text-muted-foreground hover:text-destructive"
+                      >
+                        <X className="size-4" />
+                      </Button>
                     </div>
 
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">
-                        {entry.client?.name ?? 'Cliente'}
-                      </p>
-                      <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                        <span>{entry.client?.phone}</span>
-                        {!selectedBranchId && (
-                          <Badge variant="outline" className="text-xs">
-                            {getBranchName(entry.branch_id)}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                        <Clock className="size-3" />
-                        <span>{formatElapsed(entry.checked_in_at)} esperando</span>
-                      </div>
-                    </div>
-
-                    {/* Reasignar barbero */}
-                    <div className="shrink-0">
+                    {/* Fila inferior: selector de barbero en ancho completo en mobile */}
+                    <div className="mt-3 pt-3 border-t">
                       <Select
                         value={entry.barber_id ?? '__none__'}
                         onValueChange={(v) => handleReassign(entry.id, v)}
                         disabled={actionLoading === entry.id}
                       >
-                        <SelectTrigger className="w-[160px]">
+                        <SelectTrigger className="w-full sm:w-[200px]">
                           <UserCog className="mr-2 size-3.5 text-muted-foreground" />
                           <SelectValue placeholder="Sin asignar" />
                         </SelectTrigger>
@@ -426,17 +440,6 @@ export function FilaClient({
                         </SelectContent>
                       </Select>
                     </div>
-
-                    {/* Cancelar */}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleCancel(entry.id)}
-                      disabled={actionLoading === entry.id}
-                      className="shrink-0 text-muted-foreground hover:text-destructive"
-                    >
-                      <X className="size-4" />
-                    </Button>
                   </div>
                 ))}
               </div>
@@ -461,10 +464,10 @@ export function FilaClient({
               {inProgressEntries.map((entry) => (
                 <div
                   key={entry.id}
-                  className="flex items-center gap-4 rounded-xl border border-primary/20 bg-primary/3 p-4"
+                  className="flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/3 p-4"
                 >
-                  <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                    <Scissors className="size-5 text-primary" />
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                    <Scissors className="size-4 text-primary" />
                   </div>
 
                   <div className="min-w-0 flex-1">
@@ -472,35 +475,39 @@ export function FilaClient({
                       {entry.client?.name ?? 'Cliente'}
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      Atendido por{' '}
+                      <span className="hidden sm:inline">Atendido por{' '}</span>
                       <span className="font-medium text-foreground">
                         {entry.barber?.full_name ?? 'barbero'}
                       </span>
                     </p>
+                    {entry.started_at && (
+                      <p className="mt-0.5 text-xs text-muted-foreground sm:hidden">
+                        {formatElapsed(entry.started_at)} en servicio
+                      </p>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-4">
-                    {entry.started_at && (
-                      <div className="shrink-0 text-right">
-                        <p className="text-xs text-muted-foreground">
-                          Tiempo de servicio
-                        </p>
-                        <p className="text-lg font-semibold tabular-nums">
-                          {formatElapsed(entry.started_at)}
-                        </p>
-                      </div>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleCancel(entry.id)}
-                      disabled={actionLoading === entry.id}
-                      className="shrink-0 text-muted-foreground hover:text-destructive"
-                      title="Cancelar servicio"
-                    >
-                      <X className="size-4" />
-                    </Button>
-                  </div>
+                  {entry.started_at && (
+                    <div className="hidden sm:block shrink-0 text-right">
+                      <p className="text-xs text-muted-foreground">
+                        Tiempo de servicio
+                      </p>
+                      <p className="text-lg font-semibold tabular-nums">
+                        {formatElapsed(entry.started_at)}
+                      </p>
+                    </div>
+                  )}
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleCancel(entry.id)}
+                    disabled={actionLoading === entry.id}
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                    title="Cancelar servicio"
+                  >
+                    <X className="size-4" />
+                  </Button>
                 </div>
               ))}
             </div>

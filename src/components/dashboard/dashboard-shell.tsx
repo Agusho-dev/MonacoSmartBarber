@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useTransition, useEffect, useMemo, useCallback } from 'react'
+import { useState, useTransition, useEffect, useMemo, useCallback, useRef } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard,
   Building2,
@@ -61,6 +61,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { BranchScopeProvider } from '@/components/dashboard/branch-scope-provider'
+import { MobileBottomNav } from '@/components/dashboard/mobile-bottom-nav'
 import { useBranchStore } from '@/stores/branch-store'
 import { createClient } from '@/lib/supabase/client'
 
@@ -228,6 +229,10 @@ interface DashboardShellProps {
 
 export function DashboardShell({ user, permissions, allowedBranchIds, children }: DashboardShellProps) {
   const pathname = usePathname()
+  const router = useRouter()
+  const touchStartX = useRef(0)
+  const touchStartY = useRef(0)
+  const touchStartTime = useRef(0)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [, startTransition] = useTransition()
   const [pendingBreakCount, setPendingBreakCount] = useState(0)
@@ -288,6 +293,41 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
       return ai - bi
     })
   }, [navOrder, permissions])
+
+  const currentNavIndex = useMemo(() => {
+    return orderedItems.findIndex(item =>
+      item.href === '/dashboard'
+        ? pathname === '/dashboard'
+        : pathname.startsWith(item.href)
+    )
+  }, [orderedItems, pathname])
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX
+    touchStartY.current = e.touches[0].clientY
+    touchStartTime.current = Date.now()
+  }, [])
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    const deltaX = e.changedTouches[0].clientX - touchStartX.current
+    const deltaY = e.changedTouches[0].clientY - touchStartY.current
+    const deltaTime = Date.now() - touchStartTime.current
+
+    const MIN_SWIPE = 60
+    const MAX_TIME = 400
+
+    if (
+      Math.abs(deltaX) > MIN_SWIPE &&
+      Math.abs(deltaX) > Math.abs(deltaY) * 1.8 &&
+      deltaTime < MAX_TIME
+    ) {
+      if (deltaX < 0 && currentNavIndex < orderedItems.length - 1) {
+        router.push(orderedItems[currentNavIndex + 1].href)
+      } else if (deltaX > 0 && currentNavIndex > 0) {
+        router.push(orderedItems[currentNavIndex - 1].href)
+      }
+    }
+  }, [currentNavIndex, orderedItems, router])
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event
@@ -412,8 +452,10 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
           </Button>
 
           <div className="flex items-center gap-2 lg:hidden">
-            <Scissors className="size-4" />
-            <span className="font-semibold">Monaco</span>
+            <Scissors className="size-4 shrink-0" />
+            <span className="font-semibold truncate max-w-[160px]">
+              {currentNavIndex >= 0 ? orderedItems[currentNavIndex]?.label : 'Monaco'}
+            </span>
           </div>
 
           <div className="flex-1" />
@@ -444,11 +486,19 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
           </DropdownMenu>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <main
+          className="flex-1 overflow-y-auto p-4 pb-16 lg:p-6 lg:pb-6"
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
           <BranchScopeProvider allowedBranchIds={allowedBranchIds}>
             {children}
           </BranchScopeProvider>
         </main>
+        <MobileBottomNav
+          orderedItems={orderedItems}
+          currentIndex={currentNavIndex < 0 ? 0 : currentNavIndex}
+        />
       </div>
     </div>
   )

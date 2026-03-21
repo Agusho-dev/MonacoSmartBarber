@@ -111,16 +111,16 @@ export function FidelizacionClient({ branches, initialConfigs, topClients }: Pro
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Fidelización</h1>
+          <h1 className="text-2xl font-bold tracking-tight lg:text-3xl">Fidelización</h1>
           <p className="text-muted-foreground">
             Configurá el sistema de recompensas y mirá el ranking de clientes.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Select value={selectedBranchId} onValueChange={handleBranchChange}>
-            <SelectTrigger className="w-[200px] bg-background">
+            <SelectTrigger className="w-full bg-background sm:w-[200px]">
               <SelectValue placeholder="Seleccionar sucursal" />
             </SelectTrigger>
             <SelectContent>
@@ -260,49 +260,76 @@ export function FidelizacionClient({ branches, initialConfigs, topClients }: Pro
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border">
-            <div className="grid grid-cols-[1fr_100px_100px_100px] gap-4 border-b bg-muted/50 p-4 font-medium sm:grid-cols-[1fr_200px_100px_100px_100px]">
-              <div>Cliente</div>
-              <div className="hidden sm:block">Sucursal Principal</div>
-              <div className="text-right">Balance</div>
-              <div className="text-right">Ganados</div>
-              <div className="text-right">Canjeados</div>
+          {topClients.length === 0 ? (
+            <div className="p-8 text-center text-muted-foreground">
+              <Users className="mx-auto mb-3 size-8 opacity-20" />
+              <p>No hay puntos registrados todavía.</p>
             </div>
-            {topClients.length === 0 ? (
-              <div className="p-8 text-center text-muted-foreground">
-                <Users className="mx-auto mb-3 size-8 opacity-20" />
-                <p>No hay puntos registrados todavía.</p>
+          ) : (
+            <>
+              {/* Vista tabla — desktop */}
+              <div className="hidden rounded-md border sm:block">
+                <div className="grid grid-cols-[1fr_200px_100px_100px_100px] gap-4 border-b bg-muted/50 p-4 font-medium">
+                  <div>Cliente</div>
+                  <div>Sucursal Principal</div>
+                  <div className="text-right">Balance</div>
+                  <div className="text-right">Ganados</div>
+                  <div className="text-right">Canjeados</div>
+                </div>
+                <div className="divide-y">
+                  {topClients.map((tc, i) => (
+                    <div
+                      key={i}
+                      className="grid grid-cols-[1fr_200px_100px_100px_100px] items-center gap-4 p-4 text-sm"
+                    >
+                      <div>
+                        <p className="font-medium">{tc.clients?.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {tc.clients?.phone}
+                        </p>
+                      </div>
+                      <div className="truncate text-muted-foreground">
+                        {tc.branches?.name || '—'}
+                      </div>
+                      <div className="text-right font-bold text-primary">
+                        {tc.points_balance} pts
+                      </div>
+                      <div className="text-right text-muted-foreground">
+                        {tc.total_earned}
+                      </div>
+                      <div className="text-right text-muted-foreground">
+                        {tc.total_redeemed}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ) : (
-              <div className="divide-y">
+
+              {/* Vista cards — mobile */}
+              <div className="space-y-3 sm:hidden">
                 {topClients.map((tc, i) => (
-                  <div
-                    key={i}
-                    className="grid grid-cols-[1fr_100px_100px_100px] items-center gap-4 p-4 text-sm sm:grid-cols-[1fr_200px_100px_100px_100px]"
-                  >
-                    <div>
-                      <p className="font-medium">{tc.clients?.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {tc.clients?.phone}
-                      </p>
+                  <div key={i} className="rounded-lg border p-4">
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-semibold">{tc.clients?.name}</p>
+                        <p className="text-xs text-muted-foreground">{tc.clients?.phone}</p>
+                        {tc.branches?.name && (
+                          <p className="text-xs text-muted-foreground">{tc.branches.name}</p>
+                        )}
+                      </div>
+                      <span className="shrink-0 text-lg font-bold text-primary">
+                        {tc.points_balance} pts
+                      </span>
                     </div>
-                    <div className="hidden truncate text-muted-foreground sm:block">
-                      {tc.branches?.name || '—'}
-                    </div>
-                    <div className="text-right font-bold text-primary">
-                      {tc.points_balance} pts
-                    </div>
-                    <div className="text-right text-muted-foreground">
-                      {tc.total_earned}
-                    </div>
-                    <div className="text-right text-muted-foreground">
-                      {tc.total_redeemed}
+                    <div className="flex gap-4 text-sm text-muted-foreground">
+                      <span>Ganados: <strong className="text-foreground">{tc.total_earned}</strong></span>
+                      <span>Canjeados: <strong className="text-foreground">{tc.total_redeemed}</strong></span>
                     </div>
                   </div>
                 ))}
               </div>
-            )}
-          </div>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

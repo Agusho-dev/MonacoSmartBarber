@@ -146,7 +146,7 @@ export function EquipoClient({
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight">Equipo</h1>
                     <p className="text-muted-foreground">
@@ -164,15 +164,16 @@ export function EquipoClient({
                             <button
                                 key={tab.id}
                                 onClick={() => handleTabChange(tab.id)}
+                                title={tab.label}
                                 className={cn(
-                                    'flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all whitespace-nowrap',
+                                    'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-all whitespace-nowrap',
                                     activeTab === tab.id
                                         ? 'bg-background text-foreground shadow-sm'
                                         : 'text-muted-foreground hover:text-foreground'
                                 )}
                             >
                                 <tab.icon className="size-4 shrink-0" />
-                                {tab.label}
+                                <span className="hidden sm:inline">{tab.label}</span>
                             </button>
                         )
                     })}

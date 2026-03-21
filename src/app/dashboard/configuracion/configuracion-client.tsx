@@ -36,9 +36,9 @@ interface Props {
 export function ConfiguracionClient({ appSettings, rewardsConfig }: Props) {
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold tracking-tight">Configuración</h2>
+      <h2 className="text-xl font-bold tracking-tight lg:text-2xl">Configuración</h2>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <BusinessHoursCard settings={appSettings} />
         <ThresholdsCard settings={appSettings} />
         <ShiftEndMarginCard settings={appSettings} />
@@ -91,7 +91,7 @@ function BusinessHoursCard({ settings }: { settings: AppSettings | null }) {
         <CardDescription>Aplica a todas las sucursales</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="hours-open">Apertura</Label>
             <Input
@@ -396,12 +396,12 @@ function RewardsSection({ configs }: { configs: RewardsConfig[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <Gift className="size-5 text-muted-foreground" />
           <h3 className="text-lg font-semibold">Recompensas</h3>
         </div>
-        <Button size="sm" onClick={startNew}>
+        <Button size="sm" onClick={startNew} className="w-full sm:w-auto">
           Agregar configuración
         </Button>
       </div>
@@ -516,7 +516,7 @@ function RewardForm({
             placeholder="Ej: Corte gratis al acumular puntos"
           />
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label>Puntos por visita</Label>
             <Input

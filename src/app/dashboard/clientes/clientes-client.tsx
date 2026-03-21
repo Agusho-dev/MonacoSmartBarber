@@ -319,7 +319,7 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Clientes</h2>
           <p className="text-sm text-muted-foreground">
@@ -374,13 +374,14 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
         </div>
       </div>
 
-      <div className="rounded-lg border">
+      {/* Vista desktop: tabla */}
+      <div className="hidden md:block rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Nombre</TableHead>
-              <TableHead className="hidden sm:table-cell">Teléfono</TableHead>
-              <TableHead className="text-right hidden md:table-cell">
+              <TableHead>Teléfono</TableHead>
+              <TableHead className="text-right">
                 <button
                   onClick={() => toggleSort('totalVisits')}
                   className="inline-flex items-center justify-end w-full hover:text-foreground transition-colors"
@@ -389,7 +390,7 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
                   <SortIcon field="totalVisits" />
                 </button>
               </TableHead>
-              <TableHead className="hidden md:table-cell">
+              <TableHead>
                 <button
                   onClick={() => toggleSort('lastVisit')}
                   className="inline-flex items-center hover:text-foreground transition-colors"
@@ -399,7 +400,7 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
                 </button>
               </TableHead>
               <TableHead className="hidden lg:table-cell">Segmento</TableHead>
-              <TableHead className="text-right hidden sm:table-cell">Puntos</TableHead>
+              <TableHead className="text-right">Puntos</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
@@ -425,13 +426,13 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
               return (
                 <TableRow key={client.id}>
                   <TableCell className="font-medium">{client.name}</TableCell>
-                  <TableCell className="font-mono text-sm hidden sm:table-cell">
+                  <TableCell className="font-mono text-sm">
                     {client.phone}
                   </TableCell>
-                  <TableCell className="text-right hidden md:table-cell">
+                  <TableCell className="text-right">
                     {displayStats?.totalVisits ?? 0}
                   </TableCell>
-                  <TableCell className="hidden md:table-cell">
+                  <TableCell>
                     {displayStats?.lastVisitDate
                       ? formatDate(displayStats.lastVisitDate)
                       : <span className="text-xs italic text-muted-foreground/60">Se retiró antes del servicio</span>}
@@ -441,7 +442,7 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
                       {segCfg.label}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right hidden sm:table-cell">{pts}</TableCell>
+                  <TableCell className="text-right">{pts}</TableCell>
                   <TableCell className="text-right">
                     <Button
                       variant="ghost"
@@ -456,6 +457,56 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
             })}
           </TableBody>
         </Table>
+      </div>
+
+      {/* Vista mobile: cards */}
+      <div className="md:hidden space-y-2">
+        {filteredClients.length === 0 && (
+          <div className="py-10 text-center text-sm text-muted-foreground">
+            {search ? 'No se encontraron clientes' : 'No hay clientes registrados'}
+          </div>
+        )}
+        {filteredClients.map((client) => {
+          const displayStats = branchClientStats.get(client.id)
+          const segment = getSegment(client)
+          const segCfg = segmentConfig[segment]
+          const pts = pointsMap.get(client.id) ?? 0
+
+          return (
+            <div
+              key={client.id}
+              className="rounded-lg border p-3"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium leading-tight truncate">{client.name}</p>
+                  <p className="mt-0.5 font-mono text-xs text-muted-foreground">{client.phone}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Badge variant="outline" className={`text-xs ${segCfg.className}`}>
+                    {segCfg.label}
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => setDetailClient(client)}
+                  >
+                    <Eye className="size-3.5" />
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
+                <span>{displayStats?.totalVisits ?? 0} visitas</span>
+                <span>
+                  {pts} {pts === 1 ? 'punto' : 'puntos'}
+                </span>
+                {displayStats?.lastVisitDate && (
+                  <span className="truncate">{formatDate(displayStats.lastVisitDate)}</span>
+                )}
+              </div>
+            </div>
+          )
+        })}
       </div>
 
       {/* Client profile sheet */}
