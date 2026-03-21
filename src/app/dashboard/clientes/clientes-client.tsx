@@ -225,6 +225,8 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
     let list = clients.filter((c) => {
       if (searchLower && !c.name.toLowerCase().includes(searchLower) && !c.phone.includes(searchLower)) return false
       if (segmentFilter !== 'all' && getSegment(c) !== segmentFilter) return false
+      // Si hay sucursal seleccionada, mostrar solo clientes con visitas en esa sucursal
+      if (selectedBranchId && !branchClientStats.has(c.id)) return false
       return true
     })
 
@@ -324,7 +326,7 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
             Base de datos y segmentación de clientes
           </p>
         </div>
-        <BranchSelector branches={branches} />
+        <BranchSelector branches={branches} allowAll />
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">

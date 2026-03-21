@@ -15,12 +15,15 @@ interface Branch {
   name: string
 }
 
+const ALL_BRANCHES_VALUE = '__all__'
+
 interface Props {
   branches: Branch[]
   className?: string
+  allowAll?: boolean
 }
 
-export function BranchSelector({ branches, className }: Props) {
+export function BranchSelector({ branches, className, allowAll }: Props) {
   const { selectedBranchId, setSelectedBranchId, allowedBranchIds } = useBranchStore()
 
   const [isMounted, setIsMounted] = useState(false)
@@ -32,11 +35,11 @@ export function BranchSelector({ branches, className }: Props) {
 
   useEffect(() => {
     setIsMounted(true)
-    // Initialize branch in store if not set
-    if (!selectedBranchId && visibleBranches.length > 0) {
+    // Initialize branch in store if not set (skip when allowAll — null means "todas")
+    if (!allowAll && !selectedBranchId && visibleBranches.length > 0) {
       setSelectedBranchId(visibleBranches[0].id)
     }
-  }, [selectedBranchId, visibleBranches, setSelectedBranchId])
+  }, [allowAll, selectedBranchId, visibleBranches, setSelectedBranchId])
 
   if (!isMounted) {
     return (
@@ -44,17 +47,26 @@ export function BranchSelector({ branches, className }: Props) {
     )
   }
 
-  const effectiveValue = selectedBranchId ?? (visibleBranches[0]?.id ?? '')
+  // Hide selector if only 1 visible branch (or none) and allowAll is not set
+  if (!allowAll && visibleBranches.length <= 1) return null
 
-  // Hide selector if only 1 visible branch (or none)
-  if (visibleBranches.length <= 1) return null
+  const effectiveValue = allowAll
+    ? (selectedBranchId ?? ALL_BRANCHES_VALUE)
+    : (selectedBranchId ?? (visibleBranches[0]?.id ?? ''))
+
+  function handleChange(value: string) {
+    setSelectedBranchId(value === ALL_BRANCHES_VALUE ? null : value)
+  }
 
   return (
-    <Select value={effectiveValue} onValueChange={setSelectedBranchId}>
+    <Select value={effectiveValue} onValueChange={handleChange}>
       <SelectTrigger className={className ?? 'w-[200px]'}>
         <SelectValue placeholder="Seleccionar sucursal" />
       </SelectTrigger>
       <SelectContent>
+        {allowAll && (
+          <SelectItem value={ALL_BRANCHES_VALUE}>Todas las sucursales</SelectItem>
+        )}
         {visibleBranches.map((b) => (
           <SelectItem key={b.id} value={b.id}>
             {b.name}
