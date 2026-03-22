@@ -318,12 +318,30 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
     const el = mainRef.current
     if (!el) return
 
+    // Detecta si el elemento tocado (o algún ancestro hasta main) tiene scroll horizontal propio.
+    // Esto permite que tab bars y tablas con overflow-x-auto funcionen sin conflicto con el swipe.
+    function isHorizontallyScrollable(target: EventTarget | null): boolean {
+      let node = target as Element | null
+      while (node && node !== el) {
+        const ox = window.getComputedStyle(node).overflowX
+        if ((ox === 'auto' || ox === 'scroll') && node.scrollWidth > node.clientWidth) {
+          return true
+        }
+        node = node.parentElement
+      }
+      return false
+    }
+
     const onMove = (e: TouchEvent) => {
       const dx = e.touches[0].clientX - touchStartX.current
       const dy = e.touches[0].clientY - touchStartY.current
 
       // Ignorar gestos verticales y movimientos mínimos
       if (Math.abs(dx) < 8 || Math.abs(dx) < Math.abs(dy) * 1.5) return
+
+      // No interceptar si el toque proviene de un elemento con scroll horizontal propio
+      // (tab bars, tablas, etc.) — dejar que el browser lo maneje
+      if (isHorizontallyScrollable(e.target)) return
 
       const isLeft = dx < 0
       const canGo =
