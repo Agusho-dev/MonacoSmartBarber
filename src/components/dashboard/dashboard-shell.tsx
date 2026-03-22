@@ -233,7 +233,11 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
   const touchStartX = useRef(0)
   const touchStartY = useRef(0)
   const touchStartTime = useRef(0)
+  const mainRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const swipeDirectionRef = useRef<'left' | 'right' | null>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [swipeTargetItem, setSwipeTargetItem] = useState<NavItem | null>(null)
   const [, startTransition] = useTransition()
   const [pendingBreakCount, setPendingBreakCount] = useState(0)
   const { selectedBranchId } = useBranchStore()
@@ -308,24 +312,130 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
     touchStartTime.current = Date.now()
   }, [])
 
-  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-    const deltaX = e.changedTouches[0].clientX - touchStartX.current
-    const deltaY = e.changedTouches[0].clientY - touchStartY.current
-    const deltaTime = Date.now() - touchStartTime.current
+  // Listener nativo para touchmove — necesario para llamar preventDefault()
+  // y evitar el scroll vertical mientras se desliza horizontalmente
+  useEffect(() => {
+    const el = mainRef.current
+    if (!el) return
 
-    const MIN_SWIPE = 60
-    const MAX_TIME = 400
+    const onMove = (e: TouchEvent) => {
+      const dx = e.touches[0].clientX - touchStartX.current
+      const dy = e.touches[0].clientY - touchStartY.current
 
-    if (
-      Math.abs(deltaX) > MIN_SWIPE &&
-      Math.abs(deltaX) > Math.abs(deltaY) * 1.8 &&
-      deltaTime < MAX_TIME
-    ) {
-      if (deltaX < 0 && currentNavIndex < orderedItems.length - 1) {
-        router.push(orderedItems[currentNavIndex + 1].href)
-      } else if (deltaX > 0 && currentNavIndex > 0) {
-        router.push(orderedItems[currentNavIndex - 1].href)
+      // Ignorar gestos verticales y movimientos mínimos
+      if (Math.abs(dx) < 8 || Math.abs(dx) < Math.abs(dy) * 1.5) return
+
+      const isLeft = dx < 0
+      const canGo =
+        (isLeft && currentNavIndex < orderedItems.length - 1) ||
+        (!isLeft && currentNavIndex > 0)
+
+      if (!canGo) return
+
+      e.preventDefault()
+
+      const W = window.innerWidth
+
+      // Página actual — parallax sutil (25% de la velocidad del dedo)
+      if (mainRef.current) {
+        mainRef.current.style.transform = `translateX(${dx * 0.25}px)`
       }
+
+      // Panel entrante — se superpone deslizándose desde el borde a velocidad completa
+      if (panelRef.current) {
+        const rawOffset = isLeft ? W + dx : -W + dx
+        const clamped = isLeft ? Math.max(0, rawOffset) : Math.min(0, rawOffset)
+        panelRef.current.style.transform = `translateX(${clamped}px)`
+        panelRef.current.style.visibility = 'visible'
+        panelRef.current.style.boxShadow = isLeft
+          ? '-16px 0 48px rgba(0,0,0,0.13)'
+          : '16px 0 48px rgba(0,0,0,0.13)'
+      }
+
+      // Establecer ítem destino una sola vez por gesto (evita re-renders continuos)
+      if (swipeDirectionRef.current === null) {
+        swipeDirectionRef.current = isLeft ? 'left' : 'right'
+        const target = isLeft
+          ? orderedItems[currentNavIndex + 1]
+          : orderedItems[currentNavIndex - 1]
+        setSwipeTargetItem(target ?? null)
+      }
+    }
+
+    el.addEventListener('touchmove', onMove, { passive: false })
+    return () => el.removeEventListener('touchmove', onMove)
+  }, [currentNavIndex, orderedItems])
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    // Si no hubo un swipe horizontal activo, no hacer nada
+    if (swipeDirectionRef.current === null) return
+
+    const dx = e.changedTouches[0].clientX - touchStartX.current
+    const dy = e.changedTouches[0].clientY - touchStartY.current
+    const dt = Date.now() - touchStartTime.current
+
+    const W = window.innerWidth
+    const isLeft = dx < 0
+    const THRESHOLD = W * 0.28                          // 28% del ancho de pantalla
+    const isFlick = Math.abs(dx) > 40 && Math.abs(dx) / dt > 0.45  // gesto rápido
+    const isValidSwipe =
+      (Math.abs(dx) > THRESHOLD || isFlick) &&
+      Math.abs(dx) > Math.abs(dy) * 1.5
+
+    const EASE = 'transform 240ms cubic-bezier(0.4, 0, 0.2, 1)'
+
+    if (isValidSwipe) {
+      // Completar: animar hasta cubrir pantalla, luego navegar
+      if (mainRef.current) {
+        mainRef.current.style.transition = EASE
+        mainRef.current.style.transform = `translateX(${isLeft ? -(W * 0.25) : W * 0.25}px)`
+      }
+      if (panelRef.current) {
+        panelRef.current.style.transition = EASE
+        panelRef.current.style.transform = 'translateX(0)'
+      }
+
+      const targetHref = isLeft
+        ? orderedItems[currentNavIndex + 1]?.href
+        : orderedItems[currentNavIndex - 1]?.href
+
+      setTimeout(() => {
+        // Resetear antes de navegar para evitar flash al montar la nueva página
+        if (mainRef.current) {
+          mainRef.current.style.transition = ''
+          mainRef.current.style.transform = ''
+        }
+        if (panelRef.current) {
+          panelRef.current.style.visibility = 'hidden'
+          panelRef.current.style.transition = ''
+          panelRef.current.style.transform = 'translateX(100%)'
+          panelRef.current.style.boxShadow = ''
+        }
+        swipeDirectionRef.current = null
+        setSwipeTargetItem(null)
+        if (targetHref) router.push(targetHref)
+      }, 240)
+    } else {
+      // Spring-back: volver a la posición original con animación suave
+      if (mainRef.current) {
+        mainRef.current.style.transition = EASE
+        mainRef.current.style.transform = ''
+      }
+      if (panelRef.current) {
+        panelRef.current.style.transition = EASE
+        panelRef.current.style.transform = `translateX(${isLeft ? W : -W}px)`
+      }
+
+      setTimeout(() => {
+        if (mainRef.current) mainRef.current.style.transition = ''
+        if (panelRef.current) {
+          panelRef.current.style.visibility = 'hidden'
+          panelRef.current.style.transition = ''
+          panelRef.current.style.boxShadow = ''
+        }
+        swipeDirectionRef.current = null
+        setSwipeTargetItem(null)
+      }, 240)
     }
   }, [currentNavIndex, orderedItems, router])
 
@@ -486,15 +596,38 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
           </DropdownMenu>
         </header>
 
-        <main
-          className="flex-1 overflow-y-auto p-4 pb-16 lg:p-6 lg:pb-6"
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
-        >
-          <BranchScopeProvider allowedBranchIds={allowedBranchIds}>
-            {children}
-          </BranchScopeProvider>
-        </main>
+        {/* Contenedor de swipe — overflow-hidden recorta el panel entrante */}
+        <div className="relative flex-1 overflow-hidden">
+          <main
+            ref={mainRef}
+            className="h-full overflow-y-auto p-4 pb-16 lg:p-6 lg:pb-6"
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+          >
+            <BranchScopeProvider allowedBranchIds={allowedBranchIds}>
+              {children}
+            </BranchScopeProvider>
+          </main>
+
+          {/* Panel de sección entrante — solo visible durante el swipe en mobile */}
+          <div
+            ref={panelRef}
+            className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-5 bg-background lg:hidden"
+            style={{ visibility: 'hidden', transform: 'translateX(100%)' }}
+            aria-hidden="true"
+          >
+            {swipeTargetItem && (
+              <>
+                <div className="rounded-2xl bg-muted p-5 ring-1 ring-border/60">
+                  <swipeTargetItem.icon className="size-12 text-foreground/70" />
+                </div>
+                <p className="text-2xl font-semibold tracking-tight text-foreground">
+                  {swipeTargetItem.label}
+                </p>
+              </>
+            )}
+          </div>
+        </div>
         <MobileBottomNav
           orderedItems={orderedItems}
           currentIndex={currentNavIndex < 0 ? 0 : currentNavIndex}
