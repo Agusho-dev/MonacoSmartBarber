@@ -195,12 +195,12 @@ export function EstadisticasClient({ initialData, branches }: Props) {
         </div>
 
         <Tabs defaultValue="tendencias" className="space-y-4">
-          <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
-            <TabsList className="w-max min-w-full sm:w-auto">
-              <TabsTrigger value="tendencias">Tendencias</TabsTrigger>
-              <TabsTrigger value="ocupacion">Ocupación</TabsTrigger>
-              <TabsTrigger value="barberos">Barberos</TabsTrigger>
-              <TabsTrigger value="clientes">Clientes</TabsTrigger>
+          <div className="overflow-x-auto">
+            <TabsList className="min-w-max">
+              <TabsTrigger value="tendencias" className="whitespace-nowrap">Tendencias</TabsTrigger>
+              <TabsTrigger value="ocupacion" className="whitespace-nowrap">Ocupación</TabsTrigger>
+              <TabsTrigger value="barberos" className="whitespace-nowrap">Barberos</TabsTrigger>
+              <TabsTrigger value="clientes" className="whitespace-nowrap">Clientes</TabsTrigger>
             </TabsList>
           </div>
 

@@ -75,23 +75,25 @@ export function FinanzasTabsClient({
                 </p>
             </div>
 
-            {/* Tab navigation */}
-            <div className="flex gap-1 rounded-lg border bg-muted/50 p-1">
-                {visibleTabs.map((tab) => (
-                    <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id)}
-                        className={cn(
-                            'flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all',
-                            activeTab === tab.id
-                                ? 'bg-background text-foreground shadow-sm'
-                                : 'text-muted-foreground hover:text-foreground'
-                        )}
-                    >
-                        <tab.icon className="size-4" />
-                        {tab.label}
-                    </button>
-                ))}
+            {/* Tab navigation — scrollable en mobile */}
+            <div className="overflow-x-auto">
+                <div className="flex gap-1 rounded-lg border bg-muted/50 p-1 min-w-max">
+                    {visibleTabs.map((tab) => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            className={cn(
+                                'flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium whitespace-nowrap transition-all',
+                                activeTab === tab.id
+                                    ? 'bg-background text-foreground shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground'
+                            )}
+                        >
+                            <tab.icon className="size-4" />
+                            {tab.label}
+                        </button>
+                    ))}
+                </div>
             </div>
 
             {/* Tab content */}

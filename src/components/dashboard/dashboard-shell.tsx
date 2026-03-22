@@ -385,7 +385,11 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
     const EASE = 'transform 240ms cubic-bezier(0.4, 0, 0.2, 1)'
 
     if (isValidSwipe) {
-      // Completar: animar hasta cubrir pantalla, luego navegar
+      const targetHref = isLeft
+        ? orderedItems[currentNavIndex + 1]?.href
+        : orderedItems[currentNavIndex - 1]?.href
+
+      // Animar panel para cubrir pantalla
       if (mainRef.current) {
         mainRef.current.style.transition = EASE
         mainRef.current.style.transform = `translateX(${isLeft ? -(W * 0.25) : W * 0.25}px)`
@@ -395,12 +399,10 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
         panelRef.current.style.transform = 'translateX(0)'
       }
 
-      const targetHref = isLeft
-        ? orderedItems[currentNavIndex + 1]?.href
-        : orderedItems[currentNavIndex - 1]?.href
+      // Navegar INMEDIATAMENTE — el panel cubre la pantalla durante la carga de la nueva página
+      if (targetHref) router.push(targetHref)
 
       setTimeout(() => {
-        // Resetear antes de navegar para evitar flash al montar la nueva página
         if (mainRef.current) {
           mainRef.current.style.transition = ''
           mainRef.current.style.transform = ''
@@ -413,7 +415,6 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
         }
         swipeDirectionRef.current = null
         setSwipeTargetItem(null)
-        if (targetHref) router.push(targetHref)
       }, 240)
     } else {
       // Spring-back: volver a la posición original con animación suave
@@ -600,7 +601,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
         <div className="relative flex-1 overflow-hidden">
           <main
             ref={mainRef}
-            className="h-full overflow-y-auto p-4 pb-16 lg:p-6 lg:pb-6"
+            className="h-full overflow-y-auto overflow-x-hidden p-4 pb-16 lg:p-6 lg:pb-6"
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
           >
