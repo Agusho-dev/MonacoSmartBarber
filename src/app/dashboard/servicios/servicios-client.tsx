@@ -526,7 +526,7 @@ export function ServiciosClient({ services, branches, barbers, commissions }: Pr
       <Separator />
 
       {/* History section */}
-      <HistorialServicios branches={branches} barbers={barbers} />
+      <HistorialServicios branches={branches} barbers={barbers} services={services} />
     </div>
   )
 }

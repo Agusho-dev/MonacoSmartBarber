@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/format'
 import { Button } from '@/components/ui/button'
@@ -29,10 +29,18 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { useBranchStore } from '@/stores/branch-store'
-import { RefreshCw, Search } from 'lucide-react'
+import { RefreshCw, Search, Plus } from 'lucide-react'
 import { toast } from 'sonner'
+import { createManualVisit } from '@/lib/actions/visit-history'
 
 interface Branch {
   id: string
@@ -42,6 +50,13 @@ interface Branch {
 interface Barber {
   id: string
   full_name: string
+  branch_id: string | null
+}
+
+interface ServiceOption {
+  id: string
+  name: string
+  price: number
   branch_id: string | null
 }
 
@@ -80,16 +95,17 @@ interface DayGroup {
 interface Props {
   branches: Branch[]
   barbers: Barber[]
+  services: ServiceOption[]
 }
 
-export function HistorialServicios({ branches, barbers }: Props) {
+export function HistorialServicios({ branches, barbers, services }: Props) {
   const supabase = createClient()
   const { selectedBranchId } = useBranchStore()
 
   const [visits, setVisits] = useState<VisitHistory[]>([])
   const [loading, setLoading] = useState(false)
 
-  // Filters
+  // Filtros
   const [branchId, setBranchId] = useState<string>(selectedBranchId ?? 'all')
   const [barberId, setBarberId] = useState<string>('all')
   const [dateFrom, setDateFrom] = useState<string>('')
@@ -105,10 +121,43 @@ export function HistorialServicios({ branches, barbers }: Props) {
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccountOption[]>([])
   const [saving, setSaving] = useState(false)
 
-  // Sync branch from store
+  // Dialog "Registrar servicio manualmente"
+  const [addOpen, setAddOpen] = useState(false)
+  const [addSaving, setAddSaving] = useState(false)
+
+  // Campos del formulario de registro manual
+  const [addBranchId, setAddBranchId] = useState<string>('')
+  const [addBarberId, setAddBarberId] = useState<string>('')
+  const [addServiceId, setAddServiceId] = useState<string>('')
+  const [addDate, setAddDate] = useState<string>('')
+  const [addTime, setAddTime] = useState<string>('')
+  const [addPaymentMethod, setAddPaymentMethod] = useState<string>('cash')
+  const [addPaymentAccountId, setAddPaymentAccountId] = useState<string>('')
+  const [addAmount, setAddAmount] = useState<string>('')
+  const [addNotes, setAddNotes] = useState<string>('')
+
+  // Búsqueda de cliente
+  const [clientSearch, setClientSearch] = useState<string>('')
+  const [clientResults, setClientResults] = useState<Array<{ id: string; name: string; phone: string }>>([])
+  const [selectedClient, setSelectedClient] = useState<{ id: string; name: string } | null>(null)
+  const [clientDropdownOpen, setClientDropdownOpen] = useState(false)
+  const clientDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Sincronizar sucursal desde el store global
   useEffect(() => {
     setBranchId(selectedBranchId ?? 'all')
   }, [selectedBranchId])
+
+  // Cerrar dropdown de cliente al hacer clic afuera
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (clientDropdownRef.current && !clientDropdownRef.current.contains(e.target as Node)) {
+        setClientDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   const fetchHistory = useCallback(async () => {
     setLoading(true)
@@ -149,13 +198,14 @@ export function HistorialServicios({ branches, barbers }: Props) {
   }, [fetchHistory])
 
   const fetchPaymentAccounts = useCallback(async () => {
+    if (paymentAccounts.length > 0) return
     const { data } = await supabase
       .from('payment_accounts')
       .select('id, name, alias_or_cbu')
       .eq('is_active', true)
       .order('name')
     setPaymentAccounts(data ?? [])
-  }, [supabase])
+  }, [supabase, paymentAccounts.length])
 
   function openEdit(visit: VisitHistory) {
     setEditingVisit(visit)
@@ -164,7 +214,7 @@ export function HistorialServicios({ branches, barbers }: Props) {
     setEditAmount(String(visit.amount))
     setEditNotes(visit.notes ?? '')
     setEditTagsInput((visit.tags ?? []).join(', '))
-    fetchPaymentAccounts()
+    if (paymentAccounts.length === 0) fetchPaymentAccounts()
   }
 
   async function handleSave() {
@@ -214,10 +264,99 @@ export function HistorialServicios({ branches, barbers }: Props) {
     setSaving(false)
   }
 
+  // Búsqueda de clientes para el formulario manual
+  async function searchClients(query: string) {
+    if (query.length < 2) {
+      setClientResults([])
+      return
+    }
+    const { data } = await supabase
+      .from('clients')
+      .select('id, name, phone')
+      .or(`name.ilike.%${query}%,phone.ilike.%${query}%`)
+      .limit(8)
+    setClientResults(data ?? [])
+  }
+
+  // Auto-completar monto cuando cambia el servicio seleccionado
+  useEffect(() => {
+    if (!addServiceId) return
+    const svc = services.find((s) => s.id === addServiceId)
+    if (svc) setAddAmount(String(svc.price))
+  }, [addServiceId, services])
+
+  // Resetear barbero y servicio cuando cambia la sucursal del formulario
+  useEffect(() => {
+    setAddBarberId('')
+    setAddServiceId('')
+  }, [addBranchId])
+
+  // Cargar cuentas de pago cuando se selecciona transferencia
+  useEffect(() => {
+    if (addPaymentMethod === 'transfer') fetchPaymentAccounts()
+  }, [addPaymentMethod, fetchPaymentAccounts])
+
+  function openAddDialog() {
+    const today = new Date()
+    const dateStr = today.toISOString().split('T')[0]
+    const hours = String(today.getHours()).padStart(2, '0')
+    const mins = String(today.getMinutes()).padStart(2, '0')
+    setAddDate(dateStr)
+    setAddTime(`${hours}:${mins}`)
+    setAddBranchId(branchId !== 'all' ? branchId : (branches[0]?.id ?? ''))
+    setAddBarberId('')
+    setAddServiceId('')
+    setAddAmount('')
+    setAddPaymentMethod('cash')
+    setAddPaymentAccountId('')
+    setAddNotes('')
+    setSelectedClient(null)
+    setClientSearch('')
+    setClientResults([])
+    setClientDropdownOpen(false)
+    setAddOpen(true)
+  }
+
+  async function handleAddSave() {
+    if (!addBranchId || !addBarberId || !addServiceId || !addDate || !addTime || !addAmount) return
+    setAddSaving(true)
+
+    // Construir ISO datetime con zona horaria de Argentina (-03:00)
+    const completedAt = `${addDate}T${addTime}:00-03:00`
+
+    const result = await createManualVisit({
+      branchId: addBranchId,
+      clientId: selectedClient?.id ?? null,
+      barberId: addBarberId,
+      serviceId: addServiceId,
+      paymentMethod: addPaymentMethod as 'cash' | 'card' | 'transfer',
+      paymentAccountId: addPaymentAccountId || null,
+      amount: Number(addAmount),
+      completedAt,
+      notes: addNotes.trim() || null,
+    })
+
+    if ('error' in result) {
+      toast.error('Error al registrar: ' + result.error)
+    } else {
+      toast.success('Servicio registrado correctamente')
+      setAddOpen(false)
+      fetchHistory()
+    }
+    setAddSaving(false)
+  }
+
   const filteredBarbers =
     branchId !== 'all' ? barbers.filter((b) => b.branch_id === branchId) : barbers
 
-  // Group by day
+  const addFilteredBarbers =
+    addBranchId ? barbers.filter((b) => b.branch_id === addBranchId) : barbers
+
+  const addFilteredServices = services.filter(
+    (s) => s.branch_id === null || s.branch_id === addBranchId
+  )
+
+  // Agrupar visitas por día
   const groupedVisits: DayGroup[] = []
   if (!loading && visits.length > 0) {
     let currentGroup: DayGroup | null = null
@@ -264,17 +403,28 @@ export function HistorialServicios({ branches, barbers }: Props) {
     return method
   }
 
+  const addFormValid =
+    !!addBranchId && !!addBarberId && !!addServiceId && !!addDate && !!addTime && !!addAmount
+
   return (
     <>
       <Card className="mt-8">
         <CardHeader>
-          <CardTitle>Historial de Servicios</CardTitle>
-          <CardDescription>
-            Últimos 100 servicios completados. Hacé clic en una fila para editarla.
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Historial de Servicios</CardTitle>
+              <CardDescription>
+                Últimos 100 servicios completados. Hacé clic en una fila para editarla.
+              </CardDescription>
+            </div>
+            <Button size="sm" onClick={openAddDialog}>
+              <Plus className="mr-2 h-4 w-4" />
+              Registrar servicio
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Filters */}
+          {/* Filtros */}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
             <div className="space-y-2">
               <Label>Sucursal</Label>
@@ -336,7 +486,7 @@ export function HistorialServicios({ branches, barbers }: Props) {
             </div>
           </div>
 
-          {/* Table */}
+          {/* Tabla */}
           <div className="rounded-md border">
             <Table>
               <TableHeader>
@@ -596,6 +746,242 @@ export function HistorialServicios({ branches, barbers }: Props) {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Dialog — Registrar servicio manualmente */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="max-w-lg overflow-y-auto max-h-[90vh]">
+          <DialogHeader>
+            <DialogTitle>Registrar servicio manualmente</DialogTitle>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-2">
+            {/* Sucursal */}
+            <div className="grid gap-2">
+              <Label>Sucursal <span className="text-destructive">*</span></Label>
+              <Select value={addBranchId} onValueChange={setAddBranchId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccioná una sucursal" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branches.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Barbero */}
+            <div className="grid gap-2">
+              <Label>Barbero <span className="text-destructive">*</span></Label>
+              <Select
+                value={addBarberId}
+                onValueChange={setAddBarberId}
+                disabled={!addBranchId}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccioná un barbero" />
+                </SelectTrigger>
+                <SelectContent>
+                  {addFilteredBarbers.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.full_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Servicio */}
+            <div className="grid gap-2">
+              <Label>Servicio <span className="text-destructive">*</span></Label>
+              <Select
+                value={addServiceId}
+                onValueChange={setAddServiceId}
+                disabled={!addBranchId}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccioná un servicio" />
+                </SelectTrigger>
+                <SelectContent>
+                  {addFilteredServices.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name} — {formatCurrency(s.price)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Cliente */}
+            <div className="grid gap-2">
+              <Label>Cliente</Label>
+              <div className="relative" ref={clientDropdownRef}>
+                <Input
+                  value={selectedClient ? selectedClient.name : clientSearch}
+                  onChange={(e) => {
+                    if (selectedClient) {
+                      // Al escribir luego de seleccionar, limpiar selección
+                      setSelectedClient(null)
+                    }
+                    setClientSearch(e.target.value)
+                    setClientDropdownOpen(true)
+                    searchClients(e.target.value)
+                  }}
+                  onFocus={() => setClientDropdownOpen(true)}
+                  placeholder="Buscar por nombre o teléfono..."
+                />
+                {clientDropdownOpen && (
+                  <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md">
+                    {/* Opción fija: Consumidor Final */}
+                    <button
+                      type="button"
+                      className="flex w-full items-center px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground text-left"
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        setSelectedClient(null)
+                        setClientSearch('')
+                        setClientResults([])
+                        setClientDropdownOpen(false)
+                      }}
+                    >
+                      <span className="text-muted-foreground italic">Consumidor Final</span>
+                    </button>
+                    {/* Resultados de búsqueda */}
+                    {clientResults.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        className="flex w-full flex-col items-start px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground text-left"
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          setSelectedClient({ id: c.id, name: c.name })
+                          setClientSearch('')
+                          setClientResults([])
+                          setClientDropdownOpen(false)
+                        }}
+                      >
+                        <span className="font-medium">{c.name}</span>
+                        <span className="text-xs text-muted-foreground">{c.phone}</span>
+                      </button>
+                    ))}
+                    {clientSearch.length >= 2 && clientResults.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        Sin resultados
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              {selectedClient && (
+                <p className="text-xs text-muted-foreground">
+                  Cliente seleccionado: <strong>{selectedClient.name}</strong>
+                </p>
+              )}
+            </div>
+
+            {/* Fecha y hora */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Fecha <span className="text-destructive">*</span></Label>
+                <Input
+                  type="date"
+                  value={addDate}
+                  onChange={(e) => setAddDate(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Hora <span className="text-destructive">*</span></Label>
+                <Input
+                  type="time"
+                  value={addTime}
+                  onChange={(e) => setAddTime(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Método de pago y monto */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Método de pago <span className="text-destructive">*</span></Label>
+                <Select value={addPaymentMethod} onValueChange={setAddPaymentMethod}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Efectivo</SelectItem>
+                    <SelectItem value="transfer">Transferencia</SelectItem>
+                    <SelectItem value="card">Tarjeta</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Monto (ARS) <span className="text-destructive">*</span></Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={addAmount}
+                  onChange={(e) => setAddAmount(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+            </div>
+
+            {/* Cuenta de transferencia (solo si método es transfer) */}
+            {addPaymentMethod === 'transfer' && (
+              <div className="grid gap-2">
+                <Label>Cuenta de transferencia</Label>
+                <Select
+                  value={addPaymentAccountId || 'none'}
+                  onValueChange={(v) => setAddPaymentAccountId(v === 'none' ? '' : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sin cuenta asignada" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin cuenta asignada</SelectItem>
+                    {paymentAccounts.map((pa) => (
+                      <SelectItem key={pa.id} value={pa.id}>
+                        {pa.name}
+                        {pa.alias_or_cbu && (
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            — {pa.alias_or_cbu}
+                          </span>
+                        )}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Notas */}
+            <div className="grid gap-2">
+              <Label>Notas</Label>
+              <textarea
+                value={addNotes}
+                onChange={(e) => setAddNotes(e.target.value)}
+                placeholder="Observaciones del servicio..."
+                rows={2}
+                className="w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleAddSave}
+              disabled={addSaving || !addFormValid}
+            >
+              {addSaving ? 'Guardando...' : 'Registrar servicio'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
