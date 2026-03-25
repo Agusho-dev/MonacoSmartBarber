@@ -185,6 +185,7 @@ export function EquipoClient({
                 {activeTab === 'barberos' && (
                     <BarberosClient
                         barbers={barbers as Parameters<typeof BarberosClient>[0]['barbers']}
+                        branches={branches as Parameters<typeof BarberosClient>[0]['branches']}
                         todayVisits={todayVisits as Parameters<typeof BarberosClient>[0]['todayVisits']}
                         roles={roles}
                         serviceHistory={serviceHistory as Parameters<typeof BarberosClient>[0]['serviceHistory']}

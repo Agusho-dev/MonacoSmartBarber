@@ -58,6 +58,7 @@ interface ServiceHistoryItem {
 
 interface Props {
   barbers: Staff[]
+  branches: { id: string; name: string }[]
   todayVisits: BarberVisitRow[]
   roles: Role[]
   serviceHistory?: ServiceHistoryItem[]
@@ -119,7 +120,7 @@ const emptyForm = {
   phone: '',
 }
 
-export function BarberosClient({ barbers, todayVisits, roles, serviceHistory, canHideStaff }: Props) {
+export function BarberosClient({ barbers, branches, todayVisits, roles, serviceHistory, canHideStaff }: Props) {
   const router = useRouter()
   const supabase = createClient()
   const { selectedBranchId } = useBranchStore()
@@ -156,7 +157,7 @@ export function BarberosClient({ barbers, todayVisits, roles, serviceHistory, ca
 
   function openAdd() {
     setEditingId(null)
-    setForm({ ...emptyForm, password: '', hasAuth: false })
+    setForm({ ...emptyForm, branch_id: selectedBranchId ?? (branches.length > 0 ? branches[0].id : ''), password: '', hasAuth: false })
     setAvatarFile(null)
     setAvatarPreview(null)
     setDialogOpen(true)
@@ -656,6 +657,25 @@ export function BarberosClient({ barbers, todayVisits, roles, serviceHistory, ca
                   placeholder="3410000000"
                 />
               </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>Sucursal</Label>
+              <Select
+                value={form.branch_id || 'none'}
+                onValueChange={(v) => setForm({ ...form, branch_id: v === 'none' ? '' : v })}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Sin sucursal" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sin sucursal</SelectItem>
+                  {branches.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
