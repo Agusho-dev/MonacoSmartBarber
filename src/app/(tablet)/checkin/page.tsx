@@ -9,6 +9,13 @@ import { verifyBarberPin } from '@/lib/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
+import {
   Scissors,
   ArrowLeft,
   Delete,
@@ -1134,7 +1141,7 @@ export default function CheckinPage() {
 
           {/* ── CTA 2: Elegir barbero (secondary, smaller) ── */}
           <button
-            onClick={() => setShowBarberPreference(!showBarberPreference)}
+            onClick={() => setShowBarberPreference(true)}
             disabled={submitting}
             className="group relative w-full flex items-center gap-4 rounded-2xl border-2 border-violet-400/30 bg-gradient-to-r from-violet-950/40 to-indigo-950/40 p-4 md:p-5 text-left transition-all duration-300 hover:border-violet-400/60 hover:shadow-[0_0_30px_rgba(139,92,246,0.15)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
           >
@@ -1162,23 +1169,45 @@ export default function CheckinPage() {
           </button>
         </div>
 
-        {/* ── Expandable barber list ── */}
-        {showBarberPreference && (
-          <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
-            <div className="grid grid-cols-2 gap-3">
-              {availableBarbers.map((barber) => renderBarberCard(barber, onSelect, showExpand))}
-            </div>
+        {/* ── Barber Selection Dialog Modal ── */}
+        <Dialog open={showBarberPreference} onOpenChange={setShowBarberPreference}>
+          <DialogContent className="max-w-2xl bg-zinc-950/90 backdrop-blur-2xl border-white/10 p-6 md:p-8 rounded-[2rem] shadow-2xl">
+            <DialogHeader className="text-left mb-6">
+              <DialogTitle className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-violet-200 to-indigo-200 bg-clip-text text-transparent">
+                Elegí tu barbero
+              </DialogTitle>
+              <DialogDescription className="text-base text-violet-300/70">
+                Seleccioná con quién te querés atender
+              </DialogDescription>
+            </DialogHeader>
 
-            {notArrivedBarbers.length > 0 && (
-              <>
-                <div className="w-full h-px bg-white/8" />
-                <div className="grid grid-cols-2 gap-3">
-                  {notArrivedBarbers.map((barber) => renderBarberCard(barber, onSelect, showExpand))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
+            <div className="overflow-y-auto max-h-[60vh] pr-2 -mr-2 space-y-3 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/20">
+              <div className="grid grid-cols-2 gap-3 md:gap-4 pb-2">
+                {availableBarbers.map((barber) => renderBarberCard(barber, (id) => {
+                  setShowBarberPreference(false);
+                  onSelect(id);
+                }, showExpand))}
+              </div>
+
+              {notArrivedBarbers.length > 0 && (
+                <>
+                  <div className="w-full h-px bg-white/8 my-6" />
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="h-px bg-white/10 flex-1" />
+                    <h4 className="text-xs font-bold text-white/40 uppercase tracking-widest shrink-0">Aún no llegaron</h4>
+                    <div className="h-px bg-white/10 flex-1" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 md:gap-4 pb-4">
+                    {notArrivedBarbers.map((barber) => renderBarberCard(barber, (id) => {
+                      setShowBarberPreference(false);
+                      onSelect(id);
+                    }, showExpand))}
+                  </div>
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }
