@@ -32,9 +32,7 @@ import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule, AppSetti
 import {
   buildBarberAvgMinutes,
   getBarberStats,
-  formatWaitTime,
   statusConfig,
-  getLoadColor,
   assignDynamicBarbers,
   isBarberBlockedByShiftEnd,
 } from '@/lib/barber-utils'
@@ -591,14 +589,7 @@ export default function CheckinPage() {
     return assignDynamicBarbers(queueEntries, barbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers)
   }, [queueEntries, barbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
 
-  const maxLoad = useMemo(
-    () =>
-      Math.max(
-        1,
-        ...barbers.map((b) => getBarberStats(b, dynamicEntries, barberAvgMinutes).totalLoad)
-      ),
-    [barbers, dynamicEntries, barberAvgMinutes]
-  )
+
 
   const minWaitBarber = useMemo(() => {
     const active = barbers.filter(b =>
@@ -639,6 +630,29 @@ export default function CheckinPage() {
     if (!minWaitBarber) return 0
     return getBarberStats(minWaitBarber, dynamicEntries, barberAvgMinutes).eta
   }, [minWaitBarber, dynamicEntries, barberAvgMinutes])
+
+  // ── Availability level: 1 (green/low), 2 (yellow/medium), 3 (orange/high) ──
+  const getAvailabilityLevel = useCallback((eta: number): 1 | 2 | 3 => {
+    // Calculate the global average service time
+    const avgValues = Object.entries(barberAvgMinutes)
+      .filter(([k]) => k !== '__fallback')
+      .map(([, v]) => v)
+    const globalAvg = avgValues.length > 0
+      ? avgValues.reduce((a, b) => a + b, 0) / avgValues.length
+      : barberAvgMinutes.__fallback ?? 30
+
+    // Level thresholds based on avg service time
+    // 1 chair (green) = less than 1x average (quick service)
+    // 2 chairs (yellow) = between 1x and 2x average
+    // 3 chairs (orange) = more than 2x average
+    if (eta <= globalAvg * 0.8) return 1
+    if (eta <= globalAvg * 1.8) return 2
+    return 3
+  }, [barberAvgMinutes])
+
+  const globalAvailability = useMemo(() => {
+    return getAvailabilityLevel(minWaitEta)
+  }, [minWaitEta, getAvailabilityLevel])
 
   // ── Face ID handlers ──
 
@@ -922,6 +936,42 @@ export default function CheckinPage() {
     </button>
   ) : null
 
+  // ── Availability indicator (3 chairs) ──
+  const AvailabilityIndicator = ({ level, size = 'md' }: { level: 1 | 2 | 3; size?: 'sm' | 'md' | 'lg' }) => {
+    const sizeClass = size === 'lg' ? 'size-7 md:size-8' : size === 'md' ? 'size-5 md:size-6' : 'size-4 md:size-5'
+    const gapClass = size === 'lg' ? 'gap-2' : size === 'md' ? 'gap-1.5' : 'gap-1'
+    const labels = ['Baja espera', 'Espera media', 'Alta espera']
+    const colors = [
+      { active: 'text-emerald-400', inactive: 'text-white/15' },
+      { active: 'text-amber-400', inactive: 'text-white/15' },
+      { active: 'text-orange-400', inactive: 'text-white/15' },
+    ]
+    const bgColors = [
+      'bg-emerald-400/10 border-emerald-400/30',
+      'bg-amber-400/10 border-amber-400/30',
+      'bg-orange-400/10 border-orange-400/30',
+    ]
+    const textColors = ['text-emerald-400', 'text-amber-400', 'text-orange-400']
+    const color = colors[level - 1]
+
+    return (
+      <div className="flex flex-col items-center gap-1.5">
+        <div className={`flex items-center ${gapClass}`}>
+          {[1, 2, 3].map((i) => (
+            <svg key={i} className={`${sizeClass} ${i <= level ? color.active : color.inactive} transition-colors duration-300`} viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
+            </svg>
+          ))}
+        </div>
+        {size !== 'sm' && (
+          <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${bgColors[level - 1]}`}>
+            <span className={textColors[level - 1]}>{labels[level - 1]}</span>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const renderBarberCard = (
     barber: Staff,
     onSelect: (barberId: string) => void,
@@ -930,7 +980,7 @@ export default function CheckinPage() {
     const isNotClockedIn = notClockedInBarbers.has(barber.id)
     const stats = getBarberStats(barber, dynamicEntries, barberAvgMinutes)
     const cfg = statusConfig[stats.status]
-    const loadPct = Math.min(100, (stats.totalLoad / Math.max(maxLoad, 4)) * 100)
+    const availLevel = getAvailabilityLevel(stats.eta)
 
     const ringColor = isNotClockedIn
       ? 'ring-orange-500/60'
@@ -993,21 +1043,9 @@ export default function CheckinPage() {
                     {!stats.attending && stats.waiting === 0 && 'Sin espera'}
                   </p>
 
-                  <div className="space-y-1 pt-0.5">
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>
-                        {stats.totalLoad} {stats.totalLoad === 1 ? 'persona' : 'personas'}
-                      </span>
-                      <span className="font-semibold text-foreground text-sm">
-                        {formatWaitTime(stats.eta)}
-                      </span>
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-white/6 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${getLoadColor(stats.totalLoad)}`}
-                        style={{ width: `${loadPct}%` }}
-                      />
-                    </div>
+                  {/* Availability indicator instead of wait time */}
+                  <div className="pt-1">
+                    <AvailabilityIndicator level={availLevel} size="sm" />
                   </div>
                 </>
               )}
@@ -1029,77 +1067,90 @@ export default function CheckinPage() {
     )
 
     return (
-      <div className="w-full space-y-5 overflow-y-auto min-h-0 flex-1">
+      <div className="w-full flex flex-col gap-5 overflow-y-auto min-h-0 flex-1">
 
-        {/* ── HERO: Menor Espera CTA ── */}
-        {minWaitBarber && (
-          <div className="relative">
-            {/* Animated glow background */}
-            <div className="absolute -inset-1 rounded-[1.75rem] bg-gradient-to-r from-emerald-500/40 via-cyan-400/40 to-emerald-500/40 blur-xl opacity-60" style={{ animation: 'checkin-pulse-glow 3s ease-in-out infinite' }} />
-            
+        {/* ── Title ── */}
+        <div className="text-center">
+          <h2 className="text-2xl md:text-3xl font-bold">¿Cómo querés atenderte?</h2>
+          <p className="text-muted-foreground mt-1 text-base md:text-lg">Elegí una opción para continuar</p>
+        </div>
+
+        {/* ── TWO MAIN CTAs ── */}
+        <div className="flex flex-col gap-4 w-full">
+
+          {/* ── CTA 1: Menor Espera (recommended, bigger) ── */}
+          {minWaitBarber && (
             <button
               onClick={() => onSelect(null as unknown as string)}
               disabled={submitting}
-              className="relative w-full flex flex-col items-center gap-4 rounded-3xl border-2 border-emerald-400/50 bg-gradient-to-br from-emerald-950/80 via-emerald-900/60 to-cyan-950/80 p-7 md:p-8 text-center transition-all duration-300 hover:border-emerald-400/80 hover:shadow-[0_0_40px_rgba(16,185,129,0.3)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
+              className="group relative w-full flex items-center gap-5 rounded-2xl border-2 border-emerald-400/40 bg-gradient-to-r from-emerald-950/60 to-cyan-950/60 p-6 md:p-7 text-left transition-all duration-300 hover:border-emerald-400/70 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
             >
-              {/* Floating particles */}
-              <div className="absolute inset-0 overflow-hidden rounded-3xl pointer-events-none">
-                <div className="absolute top-4 left-[15%] size-1.5 rounded-full bg-emerald-400/40" style={{ animation: 'checkin-float-particle 4s ease-in-out infinite' }} />
-                <div className="absolute top-8 right-[20%] size-1 rounded-full bg-cyan-400/50" style={{ animation: 'checkin-float-particle 5s ease-in-out infinite 1s' }} />
-                <div className="absolute bottom-6 left-[30%] size-1 rounded-full bg-emerald-300/30" style={{ animation: 'checkin-float-particle 3.5s ease-in-out infinite 0.5s' }} />
-                <div className="absolute bottom-4 right-[25%] size-1.5 rounded-full bg-cyan-300/40" style={{ animation: 'checkin-float-particle 4.5s ease-in-out infinite 1.5s' }} />
+              {/* Subtle shimmer effect */}
+              <div className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none">
+                <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%)', animation: 'checkin-shimmer 3s ease-in-out infinite' }} />
               </div>
 
-              {/* Icon + AI Badge */}
-              <div className="flex flex-col items-center gap-3">
-                <div className="relative">
-                  <div className="size-16 md:size-20 rounded-2xl bg-gradient-to-br from-emerald-400/20 to-cyan-400/20 border border-emerald-400/30 flex items-center justify-center" style={{ animation: 'checkin-pulse-glow 2.5s ease-in-out infinite' }}>
-                    <Zap className="size-9 md:size-11 text-emerald-300" fill="currentColor" />
+              {/* Icon */}
+              <div className="relative shrink-0">
+                <div className="size-16 md:size-[4.5rem] rounded-xl bg-gradient-to-br from-emerald-400/20 to-cyan-400/20 border border-emerald-400/30 flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
+                  <Zap className="size-8 md:size-9 text-emerald-300" fill="currentColor" />
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-2xl md:text-3xl font-bold text-white">
+                    Menor espera
+                  </h3>
+                  <div className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-400/15 border border-emerald-400/30">
+                    <Sparkles className="size-2.5 text-emerald-300" />
+                    <span className="text-emerald-300">IA</span>
                   </div>
                 </div>
-
-                {/* AI Badge with shimmer */}
-                <div className="relative inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold uppercase tracking-widest overflow-hidden" style={{ background: 'linear-gradient(135deg, rgba(16,185,129,0.15), rgba(34,211,238,0.15))' }}>
-                  <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%)', animation: 'checkin-shimmer 2.5s ease-in-out infinite' }} />
-                  <Sparkles className="size-3.5 text-cyan-300 relative z-10" />
-                  <span className="relative z-10 bg-gradient-to-r from-emerald-300 to-cyan-300 bg-clip-text text-transparent">Propulsado por IA</span>
-                </div>
-              </div>
-
-              {/* Main text */}
-              <div className="space-y-1">
-                <h3 className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-emerald-200 via-white to-cyan-200 bg-clip-text text-transparent">
-                  Menor espera
-                </h3>
-                <p className="text-base md:text-lg text-emerald-300/80">
-                  Te asignamos automáticamente al barbero con menos fila
+                <p className="text-sm md:text-base text-emerald-300/70">
+                  Te asignamos al barbero con menos fila
                 </p>
               </div>
 
-              {/* Wait time */}
-              <div className="flex items-center gap-2 bg-emerald-400/10 border border-emerald-400/20 rounded-2xl px-6 py-3">
-                <span className="text-3xl md:text-4xl font-black text-emerald-300 tabular-nums">
-                  {formatWaitTime(minWaitEta)}
-                </span>
-                <span className="text-sm text-emerald-400/70 text-left leading-tight">de espera<br/>estimada</span>
+              {/* Availability indicator */}
+              <div className="shrink-0">
+                <AvailabilityIndicator level={globalAvailability} size="lg" />
               </div>
             </button>
-          </div>
-        )}
+          )}
 
-        {/* ── Secondary: Barber preference toggle ── */}
-        <button
-          onClick={() => setShowBarberPreference(!showBarberPreference)}
-          className="w-full flex items-center justify-center gap-2.5 rounded-2xl border border-white/10 bg-white/3 px-5 py-4 text-center transition-all duration-200 hover:bg-white/6 hover:border-white/20 active:scale-[0.98]"
-        >
-          <User className="size-5 text-muted-foreground" />
-          <span className="text-base md:text-lg font-medium text-muted-foreground">
-            {showBarberPreference ? 'Ocultar barberos' : '¿Tenés preferencia? Elegí tu barbero'}
-          </span>
-          <ChevronDown className={`size-5 text-muted-foreground transition-transform duration-300 ${showBarberPreference ? 'rotate-180' : ''}`} />
-        </button>
+          {/* ── CTA 2: Elegir barbero (secondary, smaller) ── */}
+          <button
+            onClick={() => setShowBarberPreference(!showBarberPreference)}
+            disabled={submitting}
+            className="group relative w-full flex items-center gap-4 rounded-2xl border-2 border-violet-400/30 bg-gradient-to-r from-violet-950/40 to-indigo-950/40 p-4 md:p-5 text-left transition-all duration-300 hover:border-violet-400/60 hover:shadow-[0_0_30px_rgba(139,92,246,0.15)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
+          >
+            {/* Icon */}
+            <div className="relative shrink-0">
+              <div className="size-12 md:size-14 rounded-xl bg-gradient-to-br from-violet-400/20 to-indigo-400/20 border border-violet-400/30 flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
+                <User className="size-6 md:size-7 text-violet-300" />
+              </div>
+            </div>
 
-        {/* ── Collapsible barberbList ── */}
+            {/* Content */}
+            <div className="flex-1 min-w-0">
+              <h3 className="text-xl md:text-2xl font-bold text-white">
+                Elegir barbero
+              </h3>
+              <p className="text-xs md:text-sm text-violet-300/70 mt-0.5">
+                ¿Tenés preferencia? Elegí con quién atenderte
+              </p>
+            </div>
+
+            {/* Arrow indicator */}
+            <div className="shrink-0">
+              <ChevronDown className={`size-6 text-violet-300/60 transition-transform duration-300 ${showBarberPreference ? 'rotate-180' : ''}`} />
+            </div>
+          </button>
+        </div>
+
+        {/* ── Expandable barber list ── */}
         {showBarberPreference && (
           <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
             <div className="grid grid-cols-2 gap-3">
