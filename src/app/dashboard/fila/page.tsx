@@ -13,6 +13,7 @@ export default async function FilaAdminPage() {
     { data: entries },
     { data: barbers },
     { data: branches },
+    { data: breakConfigs },
   ] = await Promise.all([
     supabase
       .from('queue_entries')
@@ -21,7 +22,7 @@ export default async function FilaAdminPage() {
       .order('position'),
     supabase
       .from('staff')
-      .select('id, full_name, branch_id, status, is_active, hidden_from_checkin')
+      .select('id, full_name, branch_id, status, is_active, hidden_from_checkin, avatar_url')
       .eq('role', 'barber')
       .eq('is_active', true)
       .order('full_name'),
@@ -29,6 +30,11 @@ export default async function FilaAdminPage() {
       .from('branches')
       .select('id, name')
       .eq('is_active', true),
+    supabase
+      .from('break_configs')
+      .select('*')
+      .eq('is_active', true)
+      .order('name'),
   ])
 
   return (
@@ -36,6 +42,7 @@ export default async function FilaAdminPage() {
       initialEntries={entries ?? []}
       barbers={barbers ?? []}
       branches={branches ?? []}
+      breakConfigs={breakConfigs ?? []}
     />
   )
 }

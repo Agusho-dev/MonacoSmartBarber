@@ -582,3 +582,68 @@ export async function reassignMyBarber(
   revalidatePath('/dashboard/fila')
   return { success: true }
 }
+
+export async function updateQueueOrder(
+  updates: { id: string; position: number; barber_id?: string | null; is_dynamic?: boolean }[]
+) {
+  const supabase = await createClient()
+
+  const promises = updates.map((update) => {
+    const dataToUpdate: any = { position: update.position }
+    if (update.barber_id !== undefined) dataToUpdate.barber_id = update.barber_id
+    if (update.is_dynamic !== undefined) dataToUpdate.is_dynamic = update.is_dynamic
+
+    return supabase
+      .from('queue_entries')
+      .update(dataToUpdate)
+      .eq('id', update.id)
+  })
+
+  const results = await Promise.all(promises)
+  
+  const hasError = results.some((result) => result.error)
+
+  if (hasError) {
+    return { error: 'Error al actualizar el orden de la fila' }
+  }
+
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
+  return { success: true }
+}
+
+export async function createBreakEntry(branchId: string, barberId: string, breakConfigName: string) {
+  const supabase = await createClient()
+
+  const { data: position } = await supabase.rpc('next_queue_position', {
+    p_branch_id: branchId,
+  })
+
+  // We map the break config to a simple client record or just use the name as a placeholder.
+  // Currently breaks use client_id = null and is_break = true.
+  
+  const { data: queueEntry, error } = await supabase
+    .from('queue_entries')
+    .insert({
+      branch_id: branchId,
+      barber_id: barberId,
+      position: position ?? 1,
+      status: 'waiting',
+      is_break: true,
+      is_dynamic: false,
+    })
+    .select('id')
+    .single()
+
+  if (error || !queueEntry) {
+    return { error: 'Error al asignar descanso' }
+  }
+
+  // To store the name of the break since there's no client_id, we can check if there's any field for it or just rely on 'is_break'.
+  // Currently `is_break` boolean implies it's a break, and it's displayed as "Descanso". 
+  // If we need the specific config name, we can store it somewhere or just keep it as "Descanso".
+
+  revalidatePath('/dashboard/fila')
+  revalidatePath('/barbero/fila')
+  return { success: true, queueEntryId: queueEntry.id, position }
+}
