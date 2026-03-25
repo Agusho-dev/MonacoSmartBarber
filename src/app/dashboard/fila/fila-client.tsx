@@ -503,7 +503,7 @@ function DynamicColumn({
   return (
     <div
       ref={setNodeRef}
-      className="flex flex-col w-[260px] shrink-0 bg-zinc-950 border-r border-zinc-800/80"
+      className="flex flex-col w-full md:w-[260px] md:shrink-0 bg-zinc-950 border-b md:border-b-0 md:border-r border-zinc-800/80"
     >
       <div className="p-4 border-b border-zinc-800/80 bg-zinc-950 sticky top-0 z-40 shadow-sm">
         <div className="flex items-center gap-2 h-6">
@@ -511,7 +511,7 @@ function DynamicColumn({
           <h3 className="font-semibold text-zinc-100 text-sm md:text-base">Dinámicos</h3>
         </div>
       </div>
-      <div className="flex-1 p-3 flex flex-col gap-3 min-h-[500px]">
+      <div className="flex-1 p-3 flex flex-col gap-3 md:min-h-[500px]">
         <SortableContext items={entryIds} strategy={verticalListSortingStrategy}>
           {entries.map((entry) => (
             <QueueCard
@@ -614,9 +614,9 @@ function BarberRow({
   const entryIds = useMemo(() => entries.map((e) => e.id), [entries])
 
   return (
-    <div className={`flex min-h-[100px] items-stretch border-b border-zinc-800/80 ${isUnavailable ? 'opacity-60' : ''}`}>
+    <div className={`flex flex-col md:flex-row md:min-h-[100px] md:items-stretch border-b border-zinc-800/80 ${isUnavailable ? 'opacity-60' : ''}`}>
       {/* ── Info Barbero (Celda Fija y Sticky) ── */}
-      <div className="sticky left-[260px] z-20 w-[200px] shrink-0 border-r border-zinc-800/80 bg-zinc-950 p-3 flex items-center justify-start shadow-[8px_0_16px_-12px_rgba(0,0,0,0.8)]">
+      <div className="md:sticky md:left-[260px] z-20 w-full md:w-[200px] md:shrink-0 border-b md:border-b-0 md:border-r border-zinc-800/80 bg-zinc-950 p-3 flex items-center justify-start md:shadow-[8px_0_16px_-12px_rgba(0,0,0,0.8)]">
         <div className="flex flex-row items-center gap-3 text-left w-full">
           <div className="relative h-12 w-12 shrink-0">
             <div className="h-full w-full rounded-full bg-zinc-800 overflow-hidden ring-2 ring-zinc-800">
@@ -645,16 +645,16 @@ function BarberRow({
       </div>
 
       {/* ── Fila de Clientes (Arrastrables con grid infinito css) ── */}
-      <div 
-        ref={setNodeRef} 
-        className="flex-1 flex isolate bg-zinc-900/10 min-w-max"
+      <div
+        ref={setNodeRef}
+        className="flex-1 flex flex-col md:flex-row isolate bg-zinc-900/10 md:min-w-max p-3 md:p-0 gap-2 md:gap-0"
         style={{
           backgroundSize: '260px 100%',
           backgroundImage: 'linear-gradient(to right, transparent 259px, rgba(39, 39, 42, 0.4) 259px, rgba(39, 39, 42, 0.4) 260px)'
         }}
       >
         {inProgressEntry && (
-          <div className="shrink-0 w-[260px] p-3">
+          <div className="w-full md:w-[260px] md:shrink-0 md:p-3">
             <InProgressCard
               entry={inProgressEntry}
               formatElapsed={formatElapsed}
@@ -666,7 +666,7 @@ function BarberRow({
 
         <SortableContext items={entryIds} strategy={horizontalListSortingStrategy}>
           {entries.map((entry) => (
-            <div key={entry.id} className="shrink-0 w-[260px] p-3">
+            <div key={entry.id} className="w-full md:w-[260px] md:shrink-0 md:p-3">
               <QueueCard
                 entry={entry}
                 formatElapsed={formatElapsed}
@@ -681,12 +681,12 @@ function BarberRow({
         
         {/* Un único filler para ayudar al drop visual si está vacío */}
         {entries.length === 0 && !inProgressEntry && (
-          <div className="shrink-0 w-[260px] p-3 flex items-center justify-center text-zinc-600/50">
+          <div className="w-full md:w-[260px] p-3 flex items-center justify-center text-zinc-600/50">
             <p className="text-xs font-medium bg-zinc-900/40 px-3 py-1.5 rounded-md border border-zinc-800/40">Vacío</p>
           </div>
         )}
-        
-        <div className="flex-1 min-w-[260px]" />
+
+        <div className="hidden md:flex md:flex-1 md:min-w-[260px]" />
       </div>
     </div>
   )
@@ -1105,7 +1105,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
         
         {/* Encabezado y Descansos (Top Bar) */}
         <div className="flex shrink-0 flex-col gap-3 px-2">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
               <h2 className="text-xl font-bold tracking-tight">Fila en vivo</h2>
               <p className="text-xs text-muted-foreground">
@@ -1131,11 +1131,11 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
         </div>
 
         {/* Tablero Kanban (Grid Layout) */}
-        <div className="flex flex-1 overflow-auto bg-zinc-950/40 border-t border-zinc-800/80 mt-2 relative overflow-x-auto overflow-y-auto">
-          <div className="flex min-w-max w-full h-full">
-            
+        <div className="flex flex-1 overflow-auto bg-zinc-950/40 border-t border-zinc-800/80 mt-2 relative md:overflow-x-auto overflow-y-auto">
+          <div className="flex flex-col md:flex-row md:min-w-max w-full md:h-full">
+
             {/* Columna Dinámicos (Sticky a la izquierda) */}
-            <div className="sticky left-0 z-30 flex shrink-0 shadow-[4px_0_24px_-8px_rgba(0,0,0,0.8)] bg-zinc-950">
+            <div className="md:sticky md:left-0 z-30 flex md:shrink-0 md:shadow-[4px_0_24px_-8px_rgba(0,0,0,0.8)] bg-zinc-950">
               <DynamicColumn
                 id="__dynamic__"
                 entries={columnsData['__dynamic__']}
@@ -1148,7 +1148,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
             </div>
 
             {/* Filas de Barberos (Se expanden a la derecha) */}
-            <div className="flex-1 flex flex-col bg-zinc-950/20 min-w-max">
+            <div className="flex-1 flex flex-col bg-zinc-950/20 md:min-w-max">
               {filteredBarbers.map((barber) => (
                 <BarberRow
                   key={barber.id}
