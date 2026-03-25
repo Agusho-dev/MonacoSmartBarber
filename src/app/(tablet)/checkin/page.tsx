@@ -940,7 +940,7 @@ export default function CheckinPage() {
   const AvailabilityIndicator = ({ level, size = 'md' }: { level: 1 | 2 | 3; size?: 'sm' | 'md' | 'lg' }) => {
     const sizeClass = size === 'lg' ? 'size-7 md:size-8' : size === 'md' ? 'size-5 md:size-6' : 'size-4 md:size-5'
     const gapClass = size === 'lg' ? 'gap-2' : size === 'md' ? 'gap-1.5' : 'gap-1'
-    const labels = ['Baja espera', 'Espera media', 'Alta espera']
+    const labels = ['Baja espera', 'Espera media', 'Espera elevada']
     const colors = [
       { active: 'text-emerald-400', inactive: 'text-white/15' },
       { active: 'text-amber-400', inactive: 'text-white/15' },
@@ -1078,46 +1078,58 @@ export default function CheckinPage() {
         {/* ── TWO MAIN CTAs ── */}
         <div className="flex flex-col gap-4 w-full">
 
-          {/* ── CTA 1: Menor Espera (recommended, bigger) ── */}
+          {/* ── CTA 1: Menor Espera (recommended, bigger, glowing border) ── */}
           {minWaitBarber && (
-            <button
-              onClick={() => onSelect(null as unknown as string)}
-              disabled={submitting}
-              className="group relative w-full flex items-center gap-5 rounded-2xl border-2 border-emerald-400/40 bg-gradient-to-r from-emerald-950/60 to-cyan-950/60 p-6 md:p-7 text-left transition-all duration-300 hover:border-emerald-400/70 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
-            >
-              {/* Subtle shimmer effect */}
-              <div className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none">
-                <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%)', animation: 'checkin-shimmer 3s ease-in-out infinite' }} />
+            <div className="relative rounded-[1.25rem]" style={{ padding: '2px' }}>
+              {/* Animated rotating border glow */}
+              <div className="absolute inset-0 rounded-[1.25rem] overflow-hidden pointer-events-none">
+                <div className="absolute inset-[-200%] bg-[conic-gradient(from_0deg,transparent_0%,rgba(16,185,129,0.7)_10%,rgba(34,211,238,0.7)_20%,transparent_30%)] animate-[checkin-border-rotate_3s_linear_infinite]" />
               </div>
-
-              {/* Icon */}
-              <div className="relative shrink-0">
-                <div className="size-16 md:size-[4.5rem] rounded-xl bg-gradient-to-br from-emerald-400/20 to-cyan-400/20 border border-emerald-400/30 flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
-                  <Zap className="size-8 md:size-9 text-emerald-300" fill="currentColor" />
+              {/* Inner glow pulse */}
+              <div className="absolute -inset-2 rounded-[1.75rem] bg-gradient-to-r from-emerald-500/30 via-cyan-400/30 to-emerald-500/30 blur-xl opacity-50 animate-[checkin-pulse-glow_3s_ease-in-out_infinite] pointer-events-none" />
+              
+              <button
+                onClick={() => onSelect(null as unknown as string)}
+                disabled={submitting}
+                className="group relative w-full flex items-center gap-5 rounded-[1.15rem] bg-gradient-to-r from-emerald-950/90 to-cyan-950/90 p-7 md:p-8 text-left transition-all duration-300 hover:shadow-[0_0_50px_rgba(16,185,129,0.3)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
+              >
+                {/* Shimmer sweep */}
+                <div className="absolute inset-0 overflow-hidden rounded-[1.15rem] pointer-events-none">
+                  <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.06) 50%, transparent 100%)', animation: 'checkin-shimmer 2.5s ease-in-out infinite' }} />
                 </div>
-              </div>
 
-              {/* Content */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="text-2xl md:text-3xl font-bold text-white">
-                    Menor espera
-                  </h3>
-                  <div className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-400/15 border border-emerald-400/30">
-                    <Sparkles className="size-2.5 text-emerald-300" />
-                    <span className="text-emerald-300">IA</span>
+                {/* Icon */}
+                <div className="relative shrink-0">
+                  <div className="size-[4.5rem] md:size-20 rounded-xl bg-gradient-to-br from-emerald-400/25 to-cyan-400/25 border border-emerald-400/40 flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+                    <Zap className="size-9 md:size-10 text-emerald-300 drop-shadow-[0_0_8px_rgba(16,185,129,0.5)]" fill="currentColor" />
                   </div>
                 </div>
-                <p className="text-sm md:text-base text-emerald-300/70">
-                  Te asignamos al barbero con menos fila
-                </p>
-              </div>
 
-              {/* Availability indicator */}
-              <div className="shrink-0">
-                <AvailabilityIndicator level={globalAvailability} size="lg" />
-              </div>
-            </button>
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <h3 className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-emerald-200 via-white to-cyan-200 bg-clip-text text-transparent">
+                      Menor espera
+                    </h3>
+                    <div className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-400/15 border border-emerald-400/30">
+                      <Sparkles className="size-2.5 text-cyan-300" />
+                      <span className="text-emerald-300">IA</span>
+                    </div>
+                  </div>
+                  <p className="text-sm md:text-base text-emerald-300/70">
+                    Te asignamos al barbero con menos fila
+                  </p>
+                  <p className="text-xs text-emerald-400/50 mt-1.5 font-medium tracking-wide uppercase">
+                    Tocá para continuar →
+                  </p>
+                </div>
+
+                {/* Availability indicator */}
+                <div className="shrink-0">
+                  <AvailabilityIndicator level={globalAvailability} size="lg" />
+                </div>
+              </button>
+            </div>
           )}
 
           {/* ── CTA 2: Elegir barbero (secondary, smaller) ── */}
@@ -1562,8 +1574,8 @@ export default function CheckinPage() {
           {/* CSS Animations for barber selection */}
           <style>{`
             @keyframes checkin-pulse-glow {
-              0%, 100% { opacity: 0.6; transform: scale(1); }
-              50% { opacity: 1; transform: scale(1.03); }
+              0%, 100% { opacity: 0.4; transform: scale(1); }
+              50% { opacity: 0.8; transform: scale(1.02); }
             }
             @keyframes checkin-shimmer {
               0% { transform: translateX(-100%); }
@@ -1572,6 +1584,10 @@ export default function CheckinPage() {
             @keyframes checkin-float-particle {
               0%, 100% { transform: translateY(0) scale(1); opacity: 0.4; }
               50% { transform: translateY(-12px) scale(1.3); opacity: 0.8; }
+            }
+            @keyframes checkin-border-rotate {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
             }
           `}</style>
         </div>
