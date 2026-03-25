@@ -20,6 +20,7 @@ import {
   SortableContext,
   useSortable,
   verticalListSortingStrategy,
+  horizontalListSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -103,8 +104,10 @@ function QueueCard({
     <div
       ref={setNodeRef}
       style={style}
+      {...attributes}
+      {...listeners}
       className={[
-        'group relative rounded-xl border transition-colors duration-150',
+        'w-full cursor-grab active:cursor-grabbing group relative rounded-xl border transition-colors duration-150 overflow-hidden',
         isDragging ? 'opacity-40 scale-[0.98] z-50' : 'bg-zinc-900/80',
         isBreak
           ? 'border-amber-900/50 bg-amber-950/30'
@@ -112,16 +115,10 @@ function QueueCard({
       ].join(' ')}
     >
       <div className="flex items-center gap-2.5 px-3 py-2.5">
-        {/* Handle */}
-        <button
-          {...attributes}
-          {...listeners}
-          type="button"
-          aria-label="Arrastrar"
-          className="shrink-0 touch-none cursor-grab active:cursor-grabbing text-zinc-700 hover:text-zinc-400 transition-colors"
-        >
+        {/* Handle visual */}
+        <div className="shrink-0 text-zinc-700/50 group-hover:text-zinc-500 transition-colors">
           <GripVertical className="size-4" />
-        </button>
+        </div>
 
         {/* Badge */}
         <div
@@ -136,7 +133,7 @@ function QueueCard({
         </div>
 
         {/* Datos */}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 flex flex-col justify-center">
           <p
             className={`truncate text-sm font-medium ${
               isBreak ? 'text-amber-200' : 'text-zinc-200'
@@ -144,27 +141,28 @@ function QueueCard({
           >
             {displayName}
           </p>
-          <div className="flex items-center gap-2 text-[11px] text-zinc-500 mt-0.5">
+          <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 mt-0.5 min-w-0 overflow-hidden">
             {!isBreak && entry.client?.phone && (
-              <span className="truncate max-w-[90px]">{entry.client.phone}</span>
+              <span className="truncate shrink-0 max-w-[80px]">{entry.client.phone}</span>
             )}
             {!selectedBranchId && (
-              <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-px text-[10px] text-zinc-400">
+              <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-px text-[10px] text-zinc-400 truncate max-w-[60px]">
                 {getBranchName(entry.branch_id)}
               </span>
             )}
-            <span className="flex shrink-0 items-center gap-1">
-              <Clock className="size-3" />
-              {formatElapsed(entry.checked_in_at)}
+            <span className="flex shrink-0 items-center gap-1 ml-auto min-w-0">
+              <Clock className="size-3 shrink-0" />
+              <span className="truncate">{formatElapsed(entry.checked_in_at)}</span>
             </span>
           </div>
         </div>
 
-        {/* Cancelar */}
+        {/* Cancelar (No interfiere con drag gracias a activationConstraint) */}
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => onCancel(entry.id)}
+          onClick={(e) => { e.stopPropagation(); onCancel(entry.id); }}
+          onPointerDown={(e) => e.stopPropagation()} /* Prevents drag when interacting with button */
           disabled={actionLoading === entry.id}
           className="size-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-zinc-600 hover:text-red-400"
         >
@@ -174,6 +172,7 @@ function QueueCard({
     </div>
   )
 }
+
 
 // ─── En Servicio Card (No arrastrable) ───────────────────────────────────────
 
@@ -192,7 +191,7 @@ function InProgressCard({
   const displayName = isBreak ? 'Descanso' : (entry.client?.name ?? 'Cliente')
 
   return (
-    <div className="group relative rounded-xl border border-green-500/30 bg-green-950/20 shadow-md">
+    <div className="w-full group relative rounded-xl border border-green-500/30 bg-green-950/20 shadow-md overflow-hidden min-w-0">
       <div className="flex items-center gap-2.5 px-3 py-2.5">
         <div className="shrink-0 text-green-500/50 w-4 flex justify-center">
           <Scissors className="size-4" />
@@ -200,19 +199,20 @@ function InProgressCard({
         <div className="flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold bg-green-500/20 text-green-400">
           {isBreak ? <Pause className="size-3.5" /> : `#${entry.position}`}
         </div>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 flex flex-col justify-center">
           <p className="truncate text-sm font-medium text-green-400">{displayName}</p>
-          <div className="flex items-center gap-2 text-[11px] text-green-500/70 mt-0.5">
-            <span className="flex shrink-0 items-center gap-1">
-              <Clock className="size-3" />
-              {entry.started_at ? formatElapsed(entry.started_at) : 'En curso'}
+          <div className="flex items-center gap-1.5 text-[11px] text-green-500/70 mt-0.5 min-w-0 overflow-hidden">
+            <span className="flex shrink-0 items-center gap-1 min-w-0">
+              <Clock className="size-3 shrink-0" />
+              <span className="truncate">{entry.started_at ? formatElapsed(entry.started_at) : 'En curso'}</span>
             </span>
           </div>
         </div>
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => onCancel(entry.id)}
+          onClick={(e) => { e.stopPropagation(); onCancel(entry.id); }}
+          onPointerDown={(e) => e.stopPropagation()}
           disabled={actionLoading === entry.id}
           className="size-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-green-600/50 hover:text-red-400 hover:bg-transparent"
         >
@@ -241,21 +241,17 @@ function BreakTemplateCard({ config }: { config: BreakConfig }) {
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform) }}
+      {...attributes}
+      {...listeners}
       className={[
-        'group relative rounded-xl border border-amber-500/30 bg-amber-950/20 shadow-sm transition-all duration-150',
+        'w-full cursor-grab active:cursor-grabbing group relative rounded-xl border border-amber-500/30 bg-amber-950/20 shadow-sm transition-all duration-150',
         isDragging ? 'opacity-40 scale-[0.98] z-50' : 'hover:border-amber-500/50',
       ].join(' ')}
     >
       <div className="flex items-center gap-2.5 px-3 py-2.5">
-        <button
-          {...attributes}
-          {...listeners}
-          type="button"
-          aria-label="Arrastrar Descanso"
-          className="shrink-0 touch-none cursor-grab active:cursor-grabbing text-amber-700 hover:text-amber-500 transition-colors"
-        >
+        <div className="shrink-0 text-amber-700/50 group-hover:text-amber-600 transition-colors">
           <GripVertical className="size-4" />
-        </button>
+        </div>
         <div className="flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold bg-amber-500/20 text-amber-500">
           <Pause className="size-3.5" />
         </div>
@@ -368,21 +364,23 @@ function KanbanColumn({
 
     HeaderContent = (
       <div className={`flex items-center gap-3 w-full transition-opacity ${isUnavailable ? 'opacity-50' : ''}`}>
-        <div className="relative h-12 w-12 shrink-0 rounded-full bg-zinc-800 overflow-hidden ring-2 ring-zinc-800">
-          {barber.avatar_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={barber.avatar_url}
-              alt={barber.full_name}
-              className="h-full w-full object-cover"
-              style={{ objectPosition: 'center 15%' }}
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center">
-              <User className="size-5 text-zinc-500" />
-            </div>
-          )}
-          <div className={`absolute right-0 bottom-0 size-3 rounded-full ring-2 ring-zinc-900 ${dotClass}`} />
+        <div className="relative h-12 w-12 shrink-0">
+          <div className="h-full w-full rounded-full bg-zinc-800 overflow-hidden ring-2 ring-zinc-800">
+            {barber.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={barber.avatar_url}
+                alt={barber.full_name}
+                className="h-full w-full object-cover"
+                style={{ objectPosition: 'center 15%' }}
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <User className="size-5 text-zinc-500" />
+              </div>
+            )}
+          </div>
+          <div className={`absolute right-0 bottom-0 size-3.5 rounded-full ring-2 ring-zinc-900 z-10 ${dotClass}`} />
         </div>
         <div className="min-w-0 flex-1">
           <h3 className="truncate font-semibold text-zinc-100 text-sm">{barber.full_name}</h3>
@@ -472,6 +470,224 @@ function DragGhost({ entry }: { entry: QueueEntry }) {
       <span className="truncate text-sm font-semibold text-white">
         {displayName}
       </span>
+    </div>
+  )
+}
+
+// ─── Dynamic Column (Top-to-Bottom) ─────────────────────────────────────────
+
+function DynamicColumn({
+  id,
+  entries,
+  formatElapsed,
+  onCancel,
+  actionLoading,
+  selectedBranchId,
+  getBranchName,
+}: {
+  id: ColumnId
+  entries: QueueEntry[]
+  formatElapsed: (ts: string) => string
+  onCancel: (id: string) => void
+  actionLoading: string | null
+  selectedBranchId: string | null
+  getBranchName: (id: string) => string
+}) {
+  const { setNodeRef } = useSortable({
+    id,
+    data: { type: 'Column', columnId: id },
+  })
+
+  const entryIds = useMemo(() => entries.map((e) => e.id), [entries])
+
+  return (
+    <div
+      ref={setNodeRef}
+      className="flex flex-col w-[260px] shrink-0 bg-zinc-950 border-r border-zinc-800/80"
+    >
+      <div className="p-4 border-b border-zinc-800/80 bg-zinc-950 sticky top-0 z-40 shadow-sm">
+        <div className="flex items-center gap-2 h-6">
+          <Zap className="size-4 text-yellow-400" />
+          <h3 className="font-semibold text-zinc-100 text-sm md:text-base">Dinámicos</h3>
+        </div>
+      </div>
+      <div className="flex-1 p-3 flex flex-col gap-3 min-h-[500px]">
+        <SortableContext items={entryIds} strategy={verticalListSortingStrategy}>
+          {entries.map((entry) => (
+            <QueueCard
+              key={entry.id}
+              entry={entry}
+              formatElapsed={formatElapsed}
+              onCancel={onCancel}
+              actionLoading={actionLoading}
+              selectedBranchId={selectedBranchId}
+              getBranchName={getBranchName}
+            />
+          ))}
+        </SortableContext>
+        {entries.length === 0 && (
+          <div className="flex flex-1 items-center justify-center border-2 border-dashed border-zinc-800/40 rounded-xl text-zinc-600 min-h-[100px]">
+            <p className="text-xs font-medium">Soltar aquí</p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Barber Row (Left-to-Right) ─────────────────────────────────────────────
+
+function BarberRow({
+  barber,
+  entries,
+  inProgressEntry,
+  notClockedInBarbers,
+  schedules,
+  now,
+  shiftEndMargin,
+  formatElapsed,
+  onCancel,
+  actionLoading,
+  selectedBranchId,
+  getBranchName,
+}: {
+  barber: BarberRow
+  entries: QueueEntry[]
+  inProgressEntry?: QueueEntry
+  notClockedInBarbers?: Set<string>
+  schedules?: StaffSchedule[]
+  now?: number
+  shiftEndMargin?: number
+  formatElapsed: (ts: string) => string
+  onCancel: (id: string) => void
+  actionLoading: string | null
+  selectedBranchId: string | null
+  getBranchName: (id: string) => string
+}) {
+  const { setNodeRef } = useSortable({
+    id: barber.id,
+    data: { type: 'Column', columnId: barber.id },
+  })
+
+  const isNotClocked = notClockedInBarbers?.has(barber.id)
+  const isHidden = barber.hidden_from_checkin
+  const isShiftEnd =
+    !isNotClocked &&
+    schedules &&
+    now !== undefined &&
+    shiftEndMargin !== undefined &&
+    isBarberBlockedByShiftEnd(
+      barber as unknown as Staff,
+      inProgressEntry ? [inProgressEntry] : [],
+      schedules,
+      now,
+      shiftEndMargin
+    )
+  const isUnavailable = isHidden || isNotClocked || !!isShiftEnd
+
+  let statusText: string
+  let statusClass: string
+  let dotClass: string
+
+  if (isHidden) {
+    statusText = 'Oculto en check-in'
+    statusClass = 'text-zinc-500'
+    dotClass = 'bg-zinc-600'
+  } else if (isNotClocked) {
+    statusText = 'Sin entrada'
+    statusClass = 'text-zinc-500'
+    dotClass = 'bg-zinc-600'
+  } else if (isShiftEnd) {
+    statusText = 'Fin de turno'
+    statusClass = 'text-amber-400'
+    dotClass = 'bg-amber-500'
+  } else if (inProgressEntry) {
+    statusText = inProgressEntry.is_break ? 'En descanso' : 'Atendiendo'
+    statusClass = inProgressEntry.is_break ? 'text-amber-400' : 'text-green-400'
+    dotClass = inProgressEntry.is_break ? 'bg-amber-500' : 'bg-green-500'
+  } else {
+    statusText = 'Disponible'
+    statusClass = 'text-zinc-400'
+    dotClass = 'bg-emerald-500'
+  }
+
+  const entryIds = useMemo(() => entries.map((e) => e.id), [entries])
+
+  return (
+    <div className={`flex min-h-[100px] items-stretch border-b border-zinc-800/80 ${isUnavailable ? 'opacity-60' : ''}`}>
+      {/* ── Info Barbero (Celda Fija y Sticky) ── */}
+      <div className="sticky left-[260px] z-20 w-[200px] shrink-0 border-r border-zinc-800/80 bg-zinc-950 p-3 flex items-center justify-start shadow-[8px_0_16px_-12px_rgba(0,0,0,0.8)]">
+        <div className="flex flex-row items-center gap-3 text-left w-full">
+          <div className="relative h-12 w-12 shrink-0">
+            <div className="h-full w-full rounded-full bg-zinc-800 overflow-hidden ring-2 ring-zinc-800">
+              {barber.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={barber.avatar_url}
+                  alt={barber.full_name}
+                  className="h-full w-full object-cover"
+                  style={{ objectPosition: 'center 15%' }}
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center">
+                  <User className="size-6 text-zinc-500" />
+                </div>
+              )}
+            </div>
+            <div className={`absolute -right-0.5 -bottom-0.5 size-3.5 rounded-full ring-2 ring-zinc-900 z-10 ${dotClass}`} />
+          </div>
+          
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate font-bold text-zinc-100 text-sm">{barber.full_name}</h3>
+            <p className={`truncate text-xs mt-0.5 font-medium ${statusClass}`}>{statusText}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Fila de Clientes (Arrastrables con grid infinito css) ── */}
+      <div 
+        ref={setNodeRef} 
+        className="flex-1 flex isolate bg-zinc-900/10 min-w-max"
+        style={{
+          backgroundSize: '260px 100%',
+          backgroundImage: 'linear-gradient(to right, transparent 259px, rgba(39, 39, 42, 0.4) 259px, rgba(39, 39, 42, 0.4) 260px)'
+        }}
+      >
+        {inProgressEntry && (
+          <div className="shrink-0 w-[260px] p-3">
+            <InProgressCard
+              entry={inProgressEntry}
+              formatElapsed={formatElapsed}
+              onCancel={onCancel}
+              actionLoading={actionLoading}
+            />
+          </div>
+        )}
+
+        <SortableContext items={entryIds} strategy={horizontalListSortingStrategy}>
+          {entries.map((entry) => (
+            <div key={entry.id} className="shrink-0 w-[260px] p-3">
+              <QueueCard
+                entry={entry}
+                formatElapsed={formatElapsed}
+                onCancel={onCancel}
+                actionLoading={actionLoading}
+                selectedBranchId={selectedBranchId}
+                getBranchName={getBranchName}
+              />
+            </div>
+          ))}
+        </SortableContext>
+        
+        {/* Un único filler para ayudar al drop visual si está vacío */}
+        {entries.length === 0 && !inProgressEntry && (
+          <div className="shrink-0 w-[260px] p-3 flex items-center justify-center text-zinc-600/50">
+            <p className="text-xs font-medium bg-zinc-900/40 px-3 py-1.5 rounded-md border border-zinc-800/40">Vacío</p>
+          </div>
+        )}
+        
+        <div className="flex-1 min-w-[260px]" />
+      </div>
     </div>
   )
 }
@@ -629,14 +845,11 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   const getEntryColumnId = useCallback((entry: QueueEntry): ColumnId => {
     if (entry.status === 'in_progress') return entry.barber_id ?? '__dynamic__'
     if (entry.barber_id) return entry.barber_id
-    if (entry.is_break) return '__breaks__'
-    if (entry.is_dynamic || !entry.barber_id) return '__dynamic__'
     return '__dynamic__'
   }, [])
 
   const columnsData = useMemo(() => {
     const cols: Record<ColumnId, QueueEntry[]> = {
-      __breaks__: [],
       __dynamic__: [],
     }
     for (const b of filteredBarbers) {
@@ -724,8 +937,6 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
       if (targetColId === '__dynamic__') {
         newItem.barber_id = null
         newItem.is_dynamic = true
-      } else if (targetColId === '__breaks__') {
-        newItem.barber_id = null
       } else {
         newItem.barber_id = targetColId
         newItem.is_dynamic = false
@@ -769,7 +980,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
       }
 
       // Can only assign break to a barber column
-      if (targetColId && targetColId !== '__dynamic__' && targetColId !== '__breaks__') {
+      if (targetColId && targetColId !== '__dynamic__') {
         const config = active.data.current?.config as BreakConfig
         if (!config || !selectedBranchId && !config.branch_id) return // We need branch_id
 
@@ -892,78 +1103,71 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
     >
       <div className="flex h-[calc(100dvh-5rem)] flex-col gap-4 overflow-hidden p-1">
         
-        {/* Encabezado */}
-        <div className="flex shrink-0 items-center justify-between px-2">
-          <div>
-            <h2 className="text-xl font-bold tracking-tight">Fila en vivo</h2>
-            <p className="text-xs text-muted-foreground">
-              Arrastrá clientes o descansos libremente entre las columnas para asignarlos o reordenarlos.
-            </p>
+        {/* Encabezado y Descansos (Top Bar) */}
+        <div className="flex shrink-0 flex-col gap-3 px-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-bold tracking-tight">Fila en vivo</h2>
+              <p className="text-xs text-muted-foreground">
+                Arrastrá clientes o descansos libremente para asignarlos o reordenarlos.
+              </p>
+            </div>
+            <BranchSelector branches={branches} />
           </div>
-          <BranchSelector branches={branches} />
-        </div>
-
-        {/* Tablero Kanban (Scroll Horizontal) */}
-        <div className="flex flex-1 gap-4 overflow-x-auto pb-4 items-start px-2">
           
-          {/* Columna Dinámicos */}
-          <KanbanColumn
-            id="__dynamic__"
-            title="Dinámicos"
-            icon={<Zap className="size-4 text-yellow-400" />}
-            entries={columnsData['__dynamic__']}
-            formatElapsed={formatElapsed}
-            onCancel={handleCancel}
-            actionLoading={actionLoading}
-            selectedBranchId={selectedBranchId}
-            getBranchName={getBranchName}
-          />
-
-          {/* Columna Descansos */}
-          <KanbanColumn
-            id="__breaks__"
-            title="Descansos"
-            icon={<Pause className="size-4 text-amber-500" />}
-            entries={columnsData['__breaks__']}
-            formatElapsed={formatElapsed}
-            onCancel={handleCancel}
-            actionLoading={actionLoading}
-            selectedBranchId={selectedBranchId}
-            getBranchName={getBranchName}
-          >
+          <div className="flex items-center gap-3 overflow-x-auto pb-2">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 text-amber-500 text-sm font-bold border border-amber-500/20 shrink-0">
+              <Pause className="size-4" />
+              Plantillas de Descanso
+            </div>
             {breakConfigs
               .filter((c) => !selectedBranchId || c.branch_id === selectedBranchId)
               .map((config) => (
-                <BreakTemplateCard key={config.id} config={config} />
+                <div key={config.id} className="w-48 shrink-0">
+                  <BreakTemplateCard config={config} />
+                </div>
               ))}
-          </KanbanColumn>
+          </div>
+        </div>
 
-          {/* Separador vertical sutil */}
-          <div className="w-px shrink-0 bg-zinc-800/50 self-stretch my-2 rounded-full" />
+        {/* Tablero Kanban (Grid Layout) */}
+        <div className="flex flex-1 overflow-auto bg-zinc-950/40 border-t border-zinc-800/80 mt-2 relative overflow-x-auto overflow-y-auto">
+          <div className="flex min-w-max w-full h-full">
+            
+            {/* Columna Dinámicos (Sticky a la izquierda) */}
+            <div className="sticky left-0 z-30 flex shrink-0 shadow-[4px_0_24px_-8px_rgba(0,0,0,0.8)] bg-zinc-950">
+              <DynamicColumn
+                id="__dynamic__"
+                entries={columnsData['__dynamic__']}
+                formatElapsed={formatElapsed}
+                onCancel={handleCancel}
+                actionLoading={actionLoading}
+                selectedBranchId={selectedBranchId}
+                getBranchName={getBranchName}
+              />
+            </div>
 
-          {/* Columnas de Barberos */}
-          {filteredBarbers.map((barber) => (
-            <KanbanColumn
-              key={barber.id}
-              id={barber.id}
-              title={barber.full_name}
-              barber={barber}
-              entries={columnsData[barber.id]}
-              inProgressEntry={inProgressData[barber.id]}
-              notClockedInBarbers={notClockedInBarbers}
-              schedules={schedules}
-              now={now}
-              shiftEndMargin={shiftEndMargin}
-              formatElapsed={formatElapsed}
-              onCancel={handleCancel}
-              actionLoading={actionLoading}
-              selectedBranchId={selectedBranchId}
-              getBranchName={getBranchName}
-            />
-          ))}
-
-          {/* Padding al final para scroll agradable */}
-          <div className="w-4 shrink-0" />
+            {/* Filas de Barberos (Se expanden a la derecha) */}
+            <div className="flex-1 flex flex-col bg-zinc-950/20 min-w-max">
+              {filteredBarbers.map((barber) => (
+                <BarberRow
+                  key={barber.id}
+                  barber={barber}
+                  entries={columnsData[barber.id] || []}
+                  inProgressEntry={inProgressData[barber.id]}
+                  notClockedInBarbers={notClockedInBarbers}
+                  schedules={schedules}
+                  now={now}
+                  shiftEndMargin={shiftEndMargin}
+                  formatElapsed={formatElapsed}
+                  onCancel={handleCancel}
+                  actionLoading={actionLoading}
+                  selectedBranchId={selectedBranchId}
+                  getBranchName={getBranchName}
+                />
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
