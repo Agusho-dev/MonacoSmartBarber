@@ -31,7 +31,7 @@ import { BranchSelector } from '@/components/dashboard/branch-selector'
 import type { QueueEntry, StaffStatus, StaffSchedule, Staff, BreakConfig } from '@/lib/types/database'
 import { assignDynamicBarbers, isBarberBlockedByShiftEnd } from '@/lib/barber-utils'
 import { Button } from '@/components/ui/button'
-import { Clock, User, Scissors, X, Pause, GripVertical, Zap, Plus } from 'lucide-react'
+import { Clock, User, Scissors, X, Pause, GripVertical, Zap, Plus, UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -1112,7 +1112,24 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
                 Arrastrá clientes o descansos libremente para asignarlos o reordenarlos.
               </p>
             </div>
-            <BranchSelector branches={branches} />
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 shrink-0"
+                asChild
+              >
+                <a
+                  href={`/checkin${selectedBranchId ? `?branch=${selectedBranchId}` : ''}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <UserPlus className="size-4" />
+                  <span className="hidden sm:inline">Registrar cliente</span>
+                </a>
+              </Button>
+              <BranchSelector branches={branches} />
+            </div>
           </div>
           
           <div className="flex items-center gap-3 overflow-x-auto pb-2">

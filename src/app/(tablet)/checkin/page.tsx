@@ -2,6 +2,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { checkinClient, checkinClientByFace, reassignMyBarber } from '@/lib/actions/queue'
 import { registerBarberClockIn, registerBarberClockOut } from '@/lib/actions/attendance'
@@ -80,6 +81,7 @@ function formatPhone(digits: string): string {
 }
 
 export default function CheckinPage() {
+  const searchParams = useSearchParams()
   const [step, setStep] = useState<Step>('branch')
   const [branches, setBranches] = useState<Branch[]>([])
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null)
@@ -160,7 +162,18 @@ export default function CheckinPage() {
         if (data) {
           setBranches(data)
 
-          // Restore branch from localStorage, but validate it still exists in DB
+          // Prioridad 1: parámetro ?branch= en la URL (viene del dashboard)
+          const branchParam = searchParams.get('branch')
+          if (branchParam) {
+            const found = data.find((b) => b.id === branchParam)
+            if (found) {
+              setSelectedBranch(found)
+              setStep('home')
+              return
+            }
+          }
+
+          // Prioridad 2: Restore branch from localStorage
           try {
             const stored = localStorage.getItem(LOCALSTORAGE_KEY)
             if (stored) {
@@ -1104,7 +1117,7 @@ export default function CheckinPage() {
               <button
                 onClick={() => onSelect(null as unknown as string)}
                 disabled={submitting}
-                className="group relative w-full flex items-center gap-5 rounded-[1.15rem] bg-gradient-to-r from-emerald-950/90 to-cyan-950/90 p-7 md:p-8 text-left transition-all duration-300 hover:shadow-[0_0_50px_rgba(16,185,129,0.3)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
+                className="group relative w-full flex items-center gap-3 md:gap-5 rounded-[1.15rem] bg-gradient-to-r from-emerald-950/90 to-cyan-950/90 p-4 md:p-8 text-left transition-all duration-300 hover:shadow-[0_0_50px_rgba(16,185,129,0.3)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
               >
                 {/* Shimmer sweep */}
                 <div className="absolute inset-0 overflow-hidden rounded-[1.15rem] pointer-events-none">
@@ -1113,26 +1126,26 @@ export default function CheckinPage() {
 
                 {/* Icon */}
                 <div className="relative shrink-0">
-                  <div className="size-[4.5rem] md:size-20 rounded-xl bg-gradient-to-br from-emerald-400/25 to-cyan-400/25 border border-emerald-400/40 flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
-                    <Zap className="size-9 md:size-10 text-emerald-300 drop-shadow-[0_0_8px_rgba(16,185,129,0.5)]" fill="currentColor" />
+                  <div className="size-14 md:size-20 rounded-xl bg-gradient-to-br from-emerald-400/25 to-cyan-400/25 border border-emerald-400/40 flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+                    <Zap className="size-7 md:size-10 text-emerald-300 drop-shadow-[0_0_8px_rgba(16,185,129,0.5)]" fill="currentColor" />
                   </div>
                 </div>
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <h3 className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-emerald-200 via-white to-cyan-200 bg-clip-text text-transparent">
+                  <div className="flex items-center gap-1.5 md:gap-2 mb-1">
+                    <h3 className="text-lg md:text-3xl font-extrabold bg-gradient-to-r from-emerald-200 via-white to-cyan-200 bg-clip-text text-transparent">
                       Menor espera
                     </h3>
-                    <div className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-400/15 border border-emerald-400/30">
+                    <div className="inline-flex items-center gap-1 rounded-full px-1.5 md:px-2 py-0.5 text-[9px] md:text-[10px] font-bold uppercase tracking-wider bg-emerald-400/15 border border-emerald-400/30">
                       <Sparkles className="size-2.5 text-cyan-300" />
                       <span className="text-emerald-300">IA</span>
                     </div>
                   </div>
-                  <p className="text-sm md:text-base text-emerald-300/70">
+                  <p className="text-xs md:text-base text-emerald-300/70">
                     Te asignamos al barbero con menos fila
                   </p>
-                  <p className="text-xs text-emerald-400/50 mt-1.5 font-medium tracking-wide uppercase">
+                  <p className="text-[10px] md:text-xs text-emerald-400/50 mt-1 md:mt-1.5 font-medium tracking-wide uppercase">
                     Tocá para continuar →
                   </p>
                 </div>
@@ -1149,21 +1162,21 @@ export default function CheckinPage() {
           <button
             onClick={() => setShowBarberPreference(true)}
             disabled={submitting}
-            className="group relative w-full flex items-center gap-4 rounded-2xl border-2 border-violet-400/30 bg-gradient-to-r from-violet-950/40 to-indigo-950/40 p-4 md:p-5 text-left transition-all duration-300 hover:border-violet-400/60 hover:shadow-[0_0_30px_rgba(139,92,246,0.15)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
+            className="group relative w-full flex items-center gap-3 md:gap-4 rounded-2xl border-2 border-violet-400/30 bg-gradient-to-r from-violet-950/40 to-indigo-950/40 p-3 md:p-5 text-left transition-all duration-300 hover:border-violet-400/60 hover:shadow-[0_0_30px_rgba(139,92,246,0.15)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
           >
             {/* Icon */}
             <div className="relative shrink-0">
-              <div className="size-12 md:size-14 rounded-xl bg-gradient-to-br from-violet-400/20 to-indigo-400/20 border border-violet-400/30 flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
-                <User className="size-6 md:size-7 text-violet-300" />
+              <div className="size-10 md:size-14 rounded-xl bg-gradient-to-br from-violet-400/20 to-indigo-400/20 border border-violet-400/30 flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
+                <User className="size-5 md:size-7 text-violet-300" />
               </div>
             </div>
 
             {/* Content */}
             <div className="flex-1 min-w-0">
-              <h3 className="text-xl md:text-2xl font-bold text-white">
+              <h3 className="text-base md:text-2xl font-bold text-white">
                 Elegir barbero
               </h3>
-              <p className="text-xs md:text-sm text-violet-300/70 mt-0.5">
+              <p className="text-[11px] md:text-sm text-violet-300/70 mt-0.5">
                 ¿Tenés preferencia? Elegí con quién atenderte
               </p>
             </div>
@@ -1177,17 +1190,17 @@ export default function CheckinPage() {
 
         {/* ── Barber Selection Dialog Modal ── */}
         <Dialog open={showBarberPreference} onOpenChange={setShowBarberPreference}>
-          <DialogContent className="max-w-2xl bg-zinc-700/95 backdrop-blur-2xl border-white/10 p-6 md:p-8 rounded-[2rem] shadow-2xl">
-            <DialogHeader className="text-left mb-6">
-              <DialogTitle className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-violet-200 to-indigo-200 bg-clip-text text-transparent">
+          <DialogContent className="max-w-[95vw] md:max-w-2xl max-h-[90dvh] bg-zinc-700/95 backdrop-blur-2xl border-white/10 p-4 md:p-8 rounded-2xl md:rounded-[2rem] shadow-2xl">
+            <DialogHeader className="text-left mb-3 md:mb-6">
+              <DialogTitle className="text-xl md:text-3xl font-extrabold bg-gradient-to-r from-violet-200 to-indigo-200 bg-clip-text text-transparent">
                 Elegí tu barbero
               </DialogTitle>
-              <DialogDescription className="text-base text-violet-300/70">
+              <DialogDescription className="text-sm md:text-base text-violet-300/70">
                 Seleccioná con quién te querés atender
               </DialogDescription>
             </DialogHeader>
 
-            <div className="overflow-y-auto max-h-[60vh] pr-2 -mr-2 space-y-3 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/20">
+            <div className="overflow-y-auto max-h-[65dvh] pr-2 -mr-2 space-y-3 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/20">
               <div className="grid grid-cols-2 gap-3 md:gap-4 pb-2">
                 {availableBarbers.map((barber) => renderBarberCard(barber, (id) => {
                   setShowBarberPreference(false);
@@ -1223,15 +1236,15 @@ export default function CheckinPage() {
     isLooking: boolean
   ) => (
     <>
-      <div className="w-full rounded-2xl border border-white/8 bg-white/2 p-4 text-center relative overflow-hidden">
-        <p className="text-3xl font-mono font-bold tracking-[0.15em] min-h-10 flex items-center justify-center">
+      <div className="w-full rounded-2xl border border-white/8 bg-white/2 p-3 md:p-4 text-center relative overflow-hidden">
+        <p className="text-2xl md:text-3xl font-mono font-bold tracking-[0.15em] min-h-8 md:min-h-10 flex items-center justify-center">
           {currentPhone ? (
             formatPhone(currentPhone)
           ) : (
             <span className="text-white/20">__ ____ ____</span>
           )}
         </p>
-        <p className="text-sm text-muted-foreground mt-2">
+        <p className="text-xs md:text-sm text-muted-foreground mt-1 md:mt-2">
           {currentPhone.length < PHONE_LENGTH
             ? `${PHONE_LENGTH - currentPhone.length} dígitos restantes`
             : 'Buscando...'}
@@ -1243,13 +1256,13 @@ export default function CheckinPage() {
         )}
       </div>
 
-      <div className="w-full grid grid-cols-3 gap-3 mt-1">
+      <div className="w-full grid grid-cols-3 gap-2 md:gap-3 mt-1">
         {KEYPAD.map((d) => (
           <button
             key={d}
             onClick={() => pressDigit(d)}
             disabled={isLooking}
-            className="h-[56px] rounded-2xl bg-white/4 border border-white/6 text-2xl font-semibold transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+            className="h-11 md:h-[56px] rounded-xl md:rounded-2xl bg-white/4 border border-white/6 text-xl md:text-2xl font-semibold transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
           >
             {d}
           </button>
@@ -1258,14 +1271,14 @@ export default function CheckinPage() {
         <button
           onClick={() => pressDelete()}
           disabled={isLooking || currentPhone.length === 0}
-          className="h-[56px] rounded-2xl bg-white/4 border border-white/6 flex items-center justify-center transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+          className="h-11 md:h-[56px] rounded-xl md:rounded-2xl bg-white/4 border border-white/6 flex items-center justify-center transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
         >
-          <Delete className="size-6" />
+          <Delete className="size-5 md:size-6" />
         </button>
         <button
           onClick={() => pressDigit('0')}
           disabled={isLooking}
-          className="h-[56px] rounded-2xl bg-white/4 border border-white/6 text-2xl font-semibold transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+          className="h-11 md:h-[56px] rounded-xl md:rounded-2xl bg-white/4 border border-white/6 text-xl md:text-2xl font-semibold transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
         >
           0
         </button>
@@ -1277,23 +1290,23 @@ export default function CheckinPage() {
   // ── Render ──
 
   return (
-    <div className="h-dvh flex flex-col items-center select-none overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)] py-3 md:py-4">
+    <div className="h-dvh flex flex-col items-center select-none overflow-y-auto overflow-x-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)] py-2 md:py-4">
       {backButton}
       {/* ═══════════════ BRANCH SELECTION ═══════════════ */}
       {step === 'branch' && (
         <div
           key={`branch-${animKey}`}
-          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-6 md:gap-8 px-4 md:px-8 my-auto animate-in fade-in zoom-in-95 duration-500"
+          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-4 md:gap-8 px-4 md:px-8 my-auto animate-in fade-in zoom-in-95 duration-500"
         >
-          <div className="flex flex-col items-center gap-4 md:gap-5">
-            <div className="size-20 md:size-24 rounded-[1.5rem] md:rounded-3xl bg-white/4 border border-white/10 flex items-center justify-center">
-              <Scissors className="size-10 md:size-12 text-white" strokeWidth={1.5} />
+          <div className="flex flex-col items-center gap-3 md:gap-5">
+            <div className="size-16 md:size-24 rounded-[1.25rem] md:rounded-3xl bg-white/4 border border-white/10 flex items-center justify-center">
+              <Scissors className="size-8 md:size-12 text-white" strokeWidth={1.5} />
             </div>
             <div className="text-center">
-              <h1 className="text-3xl md:text-5xl font-bold tracking-tight">
+              <h1 className="text-2xl md:text-5xl font-bold tracking-tight">
                 Monaco Smart Barber
               </h1>
-              <p className="text-lg md:text-xl text-muted-foreground mt-2 md:mt-3">Bienvenido</p>
+              <p className="text-base md:text-xl text-muted-foreground mt-1 md:mt-3">Bienvenido</p>
             </div>
           </div>
 
@@ -1341,56 +1354,56 @@ export default function CheckinPage() {
       {step === 'home' && selectedBranch && (
         <div
           key={`home-${animKey}`}
-          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center justify-center gap-3 md:gap-4 px-4 md:px-8 py-4 md:py-6 my-auto animate-in fade-in zoom-in-95 duration-500"
+          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center justify-center gap-3 md:gap-4 px-4 md:px-8 py-2 md:py-6 my-auto animate-in fade-in zoom-in-95 duration-500"
         >
-          <div className="flex flex-col items-center gap-2">
-            <div className="size-14 md:size-16 rounded-[1.25rem] md:rounded-2xl overflow-hidden flex items-center justify-center">
+          <div className="flex flex-col items-center gap-1.5 md:gap-2">
+            <div className="size-12 md:size-16 rounded-[1.25rem] md:rounded-2xl overflow-hidden flex items-center justify-center">
               <img src="/logo-monaco.png" alt="Monaco Smart Barber" className="w-full h-full object-contain" />
             </div>
             <div className="text-center">
-              <h1 className="text-2xl md:text-4xl font-bold tracking-tight">
+              <h1 className="text-xl md:text-4xl font-bold tracking-tight">
                 Monaco Smart Barber
               </h1>
-              <div className="flex items-center justify-center gap-2 mt-1 md:mt-2">
-                <MapPin className="size-4 text-muted-foreground" />
-                <p className="text-sm md:text-lg text-muted-foreground">{selectedBranch.name}</p>
+              <div className="flex items-center justify-center gap-2 mt-0.5 md:mt-2">
+                <MapPin className="size-3.5 md:size-4 text-muted-foreground" />
+                <p className="text-xs md:text-lg text-muted-foreground">{selectedBranch.name}</p>
               </div>
             </div>
           </div>
 
           <Button
             onClick={() => goTo('face_scan')}
-            className="w-full max-w-xs md:max-w-md h-12 md:h-14 text-lg md:text-2xl rounded-2xl md:rounded-3xl font-bold tracking-wide gap-3 md:gap-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+            className="w-full max-w-xs md:max-w-md h-11 md:h-14 text-base md:text-2xl rounded-2xl md:rounded-3xl font-bold tracking-wide gap-2 md:gap-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
             size="lg"
           >
-            <ScanFace className="size-6 md:size-8" strokeWidth={1.5} />
+            <ScanFace className="size-5 md:size-8" strokeWidth={1.5} />
             INGRESAR
           </Button>
 
-          <div className="flex flex-col items-center gap-2 justify-center">
-            <div className="flex items-center gap-6 justify-center">
+          <div className="flex flex-col items-center gap-1.5 md:gap-2 justify-center">
+            <div className="flex items-center gap-4 md:gap-6 justify-center">
               <button
                 onClick={() => goTo('phone')}
-                className="flex items-center gap-2 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-1.5"
+                className="flex items-center gap-1.5 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-1.5"
               >
                 <Search className="size-4 md:size-5" />
-                <span className="text-base md:text-lg">Soy Nuevo</span>
+                <span className="text-sm md:text-lg">Soy Nuevo</span>
               </button>
               <span className="text-white/20">·</span>
               <button
                 onClick={() => goTo('staff_face_scan')}
-                className="flex items-center gap-2 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-1.5"
+                className="flex items-center gap-1.5 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-1.5"
               >
                 <LogIn className="size-4 md:size-5" />
-                <span className="text-base md:text-lg">Soy barbero</span>
+                <span className="text-sm md:text-lg">Soy barbero</span>
               </button>
             </div>
 
             <button
               onClick={changeBranch}
-              className="flex items-center gap-2 text-sm text-muted-foreground/60 hover:text-muted-foreground transition-colors py-1"
+              className="flex items-center gap-2 text-xs md:text-sm text-muted-foreground/60 hover:text-muted-foreground transition-colors py-1"
             >
-              <Settings2 className="size-4" />
+              <Settings2 className="size-3.5 md:size-4" />
               Cambiar sucursal
             </button>
           </div>
@@ -1417,22 +1430,22 @@ export default function CheckinPage() {
       {step === 'phone' && (
         <div
           key={`phone-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-2 md:gap-4 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
 
           {/* Show no-match header if coming from face scan */}
           {faceDescriptor && (
-            <div className="flex flex-col items-center gap-2 mb-2">
-              <div className="size-12 md:size-14 rounded-full bg-white/4 border border-white/10 flex items-center justify-center">
-                <User className="size-6 md:size-7 text-white/60" />
+            <div className="flex flex-col items-center gap-1.5 md:gap-2 mb-1 md:mb-2">
+              <div className="size-10 md:size-14 rounded-full bg-white/4 border border-white/10 flex items-center justify-center">
+                <User className="size-5 md:size-7 text-white/60" />
               </div>
-              <p className="text-base text-muted-foreground">No te reconocemos · número de teléfono</p>
+              <p className="text-sm md:text-base text-muted-foreground">No te reconocemos · número de teléfono</p>
             </div>
           )}
 
-          <div className="text-center mt-2">
-            <h2 className="text-2xl md:text-3xl font-bold">Número de teléfono</h2>
-            <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
+          <div className="text-center mt-1 md:mt-2">
+            <h2 className="text-xl md:text-3xl font-bold">Número de teléfono</h2>
+            <p className="text-muted-foreground mt-0.5 md:mt-2 text-sm md:text-lg">
               {selectedBranch?.name}
             </p>
           </div>
@@ -1530,17 +1543,17 @@ export default function CheckinPage() {
       {step === 'service_selection' && (
         <div
           key={`service-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-6 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
 
           <div className="text-center">
-            <h2 className="text-2xl md:text-3xl font-bold">¿Qué te vas a hacer?</h2>
-            <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
+            <h2 className="text-xl md:text-3xl font-bold">¿Qué te vas a hacer?</h2>
+            <p className="text-muted-foreground mt-0.5 md:mt-2 text-sm md:text-lg">
               Elegí tu servicio
             </p>
           </div>
 
-          <div className="w-full grid gap-3 md:gap-4 mt-2 overflow-y-auto min-h-0 flex-1">
+          <div className="w-full grid gap-2.5 md:gap-4 mt-1 md:mt-2 overflow-y-auto min-h-0 flex-1">
             {services.map(s => (
               <button
                 key={s.id}
@@ -1548,10 +1561,10 @@ export default function CheckinPage() {
                   setSelectedServiceId(s.id)
                   goTo('barber')
                 }}
-                className="flex items-center justify-between p-5 rounded-2xl border border-white/8 bg-white/2 hover:bg-white/6 hover:border-white/20 transition-all text-left"
+                className="flex items-center justify-between p-3.5 md:p-5 rounded-xl md:rounded-2xl border border-white/8 bg-white/2 hover:bg-white/6 hover:border-white/20 transition-all text-left"
               >
                 <div>
-                  <h3 className="text-lg md:text-xl font-semibold">{s.name}</h3>
+                  <h3 className="text-base md:text-xl font-semibold">{s.name}</h3>
                 </div>
                 <div className="shrink-0 text-right">
                   {s.duration_minutes && (
@@ -1571,11 +1584,11 @@ export default function CheckinPage() {
       {step === 'barber' && (
         <div
           key={`barber-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 pt-8 md:pt-10 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-5 px-4 md:px-6 pt-4 md:pt-10 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
 
           <div className="text-center">
-            <p className="text-muted-foreground text-base md:text-lg">
+            <p className="text-muted-foreground text-sm md:text-lg">
               {name} · {selectedBranch?.name}
             </p>
           </div>
@@ -1632,19 +1645,19 @@ export default function CheckinPage() {
       {step === 'success' && (
         <div
           key={`success-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
+          className="relative w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-2.5 md:gap-4 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
         >
           {!changingBarberInSuccess ? (
             <>
-              <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/3 p-8 md:p-10 flex flex-col items-center gap-5 animate-in zoom-in-50 duration-700">
-                <div className="size-14 md:size-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                  <CheckCircle2 className="size-8 md:size-9 text-emerald-400" strokeWidth={1.5} />
+              <div className="w-full max-w-xl rounded-2xl md:rounded-3xl border border-white/10 bg-white/3 p-5 md:p-10 flex flex-col items-center gap-3 md:gap-5 animate-in zoom-in-50 duration-700">
+                <div className="size-12 md:size-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                  <CheckCircle2 className="size-6 md:size-9 text-emerald-400" strokeWidth={1.5} />
                 </div>
 
-                <h2 className="text-xl md:text-2xl font-bold text-muted-foreground">¡Estás en la fila!</h2>
+                <h2 className="text-lg md:text-2xl font-bold text-muted-foreground">¡Estás en la fila!</h2>
 
                 <div className="text-center">
-                  <p className="text-8xl md:text-9xl font-bold tabular-nums leading-none">
+                  <p className="text-7xl md:text-9xl font-bold tabular-nums leading-none">
                     #{position}
                   </p>
                 </div>
