@@ -38,7 +38,7 @@ export default async function DashboardPage() {
   if (!permissions['dashboard.home']) {
     // Find the first available section they CAN access to redirect them
     const navItems = [
-      { href: '/dashboard/cola', requiredPermissions: ['queue.view'] },
+      { href: '/dashboard/fila', requiredPermissions: ['queue.view'] },
       { href: '/dashboard/sucursales', requiredPermissions: ['branches.view'] },
       { href: '/dashboard/equipo', requiredPermissions: ['staff.view', 'roles.manage', 'breaks.view', 'incentives.view', 'discipline.view'] },
       { href: '/dashboard/servicios', requiredPermissions: ['services.view'] },

@@ -147,9 +147,9 @@ export function EstadisticasClient({ initialData, branches }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-2xl font-bold tracking-tight">Estadísticas</h2>
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <h2 className="text-xl font-bold tracking-tight lg:text-2xl">Estadísticas</h2>
+        <div className="flex flex-wrap items-center gap-2">
           <BranchSelector branches={branches} />
           <Button variant="outline" size="sm" onClick={handleExportCSV}>
             <FileDown className="mr-2 size-4" /> CSV
@@ -160,7 +160,9 @@ export function EstadisticasClient({ initialData, branches }: Props) {
         </div>
       </div>
 
-      <DateRangePicker from={from} to={to} onChange={handleDateChange} />
+      <div className="w-full overflow-x-auto">
+        <DateRangePicker from={from} to={to} onChange={handleDateChange} />
+      </div>
 
       {isPending && (
         <div className="flex items-center justify-center py-8">
@@ -193,12 +195,14 @@ export function EstadisticasClient({ initialData, branches }: Props) {
         </div>
 
         <Tabs defaultValue="tendencias" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="tendencias">Tendencias</TabsTrigger>
-            <TabsTrigger value="ocupacion">Ocupación</TabsTrigger>
-            <TabsTrigger value="barberos">Barberos</TabsTrigger>
-            <TabsTrigger value="clientes">Clientes</TabsTrigger>
-          </TabsList>
+          <div className="overflow-x-auto">
+            <TabsList className="min-w-max">
+              <TabsTrigger value="tendencias" className="whitespace-nowrap">Tendencias</TabsTrigger>
+              <TabsTrigger value="ocupacion" className="whitespace-nowrap">Ocupación</TabsTrigger>
+              <TabsTrigger value="barberos" className="whitespace-nowrap">Barberos</TabsTrigger>
+              <TabsTrigger value="clientes" className="whitespace-nowrap">Clientes</TabsTrigger>
+            </TabsList>
+          </div>
 
           <TabsContent value="tendencias">
             <TrendsTab data={data} />
@@ -390,10 +394,10 @@ function TrendsTab({ data }: { data: StatsData }) {
                 />
                 <XAxis
                   type="number"
-                  tick={{ fill: COLORS.axis, fontSize: 12 }}
+                  tick={{ fill: COLORS.axis, fontSize: 11 }}
                   axisLine={false}
                   tickLine={false}
-                  tickFormatter={(v) => formatCurrency(v)}
+                  tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                 />
                 <YAxis
                   type="category"
@@ -401,7 +405,7 @@ function TrendsTab({ data }: { data: StatsData }) {
                   tick={{ fill: COLORS.axis, fontSize: 12 }}
                   axisLine={false}
                   tickLine={false}
-                  width={110}
+                  width={90}
                 />
                 <Tooltip content={<ChartTooltip />} cursor={{ fill: 'transparent' }} />
                 <Bar
@@ -596,24 +600,61 @@ function RankingTab({ data }: { data: StatsData }) {
             Sin datos para el período
           </p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12">#</TableHead>
-                <TableHead>Barbero</TableHead>
-                <TableHead className="text-right">Cortes</TableHead>
-                <TableHead className="text-right">Ingresos</TableHead>
-                <TableHead className="text-right">Clientes</TableHead>
-                <TableHead className="text-right">Comisión</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <>
+            {/* Vista tabla — desktop */}
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12">#</TableHead>
+                    <TableHead>Barbero</TableHead>
+                    <TableHead className="text-right">Cortes</TableHead>
+                    <TableHead className="text-right">Ingresos</TableHead>
+                    <TableHead className="text-right">Clientes</TableHead>
+                    <TableHead className="text-right">Comisión</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.ranking.map((r, i) => (
+                    <TableRow key={r.id}>
+                      <TableCell>
+                        {i < 3 ? (
+                          <Trophy
+                            className={`size-4 ${
+                              i === 0
+                                ? 'text-yellow-400'
+                                : i === 1
+                                  ? 'text-gray-400'
+                                  : 'text-amber-600'
+                            }`}
+                          />
+                        ) : (
+                          <span className="text-muted-foreground">{i + 1}</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="font-medium">{r.name}</TableCell>
+                      <TableCell className="text-right">{r.cuts}</TableCell>
+                      <TableCell className="text-right">
+                        {formatCurrency(r.revenue)}
+                      </TableCell>
+                      <TableCell className="text-right">{r.clients}</TableCell>
+                      <TableCell className="text-right">
+                        {formatCurrency(r.commission)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            {/* Vista cards — mobile */}
+            <div className="space-y-3 md:hidden">
               {data.ranking.map((r, i) => (
-                <TableRow key={r.id}>
-                  <TableCell>
+                <div key={r.id} className="rounded-lg border p-4">
+                  <div className="mb-3 flex items-center gap-3">
                     {i < 3 ? (
                       <Trophy
-                        className={`size-4 ${
+                        className={`size-5 shrink-0 ${
                           i === 0
                             ? 'text-yellow-400'
                             : i === 1
@@ -622,22 +663,34 @@ function RankingTab({ data }: { data: StatsData }) {
                         }`}
                       />
                     ) : (
-                      <span className="text-muted-foreground">{i + 1}</span>
+                      <span className="flex size-5 shrink-0 items-center justify-center text-sm text-muted-foreground">
+                        {i + 1}
+                      </span>
                     )}
-                  </TableCell>
-                  <TableCell className="font-medium">{r.name}</TableCell>
-                  <TableCell className="text-right">{r.cuts}</TableCell>
-                  <TableCell className="text-right">
-                    {formatCurrency(r.revenue)}
-                  </TableCell>
-                  <TableCell className="text-right">{r.clients}</TableCell>
-                  <TableCell className="text-right">
-                    {formatCurrency(r.commission)}
-                  </TableCell>
-                </TableRow>
+                    <span className="font-semibold">{r.name}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Cortes</p>
+                      <p className="font-medium">{r.cuts}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Clientes</p>
+                      <p className="font-medium">{r.clients}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Ingresos</p>
+                      <p className="font-medium">{formatCurrency(r.revenue)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Comisión</p>
+                      <p className="font-medium">{formatCurrency(r.commission)}</p>
+                    </div>
+                  </div>
+                </div>
               ))}
-            </TableBody>
-          </Table>
+            </div>
+          </>
         )}
       </CardContent>
     </Card>

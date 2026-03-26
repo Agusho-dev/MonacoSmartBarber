@@ -52,6 +52,6 @@ export async function createScheduledBreakRequests(branchId: string, breakConfig
 
   revalidatePath('/dashboard/descansos')
   revalidatePath('/dashboard/equipo')
-  revalidatePath('/barbero/cola')
+  revalidatePath('/barbero/fila')
   return { created: barbersToCreate.length }
 }

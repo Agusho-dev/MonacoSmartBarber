@@ -27,6 +27,7 @@ export default async function BarberosPage() {
   return (
     <BarberosClient
       barbers={barbers ?? []}
+      branches={branches ?? []}
       todayVisits={todayVisits ?? []}
       roles={roles ?? []}
     />

@@ -84,11 +84,11 @@ export async function checkinClient(formData: FormData) {
       return { alreadyInQueue: true, position: existing?.position ?? 1, queueEntryId: existing?.id ?? '' }
     }
     console.error('Insert queue entry error:', queueError)
-    return { error: 'Error al agregar a la cola: ' + (queueError?.message || 'Error desconocido') }
+    return { error: 'Error al agregar a la fila: ' + (queueError?.message || 'Error desconocido') }
   }
 
   revalidatePath('/checkin')
-  revalidatePath('/barbero/cola')
+  revalidatePath('/barbero/fila')
   return { success: true, position, queueEntryId: queueEntry.id, clientId }
 }
 
@@ -110,7 +110,7 @@ export async function startService(queueEntryId: string, barberId: string) {
     return { error: 'Error al iniciar servicio' }
   }
 
-  revalidatePath('/barbero/cola')
+  revalidatePath('/barbero/fila')
   return { success: true }
 }
 
@@ -446,7 +446,7 @@ export async function completeService(
     }
   }
 
-  revalidatePath('/barbero/cola')
+  revalidatePath('/barbero/fila')
   revalidatePath('/barbero/facturacion')
   revalidatePath('/barbero/rendimiento')
   revalidatePath('/dashboard')
@@ -467,8 +467,8 @@ export async function cancelQueueEntry(queueEntryId: string) {
     return { error: 'Error al cancelar' }
   }
 
-  revalidatePath('/barbero/cola')
-  revalidatePath('/dashboard/cola')
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
   return { success: true }
 }
 
@@ -488,8 +488,8 @@ export async function reassignBarber(
     return { error: 'Error al reasignar barbero' }
   }
 
-  revalidatePath('/barbero/cola')
-  revalidatePath('/dashboard/cola')
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
   return { success: true }
 }
 
@@ -553,11 +553,11 @@ export async function checkinClientByFace(
         .single()
       return { alreadyInQueue: true, position: existing?.position ?? 1, queueEntryId: existing?.id ?? '' }
     }
-    return { error: 'Error al agregar a la cola' }
+    return { error: 'Error al agregar a la fila' }
   }
 
   revalidatePath('/checkin')
-  revalidatePath('/barbero/cola')
+  revalidatePath('/barbero/fila')
   return { success: true, position, queueEntryId: queueEntry.id }
 }
 
@@ -578,7 +578,72 @@ export async function reassignMyBarber(
   }
 
   revalidatePath('/checkin')
-  revalidatePath('/barbero/cola')
-  revalidatePath('/dashboard/cola')
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
   return { success: true }
+}
+
+export async function updateQueueOrder(
+  updates: { id: string; position: number; barber_id?: string | null; is_dynamic?: boolean }[]
+) {
+  const supabase = await createClient()
+
+  const promises = updates.map((update) => {
+    const dataToUpdate: any = { position: update.position }
+    if (update.barber_id !== undefined) dataToUpdate.barber_id = update.barber_id
+    if (update.is_dynamic !== undefined) dataToUpdate.is_dynamic = update.is_dynamic
+
+    return supabase
+      .from('queue_entries')
+      .update(dataToUpdate)
+      .eq('id', update.id)
+  })
+
+  const results = await Promise.all(promises)
+  
+  const hasError = results.some((result) => result.error)
+
+  if (hasError) {
+    return { error: 'Error al actualizar el orden de la fila' }
+  }
+
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
+  return { success: true }
+}
+
+export async function createBreakEntry(branchId: string, barberId: string, breakConfigName: string) {
+  const supabase = await createClient()
+
+  const { data: position } = await supabase.rpc('next_queue_position', {
+    p_branch_id: branchId,
+  })
+
+  // We map the break config to a simple client record or just use the name as a placeholder.
+  // Currently breaks use client_id = null and is_break = true.
+  
+  const { data: queueEntry, error } = await supabase
+    .from('queue_entries')
+    .insert({
+      branch_id: branchId,
+      barber_id: barberId,
+      position: position ?? 1,
+      status: 'waiting',
+      is_break: true,
+      is_dynamic: false,
+    })
+    .select('id')
+    .single()
+
+  if (error || !queueEntry) {
+    return { error: 'Error al asignar descanso' }
+  }
+
+  // To store the name of the break since there's no client_id, we can check if there's any field for it or just rely on 'is_break'.
+  // Currently `is_break` boolean implies it's a break, and it's displayed as "Descanso". 
+  // If we need the specific config name, we can store it somewhere or just keep it as "Descanso".
+
+  revalidatePath('/dashboard/fila')
+  revalidatePath('/barbero/fila')
+  return { success: true, queueEntryId: queueEntry.id, position }
 }

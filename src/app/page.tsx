@@ -30,7 +30,7 @@ export default function HomePage() {
           <div className="flex flex-col items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-6 transition-colors group-hover:border-white/20 group-hover:bg-white/10">
             <Users className="size-8 text-muted-foreground group-hover:text-foreground transition-colors" />
             <span className="font-medium">Barberos</span>
-            <span className="text-xs text-muted-foreground">Panel de cola</span>
+            <span className="text-xs text-muted-foreground">Panel de fila</span>
           </div>
         </Link>
 

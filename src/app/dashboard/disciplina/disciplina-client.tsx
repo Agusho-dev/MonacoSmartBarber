@@ -35,7 +35,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { AlertTriangle, Plus, Trash2, Pencil, Clock, UserX, Coffee } from 'lucide-react'
+import { AlertTriangle, Plus, Trash2, Pencil, Clock, UserX, Coffee, LogIn, LogOut, ScanFace } from 'lucide-react'
 import { toast } from 'sonner'
 import { useBranchStore } from '@/stores/branch-store'
 
@@ -43,6 +43,16 @@ interface BarberBasic {
   id: string
   full_name: string
   branch_id: string | null
+  role?: string
+}
+
+interface AttendanceLog {
+  id: string
+  staff_id: string
+  branch_id: string
+  action_type: 'clock_in' | 'clock_out'
+  recorded_at: string
+  face_verified: boolean
 }
 
 interface EventWithStaff extends Omit<DisciplinaryEvent, 'staff'> {
@@ -82,6 +92,7 @@ interface Props {
   fromDate: string
   activeBreakEntries?: ActiveBreakEntry[]
   breakOvertimeHistory?: BreakOvertimeRecord[]
+  attendanceLogs?: AttendanceLog[]
 }
 
 const EVENT_LABELS: Record<DisciplinaryEventType, string> = {
@@ -104,6 +115,7 @@ export function DisciplinaClient({
   fromDate,
   activeBreakEntries = [],
   breakOvertimeHistory = [],
+  attendanceLogs = [],
 }: Props) {
   const { selectedBranchId } = useBranchStore()
   const [overtimeFilter, setOvertimeFilter] = useState<OvertimeFilter>('week')
@@ -201,6 +213,18 @@ export function DisciplinaClient({
     }
   })
 
+  // Attendance logs filtered by branch
+  const branchAttendanceLogs = attendanceLogs.filter((l) => l.branch_id === selectedBranchId)
+
+  // Build staff name map for attendance display
+  const staffNameMap = new Map(barbers.map((b) => [b.id, b]))
+
+  const ROLE_LABELS: Record<string, string> = {
+    barber: 'Barbero',
+    admin: 'Encargado',
+    owner: 'Dueño',
+  }
+
   function openCreateRule() {
     setRuleForm({ id: '', event_type: 'absence', occurrence_number: '1', consequence: 'none', deduction_amount: '', description: '' })
     setRuleDialog(true)
@@ -273,7 +297,7 @@ export function DisciplinaClient({
         <div>
           <h1 className="text-2xl font-bold">Faltas y Tardanzas</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Configurá las reglas disciplinarias y registrá eventos por barbero.
+            Configurá las reglas disciplinarias y registrá eventos por personal.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -324,7 +348,7 @@ export function DisciplinaClient({
       <Tabs defaultValue="eventos">
         <TabsList>
           <TabsTrigger value="eventos">Eventos del mes</TabsTrigger>
-          <TabsTrigger value="resumen">Resumen por barbero</TabsTrigger>
+          <TabsTrigger value="resumen">Resumen por personal</TabsTrigger>
           <TabsTrigger value="descansos" className="flex items-center gap-1.5">
             <Coffee className="size-3.5" />
             Descansos excedidos
@@ -335,6 +359,10 @@ export function DisciplinaClient({
             )}
           </TabsTrigger>
           <TabsTrigger value="reglas">Reglas disciplinarias</TabsTrigger>
+          <TabsTrigger value="asistencia" className="flex items-center gap-1.5">
+            <LogIn className="size-3.5" />
+            Asistencia
+          </TabsTrigger>
         </TabsList>
 
         {/* Eventos del mes */}
@@ -381,7 +409,7 @@ export function DisciplinaClient({
         {/* Resumen por barbero */}
         <TabsContent value="resumen" className="mt-4">
           {barberSummary.length === 0 ? (
-            <div className="rounded-xl border bg-card p-8 text-center text-muted-foreground">Sin barberos.</div>
+            <div className="rounded-xl border bg-card p-8 text-center text-muted-foreground">Sin personal.</div>
           ) : (
             <div className="divide-y rounded-xl border bg-card">
               {barberSummary.map((b) => (
@@ -389,7 +417,14 @@ export function DisciplinaClient({
                   <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-sm">
                     {b.full_name.charAt(0)}
                   </div>
-                  <div className="flex-1 font-medium">{b.full_name}</div>
+                  <div className="flex-1 flex items-center gap-2">
+                    <span className="font-medium">{b.full_name}</span>
+                    {b.role && b.role !== 'barber' && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                        {ROLE_LABELS[b.role] ?? b.role}
+                      </Badge>
+                    )}
+                  </div>
                   <div className="flex items-center gap-3 shrink-0">
                     <div className="flex items-center gap-1.5 text-sm">
                       <UserX className="size-4 text-red-500" />
@@ -491,6 +526,61 @@ export function DisciplinaClient({
                   ))}
                 </div>
               </div>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* Asistencia */}
+        <TabsContent value="asistencia" className="mt-4">
+          <p className="text-xs text-muted-foreground mb-3">
+            Entradas y salidas del personal desde {new Date(fromDate + 'T12:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })}
+          </p>
+          {branchAttendanceLogs.length === 0 ? (
+            <div className="rounded-xl border bg-card p-8 text-center text-muted-foreground">
+              <LogIn className="size-8 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">Sin registros de asistencia este mes.</p>
+            </div>
+          ) : (
+            <div className="divide-y rounded-xl border bg-card">
+              {branchAttendanceLogs.map((log) => {
+                const staffMember = staffNameMap.get(log.staff_id)
+                const isClockIn = log.action_type === 'clock_in'
+                return (
+                  <div key={log.id} className="flex items-center gap-4 px-5 py-3">
+                    <div className={`flex size-9 shrink-0 items-center justify-center rounded-full ${isClockIn ? 'bg-emerald-500/15 text-emerald-500' : 'bg-blue-500/15 text-blue-500'}`}>
+                      {isClockIn ? <LogIn className="size-4" /> : <LogOut className="size-4" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium">{staffMember?.full_name ?? 'Personal'}</p>
+                        {staffMember?.role && staffMember.role !== 'barber' && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                            {ROLE_LABELS[staffMember.role] ?? staffMember.role}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {isClockIn ? 'Entrada' : 'Salida'}
+                        {' · '}
+                        {new Date(log.recorded_at).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}
+                        {' '}
+                        {new Date(log.recorded_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {log.face_verified && (
+                        <Badge variant="outline" className="text-[10px] gap-1 px-1.5 py-0 border-emerald-500/30 text-emerald-600">
+                          <ScanFace className="size-3" />
+                          Face ID
+                        </Badge>
+                      )}
+                      <Badge variant={isClockIn ? 'default' : 'secondary'} className={isClockIn ? 'bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/15' : 'bg-blue-500/15 text-blue-600 hover:bg-blue-500/15'}>
+                        {isClockIn ? 'Entrada' : 'Salida'}
+                      </Badge>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </TabsContent>
@@ -620,9 +710,9 @@ export function DisciplinaClient({
           </DialogHeader>
           <form onSubmit={handleEventSubmit} className="space-y-4">
             <div>
-              <Label>Barbero</Label>
+              <Label>Personal</Label>
               <Select value={eventForm.staff_id} onValueChange={(v) => setEventForm((f) => ({ ...f, staff_id: v }))}>
-                <SelectTrigger className="mt-1.5"><SelectValue placeholder="Seleccionar barbero" /></SelectTrigger>
+                <SelectTrigger className="mt-1.5"><SelectValue placeholder="Seleccionar personal" /></SelectTrigger>
                 <SelectContent>
                   {branchBarbers.map((b) => <SelectItem key={b.id} value={b.id}>{b.full_name}</SelectItem>)}
                 </SelectContent>

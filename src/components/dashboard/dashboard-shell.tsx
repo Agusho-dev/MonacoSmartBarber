@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useTransition, useEffect, useMemo, useCallback } from 'react'
+import { useState, useTransition, useEffect, useMemo, useCallback, useRef } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard,
   Building2,
@@ -16,16 +16,31 @@ import {
   LogOut,
   ListOrdered,
   Gift,
-  Coffee,
-  Wallet,
   CalendarDays,
-  Banknote,
-  Trophy,
-  AlertTriangle,
   Package,
   MessageSquare,
   Smartphone,
+  GripVertical,
+  Check,
 } from 'lucide-react'
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  TouchSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { logout } from '@/lib/actions/auth'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -46,12 +61,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { BranchScopeProvider } from '@/components/dashboard/branch-scope-provider'
+import { MobileBottomNav } from '@/components/dashboard/mobile-bottom-nav'
 import { useBranchStore } from '@/stores/branch-store'
 import { createClient } from '@/lib/supabase/client'
 
 const navItems = [
   { href: '/dashboard', label: 'Inicio', icon: LayoutDashboard, requiredPermissions: ['dashboard.home'] },
-  { href: '/dashboard/cola', label: 'Cola', icon: ListOrdered, requiredPermissions: ['queue.view'] },
+  { href: '/dashboard/fila', label: 'Fila', icon: ListOrdered, requiredPermissions: ['queue.view'] },
   { href: '/dashboard/sucursales', label: 'Sucursales', icon: Building2, requiredPermissions: ['branches.view'] },
   { href: '/dashboard/equipo', label: 'Equipo', icon: Scissors, requiredPermissions: ['staff.view', 'roles.manage', 'breaks.view', 'incentives.view', 'discipline.view'] },
   { href: '/dashboard/servicios', label: 'Servicios', icon: Sparkles, requiredPermissions: ['services.view'] },
@@ -66,6 +82,143 @@ const navItems = [
   { href: '/dashboard/configuracion', label: 'Configuración', icon: Settings, requiredPermissions: ['settings.view'] },
 ]
 
+// Tipo para cada ítem de navegación
+interface NavItem {
+  href: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  requiredPermissions: string[]
+}
+
+// Props para el componente de ítem sorteable — debe estar fuera de DashboardShell
+// para evitar violaciones de las reglas de hooks (hooks dentro de funciones anidadas)
+interface SortableNavItemProps {
+  item: NavItem
+  isActive: boolean
+  isEditMode: boolean
+  pendingBreakCount: number
+  onNavigate: () => void
+}
+
+function SortableNavItem({
+  item,
+  isActive,
+  isEditMode,
+  pendingBreakCount,
+  onNavigate,
+}: SortableNavItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: item.href })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
+  if (isEditMode) {
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        className={cn(
+          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium',
+          'bg-sidebar-accent/30 text-sidebar-foreground/60 select-none',
+          isDragging && 'opacity-50 shadow-lg z-50 relative'
+        )}
+      >
+        {/* Manejador de arrastre — objetivo táctil mínimo 44x44px */}
+        <button
+          {...attributes}
+          {...listeners}
+          className="touch-none flex items-center justify-center min-w-[44px] min-h-[44px] -ml-2 -my-2 text-muted-foreground hover:text-sidebar-foreground cursor-grab active:cursor-grabbing"
+          aria-label={`Arrastrar para reordenar ${item.label}`}
+        >
+          <GripVertical className="size-4 shrink-0" />
+        </button>
+        <item.icon className="size-4 shrink-0 text-muted-foreground" />
+        <span>{item.label}</span>
+        {item.href === '/dashboard/equipo' && pendingBreakCount > 0 && (
+          <span className="ml-auto flex size-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
+            {pendingBreakCount}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  // Modo normal — comportamiento de link igual al original
+  return (
+    <div ref={setNodeRef} style={style}>
+      <Link
+        href={item.href}
+        onClick={onNavigate}
+        className={cn(
+          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+          isActive
+            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+            : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+        )}
+      >
+        <item.icon className="size-4 shrink-0" />
+        {item.label}
+        {item.href === '/dashboard/equipo' && pendingBreakCount > 0 && (
+          <span className="ml-auto flex size-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
+            {pendingBreakCount}
+          </span>
+        )}
+      </Link>
+    </div>
+  )
+}
+
+// FIX 1 — SidebarContent extraído a módulo para evitar remount por nueva referencia en cada render
+interface SidebarContentProps {
+  isEditMode: boolean
+  onToggleEditMode: () => void
+  userRole: string
+  userFullName: string
+  children: React.ReactNode
+}
+
+function SidebarContent({ isEditMode, onToggleEditMode, userRole, userFullName, children }: SidebarContentProps) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex h-14 items-center gap-2 px-6">
+        <Scissors className="size-5" />
+        <span className="text-lg font-bold tracking-tight">Monaco</span>
+      </div>
+      <Separator className="bg-sidebar-border" />
+      <ScrollArea className="flex-1 py-4">
+        {children}
+        {/* Botón para activar/desactivar modo edición de orden */}
+        <div className="px-3 pb-2 pt-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 text-xs text-sidebar-foreground/40 hover:text-sidebar-foreground/70"
+            onClick={onToggleEditMode}
+          >
+            {isEditMode ? <Check className="size-3 shrink-0" /> : <GripVertical className="size-3 shrink-0" />}
+            {isEditMode ? 'Listo' : 'Personalizar orden'}
+          </Button>
+        </div>
+      </ScrollArea>
+      <Separator className="bg-sidebar-border" />
+      <div className="p-4">
+        <p className="text-xs text-sidebar-foreground/50">
+          {userRole === 'owner' ? 'Propietario' : 'Administrador'}
+        </p>
+        <p className="truncate text-sm font-medium">{userFullName}</p>
+      </div>
+    </div>
+  )
+}
 
 interface DashboardShellProps {
   user: { full_name: string; email: string | null; role: string }
@@ -76,11 +229,252 @@ interface DashboardShellProps {
 
 export function DashboardShell({ user, permissions, allowedBranchIds, children }: DashboardShellProps) {
   const pathname = usePathname()
+  const router = useRouter()
+  const touchStartX = useRef(0)
+  const touchStartY = useRef(0)
+  const touchStartTime = useRef(0)
+  const mainRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const swipeDirectionRef = useRef<'left' | 'right' | null>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [swipeTargetItem, setSwipeTargetItem] = useState<NavItem | null>(null)
   const [, startTransition] = useTransition()
   const [pendingBreakCount, setPendingBreakCount] = useState(0)
   const { selectedBranchId } = useBranchStore()
   const supabase = useMemo(() => createClient(), [])
+
+  // --- Estado de ordenamiento personalizado por usuario ---
+  const storageKey = `nav-order-${user.full_name}`
+
+  // FIX 3 — Inicializar siempre con el orden por defecto para evitar mismatch de hidratación SSR/cliente.
+  // El orden guardado se lee en useEffect, únicamente en el cliente.
+  const [navOrder, setNavOrder] = useState<string[]>(() => navItems.map(i => i.href))
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed) && parsed.every((v): v is string => typeof v === 'string')) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setNavOrder(parsed)
+        }
+      }
+    } catch {
+      // localStorage no disponible (modo privado, cuota excedida)
+    }
+  }, [storageKey])
+
+  const [isEditMode, setIsEditMode] = useState(false)
+
+  // --- Sensores dnd-kit: puntero (mouse) + táctil + teclado ---
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      // Requiere 5px de movimiento antes de activar el arrastre,
+      // para no interferir con clics normales
+      activationConstraint: { distance: 5 },
+    }),
+    useSensor(TouchSensor, {
+      // Demora de 250ms en touch para distinguir arrastre de scroll
+      activationConstraint: { delay: 250, tolerance: 5 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+
+  // Ítems filtrados por permisos y ordenados según preferencia del usuario
+  const orderedItems = useMemo(() => {
+    const filtered = navItems.filter(item =>
+      item.requiredPermissions.some(p => permissions[p])
+    )
+    return [...filtered].sort((a, b) => {
+      const ai = navOrder.indexOf(a.href)
+      const bi = navOrder.indexOf(b.href)
+      if (ai === -1 && bi === -1) return 0
+      if (ai === -1) return 1
+      if (bi === -1) return -1
+      return ai - bi
+    })
+  }, [navOrder, permissions])
+
+  const currentNavIndex = useMemo(() => {
+    return orderedItems.findIndex(item =>
+      item.href === '/dashboard'
+        ? pathname === '/dashboard'
+        : pathname.startsWith(item.href)
+    )
+  }, [orderedItems, pathname])
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX
+    touchStartY.current = e.touches[0].clientY
+    touchStartTime.current = Date.now()
+  }, [])
+
+  // Listener nativo para touchmove — necesario para llamar preventDefault()
+  // y evitar el scroll vertical mientras se desliza horizontalmente
+  useEffect(() => {
+    const el = mainRef.current
+    if (!el) return
+
+    // Detecta si el elemento tocado (o algún ancestro hasta main) tiene scroll horizontal propio.
+    // Esto permite que tab bars y tablas con overflow-x-auto funcionen sin conflicto con el swipe.
+    function isHorizontallyScrollable(target: EventTarget | null): boolean {
+      let node = target as Element | null
+      while (node && node !== el) {
+        const ox = window.getComputedStyle(node).overflowX
+        if ((ox === 'auto' || ox === 'scroll') && node.scrollWidth > node.clientWidth) {
+          return true
+        }
+        node = node.parentElement
+      }
+      return false
+    }
+
+    const onMove = (e: TouchEvent) => {
+      const dx = e.touches[0].clientX - touchStartX.current
+      const dy = e.touches[0].clientY - touchStartY.current
+
+      // Ignorar gestos verticales y movimientos mínimos
+      if (Math.abs(dx) < 8 || Math.abs(dx) < Math.abs(dy) * 1.5) return
+
+      // No interceptar si el toque proviene de un elemento con scroll horizontal propio
+      // (tab bars, tablas, etc.) — dejar que el browser lo maneje
+      if (isHorizontallyScrollable(e.target)) return
+
+      const isLeft = dx < 0
+      const canGo =
+        (isLeft && currentNavIndex < orderedItems.length - 1) ||
+        (!isLeft && currentNavIndex > 0)
+
+      if (!canGo) return
+
+      e.preventDefault()
+
+      const W = window.innerWidth
+
+      // Página actual — parallax sutil (25% de la velocidad del dedo)
+      if (mainRef.current) {
+        mainRef.current.style.transform = `translateX(${dx * 0.25}px)`
+      }
+
+      // Panel entrante — se superpone deslizándose desde el borde a velocidad completa
+      if (panelRef.current) {
+        const rawOffset = isLeft ? W + dx : -W + dx
+        const clamped = isLeft ? Math.max(0, rawOffset) : Math.min(0, rawOffset)
+        panelRef.current.style.transform = `translateX(${clamped}px)`
+        panelRef.current.style.visibility = 'visible'
+        panelRef.current.style.boxShadow = isLeft
+          ? '-16px 0 48px rgba(0,0,0,0.13)'
+          : '16px 0 48px rgba(0,0,0,0.13)'
+      }
+
+      // Establecer ítem destino una sola vez por gesto (evita re-renders continuos)
+      if (swipeDirectionRef.current === null) {
+        swipeDirectionRef.current = isLeft ? 'left' : 'right'
+        const target = isLeft
+          ? orderedItems[currentNavIndex + 1]
+          : orderedItems[currentNavIndex - 1]
+        setSwipeTargetItem(target ?? null)
+      }
+    }
+
+    el.addEventListener('touchmove', onMove, { passive: false })
+    return () => el.removeEventListener('touchmove', onMove)
+  }, [currentNavIndex, orderedItems])
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    // Si no hubo un swipe horizontal activo, no hacer nada
+    if (swipeDirectionRef.current === null) return
+
+    const dx = e.changedTouches[0].clientX - touchStartX.current
+    const dy = e.changedTouches[0].clientY - touchStartY.current
+    const dt = Date.now() - touchStartTime.current
+
+    const W = window.innerWidth
+    const isLeft = dx < 0
+    const THRESHOLD = W * 0.28                          // 28% del ancho de pantalla
+    const isFlick = Math.abs(dx) > 40 && Math.abs(dx) / dt > 0.45  // gesto rápido
+    const isValidSwipe =
+      (Math.abs(dx) > THRESHOLD || isFlick) &&
+      Math.abs(dx) > Math.abs(dy) * 1.5
+
+    const EASE = 'transform 240ms cubic-bezier(0.4, 0, 0.2, 1)'
+
+    if (isValidSwipe) {
+      const targetHref = isLeft
+        ? orderedItems[currentNavIndex + 1]?.href
+        : orderedItems[currentNavIndex - 1]?.href
+
+      // Animar panel para cubrir pantalla
+      if (mainRef.current) {
+        mainRef.current.style.transition = EASE
+        mainRef.current.style.transform = `translateX(${isLeft ? -(W * 0.25) : W * 0.25}px)`
+      }
+      if (panelRef.current) {
+        panelRef.current.style.transition = EASE
+        panelRef.current.style.transform = 'translateX(0)'
+      }
+
+      // Navegar INMEDIATAMENTE — el panel cubre la pantalla durante la carga de la nueva página
+      if (targetHref) router.push(targetHref)
+
+      setTimeout(() => {
+        if (mainRef.current) {
+          mainRef.current.style.transition = ''
+          mainRef.current.style.transform = ''
+        }
+        if (panelRef.current) {
+          panelRef.current.style.visibility = 'hidden'
+          panelRef.current.style.transition = ''
+          panelRef.current.style.transform = 'translateX(100%)'
+          panelRef.current.style.boxShadow = ''
+        }
+        swipeDirectionRef.current = null
+        setSwipeTargetItem(null)
+      }, 240)
+    } else {
+      // Spring-back: volver a la posición original con animación suave
+      if (mainRef.current) {
+        mainRef.current.style.transition = EASE
+        mainRef.current.style.transform = ''
+      }
+      if (panelRef.current) {
+        panelRef.current.style.transition = EASE
+        panelRef.current.style.transform = `translateX(${isLeft ? W : -W}px)`
+      }
+
+      setTimeout(() => {
+        if (mainRef.current) mainRef.current.style.transition = ''
+        if (panelRef.current) {
+          panelRef.current.style.visibility = 'hidden'
+          panelRef.current.style.transition = ''
+          panelRef.current.style.boxShadow = ''
+        }
+        swipeDirectionRef.current = null
+        setSwipeTargetItem(null)
+      }, 240)
+    }
+  }, [currentNavIndex, orderedItems, router])
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (over && active.id !== over.id) {
+      const oldIndex = orderedItems.findIndex(i => i.href === active.id)
+      const newIndex = orderedItems.findIndex(i => i.href === over.id)
+      const newOrder = arrayMove(orderedItems, oldIndex, newIndex).map(i => i.href)
+      setNavOrder(newOrder)
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(newOrder))
+      } catch {
+        // Ignorar errores de localStorage (modo privado, cuota excedida, etc.)
+      }
+    }
+  }
+
+  // FIX 5 — Callback estable para evitar nuevas closures en cada render
+  const handleMobileClose = useCallback(() => setMobileOpen(false), [])
 
   const handleLogout = () => startTransition(() => logout())
 
@@ -91,7 +485,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
     .toUpperCase()
     .slice(0, 2)
 
-  // Fetch pending break requests count
+  // Obtener conteo de solicitudes de descanso pendientes
   const fetchPendingBreakCount = useCallback(async () => {
     if (!selectedBranchId) { setPendingBreakCount(0); return }
     const { count } = await supabase
@@ -103,6 +497,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
   }, [supabase, selectedBranchId])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPendingBreakCount()
     const channel = supabase
       .channel('dashboard-break-requests')
@@ -113,68 +508,47 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
     return () => { supabase.removeChannel(channel) }
   }, [supabase, fetchPendingBreakCount])
 
-  function NavLinks() {
+  // FIX 2 — Renombrado a renderNavLinks (minúscula) para que React lo trate como
+  // llamada de función plana y no como un componente nuevo en cada render,
+  // evitando que DndContext pierda estado durante el arrastre.
+  function renderNavLinks() {
     return (
       <nav className="flex flex-col gap-1 px-3">
-        {navItems
-          .filter(item => item.requiredPermissions.some(pred => permissions[pred]))
-          .map((item) => {
-            const isActive =
-              item.href === '/dashboard'
-                ? pathname === '/dashboard'
-                : pathname.startsWith(item.href)
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setMobileOpen(false)}
-                className={cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                    : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-                )}
-              >
-                <item.icon className="size-4 shrink-0" />
-                {item.label}
-                {item.href === '/dashboard/equipo' && pendingBreakCount > 0 && (
-                  <span className="ml-auto flex size-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
-                    {pendingBreakCount}
-                  </span>
-                )}
-              </Link>
-            )
-          })}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={orderedItems.map(i => i.href)} strategy={verticalListSortingStrategy}>
+            {orderedItems.map((item) => {
+              const isActive =
+                item.href === '/dashboard'
+                  ? pathname === '/dashboard'
+                  : pathname.startsWith(item.href)
+              return (
+                <SortableNavItem
+                  key={item.href}
+                  item={item}
+                  isActive={isActive}
+                  isEditMode={isEditMode}
+                  pendingBreakCount={pendingBreakCount}
+                  onNavigate={handleMobileClose}
+                />
+              )
+            })}
+          </SortableContext>
+        </DndContext>
       </nav>
-    )
-  }
-
-  function SidebarContent() {
-    return (
-      <div className="flex h-full flex-col">
-        <div className="flex h-14 items-center gap-2 px-6">
-          <Scissors className="size-5" />
-          <span className="text-lg font-bold tracking-tight">Monaco</span>
-        </div>
-        <Separator className="bg-sidebar-border" />
-        <ScrollArea className="flex-1 py-4">
-          <NavLinks />
-        </ScrollArea>
-        <Separator className="bg-sidebar-border" />
-        <div className="p-4">
-          <p className="text-xs text-sidebar-foreground/50">
-            {user.role === 'owner' ? 'Propietario' : 'Administrador'}
-          </p>
-          <p className="truncate text-sm font-medium">{user.full_name}</p>
-        </div>
-      </div>
     )
   }
 
   return (
     <div className="flex h-screen overflow-hidden">
       <aside className="hidden w-64 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
-        <SidebarContent />
+        <SidebarContent
+          isEditMode={isEditMode}
+          onToggleEditMode={() => setIsEditMode(p => !p)}
+          userRole={user.role}
+          userFullName={user.full_name}
+        >
+          {renderNavLinks()}
+        </SidebarContent>
       </aside>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -184,7 +558,14 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
           showCloseButton={false}
         >
           <SheetTitle className="sr-only">Menú de navegación</SheetTitle>
-          <SidebarContent />
+          <SidebarContent
+            isEditMode={isEditMode}
+            onToggleEditMode={() => setIsEditMode(p => !p)}
+            userRole={user.role}
+            userFullName={user.full_name}
+          >
+            {renderNavLinks()}
+          </SidebarContent>
         </SheetContent>
       </Sheet>
 
@@ -200,8 +581,10 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
           </Button>
 
           <div className="flex items-center gap-2 lg:hidden">
-            <Scissors className="size-4" />
-            <span className="font-semibold">Monaco</span>
+            <Scissors className="size-4 shrink-0" />
+            <span className="font-semibold truncate max-w-[160px]">
+              {currentNavIndex >= 0 ? orderedItems[currentNavIndex]?.label : 'Monaco'}
+            </span>
           </div>
 
           <div className="flex-1" />
@@ -232,11 +615,42 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
           </DropdownMenu>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
-          <BranchScopeProvider allowedBranchIds={allowedBranchIds}>
-            {children}
-          </BranchScopeProvider>
-        </main>
+        {/* Contenedor de swipe — overflow-hidden recorta el panel entrante */}
+        <div className="relative flex-1 overflow-hidden">
+          <main
+            ref={mainRef}
+            className="h-full overflow-y-auto overflow-x-hidden p-4 pb-16 lg:p-6 lg:pb-6"
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+          >
+            <BranchScopeProvider allowedBranchIds={allowedBranchIds}>
+              {children}
+            </BranchScopeProvider>
+          </main>
+
+          {/* Panel de sección entrante — solo visible durante el swipe en mobile */}
+          <div
+            ref={panelRef}
+            className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-5 bg-background lg:hidden"
+            style={{ visibility: 'hidden', transform: 'translateX(100%)' }}
+            aria-hidden="true"
+          >
+            {swipeTargetItem && (
+              <>
+                <div className="rounded-2xl bg-muted p-5 ring-1 ring-border/60">
+                  <swipeTargetItem.icon className="size-12 text-foreground/70" />
+                </div>
+                <p className="text-2xl font-semibold tracking-tight text-foreground">
+                  {swipeTargetItem.label}
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+        <MobileBottomNav
+          orderedItems={orderedItems}
+          currentIndex={currentNavIndex < 0 ? 0 : currentNavIndex}
+        />
       </div>
     </div>
   )

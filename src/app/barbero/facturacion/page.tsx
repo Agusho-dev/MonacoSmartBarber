@@ -59,7 +59,7 @@ export default async function BarberBillingPage() {
     <div className="min-h-dvh bg-background">
       <div className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur">
         <div className="flex items-center gap-3 px-4 py-3">
-          <Link href="/barbero/cola">
+          <Link href="/barbero/fila">
             <Button variant="ghost" size="icon">
               <ArrowLeft className="size-5" />
             </Button>

@@ -9,6 +9,13 @@ import { verifyBarberPin } from '@/lib/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
+import {
   Scissors,
   ArrowLeft,
   Delete,
@@ -25,14 +32,14 @@ import {
   Coffee,
   ScanFace,
   Settings2,
+  ChevronDown,
+  Sparkles,
 } from 'lucide-react'
 import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule, AppSettings } from '@/lib/types/database'
 import {
   buildBarberAvgMinutes,
   getBarberStats,
-  formatWaitTime,
   statusConfig,
-  getLoadColor,
   assignDynamicBarbers,
   isBarberBlockedByShiftEnd,
 } from '@/lib/barber-utils'
@@ -138,6 +145,7 @@ export default function CheckinPage() {
 
   const [services, setServices] = useState<Service[]>([])
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null)
+  const [showBarberPreference, setShowBarberPreference] = useState(false)
 
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -432,7 +440,7 @@ export default function CheckinPage() {
       .from('staff')
       .select('*')
       .eq('branch_id', selectedBranch.id)
-      .eq('role', 'barber')
+      .in('role', ['barber', 'admin', 'owner'])
       .eq('is_active', true)
       .order('full_name')
       .then(({ data }) => {
@@ -445,6 +453,7 @@ export default function CheckinPage() {
     setAnimKey((k) => k + 1)
     setStep(next)
     setError('')
+    setShowBarberPreference(false)
   }
 
   const reset = () => {
@@ -593,14 +602,7 @@ export default function CheckinPage() {
     return assignDynamicBarbers(queueEntries, barbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs)
   }, [queueEntries, barbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs])
 
-  const maxLoad = useMemo(
-    () =>
-      Math.max(
-        1,
-        ...barbers.map((b) => getBarberStats(b, dynamicEntries, barberAvgMinutes).totalLoad)
-      ),
-    [barbers, dynamicEntries, barberAvgMinutes]
-  )
+
 
   const minWaitBarber = useMemo(() => {
     const active = barbers.filter(b =>
@@ -641,6 +643,29 @@ export default function CheckinPage() {
     if (!minWaitBarber) return 0
     return getBarberStats(minWaitBarber, dynamicEntries, barberAvgMinutes).eta
   }, [minWaitBarber, dynamicEntries, barberAvgMinutes])
+
+  // ── Availability level: 1 (green/low), 2 (yellow/medium), 3 (orange/high) ──
+  const getAvailabilityLevel = useCallback((eta: number): 1 | 2 | 3 => {
+    // Calculate the global average service time
+    const avgValues = Object.entries(barberAvgMinutes)
+      .filter(([k]) => k !== '__fallback')
+      .map(([, v]) => v)
+    const globalAvg = avgValues.length > 0
+      ? avgValues.reduce((a, b) => a + b, 0) / avgValues.length
+      : barberAvgMinutes.__fallback ?? 30
+
+    // Level thresholds based on avg service time
+    // 1 chair (green) = less than 1x average (quick service)
+    // 2 chairs (yellow) = between 1x and 2x average
+    // 3 chairs (orange) = more than 2x average
+    if (eta <= globalAvg * 0.8) return 1
+    if (eta <= globalAvg * 1.8) return 2
+    return 3
+  }, [barberAvgMinutes])
+
+  const globalAvailability = useMemo(() => {
+    return getAvailabilityLevel(minWaitEta)
+  }, [minWaitEta, getAvailabilityLevel])
 
   // ── Face ID handlers ──
 
@@ -924,6 +949,42 @@ export default function CheckinPage() {
     </button>
   ) : null
 
+  // ── Availability indicator (3 chairs) ──
+  const AvailabilityIndicator = ({ level, size = 'md' }: { level: 1 | 2 | 3; size?: 'sm' | 'md' | 'lg' }) => {
+    const sizeClass = size === 'lg' ? 'size-7 md:size-8' : size === 'md' ? 'size-5 md:size-6' : 'size-4 md:size-5'
+    const gapClass = size === 'lg' ? 'gap-2' : size === 'md' ? 'gap-1.5' : 'gap-1'
+    const labels = ['Baja espera', 'Espera media', 'Espera elevada']
+    const colors = [
+      { active: 'text-emerald-400', inactive: 'text-white/15' },
+      { active: 'text-amber-400', inactive: 'text-white/15' },
+      { active: 'text-orange-400', inactive: 'text-white/15' },
+    ]
+    const bgColors = [
+      'bg-emerald-400/10 border-emerald-400/30',
+      'bg-amber-400/10 border-amber-400/30',
+      'bg-orange-400/10 border-orange-400/30',
+    ]
+    const textColors = ['text-emerald-400', 'text-amber-400', 'text-orange-400']
+    const color = colors[level - 1]
+
+    return (
+      <div className="flex flex-col items-center gap-1.5">
+        <div className={`flex items-center ${gapClass}`}>
+          {[1, 2, 3].map((i) => (
+            <svg key={i} className={`${sizeClass} ${i <= level ? color.active : color.inactive} transition-colors duration-300`} viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
+            </svg>
+          ))}
+        </div>
+        {size !== 'sm' && (
+          <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${bgColors[level - 1]}`}>
+            <span className={textColors[level - 1]}>{labels[level - 1]}</span>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const renderBarberCard = (
     barber: Staff,
     onSelect: (barberId: string) => void,
@@ -932,7 +993,7 @@ export default function CheckinPage() {
     const isNotClockedIn = notClockedInBarbers.has(barber.id)
     const stats = getBarberStats(barber, dynamicEntries, barberAvgMinutes)
     const cfg = statusConfig[stats.status]
-    const loadPct = Math.min(100, (stats.totalLoad / Math.max(maxLoad, 4)) * 100)
+    const availLevel = getAvailabilityLevel(stats.eta)
 
     const ringColor = isNotClockedIn
       ? 'ring-orange-500/60'
@@ -953,7 +1014,7 @@ export default function CheckinPage() {
           className="w-full p-4 text-left hover:bg-white/6 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
         >
           <div className="flex flex-col items-center gap-3">
-            <div className={`shrink-0 rounded-full ring-2 ring-offset-2 ring-offset-black ${ringColor}`}>
+            <div className={`shrink-0 rounded-full ring-2 ring-offset-2 ring-offset-zinc-700 ${ringColor}`}>
               {barber.avatar_url ? (
                 <img
                   src={barber.avatar_url}
@@ -995,21 +1056,9 @@ export default function CheckinPage() {
                     {!stats.attending && stats.waiting === 0 && 'Sin espera'}
                   </p>
 
-                  <div className="space-y-1 pt-0.5">
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>
-                        {stats.totalLoad} {stats.totalLoad === 1 ? 'persona' : 'personas'}
-                      </span>
-                      <span className="font-semibold text-foreground text-sm">
-                        {formatWaitTime(stats.eta)}
-                      </span>
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-white/6 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${getLoadColor(stats.totalLoad)}`}
-                        style={{ width: `${loadPct}%` }}
-                      />
-                    </div>
+                  {/* Availability indicator instead of wait time */}
+                  <div className="pt-1">
+                    <AvailabilityIndicator level={availLevel} size="sm" />
                   </div>
                 </>
               )}
@@ -1031,45 +1080,140 @@ export default function CheckinPage() {
     )
 
     return (
-      <div className="w-full space-y-4 overflow-y-auto min-h-0 flex-1">
+      <div className="w-full flex flex-col gap-5 overflow-y-auto min-h-0 flex-1">
 
-        {minWaitBarber && (
-          <button
-            onClick={() => onSelect(null as unknown as string)}
-            disabled={submitting}
-            className="w-full flex items-center gap-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5 text-left transition-all duration-200 hover:bg-emerald-500/10 hover:border-emerald-500/50 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
-          >
-            <div className="shrink-0 size-14 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-              <Zap className="size-7 text-emerald-400" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-xl font-semibold text-emerald-300">Menor espera</p>
-              <p className="text-base text-emerald-400/70 mt-0.5">
-                Te atiende el barbero con menos cola
-              </p>
-            </div>
-            <div className="text-right shrink-0">
-              <p className="text-2xl font-bold text-emerald-400">
-                {formatWaitTime(minWaitEta)}
-              </p>
-            </div>
-          </button>
-        )}
-
-        <div className="w-full h-px bg-white/8" />
-
-        <div className="grid grid-cols-2 gap-3">
-          {availableBarbers.map((barber) => renderBarberCard(barber, onSelect, showExpand))}
+        {/* ── Title ── */}
+        <div className="text-center">
+          <h2 className="text-2xl md:text-3xl font-bold">¿Cómo querés atenderte?</h2>
+          <p className="text-muted-foreground mt-1 text-base md:text-lg">Elegí una opción para continuar</p>
         </div>
 
-        {notArrivedBarbers.length > 0 && (
-          <>
-            <div className="w-full h-px bg-white/8" />
-            <div className="grid grid-cols-2 gap-3">
-              {notArrivedBarbers.map((barber) => renderBarberCard(barber, onSelect, showExpand))}
+        {/* ── TWO MAIN CTAs ── */}
+        <div className="flex flex-col gap-4 w-full">
+
+          {/* ── CTA 1: Menor Espera (recommended, bigger, glowing border) ── */}
+          {minWaitBarber && (
+            <div className="relative rounded-[1.25rem]" style={{ padding: '2px' }}>
+              {/* Animated rotating border glow */}
+              <div className="absolute inset-0 rounded-[1.25rem] overflow-hidden pointer-events-none">
+                <div className="absolute inset-[-200%] bg-[conic-gradient(from_0deg,transparent_0%,rgba(16,185,129,0.5)_10%,rgba(20,184,166,0.5)_20%,transparent_30%)] animate-[checkin-border-rotate_3s_linear_infinite]" />
+              </div>
+              {/* Inner glow pulse */}
+              <div className="absolute -inset-2 rounded-[1.75rem] bg-gradient-to-r from-emerald-900/60 via-teal-900/60 to-emerald-900/60 blur-xl opacity-40 animate-[checkin-pulse-glow_3s_ease-in-out_infinite] pointer-events-none" />
+              
+              <button
+                onClick={() => onSelect(null as unknown as string)}
+                disabled={submitting}
+                className="group relative w-full flex items-center gap-5 rounded-[1.15rem] bg-gradient-to-r from-emerald-950/90 to-cyan-950/90 p-7 md:p-8 text-left transition-all duration-300 hover:shadow-[0_0_50px_rgba(16,185,129,0.3)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
+              >
+                {/* Shimmer sweep */}
+                <div className="absolute inset-0 overflow-hidden rounded-[1.15rem] pointer-events-none">
+                  <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.06) 50%, transparent 100%)', animation: 'checkin-shimmer 2.5s ease-in-out infinite' }} />
+                </div>
+
+                {/* Icon */}
+                <div className="relative shrink-0">
+                  <div className="size-[4.5rem] md:size-20 rounded-xl bg-gradient-to-br from-emerald-400/25 to-cyan-400/25 border border-emerald-400/40 flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+                    <Zap className="size-9 md:size-10 text-emerald-300 drop-shadow-[0_0_8px_rgba(16,185,129,0.5)]" fill="currentColor" />
+                  </div>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <h3 className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-emerald-200 via-white to-cyan-200 bg-clip-text text-transparent">
+                      Menor espera
+                    </h3>
+                    <div className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-400/15 border border-emerald-400/30">
+                      <Sparkles className="size-2.5 text-cyan-300" />
+                      <span className="text-emerald-300">IA</span>
+                    </div>
+                  </div>
+                  <p className="text-sm md:text-base text-emerald-300/70">
+                    Te asignamos al barbero con menos fila
+                  </p>
+                  <p className="text-xs text-emerald-400/50 mt-1.5 font-medium tracking-wide uppercase">
+                    Tocá para continuar →
+                  </p>
+                </div>
+
+                {/* Availability indicator */}
+                <div className="shrink-0">
+                  <AvailabilityIndicator level={globalAvailability} size="lg" />
+                </div>
+              </button>
             </div>
-          </>
-        )}
+          )}
+
+          {/* ── CTA 2: Elegir barbero (secondary, smaller) ── */}
+          <button
+            onClick={() => setShowBarberPreference(true)}
+            disabled={submitting}
+            className="group relative w-full flex items-center gap-4 rounded-2xl border-2 border-violet-400/30 bg-gradient-to-r from-violet-950/40 to-indigo-950/40 p-4 md:p-5 text-left transition-all duration-300 hover:border-violet-400/60 hover:shadow-[0_0_30px_rgba(139,92,246,0.15)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
+          >
+            {/* Icon */}
+            <div className="relative shrink-0">
+              <div className="size-12 md:size-14 rounded-xl bg-gradient-to-br from-violet-400/20 to-indigo-400/20 border border-violet-400/30 flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
+                <User className="size-6 md:size-7 text-violet-300" />
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 min-w-0">
+              <h3 className="text-xl md:text-2xl font-bold text-white">
+                Elegir barbero
+              </h3>
+              <p className="text-xs md:text-sm text-violet-300/70 mt-0.5">
+                ¿Tenés preferencia? Elegí con quién atenderte
+              </p>
+            </div>
+
+            {/* Arrow indicator */}
+            <div className="shrink-0">
+              <ChevronDown className={`size-6 text-violet-300/60 transition-transform duration-300 ${showBarberPreference ? 'rotate-180' : ''}`} />
+            </div>
+          </button>
+        </div>
+
+        {/* ── Barber Selection Dialog Modal ── */}
+        <Dialog open={showBarberPreference} onOpenChange={setShowBarberPreference}>
+          <DialogContent className="max-w-2xl bg-zinc-700/95 backdrop-blur-2xl border-white/10 p-6 md:p-8 rounded-[2rem] shadow-2xl">
+            <DialogHeader className="text-left mb-6">
+              <DialogTitle className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-violet-200 to-indigo-200 bg-clip-text text-transparent">
+                Elegí tu barbero
+              </DialogTitle>
+              <DialogDescription className="text-base text-violet-300/70">
+                Seleccioná con quién te querés atender
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="overflow-y-auto max-h-[60vh] pr-2 -mr-2 space-y-3 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/20">
+              <div className="grid grid-cols-2 gap-3 md:gap-4 pb-2">
+                {availableBarbers.map((barber) => renderBarberCard(barber, (id) => {
+                  setShowBarberPreference(false);
+                  onSelect(id);
+                }, showExpand))}
+              </div>
+
+              {notArrivedBarbers.length > 0 && (
+                <>
+                  <div className="w-full h-px bg-white/8 my-6" />
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="h-px bg-white/10 flex-1" />
+                    <h4 className="text-xs font-bold text-white/40 uppercase tracking-widest shrink-0">Aún no llegaron</h4>
+                    <div className="h-px bg-white/10 flex-1" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 md:gap-4 pb-4">
+                    {notArrivedBarbers.map((barber) => renderBarberCard(barber, (id) => {
+                      setShowBarberPreference(false);
+                      onSelect(id);
+                    }, showExpand))}
+                  </div>
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }
@@ -1427,12 +1571,11 @@ export default function CheckinPage() {
       {step === 'barber' && (
         <div
           key={`barber-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-4 md:gap-5 px-4 md:px-6 pt-8 md:pt-10 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
 
           <div className="text-center">
-            <h2 className="text-2xl md:text-3xl font-bold">Elegí tu barbero</h2>
-            <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
+            <p className="text-muted-foreground text-base md:text-lg">
               {name} · {selectedBranch?.name}
             </p>
           </div>
@@ -1462,6 +1605,26 @@ export default function CheckinPage() {
               <span className="text-lg">Registrando...</span>
             </div>
           )}
+
+          {/* CSS Animations for barber selection */}
+          <style>{`
+            @keyframes checkin-pulse-glow {
+              0%, 100% { opacity: 0.4; transform: scale(1); }
+              50% { opacity: 0.8; transform: scale(1.02); }
+            }
+            @keyframes checkin-shimmer {
+              0% { transform: translateX(-100%); }
+              100% { transform: translateX(200%); }
+            }
+            @keyframes checkin-float-particle {
+              0%, 100% { transform: translateY(0) scale(1); opacity: 0.4; }
+              50% { transform: translateY(-12px) scale(1.3); opacity: 0.8; }
+            }
+            @keyframes checkin-border-rotate {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          `}</style>
         </div>
       )}
 

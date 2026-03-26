@@ -214,16 +214,16 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h2 className="text-2xl font-bold tracking-tight">Productos</h2>
+                    <h2 className="text-xl font-bold tracking-tight lg:text-2xl">Productos</h2>
                     <p className="text-sm text-muted-foreground">
                         Gestión de inventario y ventas
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <BranchSelector branches={branches} />
-                    <Button onClick={openAdd}>
+                    <Button onClick={openAdd} size="sm" className="w-full sm:w-auto">
                         <Plus className="mr-2 size-4" />
                         Agregar producto
                     </Button>
@@ -243,7 +243,8 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
                 </TabsList>
 
                 <TabsContent value="inventory" className="space-y-4 m-0">
-                    <div className="rounded-md border">
+                    {/* Vista tabla — solo en desktop */}
+                    <div className="hidden md:block rounded-md border">
                         <Table>
                             <TableHeader>
                                 <TableRow>
@@ -314,10 +315,76 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
                             </TableBody>
                         </Table>
                     </div>
+
+                    {/* Vista cards — solo en mobile */}
+                    <div className="md:hidden space-y-3">
+                        {filteredProducts.length === 0 ? (
+                            <div className="rounded-lg border py-10 text-center text-sm text-muted-foreground">
+                                No hay productos registrados
+                            </div>
+                        ) : (
+                            filteredProducts.map((p) => (
+                                <div key={p.id} className="rounded-lg border p-4">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="min-w-0 flex-1">
+                                            <p className="font-medium truncate">{p.name}</p>
+                                            <p className="text-xs text-muted-foreground">{getBranchName(p.branch_id)}</p>
+                                        </div>
+                                        <div className="flex shrink-0 items-center gap-0.5">
+                                            <Badge variant={p.is_active ? 'default' : 'secondary'} className="text-[10px] mr-1">
+                                                {p.is_active ? 'Activo' : 'Inactivo'}
+                                            </Badge>
+                                            <Button variant="ghost" size="icon-xs" onClick={() => openEdit(p)}>
+                                                <Pencil className="size-3" />
+                                            </Button>
+                                            <Button variant="ghost" size="icon-xs" onClick={() => handleToggle(p)}>
+                                                <Power className="size-3" />
+                                            </Button>
+                                            <Button variant="ghost" size="icon-xs" onClick={() => setDeleteId(p.id)}>
+                                                <Trash2 className="size-3" />
+                                            </Button>
+                                            {p.is_active && (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon-xs"
+                                                    className="text-emerald-600 hover:text-emerald-500"
+                                                    onClick={() => openSell(p)}
+                                                    title="Registrar venta"
+                                                >
+                                                    <ShoppingCart className="size-3" />
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
+                                        <div>
+                                            <p className="text-[10px] text-muted-foreground">Precio público</p>
+                                            <p className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                                {formatCurrency(p.sale_price)}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] text-muted-foreground">Comisión</p>
+                                            <p className="font-medium text-blue-600 dark:text-blue-400">
+                                                {formatCurrency(p.barber_commission)}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] text-muted-foreground">Stock</p>
+                                            <p className="font-medium">
+                                                {p.stock === null ? 'Ilimitado' : p.stock}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
                 </TabsContent>
 
                 <TabsContent value="sales" className="space-y-4 m-0">
-                    <div className="rounded-md border">
+                    {/* Vista tabla — solo en desktop */}
+                    <div className="hidden md:block rounded-md border">
                         <Table>
                             <TableHeader>
                                 <TableRow>
@@ -334,7 +401,7 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
                             <TableBody>
                                 {filteredSales.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                                        <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                                             No hay ventas en este mes.
                                         </TableCell>
                                     </TableRow>
@@ -365,6 +432,42 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
                             </TableBody>
                         </Table>
                     </div>
+
+                    {/* Vista cards — solo en mobile */}
+                    <div className="md:hidden space-y-3">
+                        {filteredSales.length === 0 ? (
+                            <div className="rounded-lg border py-10 text-center text-sm text-muted-foreground">
+                                No hay ventas en este mes.
+                            </div>
+                        ) : (
+                            filteredSales.map((s) => (
+                                <div key={s.id} className="rounded-lg border p-4">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="min-w-0 flex-1">
+                                            <p className="font-medium truncate">{s.product?.name}</p>
+                                            <p className="text-xs text-muted-foreground">{s.barber?.full_name}</p>
+                                        </div>
+                                        <div className="shrink-0 text-right">
+                                            <p className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                                {formatCurrency(s.unit_price * s.quantity)}
+                                            </p>
+                                            <Badge variant="outline" className="font-normal text-[10px]">
+                                                {paymentMethodMap[s.payment_method] || s.payment_method}
+                                            </Badge>
+                                        </div>
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                        <span>{format(new Date(s.sold_at), "d 'de' MMMM, HH:mm", { locale: es })}</span>
+                                        <span>Cant: {s.quantity}</span>
+                                        <span>Precio u.: {formatCurrency(s.unit_price)}</span>
+                                        <span className="text-blue-600 dark:text-blue-400">
+                                            Comisión: {formatCurrency(s.commission_amount)}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
                 </TabsContent>
             </Tabs>
 
@@ -387,7 +490,7 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
                             />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div className="grid gap-2">
                                 <Label>Precio de Venta (Público) *</Label>
                                 <Input
@@ -410,7 +513,7 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div className="grid gap-2">
                                 <Label>Comisión Barbero</Label>
                                 <Input
@@ -502,7 +605,7 @@ export function ProductosClient({ products, branches, sales, barbers }: Props) {
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div className="grid gap-2">
                                 <Label>Cantidad</Label>
                                 <Input

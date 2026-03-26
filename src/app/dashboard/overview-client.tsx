@@ -98,7 +98,7 @@ export function OverviewClient({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-2xl font-bold tracking-tight">Inicio</h2>
         <BranchSelector branches={branches} />
       </div>
@@ -121,14 +121,14 @@ export function OverviewClient({
         </Link>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard title="Clientes hoy" value={uniqueClientsToday} icon={Users} />
-        <StatCard title="En cola" value={clientsWaiting} icon={Clock} />
+        <StatCard title="En fila" value={clientsWaiting} icon={Clock} />
         <StatCard title="En atención" value={clientsInProgress} icon={Scissors} />
         <StatCard title="Cortes completados" value={completedToday} icon={CircleCheck} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader>
             <CardDescription>Ingresos de hoy</CardDescription>
@@ -151,13 +151,13 @@ export function OverviewClient({
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-2">
+        <Card className="md:col-span-2">
           <CardHeader>
             <CardTitle>Estadísticas rápidas</CardTitle>
             <CardDescription>Resumen del período</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-6 sm:grid-cols-3">
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
               <QuickStat
                 icon={UserPlus}
                 label="Clientes nuevos"
@@ -242,7 +242,7 @@ function StatCard({
         </CardAction>
       </CardHeader>
       <CardContent>
-        <p className="text-3xl font-bold">{value}</p>
+        <p className="text-2xl font-bold lg:text-3xl">{value}</p>
       </CardContent>
     </Card>
   )

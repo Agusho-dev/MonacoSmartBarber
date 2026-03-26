@@ -124,30 +124,32 @@ export function AppMovilClient({
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div className="flex items-center gap-3">
-        <Smartphone className="size-7 text-primary" />
+        <Smartphone className="size-6 shrink-0 text-primary lg:size-7" />
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">APP Móvil</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl font-bold tracking-tight lg:text-3xl">APP Móvil</h1>
+          <p className="text-sm text-muted-foreground lg:text-base">
             Configurá los contenidos y recompensas que ven los clientes en la app.
           </p>
         </div>
       </div>
 
       <Tabs defaultValue="puntos" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="puntos" className="gap-2">
-            <Gift className="size-4" />
-            Puntos
-          </TabsTrigger>
-          <TabsTrigger value="catalogo" className="gap-2">
-            <Gift className="size-4" />
-            Catálogo
-          </TabsTrigger>
-          <TabsTrigger value="cartelera" className="gap-2">
-            <Megaphone className="size-4" />
-            Cartelera
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+          <TabsList className="grid w-full min-w-[280px] grid-cols-3 sm:w-full">
+            <TabsTrigger value="puntos" className="gap-1.5 text-xs sm:text-sm sm:gap-2">
+              <Gift className="size-3.5 sm:size-4" />
+              Puntos
+            </TabsTrigger>
+            <TabsTrigger value="catalogo" className="gap-1.5 text-xs sm:text-sm sm:gap-2">
+              <Gift className="size-3.5 sm:size-4" />
+              Catálogo
+            </TabsTrigger>
+            <TabsTrigger value="cartelera" className="gap-1.5 text-xs sm:text-sm sm:gap-2">
+              <Megaphone className="size-3.5 sm:size-4" />
+              Cartelera
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="puntos">
           <PuntosTab branches={branches} initialConfigs={initialConfigs} />
@@ -430,20 +432,21 @@ function CatalogoTab({ initialCatalog }: { initialCatalog: CatalogItem[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold">Catálogo de Premios</h2>
           <p className="text-sm text-muted-foreground">
             Premios que los clientes pueden canjear con puntos desde la app.
           </p>
         </div>
-        <Button onClick={openAdd}>
+        <Button onClick={openAdd} className="w-full sm:w-auto">
           <Plus className="mr-2 size-4" />
           Agregar Premio
         </Button>
       </div>
 
-      <div className="rounded-lg border">
+      {/* Vista tabla — desktop */}
+      <div className="hidden rounded-lg border md:block">
         <Table>
           <TableHeader>
             <TableRow>
@@ -497,6 +500,55 @@ function CatalogoTab({ initialCatalog }: { initialCatalog: CatalogItem[] }) {
             )}
           </TableBody>
         </Table>
+      </div>
+
+      {/* Vista cards — mobile */}
+      <div className="space-y-3 md:hidden">
+        {initialCatalog.length === 0 ? (
+          <div className="rounded-lg border p-8 text-center text-muted-foreground">
+            No hay premios en el catálogo. Agregá uno para empezar.
+          </div>
+        ) : (
+          initialCatalog.map((item) => (
+            <div key={item.id} className="rounded-lg border p-4">
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-semibold leading-tight">{item.name}</p>
+                  <Badge variant="secondary" className="mt-1 text-xs">
+                    {REWARD_TYPES[item.type] || item.type}
+                  </Badge>
+                </div>
+                <Badge variant={item.is_active ? 'default' : 'secondary'} className="shrink-0">
+                  {item.is_active ? 'Activo' : 'Inactivo'}
+                </Badge>
+              </div>
+              <div className="mb-3 grid grid-cols-3 gap-2 text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground">Puntos</p>
+                  <p className="font-medium">{item.points_cost}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Descuento</p>
+                  <p className="font-medium">{item.discount_pct != null ? `${item.discount_pct}%` : '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Stock</p>
+                  <p className="font-medium">{item.stock != null ? item.stock : '∞'}</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => openEdit(item)}>
+                  <Pencil className="mr-1.5 size-3.5" />
+                  Editar
+                </Button>
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => toggleActive(item)}>
+                  <Power className="mr-1.5 size-3.5" />
+                  {item.is_active ? 'Desactivar' : 'Activar'}
+                </Button>
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
       {/* Dialog */}
@@ -768,20 +820,21 @@ function CarteleraTab({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold">Cartelera</h2>
           <p className="text-sm text-muted-foreground">
             Banners y promociones que aparecen en el inicio de la app.
           </p>
         </div>
-        <Button onClick={openAdd}>
+        <Button onClick={openAdd} className="w-full sm:w-auto">
           <Plus className="mr-2 size-4" />
           Agregar Item
         </Button>
       </div>
 
-      <div className="rounded-lg border">
+      {/* Vista tabla — desktop */}
+      <div className="hidden rounded-lg border md:block">
         <Table>
           <TableHeader>
             <TableRow>
@@ -832,6 +885,49 @@ function CarteleraTab({
             )}
           </TableBody>
         </Table>
+      </div>
+
+      {/* Vista cards — mobile */}
+      <div className="space-y-3 md:hidden">
+        {initialBillboard.length === 0 ? (
+          <div className="rounded-lg border p-8 text-center text-muted-foreground">
+            <ImageIcon className="mx-auto mb-2 size-8 opacity-20" />
+            No hay items en la cartelera. Agregá uno para empezar.
+          </div>
+        ) : (
+          initialBillboard.map((item) => (
+            <div key={item.id} className="rounded-lg border p-4">
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-semibold leading-tight">{item.title}</p>
+                  {item.subtitle && (
+                    <p className="text-sm text-muted-foreground">{item.subtitle}</p>
+                  )}
+                </div>
+                <Badge variant={item.is_active ? 'default' : 'secondary'} className="shrink-0">
+                  {item.is_active ? 'Activo' : 'Inactivo'}
+                </Badge>
+              </div>
+              <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                <span>Sucursal: <strong className="text-foreground">{item.branch?.name || 'Todas'}</strong></span>
+                <span>Orden: <strong className="text-foreground">{item.sort_order}</strong></span>
+                <span>
+                  {formatDateShort(item.starts_at)} – {formatDateShort(item.ends_at)}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => openEdit(item)}>
+                  <Pencil className="mr-1.5 size-3.5" />
+                  Editar
+                </Button>
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => toggleActive(item)}>
+                  <Power className="mr-1.5 size-3.5" />
+                  {item.is_active ? 'Desactivar' : 'Activar'}
+                </Button>
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
       {/* Dialog */}

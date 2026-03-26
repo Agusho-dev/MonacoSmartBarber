@@ -1,18 +1,19 @@
 import type { Metadata } from 'next'
 import { createClient } from '@/lib/supabase/server'
-import { ColaClient } from './cola-client'
+import { FilaClient } from './fila-client'
 
 export const metadata: Metadata = {
-  title: 'Cola | Monaco Smart Barber',
+  title: 'Fila | Monaco Smart Barber',
 }
 
-export default async function ColaAdminPage() {
+export default async function FilaAdminPage() {
   const supabase = await createClient()
 
   const [
     { data: entries },
     { data: barbers },
     { data: branches },
+    { data: breakConfigs },
   ] = await Promise.all([
     supabase
       .from('queue_entries')
@@ -21,7 +22,7 @@ export default async function ColaAdminPage() {
       .order('position'),
     supabase
       .from('staff')
-      .select('id, full_name, branch_id, status, is_active')
+      .select('id, full_name, branch_id, status, is_active, hidden_from_checkin, avatar_url')
       .eq('role', 'barber')
       .eq('is_active', true)
       .order('full_name'),
@@ -29,13 +30,19 @@ export default async function ColaAdminPage() {
       .from('branches')
       .select('id, name')
       .eq('is_active', true),
+    supabase
+      .from('break_configs')
+      .select('*')
+      .eq('is_active', true)
+      .order('name'),
   ])
 
   return (
-    <ColaClient
+    <FilaClient
       initialEntries={entries ?? []}
       barbers={barbers ?? []}
       branches={branches ?? []}
+      breakConfigs={breakConfigs ?? []}
     />
   )
 }

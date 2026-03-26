@@ -44,6 +44,7 @@ interface EquipoClientProps {
     // Disciplina
     disciplinaryRules: unknown[]
     disciplinaryEvents: unknown[]
+    attendanceLogs: unknown[]
     defaultPeriod: string
     fromDate: string
     // Roles
@@ -66,6 +67,7 @@ export function EquipoClient({
     incentiveAchievements,
     disciplinaryRules,
     disciplinaryEvents,
+    attendanceLogs,
     defaultPeriod,
     fromDate,
     roles,
@@ -144,7 +146,7 @@ export function EquipoClient({
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight">Equipo</h1>
                     <p className="text-muted-foreground">
@@ -162,15 +164,16 @@ export function EquipoClient({
                             <button
                                 key={tab.id}
                                 onClick={() => handleTabChange(tab.id)}
+                                title={tab.label}
                                 className={cn(
-                                    'flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all whitespace-nowrap',
+                                    'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-all whitespace-nowrap',
                                     activeTab === tab.id
                                         ? 'bg-background text-foreground shadow-sm'
                                         : 'text-muted-foreground hover:text-foreground'
                                 )}
                             >
                                 <tab.icon className="size-4 shrink-0" />
-                                {tab.label}
+                                <span className="hidden sm:inline">{tab.label}</span>
                             </button>
                         )
                     })}
@@ -182,6 +185,7 @@ export function EquipoClient({
                 {activeTab === 'barberos' && (
                     <BarberosClient
                         barbers={barbers as Parameters<typeof BarberosClient>[0]['barbers']}
+                        branches={branches as Parameters<typeof BarberosClient>[0]['branches']}
                         todayVisits={todayVisits as Parameters<typeof BarberosClient>[0]['todayVisits']}
                         roles={roles}
                         serviceHistory={serviceHistory as Parameters<typeof BarberosClient>[0]['serviceHistory']}
@@ -229,17 +233,19 @@ export function EquipoClient({
                         rules={disciplinaryRules as Parameters<typeof DisciplinaClient>[0]['rules']}
                         barbers={
                             (barbers as unknown[])
-                                .filter((b: unknown) => (b as { role: string }).role === 'barber' && (b as { is_active: boolean }).is_active)
+                                .filter((b: unknown) => (b as { is_active: boolean }).is_active)
                                 .map((b: unknown) => ({
                                     id: (b as { id: string }).id,
                                     full_name: (b as { full_name: string }).full_name,
                                     branch_id: (b as { branch_id: string }).branch_id,
+                                    role: (b as { role: string }).role,
                                 })) as Parameters<typeof DisciplinaClient>[0]['barbers']
                         }
                         events={disciplinaryEvents as Parameters<typeof DisciplinaClient>[0]['events']}
                         fromDate={fromDate}
                         activeBreakEntries={activeBreakEntries as Parameters<typeof DisciplinaClient>[0]['activeBreakEntries']}
                         breakOvertimeHistory={breakOvertimeHistory as Parameters<typeof DisciplinaClient>[0]['breakOvertimeHistory']}
+                        attendanceLogs={attendanceLogs as Parameters<typeof DisciplinaClient>[0]['attendanceLogs']}
                     />
                 )}
                 {activeTab === 'roles' && isOwner && (
