@@ -171,3 +171,21 @@ export async function updateRewardsConfig(formData: FormData) {
   revalidatePath('/dashboard/configuracion')
   return { success: true }
 }
+
+export async function updateCheckinBgColor(color: 'white' | 'black' | 'graphite') {
+  const supabase = await createClient()
+
+  const { data: existing } = await supabase
+    .from('app_settings')
+    .select('id')
+    .maybeSingle()
+
+  const { error } = existing
+    ? await supabase.from('app_settings').update({ checkin_bg_color: color }).eq('id', existing.id)
+    : await supabase.from('app_settings').insert({ checkin_bg_color: color })
+
+  if (error) return { error: error.message }
+  revalidatePath('/dashboard/configuracion')
+  revalidatePath('/(tablet)/checkin')
+  return { success: true }
+}

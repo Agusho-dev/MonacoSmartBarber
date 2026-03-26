@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
-import { updateAppSettings, updateRewardsConfig } from '@/lib/actions/settings'
+import { updateAppSettings, updateRewardsConfig, updateCheckinBgColor } from '@/lib/actions/settings'
 import type { AppSettings, RewardsConfig } from '@/lib/types/database'
 import {
   Card,
@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Clock, UserX, Gift, Save, Timer, AlertTriangle } from 'lucide-react'
+import { Clock, UserX, Gift, Save, Timer, AlertTriangle, Monitor } from 'lucide-react'
 
 const DAY_OPTIONS = [
   { value: 1, label: 'Lun' },
@@ -43,6 +43,7 @@ export function ConfiguracionClient({ appSettings, rewardsConfig }: Props) {
         <ThresholdsCard settings={appSettings} />
         <ShiftEndMarginCard settings={appSettings} />
         <NextClientAlertCard settings={appSettings} />
+        <CheckinBgColorCard settings={appSettings} />
       </div>
 
       <RewardsSection configs={rewardsConfig} />
@@ -370,6 +371,70 @@ function NextClientAlertCard({ settings }: { settings: AppSettings | null }) {
           {isPending ? 'Guardando...' : 'Guardar alerta'}
         </Button>
       </CardFooter>
+    </Card>
+  )
+}
+
+/* ─── Checkin Background Color ─── */
+
+const CHECKIN_BG_OPTIONS = [
+  { value: 'white' as const, label: 'Blanco', bg: 'bg-white', border: 'border-zinc-300' },
+  { value: 'black' as const, label: 'Negro', bg: 'bg-zinc-950', border: 'border-zinc-700' },
+  { value: 'graphite' as const, label: 'Grafito', bg: 'bg-zinc-700', border: 'border-zinc-500' },
+]
+
+function CheckinBgColorCard({ settings }: { settings: AppSettings | null }) {
+  const [selected, setSelected] = useState<'white' | 'black' | 'graphite'>(
+    settings?.checkin_bg_color ?? 'graphite'
+  )
+  const [isPending, startTransition] = useTransition()
+
+  const handleSelect = (color: 'white' | 'black' | 'graphite') => {
+    setSelected(color)
+    startTransition(async () => {
+      const result = await updateCheckinBgColor(color)
+      if (result.error) toast.error(result.error)
+      else toast.success('Color de fondo actualizado')
+    })
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Monitor className="size-5 text-muted-foreground" />
+          <CardTitle>Fondo de terminal</CardTitle>
+        </div>
+        <CardDescription>Color de fondo de la pantalla de check-in</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex gap-6">
+          {CHECKIN_BG_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              disabled={isPending}
+              onClick={() => handleSelect(opt.value)}
+              className="flex flex-col items-center gap-2 group disabled:opacity-50"
+            >
+              <div
+                className={`size-12 rounded-full border-2 ${opt.bg} ${opt.border} transition-all ${
+                  selected === opt.value
+                    ? 'ring-2 ring-primary ring-offset-2'
+                    : 'group-hover:ring-2 group-hover:ring-muted-foreground group-hover:ring-offset-2'
+                }`}
+              />
+              <span
+                className={`text-xs ${
+                  selected === opt.value ? 'font-medium text-foreground' : 'text-muted-foreground'
+                }`}
+              >
+                {opt.label}
+              </span>
+            </button>
+          ))}
+        </div>
+      </CardContent>
     </Card>
   )
 }

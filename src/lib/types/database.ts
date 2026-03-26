@@ -300,6 +300,7 @@ export interface AppSettings {
   review_delay_minutes: number
   review_message_template: string | null
   wa_api_url: string | null
+  checkin_bg_color: 'white' | 'black' | 'graphite'
   updated_at: string
 }
 

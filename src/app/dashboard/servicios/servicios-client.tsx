@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Power, ChevronDown, ChevronUp, Percent } from 'lucide-react'
+import { Plus, Pencil, Power, ChevronDown, ChevronUp, Percent, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
@@ -29,6 +29,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   Select,
   SelectContent,
@@ -80,6 +90,11 @@ export function ServiciosClient({ services, branches, barbers, commissions }: Pr
   // Commission overrides state
   const [showOverrides, setShowOverrides] = useState(false)
   const [barberOverrides, setBarberOverrides] = useState<Record<string, string>>({})
+
+  // Delete state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deletingService, setDeletingService] = useState<ServiceWithBranch | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const filtered = selectedBranchId
     ? services.filter(
@@ -177,6 +192,22 @@ export function ServiciosClient({ services, branches, barbers, commissions }: Pr
 
     setSaving(false)
     setDialogOpen(false)
+    router.refresh()
+  }
+
+  function openDelete(service: ServiceWithBranch) {
+    setDeletingService(service)
+    setDeleteDialogOpen(true)
+  }
+
+  async function handleDelete() {
+    if (!deletingService) return
+    setDeleting(true)
+    await supabase.from('services').delete().eq('id', deletingService.id)
+    setDeleting(false)
+    setDeleteDialogOpen(false)
+    setDeletingService(null)
+    toast.success(`Servicio "${deletingService.name}" eliminado`)
     router.refresh()
   }
 
@@ -279,6 +310,14 @@ export function ServiciosClient({ services, branches, barbers, commissions }: Pr
                       >
                         <Power className="size-3" />
                       </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => openDelete(service)}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="size-3" />
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -320,6 +359,14 @@ export function ServiciosClient({ services, branches, barbers, commissions }: Pr
                     onClick={() => toggleActive(service)}
                   >
                     <Power className="size-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => openDelete(service)}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="size-3" />
                   </Button>
                 </div>
               </div>
@@ -527,6 +574,30 @@ export function ServiciosClient({ services, branches, barbers, commissions }: Pr
 
       {/* History section */}
       <HistorialServicios branches={branches} barbers={barbers} services={services} />
+
+      {/* Confirm delete dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar servicio?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Estás por eliminar <strong>{deletingService?.name}</strong>. Esta acción no se puede deshacer.
+              Las visitas históricas que tenían este servicio quedarán sin referencia de servicio,
+              pero sus datos de precio y comisión se conservan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? 'Eliminando...' : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
