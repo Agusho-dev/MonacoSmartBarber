@@ -36,11 +36,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { useBranchStore } from '@/stores/branch-store'
-import { RefreshCw, Search, Plus } from 'lucide-react'
+import { RefreshCw, Search, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { createManualVisit } from '@/lib/actions/visit-history'
+import { createManualVisit, deleteVisit } from '@/lib/actions/visit-history'
 
 interface Branch {
   id: string
@@ -120,6 +130,8 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
   const [editTagsInput, setEditTagsInput] = useState('')
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccountOption[]>([])
   const [saving, setSaving] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   // Dialog "Registrar servicio manualmente"
   const [addOpen, setAddOpen] = useState(false)
@@ -262,6 +274,21 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
       setEditingVisit(null)
     }
     setSaving(false)
+  }
+
+  async function handleDelete() {
+    if (!editingVisit) return
+    setDeleting(true)
+    const result = await deleteVisit(editingVisit.id)
+    if (result.error) {
+      toast.error('Error al eliminar la visita')
+    } else {
+      toast.success('Visita eliminada')
+      setVisits((prev) => prev.filter((v) => v.id !== editingVisit.id))
+      setEditingVisit(null)
+      setDeleteConfirmOpen(false)
+    }
+    setDeleting(false)
   }
 
   // Búsqueda de clientes para el formulario manual
@@ -606,146 +633,176 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
 
       {/* Edit sheet */}
       <Sheet open={!!editingVisit} onOpenChange={(open) => !open && setEditingVisit(null)}>
-        <SheetContent className="w-full !max-w-[440px] overflow-y-auto">
+        <SheetContent className="flex w-full flex-col !max-w-[420px] p-0 overflow-hidden">
           {editingVisit && (
-            <div className="space-y-5 pt-2">
-              <SheetHeader>
-                <SheetTitle>Editar visita</SheetTitle>
-              </SheetHeader>
-
-              {/* Info de solo lectura */}
-              <div className="rounded-lg border bg-muted/30 px-4 py-3 space-y-1.5 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Cliente</span>
-                  <span className="font-medium">
-                    {editingVisit.client?.name || 'Consumidor Final'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Barbero</span>
-                  <span>{editingVisit.barber?.full_name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Servicio</span>
-                  <span>{editingVisit.service?.name || '—'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Sucursal</span>
-                  <span>{editingVisit.branch?.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Fecha</span>
-                  <span>
-                    {new Date(editingVisit.completed_at).toLocaleString('es-AR', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                </div>
+            <>
+              {/* Header fijo */}
+              <div className="border-b px-6 py-4">
+                <SheetHeader>
+                  <SheetTitle className="text-base">Editar visita</SheetTitle>
+                </SheetHeader>
               </div>
 
-              <Separator />
+              {/* Contenido scrolleable */}
+              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+                {/* Info de solo lectura */}
+                <div className="rounded-lg border bg-muted/20 divide-y text-sm">
+                  {[
+                    { label: 'Cliente', value: editingVisit.client?.name || 'Consumidor Final' },
+                    { label: 'Barbero', value: editingVisit.barber?.full_name },
+                    { label: 'Servicio', value: editingVisit.service?.name || '—' },
+                    { label: 'Sucursal', value: editingVisit.branch?.name },
+                    {
+                      label: 'Fecha',
+                      value: new Date(editingVisit.completed_at).toLocaleString('es-AR', {
+                        day: '2-digit', month: '2-digit', year: 'numeric',
+                        hour: '2-digit', minute: '2-digit',
+                      }),
+                    },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="grid grid-cols-[110px_1fr] items-start gap-2 px-4 py-2.5">
+                      <span className="text-muted-foreground shrink-0">{label}</span>
+                      <span className="font-medium text-right break-words">{value}</span>
+                    </div>
+                  ))}
+                </div>
 
-              {/* Campos editables */}
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Método de pago</Label>
-                    <Select value={editPaymentMethod} onValueChange={setEditPaymentMethod}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="cash">Efectivo</SelectItem>
-                        <SelectItem value="transfer">Transferencia</SelectItem>
-                        <SelectItem value="card">Tarjeta</SelectItem>
-                      </SelectContent>
-                    </Select>
+                <Separator />
+
+                {/* Campos editables */}
+                <div className="space-y-4">
+                  <div className="grid grid-cols-[1fr_120px] gap-3">
+                    <div className="space-y-1.5">
+                      <Label>Método de pago</Label>
+                      <Select value={editPaymentMethod} onValueChange={setEditPaymentMethod}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cash">Efectivo</SelectItem>
+                          <SelectItem value="transfer">Transferencia</SelectItem>
+                          <SelectItem value="card">Tarjeta</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Monto</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={editAmount}
+                        onChange={(e) => setEditAmount(e.target.value)}
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Monto</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={editAmount}
-                      onChange={(e) => setEditAmount(e.target.value)}
+
+                  {editPaymentMethod === 'transfer' && (
+                    <div className="space-y-1.5">
+                      <Label>Cuenta de transferencia</Label>
+                      <Select
+                        value={editPaymentAccountId || 'none'}
+                        onValueChange={(v) => setEditPaymentAccountId(v === 'none' ? '' : v)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Sin cuenta asignada" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Sin cuenta asignada</SelectItem>
+                          {paymentAccounts.map((pa) => (
+                            <SelectItem key={pa.id} value={pa.id}>
+                              {pa.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {editPaymentAccountId &&
+                        (() => {
+                          const acct = paymentAccounts.find((p) => p.id === editPaymentAccountId)
+                          return acct?.alias_or_cbu ? (
+                            <p className="text-xs text-muted-foreground font-mono pl-1">
+                              {acct.alias_or_cbu}
+                            </p>
+                          ) : null
+                        })()}
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <Label>Notas</Label>
+                    <textarea
+                      value={editNotes}
+                      onChange={(e) => setEditNotes(e.target.value)}
+                      placeholder="Observaciones del servicio..."
+                      rows={3}
+                      className="w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                     />
                   </div>
-                </div>
 
-                {editPaymentMethod === 'transfer' && (
-                  <div className="space-y-2">
-                    <Label>Cuenta de transferencia</Label>
-                    <Select
-                      value={editPaymentAccountId || 'none'}
-                      onValueChange={(v) => setEditPaymentAccountId(v === 'none' ? '' : v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Sin cuenta asignada" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Sin cuenta asignada</SelectItem>
-                        {paymentAccounts.map((pa) => (
-                          <SelectItem key={pa.id} value={pa.id}>
-                            {pa.name}
-                            {pa.alias_or_cbu && (
-                              <span className="ml-2 text-xs text-muted-foreground">
-                                — {pa.alias_or_cbu}
-                              </span>
-                            )}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {editPaymentAccountId &&
-                      (() => {
-                        const acct = paymentAccounts.find((p) => p.id === editPaymentAccountId)
-                        return acct?.alias_or_cbu ? (
-                          <p className="text-xs text-muted-foreground font-mono">
-                            Alias / CBU: {acct.alias_or_cbu}
-                          </p>
-                        ) : null
-                      })()}
+                  <div className="space-y-1.5">
+                    <Label>Etiquetas</Label>
+                    <Input
+                      value={editTagsInput}
+                      onChange={(e) => setEditTagsInput(e.target.value)}
+                      placeholder="Degradé, Diseño, ... (separadas por coma)"
+                    />
+                    <p className="text-xs text-muted-foreground">Separalas por coma</p>
                   </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label>Notas</Label>
-                  <textarea
-                    value={editNotes}
-                    onChange={(e) => setEditNotes(e.target.value)}
-                    placeholder="Observaciones del servicio..."
-                    rows={2}
-                    className="w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Etiquetas</Label>
-                  <Input
-                    value={editTagsInput}
-                    onChange={(e) => setEditTagsInput(e.target.value)}
-                    placeholder="Degradé, Diseño, ... (separadas por coma)"
-                  />
-                  <p className="text-xs text-muted-foreground">Separalas por coma</p>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" onClick={() => setEditingVisit(null)}>
-                  Cancelar
+              {/* Footer fijo */}
+              <div className="border-t px-6 py-4 flex items-center justify-between gap-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDeleteConfirmOpen(true)}
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0"
+                >
+                  <Trash2 className="mr-1.5 size-4" />
+                  Eliminar
                 </Button>
-                <Button onClick={handleSave} disabled={saving || !editAmount}>
-                  {saving ? 'Guardando...' : 'Guardar cambios'}
-                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setEditingVisit(null)}>
+                    Cancelar
+                  </Button>
+                  <Button size="sm" onClick={handleSave} disabled={saving || !editAmount}>
+                    {saving ? 'Guardando...' : 'Guardar cambios'}
+                  </Button>
+                </div>
               </div>
-            </div>
+            </>
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Confirm delete visit */}
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar esta visita?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Estás por eliminar el registro de{' '}
+              <strong>{editingVisit?.service?.name || 'servicio'}</strong> de{' '}
+              <strong>{editingVisit?.client?.name || 'Consumidor Final'}</strong>{' '}
+              ({editingVisit && new Date(editingVisit.completed_at).toLocaleString('es-AR', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit',
+              })}).
+              Esta acción no se puede deshacer y se verá reflejada en estadísticas y finanzas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? 'Eliminando...' : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Dialog — Registrar servicio manualmente */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>

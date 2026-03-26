@@ -219,10 +219,27 @@ export async function createManualVisit(params: {
     return { error: 'No se pudo registrar la visita manual' }
   }
 
+  revalidatePath('/dashboard')
   revalidatePath('/dashboard/servicios')
   revalidatePath('/dashboard/estadisticas')
   revalidatePath('/dashboard/finanzas')
   revalidatePath('/dashboard/clientes')
 
   return { success: true, visitId: newVisit.id }
+}
+
+export async function deleteVisit(
+  visitId: string
+): Promise<{ error?: string }> {
+  const supabase = createAdminClient()
+  const { error } = await supabase.from('visits').delete().eq('id', visitId)
+  if (error) return { error: error.message }
+
+  revalidatePath('/dashboard')
+  revalidatePath('/dashboard/servicios')
+  revalidatePath('/dashboard/estadisticas')
+  revalidatePath('/dashboard/finanzas')
+  revalidatePath('/dashboard/clientes')
+
+  return {}
 }
