@@ -25,14 +25,36 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { createClient } from '@/lib/supabase/client'
-import { cancelQueueEntry, updateQueueOrder, createBreakEntry, startService } from '@/lib/actions/queue'
+import { cancelQueueEntry, updateQueueOrder, createBreakEntry, startService, checkinClient } from '@/lib/actions/queue'
+import { searchClients } from '@/lib/actions/clients'
 import { CompleteServiceDialog } from '@/components/barber/complete-service-dialog'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
-import type { QueueEntry, StaffStatus, StaffSchedule, Staff, BreakConfig } from '@/lib/types/database'
+import type { QueueEntry, StaffStatus, StaffSchedule, Staff, BreakConfig, Service } from '@/lib/types/database'
 import { assignDynamicBarbers, isBarberBlockedByShiftEnd } from '@/lib/barber-utils'
 import { Button } from '@/components/ui/button'
-import { Clock, User, Scissors, X, Pause, GripVertical, Zap, Plus, UserPlus, Play, Check } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Clock, User, Scissors, X, Pause, GripVertical, Zap, Plus, UserPlus, Play, Check, ChevronDown, Search, FileEdit, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -161,7 +183,7 @@ function QueueCard({
         </div>
 
         {/* Acciones */}
-        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1 shrink-0">
           {!isBreak && entry.barber_id && onStartService && (
             <Button
               variant="ghost"
@@ -169,7 +191,7 @@ function QueueCard({
               onClick={(e) => { e.stopPropagation(); onStartService(entry); }}
               onPointerDown={(e) => e.stopPropagation()}
               disabled={actionLoading === entry.id}
-              className="size-7 text-zinc-600 hover:text-green-400"
+              className="size-7 text-green-400"
               title="Iniciar corte"
             >
               <Play className="size-3.5" />
@@ -181,7 +203,7 @@ function QueueCard({
             onClick={(e) => { e.stopPropagation(); onCancel(entry.id); }}
             onPointerDown={(e) => e.stopPropagation()}
             disabled={actionLoading === entry.id}
-            className="size-7 text-zinc-600 hover:text-red-400"
+            className="size-7 text-red-400"
             title="Cancelar"
           >
             <X className="size-3.5" />
@@ -229,7 +251,7 @@ function InProgressCard({
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1 shrink-0">
           {!isBreak && onComplete && (
             <Button
               variant="ghost"
@@ -237,7 +259,7 @@ function InProgressCard({
               onClick={(e) => { e.stopPropagation(); onComplete(entry); }}
               onPointerDown={(e) => e.stopPropagation()}
               disabled={actionLoading === entry.id}
-              className="size-7 text-green-600/50 hover:text-emerald-400 hover:bg-transparent"
+              className="size-7 text-emerald-400"
               title="Finalizar corte"
             >
               <Check className="size-3.5" />
@@ -249,7 +271,7 @@ function InProgressCard({
             onClick={(e) => { e.stopPropagation(); onCancel(entry.id); }}
             onPointerDown={(e) => e.stopPropagation()}
             disabled={actionLoading === entry.id}
-            className="size-7 text-green-600/50 hover:text-red-400 hover:bg-transparent"
+            className="size-7 text-red-400"
             title="Cancelar"
           >
             <X className="size-3.5" />
@@ -760,6 +782,19 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   const [draggedEntry, setDraggedEntry] = useState<QueueEntry | null>(null)
   const [draggedTemplate, setDraggedTemplate] = useState<BreakConfig | null>(null)
 
+  // ── Registro manual & búsqueda de clientes ─────────────────────────────────
+  const [manualDialogOpen, setManualDialogOpen] = useState(false)
+  const [searchDialogOpen, setSearchDialogOpen] = useState(false)
+  const [services, setServices] = useState<Service[]>([])
+  const [manualForm, setManualForm] = useState({ phone: '', name: '', serviceId: '' })
+  const [manualLoading, setManualLoading] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<{ id: string; name: string; phone: string }[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [selectedSearchClient, setSelectedSearchClient] = useState<{ id: string; name: string; phone: string } | null>(null)
+  const [searchServiceId, setSearchServiceId] = useState('')
+  const [searchCheckinLoading, setSearchCheckinLoading] = useState(false)
+
   const supabase = useMemo(() => createClient(), [])
 
   const sensors = useSensors(
@@ -871,6 +906,86 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
     const interval = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(interval)
   }, [])
+
+  // ── Fetch servicios para registro manual ──────────────────────────────────
+  useEffect(() => {
+    supabase
+      .from('services')
+      .select('*')
+      .eq('is_active', true)
+      .in('availability', ['checkin', 'both'])
+      .order('name')
+      .then(({ data }) => { if (data) setServices(data as Service[]) })
+  }, [supabase])
+
+  // ── Handlers registro manual ──────────────────────────────────────────────
+  const handleManualCheckin = async () => {
+    if (!manualForm.phone || !manualForm.name) {
+      toast.error('Nombre y teléfono son obligatorios')
+      return
+    }
+    if (!selectedBranchId) {
+      toast.error('Seleccioná una sucursal primero')
+      return
+    }
+    setManualLoading(true)
+    const fd = new FormData()
+    fd.set('name', manualForm.name)
+    fd.set('phone', manualForm.phone)
+    fd.set('branch_id', selectedBranchId)
+    if (manualForm.serviceId) fd.set('service_id', manualForm.serviceId)
+    const result = await checkinClient(fd)
+    setManualLoading(false)
+    if (result.error) {
+      toast.error(result.error)
+    } else if (result.alreadyInQueue) {
+      toast.info('El cliente ya está en la fila')
+    } else {
+      toast.success('Cliente registrado en la fila')
+      setManualForm({ phone: '', name: '', serviceId: '' })
+      setManualDialogOpen(false)
+    }
+  }
+
+  // ── Handlers búsqueda de clientes ─────────────────────────────────────────
+  const handleSearch = async () => {
+    if (searchQuery.trim().length < 2) return
+    setSearchLoading(true)
+    const result = await searchClients(searchQuery)
+    setSearchLoading(false)
+    if (result.error) {
+      toast.error(result.error)
+    } else {
+      setSearchResults(result.data ?? [])
+    }
+  }
+
+  const handleSearchCheckin = async (client: { id: string; name: string; phone: string }) => {
+    if (!selectedBranchId) {
+      toast.error('Seleccioná una sucursal primero')
+      return
+    }
+    setSearchCheckinLoading(true)
+    const fd = new FormData()
+    fd.set('name', client.name)
+    fd.set('phone', client.phone)
+    fd.set('branch_id', selectedBranchId)
+    if (searchServiceId) fd.set('service_id', searchServiceId)
+    const result = await checkinClient(fd)
+    setSearchCheckinLoading(false)
+    if (result.error) {
+      toast.error(result.error)
+    } else if (result.alreadyInQueue) {
+      toast.info('El cliente ya está en la fila')
+    } else {
+      toast.success(`${client.name} registrado en la fila`)
+      setSearchQuery('')
+      setSearchResults([])
+      setSelectedSearchClient(null)
+      setSearchServiceId('')
+      setSearchDialogOpen(false)
+    }
+  }
 
   // ── Filtros y Categorización ──────────────────────────────────────────────
 
@@ -1181,23 +1296,183 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 shrink-0"
-                asChild
-              >
-                <a
-                  href={`/checkin${selectedBranchId ? `?branch=${selectedBranchId}` : ''}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <UserPlus className="size-4" />
-                  <span className="hidden sm:inline">Registrar cliente</span>
-                </a>
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 shrink-0"
+                  >
+                    <UserPlus className="size-4" />
+                    <span className="hidden sm:inline">Registrar cliente</span>
+                    <ChevronDown className="size-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem asChild>
+                    <a
+                      href={`/checkin${selectedBranchId ? `?branch=${selectedBranchId}` : ''}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="gap-2"
+                    >
+                      <ExternalLink className="size-4" />
+                      Check-in normal
+                    </a>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setManualDialogOpen(true)} className="gap-2">
+                    <FileEdit className="size-4" />
+                    Registro manual
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setSearchDialogOpen(true)} className="gap-2">
+                    <Search className="size-4" />
+                    Buscar cliente existente
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <BranchSelector branches={branches} />
             </div>
+
+            {/* Dialog: Registro manual */}
+            <Dialog open={manualDialogOpen} onOpenChange={setManualDialogOpen}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Registro manual</DialogTitle>
+                </DialogHeader>
+                <div className="flex flex-col gap-4 py-2">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="manual-phone">Teléfono</Label>
+                    <Input
+                      id="manual-phone"
+                      placeholder="Ej: 1122334455"
+                      value={manualForm.phone}
+                      onChange={(e) => setManualForm((f) => ({ ...f, phone: e.target.value }))}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="manual-name">Nombre</Label>
+                    <Input
+                      id="manual-name"
+                      placeholder="Nombre del cliente"
+                      value={manualForm.name}
+                      onChange={(e) => setManualForm((f) => ({ ...f, name: e.target.value }))}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Servicio</Label>
+                    <Select
+                      value={manualForm.serviceId}
+                      onValueChange={(v) => setManualForm((f) => ({ ...f, serviceId: v }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Seleccionar servicio (opcional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {services
+                          .filter((s) => !selectedBranchId || s.branch_id === selectedBranchId || !s.branch_id)
+                          .map((s) => (
+                            <SelectItem key={s.id} value={s.id}>
+                              {s.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button onClick={handleManualCheckin} disabled={manualLoading} className="w-full">
+                    {manualLoading ? 'Registrando…' : 'Agregar a la fila'}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* Dialog: Buscar cliente existente */}
+            <Dialog open={searchDialogOpen} onOpenChange={(open) => {
+              setSearchDialogOpen(open)
+              if (!open) {
+                setSearchQuery('')
+                setSearchResults([])
+                setSelectedSearchClient(null)
+                setSearchServiceId('')
+              }
+            }}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Buscar cliente</DialogTitle>
+                </DialogHeader>
+                <div className="flex flex-col gap-4 py-2">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Nombre o teléfono…"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleSearch() }}
+                    />
+                    <Button onClick={handleSearch} disabled={searchLoading} variant="outline" size="icon" className="shrink-0">
+                      <Search className="size-4" />
+                    </Button>
+                  </div>
+
+                  {searchResults.length > 0 && (
+                    <div className="flex flex-col gap-1 max-h-60 overflow-y-auto">
+                      {searchResults.map((client) => (
+                        <button
+                          key={client.id}
+                          type="button"
+                          onClick={() => setSelectedSearchClient(client)}
+                          className={`flex items-center gap-3 px-3 py-2 rounded-md text-left text-sm transition-colors ${
+                            selectedSearchClient?.id === client.id
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-zinc-900/50 active:bg-zinc-800'
+                          }`}
+                        >
+                          <User className="size-4 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="font-medium truncate">{client.name}</p>
+                            <p className="text-xs opacity-70">{client.phone}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {searchResults.length === 0 && searchQuery.length >= 2 && !searchLoading && (
+                    <p className="text-sm text-muted-foreground text-center py-4">No se encontraron clientes</p>
+                  )}
+
+                  {selectedSearchClient && (
+                    <div className="flex flex-col gap-3 border-t pt-3">
+                      <p className="text-sm font-medium">
+                        Registrar a <span className="text-primary">{selectedSearchClient.name}</span>
+                      </p>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Servicio</Label>
+                        <Select value={searchServiceId} onValueChange={setSearchServiceId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Seleccionar servicio (opcional)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {services
+                              .filter((s) => !selectedBranchId || s.branch_id === selectedBranchId || !s.branch_id)
+                              .map((s) => (
+                                <SelectItem key={s.id} value={s.id}>
+                                  {s.name}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                        onClick={() => handleSearchCheckin(selectedSearchClient)}
+                        disabled={searchCheckinLoading}
+                        className="w-full"
+                      >
+                        {searchCheckinLoading ? 'Registrando…' : 'Agregar a la fila'}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
           
           <div className="flex items-center gap-3 overflow-x-auto pb-2">

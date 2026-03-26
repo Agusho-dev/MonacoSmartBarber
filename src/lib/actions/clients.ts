@@ -25,3 +25,20 @@ export async function updateClientNotes(
   revalidatePath('/dashboard/clientes')
   return { success: true }
 }
+
+export async function searchClients(query: string) {
+  if (!query || query.trim().length < 2) return { data: [] }
+
+  const supabase = createAdminClient()
+  const trimmed = query.trim()
+
+  const { data, error } = await supabase
+    .from('clients')
+    .select('id, name, phone')
+    .or(`name.ilike.%${trimmed}%,phone.ilike.%${trimmed}%`)
+    .order('name')
+    .limit(10)
+
+  if (error) return { error: 'Error al buscar clientes' }
+  return { data: data ?? [] }
+}
