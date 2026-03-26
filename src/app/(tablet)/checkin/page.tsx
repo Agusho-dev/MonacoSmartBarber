@@ -1008,7 +1008,7 @@ export default function CheckinPage() {
           className="w-full p-4 text-left hover:bg-white/6 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
         >
           <div className="flex flex-col items-center gap-3">
-            <div className={`shrink-0 rounded-full ring-2 ring-offset-2 ring-offset-black ${ringColor}`}>
+            <div className={`shrink-0 rounded-full ring-2 ring-offset-2 ring-offset-zinc-700 ${ringColor}`}>
               {barber.avatar_url ? (
                 <img
                   src={barber.avatar_url}
@@ -1090,10 +1090,10 @@ export default function CheckinPage() {
             <div className="relative rounded-[1.25rem]" style={{ padding: '2px' }}>
               {/* Animated rotating border glow */}
               <div className="absolute inset-0 rounded-[1.25rem] overflow-hidden pointer-events-none">
-                <div className="absolute inset-[-200%] bg-[conic-gradient(from_0deg,transparent_0%,rgba(16,185,129,0.7)_10%,rgba(34,211,238,0.7)_20%,transparent_30%)] animate-[checkin-border-rotate_3s_linear_infinite]" />
+                <div className="absolute inset-[-200%] bg-[conic-gradient(from_0deg,transparent_0%,rgba(16,185,129,0.5)_10%,rgba(20,184,166,0.5)_20%,transparent_30%)] animate-[checkin-border-rotate_3s_linear_infinite]" />
               </div>
               {/* Inner glow pulse */}
-              <div className="absolute -inset-2 rounded-[1.75rem] bg-gradient-to-r from-emerald-500/30 via-cyan-400/30 to-emerald-500/30 blur-xl opacity-50 animate-[checkin-pulse-glow_3s_ease-in-out_infinite] pointer-events-none" />
+              <div className="absolute -inset-2 rounded-[1.75rem] bg-gradient-to-r from-emerald-900/60 via-teal-900/60 to-emerald-900/60 blur-xl opacity-40 animate-[checkin-pulse-glow_3s_ease-in-out_infinite] pointer-events-none" />
               
               <button
                 onClick={() => onSelect(null as unknown as string)}
@@ -1171,7 +1171,7 @@ export default function CheckinPage() {
 
         {/* ── Barber Selection Dialog Modal ── */}
         <Dialog open={showBarberPreference} onOpenChange={setShowBarberPreference}>
-          <DialogContent className="max-w-2xl bg-zinc-950/90 backdrop-blur-2xl border-white/10 p-6 md:p-8 rounded-[2rem] shadow-2xl">
+          <DialogContent className="max-w-2xl bg-zinc-700/95 backdrop-blur-2xl border-white/10 p-6 md:p-8 rounded-[2rem] shadow-2xl">
             <DialogHeader className="text-left mb-6">
               <DialogTitle className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-violet-200 to-indigo-200 bg-clip-text text-transparent">
                 Elegí tu barbero
