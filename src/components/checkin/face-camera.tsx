@@ -32,6 +32,8 @@ type CameraState =
 
 const SCAN_INTERVAL_MS = 200
 const MATCH_HOLD_MS = 2000
+const CONSECUTIVE_MATCHES_REQUIRED = 2 // confirmaciones consecutivas antes de aceptar un match
+const MIN_FACE_WIDTH_RATIO = 0.18 // cara debe ocupar al menos 18% del ancho del video
 
 export function FaceCamera({
   onMatch,
@@ -50,6 +52,7 @@ export function FaceCamera({
   const [matchResult, setMatchResult] = useState<FaceMatchResult | null>(null)
   const [lastDescriptor, setLastDescriptor] = useState<Float32Array | null>(null)
   const [faceBox, setFaceBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  const consecutiveMatchRef = useRef<{ clientId: string; count: number } | null>(null)
 
   const stopCamera = useCallback(() => {
     if (scanTimerRef.current) {
@@ -146,18 +149,19 @@ export function FaceCamera({
       const faceCenterX = x + width / 2
       const faceCenterY = y + height / 2
 
-      // Check if face center falls roughly within central 40% width and 60% height
+      // Cara centrada, tamaño mínimo y score suficiente
       isFaceValid = (
         faceCenterX > videoW * 0.30 &&
         faceCenterX < videoW * 0.70 &&
         faceCenterY > videoH * 0.20 &&
-        faceCenterY < videoH * 0.80
+        faceCenterY < videoH * 0.80 &&
+        width >= videoW * MIN_FACE_WIDTH_RATIO
       )
     }
 
     drawFaceOverlay(detection, isFaceValid)
 
-    if (detection && isFaceValid && detection.score > 0.6) {
+    if (detection && isFaceValid && detection.score > 0.65) {
       setState('matching')
       setLastDescriptor(detection.descriptor)
 
@@ -165,12 +169,27 @@ export function FaceCamera({
       if (!mountedRef.current) return
 
       if (match) {
-        setState('matched')
-        setMatchResult(match)
-        setTimeout(() => {
-          if (mountedRef.current) onMatch(match, detection.descriptor)
-        }, MATCH_HOLD_MS)
+        // Requiere confirmaciones consecutivas del mismo cliente para evitar falsos positivos
+        const prev = consecutiveMatchRef.current
+        if (prev && prev.clientId === match.clientId) {
+          prev.count += 1
+        } else {
+          consecutiveMatchRef.current = { clientId: match.clientId, count: 1 }
+        }
+
+        if (consecutiveMatchRef.current.count >= CONSECUTIVE_MATCHES_REQUIRED) {
+          consecutiveMatchRef.current = null
+          setState('matched')
+          setMatchResult(match)
+          setTimeout(() => {
+            if (mountedRef.current) onMatch(match, detection.descriptor)
+          }, MATCH_HOLD_MS)
+        } else {
+          // Aún no suficientes confirmaciones, seguir escaneando
+          setState('scanning')
+        }
       } else {
+        consecutiveMatchRef.current = null
         setState('no_match')
         setTimeout(() => {
           if (mountedRef.current) {
@@ -179,6 +198,7 @@ export function FaceCamera({
         }, 2000)
       }
     } else {
+      consecutiveMatchRef.current = null
       scanTimerRef.current = setTimeout(runScanLoop, SCAN_INTERVAL_MS)
     }
   }, [state, drawFaceOverlay, onMatch, targetRole])

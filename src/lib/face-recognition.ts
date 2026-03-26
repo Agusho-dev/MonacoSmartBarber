@@ -7,8 +7,8 @@ let modelsLoaded = false
 let modelsLoading: Promise<void> | null = null
 
 const MODEL_URL = '/models'
-const DETECTION_SCORE_THRESHOLD = 0.60 // lowered slightly for lower-res inputs
-const MATCH_THRESHOLD = 0.45 // lowered threshold to prevent false positives (confusing faces)
+const DETECTION_SCORE_THRESHOLD = 0.65
+const MATCH_THRESHOLD = 0.40 // umbral estricto para evitar falsos positivos con caras nuevas
 
 async function loadFaceApi(): Promise<FaceApiModule> {
   if (faceapi) return faceapi
@@ -84,7 +84,7 @@ export async function detectFace(
   if (!modelsLoaded || !faceapi) return null
 
   const detection = await faceapi
-    .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: DETECTION_SCORE_THRESHOLD }))
+    .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: DETECTION_SCORE_THRESHOLD }))
     .withFaceLandmarks()
     .withFaceDescriptor()
 
