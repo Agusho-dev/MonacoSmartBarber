@@ -25,13 +25,14 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { createClient } from '@/lib/supabase/client'
-import { cancelQueueEntry, updateQueueOrder, createBreakEntry } from '@/lib/actions/queue'
+import { cancelQueueEntry, updateQueueOrder, createBreakEntry, startService } from '@/lib/actions/queue'
+import { CompleteServiceDialog } from '@/components/barber/complete-service-dialog'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import type { QueueEntry, StaffStatus, StaffSchedule, Staff, BreakConfig } from '@/lib/types/database'
 import { assignDynamicBarbers, isBarberBlockedByShiftEnd } from '@/lib/barber-utils'
 import { Button } from '@/components/ui/button'
-import { Clock, User, Scissors, X, Pause, GripVertical, Zap, Plus, UserPlus } from 'lucide-react'
+import { Clock, User, Scissors, X, Pause, GripVertical, Zap, Plus, UserPlus, Play, Check } from 'lucide-react'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -66,6 +67,7 @@ interface QueueCardProps {
   entry: QueueEntry
   formatElapsed: (ts: string) => string
   onCancel: (id: string) => void
+  onStartService?: (entry: QueueEntry) => void
   actionLoading: string | null
   selectedBranchId: string | null
   getBranchName: (id: string) => string
@@ -75,6 +77,7 @@ function QueueCard({
   entry,
   formatElapsed,
   onCancel,
+  onStartService,
   actionLoading,
   selectedBranchId,
   getBranchName,
@@ -157,17 +160,33 @@ function QueueCard({
           </div>
         </div>
 
-        {/* Cancelar (No interfiere con drag gracias a activationConstraint) */}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={(e) => { e.stopPropagation(); onCancel(entry.id); }}
-          onPointerDown={(e) => e.stopPropagation()} /* Prevents drag when interacting with button */
-          disabled={actionLoading === entry.id}
-          className="size-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-zinc-600 hover:text-red-400"
-        >
-          <X className="size-3.5" />
-        </Button>
+        {/* Acciones */}
+        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          {!isBreak && entry.barber_id && onStartService && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={(e) => { e.stopPropagation(); onStartService(entry); }}
+              onPointerDown={(e) => e.stopPropagation()}
+              disabled={actionLoading === entry.id}
+              className="size-7 text-zinc-600 hover:text-green-400"
+              title="Iniciar corte"
+            >
+              <Play className="size-3.5" />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={(e) => { e.stopPropagation(); onCancel(entry.id); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            disabled={actionLoading === entry.id}
+            className="size-7 text-zinc-600 hover:text-red-400"
+            title="Cancelar"
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
       </div>
     </div>
   )
@@ -180,11 +199,13 @@ function InProgressCard({
   entry,
   formatElapsed,
   onCancel,
+  onComplete,
   actionLoading,
 }: {
   entry: QueueEntry
   formatElapsed: (ts: string) => string
   onCancel: (id: string) => void
+  onComplete?: (entry: QueueEntry) => void
   actionLoading: string | null
 }) {
   const isBreak = entry.is_break
@@ -208,16 +229,32 @@ function InProgressCard({
             </span>
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={(e) => { e.stopPropagation(); onCancel(entry.id); }}
-          onPointerDown={(e) => e.stopPropagation()}
-          disabled={actionLoading === entry.id}
-          className="size-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-green-600/50 hover:text-red-400 hover:bg-transparent"
-        >
-          <X className="size-3.5" />
-        </Button>
+        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          {!isBreak && onComplete && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={(e) => { e.stopPropagation(); onComplete(entry); }}
+              onPointerDown={(e) => e.stopPropagation()}
+              disabled={actionLoading === entry.id}
+              className="size-7 text-green-600/50 hover:text-emerald-400 hover:bg-transparent"
+              title="Finalizar corte"
+            >
+              <Check className="size-3.5" />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={(e) => { e.stopPropagation(); onCancel(entry.id); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            disabled={actionLoading === entry.id}
+            className="size-7 text-green-600/50 hover:text-red-400 hover:bg-transparent"
+            title="Cancelar"
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
       </div>
     </div>
   )
@@ -286,6 +323,8 @@ interface KanbanColumnProps {
   shiftEndMargin?: number
   formatElapsed: (ts: string) => string
   onCancel: (id: string) => void
+  onStartService?: (entry: QueueEntry) => void
+  onCompleteService?: (entry: QueueEntry) => void
   actionLoading: string | null
   selectedBranchId: string | null
   getBranchName: (id: string) => string
@@ -305,6 +344,8 @@ function KanbanColumn({
   shiftEndMargin,
   formatElapsed,
   onCancel,
+  onStartService,
+  onCompleteService,
   actionLoading,
   selectedBranchId,
   getBranchName,
@@ -419,10 +460,11 @@ function KanbanColumn({
             entry={inProgressEntry}
             formatElapsed={formatElapsed}
             onCancel={onCancel}
+            onComplete={onCompleteService}
             actionLoading={actionLoading}
           />
         )}
-        
+
         <SortableContext items={entryIds} strategy={verticalListSortingStrategy}>
           {entries.map((entry) => (
             <QueueCard
@@ -430,6 +472,7 @@ function KanbanColumn({
               entry={entry}
               formatElapsed={formatElapsed}
               onCancel={onCancel}
+              onStartService={onStartService}
               actionLoading={actionLoading}
               selectedBranchId={selectedBranchId}
               getBranchName={getBranchName}
@@ -547,6 +590,8 @@ function BarberRow({
   shiftEndMargin,
   formatElapsed,
   onCancel,
+  onStartService,
+  onCompleteService,
   actionLoading,
   selectedBranchId,
   getBranchName,
@@ -560,6 +605,8 @@ function BarberRow({
   shiftEndMargin?: number
   formatElapsed: (ts: string) => string
   onCancel: (id: string) => void
+  onStartService?: (entry: QueueEntry) => void
+  onCompleteService?: (entry: QueueEntry) => void
   actionLoading: string | null
   selectedBranchId: string | null
   getBranchName: (id: string) => string
@@ -659,6 +706,7 @@ function BarberRow({
               entry={inProgressEntry}
               formatElapsed={formatElapsed}
               onCancel={onCancel}
+              onComplete={onCompleteService}
               actionLoading={actionLoading}
             />
           </div>
@@ -671,6 +719,7 @@ function BarberRow({
                 entry={entry}
                 formatElapsed={formatElapsed}
                 onCancel={onCancel}
+                onStartService={onStartService}
                 actionLoading={actionLoading}
                 selectedBranchId={selectedBranchId}
                 getBranchName={getBranchName}
@@ -706,6 +755,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
   const [latestAttendance, setLatestAttendance] = useState<Record<string, string>>({})
   
+  const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
+
   const [draggedEntry, setDraggedEntry] = useState<QueueEntry | null>(null)
   const [draggedTemplate, setDraggedTemplate] = useState<BreakConfig | null>(null)
 
@@ -1063,6 +1114,23 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
     setActionLoading(null)
   }
 
+  async function handleStartService(entry: QueueEntry) {
+    if (!entry.barber_id) {
+      toast.error('El cliente no tiene barbero asignado')
+      return
+    }
+    setActionLoading(entry.id)
+    const result = await startService(entry.id, entry.barber_id)
+    if ('error' in result) toast.error(result.error)
+    else toast.success('Corte iniciado')
+    await fetchQueue()
+    setActionLoading(null)
+  }
+
+  function handleCompleteService(entry: QueueEntry) {
+    setCompletingEntry(entry)
+  }
+
   function formatElapsed(timestamp: string) {
     const elapsed = now - new Date(timestamp).getTime()
     if (isNaN(elapsed) || elapsed < 0) return '0m'
@@ -1178,6 +1246,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
                   shiftEndMargin={shiftEndMargin}
                   formatElapsed={formatElapsed}
                   onCancel={handleCancel}
+                  onStartService={handleStartService}
+                  onCompleteService={handleCompleteService}
                   actionLoading={actionLoading}
                   selectedBranchId={selectedBranchId}
                   getBranchName={getBranchName}
@@ -1196,6 +1266,19 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
           </div>
         )}
       </DragOverlay>
+
+      {completingEntry && (
+        <CompleteServiceDialog
+          entry={completingEntry}
+          branchId={completingEntry.branch_id}
+          onClose={() => setCompletingEntry(null)}
+          onCompleted={async () => {
+            setCompletingEntry(null)
+            toast.success('Corte finalizado')
+            await fetchQueue()
+          }}
+        />
+      )}
     </DndContext>
   )
 }
