@@ -791,6 +791,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<{ id: string; name: string; phone: string }[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
+  const [searchExecuted, setSearchExecuted] = useState(false)
   const [selectedSearchClient, setSelectedSearchClient] = useState<{ id: string; name: string; phone: string } | null>(null)
   const [searchServiceId, setSearchServiceId] = useState('')
   const [searchCheckinLoading, setSearchCheckinLoading] = useState(false)
@@ -948,17 +949,34 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   }
 
   // ── Handlers búsqueda de clientes ─────────────────────────────────────────
-  const handleSearch = async () => {
-    if (searchQuery.trim().length < 2) return
+  const handleSearch = useCallback(async (query: string) => {
+    const trimmed = query.trim()
+    if (trimmed.length < 2) {
+      setSearchResults([])
+      setSearchExecuted(false)
+      return
+    }
     setSearchLoading(true)
-    const result = await searchClients(searchQuery)
+    setSearchExecuted(true)
+    const result = await searchClients(trimmed)
     setSearchLoading(false)
     if (result.error) {
       toast.error(result.error)
     } else {
       setSearchResults(result.data ?? [])
     }
-  }
+  }, [])
+
+  // Búsqueda automática al escribir (debounce)
+  useEffect(() => {
+    if (searchQuery.trim().length < 2) {
+      setSearchResults([])
+      setSearchExecuted(false)
+      return
+    }
+    const timer = setTimeout(() => handleSearch(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery, handleSearch])
 
   const handleSearchCheckin = async (client: { id: string; name: string; phone: string }) => {
     if (!selectedBranchId) {
@@ -1391,6 +1409,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
               if (!open) {
                 setSearchQuery('')
                 setSearchResults([])
+                setSearchExecuted(false)
                 setSelectedSearchClient(null)
                 setSearchServiceId('')
               }
@@ -1400,17 +1419,20 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
                   <DialogTitle>Buscar cliente</DialogTitle>
                 </DialogHeader>
                 <div className="flex flex-col gap-4 py-2">
-                  <div className="flex gap-2">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                     <Input
                       placeholder="Nombre o teléfono…"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') handleSearch() }}
+                      className="pl-9"
+                      autoFocus
                     />
-                    <Button onClick={handleSearch} disabled={searchLoading} variant="outline" size="icon" className="shrink-0">
-                      <Search className="size-4" />
-                    </Button>
                   </div>
+
+                  {searchLoading && (
+                    <p className="text-sm text-muted-foreground text-center py-4">Buscando…</p>
+                  )}
 
                   {searchResults.length > 0 && (
                     <div className="flex flex-col gap-1 max-h-60 overflow-y-auto">
@@ -1435,7 +1457,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
                     </div>
                   )}
 
-                  {searchResults.length === 0 && searchQuery.length >= 2 && !searchLoading && (
+                  {searchResults.length === 0 && searchExecuted && !searchLoading && (
                     <p className="text-sm text-muted-foreground text-center py-4">No se encontraron clientes</p>
                   )}
 
@@ -1476,10 +1498,15 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
           </div>
           
           <div className="flex items-center gap-3 overflow-x-auto pb-2">
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 text-amber-500 text-sm font-bold border border-amber-500/20 shrink-0">
+            <a
+              href="/dashboard/equipo?tab=descansos"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 text-amber-500 text-sm font-bold border border-amber-500/20 shrink-0 transition-colors active:bg-amber-500/20"
+            >
               <Pause className="size-4" />
-              Plantillas de Descanso
-            </div>
+              {breakConfigs.filter((c) => !selectedBranchId || c.branch_id === selectedBranchId).length > 0
+                ? 'Plantillas de Descanso'
+                : 'No hay descansos configurados'}
+            </a>
             {breakConfigs
               .filter((c) => !selectedBranchId || c.branch_id === selectedBranchId)
               .map((config) => (

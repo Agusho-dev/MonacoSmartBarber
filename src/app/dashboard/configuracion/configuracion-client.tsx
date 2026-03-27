@@ -2,8 +2,8 @@
 
 import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
-import { updateAppSettings, updateRewardsConfig } from '@/lib/actions/settings'
-import type { AppSettings, RewardsConfig } from '@/lib/types/database'
+import { updateAppSettings } from '@/lib/actions/settings'
+import type { AppSettings } from '@/lib/types/database'
 import {
   Card,
   CardContent,
@@ -15,8 +15,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Clock, UserX, Gift, Save, Timer, AlertTriangle, Zap } from 'lucide-react'
+import { Clock, UserX, Save, Timer, AlertTriangle, Zap } from 'lucide-react'
 
 const DAY_OPTIONS = [
   { value: 1, label: 'Lun' },
@@ -30,10 +29,9 @@ const DAY_OPTIONS = [
 
 interface Props {
   appSettings: AppSettings | null
-  rewardsConfig: RewardsConfig[]
 }
 
-export function ConfiguracionClient({ appSettings, rewardsConfig }: Props) {
+export function ConfiguracionClient({ appSettings }: Props) {
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold tracking-tight">Configuración</h2>
@@ -45,8 +43,6 @@ export function ConfiguracionClient({ appSettings, rewardsConfig }: Props) {
         <NextClientAlertCard settings={appSettings} />
         <DynamicCooldownCard settings={appSettings} />
       </div>
-
-      <RewardsSection configs={rewardsConfig} />
     </div>
   )
 }
@@ -449,188 +445,3 @@ function DynamicCooldownCard({ settings }: { settings: AppSettings | null }) {
   )
 }
 
-/* ─── Rewards ─── */
-
-function RewardsSection({ configs }: { configs: RewardsConfig[] }) {
-  const [editing, setEditing] = useState<RewardsConfig | null>(null)
-  const [isNew, setIsNew] = useState(false)
-
-  const startNew = () => {
-    setEditing({
-      id: '',
-      branch_id: null,
-      points_per_visit: 10,
-      redemption_threshold: 100,
-      reward_description: '',
-      is_active: true,
-      created_at: '',
-      updated_at: '',
-    })
-    setIsNew(true)
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Gift className="size-5 text-muted-foreground" />
-          <h3 className="text-lg font-semibold">Recompensas</h3>
-        </div>
-        <Button size="sm" onClick={startNew}>
-          Agregar configuración
-        </Button>
-      </div>
-
-      {editing && (
-        <RewardForm
-          config={editing}
-          isNew={isNew}
-          onClose={() => {
-            setEditing(null)
-            setIsNew(false)
-          }}
-        />
-      )}
-
-      {configs.length === 0 && !editing && (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            No hay configuraciones de recompensas
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        {configs.map((c) => (
-          <Card key={c.id}>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">
-                  {c.reward_description || 'Sin descripción'}
-                </CardTitle>
-                <Badge variant={c.is_active ? 'default' : 'secondary'}>
-                  {c.is_active ? 'Activo' : 'Inactivo'}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-1 text-sm">
-              <p>
-                <span className="text-muted-foreground">Puntos por visita:</span>{' '}
-                {c.points_per_visit}
-              </p>
-              <p>
-                <span className="text-muted-foreground">Umbral de canje:</span>{' '}
-                {c.redemption_threshold} puntos
-              </p>
-            </CardContent>
-            <CardFooter>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setEditing(c)
-                  setIsNew(false)
-                }}
-              >
-                Editar
-              </Button>
-            </CardFooter>
-          </Card>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function RewardForm({
-  config,
-  isNew,
-  onClose,
-}: {
-  config: RewardsConfig
-  isNew: boolean
-  onClose: () => void
-}) {
-  const [ppv, setPpv] = useState(config.points_per_visit)
-  const [threshold, setThreshold] = useState(config.redemption_threshold)
-  const [desc, setDesc] = useState(config.reward_description)
-  const [active, setActive] = useState(config.is_active)
-  const [isPending, startTransition] = useTransition()
-
-  const handleSave = () => {
-    const fd = new FormData()
-    if (!isNew) fd.set('id', config.id)
-    fd.set('points_per_visit', String(ppv))
-    fd.set('redemption_threshold', String(threshold))
-    fd.set('reward_description', desc)
-    fd.set('is_active', String(active))
-
-    startTransition(async () => {
-      const result = await updateRewardsConfig(fd)
-      if (result.error) toast.error(result.error)
-      else {
-        toast.success(isNew ? 'Recompensa creada' : 'Recompensa actualizada')
-        onClose()
-      }
-    })
-  }
-
-  return (
-    <Card className="border-primary/30">
-      <CardHeader>
-        <CardTitle className="text-base">
-          {isNew ? 'Nueva recompensa' : 'Editar recompensa'}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label>Descripción</Label>
-          <Input
-            value={desc}
-            onChange={(e) => setDesc(e.target.value)}
-            placeholder="Ej: Corte gratis al acumular puntos"
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label>Puntos por visita</Label>
-            <Input
-              type="number"
-              min={1}
-              value={ppv}
-              onChange={(e) => setPpv(Number(e.target.value))}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Umbral de canje</Label>
-            <Input
-              type="number"
-              min={1}
-              value={threshold}
-              onChange={(e) => setThreshold(Number(e.target.value))}
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant={active ? 'default' : 'outline'}
-            onClick={() => setActive(!active)}
-          >
-            {active ? 'Activo' : 'Inactivo'}
-          </Button>
-        </div>
-      </CardContent>
-      <CardFooter className="gap-2">
-        <Button onClick={handleSave} disabled={isPending}>
-          <Save className="mr-2 size-4" />
-          {isPending ? 'Guardando...' : 'Guardar'}
-        </Button>
-        <Button variant="outline" onClick={onClose}>
-          Cancelar
-        </Button>
-      </CardFooter>
-    </Card>
-  )
-}

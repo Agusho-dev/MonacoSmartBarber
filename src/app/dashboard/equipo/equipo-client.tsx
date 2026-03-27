@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
-import { Scissors, Coffee, Trophy, AlertTriangle, Shield, ClipboardList } from 'lucide-react'
+import { Scissors, Coffee, Trophy, AlertTriangle, Shield, ClipboardList, Users, CalendarDays } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
@@ -13,11 +13,15 @@ import { IncentivosClient } from '../incentivos/incentivos-client'
 import { DisciplinaClient } from '../disciplina/disciplina-client'
 import { RolesClient } from './roles-client'
 import { HistorialServiciosClient } from './historial-servicios-client'
+import { PerfilesClient } from './perfiles-client'
+import { CalendarioClient } from '../calendario/calendario-client'
 import type { Role, Branch } from '@/lib/types/database'
 
 const TABS = [
     { id: 'barberos', label: 'Barberos', icon: Scissors, permission: 'staff.view' },
+    { id: 'perfiles', label: 'Perfiles', icon: Users, permission: 'staff.view' },
     { id: 'historial-servicios', label: 'Historial de Servicios', icon: ClipboardList, permission: 'staff.view' },
+    { id: 'calendario', label: 'Calendario', icon: CalendarDays, permission: 'staff.view' },
     { id: 'descansos', label: 'Descansos', icon: Coffee, permission: 'breaks.view' },
     { id: 'incentivos', label: 'Incentivos', icon: Trophy, permission: 'incentives.view' },
     { id: 'disciplina', label: 'Disciplina', icon: AlertTriangle, permission: 'discipline.view' },
@@ -53,6 +57,9 @@ interface EquipoClientProps {
     permissions: Record<string, boolean>
     // Historial de servicios
     serviceHistory: unknown[]
+    // Perfiles
+    salaryConfigs: unknown[]
+    calendarBarbers: unknown[]
 }
 
 export function EquipoClient({
@@ -74,6 +81,8 @@ export function EquipoClient({
     isOwner,
     permissions,
     serviceHistory,
+    salaryConfigs,
+    calendarBarbers,
 }: EquipoClientProps) {
     const searchParams = useSearchParams()
     const router = useRouter()
@@ -192,6 +201,18 @@ export function EquipoClient({
                         canHideStaff={isOwner || !!permissions['staff.hide']}
                     />
                 )}
+                {activeTab === 'perfiles' && (
+                    <PerfilesClient
+                        barbers={barbers as Parameters<typeof PerfilesClient>[0]['barbers']}
+                        roles={roles}
+                        todayVisits={todayVisits as Parameters<typeof PerfilesClient>[0]['todayVisits']}
+                        serviceHistory={serviceHistory as Parameters<typeof PerfilesClient>[0]['serviceHistory']}
+                        disciplinaryEvents={disciplinaryEvents as Parameters<typeof PerfilesClient>[0]['disciplinaryEvents']}
+                        breakOvertimeHistory={breakOvertimeHistory as Parameters<typeof PerfilesClient>[0]['breakOvertimeHistory']}
+                        salaryConfigs={salaryConfigs as Parameters<typeof PerfilesClient>[0]['salaryConfigs']}
+                        calendarBarbers={calendarBarbers as Parameters<typeof PerfilesClient>[0]['calendarBarbers']}
+                    />
+                )}
                 {activeTab === 'historial-servicios' && (
                     <HistorialServiciosClient
                         visits={serviceHistory as Parameters<typeof HistorialServiciosClient>[0]['visits']}
@@ -204,6 +225,12 @@ export function EquipoClient({
                                     branch_id: (b as { branch_id: string }).branch_id,
                                 })) as Parameters<typeof HistorialServiciosClient>[0]['barbers']
                         }
+                    />
+                )}
+                {activeTab === 'calendario' && (
+                    <CalendarioClient
+                        branches={branches as Parameters<typeof CalendarioClient>[0]['branches']}
+                        barbers={calendarBarbers as Parameters<typeof CalendarioClient>[0]['barbers']}
                     />
                 )}
                 {activeTab === 'descansos' && (

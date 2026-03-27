@@ -45,6 +45,10 @@ export default async function EquipoPage() {
         isOwner = currentStaff?.role === 'owner'
     }
 
+    // Date 12 months ago for profile history
+    const twelveMonthsAgo = new Date(now.getFullYear() - 1, now.getMonth(), 1)
+    const twelveMonthsAgoStr = twelveMonthsAgo.toISOString().slice(0, 10)
+
     const [
         { data: barbers },
         { data: branches },
@@ -60,6 +64,8 @@ export default async function EquipoPage() {
         { data: breakOvertimeHistory },
         { data: serviceHistory },
         { data: attendanceLogs },
+        { data: salaryConfigs },
+        { data: calendarBarbers },
     ] = await Promise.all([
         supabase.from('staff').select('*, branch:branches(*)').order('full_name'),
         supabase.from('branches').select('*').eq('is_active', true).order('name'),
@@ -108,14 +114,21 @@ export default async function EquipoPage() {
         supabase
             .from('visits')
             .select('id, amount, payment_method, commission_amount, started_at, completed_at, branch_id, service:services(name), client:clients(name), barber:staff(id, full_name)')
-            .gte('completed_at', fromDate)
+            .gte('completed_at', twelveMonthsAgoStr)
             .order('completed_at', { ascending: false })
-            .limit(500),
+            .limit(5000),
         supabase
             .from('attendance_logs')
             .select('id, staff_id, branch_id, action_type, recorded_at, face_verified')
             .gte('recorded_at', fromDate)
             .order('recorded_at', { ascending: false }),
+        supabase.from('salary_configs').select('*'),
+        supabase
+            .from('staff')
+            .select('id, full_name, branch_id, staff_schedules(*), staff_schedule_exceptions(*)')
+            .eq('role', 'barber')
+            .eq('is_active', true)
+            .order('full_name'),
     ])
 
     // Get user permissions
@@ -159,6 +172,8 @@ export default async function EquipoPage() {
             isOwner={isOwner}
             permissions={userPermissions}
             serviceHistory={serviceHistory ?? []}
+            salaryConfigs={salaryConfigs ?? []}
+            calendarBarbers={calendarBarbers ?? []}
         />
     )
 }

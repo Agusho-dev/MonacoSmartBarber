@@ -32,6 +32,7 @@ export async function searchClients(query: string) {
   const supabase = createAdminClient()
   const trimmed = query.trim()
 
+  // Buscar por nombre o teléfono
   const { data, error } = await supabase
     .from('clients')
     .select('id, name, phone')
@@ -39,6 +40,10 @@ export async function searchClients(query: string) {
     .order('name')
     .limit(10)
 
-  if (error) return { error: 'Error al buscar clientes' }
+  if (error) {
+    console.error('searchClients error:', error)
+    return { error: 'Error al buscar clientes' }
+  }
+
   return { data: data ?? [] }
 }

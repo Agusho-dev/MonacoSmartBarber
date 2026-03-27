@@ -4,7 +4,6 @@ import { useState, useTransition, useEffect, useMemo, useCallback, useRef } from
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
-  LayoutDashboard,
   Building2,
   Scissors,
   Sparkles,
@@ -15,8 +14,6 @@ import {
   Menu,
   LogOut,
   ListOrdered,
-  Gift,
-  CalendarDays,
   Package,
   MessageSquare,
   Smartphone,
@@ -66,7 +63,6 @@ import { useBranchStore } from '@/stores/branch-store'
 import { createClient } from '@/lib/supabase/client'
 
 const navItems = [
-  { href: '/dashboard', label: 'Inicio', icon: LayoutDashboard, requiredPermissions: ['dashboard.home'] },
   { href: '/dashboard/fila', label: 'Fila', icon: ListOrdered, requiredPermissions: ['queue.view'] },
   { href: '/dashboard/sucursales', label: 'Sucursales', icon: Building2, requiredPermissions: ['branches.view'] },
   { href: '/dashboard/equipo', label: 'Equipo', icon: Scissors, requiredPermissions: ['staff.view', 'roles.manage', 'breaks.view', 'incentives.view', 'discipline.view'] },
@@ -74,11 +70,9 @@ const navItems = [
   { href: '/dashboard/productos', label: 'Productos', icon: Package, requiredPermissions: ['services.view'] },
   { href: '/dashboard/clientes', label: 'Clientes', icon: Users, requiredPermissions: ['clients.view'] },
   { href: '/dashboard/mensajeria', label: 'Mensajería', icon: MessageSquare, requiredPermissions: ['clients.view'] },
-  { href: '/dashboard/fidelizacion', label: 'Fidelización', icon: Gift, requiredPermissions: ['rewards.view'] },
   { href: '/dashboard/app-movil', label: 'APP Móvil', icon: Smartphone, requiredPermissions: ['rewards.view'] },
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3, requiredPermissions: ['stats.view'] },
   { href: '/dashboard/finanzas', label: 'Finanzas', icon: DollarSign, requiredPermissions: ['finances.view', 'salary.view'] },
-  { href: '/dashboard/calendario', label: 'Calendario', icon: CalendarDays, requiredPermissions: ['calendar.view'] },
   { href: '/dashboard/configuracion', label: 'Configuración', icon: Settings, requiredPermissions: ['settings.view'] },
 ]
 
