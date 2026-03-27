@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
-import { Scissors, Coffee, Trophy, AlertTriangle, Shield, ClipboardList, Users, CalendarDays } from 'lucide-react'
+import { Scissors, Coffee, Trophy, AlertTriangle, Shield, ClipboardList, CalendarDays, LayoutGrid, UserCircle2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
@@ -17,10 +17,9 @@ import { PerfilesClient } from './perfiles-client'
 import { CalendarioClient } from '../calendario/calendario-client'
 import type { Role, Branch } from '@/lib/types/database'
 
-const TABS = [
+const ADMIN_TABS = [
     { id: 'barberos', label: 'Barberos', icon: Scissors, permission: 'staff.view' },
-    { id: 'perfiles', label: 'Perfiles', icon: Users, permission: 'staff.view' },
-    { id: 'historial-servicios', label: 'Historial de Servicios', icon: ClipboardList, permission: 'staff.view' },
+    { id: 'historial-servicios', label: 'Historial', icon: ClipboardList, permission: 'staff.view' },
     { id: 'calendario', label: 'Calendario', icon: CalendarDays, permission: 'staff.view' },
     { id: 'descansos', label: 'Descansos', icon: Coffee, permission: 'breaks.view' },
     { id: 'incentivos', label: 'Incentivos', icon: Trophy, permission: 'incentives.view' },
@@ -28,7 +27,11 @@ const TABS = [
     { id: 'roles', label: 'Roles', icon: Shield, ownerOnly: true, permission: 'roles.manage' },
 ] as const
 
-type TabId = (typeof TABS)[number]['id']
+const PERFIL_TAB = { id: 'perfiles', label: 'Perfiles', permission: 'staff.view' } as const
+
+type AdminTabId = (typeof ADMIN_TABS)[number]['id']
+type TabId = AdminTabId | 'perfiles'
+type Segment = 'administracion' | 'perfiles'
 
 interface EquipoClientProps {
     // Barberos
@@ -88,30 +91,36 @@ export function EquipoClient({
     const router = useRouter()
     const pathname = usePathname()
 
-    // Filter tabs based on permissions
-    const visibleTabs = TABS.filter(tab => {
+    // Filtrar tabs de administración según permisos
+    const visibleAdminTabs = ADMIN_TABS.filter(tab => {
         if ('ownerOnly' in tab && tab.ownerOnly && !isOwner) return false
         return permissions[tab.permission]
     })
 
+    const hasPerfilAccess = permissions[PERFIL_TAB.permission]
+
     const branchList = branches as { id: string; name: string }[]
     const firstBranchId = branchList[0]?.id ?? ''
 
-    const initialTabId = searchParams.get('tab') as TabId
-    const firstAvailableTab = visibleTabs.length > 0 ? visibleTabs[0].id : null
+    const initialTabId = searchParams.get('tab') as TabId | null
+    const firstAvailableAdminTab = visibleAdminTabs.length > 0 ? visibleAdminTabs[0].id : null
 
-    // Always initialize with first available tab to prevent SSR hydration mismatch.
-    const [activeTab, setActiveTab] = useState<TabId | null>(firstAvailableTab || null)
+    // Determinar el tab inicial evitando mismatch de hidratación SSR
+    const [activeTab, setActiveTab] = useState<TabId | null>(firstAvailableAdminTab)
 
-    // Sync activeTab with URL params after hydration
+    // Sincronizar activeTab con los parámetros de URL después de la hidratación
     useEffect(() => {
-        if (initialTabId && visibleTabs.some(t => t.id === initialTabId)) {
-            setActiveTab(initialTabId)
+        if (initialTabId === 'perfiles' && hasPerfilAccess) {
+            setActiveTab('perfiles')
+        } else if (initialTabId && visibleAdminTabs.some(t => t.id === initialTabId)) {
+            setActiveTab(initialTabId as AdminTabId)
         }
-    }, [initialTabId, visibleTabs])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialTabId])
+
     const { selectedBranchId, setSelectedBranchId } = useBranchStore()
 
-    // Initialize branch in store if not set
+    // Inicializar branch en el store si no está seleccionado
     useEffect(() => {
         if (!selectedBranchId && firstBranchId) {
             setSelectedBranchId(firstBranchId)
@@ -120,32 +129,51 @@ export function EquipoClient({
 
     const effectiveBranchId = selectedBranchId ?? firstBranchId
 
-    // Update URL whenever tab changes
+    // Forzar activeTab válido si cambian los permisos o el estado queda obsoleto
+    useEffect(() => {
+        if (!activeTab) {
+            if (firstAvailableAdminTab) setActiveTab(firstAvailableAdminTab)
+            return
+        }
+        if (activeTab === 'perfiles') {
+            if (!hasPerfilAccess && firstAvailableAdminTab) setActiveTab(firstAvailableAdminTab)
+            return
+        }
+        if (!visibleAdminTabs.some(t => t.id === activeTab)) {
+            if (firstAvailableAdminTab) setActiveTab(firstAvailableAdminTab)
+            else if (hasPerfilAccess) setActiveTab('perfiles')
+        }
+    }, [activeTab, visibleAdminTabs, firstAvailableAdminTab, hasPerfilAccess])
+
+    // Actualizar la URL cuando cambia el tab
     const updateUrl = useCallback((tab: string | null) => {
         const params = new URLSearchParams()
         if (tab) params.set('tab', tab)
         router.replace(`${pathname}?${params.toString()}`, { scroll: false })
     }, [router, pathname])
 
-    // Force activeTab to be valid if permissions change or state is stale
-    useEffect(() => {
-        if (activeTab && visibleTabs.length > 0 && !visibleTabs.some(t => t.id === activeTab)) {
-            setActiveTab(visibleTabs[0].id)
-        } else if (!activeTab && visibleTabs.length > 0) {
-            setActiveTab(visibleTabs[0].id)
-        }
-    }, [activeTab, visibleTabs])
-
     const handleTabChange = (tab: TabId) => {
         setActiveTab(tab)
         updateUrl(tab)
     }
 
-    const handleBranchChange = (branchId: string) => {
-        setSelectedBranchId(branchId)
+    const handleSegmentChange = (segment: Segment) => {
+        if (segment === 'perfiles') {
+            handleTabChange('perfiles')
+        } else {
+            // Al cambiar a administración, activar el primer sub-tab disponible
+            if (firstAvailableAdminTab) {
+                handleTabChange(firstAvailableAdminTab)
+            }
+        }
     }
 
-    if (visibleTabs.length === 0) {
+    // Derivar el segmento activo del tab activo
+    const activeSegment: Segment = activeTab === 'perfiles' ? 'perfiles' : 'administracion'
+
+    const noAccess = visibleAdminTabs.length === 0 && !hasPerfilAccess
+
+    if (noAccess) {
         return (
             <div className="flex h-[50vh] items-center justify-center">
                 <p className="text-muted-foreground">No tienes acceso a ninguna sección de Equipo.</p>
@@ -155,6 +183,7 @@ export function EquipoClient({
 
     return (
         <div className="space-y-6">
+            {/* Header con BranchSelector */}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight">Equipo</h1>
@@ -165,11 +194,45 @@ export function EquipoClient({
                 <BranchSelector branches={branches as { id: string; name: string }[]} />
             </div>
 
-            {/* Tab navigation */}
-            <div className="flex gap-1 overflow-x-auto pb-2 scrollbar-hide">
-                <div className="flex gap-1 rounded-lg border bg-muted/50 p-1 flex-nowrap min-w-max">
-                    {visibleTabs.map((tab) => {
-                        return (
+            {/* Segmented control — Administración / Perfiles */}
+            <div className="flex gap-1 p-1 bg-muted/50 rounded-xl border w-fit">
+                {visibleAdminTabs.length > 0 && (
+                    <button
+                        onClick={() => handleSegmentChange('administracion')}
+                        aria-pressed={activeSegment === 'administracion'}
+                        className={cn(
+                            'flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all',
+                            activeSegment === 'administracion'
+                                ? 'bg-background text-foreground shadow-sm'
+                                : 'text-muted-foreground hover:text-foreground'
+                        )}
+                    >
+                        <LayoutGrid className="size-4" />
+                        Administración
+                    </button>
+                )}
+                {hasPerfilAccess && (
+                    <button
+                        onClick={() => handleSegmentChange('perfiles')}
+                        aria-pressed={activeSegment === 'perfiles'}
+                        className={cn(
+                            'flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all',
+                            activeSegment === 'perfiles'
+                                ? 'bg-background text-foreground shadow-sm'
+                                : 'text-muted-foreground hover:text-foreground'
+                        )}
+                    >
+                        <UserCircle2 className="size-4" />
+                        Perfiles
+                    </button>
+                )}
+            </div>
+
+            {/* Sub-tabs solo visibles en el segmento Administración */}
+            {activeSegment === 'administracion' && visibleAdminTabs.length > 0 && (
+                <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">
+                    <div className="flex gap-1 rounded-lg border bg-muted/30 p-1 flex-nowrap min-w-max">
+                        {visibleAdminTabs.map((tab) => (
                             <button
                                 key={tab.id}
                                 onClick={() => handleTabChange(tab.id)}
@@ -184,12 +247,12 @@ export function EquipoClient({
                                 <tab.icon className="size-4 shrink-0" />
                                 <span className="hidden sm:inline">{tab.label}</span>
                             </button>
-                        )
-                    })}
+                        ))}
+                    </div>
                 </div>
-            </div>
+            )}
 
-            {/* Tab content */}
+            {/* Contenido del tab activo */}
             <div>
                 {activeTab === 'barberos' && (
                     <BarberosClient

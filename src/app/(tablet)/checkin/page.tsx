@@ -902,7 +902,7 @@ export default function CheckinPage() {
 
   // ── Shared UI pieces ──
 
-    const getBackAction = () => {
+  const getBackAction = () => {
     switch (step) {
       case 'face_scan':
       case 'staff_face_scan':
@@ -986,7 +986,7 @@ export default function CheckinPage() {
                 viewBox="0 0 24 24"
                 fill="currentColor"
               >
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z" />
               </svg>
             )
           })}
@@ -1115,7 +1115,7 @@ export default function CheckinPage() {
               </div>
               {/* Inner glow pulse */}
               <div className="absolute -inset-2 rounded-[1.75rem] bg-gradient-to-r from-emerald-900/60 via-teal-900/60 to-emerald-900/60 blur-xl opacity-40 animate-[checkin-pulse-glow_3s_ease-in-out_infinite] pointer-events-none" />
-              
+
               <button
                 onClick={() => onSelect(null as unknown as string)}
                 disabled={submitting}
@@ -1659,8 +1659,11 @@ export default function CheckinPage() {
                 <h2 className="text-lg md:text-2xl font-bold text-muted-foreground">¡Estás en la fila!</h2>
 
                 <div className="text-center">
-                  <p className="text-7xl md:text-9xl font-bold tabular-nums leading-none">
-                    #{position}
+                  <p className="text-4xl md:text-6xl font-bold leading-tight mt-2">
+                    ¡Tomá asiento!
+                  </p>
+                  <p className="text-base md:text-lg text-muted-foreground mt-2">
+                    Te llamaremos cuando sea tu turno
                   </p>
                 </div>
               </div>
@@ -1728,7 +1731,7 @@ export default function CheckinPage() {
               <div className="text-center">
                 <h2 className="text-2xl md:text-3xl font-bold">Cambiar barbero</h2>
                 <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
-                  Turno #{position}
+                  Seleccioná otro barbero
                 </p>
               </div>
 
