@@ -35,6 +35,8 @@ import {
   Settings2,
   ChevronDown,
   Sparkles,
+  Check,
+  X,
 } from 'lucide-react'
 import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule, AppSettings } from '@/lib/types/database'
 import {
@@ -54,6 +56,7 @@ type Step =
   | 'branch'
   | 'home'
   | 'face_scan'
+  | 'face_confirm'
   | 'phone'
   | 'name'
   | 'face_enroll'
@@ -130,6 +133,7 @@ export default function CheckinPage() {
 
   const [capturedFaceDescriptors, setCapturedFaceDescriptors] = useState<Float32Array[]>([])
   const [capturedFacePhoto, setCapturedFacePhoto] = useState<Blob | null>(null)
+  const [capturedScanPhoto, setCapturedScanPhoto] = useState<Blob | null>(null)
 
   // Staff attendance state
   const [staffFaceMatch, setStaffFaceMatch] = useState<FaceMatchResult | null>(null)
@@ -497,6 +501,7 @@ export default function CheckinPage() {
     setHasExistingFace(false)
     setCapturedFaceDescriptors([])
     setCapturedFacePhoto(null)
+    setCapturedScanPhoto(null)
     setStaffFaceMatch(null)
     setStaffAction(null)
     setStaffActionDone(false)
@@ -561,6 +566,16 @@ export default function CheckinPage() {
         setFaceClientId(data.id)
         setIsReturning(true)
 
+        // Retroalimentación: si el cliente negó ser el match facial, guardar foto/descriptor al cliente real
+        if (capturedScanPhoto) {
+          saveFacePhoto(data.id, capturedScanPhoto).catch(() => {})
+          setCapturedScanPhoto(null)
+        }
+        if (faceDescriptor) {
+          enrollFaceDescriptor(data.id, faceDescriptor, 'checkin', 0.85).catch(() => {})
+          setFaceDescriptor(null)
+        }
+
         const { data: faceData } = await supabase
           .from('client_face_descriptors')
           .select('id')
@@ -581,6 +596,7 @@ export default function CheckinPage() {
           setMyQueueEntry(activeEntry as unknown as QueueEntry)
           setLookingUp(false)
           goTo('manage_turn')
+          resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
           return
         }
       } else {
@@ -677,34 +693,58 @@ export default function CheckinPage() {
   // ── Face ID handlers ──
 
   const handleFaceMatch = useCallback(
-    async (match: FaceMatchResult, descriptor: Float32Array) => {
+    (match: FaceMatchResult, descriptor: Float32Array, photoBlob: Blob | null) => {
       setFaceMatch(match)
       setFaceDescriptor(descriptor)
+      setCapturedScanPhoto(photoBlob)
       setName(match.clientName)
       setPhone(match.clientPhone)
       setFaceClientId(match.clientId)
       setIsReturning(true)
       setHasExistingFace(true)
-
-      const supabase = createClient()
-      const { data: activeEntry } = await supabase
-        .from('queue_entries')
-        .select('*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)')
-        .eq('client_id', match.clientId)
-        .in('status', ['waiting', 'in_progress'])
-        .order('checked_in_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (activeEntry) {
-        setMyQueueEntry(activeEntry as unknown as QueueEntry)
-        goTo('manage_turn')
-      } else {
-        goTo('service_selection')
-      }
+      goTo('face_confirm')
     },
     []
   )
+
+  const handleFaceConfirmYes = useCallback(async () => {
+    if (!faceClientId || !faceDescriptor) return
+
+    // Retroalimentar el sistema con el descriptor y foto confirmados (fire & forget)
+    enrollFaceDescriptor(faceClientId, faceDescriptor, 'checkin', 0.85).catch(() => {})
+    if (capturedScanPhoto) {
+      saveFacePhoto(faceClientId, capturedScanPhoto).catch(() => {})
+    }
+
+    const supabase = createClient()
+    const { data: activeEntry } = await supabase
+      .from('queue_entries')
+      .select('*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)')
+      .eq('client_id', faceClientId)
+      .in('status', ['waiting', 'in_progress'])
+      .order('checked_in_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (activeEntry) {
+      setMyQueueEntry(activeEntry as unknown as QueueEntry)
+      goTo('manage_turn')
+      resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
+    } else {
+      goTo('service_selection')
+    }
+  }, [faceClientId, faceDescriptor, capturedScanPhoto])
+
+  const handleFaceConfirmNo = useCallback(() => {
+    // Mantenemos faceDescriptor y capturedScanPhoto para guardarlos al cliente real que ingrese por teléfono
+    setFaceMatch(null)
+    setName('')
+    setPhone('')
+    setFaceClientId(null)
+    setIsReturning(false)
+    setHasExistingFace(false)
+    goTo('phone')
+  }, [])
 
   const handleFaceNoMatch = useCallback(
     (descriptor: Float32Array) => {
@@ -752,6 +792,7 @@ export default function CheckinPage() {
           if (entry) setMyQueueEntry(entry as unknown as QueueEntry)
           setSubmitting(false)
           goTo('manage_turn')
+          resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
           return
         }
 
@@ -812,6 +853,7 @@ export default function CheckinPage() {
           if (entry) setMyQueueEntry(entry as unknown as QueueEntry)
           setSubmitting(false)
           goTo('manage_turn')
+          resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
           return
         }
 
@@ -907,6 +949,18 @@ export default function CheckinPage() {
       case 'face_scan':
       case 'staff_face_scan':
         return () => goTo('home')
+      case 'face_confirm':
+        return () => {
+          setFaceMatch(null)
+          setFaceDescriptor(null)
+          setFaceClientId(null)
+          setName('')
+          setPhone('')
+          setIsReturning(false)
+          setHasExistingFace(false)
+          setCapturedScanPhoto(null)
+          goTo('face_scan')
+        }
       case 'phone':
         return () => { setPhone(''); goTo('home') }
       case 'name':
@@ -1425,6 +1479,45 @@ export default function CheckinPage() {
             onNoMatch={handleFaceNoMatch}
             onManualEntry={handleFaceManualEntry}
           />
+        </div>
+      )}
+
+      {/* ═══════════════ FACE CONFIRM ═══════════════ */}
+      {step === 'face_confirm' && faceMatch && (
+        <div
+          key={`face-confirm-${animKey}`}
+          className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-8 md:gap-10 px-6 pt-16 md:pt-20 pb-8 flex-1 animate-in fade-in slide-in-from-right-4 duration-400"
+        >
+          {/* Nombre y pregunta */}
+          <div className="text-center">
+            <p className="text-muted-foreground text-lg md:text-xl">¿Sos vos?</p>
+            <h2 className="text-4xl md:text-5xl font-bold mt-2">{faceMatch.clientName}</h2>
+          </div>
+
+          {/* Botones de confirmación */}
+          <div className="flex items-center gap-10 md:gap-16">
+            {/* No soy yo */}
+            <div className="flex flex-col items-center gap-3">
+              <button
+                onClick={handleFaceConfirmNo}
+                className="size-24 md:size-28 rounded-full bg-red-500/10 border-2 border-red-500/60 flex items-center justify-center active:scale-95 transition-all duration-150 hover:bg-red-500/20 hover:border-red-400"
+              >
+                <X className="size-12 md:size-14 text-red-400" strokeWidth={2.5} />
+              </button>
+              <span className="text-red-400/70 text-sm md:text-base">No soy yo</span>
+            </div>
+
+            {/* Sí, soy yo */}
+            <div className="flex flex-col items-center gap-3">
+              <button
+                onClick={handleFaceConfirmYes}
+                className="size-24 md:size-28 rounded-full bg-emerald-500/10 border-2 border-emerald-500/60 flex items-center justify-center active:scale-95 transition-all duration-150 hover:bg-emerald-500/20 hover:border-emerald-400"
+              >
+                <Check className="size-12 md:size-14 text-emerald-400" strokeWidth={2.5} />
+              </button>
+              <span className="text-emerald-400/70 text-sm md:text-base">Sí, soy yo</span>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2130,27 +2223,41 @@ export default function CheckinPage() {
 
           {!changingBarberInManage ? (
             <>
-              <div className="w-full rounded-3xl border border-white/10 bg-white/3 p-8 md:p-10 flex flex-col items-center gap-5">
-                <h2 className="text-xl md:text-2xl font-bold text-muted-foreground">Tu turno</h2>
-
-                <div className="text-center">
-                  <p className="text-8xl md:text-9xl font-bold tabular-nums leading-none">
-                    #{myQueueEntry.position}
-                  </p>
-                  {myQueueEntry.status === 'in_progress' && (
-                    <p className="text-emerald-400 font-medium mt-3 text-lg">
-                      Te están atendiendo
-                    </p>
-                  )}
-                  {myQueueEntry.status === 'waiting' && (
-                    <p className="text-muted-foreground mt-3 text-lg">
-                      Esperando...
-                    </p>
-                  )}
-                </div>
+              <div className="w-full max-w-xl rounded-2xl md:rounded-3xl border border-white/10 bg-white/3 p-5 md:p-10 flex flex-col items-center gap-3 md:gap-5 animate-in zoom-in-50 duration-700">
+                {myQueueEntry.status === 'in_progress' ? (
+                  <>
+                    <div className="size-12 md:size-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                      <CheckCircle2 className="size-6 md:size-9 text-emerald-400" strokeWidth={1.5} />
+                    </div>
+                    <h2 className="text-lg md:text-2xl font-bold text-muted-foreground">¡Ya es tu turno!</h2>
+                    <div className="text-center">
+                      <p className="text-4xl md:text-6xl font-bold leading-tight mt-2">
+                        ¡Acercate!
+                      </p>
+                      <p className="text-base md:text-lg text-emerald-400 mt-2">
+                        Tu barbero te está esperando
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="size-12 md:size-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                      <CheckCircle2 className="size-6 md:size-9 text-emerald-400" strokeWidth={1.5} />
+                    </div>
+                    <h2 className="text-lg md:text-2xl font-bold text-muted-foreground">¡Estás en la fila!</h2>
+                    <div className="text-center">
+                      <p className="text-4xl md:text-6xl font-bold leading-tight mt-2">
+                        ¡Tomá asiento!
+                      </p>
+                      <p className="text-base md:text-lg text-muted-foreground mt-2">
+                        Ya te llamamos cuando sea tu turno
+                      </p>
+                    </div>
+                  </>
+                )}
 
                 {myQueueEntry.barber && (
-                  <div className="w-full rounded-xl border border-white/8 bg-white/3 p-3 md:p-4">
+                  <div className="w-full rounded-xl border border-white/8 bg-white/3 p-3 md:p-4 mt-1">
                     <div className="flex items-center gap-3 justify-center">
                       <div className="flex size-10 md:size-12 items-center justify-center rounded-full bg-white/6 border border-white/10 text-sm md:text-base font-bold shrink-0">
                         {(myQueueEntry.barber as Staff).full_name.charAt(0).toUpperCase()}
@@ -2168,10 +2275,13 @@ export default function CheckinPage() {
                 )}
               </div>
 
-              <div className="w-full flex flex-col items-center gap-2">
+              <div className="w-full max-w-xl flex flex-col items-center gap-2">
                 {myQueueEntry.status === 'waiting' && (
                   <Button
-                    onClick={() => setChangingBarberInManage(true)}
+                    onClick={() => {
+                      if (resetTimer.current) clearTimeout(resetTimer.current)
+                      setChangingBarberInManage(true)
+                    }}
                     variant="outline"
                     className="h-11 md:h-12 text-sm md:text-base rounded-xl w-full max-w-xs"
                   >
@@ -2179,22 +2289,30 @@ export default function CheckinPage() {
                     Cambiar barbero
                   </Button>
                 )}
-
-                <button
-                  onClick={reset}
-                  className="text-muted-foreground hover:text-foreground transition-colors py-2 text-sm md:text-base text-center"
-                >
-                  Volver al inicio
-                </button>
               </div>
+
+              {/* Countdown bar */}
+              <div className="w-full max-w-xs h-1 rounded-full bg-white/10 overflow-hidden">
+                <div
+                  className="h-full bg-white/40 rounded-full origin-left"
+                  style={{ animation: `checkin-countdown ${RESET_DELAY_MS}ms linear forwards` }}
+                />
+              </div>
+              <p className="text-xs md:text-sm text-muted-foreground/50 text-center">
+                Volviendo al inicio...
+              </p>
+
+              <style>{`
+                @keyframes checkin-countdown {
+                  from { transform: scaleX(1); }
+                  to { transform: scaleX(0); }
+                }
+              `}</style>
             </>
           ) : (
             <>
               <div className="text-center">
                 <h2 className="text-2xl md:text-3xl font-bold">Cambiar barbero</h2>
-                <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
-                  Turno #{myQueueEntry.position}
-                </p>
               </div>
 
               {loadingBarbers ? (
