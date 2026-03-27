@@ -9,14 +9,7 @@ export default async function ConfiguracionPage() {
     .select('*')
     .single()
 
-  const { data: rewardsConfig } = await supabase
-    .from('rewards_config')
-    .select('*')
-
   return (
-    <ConfiguracionClient
-      appSettings={appSettings}
-      rewardsConfig={rewardsConfig ?? []}
-    />
+    <ConfiguracionClient appSettings={appSettings} />
   )
 }

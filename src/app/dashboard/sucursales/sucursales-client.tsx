@@ -2,10 +2,9 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Users, Scissors, Clock, DollarSign } from 'lucide-react'
+import { Plus, Pencil, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency } from '@/lib/format'
-import type { Branch, BranchOccupancy } from '@/lib/types/database'
+import type { Branch } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -26,23 +25,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-
-interface StaffRow {
-  id: string
-  branch_id: string | null
-  is_active: boolean
-}
-
-interface VisitRow {
-  branch_id: string
-  amount: number
-}
+import { toast } from 'sonner'
 
 interface Props {
   branches: Branch[]
-  staff: StaffRow[]
-  todayVisits: VisitRow[]
-  occupancy: BranchOccupancy[]
 }
 
 const emptyForm = {
@@ -51,7 +37,7 @@ const emptyForm = {
   phone: '',
 }
 
-export function SucursalesClient({ branches, staff, todayVisits, occupancy }: Props) {
+export function SucursalesClient({ branches }: Props) {
   const router = useRouter()
   const supabase = createClient()
 
@@ -60,19 +46,9 @@ export function SucursalesClient({ branches, staff, todayVisits, occupancy }: Pr
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
 
-  function getBranchStats(branchId: string) {
-    const barberCount = staff.filter((s) => s.branch_id === branchId).length
-    const bVisits = todayVisits.filter((v) => v.branch_id === branchId)
-    const revenue = bVisits.reduce((s, v) => s + v.amount, 0)
-    const occ = occupancy.find((o) => o.branch_id === branchId)
-    return {
-      barberCount,
-      visitsToday: bVisits.length,
-      revenue,
-      waiting: occ?.clients_waiting ?? 0,
-      inProgress: occ?.clients_in_progress ?? 0,
-    }
-  }
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deletingBranch, setDeletingBranch] = useState<Branch | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   function openAdd() {
     setEditingId(null)
@@ -88,6 +64,11 @@ export function SucursalesClient({ branches, staff, todayVisits, occupancy }: Pr
       phone: branch.phone ?? '',
     })
     setDialogOpen(true)
+  }
+
+  function openDelete(branch: Branch) {
+    setDeletingBranch(branch)
+    setDeleteDialogOpen(true)
   }
 
   async function handleSave() {
@@ -107,6 +88,26 @@ export function SucursalesClient({ branches, staff, todayVisits, occupancy }: Pr
     setSaving(false)
     setDialogOpen(false)
     router.refresh()
+  }
+
+  async function handleDelete() {
+    if (!deletingBranch) return
+    setDeleting(true)
+    const { error } = await supabase
+      .from('branches')
+      .delete()
+      .eq('id', deletingBranch.id)
+
+    setDeleting(false)
+    setDeleteDialogOpen(false)
+    setDeletingBranch(null)
+
+    if (error) {
+      toast.error('No se pudo eliminar la sucursal. Puede tener datos asociados.')
+    } else {
+      toast.success('Sucursal eliminada')
+      router.refresh()
+    }
   }
 
   return (
@@ -133,28 +134,30 @@ export function SucursalesClient({ branches, staff, todayVisits, occupancy }: Pr
       )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {branches.map((branch) => {
-          const stats = getBranchStats(branch.id)
-          return (
-            <Card key={branch.id}>
-              <CardHeader>
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    {branch.name}
-                    <Badge
-                      variant={branch.is_active ? 'default' : 'secondary'}
-                      className="text-[10px]"
-                    >
-                      {branch.is_active ? 'Activa' : 'Inactiva'}
-                    </Badge>
-                  </CardTitle>
-                  {branch.address && (
-                    <CardDescription className="mt-1">
-                      {branch.address}
-                    </CardDescription>
-                  )}
-                </div>
-                <CardAction>
+        {branches.map((branch) => (
+          <Card key={branch.id}>
+            <CardHeader>
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  {branch.name}
+                  <Badge
+                    variant={branch.is_active ? 'default' : 'secondary'}
+                    className="text-[10px]"
+                  >
+                    {branch.is_active ? 'Activa' : 'Inactiva'}
+                  </Badge>
+                </CardTitle>
+                {branch.address && (
+                  <CardDescription className="mt-1">
+                    {branch.address}
+                  </CardDescription>
+                )}
+                {branch.phone && (
+                  <CardDescription>{branch.phone}</CardDescription>
+                )}
+              </div>
+              <CardAction>
+                <div className="flex items-center gap-1">
                   <Button
                     variant="ghost"
                     size="icon-xs"
@@ -162,25 +165,22 @@ export function SucursalesClient({ branches, staff, todayVisits, occupancy }: Pr
                   >
                     <Pencil className="size-3" />
                   </Button>
-                </CardAction>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-3">
-                  <MiniStat icon={Users} label="Barberos" value={stats.barberCount} />
-                  <MiniStat icon={Scissors} label="Cortes hoy" value={stats.visitsToday} />
-                  <MiniStat icon={Clock} label="En fila" value={stats.waiting} />
-                  <MiniStat
-                    icon={DollarSign}
-                    label="Ingresos hoy"
-                    value={formatCurrency(stats.revenue)}
-                  />
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => openDelete(branch)}
+                    className="text-red-400"
+                  >
+                    <Trash2 className="size-3" />
+                  </Button>
                 </div>
-              </CardContent>
-            </Card>
-          )
-        })}
+              </CardAction>
+            </CardHeader>
+          </Card>
+        ))}
       </div>
 
+      {/* Dialog: Agregar/Editar */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -231,26 +231,26 @@ export function SucursalesClient({ branches, staff, todayVisits, occupancy }: Pr
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  )
-}
 
-function MiniStat({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: React.ComponentType<{ className?: string }>
-  label: string
-  value: string | number
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <Icon className="size-3.5 text-muted-foreground" />
-      <div>
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-sm font-semibold">{value}</p>
-      </div>
+      {/* Dialog: Confirmar eliminación */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Eliminar sucursal</DialogTitle>
+            <DialogDescription>
+              ¿Estás seguro de que querés eliminar <strong>{deletingBranch?.name}</strong>? Esta acción no se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? 'Eliminando...' : 'Eliminar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
