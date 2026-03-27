@@ -177,7 +177,7 @@ export function FaceCamera({
           consecutiveMatchRef.current = { clientId: match.clientId, count: 1 }
         }
 
-        if (consecutiveMatchRef.current.count >= CONSECUTIVE_MATCHES_REQUIRED) {
+        if (consecutiveMatchRef.current && consecutiveMatchRef.current.count >= CONSECUTIVE_MATCHES_REQUIRED) {
           consecutiveMatchRef.current = null
           setState('matched')
           setMatchResult(match)

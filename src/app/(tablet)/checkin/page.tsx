@@ -43,6 +43,7 @@ import {
   statusConfig,
   assignDynamicBarbers,
   isBarberBlockedByShiftEnd,
+  type BarberStats,
 } from '@/lib/barber-utils'
 import { FaceCamera } from '@/components/checkin/face-camera'
 import { FaceEnrollment } from '@/components/checkin/face-enrollment'
