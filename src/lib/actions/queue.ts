@@ -619,16 +619,25 @@ export async function createBreakEntry(branchId: string, barberId: string, break
     p_branch_id: branchId,
   })
 
-  // We map the break config to a simple client record or just use the name as a placeholder.
-  // Currently breaks use client_id = null and is_break = true.
-  
+  // Si el barbero no tiene un servicio activo, el descanso empieza de inmediato
+  const { data: currentService } = await supabase
+    .from('queue_entries')
+    .select('id')
+    .eq('barber_id', barberId)
+    .eq('status', 'in_progress')
+    .eq('is_break', false)
+    .maybeSingle()
+
+  const shouldStartImmediately = !currentService
+
   const { data: queueEntry, error } = await supabase
     .from('queue_entries')
     .insert({
       branch_id: branchId,
       barber_id: barberId,
       position: position ?? 1,
-      status: 'waiting',
+      status: shouldStartImmediately ? 'in_progress' : 'waiting',
+      started_at: shouldStartImmediately ? new Date().toISOString() : null,
       is_break: true,
       is_dynamic: false,
     })
@@ -638,10 +647,6 @@ export async function createBreakEntry(branchId: string, barberId: string, break
   if (error || !queueEntry) {
     return { error: 'Error al asignar descanso' }
   }
-
-  // To store the name of the break since there's no client_id, we can check if there's any field for it or just rely on 'is_break'.
-  // Currently `is_break` boolean implies it's a break, and it's displayed as "Descanso". 
-  // If we need the specific config name, we can store it somewhere or just keep it as "Descanso".
 
   revalidatePath('/dashboard/fila')
   revalidatePath('/barbero/fila')
