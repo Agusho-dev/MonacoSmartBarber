@@ -49,6 +49,9 @@ const emptyForm = {
   name: '',
   address: '',
   phone: '',
+  business_hours_open: '09:00',
+  business_hours_close: '21:00',
+  business_days: [1, 2, 3, 4, 5, 6] as number[],
 }
 
 export function SucursalesClient({ branches, staff, todayVisits, occupancy }: Props) {
@@ -86,6 +89,9 @@ export function SucursalesClient({ branches, staff, todayVisits, occupancy }: Pr
       name: branch.name,
       address: branch.address ?? '',
       phone: branch.phone ?? '',
+      business_hours_open: branch.business_hours_open?.slice(0, 5) ?? '09:00',
+      business_hours_close: branch.business_hours_close?.slice(0, 5) ?? '21:00',
+      business_days: branch.business_days ?? [1, 2, 3, 4, 5, 6],
     })
     setDialogOpen(true)
   }
@@ -96,6 +102,9 @@ export function SucursalesClient({ branches, staff, todayVisits, occupancy }: Pr
       name: form.name,
       address: form.address || null,
       phone: form.phone || null,
+      business_hours_open: form.business_hours_open,
+      business_hours_close: form.business_hours_close,
+      business_days: form.business_days,
     }
 
     if (editingId) {
@@ -175,6 +184,20 @@ export function SucursalesClient({ branches, staff, todayVisits, occupancy }: Pr
                     value={formatCurrency(stats.revenue)}
                   />
                 </div>
+                {(branch.business_hours_open || branch.business_hours_close) && (
+                  <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground border-t pt-3">
+                    <Clock className="size-3" />
+                    <span>
+                      {branch.business_hours_open?.slice(0, 5)} – {branch.business_hours_close?.slice(0, 5)}
+                    </span>
+                    <span className="mx-1">·</span>
+                    <span>
+                      {['D', 'L', 'M', 'X', 'J', 'V', 'S']
+                        .filter((_, i) => branch.business_days?.includes(i))
+                        .join(' ')}
+                    </span>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )
@@ -218,6 +241,64 @@ export function SucursalesClient({ branches, staff, todayVisits, occupancy }: Pr
                 onChange={(e) => setForm({ ...form, phone: e.target.value })}
                 placeholder="+54 11 1234-5678"
               />
+            </div>
+            <div className="border-t pt-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Horarios de atención</p>
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className="grid gap-2">
+                  <Label>Apertura</Label>
+                  <Input
+                    type="time"
+                    value={form.business_hours_open}
+                    onChange={(e) => setForm({ ...form, business_hours_open: e.target.value })}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Cierre</Label>
+                  <Input
+                    type="time"
+                    value={form.business_hours_close}
+                    onChange={(e) => setForm({ ...form, business_hours_close: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <Label>Días de atención</Label>
+                <div className="flex gap-1 flex-wrap">
+                  {[
+                    { label: 'D', value: 0 },
+                    { label: 'L', value: 1 },
+                    { label: 'M', value: 2 },
+                    { label: 'X', value: 3 },
+                    { label: 'J', value: 4 },
+                    { label: 'V', value: 5 },
+                    { label: 'S', value: 6 },
+                  ].map(({ label, value }) => {
+                    const active = form.business_days.includes(value)
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => {
+                          setForm({
+                            ...form,
+                            business_days: active
+                              ? form.business_days.filter((d) => d !== value)
+                              : [...form.business_days, value].sort((a, b) => a - b),
+                          })
+                        }}
+                        className={`h-8 w-8 rounded-md text-xs font-semibold transition-colors ${
+                          active
+                            ? 'bg-primary text-primary-foreground'
+                            : 'border border-input bg-background text-muted-foreground hover:bg-muted'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
           </div>
 

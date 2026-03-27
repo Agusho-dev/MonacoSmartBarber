@@ -652,33 +652,26 @@ export default function CheckinPage() {
     return best
   }, [barbers, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers, dailyServiceCounts, lastCompletedAt])
 
-  const minWaitEta = useMemo(() => {
-    if (!minWaitBarber) return 0
-    return getBarberStats(minWaitBarber, dynamicEntries, barberAvgMinutes).eta
-  }, [minWaitBarber, dynamicEntries, barberAvgMinutes])
+  // ── Availability level: 1 (sin espera), 2 (baja), 3 (media), 4 (alta) ──
+  const getAvailabilityLevel = useCallback((stats: BarberStats): 1 | 2 | 3 | 4 => {
+    if (stats.status === 'available') return 1  // sin espera: barbero libre
+    if (stats.waiting === 0) return 2           // baja: atendiendo, sin cola
+    if (stats.waiting === 1) return 3           // media: 1 en espera
+    return 4                                     // alta: 2+ en espera
+  }, [])
 
-  // ── Availability level: 1 (green/low), 2 (yellow/medium), 3 (orange/high) ──
-  const getAvailabilityLevel = useCallback((eta: number): 1 | 2 | 3 => {
-    // Calculate the global average service time
-    const avgValues = Object.entries(barberAvgMinutes)
-      .filter(([k]) => k !== '__fallback')
-      .map(([, v]) => v)
-    const globalAvg = avgValues.length > 0
-      ? avgValues.reduce((a, b) => a + b, 0) / avgValues.length
-      : barberAvgMinutes.__fallback ?? 30
+  const globalAvailability = useMemo((): 1 | 2 | 3 | 4 => {
+    const activeBarbersList = barbers.filter(b => !notClockedInBarbers.has(b.id))
+    const availableCount = activeBarbersList.filter(b =>
+      getBarberStats(b, dynamicEntries, barberAvgMinutes).status === 'available'
+    ).length
+    const totalWaiting = dynamicEntries.filter(e => e.status === 'waiting').length
 
-    // Level thresholds based on avg service time
-    // 1 chair (green) = less than 1x average (quick service)
-    // 2 chairs (yellow) = between 1x and 2x average
-    // 3 chairs (orange) = more than 2x average
-    if (eta <= globalAvg * 0.8) return 1
-    if (eta <= globalAvg * 1.8) return 2
-    return 3
-  }, [barberAvgMinutes])
-
-  const globalAvailability = useMemo(() => {
-    return getAvailabilityLevel(minWaitEta)
-  }, [minWaitEta, getAvailabilityLevel])
+    if (availableCount >= 1) return 1
+    if (totalWaiting === 0) return 2
+    if (activeBarbersList.length === 0 || totalWaiting < 2 * activeBarbersList.length) return 3
+    return 4
+  }, [barbers, notClockedInBarbers, dynamicEntries, barberAvgMinutes])
 
   // ── Face ID handlers ──
 
@@ -962,36 +955,44 @@ export default function CheckinPage() {
     </button>
   ) : null
 
-  // ── Availability indicator (3 chairs) ──
-  const AvailabilityIndicator = ({ level, size = 'md' }: { level: 1 | 2 | 3; size?: 'sm' | 'md' | 'lg' }) => {
+  // ── Availability indicator (4 niveles, 3 sillas) ──
+  const AvailabilityIndicator = ({ level, size = 'md' }: { level: 1 | 2 | 3 | 4; size?: 'sm' | 'md' | 'lg' }) => {
     const sizeClass = size === 'lg' ? 'size-7 md:size-8' : size === 'md' ? 'size-5 md:size-6' : 'size-4 md:size-5'
     const gapClass = size === 'lg' ? 'gap-2' : size === 'md' ? 'gap-1.5' : 'gap-1'
-    const labels = ['Baja espera', 'Espera media', 'Espera elevada']
-    const colors = [
-      { active: 'text-emerald-400', inactive: 'text-white/15' },
-      { active: 'text-amber-400', inactive: 'text-white/15' },
-      { active: 'text-orange-400', inactive: 'text-white/15' },
+    const labels = ['Sin espera', 'Baja espera', 'Espera media', 'Espera elevada']
+    // Cuántas sillas encender: nivel 1=0, nivel 2=1, nivel 3=2, nivel 4=3
+    const litCount = level - 1
+    // Color de las sillas encendidas según el nivel general
+    const activeColors = ['text-emerald-400', 'text-emerald-400', 'text-amber-400', 'text-red-400']
+    const activeColor = activeColors[level - 1]
+    const inactiveColor = 'text-white/15'
+    const badgeColors = [
+      'bg-emerald-400/10 border-emerald-400/30 text-emerald-400', // sin espera
+      'bg-emerald-400/10 border-emerald-400/30 text-emerald-400', // baja
+      'bg-amber-400/10 border-amber-400/30 text-amber-400',       // media
+      'bg-red-400/10 border-red-400/30 text-red-400',             // alta
     ]
-    const bgColors = [
-      'bg-emerald-400/10 border-emerald-400/30',
-      'bg-amber-400/10 border-amber-400/30',
-      'bg-orange-400/10 border-orange-400/30',
-    ]
-    const textColors = ['text-emerald-400', 'text-amber-400', 'text-orange-400']
-    const color = colors[level - 1]
 
     return (
       <div className="flex flex-col items-center gap-1.5">
         <div className={`flex items-center ${gapClass}`}>
-          {[1, 2, 3].map((i) => (
-            <svg key={i} className={`${sizeClass} ${i <= level ? color.active : color.inactive} transition-colors duration-300`} viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
-            </svg>
-          ))}
+          {[0, 1, 2].map((i) => {
+            const isLit = i < litCount
+            return (
+              <svg
+                key={i}
+                className={`${sizeClass} ${isLit ? activeColor : inactiveColor} transition-colors duration-300`}
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
+              </svg>
+            )
+          })}
         </div>
         {size !== 'sm' && (
-          <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${bgColors[level - 1]}`}>
-            <span className={textColors[level - 1]}>{labels[level - 1]}</span>
+          <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${badgeColors[level - 1]}`}>
+            <span>{labels[level - 1]}</span>
           </div>
         )}
       </div>
@@ -1006,7 +1007,7 @@ export default function CheckinPage() {
     const isNotClockedIn = notClockedInBarbers.has(barber.id)
     const stats = getBarberStats(barber, dynamicEntries, barberAvgMinutes)
     const cfg = statusConfig[stats.status]
-    const availLevel = getAvailabilityLevel(stats.eta)
+    const availLevel = getAvailabilityLevel(stats)
 
     const ringColor = isNotClockedIn
       ? 'ring-orange-500/60'
