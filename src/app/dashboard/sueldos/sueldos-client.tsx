@@ -97,6 +97,10 @@ const TYPE_BADGE: Record<
     label: 'Adelanto',
     className: 'bg-red-500/15 text-red-400 border-red-500/30',
   },
+  hybrid_deficit: {
+    label: 'Déficit híbrido',
+    className: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  },
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

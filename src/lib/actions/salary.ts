@@ -4,9 +4,8 @@ import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { SalaryScheme } from '@/lib/types/database'
 
-// Tipos locales para las nuevas tablas (migración 037)
-// Se moverán a database.ts una vez aplicada la migración
-export type SalaryReportType = 'commission' | 'base_salary' | 'bonus' | 'advance'
+// Tipos locales para las nuevas tablas (migración 037/044)
+export type SalaryReportType = 'commission' | 'base_salary' | 'bonus' | 'advance' | 'hybrid_deficit'
 export type SalaryReportStatus = 'pending' | 'paid'
 
 export interface SalaryReport {
@@ -518,4 +517,291 @@ export async function deleteSalaryReport(reportId: string) {
 
   revalidatePath('/dashboard/sueldos')
   return { success: true }
+}
+
+// ─── Generación automática al checkout ──────────────────────────────────────
+
+const TZ = 'America/Argentina/Buenos_Aires'
+
+/**
+ * Genera un reporte de comisión automáticamente al hacer checkout.
+ * Busca el último clock_in del día, suma visitas entre entrada y salida,
+ * y crea el salary_report correspondiente según el esquema del barbero.
+ */
+export async function generateCheckoutCommissionReport(
+  staffId: string,
+  branchId: string
+) {
+  const supabase = await createClient()
+
+  // Fecha local de hoy en Argentina
+  const now = new Date()
+  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(now)
+
+  // Buscar el último clock_in de hoy para determinar el inicio del turno
+  const { data: clockInLog } = await supabase
+    .from('attendance_logs')
+    .select('created_at')
+    .eq('staff_id', staffId)
+    .eq('branch_id', branchId)
+    .eq('action_type', 'clock_in')
+    .gte('created_at', `${todayStr}T00:00:00.000Z`)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  // Si no hay clock_in hoy, usar inicio del día
+  const shiftStart = clockInLog?.created_at ?? `${todayStr}T00:00:00.000Z`
+  const shiftEnd = now.toISOString()
+
+  // Verificar que no exista ya un reporte de comisión para este día
+  const { count: existingCount } = await supabase
+    .from('salary_reports')
+    .select('id', { count: 'exact', head: true })
+    .eq('staff_id', staffId)
+    .eq('branch_id', branchId)
+    .eq('type', 'commission')
+    .eq('report_date', todayStr)
+
+  if (existingCount && existingCount > 0) {
+    return { success: true, skipped: true }
+  }
+
+  // Sumar commission_amount de visitas en el turno
+  const { data: visits } = await supabase
+    .from('visits')
+    .select('commission_amount')
+    .eq('barber_id', staffId)
+    .eq('branch_id', branchId)
+    .gte('completed_at', shiftStart)
+    .lte('completed_at', shiftEnd)
+
+  const totalCommission = (visits ?? []).reduce(
+    (sum, v) => sum + Number(v.commission_amount ?? 0), 0
+  )
+
+  if (totalCommission <= 0) {
+    return { success: true, skipped: true, reason: 'Sin comisiones en el turno' }
+  }
+
+  // Obtener configuración salarial para registrar el esquema en las notas
+  const { data: salaryConfig } = await supabase
+    .from('salary_configs')
+    .select('scheme')
+    .eq('staff_id', staffId)
+    .single()
+
+  const scheme = salaryConfig?.scheme ?? 'commission'
+
+  const { error: insertError } = await supabase
+    .from('salary_reports')
+    .insert({
+      staff_id: staffId,
+      branch_id: branchId,
+      type: 'commission',
+      amount: totalCommission,
+      notes: `Generado automáticamente al checkout (${scheme})`,
+      report_date: todayStr,
+      period_start: shiftStart,
+      period_end: shiftEnd,
+      status: 'pending',
+    })
+
+  if (insertError) {
+    console.error('Error al insertar reporte de comisión automático:', insertError)
+    return { error: insertError.message }
+  }
+
+  return { success: true, data: { totalCommission, scheme } }
+}
+
+// ─── Liquidación de período híbrido ─────────────────────────────────────────
+
+/**
+ * Liquida un período para un barbero con esquema híbrido.
+ * - Si las comisiones >= sueldo base → paga comisiones (limpias para el barbero)
+ * - Si las comisiones < sueldo base → paga sueldo fijo + registra déficit
+ * Cada período arranca en cero, sin acumulación de déficit.
+ */
+export async function settleHybridPeriod(
+  staffId: string,
+  branchId: string,
+  periodStart: string,
+  periodEnd: string,
+  notes?: string
+) {
+  if (!staffId || !branchId || !periodStart || !periodEnd) {
+    return { error: 'El barbero, la sucursal y el período son obligatorios.' }
+  }
+
+  const supabase = await createClient()
+
+  // Obtener configuración salarial
+  const { data: salaryConfig, error: configError } = await supabase
+    .from('salary_configs')
+    .select('scheme, base_amount, commission_pct')
+    .eq('staff_id', staffId)
+    .single()
+
+  if (configError || !salaryConfig) {
+    return { error: 'No se encontró configuración salarial para este barbero.' }
+  }
+
+  if (salaryConfig.scheme !== 'hybrid') {
+    return { error: 'Esta acción solo aplica a barberos con esquema híbrido.' }
+  }
+
+  const baseAmount = salaryConfig.base_amount ?? 0
+  if (baseAmount <= 0) {
+    return { error: 'El monto base configurado no es válido.' }
+  }
+
+  // Obtener comisiones pendientes del período
+  const { data: pendingReports, error: reportsError } = await supabase
+    .from('salary_reports')
+    .select('id, amount')
+    .eq('staff_id', staffId)
+    .eq('branch_id', branchId)
+    .eq('type', 'commission')
+    .eq('status', 'pending')
+    .gte('report_date', periodStart)
+    .lte('report_date', periodEnd)
+
+  if (reportsError) {
+    return { error: 'Error al obtener comisiones del período.' }
+  }
+
+  const totalCommissions = (pendingReports ?? []).reduce(
+    (sum, r) => sum + Number(r.amount), 0
+  )
+  const reportIds = (pendingReports ?? []).map(r => r.id)
+
+  const exceededBase = totalCommissions >= baseAmount
+  const paymentAmount = exceededBase ? totalCommissions : baseAmount
+  const deficit = exceededBase ? 0 : baseAmount - totalCommissions
+
+  // Crear batch de pago
+  const { data: batch, error: batchError } = await supabase
+    .from('salary_payment_batches')
+    .insert({
+      staff_id: staffId,
+      branch_id: branchId,
+      total_amount: paymentAmount,
+      paid_at: new Date().toISOString(),
+      notes: notes ?? (exceededBase
+        ? `Híbrido: comisiones superaron base ($${totalCommissions} >= $${baseAmount})`
+        : `Híbrido: se pagó sueldo fijo (comisiones $${totalCommissions} < base $${baseAmount})`),
+    })
+    .select('id')
+    .single()
+
+  if (batchError || !batch) {
+    return { error: 'Error al crear el lote de pago.' }
+  }
+
+  // Marcar comisiones como pagadas
+  if (reportIds.length > 0) {
+    await supabase
+      .from('salary_reports')
+      .update({ status: 'paid', batch_id: batch.id })
+      .in('id', reportIds)
+  }
+
+  // Si no llegó al base, registrar el sueldo base y el déficit
+  if (!exceededBase) {
+    await supabase
+      .from('salary_reports')
+      .insert([
+        {
+          staff_id: staffId,
+          branch_id: branchId,
+          type: 'base_salary' as const,
+          amount: baseAmount,
+          notes: `Sueldo fijo aplicado — comisiones no alcanzaron el piso`,
+          report_date: periodEnd,
+          period_start: periodStart,
+          period_end: periodEnd,
+          status: 'paid' as const,
+          batch_id: batch.id,
+        },
+        {
+          staff_id: staffId,
+          branch_id: branchId,
+          type: 'hybrid_deficit' as const,
+          amount: deficit,
+          notes: `Diferencia entre sueldo fijo ($${baseAmount}) y comisiones ($${totalCommissions})`,
+          report_date: periodEnd,
+          period_start: periodStart,
+          period_end: periodEnd,
+          status: 'paid' as const,
+          batch_id: batch.id,
+        },
+      ])
+  }
+
+  revalidatePath('/dashboard/sueldos')
+  revalidatePath('/dashboard/finanzas')
+
+  return {
+    success: true,
+    data: {
+      batchId: batch.id,
+      paymentAmount,
+      totalCommissions,
+      baseAmount,
+      exceededBase,
+      deficit,
+    }
+  }
+}
+
+// ─── Consultas de comisiones para el dashboard de finanzas ──────────────────
+
+/**
+ * Obtiene el resumen de comisiones pagadas y pendientes para el dashboard.
+ */
+export async function getCommissionSummary(branchId?: string | null) {
+  const supabase = await createClient()
+
+  let pendingQuery = supabase
+    .from('salary_reports')
+    .select('amount, staff_id')
+    .eq('type', 'commission')
+    .eq('status', 'pending')
+
+  let paidQuery = supabase
+    .from('salary_reports')
+    .select('amount, staff_id')
+    .eq('type', 'commission')
+    .eq('status', 'paid')
+
+  if (branchId) {
+    pendingQuery = pendingQuery.eq('branch_id', branchId)
+    paidQuery = paidQuery.eq('branch_id', branchId)
+  }
+
+  const [{ data: pending }, { data: paid }] = await Promise.all([
+    pendingQuery,
+    paidQuery,
+  ])
+
+  const totalPending = (pending ?? []).reduce((s, r) => s + Number(r.amount), 0)
+  const totalPaid = (paid ?? []).reduce((s, r) => s + Number(r.amount), 0)
+
+  // Agrupar pendientes por barbero
+  const byBarber = new Map<string, number>()
+  for (const r of pending ?? []) {
+    byBarber.set(r.staff_id, (byBarber.get(r.staff_id) ?? 0) + Number(r.amount))
+  }
+
+  return {
+    totalPending,
+    totalPaid,
+    pendingCount: pending?.length ?? 0,
+    paidCount: paid?.length ?? 0,
+    pendingByBarber: Array.from(byBarber.entries()).map(([staffId, amount]) => ({
+      staffId,
+      amount,
+    })),
+  }
 }

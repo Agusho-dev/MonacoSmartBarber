@@ -10,6 +10,7 @@ export interface MonthlyFinancial {
   revenue: number
   commissions: number
   fixedExpenses: number
+  variableExpenses: number
   totalExpenses: number
   netProfit: number
   cuts: number
@@ -30,6 +31,7 @@ export interface FinancialSummary {
     revenue: number
     commissions: number
     fixedExpenses: number
+    variableExpenses: number
     netProfit: number
     cuts: number
   }
@@ -83,8 +85,17 @@ export async function fetchFinancialData(
 
   const monthlyFixed = (expenses ?? []).reduce((s, e) => s + Number(e.amount), 0)
 
+  // Variable expenses (expense_tickets) in range
+  let eq = supabase
+    .from('expense_tickets')
+    .select('amount, expense_date, branch_id')
+    .gte('expense_date', startDateStr.slice(0, 10))
+    .lte('expense_date', endDateStr.slice(0, 10))
+  if (branchId) eq = eq.eq('branch_id', branchId)
+  const { data: variableExpenses } = await eq
+
   // Initialize all months using local time to group
-  const monthMap = new Map<string, { revenue: number; commissions: number; cuts: number }>()
+  const monthMap = new Map<string, { revenue: number; commissions: number; cuts: number; variableExp: number }>()
   for (let i = 0; i < monthsBack; i++) {
     let year = localNow.getFullYear()
     let monthIndex = localNow.getMonth() - i
@@ -94,7 +105,7 @@ export async function fetchFinancialData(
     }
     const d = new Date(year, monthIndex, 1)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    monthMap.set(key, { revenue: 0, commissions: 0, cuts: 0 })
+    monthMap.set(key, { revenue: 0, commissions: 0, cuts: 0, variableExp: 0 })
   }
 
   const TZ = 'America/Argentina/Buenos_Aires'
@@ -118,6 +129,16 @@ export async function fetchFinancialData(
     }
   }
 
+  // Group variable expenses by local month
+  for (const e of variableExpenses ?? []) {
+    // expense_date is already "YYYY-MM-DD"
+    const key = e.expense_date.slice(0, 7) // "YYYY-MM"
+    const m = monthMap.get(key)
+    if (m) {
+      m.variableExp += Number(e.amount)
+    }
+  }
+
   const months: MonthlyFinancial[] = [...monthMap.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([ym, d]) => ({
@@ -126,8 +147,9 @@ export async function fetchFinancialData(
       revenue: d.revenue,
       commissions: d.commissions,
       fixedExpenses: monthlyFixed,
-      totalExpenses: d.commissions + monthlyFixed,
-      netProfit: d.revenue - d.commissions - monthlyFixed,
+      variableExpenses: d.variableExp,
+      totalExpenses: d.commissions + monthlyFixed + d.variableExp,
+      netProfit: d.revenue - d.commissions - monthlyFixed - d.variableExp,
       cuts: d.cuts,
     }))
 
@@ -135,6 +157,7 @@ export async function fetchFinancialData(
   const totalCuts = months.reduce((s, m) => s + m.cuts, 0)
   const totalCommissions = months.reduce((s, m) => s + m.commissions, 0)
   const totalFixedAll = monthlyFixed * monthsBack
+  const totalVariable = months.reduce((s, m) => s + m.variableExpenses, 0)
 
   const avgRevPerCut = totalCuts > 0 ? totalRevenue / totalCuts : 0
   const avgCommPerCut = totalCuts > 0 ? totalCommissions / totalCuts : 0
@@ -153,7 +176,8 @@ export async function fetchFinancialData(
       revenue: totalRevenue,
       commissions: totalCommissions,
       fixedExpenses: totalFixedAll,
-      netProfit: totalRevenue - totalCommissions - totalFixedAll,
+      variableExpenses: totalVariable,
+      netProfit: totalRevenue - totalCommissions - totalFixedAll - totalVariable,
       cuts: totalCuts,
     },
   }

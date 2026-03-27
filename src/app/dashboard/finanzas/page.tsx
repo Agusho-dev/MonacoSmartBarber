@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
-import { fetchFinancialData } from '@/lib/actions/finances'
+import { fetchFinancialData, getFixedExpenses } from '@/lib/actions/finances'
+import { getCommissionSummary } from '@/lib/actions/salary'
 import { FinanzasTabsClient } from './finanzas-tabs-client'
 import type { Metadata } from 'next'
 
@@ -41,27 +42,35 @@ export default async function FinanzasPage() {
     isOwnerOrAdmin
   )
 
-  const financialData = await fetchFinancialData(6)
-
-  const [{ data: branches }, { data: accounts }, { data: barbersRaw }, { data: expenseTickets }] =
-    await Promise.all([
-      supabase.from('branches').select('*').eq('is_active', true).order('name'),
-      supabase
-        .from('payment_accounts')
-        .select('*, branch:branches(name)')
-        .order('name'),
-      supabase
-        .from('staff')
-        .select('id, full_name, commission_pct, branch_id, salary_configs(*)')
-        .eq('role', 'barber')
-        .eq('is_active', true)
-        .order('full_name'),
-      supabase
-        .from('expense_tickets')
-        .select('*, created_by_staff:created_by(full_name), payment_account:payment_accounts(name, alias_or_cbu)')
-        .order('expense_date', { ascending: false })
-        .limit(100),
-    ])
+  const [
+    financialData,
+    fixedExpenses,
+    commissionSummary,
+    { data: branches },
+    { data: accounts },
+    { data: barbersRaw },
+    { data: expenseTickets },
+  ] = await Promise.all([
+    fetchFinancialData(6),
+    getFixedExpenses(),
+    getCommissionSummary(),
+    supabase.from('branches').select('*').eq('is_active', true).order('name'),
+    supabase
+      .from('payment_accounts')
+      .select('*, branch:branches(name)')
+      .order('name'),
+    supabase
+      .from('staff')
+      .select('id, full_name, commission_pct, branch_id, salary_configs(*)')
+      .eq('role', 'barber')
+      .eq('is_active', true)
+      .order('full_name'),
+    supabase
+      .from('expense_tickets')
+      .select('*, created_by_staff:created_by(full_name), payment_account:payment_accounts(name, alias_or_cbu)')
+      .order('expense_date', { ascending: false })
+      .limit(100),
+  ])
 
   return (
     <FinanzasTabsClient
@@ -70,6 +79,8 @@ export default async function FinanzasPage() {
       accounts={accounts ?? []}
       barbers={barbersRaw ?? []}
       expenseTickets={expenseTickets ?? []}
+      fixedExpenses={fixedExpenses}
+      commissionSummary={commissionSummary}
       permissions={userPermissions}
     />
   )

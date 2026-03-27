@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createDisciplinaryEvent } from './disciplinary'
 import { revalidatePath } from 'next/cache'
+import { generateCheckoutCommissionReport } from './salary'
 
 export async function registerBarberClockIn(staffId: string, branchId: string, faceVerified: boolean) {
     const supabase = await createClient()
@@ -131,6 +132,12 @@ export async function registerBarberClockOut(staffId: string, branchId: string, 
     if (logError) {
         return { error: 'Error al registrar salida: ' + logError.message }
     }
+
+    // Generar reporte de comisión automático para el turno
+    // Se ejecuta en background para no bloquear el checkout
+    generateCheckoutCommissionReport(staffId, branchId).catch((err) => {
+        console.error('Error al generar reporte de comisión en checkout:', err)
+    })
 
     revalidatePath('/checkin')
     return { success: true }
