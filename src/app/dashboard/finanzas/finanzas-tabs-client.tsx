@@ -23,7 +23,6 @@ interface FinanzasTabsClientProps {
     branches: Parameters<typeof FinanzasClient>[0]['branches']
     accounts: Parameters<typeof CuentasClient>[0]['accounts']
     barbers: Parameters<typeof SueldosClient>[0]['barbers']
-    payments: Parameters<typeof SueldosClient>[0]['payments']
     expenseTickets: Parameters<typeof EgresosClient>[0]['expenseTickets']
     permissions: Record<string, boolean>
 }
@@ -33,7 +32,6 @@ export function FinanzasTabsClient({
     branches,
     accounts,
     barbers,
-    payments,
     expenseTickets,
     permissions,
 }: FinanzasTabsClientProps) {
@@ -113,7 +111,6 @@ export function FinanzasTabsClient({
                     <SueldosClient
                         branches={branches}
                         barbers={barbers}
-                        payments={payments}
                     />
                 )}
                 {activeTab === 'egresos' && (
