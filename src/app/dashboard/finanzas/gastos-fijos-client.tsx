@@ -53,6 +53,7 @@ interface FixedExpenseRow {
     category: string | null
     amount: number
     is_active: boolean
+    due_day?: number | null    // día de vencimiento del mes
     created_at: string
     updated_at: string
     branch?: { name: string } | null
@@ -81,6 +82,7 @@ const emptyForm = {
     amount: '',
     branch_id: '',
     is_active: true,
+    due_day: '',    // string vacío para el input de número
 }
 
 export function GastosFijosClient({ fixedExpenses, branches }: Props) {
@@ -116,12 +118,21 @@ export function GastosFijosClient({ fixedExpenses, branches }: Props) {
             amount: String(expense.amount),
             branch_id: expense.branch_id,
             is_active: expense.is_active,
+            due_day: expense.due_day != null ? String(expense.due_day) : '',
         })
         setDialogOpen(true)
     }
 
     async function handleSave() {
         if (!form.name.trim() || !form.amount || !form.branch_id) return
+
+        // Validar due_day entre 1 y 31 si fue ingresado
+        const dueDayNum = form.due_day ? Number(form.due_day) : null
+        if (dueDayNum !== null && (isNaN(dueDayNum) || dueDayNum < 1 || dueDayNum > 31)) {
+            toast.error('El día de vencimiento debe ser un número entre 1 y 31')
+            return
+        }
+
         setSaving(true)
 
         const result = await upsertFixedExpense({
@@ -130,6 +141,7 @@ export function GastosFijosClient({ fixedExpenses, branches }: Props) {
             name: form.name.trim(),
             category: form.category || null,
             amount: Number(form.amount),
+            due_day: dueDayNum,
             is_active: form.is_active,
         })
 
@@ -181,6 +193,7 @@ export function GastosFijosClient({ fixedExpenses, branches }: Props) {
                             <TableHead>Sucursal</TableHead>
                             <TableHead>Categoría</TableHead>
                             <TableHead className="text-right">Monto/mes</TableHead>
+                            <TableHead className="text-right">Vence día</TableHead>
                             <TableHead className="text-center">Estado</TableHead>
                             <TableHead className="text-right">Acciones</TableHead>
                         </TableRow>
@@ -188,7 +201,7 @@ export function GastosFijosClient({ fixedExpenses, branches }: Props) {
                     <TableBody>
                         {filtered.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                                <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
                                     No hay gastos fijos registrados
                                 </TableCell>
                             </TableRow>
@@ -206,6 +219,13 @@ export function GastosFijosClient({ fixedExpenses, branches }: Props) {
                                     </TableCell>
                                     <TableCell className="text-right font-medium">
                                         {formatCurrency(expense.amount)}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                        {expense.due_day != null ? (
+                                            <span className="text-sm">día {expense.due_day}</span>
+                                        ) : (
+                                            <span className="text-muted-foreground">—</span>
+                                        )}
                                     </TableCell>
                                     <TableCell className="text-center">
                                         {expense.is_active ? (
@@ -231,7 +251,7 @@ export function GastosFijosClient({ fixedExpenses, branches }: Props) {
                 </Table>
             </div>
 
-            {/* Form Dialog */}
+            {/* Dialog de creación/edición */}
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                 <DialogContent>
                     <DialogHeader>
@@ -289,6 +309,19 @@ export function GastosFijosClient({ fixedExpenses, branches }: Props) {
                             />
                         </div>
 
+                        {/* Campo de día de vencimiento */}
+                        <div className="grid gap-2">
+                            <Label>Día de vencimiento (opcional)</Label>
+                            <Input
+                                type="number"
+                                min="1"
+                                max="31"
+                                value={form.due_day}
+                                onChange={(e) => setForm({ ...form, due_day: e.target.value })}
+                                placeholder="Ej: 10 (día del mes en que vence)"
+                            />
+                        </div>
+
                         {form.id && (
                             <div className="flex items-center gap-3">
                                 <Switch
@@ -311,7 +344,7 @@ export function GastosFijosClient({ fixedExpenses, branches }: Props) {
                 </DialogContent>
             </Dialog>
 
-            {/* Delete Confirmation */}
+            {/* Confirmación de eliminación */}
             <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
                 <AlertDialogContent>
                     <AlertDialogHeader>

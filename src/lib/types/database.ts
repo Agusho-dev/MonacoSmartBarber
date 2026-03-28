@@ -354,6 +354,7 @@ export interface FixedExpense {
   category: string | null
   amount: number
   is_active: boolean
+  due_day: number | null
   created_at: string
   updated_at: string
   branch?: Branch
