@@ -141,6 +141,73 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
 }
 
 /**
+ * Descripciones breves de cada permiso para mostrar al usuario en el editor de roles.
+ */
+export const PERMISSION_DESCRIPTIONS: Record<string, string> = {
+    'dashboard.access': 'Sin este permiso el usuario no puede ingresar al panel. Es obligatorio para cualquier rol.',
+    'dashboard.home': 'Muestra las métricas del día: atenciones, ingresos y resumen general.',
+
+    'queue.view': 'Permite ver la fila de espera de clientes en tiempo real.',
+    'queue.manage': 'Permite iniciar atenciones, marcarlas como completadas y gestionar el flujo de la fila.',
+    'queue.reassign': 'Permite mover un cliente de un barbero a otro dentro de la fila activa.',
+    'queue.hide_self': 'El barbero puede ocultarse del listado de selección en el kiosco de check-in.',
+
+    'staff.view': 'Permite ver el listado del equipo, sus datos y estadísticas básicas.',
+    'staff.create': 'Permite agregar nuevos barberos u otros miembros al equipo.',
+    'staff.edit': 'Permite modificar nombre, sucursal, PIN y datos de miembros existentes.',
+    'staff.deactivate': 'Permite activar o dar de baja miembros sin eliminarlos permanentemente.',
+    'staff.hide': 'Permite ocultar o mostrar un miembro en el flujo de selección del check-in.',
+
+    'breaks.view': 'Permite ver el historial y estado actual de los descansos del equipo.',
+    'breaks.grant': 'Permite autorizar y otorgar descansos a los miembros del equipo.',
+    'breaks.configure': 'Permite crear y editar los tipos de descanso disponibles y su duración.',
+
+    'finances.view_summary': 'Permite ver el resumen de ingresos y egresos del negocio.',
+    'finances.view_expenses': 'Permite ver el detalle de gastos variables registrados.',
+    'finances.view_fixed': 'Permite ver los gastos fijos configurados para el negocio.',
+    'finances.view_accounts': 'Permite ver las cuentas de cobro (efectivo, transferencia, etc.).',
+    'finances.create_expense': 'Permite registrar nuevos gastos e ingresos en el sistema.',
+    'finances.manage_accounts': 'Permite crear, editar y eliminar cuentas y métodos de pago.',
+
+    'salary.view': 'Permite ver los sueldos configurados para cada miembro del equipo.',
+    'salary.view_commissions': 'Permite ver el detalle de comisiones generadas por atención.',
+    'salary.configure': 'Permite definir el esquema de sueldo: fijo, comisión por corte o combinado.',
+    'salary.pay': 'Permite registrar el pago de sueldos y marcarlos como liquidados.',
+
+    'clients.view': 'Permite ver el listado de clientes y su historial de visitas.',
+    'clients.edit': 'Permite modificar los datos de perfil de los clientes.',
+
+    'services.view': 'Permite ver el catálogo de servicios y productos del negocio.',
+    'services.manage': 'Permite crear, editar y eliminar servicios del catálogo.',
+    'products.manage': 'Permite crear, editar y eliminar productos del inventario.',
+    'products.sell': 'Permite registrar ventas de productos desde el panel.',
+
+    'stats.view': 'Permite acceder a los reportes y estadísticas históricas del negocio.',
+
+    'incentives.view': 'Permite ver las reglas y logros del programa de incentivos.',
+    'incentives.manage': 'Permite crear y modificar las reglas del programa de incentivos.',
+    'incentives.achieve': 'Permite registrar manualmente un logro de incentivo para un barbero.',
+
+    'discipline.view': 'Permite ver el registro de eventos y reglas disciplinarias del equipo.',
+    'discipline.manage': 'Permite crear y modificar las reglas del sistema disciplinario.',
+    'discipline.record': 'Permite cargar un evento disciplinario a un miembro del equipo.',
+
+    'calendar.view': 'Permite ver los horarios semanales y excepciones de los barberos.',
+    'calendar.manage': 'Permite editar horarios, agregar bloques y registrar ausencias o días especiales.',
+
+    'branches.view': 'Permite ver el listado de sucursales y sus datos básicos.',
+    'branches.manage': 'Permite crear nuevas sucursales y modificar la configuración de las existentes.',
+
+    'rewards.view': 'Permite ver el programa de fidelización y el catálogo de recompensas.',
+    'rewards.manage': 'Permite crear y editar recompensas, niveles y reglas del programa de fidelización.',
+
+    'settings.view': 'Permite ver la configuración general del negocio.',
+    'settings.manage': 'Permite modificar la configuración del sistema, datos del negocio y preferencias.',
+
+    'roles.manage': 'Permite crear, editar y eliminar roles, y asignar permisos a cada uno. Solo para dueños.',
+}
+
+/**
  * Flat list of all permission keys for validation
  */
 export const ALL_PERMISSION_KEYS: string[] = Object.values(PERMISSION_CATEGORIES).flatMap(

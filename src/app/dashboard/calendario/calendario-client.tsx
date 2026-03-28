@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect } from 'react'
 import { saveScheduleBlocks, deleteSchedule, upsertException, deleteException } from '@/lib/actions/calendar'
 import type { ScheduleBlock } from '@/lib/actions/calendar'
 import type { Branch, StaffSchedule, StaffScheduleException } from '@/lib/types/database'
+import { useBranchStore } from '@/stores/branch-store'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,14 +17,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Plus, X, AlertTriangle, Trash2 } from 'lucide-react'
+import { Plus, X, AlertTriangle, Trash2, ChevronDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -44,15 +38,21 @@ interface Props {
 }
 
 export function CalendarioClient({ branches, barbers }: Props) {
-  const [selectedBranchId, setSelectedBranchId] = useState(branches[0]?.id ?? '')
+  const { selectedBranchId: storeBranchId } = useBranchStore()
+  const effectiveBranchId = storeBranchId ?? branches[0]?.id ?? ''
   const [selectedBarberId, setSelectedBarberId] = useState<string | null>(null)
+
+  // Resetear barbero seleccionado cuando cambia la sucursal
+  useEffect(() => {
+    setSelectedBarberId(null)
+  }, [effectiveBranchId])
   const [exceptionDialog, setExceptionDialog] = useState(false)
   const [exceptionForm, setExceptionForm] = useState({ date: '', is_absent: true, reason: '' })
   const [scheduleDialog, setScheduleDialog] = useState<{ dayOfWeek: number } | null>(null)
   const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlock[]>([])
   const [, startTransition] = useTransition()
 
-  const branchBarbers = barbers.filter((b) => b.branch_id === selectedBranchId)
+  const branchBarbers = barbers.filter((b) => b.branch_id === effectiveBranchId)
   const selectedBarber = branchBarbers.find((b) => b.id === selectedBarberId) ?? branchBarbers[0] ?? null
 
   const today = new Date().toISOString().slice(0, 10)
@@ -159,46 +159,36 @@ export function CalendarioClient({ branches, barbers }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Calendario laboral</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Configurá los horarios de trabajo de cada barbero y agregá excepciones puntuales.
-          </p>
-        </div>
-        <Select value={selectedBranchId} onValueChange={(v) => { setSelectedBranchId(v); setSelectedBarberId(null) }}>
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="Sucursal" />
-          </SelectTrigger>
-          <SelectContent>
-            {branches.map((b) => (
-              <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div>
+        <h1 className="text-2xl font-bold">Calendario laboral</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Configurá los horarios de trabajo de cada barbero y agregá excepciones puntuales.
+        </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Barber selector */}
+        {/* Barber selector — horizontal scroll en mobile, lista en desktop */}
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Barberos</p>
           {branchBarbers.length === 0 ? (
             <p className="text-sm text-muted-foreground">Sin barberos en esta sucursal.</p>
           ) : (
-            branchBarbers.map((b) => (
-              <button
-                key={b.id}
-                onClick={() => setSelectedBarberId(b.id)}
-                className={cn(
-                  'w-full text-left rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
-                  (selectedBarber?.id === b.id)
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted hover:bg-muted/80'
-                )}
-              >
-                {b.full_name}
-              </button>
-            ))
+            <div className="flex lg:flex-col gap-2 overflow-x-auto pb-1 lg:pb-0 scrollbar-hide">
+              {branchBarbers.map((b) => (
+                <button
+                  key={b.id}
+                  onClick={() => setSelectedBarberId(b.id)}
+                  className={cn(
+                    'shrink-0 lg:w-full text-left rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                    (selectedBarber?.id === b.id)
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'bg-muted hover:bg-muted/80'
+                  )}
+                >
+                  {b.full_name}
+                </button>
+              ))}
+            </div>
           )}
         </div>
 

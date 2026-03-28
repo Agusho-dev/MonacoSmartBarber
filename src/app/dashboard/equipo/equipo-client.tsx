@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
-import { Scissors, Coffee, Trophy, AlertTriangle, Shield, ClipboardList, CalendarDays, LayoutGrid, UserCircle2 } from 'lucide-react'
+import { Scissors, Coffee, Trophy, AlertTriangle, Shield, CalendarDays, LayoutGrid, UserCircle2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
@@ -12,14 +12,12 @@ import { DescansosDashboard } from '../descansos/descansos-client'
 import { IncentivosClient } from '../incentivos/incentivos-client'
 import { DisciplinaClient } from '../disciplina/disciplina-client'
 import { RolesClient } from './roles-client'
-import { HistorialServiciosClient } from './historial-servicios-client'
 import { PerfilesClient } from './perfiles-client'
 import { CalendarioClient } from '../calendario/calendario-client'
 import type { Role, Branch } from '@/lib/types/database'
 
 const ADMIN_TABS = [
     { id: 'barberos', label: 'Barberos', icon: Scissors, permission: 'staff.view' },
-    { id: 'historial-servicios', label: 'Historial', icon: ClipboardList, permission: 'staff.view' },
     { id: 'calendario', label: 'Calendario', icon: CalendarDays, permission: 'staff.view' },
     { id: 'descansos', label: 'Descansos', icon: Coffee, permission: 'breaks.view' },
     { id: 'incentivos', label: 'Incentivos', icon: Trophy, permission: 'incentives.view' },
@@ -31,6 +29,7 @@ const PERFIL_TAB = { id: 'perfiles', label: 'Perfiles', permission: 'staff.view'
 
 type AdminTabId = (typeof ADMIN_TABS)[number]['id']
 type TabId = AdminTabId | 'perfiles'
+
 type Segment = 'administracion' | 'perfiles'
 
 interface EquipoClientProps {
@@ -195,13 +194,13 @@ export function EquipoClient({
             </div>
 
             {/* Segmented control — Administración / Perfiles */}
-            <div className="flex gap-1 p-1 bg-muted/50 rounded-xl border w-fit">
+            <div className="flex gap-1 p-1 bg-muted/50 rounded-xl border w-full sm:w-fit">
                 {visibleAdminTabs.length > 0 && (
                     <button
                         onClick={() => handleSegmentChange('administracion')}
                         aria-pressed={activeSegment === 'administracion'}
                         className={cn(
-                            'flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all',
+                            'flex flex-1 sm:flex-none items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200',
                             activeSegment === 'administracion'
                                 ? 'bg-background text-foreground shadow-sm'
                                 : 'text-muted-foreground hover:text-foreground'
@@ -216,7 +215,7 @@ export function EquipoClient({
                         onClick={() => handleSegmentChange('perfiles')}
                         aria-pressed={activeSegment === 'perfiles'}
                         className={cn(
-                            'flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all',
+                            'flex flex-1 sm:flex-none items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200',
                             activeSegment === 'perfiles'
                                 ? 'bg-background text-foreground shadow-sm'
                                 : 'text-muted-foreground hover:text-foreground'
@@ -253,7 +252,7 @@ export function EquipoClient({
             )}
 
             {/* Contenido del tab activo */}
-            <div>
+            <div key={activeTab} className="animate-in fade-in-0 duration-200">
                 {activeTab === 'barberos' && (
                     <BarberosClient
                         barbers={barbers as Parameters<typeof BarberosClient>[0]['barbers']}
@@ -274,20 +273,6 @@ export function EquipoClient({
                         breakOvertimeHistory={breakOvertimeHistory as Parameters<typeof PerfilesClient>[0]['breakOvertimeHistory']}
                         salaryConfigs={salaryConfigs as Parameters<typeof PerfilesClient>[0]['salaryConfigs']}
                         calendarBarbers={calendarBarbers as Parameters<typeof PerfilesClient>[0]['calendarBarbers']}
-                    />
-                )}
-                {activeTab === 'historial-servicios' && (
-                    <HistorialServiciosClient
-                        visits={serviceHistory as Parameters<typeof HistorialServiciosClient>[0]['visits']}
-                        barbers={
-                            (barbers as unknown[])
-                                .filter((b: unknown) => (b as { role: string }).role === 'barber' && (b as { is_active: boolean }).is_active)
-                                .map((b: unknown) => ({
-                                    id: (b as { id: string }).id,
-                                    full_name: (b as { full_name: string }).full_name,
-                                    branch_id: (b as { branch_id: string }).branch_id,
-                                })) as Parameters<typeof HistorialServiciosClient>[0]['barbers']
-                        }
                     />
                 )}
                 {activeTab === 'calendario' && (

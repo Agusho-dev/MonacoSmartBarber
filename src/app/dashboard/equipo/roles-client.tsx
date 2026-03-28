@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Plus, Pencil, Trash2, Shield, ChevronDown, ChevronUp, Building2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Role, Branch } from '@/lib/types/database'
-import { PERMISSION_CATEGORIES, countActivePermissions, ALL_PERMISSION_KEYS } from '@/lib/permissions'
+import { PERMISSION_CATEGORIES, PERMISSION_DESCRIPTIONS, countActivePermissions, ALL_PERMISSION_KEYS } from '@/lib/permissions'
 import { createRole, updateRole, deleteRole } from '@/lib/actions/roles'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -173,14 +173,14 @@ export function RolesClient({ roles, branches }: RolesClientProps) {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 className="text-2xl font-bold tracking-tight">Roles</h2>
                     <p className="text-sm text-muted-foreground">
                         Creá y gestioná roles con permisos personalizados
                     </p>
                 </div>
-                <Button onClick={openCreate}>
+                <Button onClick={openCreate} className="sm:self-start">
                     <Plus className="size-4" />
                     Crear rol
                 </Button>
@@ -202,7 +202,7 @@ export function RolesClient({ roles, branches }: RolesClientProps) {
                         const scopeBranches = role.role_branch_scope ?? []
 
                         return (
-                            <Card key={role.id} className="relative">
+                            <Card key={role.id} className="relative transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
                                 <CardHeader className="pb-3">
                                     <div className="flex items-start justify-between">
                                         <div className="flex items-center gap-2">
@@ -337,17 +337,18 @@ export function RolesClient({ roles, branches }: RolesClientProps) {
 
                             {/* Permissions */}
                             <div className="space-y-4">
-                                <div className="flex justify-between items-center bg-muted/30 p-3 rounded-lg border">
+                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 bg-muted/30 p-3 rounded-lg border">
                                     <div>
                                         <Label className="text-base">Listado de permisos</Label>
                                         <p className="text-sm text-muted-foreground mt-0.5">Define a qué partes del sistema puede acceder este rol.</p>
                                     </div>
-                                    <div className="flex gap-2">
+                                    <div className="flex gap-2 shrink-0">
                                         <Button
                                             type="button"
                                             variant="secondary"
                                             size="sm"
                                             onClick={selectAllPermissions}
+                                            className="flex-1 sm:flex-none"
                                         >
                                             Seleccionar todos
                                         </Button>
@@ -356,6 +357,7 @@ export function RolesClient({ roles, branches }: RolesClientProps) {
                                             variant="outline"
                                             size="sm"
                                             onClick={clearAllPermissions}
+                                            className="flex-1 sm:flex-none"
                                         >
                                             Limpiar
                                         </Button>
@@ -417,14 +419,22 @@ export function RolesClient({ roles, branches }: RolesClientProps) {
                                                                     ([permKey, permLabel]) => (
                                                                         <label
                                                                             key={permKey}
-                                                                            className="flex flex-row items-center justify-between px-4 py-3 cursor-pointer hover:bg-muted/5 transition-colors"
+                                                                            className="flex flex-row items-start gap-3 justify-between px-4 py-3 cursor-pointer hover:bg-muted/5 transition-colors"
                                                                         >
-                                                                            <span className="text-sm font-medium leading-none">{permLabel}</span>
+                                                                            <div className="flex flex-col gap-0.5 flex-1 min-w-0 pt-0.5">
+                                                                                <span className="text-sm font-medium leading-snug">{permLabel}</span>
+                                                                                {PERMISSION_DESCRIPTIONS[permKey] && (
+                                                                                    <span className="text-xs text-muted-foreground leading-relaxed">
+                                                                                        {PERMISSION_DESCRIPTIONS[permKey]}
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
                                                                             <Switch
                                                                                 checked={!!form.permissions[permKey]}
                                                                                 onCheckedChange={() =>
                                                                                     togglePermission(permKey)
                                                                                 }
+                                                                                className="shrink-0"
                                                                             />
                                                                         </label>
                                                                     )
