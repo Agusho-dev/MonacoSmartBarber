@@ -77,10 +77,10 @@ export async function processProductSales(
       commission_amount: comm * qty,
     })
 
-    // Descontar stock si está trackeado
+    // Descontar stock si está trackeado (proteger contra negativos)
     if (dbp.stock !== null) {
       await supabase.from('products').update({
-        stock: dbp.stock - qty
+        stock: Math.max(0, dbp.stock - qty)
       }).eq('id', p.id)
     }
   }
@@ -213,7 +213,7 @@ export async function directProductSale(
   revalidatePath('/dashboard')
   revalidatePath('/dashboard/finanzas')
   revalidatePath('/dashboard/estadisticas')
-  revalidatePath('/dashboard/productos')
+  revalidatePath('/dashboard/servicios')
   revalidatePath('/dashboard/sueldos')
 
   return { success: true, visitId: visit.id }

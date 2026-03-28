@@ -1,10 +1,13 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { directProductSale } from '@/lib/actions/sales'
+
+const REVALIDATE_PATH = '/dashboard/servicios'
 
 export async function getProducts(branchId?: string) {
-    const supabase = await createClient()
+    const supabase = createAdminClient()
 
     let query = supabase
         .from('products')
@@ -22,20 +25,21 @@ export async function getProducts(branchId?: string) {
 
 export async function upsertProduct(data: {
     id?: string
-    branch_id: string
+    branch_id: string | null
     name: string
     cost: number
     sale_price: number
     barber_commission: number
     stock: number | null
 }) {
-    const supabase = await createClient()
+    const supabase = createAdminClient()
 
     if (data.id) {
         const { error } = await supabase
             .from('products')
             .update({
                 name: data.name,
+                branch_id: data.branch_id,
                 cost: data.cost,
                 sale_price: data.sale_price,
                 barber_commission: data.barber_commission,
@@ -59,33 +63,33 @@ export async function upsertProduct(data: {
         if (error) return { error: error.message }
     }
 
-    revalidatePath('/dashboard/productos')
+    revalidatePath(REVALIDATE_PATH)
     return { success: true }
 }
 
 export async function toggleProduct(id: string, isActive: boolean) {
-    const supabase = await createClient()
+    const supabase = createAdminClient()
     const { error } = await supabase
         .from('products')
         .update({ is_active: isActive })
         .eq('id', id)
 
     if (error) return { error: error.message }
-    revalidatePath('/dashboard/productos')
+    revalidatePath(REVALIDATE_PATH)
     return { success: true }
 }
 
 export async function deleteProduct(id: string) {
-    const supabase = await createClient()
+    const supabase = createAdminClient()
 
-    // Verify it doesn't have sales
+    // Verificar que no tenga ventas asociadas
     const { count } = await supabase
         .from('product_sales')
         .select('*', { count: 'exact', head: true })
         .eq('product_id', id)
 
     if (count && count > 0) {
-        return { error: 'No se puede eliminar el producto porque tiene ventas asociadas. Desactívalo en su lugar.' }
+        return { error: 'No se puede eliminar el producto porque tiene ventas asociadas. Desactivalo en su lugar.' }
     }
 
     const { error } = await supabase
@@ -94,19 +98,21 @@ export async function deleteProduct(id: string) {
         .eq('id', id)
 
     if (error) return { error: error.message }
-    revalidatePath('/dashboard/productos')
+    revalidatePath(REVALIDATE_PATH)
     return { success: true }
 }
 
-export async function getProductSales(branchId: string, startDate?: string, endDate?: string) {
-    const supabase = await createClient()
+export async function getProductSales(branchId?: string, startDate?: string, endDate?: string) {
+    const supabase = createAdminClient()
 
     let query = supabase
         .from('product_sales')
         .select('*, product:product_id(name), barber:barber_id(full_name)')
-        .eq('branch_id', branchId)
         .order('sold_at', { ascending: false })
 
+    if (branchId) {
+        query = query.eq('branch_id', branchId)
+    }
     if (startDate) {
         query = query.gte('sold_at', startDate)
     }
@@ -119,58 +125,23 @@ export async function getProductSales(branchId: string, startDate?: string, endD
     return { sales: data }
 }
 
-export async function sellProduct(data: {
+/**
+ * Venta de producto desde el dashboard.
+ * Usa directProductSale para crear visita phantom + salary_report + descontar stock.
+ */
+export async function sellProductFromDashboard(data: {
     product_id: string
-    barber_id?: string          // optional: defaults to logged-in staff
+    barber_id: string
     branch_id: string
     quantity: number
-    unit_price: number
-    commission_amount: number
     payment_method: 'cash' | 'transfer' | 'card'
 }) {
-    const supabase = await createClient()
-
-    // Resolve seller: use passed barber_id or fall back to current user's staff record
-    let sellerId = data.barber_id
-    if (!sellerId) {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) return { error: 'Usuario no autenticado' }
-        const { data: staffRow } = await supabase
-            .from('staff')
-            .select('id')
-            .eq('auth_user_id', user.id)
-            .maybeSingle()
-        if (!staffRow) return { error: 'No se encontró el perfil de staff del usuario actual' }
-        sellerId = staffRow.id
-    }
-
-    const { error } = await supabase.from('product_sales').insert([{
-        product_id: data.product_id,
-        barber_id: sellerId,
-        branch_id: data.branch_id,
-        quantity: data.quantity,
-        unit_price: data.unit_price,
-        commission_amount: data.commission_amount,
-        payment_method: data.payment_method,
-    }])
-
-    if (error) return { error: error.message }
-
-    // Decrement stock if not null
-    const { data: product } = await supabase
-        .from('products')
-        .select('stock')
-        .eq('id', data.product_id)
-        .single()
-
-    if (product?.stock !== null && product?.stock !== undefined) {
-        await supabase
-            .from('products')
-            .update({ stock: Math.max(0, product.stock - data.quantity) })
-            .eq('id', data.product_id)
-    }
-
-    revalidatePath('/dashboard/productos')
-    return { success: true }
+    return directProductSale(
+        data.branch_id,
+        data.barber_id,
+        data.payment_method,
+        [{ id: data.product_id, quantity: data.quantity }],
+        null
+    )
 }
 

@@ -74,10 +74,12 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
         },
     },
     services: {
-        label: 'Servicios',
+        label: 'Servicios y Productos',
         permissions: {
-            'services.view': 'Ver servicios',
+            'services.view': 'Ver servicios y productos',
             'services.manage': 'Crear/editar/eliminar servicios',
+            'products.manage': 'Crear/editar/eliminar productos',
+            'products.sell': 'Registrar ventas de productos',
         },
     },
     stats: {
