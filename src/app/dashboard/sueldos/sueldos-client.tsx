@@ -4,13 +4,13 @@ import { useState, useTransition, useEffect, useCallback } from 'react'
 import {
   upsertSalaryConfig,
   getSalaryReports,
-  getPaymentBatches,
+  getPaymentBatchesGrouped,
   createManualSalaryReport,
   generateCommissionReport,
   deleteSalaryReport,
   paySelectedReports,
 } from '@/lib/actions/salary'
-import type { SalaryReport, SalaryPaymentBatch } from '@/lib/actions/salary'
+import type { SalaryReport, SalaryPaymentBatch, GroupedBatchMonth } from '@/lib/actions/salary'
 import { formatCurrency } from '@/lib/format'
 import type { Branch, SalaryConfig, SalaryScheme } from '@/lib/types/database'
 import type { BarberWithConfig } from './page'
@@ -52,9 +52,12 @@ import {
   ChevronRight,
   Banknote,
   AlertCircle,
+  FileDown,
+  Calendar,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { exportPaymentReceiptPDF, type ReceiptReport } from '@/lib/export'
 import { useBranchStore } from '@/stores/branch-store'
 
 // ─── Tipos y constantes ───────────────────────────────────────────────────────
@@ -96,6 +99,10 @@ const TYPE_BADGE: Record<
   advance: {
     label: 'Adelanto',
     className: 'bg-red-500/15 text-red-400 border-red-500/30',
+  },
+  hybrid_deficit: {
+    label: 'Déficit híbrido',
+    className: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
   },
 }
 
@@ -150,9 +157,7 @@ export function SueldosClient({ branches, barbers }: Props) {
 
   // Datos cargados por server action al seleccionar barbero
   const [reports, setReports] = useState<SalaryReport[]>([])
-  const [batches, setBatches] = useState<
-    { batch: SalaryPaymentBatch; reports: SalaryReport[] }[]
-  >([])
+  const [groupedHistory, setGroupedHistory] = useState<GroupedBatchMonth[]>([])
   const [loadingData, setLoadingData] = useState(false)
 
   // Checkboxes de reportes
@@ -197,21 +202,12 @@ export function SueldosClient({ branches, barbers }: Props) {
       setLoadingData(true)
       setSelectedIds(new Set())
       try {
-        const [reportsRes, batchesRes] = await Promise.all([
+        const [reportsRes, groupedRes] = await Promise.all([
           getSalaryReports(barberId, selectedBranchId),
-          getPaymentBatches(barberId, selectedBranchId),
+          getPaymentBatchesGrouped(barberId, selectedBranchId),
         ])
         setReports(reportsRes.error ? [] : (reportsRes.data ?? []))
-        setBatches(
-          batchesRes.error || !('data' in batchesRes)
-            ? []
-            : (
-                batchesRes.data as {
-                  batch: SalaryPaymentBatch
-                  reports: SalaryReport[]
-                }[]
-              ) ?? []
-        )
+        setGroupedHistory(groupedRes.data ?? [])
       } finally {
         setLoadingData(false)
       }
@@ -229,7 +225,7 @@ export function SueldosClient({ branches, barbers }: Props) {
   useEffect(() => {
     setActiveBarberId(null)
     setReports([])
-    setBatches([])
+    setGroupedHistory([])
     setSelectedIds(new Set())
   }, [selectedBranchId])
 
@@ -255,6 +251,32 @@ export function SueldosClient({ branches, barbers }: Props) {
   const selectedTotal = reports
     .filter((r) => selectedIds.has(r.id))
     .reduce((acc, r) => acc + r.amount, 0)
+
+  // Re-generar PDF de un batch del historial
+  async function handleDownloadReceipt(
+    batch: SalaryPaymentBatch,
+    batchReports: SalaryReport[]
+  ) {
+    if (!currentBarber) return
+    try {
+      await exportPaymentReceiptPDF({
+        barberName: currentBarber.full_name,
+        batchDate: batch.paid_at,
+        totalAmount: batch.total_amount,
+        notes: batch.notes,
+        reports: batchReports.map((r) => ({
+          id: r.id,
+          type: r.type,
+          amount: r.amount,
+          report_date: r.report_date,
+          notes: r.notes,
+        })),
+      })
+    } catch (err) {
+      console.error('Error al generar recibo:', err)
+      toast.error('Error al generar el recibo PDF')
+    }
+  }
 
   // ─── Acciones ─────────────────────────────────────────────────────────────
 
@@ -352,6 +374,13 @@ export function SueldosClient({ branches, barbers }: Props) {
 
   function handlePay() {
     if (!activeBarber || !selectedBranchId || selectedIds.size === 0) return
+    // Capturar reportes seleccionados antes de la transición
+    const selectedReports: ReceiptReport[] = reports
+      .filter((r) => selectedIds.has(r.id))
+      .map((r) => ({ id: r.id, type: r.type, amount: r.amount, report_date: r.report_date, notes: r.notes }))
+    const currentNotes = payNotes || null
+    const barberName = activeBarber.full_name
+
     startTransition(async () => {
       const r = await paySelectedReports(
         Array.from(selectedIds),
@@ -365,6 +394,20 @@ export function SueldosClient({ branches, barbers }: Props) {
         toast.success('Pago registrado correctamente')
         setPayDialogOpen(false)
         setPayNotes('')
+        // Generar recibo PDF
+        try {
+          await exportPaymentReceiptPDF({
+            barberName,
+            batchDate: new Date().toISOString(),
+            totalAmount: r.data!.totalAmount,
+            notes: currentNotes,
+            reports: selectedReports,
+          })
+          toast.success('Recibo PDF descargado')
+        } catch (err) {
+          console.error('Error al generar recibo PDF:', err)
+          toast.error('El pago se registró pero hubo un error al generar el recibo')
+        }
         await loadBarberData(activeBarber.id)
       }
     })
@@ -700,7 +743,7 @@ export function SueldosClient({ branches, barbers }: Props) {
                   )}
                 </TabsContent>
 
-                {/* ── Tab: Historial de pagos ──────────────────────────── */}
+                {/* ── Tab: Historial de pagos (agrupado mes/semana) ──── */}
                 <TabsContent
                   value="historial"
                   className="flex-1 overflow-auto min-h-0 mt-0 px-6 pb-4"
@@ -711,7 +754,7 @@ export function SueldosClient({ branches, barbers }: Props) {
                         <Skeleton key={i} className="h-14 w-full" />
                       ))}
                     </div>
-                  ) : batches.length === 0 ? (
+                  ) : groupedHistory.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-48 text-center gap-2">
                       <Banknote className="size-8 text-muted-foreground/40" />
                       <p className="text-sm text-muted-foreground">
@@ -720,75 +763,111 @@ export function SueldosClient({ branches, barbers }: Props) {
                     </div>
                   ) : (
                     <Accordion
-                      type="single"
-                      collapsible
-                      defaultValue={batches[0]?.batch.id}
-                      className="pt-4 space-y-2"
+                      type="multiple"
+                      defaultValue={[groupedHistory[0]?.monthKey]}
+                      className="pt-4 space-y-3"
                     >
-                      {batches.map(({ batch, reports: batchReports }) => (
+                      {groupedHistory.map((month) => (
                         <AccordionItem
-                          key={batch.id}
-                          value={batch.id}
-                          className="border border-border rounded-lg px-4 overflow-hidden"
+                          key={month.monthKey}
+                          value={month.monthKey}
+                          className="border border-border rounded-lg overflow-hidden"
                         >
-                          <AccordionTrigger className="hover:no-underline py-3">
+                          <AccordionTrigger className="hover:no-underline px-4 py-3">
                             <div className="flex items-center justify-between flex-1 mr-2">
                               <div className="flex items-center gap-2">
-                                <Banknote className="size-4 text-muted-foreground shrink-0" />
-                                <span className="text-sm font-medium">
-                                  Liquidación del {formatBatchDate(batch.paid_at)}
+                                <Calendar className="size-4 text-muted-foreground shrink-0" />
+                                <span className="text-sm font-semibold">
+                                  {month.monthLabel}
                                 </span>
                               </div>
                               <span className="text-sm font-semibold tabular-nums text-foreground">
-                                {formatCurrency(batch.total_amount)}
+                                {formatCurrency(month.totalAmount)}
                               </span>
                             </div>
                           </AccordionTrigger>
-                          <AccordionContent className="pb-3">
-                            <Separator className="mb-3" />
-                            {batch.notes && (
-                              <p className="text-xs text-muted-foreground mb-3 italic">
-                                {batch.notes}
-                              </p>
-                            )}
-                            <div className="space-y-2">
-                              {batchReports.map((r) => {
-                                const typeMeta = TYPE_BADGE[r.type]
-                                const isNeg = r.amount < 0
-                                return (
-                                  <div
-                                    key={r.id}
-                                    className="flex items-center gap-3 text-sm"
-                                  >
-                                    <ChevronRight className="size-3 text-muted-foreground/50 shrink-0" />
-                                    <span className="text-muted-foreground text-xs whitespace-nowrap">
-                                      {formatReportDate(r.report_date)}
-                                    </span>
-                                    <Badge
-                                      variant="outline"
-                                      className={cn('text-xs', typeMeta.className)}
-                                    >
-                                      {typeMeta.label}
-                                    </Badge>
-                                    {r.notes && (
-                                      <span className="text-xs text-muted-foreground truncate flex-1">
-                                        {r.notes}
-                                      </span>
-                                    )}
-                                    <span
-                                      className={cn(
-                                        'ml-auto font-medium tabular-nums text-xs whitespace-nowrap',
-                                        isNeg ? 'text-red-400' : 'text-foreground'
+                          <AccordionContent className="pb-0">
+                            <Separator />
+                            {month.weeks.map((week) => (
+                              <div key={week.weekStart} className="border-b border-border last:border-b-0">
+                                <div className="px-4 py-2 bg-muted/20">
+                                  <span className="text-xs font-medium text-muted-foreground">
+                                    {week.weekLabel} — desde {formatReportDate(week.weekStart)}
+                                  </span>
+                                </div>
+                                <div className="divide-y divide-border">
+                                  {week.batches.map(({ batch, reports: batchReports }) => (
+                                    <div key={batch.id} className="px-4 py-3">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-center gap-2">
+                                          <Banknote className="size-3.5 text-muted-foreground shrink-0" />
+                                          <span className="text-sm font-medium">
+                                            {formatBatchDate(batch.paid_at)}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-sm font-semibold tabular-nums">
+                                            {formatCurrency(batch.total_amount)}
+                                          </span>
+                                          <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className="size-7 text-muted-foreground hover:text-primary"
+                                            onClick={() => handleDownloadReceipt(batch, batchReports)}
+                                            title="Descargar recibo PDF"
+                                          >
+                                            <FileDown className="size-3.5" />
+                                          </Button>
+                                        </div>
+                                      </div>
+                                      {batch.notes && (
+                                        <p className="text-xs text-muted-foreground mb-2 italic">
+                                          {batch.notes}
+                                        </p>
                                       )}
-                                    >
-                                      {isNeg
-                                        ? `−${formatCurrency(Math.abs(r.amount))}`
-                                        : formatCurrency(r.amount)}
-                                    </span>
-                                  </div>
-                                )
-                              })}
-                            </div>
+                                      <div className="space-y-1.5">
+                                        {batchReports.map((r) => {
+                                          const typeMeta = TYPE_BADGE[r.type]
+                                          const isNeg = r.amount < 0
+                                          return (
+                                            <div
+                                              key={r.id}
+                                              className="flex items-center gap-3 text-sm"
+                                            >
+                                              <ChevronRight className="size-3 text-muted-foreground/50 shrink-0" />
+                                              <span className="text-muted-foreground text-xs whitespace-nowrap">
+                                                {formatReportDate(r.report_date)}
+                                              </span>
+                                              <Badge
+                                                variant="outline"
+                                                className={cn('text-xs', typeMeta.className)}
+                                              >
+                                                {typeMeta.label}
+                                              </Badge>
+                                              {r.notes && (
+                                                <span className="text-xs text-muted-foreground truncate flex-1">
+                                                  {r.notes}
+                                                </span>
+                                              )}
+                                              <span
+                                                className={cn(
+                                                  'ml-auto font-medium tabular-nums text-xs whitespace-nowrap',
+                                                  isNeg ? 'text-red-400' : 'text-foreground'
+                                                )}
+                                              >
+                                                {isNeg
+                                                  ? `−${formatCurrency(Math.abs(r.amount))}`
+                                                  : formatCurrency(r.amount)}
+                                              </span>
+                                            </div>
+                                          )
+                                        })}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
                           </AccordionContent>
                         </AccordionItem>
                       ))}

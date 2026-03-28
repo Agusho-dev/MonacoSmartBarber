@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useTransition } from 'react'
+import { useState, useMemo, useTransition, useEffect } from 'react'
 import {
   Scissors,
   Banknote,
@@ -19,6 +19,8 @@ import {
   Percent,
   ChevronRight,
   User,
+  FileDown,
+  Receipt,
 } from 'lucide-react'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -48,6 +50,12 @@ import {
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
+import {
   BarChart,
   Bar,
   XAxis,
@@ -60,6 +68,8 @@ import { useBranchStore } from '@/stores/branch-store'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { getPaymentBatchesGrouped, type GroupedBatchMonth, type SalaryReport, type SalaryPaymentBatch } from '@/lib/actions/salary'
+import { exportPaymentReceiptPDF } from '@/lib/export'
 import type {
   Staff,
   Role,
@@ -437,6 +447,38 @@ function BarberDetailPanel({
     commission_pct: String(salaryConfig?.commission_pct ?? barber.commission_pct),
   })
   const [, startSalaryTransition] = useTransition()
+
+  // Historial de recibos de pago
+  const [receiptHistory, setReceiptHistory] = useState<GroupedBatchMonth[]>([])
+  const [loadingReceipts, setLoadingReceipts] = useState(false)
+
+  useEffect(() => {
+    if (!barber.id || !barber.branch_id) return
+    setLoadingReceipts(true)
+    getPaymentBatchesGrouped(barber.id, barber.branch_id)
+      .then((res) => setReceiptHistory(res.data ?? []))
+      .finally(() => setLoadingReceipts(false))
+  }, [barber.id, barber.branch_id])
+
+  async function handleProfileDownloadReceipt(batch: SalaryPaymentBatch, batchReports: SalaryReport[]) {
+    try {
+      await exportPaymentReceiptPDF({
+        barberName: barber.full_name,
+        batchDate: batch.paid_at,
+        totalAmount: batch.total_amount,
+        notes: batch.notes,
+        reports: batchReports.map((r) => ({
+          id: r.id,
+          type: r.type,
+          amount: r.amount,
+          report_date: r.report_date,
+          notes: r.notes,
+        })),
+      })
+    } catch {
+      toast.error('Error al generar el recibo PDF')
+    }
+  }
 
   const filterDate = useMemo(() => getFilterDate(period), [period])
 
@@ -1513,6 +1555,96 @@ function BarberDetailPanel({
               {exporting ? 'Generando...' : 'Descargar boletín'}
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Historial de recibos de pago */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Receipt className="size-4" />
+            Historial de recibos
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loadingReceipts ? (
+            <div className="space-y-2">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="h-10 bg-muted/30 rounded animate-pulse" />
+              ))}
+            </div>
+          ) : receiptHistory.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No hay recibos de pago registrados
+            </p>
+          ) : (
+            <Accordion type="single" collapsible className="space-y-2">
+              {receiptHistory.map((month) => (
+                <AccordionItem
+                  key={month.monthKey}
+                  value={month.monthKey}
+                  className="border border-border rounded-lg overflow-hidden"
+                >
+                  <AccordionTrigger className="hover:no-underline px-3 py-2.5">
+                    <div className="flex items-center justify-between flex-1 mr-2">
+                      <span className="text-sm font-medium">{month.monthLabel}</span>
+                      <span className="text-sm font-semibold tabular-nums">
+                        {formatCurrency(month.totalAmount)}
+                      </span>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="pb-0">
+                    <Separator />
+                    {month.weeks.map((week) => (
+                      <div key={week.weekStart} className="border-b border-border last:border-b-0">
+                        <div className="px-3 py-1.5 bg-muted/20">
+                          <span className="text-xs font-medium text-muted-foreground">
+                            {week.weekLabel}
+                          </span>
+                        </div>
+                        <div className="divide-y divide-border">
+                          {week.batches.map(({ batch, reports: batchReports }) => (
+                            <div
+                              key={batch.id}
+                              className="flex items-center justify-between px-3 py-2"
+                            >
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium">
+                                  {new Date(batch.paid_at).toLocaleDateString('es-AR', {
+                                    day: 'numeric',
+                                    month: 'short',
+                                  })}
+                                </p>
+                                {batch.notes && (
+                                  <p className="text-xs text-muted-foreground truncate">
+                                    {batch.notes}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-semibold tabular-nums">
+                                  {formatCurrency(batch.total_amount)}
+                                </span>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="size-7 text-muted-foreground hover:text-primary"
+                                  onClick={() => handleProfileDownloadReceipt(batch, batchReports)}
+                                  title="Descargar recibo PDF"
+                                >
+                                  <FileDown className="size-3.5" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          )}
         </CardContent>
       </Card>
 

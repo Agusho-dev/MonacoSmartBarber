@@ -45,6 +45,8 @@ import {
   Receipt,
   Target,
   Scissors,
+  ShoppingBag,
+  Users,
 } from 'lucide-react'
 
 const PERIOD_OPTIONS = [
@@ -58,6 +60,7 @@ const COLORS = {
   revenue: 'var(--chart-2)',
   fixed: 'var(--chart-3)',
   commissions: 'var(--chart-4)',
+  variable: 'var(--chart-5)',
   netProfit: 'var(--primary)',
   grid: '#262626',
   axis: '#737373',
@@ -69,11 +72,19 @@ interface AccountWithBranch extends PaymentAccount {
   branch?: { name: string } | null
 }
 
+export interface CommissionSummaryData {
+  totalPending: number
+  totalPaid: number
+  pendingCount: number
+  paidCount: number
+}
+
 interface Props {
   initialData: FinancialSummary
   branches: Branch[]
   accounts: AccountWithBranch[]
   expenseTickets: ExpenseTicket[]
+  commissionSummary: CommissionSummaryData
 }
 
 type AccountBalance = { id: string; name: string; balance: number; income: number; expenses: number }
@@ -83,6 +94,7 @@ export function FinanzasClient({
   branches,
   accounts,
   expenseTickets,
+  commissionSummary,
 }: Props) {
   const { selectedBranchId } = useBranchStore()
   const [data, setData] = useState(initialData)
@@ -179,7 +191,7 @@ export function FinanzasClient({
 
       <div className={isPending ? 'pointer-events-none opacity-50' : ''}>
         {/* Summary Cards */}
-        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-3">
           <SummaryCard
             title="Ingresos brutos"
             value={formatCurrency(totals.revenue)}
@@ -193,10 +205,22 @@ export function FinanzasClient({
             subtitle={`${formatCurrency(breakEven.monthlyFixedExpenses)}/mes`}
           />
           <SummaryCard
+            title="Gastos variables"
+            value={formatCurrency(totals.variableExpenses)}
+            icon={ShoppingBag}
+            subtitle="Egresos del período"
+          />
+          <SummaryCard
             title="Comisiones"
             value={formatCurrency(totals.commissions)}
             icon={Scissors}
             subtitle={`${formatCurrency(breakEven.avgCommissionPerCut)} promedio/corte`}
+          />
+          <SummaryCard
+            title="Comisiones por pagar"
+            value={formatCurrency(commissionSummary.totalPending)}
+            icon={Users}
+            subtitle={`${commissionSummary.pendingCount} reportes pendientes · ${formatCurrency(commissionSummary.totalPaid)} pagadas`}
           />
           <SummaryCard
             title="Resultado neto"
@@ -262,6 +286,13 @@ export function FinanzasClient({
                     name="Gastos fijos"
                     stackId="expenses"
                     fill={COLORS.fixed}
+                    animationDuration={800}
+                  />
+                  <Bar
+                    dataKey="variableExpenses"
+                    name="Gastos variables"
+                    stackId="expenses"
+                    fill={COLORS.variable}
                     animationDuration={800}
                   />
                   <Bar

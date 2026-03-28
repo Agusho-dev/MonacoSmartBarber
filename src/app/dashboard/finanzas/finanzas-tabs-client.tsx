@@ -2,18 +2,21 @@
 
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { DollarSign, Wallet, Banknote, Receipt } from 'lucide-react'
+import { DollarSign, Wallet, Banknote, Receipt, Building2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FinanzasClient } from './finanzas-client'
+import type { CommissionSummaryData } from './finanzas-client'
 import { CuentasClient } from '../cuentas/cuentas-client'
 import { SueldosClient } from '../sueldos/sueldos-client'
 import { EgresosClient } from './egresos-client'
+import { GastosFijosClient } from './gastos-fijos-client'
 
 const TABS = [
-    { id: 'resumen', label: 'Resumen', icon: DollarSign, permission: 'finances.view' },
-    { id: 'cuentas', label: 'Cuentas de cobro', icon: Wallet, permission: 'finances.view' },
+    { id: 'resumen', label: 'Resumen', icon: DollarSign, permission: 'finances.view_summary' },
+    { id: 'cuentas', label: 'Cuentas de cobro', icon: Wallet, permission: 'finances.view_accounts' },
     { id: 'sueldos', label: 'Sueldos', icon: Banknote, permission: 'salary.view' },
-    { id: 'egresos', label: 'Egresos', icon: Receipt, permission: 'finances.view' },
+    { id: 'egresos', label: 'Egresos', icon: Receipt, permission: 'finances.view_expenses' },
+    { id: 'gastos-fijos', label: 'Gastos fijos', icon: Building2, permission: 'finances.view_fixed' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -24,6 +27,8 @@ interface FinanzasTabsClientProps {
     accounts: Parameters<typeof CuentasClient>[0]['accounts']
     barbers: Parameters<typeof SueldosClient>[0]['barbers']
     expenseTickets: Parameters<typeof EgresosClient>[0]['expenseTickets']
+    fixedExpenses: Parameters<typeof GastosFijosClient>[0]['fixedExpenses']
+    commissionSummary: CommissionSummaryData
     permissions: Record<string, boolean>
 }
 
@@ -33,6 +38,8 @@ export function FinanzasTabsClient({
     accounts,
     barbers,
     expenseTickets,
+    fixedExpenses,
+    commissionSummary,
     permissions,
 }: FinanzasTabsClientProps) {
     const searchParams = useSearchParams()
@@ -102,6 +109,7 @@ export function FinanzasTabsClient({
                         branches={branches}
                         accounts={accounts}
                         expenseTickets={expenseTickets}
+                        commissionSummary={commissionSummary}
                     />
                 )}
                 {activeTab === 'cuentas' && (
@@ -118,6 +126,12 @@ export function FinanzasTabsClient({
                         expenseTickets={expenseTickets}
                         branches={branches}
                         accounts={accounts}
+                    />
+                )}
+                {activeTab === 'gastos-fijos' && (
+                    <GastosFijosClient
+                        fixedExpenses={fixedExpenses}
+                        branches={branches}
                     />
                 )}
             </div>

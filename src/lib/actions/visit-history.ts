@@ -148,7 +148,13 @@ export async function createManualVisit(params: {
   // se registran desde el panel de administración, sin sesión de barber PIN
   const supabase = createAdminClient()
 
-  // 1. Obtener comisión global del barbero como fallback
+  // 1. Obtener comisión global: salary_configs → staff.commission_pct como fallback
+  const { data: salaryConfig } = await supabase
+    .from('salary_configs')
+    .select('commission_pct')
+    .eq('staff_id', params.barberId)
+    .single()
+
   const { data: barber, error: barberError } = await supabase
     .from('staff')
     .select('commission_pct')
@@ -159,6 +165,9 @@ export async function createManualVisit(params: {
     console.error('createManualVisit: error obteniendo barbero', barberError)
     return { error: 'No se pudo obtener la información del barbero' }
   }
+
+  // Usar salary_configs como fuente primaria, staff como fallback
+  const globalCommissionPct = salaryConfig?.commission_pct ?? barber.commission_pct
 
   // 2. Obtener comisión por defecto del servicio
   const { data: service, error: serviceError } = await supabase
@@ -180,14 +189,14 @@ export async function createManualVisit(params: {
     .eq('service_id', params.serviceId)
     .maybeSingle()
 
-  // 4. Resolver comisión: override → default del servicio → global del barbero
+  // 4. Resolver comisión: override → default del servicio → salary_configs → staff
   let commissionPct: number
   if (override) {
     commissionPct = Number(override.commission_pct)
   } else if (Number(service.default_commission_pct) > 0) {
     commissionPct = Number(service.default_commission_pct)
   } else {
-    commissionPct = Number(barber.commission_pct)
+    commissionPct = Number(globalCommissionPct)
   }
 
   const commissionAmount = params.amount * (commissionPct / 100)

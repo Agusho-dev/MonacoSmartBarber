@@ -49,7 +49,10 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
     finances: {
         label: 'Finanzas',
         permissions: {
-            'finances.view': 'Ver finanzas',
+            'finances.view_summary': 'Ver resumen financiero',
+            'finances.view_expenses': 'Ver egresos (gastos variables)',
+            'finances.view_fixed': 'Ver gastos fijos',
+            'finances.view_accounts': 'Ver cuentas de cobro',
             'finances.create_expense': 'Crear gastos',
             'finances.manage_accounts': 'Gestionar cuentas de pago',
         },
@@ -58,6 +61,7 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
         label: 'Sueldos',
         permissions: {
             'salary.view': 'Ver sueldos',
+            'salary.view_commissions': 'Ver comisiones',
             'salary.configure': 'Configurar esquemas de sueldo',
             'salary.pay': 'Registrar pagos de sueldo',
         },
