@@ -16,6 +16,10 @@ export async function updateAppSettings(formData: FormData) {
     ? businessDaysRaw.split(',').map(Number)
     : [1, 2, 3, 4, 5, 6]
 
+  const rawBgColor = formData.get('checkin_bg_color') as string | null
+  const validBgColors = ['white', 'black', 'graphite']
+  const checkinBgColor = rawBgColor && validBgColors.includes(rawBgColor) ? rawBgColor : 'graphite'
+
   const updateData = {
     lost_client_days: Number(formData.get('lost_client_days')),
     at_risk_client_days: Number(formData.get('at_risk_client_days')),
@@ -25,6 +29,7 @@ export async function updateAppSettings(formData: FormData) {
     shift_end_margin_minutes: Number(formData.get('shift_end_margin_minutes') || 35),
     next_client_alert_minutes: Number(formData.get('next_client_alert_minutes') || 5),
     dynamic_cooldown_seconds: Number(formData.get('dynamic_cooldown_seconds') || 60),
+    checkin_bg_color: checkinBgColor,
   }
 
   let opError

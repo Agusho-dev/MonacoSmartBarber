@@ -15,7 +15,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Clock, UserX, Save, Timer, AlertTriangle, Zap } from 'lucide-react'
+import { Clock, UserX, Save, Timer, AlertTriangle, Zap, Monitor } from 'lucide-react'
 
 const DAY_OPTIONS = [
   { value: 1, label: 'Lun' },
@@ -42,6 +42,7 @@ export function ConfiguracionClient({ appSettings }: Props) {
         <ShiftEndMarginCard settings={appSettings} />
         <NextClientAlertCard settings={appSettings} />
         <DynamicCooldownCard settings={appSettings} />
+        <CheckinBgColorCard settings={appSettings} />
       </div>
     </div>
   )
@@ -365,6 +366,76 @@ function NextClientAlertCard({ settings }: { settings: AppSettings | null }) {
         <Button onClick={handleSave} disabled={isPending}>
           <Save className="mr-2 size-4" />
           {isPending ? 'Guardando...' : 'Guardar alerta'}
+        </Button>
+      </CardFooter>
+    </Card>
+  )
+}
+
+/* ─── Checkin BG Color (global default) ─── */
+
+const BG_COLOR_OPTIONS = [
+  { value: 'graphite', label: 'Grafito', bg: 'bg-zinc-700', text: 'text-white' },
+  { value: 'black',    label: 'Negro',   bg: 'bg-zinc-950', text: 'text-white' },
+  { value: 'white',    label: 'Blanco',  bg: 'bg-white',    text: 'text-zinc-900 border border-zinc-200' },
+]
+
+function CheckinBgColorCard({ settings }: { settings: AppSettings | null }) {
+  const [color, setColor] = useState<'white' | 'black' | 'graphite'>(
+    (settings?.checkin_bg_color ?? 'graphite') as 'white' | 'black' | 'graphite'
+  )
+  const [isPending, startTransition] = useTransition()
+
+  const handleSave = () => {
+    const fd = new FormData()
+    fd.set('checkin_bg_color', color)
+    fd.set('lost_client_days', String(settings?.lost_client_days ?? 40))
+    fd.set('at_risk_client_days', String(settings?.at_risk_client_days ?? 25))
+    fd.set('business_hours_open', settings?.business_hours_open ?? '09:00')
+    fd.set('business_hours_close', settings?.business_hours_close ?? '21:00')
+    fd.set('business_days', (settings?.business_days ?? [1, 2, 3, 4, 5, 6]).join(','))
+    fd.set('shift_end_margin_minutes', String(settings?.shift_end_margin_minutes ?? 35))
+    fd.set('next_client_alert_minutes', String(settings?.next_client_alert_minutes ?? 5))
+    fd.set('dynamic_cooldown_seconds', String(settings?.dynamic_cooldown_seconds ?? 60))
+
+    startTransition(async () => {
+      const result = await updateAppSettings(fd)
+      if (result.error) toast.error(result.error)
+      else toast.success('Color de terminal actualizado')
+    })
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Monitor className="size-5 text-muted-foreground" />
+          <CardTitle>Color de la terminal</CardTitle>
+        </div>
+        <CardDescription>
+          Color de fondo por defecto del kiosk de check-in. Se puede sobreescribir por sucursal.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex gap-3">
+          {BG_COLOR_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setColor(opt.value as 'white' | 'black' | 'graphite')}
+              className={`flex-1 rounded-xl h-16 flex items-center justify-center font-medium text-sm transition-all ${opt.bg} ${opt.text} ${
+                color === opt.value ? 'ring-2 ring-primary ring-offset-2' : 'opacity-60 hover:opacity-80'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </CardContent>
+      <CardFooter>
+        <Button onClick={handleSave} disabled={isPending}>
+          <Save className="mr-2 size-4" />
+          {isPending ? 'Guardando...' : 'Guardar color'}
         </Button>
       </CardFooter>
     </Card>

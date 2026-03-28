@@ -5,6 +5,7 @@ import {
   initFaceModels,
   detectFace,
   matchFaceInDB,
+  captureFrameAsBlob,
   areModelsLoaded,
   type FaceDetectionResult,
   type FaceMatchResult,
@@ -13,7 +14,7 @@ import { Loader2, Camera, KeyboardIcon, UserCheck, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 interface FaceCameraProps {
-  onMatch: (match: FaceMatchResult, descriptor: Float32Array) => void
+  onMatch: (match: FaceMatchResult, descriptor: Float32Array, photoBlob: Blob | null) => void
   onNoMatch: (descriptor: Float32Array) => void
   onManualEntry: () => void
   branchName?: string
@@ -31,7 +32,7 @@ type CameraState =
   | 'error'
 
 const SCAN_INTERVAL_MS = 200
-const MATCH_HOLD_MS = 2000
+const MATCH_HOLD_MS = 1000
 const CONSECUTIVE_MATCHES_REQUIRED = 2 // confirmaciones consecutivas antes de aceptar un match
 const MIN_FACE_WIDTH_RATIO = 0.18 // cara debe ocupar al menos 18% del ancho del video
 
@@ -179,10 +180,12 @@ export function FaceCamera({
 
         if (consecutiveMatchRef.current && consecutiveMatchRef.current.count >= CONSECUTIVE_MATCHES_REQUIRED) {
           consecutiveMatchRef.current = null
+          // Capturar foto del frame actual para retroalimentación antes de navegar
+          const photoBlob = videoRef.current ? await captureFrameAsBlob(videoRef.current) : null
           setState('matched')
           setMatchResult(match)
           setTimeout(() => {
-            if (mountedRef.current) onMatch(match, detection.descriptor)
+            if (mountedRef.current) onMatch(match, detection.descriptor, photoBlob)
           }, MATCH_HOLD_MS)
         } else {
           // Aún no suficientes confirmaciones, seguir escaneando
