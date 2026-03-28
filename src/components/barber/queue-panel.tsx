@@ -27,6 +27,13 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -56,6 +63,7 @@ import {
   EyeOff,
   Eye,
   AlertTriangle,
+  MoreHorizontal,
 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -154,6 +162,7 @@ export function QueuePanel({
   const [hiddenLoading, setHiddenLoading] = useState(false)
 
   const [directSaleOpen, setDirectSaleOpen] = useState(false)
+  const [mobilePanelTab, setMobilePanelTab] = useState<'queue' | 'active'>('queue')
 
   // Next client alert state
   const [nextClientAlertMinutes, setNextClientAlertMinutes] = useState(5)
@@ -728,13 +737,13 @@ export function QueuePanel({
     return (
       <div key={entry.id} className="space-y-2">
         <Card className="gap-0 py-0">
-          <CardContent className="flex items-center gap-4 p-5 md:p-6">
-            <div className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-secondary text-xl font-bold">
+          <CardContent className="flex items-center gap-2.5 sm:gap-4 p-3 sm:p-5 md:p-6">
+            <div className="flex size-10 sm:size-14 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-secondary text-sm sm:text-xl font-bold">
               #{entry.position}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <p className="truncate text-lg font-semibold">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <p className="truncate text-base sm:text-lg font-semibold">
                   {entry.client?.name ?? 'Cliente'}
                 </p>
                 {(() => {
@@ -792,16 +801,16 @@ export function QueuePanel({
                 </div>
               )}
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
               {(!myActiveEntry && !myActiveBreak && entry.id === myWaitingEntries[0]?.id) && (
                 <Button
-                  size="lg"
-                  className="h-14 px-6 text-lg"
+                  size="sm"
+                  className="h-10 px-3 sm:h-14 sm:px-6 text-sm sm:text-lg"
                   onClick={() => handleStartService(entry.id)}
                   disabled={actionLoading === entry.id}
                 >
-                  <Scissors className="mr-2 size-5" />
-                  <span className="hidden xl:inline">Atender</span>
+                  <Scissors className="size-4 sm:size-5 sm:mr-2" />
+                  <span className="hidden sm:inline">Atender</span>
                 </Button>
               )}
 
@@ -811,10 +820,10 @@ export function QueuePanel({
                     variant="ghost"
                     size="icon"
                     disabled={actionLoading === entry.id}
-                    className="size-14 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    className="size-10 sm:size-14 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     title="No se presentó / Ausente"
                   >
-                    <X className="size-6" />
+                    <X className="size-4 sm:size-6" />
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
@@ -897,41 +906,36 @@ export function QueuePanel({
     <div className="flex h-[calc(100dvh-4rem)] flex-col bg-background">
       {/* Top bar */}
       <header className="sticky top-0 z-20 flex items-center justify-between border-b bg-background/95 backdrop-blur px-3 py-2.5 md:px-5">
-        <div className="flex items-center gap-3">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Scissors className="size-4" />
+        <div className="flex items-center gap-2.5">
+          <div className="flex size-8 sm:size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <Scissors className="size-3.5 sm:size-4" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <p className="font-semibold leading-none">{session.full_name}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="font-semibold leading-none text-sm sm:text-base">{session.full_name}</p>
               {hiddenFromCheckin && (
-                <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-amber-500/15 text-amber-500 border-amber-500/30">
-                  <EyeOff className="size-3 mr-0.5" />
+                <Badge variant="outline" className="h-4 px-1 text-[9px] uppercase tracking-wider bg-amber-500/15 text-amber-500 border-amber-500/30">
+                  <EyeOff className="size-2.5 mr-0.5" />
                   Oculto
                 </Badge>
               )}
             </div>
-            <p className="mt-0.5 text-sm text-muted-foreground">{branchName}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{branchName}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Break request button / status */}
+
+        {/* Desktop: all buttons inline */}
+        <div className="hidden sm:flex items-center gap-2">
           {!breakRequestStatus && !myActiveBreak && breakConfigs.length > 0 && (
             <Button variant="ghost" size="sm" onClick={() => setBreakDialogOpen(true)}>
               <Coffee className="size-4" />
-              <span className="hidden sm:inline">Descanso</span>
+              Descanso
             </Button>
           )}
           {breakRequestStatus === 'pending' && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-yellow-500"
-              onClick={handleCancelBreakRequest}
-              disabled={breakRequestLoading}
-            >
+            <Button variant="ghost" size="sm" className="text-yellow-500" onClick={handleCancelBreakRequest} disabled={breakRequestLoading}>
               <Coffee className="size-4 mr-1" />
-              <span className="hidden sm:inline">Solicitado</span>
+              Solicitado
               <X className="size-3 ml-1" />
             </Button>
           )}
@@ -941,20 +945,10 @@ export function QueuePanel({
               Aprobado
             </Badge>
           )}
-
-          {/* Manage breaks button for barbers with permission */}
           {canManageBreaks && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                fetchPendingBreakRequests()
-                setBreakRequestsDialogOpen(true)
-              }}
-              className="relative"
-            >
+            <Button variant="ghost" size="sm" onClick={() => { fetchPendingBreakRequests(); setBreakRequestsDialogOpen(true) }} className="relative">
               <Coffee className="size-4" />
-              <span className="hidden sm:inline">Gestionar</span>
+              Gestionar
               {pendingBreakRequests.length > 0 && (
                 <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
                   {pendingBreakRequests.length}
@@ -962,54 +956,308 @@ export function QueuePanel({
               )}
             </Button>
           )}
-
-          {/* Venta Directa */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setDirectSaleOpen(true)}
-          >
+          <Button variant="ghost" size="sm" onClick={() => setDirectSaleOpen(true)}>
             <Gift className="size-4" />
-            <span className="hidden sm:inline">Vender</span>
+            Vender
           </Button>
-
           {canHideSelf && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleToggleVisibility}
-              disabled={hiddenLoading}
-              className={hiddenFromCheckin ? 'text-amber-500' : ''}
-            >
+            <Button variant="ghost" size="sm" onClick={handleToggleVisibility} disabled={hiddenLoading} className={hiddenFromCheckin ? 'text-amber-500' : ''}>
               {hiddenFromCheckin ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              <span className="hidden sm:inline">{hiddenFromCheckin ? 'Oculto' : 'Visible'}</span>
+              {hiddenFromCheckin ? 'Oculto' : 'Visible'}
             </Button>
           )}
-
           {canDeactivateStaff && otherBarbers.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setDeactivateDialogOpen(true)}
-            >
+            <Button variant="ghost" size="sm" onClick={() => setDeactivateDialogOpen(true)}>
               <Power className="size-4" />
-              <span className="hidden sm:inline">Barberos</span>
+              Barberos
             </Button>
           )}
-
           <form action={logoutBarber}>
             <Button variant="ghost" size="sm" type="submit">
               <LogOut className="size-4" />
-              <span className="hidden sm:inline">Salir</span>
+              Salir
             </Button>
           </form>
         </div>
+
+        {/* Mobile: break status + overflow menu */}
+        <div className="flex sm:hidden items-center gap-1.5">
+          {/* Break status — always visible on mobile */}
+          {!breakRequestStatus && !myActiveBreak && breakConfigs.length > 0 && (
+            <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => setBreakDialogOpen(true)}>
+              <Coffee className="size-4" />
+            </Button>
+          )}
+          {breakRequestStatus === 'pending' && (
+            <Button variant="ghost" size="sm" className="h-8 px-2 text-yellow-500" onClick={handleCancelBreakRequest} disabled={breakRequestLoading}>
+              <Coffee className="size-4" />
+              <X className="size-3 ml-0.5" />
+            </Button>
+          )}
+          {breakRequestStatus === 'approved' && !myActiveBreak && (
+            <Badge variant="outline" className="h-6 px-1.5 bg-green-500/15 text-green-600 border-green-500/30 text-[10px]">
+              <Coffee className="size-3 mr-0.5" />
+              OK
+            </Badge>
+          )}
+          {canManageBreaks && pendingBreakRequests.length > 0 && (
+            <button
+              onClick={() => { fetchPendingBreakRequests(); setBreakRequestsDialogOpen(true) }}
+              className="relative flex size-8 items-center justify-center rounded-md hover:bg-muted/50"
+            >
+              <Coffee className="size-4" />
+              <span className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
+                {pendingBreakRequests.length}
+              </span>
+            </button>
+          )}
+
+          {/* Overflow dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-8 w-8 px-0">
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              {canManageBreaks && (
+                <DropdownMenuItem onClick={() => { fetchPendingBreakRequests(); setBreakRequestsDialogOpen(true) }}>
+                  <Coffee className="size-4 mr-2" />
+                  Gestionar descansos
+                  {pendingBreakRequests.length > 0 && (
+                    <Badge className="ml-auto h-4 px-1 text-[10px] bg-amber-500">{pendingBreakRequests.length}</Badge>
+                  )}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => setDirectSaleOpen(true)}>
+                <Gift className="size-4 mr-2" />
+                Venta directa
+              </DropdownMenuItem>
+              {canHideSelf && (
+                <DropdownMenuItem onClick={handleToggleVisibility} disabled={hiddenLoading}>
+                  {hiddenFromCheckin ? <EyeOff className="size-4 mr-2 text-amber-500" /> : <Eye className="size-4 mr-2" />}
+                  {hiddenFromCheckin ? 'Volver a ser visible' : 'Ocultarme del check-in'}
+                </DropdownMenuItem>
+              )}
+              {canDeactivateStaff && otherBarbers.length > 0 && (
+                <DropdownMenuItem onClick={() => setDeactivateDialogOpen(true)}>
+                  <Power className="size-4 mr-2" />
+                  Gestionar barberos
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <form action={logoutBarber}>
+                <DropdownMenuItem asChild>
+                  <button type="submit" className="w-full flex items-center text-destructive focus:text-destructive">
+                    <LogOut className="size-4 mr-2" />
+                    Cerrar sesión
+                  </button>
+                </DropdownMenuItem>
+              </form>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </header>
 
-
       <main className="flex flex-1 flex-col overflow-hidden sm:flex-row">
+
+        {/* ── MOBILE: tab layout ── */}
+        <div className="flex flex-1 flex-col overflow-hidden sm:hidden">
+          <Tabs value={mobilePanelTab} onValueChange={(v) => setMobilePanelTab(v as 'queue' | 'active')} className="flex flex-1 flex-col overflow-hidden">
+            <div className="px-3 pt-2 pb-1">
+              <TabsList className="w-full">
+                <TabsTrigger value="queue" className="flex-1 py-2 text-sm font-medium">
+                  Fila
+                  <Badge variant="secondary" className="ml-1.5 px-1.5 text-xs">
+                    {myWaitingEntries.filter(e => !e.is_break).length}
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger value="active" className="flex-1 py-2 text-sm font-medium relative">
+                  {myActiveBreak ? 'Descanso' : 'En atención'}
+                  {(myActiveEntry || myActiveBreak) && (
+                    <span className="ml-1.5 flex size-2 rounded-full bg-primary animate-pulse" />
+                  )}
+                </TabsTrigger>
+              </TabsList>
+            </div>
+
+            {/* Mobile queue tabs (Mi fila / General) inside the Fila tab */}
+            <TabsContent value="queue" className="mt-0 flex-1 overflow-hidden">
+              <Tabs defaultValue="my-queue" className="flex flex-1 flex-col overflow-hidden h-full">
+                <div className="px-3 pb-1">
+                  <TabsList className="w-full h-8">
+                    <TabsTrigger value="my-queue" className="flex-1 text-xs h-6">
+                      Mi fila
+                      <Badge variant="secondary" className="ml-1 px-1 text-[10px]">
+                        {myWaitingEntries.filter(e => !e.is_break).length}
+                      </Badge>
+                    </TabsTrigger>
+                    <TabsTrigger value="general-queue" className="flex-1 text-xs h-6">
+                      General
+                      <Badge variant="secondary" className="ml-1 px-1 text-[10px]">
+                        {allWaitingEntries.filter(e => !e.is_break).length}
+                      </Badge>
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+                <Separator />
+                <TabsContent value="my-queue" className="mt-0 flex-1 overflow-hidden">
+                  <ScrollArea className="h-full">
+                    <div className="space-y-2 p-3">
+                      {loading ? (
+                        Array.from({ length: 3 }).map((_, i) => (
+                          <Skeleton key={i} className="h-[72px] w-full rounded-xl" />
+                        ))
+                      ) : myWaitingEntries.length === 0 ? (
+                        renderEmptyQueue()
+                      ) : (
+                        myWaitingEntries.map((e) => renderQueueEntry(e, false))
+                      )}
+                      {!loading && renderInProgressOthers()}
+                    </div>
+                  </ScrollArea>
+                </TabsContent>
+                <TabsContent value="general-queue" className="mt-0 flex-1 overflow-hidden">
+                  <ScrollArea className="h-full">
+                    <div className="space-y-2 p-3">
+                      {loading ? (
+                        Array.from({ length: 3 }).map((_, i) => (
+                          <Skeleton key={i} className="h-[72px] w-full rounded-xl" />
+                        ))
+                      ) : allWaitingEntries.length === 0 ? (
+                        renderEmptyQueue()
+                      ) : (
+                        allWaitingEntries.map((e) => renderQueueEntry(e, true))
+                      )}
+                      {!loading && renderInProgressOthers()}
+                    </div>
+                  </ScrollArea>
+                </TabsContent>
+              </Tabs>
+            </TabsContent>
+
+            {/* Mobile active client tab */}
+            <TabsContent value="active" className="mt-0 flex-1 overflow-hidden">
+              <ScrollArea className="h-full">
+                <div className="p-3">
+                  {/* Reuse same active client rendering */}
+                  {myActiveBreak ? (
+                    (() => {
+                      const breakElapsedMs = myActiveBreak.started_at ? now - new Date(myActiveBreak.started_at).getTime() : 0
+                      const breakDurationMs = (breakDurationMinutes ?? 0) * 60_000
+                      const isBreakOverdue = breakDurationMinutes !== null && breakDurationMinutes > 0 && breakElapsedMs > breakDurationMs
+                      const overdueMs = Math.max(0, breakElapsedMs - breakDurationMs)
+                      const formatOverdue = (ms: number) => {
+                        const totalSeconds = Math.floor(ms / 1000)
+                        const m = Math.floor(totalSeconds / 60)
+                        const s = totalSeconds % 60
+                        return `${m}m ${s}s`
+                      }
+                      return (
+                        <Card className={isBreakOverdue ? 'border-red-500/20 bg-red-500/5' : 'border-amber-500/20 bg-amber-500/5'}>
+                          <CardHeader className="p-4">
+                            <div className="flex items-center gap-3">
+                              <div className={`flex size-12 shrink-0 items-center justify-center rounded-xl ${isBreakOverdue ? 'bg-red-500/15 text-red-500' : 'bg-amber-500/15 text-amber-600'}`}>
+                                <Coffee className="size-6" />
+                              </div>
+                              <div>
+                                <CardTitle className={`text-xl ${isBreakOverdue ? 'text-red-500' : 'text-amber-600'}`}>
+                                  {isBreakOverdue ? 'Tiempo de demora' : 'Descanso'}
+                                </CardTitle>
+                                <p className="mt-0.5 text-sm text-muted-foreground">
+                                  {isBreakOverdue ? 'Superaste el tiempo ⚠️' : 'Disfrutá tu descanso ☕'}
+                                </p>
+                              </div>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="space-y-4 p-4 pt-0">
+                            <div className={`flex items-center gap-3 rounded-xl px-4 py-3 ${isBreakOverdue ? 'bg-red-500/10 border border-red-500/20' : 'bg-secondary'}`}>
+                              <Clock className={`size-5 shrink-0 ${isBreakOverdue ? 'text-red-500' : 'text-muted-foreground'}`} />
+                              <p className={`text-3xl font-bold tabular-nums tracking-tight ${isBreakOverdue ? 'text-red-500' : ''}`}>
+                                {myActiveBreak.started_at ? (isBreakOverdue ? formatOverdue(overdueMs) : formatElapsed(myActiveBreak.started_at)) : '—'}
+                              </p>
+                            </div>
+                            <Button className="h-14 w-full text-lg" size="lg" onClick={handleCompleteBreak} disabled={actionLoading === myActiveBreak.id}>
+                              <Check className="mr-2 size-5" />
+                              Finalizar descanso
+                            </Button>
+                          </CardContent>
+                        </Card>
+                      )
+                    })()
+                  ) : myActiveEntry ? (
+                    <Card className="border-primary/20 bg-primary/3">
+                      <CardHeader className="p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground">
+                            #{myActiveEntry.position}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <CardTitle className="text-xl truncate">{myActiveEntry.client?.name ?? 'Cliente'}</CardTitle>
+                            {myActiveEntry.service && <p className="mt-0.5 text-sm font-medium text-primary">{myActiveEntry.service.name}</p>}
+                            <p className="mt-0.5 text-sm text-muted-foreground">{myActiveEntry.client?.phone}</p>
+                          </div>
+                          {myActiveEntry.reward_claimed && (
+                            <Badge variant="secondary" className="shrink-0 gap-1 bg-purple-500/15 text-purple-500 border-purple-500/20">
+                              <Gift className="size-3" />
+                              Premio
+                            </Badge>
+                          )}
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-3 p-4 pt-0">
+                        <div className="flex items-center gap-3 rounded-xl bg-secondary px-4 py-3">
+                          <Clock className="size-5 shrink-0 text-muted-foreground" />
+                          <div>
+                            <p className="text-xs text-muted-foreground">Tiempo de servicio</p>
+                            <p className="text-3xl font-bold tabular-nums tracking-tight">
+                              {myActiveEntry.started_at ? formatElapsed(myActiveEntry.started_at) : '—'}
+                            </p>
+                          </div>
+                        </div>
+                        <Accordion type="single" collapsible className="w-full">
+                          <AccordionItem value="history" className="border-none">
+                            <AccordionTrigger className="flex h-12 items-center justify-between rounded-lg border bg-card px-4 py-0 hover:bg-accent hover:no-underline [&[data-state=open]>svg]:rotate-180">
+                              <div className="flex items-center gap-2">
+                                <User className="size-4" />
+                                <span className="text-base font-medium">Historial y Fotos</span>
+                              </div>
+                            </AccordionTrigger>
+                            <AccordionContent className="pt-3 pb-1">
+                              {myActiveEntry.client?.notes && (
+                                <div className="rounded-lg bg-muted/50 p-3 border border-border/50 mb-3">
+                                  <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1"><User className="size-3" /> Observaciones</p>
+                                  <p className="text-sm italic text-foreground whitespace-pre-wrap">{myActiveEntry.client.notes}</p>
+                                </div>
+                              )}
+                              {myActiveEntry.client && <ClientHistory clientId={myActiveEntry.client.id} />}
+                            </AccordionContent>
+                          </AccordionItem>
+                        </Accordion>
+                        <Button className="h-14 w-full text-lg" size="lg" onClick={() => setCompletingEntry(myActiveEntry)}>
+                          <Check className="mr-2 size-5" />
+                          Finalizar
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
+                      <Scissors className="mb-3 size-12 opacity-15" />
+                      <p className="font-medium">Sin cliente en atención</p>
+                      <p className="mt-1 max-w-[220px] text-xs opacity-60">
+                        Seleccioná un cliente de la fila para comenzar
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+          </Tabs>
+        </div>
+
+        {/* ── DESKTOP: side-by-side layout ── */}
         {/* Queue list */}
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b sm:border-b-0 sm:border-r">
+        <section className="hidden sm:flex min-h-0 flex-1 flex-col overflow-hidden border-r">
           <Tabs defaultValue="my-queue" className="flex flex-1 flex-col overflow-hidden">
             <div className="px-3 py-2 md:px-5">
               <TabsList className="w-full">
@@ -1071,8 +1319,8 @@ export function QueuePanel({
           </Tabs>
         </section>
 
-        {/* Current client / Active break */}
-        <section className="flex shrink-0 flex-col sm:w-[300px] md:w-[360px] lg:w-[420px]">
+        {/* Current client / Active break — desktop only */}
+        <section className="hidden sm:flex shrink-0 flex-col sm:w-[300px] md:w-[360px] lg:w-[420px]">
           <div className="px-4 py-3 md:px-5 md:py-4">
             <h2 className="text-lg md:text-xl font-semibold">
               {myActiveBreak ? 'En descanso' : 'Tu cliente actual'}
