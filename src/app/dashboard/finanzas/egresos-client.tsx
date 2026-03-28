@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
-import { Plus, Trash2, Wallet } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { Plus, Trash2, Wallet, Pencil, Download } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
-import { createExpenseTicket, deleteExpenseTicket } from '@/lib/actions/expense-tickets'
+import { createExpenseTicket, deleteExpenseTicket, updateExpenseTicket } from '@/lib/actions/expense-tickets'
 import { useBranchStore } from '@/stores/branch-store'
 import type { Branch, ExpenseTicket, PaymentAccount } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
@@ -77,28 +77,44 @@ const emptyForm = {
 export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
     const { selectedBranchId } = useBranchStore()
 
-    // Form state
+    // Estado del formulario
     const [dialogOpen, setDialogOpen] = useState(false)
     const [form, setForm] = useState(emptyForm)
     const [saving, setSaving] = useState(false)
 
-    // Delete state
+    // Estado de edición
+    const [editId, setEditId] = useState<string | null>(null)
+
+    // Estado de eliminación
     const [deleteId, setDeleteId] = useState<string | null>(null)
     const [deleting, setDeleting] = useState(false)
 
-    // Filter state
+    // Estado de filtros
     const [filterAccount, setFilterAccount] = useState<string>('__all__')
+    const [filterYear, setFilterYear] = useState<string>('__all__')
+    const [filterMonth, setFilterMonth] = useState<string>('__all__')
+
+    // Años disponibles calculados desde los tickets
+    const availableYears = useMemo(() => {
+        const years = [...new Set(expenseTickets.map(t => t.expense_date.slice(0, 4)))]
+        return years.sort().reverse()
+    }, [expenseTickets])
 
     const filteredTickets = expenseTickets.filter((t) => {
         if (selectedBranchId && t.branch_id !== selectedBranchId) return false
         if (filterAccount !== '__all__') {
-            if (filterAccount === '__cash__') return !t.payment_account_id
-            return t.payment_account_id === filterAccount
+            if (filterAccount === '__cash__') { if (t.payment_account_id) return false }
+            else if (t.payment_account_id !== filterAccount) return false
         }
+        if (filterYear !== '__all__' && !t.expense_date.startsWith(filterYear)) return false
+        if (filterMonth !== '__all__' && !t.expense_date.startsWith(`${filterYear}-${filterMonth}`)) return false
         return true
     })
 
-    // Prepare unique categories for the select, combinding base categories and existing ones
+    // Total del filtrado actual
+    const filteredTotal = filteredTickets.reduce((s, t) => s + Number(t.amount), 0)
+
+    // Categorías disponibles combinando las base y las existentes en los registros
     const availableCategories = Array.from(
         new Set([
             ...CATEGORIES,
@@ -106,7 +122,7 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
         ])
     ).sort()
 
-    // Filter active accounts by selected branch
+    // Cuentas activas filtradas por sucursal seleccionada en el form
     const filteredAccounts = accounts.filter(a =>
         a.is_active && (form.branch_id ? a.branch_id === form.branch_id : true)
     )
@@ -116,6 +132,20 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
             ...emptyForm,
             branch_id: selectedBranchId ?? (branches[0]?.id || ''),
         })
+        setEditId(null)
+        setDialogOpen(true)
+    }
+
+    function openEdit(ticket: ExpenseTicket) {
+        setEditId(ticket.id)
+        setForm({
+            amount: String(ticket.amount),
+            category: CATEGORIES.includes(ticket.category) ? ticket.category : '__other__',
+            customCategory: CATEGORIES.includes(ticket.category) ? '' : ticket.category,
+            description: ticket.description || '',
+            branch_id: ticket.branch_id,
+            payment_account_id: ticket.payment_account_id || '',
+        })
         setDialogOpen(true)
     }
 
@@ -124,19 +154,31 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
         if (!form.amount || !finalCategory || !form.branch_id) return
         setSaving(true)
 
-        const result = await createExpenseTicket({
-            amount: Number(form.amount) || 0,
-            category: finalCategory,
-            description: form.description,
-            branch_id: form.branch_id,
-            payment_account_id: form.payment_account_id || null,
-        })
+        let result
+        if (editId) {
+            result = await updateExpenseTicket(editId, {
+                amount: Number(form.amount) || 0,
+                category: finalCategory,
+                description: form.description,
+                expense_date: expenseTickets.find(t => t.id === editId)?.expense_date ?? new Date().toISOString().slice(0, 10),
+                payment_account_id: form.payment_account_id || null,
+            })
+        } else {
+            result = await createExpenseTicket({
+                amount: Number(form.amount) || 0,
+                category: finalCategory,
+                description: form.description,
+                branch_id: form.branch_id,
+                payment_account_id: form.payment_account_id || null,
+            })
+        }
 
-        if (result.error) {
+        if ('error' in result && result.error) {
             toast.error(result.error)
         } else {
-            toast.success('Egreso registrado')
+            toast.success(editId ? 'Egreso actualizado' : 'Egreso registrado')
             setDialogOpen(false)
+            setEditId(null)
         }
         setSaving(false)
     }
@@ -162,9 +204,39 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
         if (!ticket.payment_account_id) return '-'
         const acc = ticket.payment_account
         if (acc) return acc.name
-        // Fallback: look up from accounts prop
+        // Fallback: buscar en la prop accounts
         const found = accounts.find(a => a.id === ticket.payment_account_id)
         return found?.name ?? '-'
+    }
+
+    // Escapar campo CSV: envolver en comillas si contiene coma, comillas o salto de línea
+    function csvField(val: string | number): string {
+        const s = String(val)
+        if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+            return `"${s.replace(/"/g, '""')}"`
+        }
+        return s
+    }
+
+    // Exportar los tickets filtrados como CSV
+    function exportToCSV() {
+        const headers = ['Fecha', 'Sucursal', 'Cuenta', 'Categoría', 'Descripción', 'Monto']
+        const rows = filteredTickets.map(t => [
+            t.expense_date,
+            getBranchName(t.branch_id),
+            getAccountName(t),
+            t.category,
+            t.description || '',
+            t.amount,
+        ])
+        const csvContent = [headers, ...rows].map(row => row.map(csvField).join(',')).join('\n')
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `egresos_monaco.csv`
+        a.click()
+        URL.revokeObjectURL(url)
     }
 
     return (
@@ -174,9 +246,43 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                     <h2 className="text-xl font-bold tracking-tight">Registro de Egresos</h2>
                     <p className="text-sm text-muted-foreground">
                         Registrá la salida de dinero para gastos e insumos
+                        {filteredTickets.length > 0 && (
+                            <> · <span className="font-medium text-foreground">{filteredTickets.length} registros · Total: {formatCurrency(filteredTotal)}</span></>
+                        )}
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                    {/* Filtro por año */}
+                    <Select value={filterYear} onValueChange={(v) => { setFilterYear(v); setFilterMonth('__all__') }}>
+                        <SelectTrigger className="w-[110px] h-9">
+                            <SelectValue placeholder="Año" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="__all__">Todos</SelectItem>
+                            {availableYears.map(y => (
+                                <SelectItem key={y} value={y}>{y}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+
+                    {/* Filtro por mes — solo visible si hay año seleccionado */}
+                    {filterYear !== '__all__' && (
+                        <Select value={filterMonth} onValueChange={setFilterMonth}>
+                            <SelectTrigger className="w-[120px] h-9">
+                                <SelectValue placeholder="Mes" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="__all__">Todos</SelectItem>
+                                {[
+                                    ['01', 'Enero'], ['02', 'Febrero'], ['03', 'Marzo'], ['04', 'Abril'],
+                                    ['05', 'Mayo'], ['06', 'Junio'], ['07', 'Julio'], ['08', 'Agosto'],
+                                    ['09', 'Septiembre'], ['10', 'Octubre'], ['11', 'Noviembre'], ['12', 'Diciembre']
+                                ].map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    )}
+
+                    {/* Filtro por cuenta */}
                     <Select value={filterAccount} onValueChange={setFilterAccount}>
                         <SelectTrigger className="w-[160px] h-9">
                             <SelectValue placeholder="Todas las cuentas" />
@@ -191,6 +297,11 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                             ))}
                         </SelectContent>
                     </Select>
+
+                    <Button variant="outline" size="sm" onClick={exportToCSV}>
+                        <Download className="mr-1.5 size-3.5" />
+                        Exportar CSV
+                    </Button>
                     <Button onClick={openAdd}>
                         <Plus className="mr-2 size-4" />
                         Registrar egreso
@@ -205,7 +316,7 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                             <TableHead>Fecha</TableHead>
                             <TableHead>Sucursal</TableHead>
                             <TableHead>Cuenta</TableHead>
-                            <TableHead>Vendedor/Registrado Por</TableHead>
+                            <TableHead>Registrado por</TableHead>
                             <TableHead>Categoría</TableHead>
                             <TableHead>Descripción</TableHead>
                             <TableHead className="text-right">Monto</TableHead>
@@ -250,9 +361,14 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                                         -{formatCurrency(t.amount)}
                                     </TableCell>
                                     <TableCell className="text-right">
-                                        <Button variant="ghost" size="icon-xs" onClick={() => setDeleteId(t.id)}>
-                                            <Trash2 className="size-3" />
-                                        </Button>
+                                        <div className="flex items-center justify-end gap-1">
+                                            <Button variant="ghost" size="icon-xs" onClick={() => openEdit(t)}>
+                                                <Pencil className="size-3" />
+                                            </Button>
+                                            <Button variant="ghost" size="icon-xs" onClick={() => setDeleteId(t.id)}>
+                                                <Trash2 className="size-3" />
+                                            </Button>
+                                        </div>
                                     </TableCell>
                                 </TableRow>
                             ))
@@ -261,11 +377,11 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                 </Table>
             </div>
 
-            {/* Form Dialog */}
-            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            {/* Dialog de creación/edición */}
+            <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) { setDialogOpen(false); setEditId(null) } }}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Registrar nuevo egreso</DialogTitle>
+                        <DialogTitle>{editId ? 'Editar egreso' : 'Registrar nuevo egreso'}</DialogTitle>
                         <DialogDescription>
                             Añadí los detalles del gasto a registrar en caja.
                         </DialogDescription>
@@ -273,7 +389,7 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                     <div className="grid gap-4 py-4">
                         <div className="grid gap-2">
                             <Label>Sucursal *</Label>
-                            <Select value={form.branch_id} onValueChange={(v) => setForm({ ...form, branch_id: v, payment_account_id: '' })}>
+                            <Select value={form.branch_id} onValueChange={(v) => setForm({ ...form, branch_id: v, payment_account_id: '' })} disabled={!!editId}>
                                 <SelectTrigger>
                                     <SelectValue placeholder="Seleccionar sucursal" />
                                 </SelectTrigger>
@@ -331,7 +447,7 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                                 </SelectContent>
                             </Select>
                         </div>
-                        
+
                         {form.category === '__other__' && (
                             <div className="grid gap-2">
                                 <Label>Nueva Categoría *</Label>
@@ -354,9 +470,9 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                         </div>
                     </div>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-                        <Button 
-                            onClick={handleSave} 
+                        <Button variant="outline" onClick={() => { setDialogOpen(false); setEditId(null) }}>Cancelar</Button>
+                        <Button
+                            onClick={handleSave}
                             disabled={saving || !form.amount || !form.branch_id || (form.category === '__other__' ? !form.customCategory.trim() : !form.category)}
                         >
                             {saving ? 'Guardando...' : 'Guardar'}
@@ -365,7 +481,7 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                 </DialogContent>
             </Dialog>
 
-            {/* Delete Confirmation */}
+            {/* Confirmación de eliminación */}
             <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
                 <AlertDialogContent>
                     <AlertDialogHeader>

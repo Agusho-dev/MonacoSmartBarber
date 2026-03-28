@@ -69,3 +69,32 @@ export async function deleteExpenseTicket(id: string) {
     revalidatePath('/dashboard/finanzas')
     return { success: true }
 }
+
+export async function updateExpenseTicket(
+    id: string,
+    data: {
+        amount: number
+        category: string
+        description?: string | null
+        expense_date: string
+        payment_account_id?: string | null
+    }
+) {
+    const supabase = await createClient()
+
+    const { error } = await supabase
+        .from('expense_tickets')
+        .update({
+            amount: data.amount,
+            category: data.category,
+            description: data.description ?? null,
+            expense_date: data.expense_date,
+            payment_account_id: data.payment_account_id ?? null,
+        })
+        .eq('id', id)
+
+    if (error) return { error: error.message }
+
+    revalidatePath('/dashboard/finanzas')
+    return { success: true }
+}

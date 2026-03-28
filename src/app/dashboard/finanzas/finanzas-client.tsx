@@ -38,6 +38,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Button } from '@/components/ui/button'
 import {
   DollarSign,
   TrendingUp,
@@ -47,6 +48,7 @@ import {
   Scissors,
   ShoppingBag,
   Users,
+  Download,
 } from 'lucide-react'
 
 const PERIOD_OPTIONS = [
@@ -102,6 +104,19 @@ export function FinanzasClient({
   const [isPending, startTransition] = useTransition()
   const [accountBalances, setAccountBalances] = useState<AccountBalance[]>([])
   const [expenseAccountFilter, setExpenseAccountFilter] = useState<string>('__all__')
+
+  // Estado de visibilidad de series del gráfico principal
+  const [visibleSeries, setVisibleSeries] = useState({
+    revenue: true,
+    fixedExpenses: true,
+    variableExpenses: true,
+    commissions: true,
+    netProfit: true,
+  })
+
+  const toggleSeries = (key: keyof typeof visibleSeries) => {
+    setVisibleSeries(prev => ({ ...prev, [key]: !prev[key] }))
+  }
 
   const refresh = useCallback(
     (p?: string) => {
@@ -162,6 +177,42 @@ export function FinanzasClient({
   const balancePieData = accountBalances.filter(a => a.balance > 0)
   const totalExpensesPie = expensesByCategory.reduce((s, e) => s + e.amount, 0)
 
+  // Cálculo de progreso del mes actual hacia el break-even
+  const progressPct = breakEven.cutsNeeded > 0
+    ? Math.min(100, Math.round((data.currentMonthCuts / breakEven.cutsNeeded) * 100))
+    : 0
+
+  // Escapar campo CSV: envolver en comillas si contiene coma, comillas o salto de línea
+  function csvField(val: string | number): string {
+    const s = String(val)
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return `"${s.replace(/"/g, '""')}"`
+    }
+    return s
+  }
+
+  // Función para exportar los datos del resumen como CSV
+  function exportToCSV() {
+    const headers = ['Mes', 'Ingresos', 'Gastos Fijos', 'Gastos Variables', 'Comisiones', 'Resultado Neto', 'Cortes']
+    const rows = data.months.map(m => [
+      m.label,
+      m.revenue,
+      m.fixedExpenses,
+      m.variableExpenses,
+      m.commissions,
+      m.netProfit,
+      m.cuts,
+    ])
+    const csvContent = [headers, ...rows].map(row => row.map(csvField).join(',')).join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `finanzas_monaco_${period}meses.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -180,6 +231,10 @@ export function FinanzasClient({
               ))}
             </SelectContent>
           </Select>
+          <Button variant="outline" size="sm" onClick={exportToCSV}>
+            <Download className="mr-1.5 size-3.5" />
+            Exportar CSV
+          </Button>
         </div>
       </div>
 
@@ -190,13 +245,14 @@ export function FinanzasClient({
       )}
 
       <div className={isPending ? 'pointer-events-none opacity-50' : ''}>
-        {/* Summary Cards */}
+        {/* Tarjetas de resumen */}
         <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-3">
           <SummaryCard
             title="Ingresos brutos"
             value={formatCurrency(totals.revenue)}
             icon={DollarSign}
             subtitle={`${totals.cuts} cortes`}
+            momChange={data.momChange.revenue}
           />
           <SummaryCard
             title="Gastos fijos"
@@ -209,6 +265,7 @@ export function FinanzasClient({
             value={formatCurrency(totals.variableExpenses)}
             icon={ShoppingBag}
             subtitle="Egresos del período"
+            momChange={data.momChange.variableExpenses}
           />
           <SummaryCard
             title="Comisiones"
@@ -228,10 +285,11 @@ export function FinanzasClient({
             icon={isPositive ? TrendingUp : TrendingDown}
             subtitle={isPositive ? 'Ganancia' : 'Pérdida'}
             highlight={isPositive ? 'positive' : 'negative'}
+            momChange={data.momChange.netProfit}
           />
         </div>
 
-        {/* Main Chart */}
+        {/* Gráfico principal con toggles de series */}
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>Evolución financiera mensual</CardTitle>
@@ -239,6 +297,29 @@ export function FinanzasClient({
               Ingresos, gastos y resultado neto
             </CardDescription>
           </CardHeader>
+          {/* Botones de toggle para series del gráfico */}
+          <div className="flex flex-wrap gap-2 px-6 pb-2">
+            {[
+              { key: 'revenue', label: 'Ingresos', color: COLORS.revenue },
+              { key: 'fixedExpenses', label: 'G. Fijos', color: COLORS.fixed },
+              { key: 'variableExpenses', label: 'G. Variables', color: COLORS.variable },
+              { key: 'commissions', label: 'Comisiones', color: COLORS.commissions },
+              { key: 'netProfit', label: 'Resultado', color: COLORS.netProfit },
+            ].map(({ key, label, color }) => (
+              <button
+                key={key}
+                onClick={() => toggleSeries(key as keyof typeof visibleSeries)}
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border transition-all ${
+                  visibleSeries[key as keyof typeof visibleSeries]
+                    ? 'border-transparent text-background'
+                    : 'border-border text-muted-foreground bg-transparent'
+                }`}
+                style={visibleSeries[key as keyof typeof visibleSeries] ? { backgroundColor: color } : {}}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <CardContent>
             {data.months.length === 0 ? (
               <div className="flex h-[250px] items-center justify-center md:h-[350px]">
@@ -274,54 +355,63 @@ export function FinanzasClient({
                   <Legend
                     wrapperStyle={{ fontSize: 12, color: COLORS.axis }}
                   />
-                  <Bar
-                    dataKey="revenue"
-                    name="Ingresos"
-                    fill={COLORS.revenue}
-                    radius={[4, 4, 0, 0]}
-                    animationDuration={800}
-                  />
-                  <Bar
-                    dataKey="fixedExpenses"
-                    name="Gastos fijos"
-                    stackId="expenses"
-                    fill={COLORS.fixed}
-                    animationDuration={800}
-                  />
-                  <Bar
-                    dataKey="variableExpenses"
-                    name="Gastos variables"
-                    stackId="expenses"
-                    fill={COLORS.variable}
-                    animationDuration={800}
-                  />
-                  <Bar
-                    dataKey="commissions"
-                    name="Comisiones"
-                    stackId="expenses"
-                    fill={COLORS.commissions}
-                    radius={[4, 4, 0, 0]}
-                    animationDuration={800}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="netProfit"
-                    name="Resultado neto"
-                    stroke={COLORS.netProfit}
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    dot={{ r: 4, fill: COLORS.netProfit }}
-                    animationDuration={800}
-                  />
+                  {visibleSeries.revenue && (
+                    <Bar
+                      dataKey="revenue"
+                      name="Ingresos"
+                      fill={COLORS.revenue}
+                      radius={[4, 4, 0, 0]}
+                      animationDuration={800}
+                    />
+                  )}
+                  {visibleSeries.fixedExpenses && (
+                    <Bar
+                      dataKey="fixedExpenses"
+                      name="Gastos fijos"
+                      fill={COLORS.fixed}
+                      radius={[4, 4, 0, 0]}
+                      animationDuration={800}
+                    />
+                  )}
+                  {visibleSeries.variableExpenses && (
+                    <Bar
+                      dataKey="variableExpenses"
+                      name="Gastos variables"
+                      fill={COLORS.variable}
+                      radius={[4, 4, 0, 0]}
+                      animationDuration={800}
+                    />
+                  )}
+                  {visibleSeries.commissions && (
+                    <Bar
+                      dataKey="commissions"
+                      name="Comisiones"
+                      fill={COLORS.commissions}
+                      radius={[4, 4, 0, 0]}
+                      animationDuration={800}
+                    />
+                  )}
+                  {visibleSeries.netProfit && (
+                    <Line
+                      type="monotone"
+                      dataKey="netProfit"
+                      name="Resultado neto"
+                      stroke={COLORS.netProfit}
+                      strokeWidth={2}
+                      strokeDasharray="5 5"
+                      dot={{ r: 4, fill: COLORS.netProfit }}
+                      animationDuration={800}
+                    />
+                  )}
                 </ComposedChart>
               </ResponsiveContainer>
             )}
           </CardContent>
         </Card>
 
-        {/* Bottom section: Pie Charts + Break-Even */}
+        {/* Sección inferior: Pie Charts + Break-Even */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {/* Pie Chart 1: Account Balances */}
+          {/* Pie Chart 1: Saldo por cuenta */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Saldo por cuenta</CardTitle>
@@ -348,6 +438,21 @@ export function FinanzasClient({
                         innerRadius={40}
                         paddingAngle={3}
                         animationDuration={800}
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        label={(props: any) => {
+                          const { cx, cy, midAngle, innerRadius, outerRadius, percent } = props
+                          if (percent < 0.05) return null
+                          const RADIAN = Math.PI / 180
+                          const radius = innerRadius + (outerRadius - innerRadius) * 0.6
+                          const x = cx + radius * Math.cos(-midAngle * RADIAN)
+                          const y = cy + radius * Math.sin(-midAngle * RADIAN)
+                          return (
+                            <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight="600">
+                              {`${Math.round(percent * 100)}%`}
+                            </text>
+                          )
+                        }}
+                        labelLine={false}
                       >
                         {balancePieData.map((_, i) => (
                           <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
@@ -375,7 +480,7 @@ export function FinanzasClient({
             </CardContent>
           </Card>
 
-          {/* Pie Chart 2: Expenses by Category */}
+          {/* Pie Chart 2: Egresos por categoría */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between gap-2">
@@ -422,6 +527,21 @@ export function FinanzasClient({
                         innerRadius={40}
                         paddingAngle={3}
                         animationDuration={800}
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        label={(props: any) => {
+                          const { cx, cy, midAngle, innerRadius, outerRadius, percent } = props
+                          if (percent < 0.05) return null
+                          const RADIAN = Math.PI / 180
+                          const radius = innerRadius + (outerRadius - innerRadius) * 0.6
+                          const x = cx + radius * Math.cos(-midAngle * RADIAN)
+                          const y = cy + radius * Math.sin(-midAngle * RADIAN)
+                          return (
+                            <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight="600">
+                              {`${Math.round(percent * 100)}%`}
+                            </text>
+                          )
+                        }}
+                        labelLine={false}
                       >
                         {expensesByCategory.map((_, i) => (
                           <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
@@ -449,7 +569,7 @@ export function FinanzasClient({
             </CardContent>
           </Card>
 
-          {/* Break-Even Card */}
+          {/* Break-Even Card con barra de progreso */}
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">
@@ -461,6 +581,21 @@ export function FinanzasClient({
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Barra de progreso del mes actual */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Progreso del mes</span>
+                  <span className="font-medium">{data.currentMonthCuts} / {breakEven.cutsNeeded} cortes</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${progressPct >= 100 ? 'bg-green-500' : progressPct >= 70 ? 'bg-yellow-500' : 'bg-primary'}`}
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground text-right">{progressPct}% del objetivo</p>
+              </div>
+
               <div className="flex flex-col items-center gap-1 rounded-lg bg-muted/50 p-4">
                 <span className="text-4xl font-bold">
                   {breakEven.cutsNeeded}
@@ -516,6 +651,91 @@ export function FinanzasClient({
             </CardContent>
           </Card>
         </div>
+
+        {/* Tabla de rendimiento por barbero */}
+        {data.barberPerformance.length > 0 && (
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="size-5 text-muted-foreground" />
+                Rendimiento por barbero
+              </CardTitle>
+              <CardDescription>Período seleccionado · ingresos, comisiones y margen neto</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-muted-foreground">
+                      <th className="pb-2 text-left font-medium">Barbero</th>
+                      <th className="pb-2 text-right font-medium">Cortes</th>
+                      <th className="pb-2 text-right font-medium">Ticket prom.</th>
+                      <th className="pb-2 text-right font-medium">Ingresos</th>
+                      <th className="pb-2 text-right font-medium">Comisión</th>
+                      <th className="pb-2 text-right font-medium">Margen neto</th>
+                      <th className="pb-2 text-right font-medium">% Margen</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.barberPerformance.map((b) => (
+                      <tr key={b.staffId} className="border-b last:border-0">
+                        <td className="py-2.5 font-medium">{b.name}</td>
+                        <td className="py-2.5 text-right text-muted-foreground">{b.cuts}</td>
+                        <td className="py-2.5 text-right">{formatCurrency(b.avgTicket)}</td>
+                        <td className="py-2.5 text-right">{formatCurrency(b.revenue)}</td>
+                        <td className="py-2.5 text-right text-destructive">-{formatCurrency(b.commissions)}</td>
+                        <td className="py-2.5 text-right font-medium">{formatCurrency(b.netContribution)}</td>
+                        <td className="py-2.5 text-right">
+                          <span className={`font-medium ${b.marginPct >= 50 ? 'text-green-400' : b.marginPct >= 30 ? 'text-yellow-400' : 'text-red-400'}`}>
+                            {b.marginPct}%
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Tabla de ingresos por servicio */}
+        {data.serviceRevenue.length > 0 && (
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Scissors className="size-5 text-muted-foreground" />
+                Ingresos por servicio
+              </CardTitle>
+              <CardDescription>Top servicios del período</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {data.serviceRevenue.slice(0, 8).map((s) => {
+                  const maxRevenue = data.serviceRevenue[0]?.revenue ?? 1
+                  const pct = Math.round((s.revenue / maxRevenue) * 100)
+                  return (
+                    <div key={s.serviceId ?? '__none__'} className="space-y-1">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-medium truncate max-w-[60%]">{s.serviceName}</span>
+                        <div className="flex items-center gap-3 text-right shrink-0">
+                          <span className="text-muted-foreground text-xs">{s.cuts} cortes · {formatCurrency(s.avgTicket)} prom.</span>
+                          <span className="font-semibold">{formatCurrency(s.revenue)}</span>
+                        </div>
+                      </div>
+                      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-primary/70"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   )
@@ -529,12 +749,14 @@ function SummaryCard({
   icon: Icon,
   subtitle,
   highlight,
+  momChange,
 }: {
   title: string
   value: string
   icon: React.ComponentType<{ className?: string }>
   subtitle?: string
   highlight?: 'positive' | 'negative'
+  momChange?: number | null
 }) {
   return (
     <Card
@@ -573,12 +795,18 @@ function SummaryCard({
         {subtitle && (
           <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
         )}
+        {momChange !== undefined && momChange !== null && (
+          <p className={`mt-0.5 text-xs font-medium flex items-center gap-1 ${momChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {momChange >= 0 ? <TrendingUp className="size-3" /> : <TrendingDown className="size-3" />}
+            {momChange >= 0 ? '+' : ''}{momChange}% vs mes anterior
+          </p>
+        )}
       </CardContent>
     </Card>
   )
 }
 
-/* ─── Chart Tooltips ─── */
+/* ─── Tooltips de gráficos ─── */
 
 function FinanceTooltip({
   active,
