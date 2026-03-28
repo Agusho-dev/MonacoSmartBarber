@@ -112,7 +112,6 @@ const roleLabels: Record<UserRole, string> = {
 const emptyForm = {
   full_name: '',
   branch_id: '',
-  commission_pct: '30',
   pin: '',
   role: 'barber' as UserRole,
   role_id: '',
@@ -168,7 +167,6 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
     setForm({
       full_name: barber.full_name,
       branch_id: barber.branch_id ?? '',
-      commission_pct: String(barber.commission_pct),
       pin: barber.pin ?? '',
       role: barber.role,
       role_id: barber.role_id ?? '',
@@ -212,7 +210,6 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
     const data = {
       full_name: form.full_name,
       branch_id: form.branch_id || null,
-      commission_pct: Number(form.commission_pct),
       pin: form.pin || null,
       role: form.role,
       role_id: form.role_id || null,
@@ -236,7 +233,12 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
         setSaving(false)
         return
       }
-      if (inserted) savedStaffId = inserted.id
+      if (inserted) {
+        savedStaffId = inserted.id
+        // Auto-crear salary_configs con esquema comisión y 30% por defecto
+        const { upsertSalaryConfig } = await import('@/lib/actions/salary')
+        await upsertSalaryConfig(inserted.id, 'commission', 0, 30)
+      }
     }
 
     // Handle auth linkage if email and password provided
@@ -331,7 +333,6 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
               <TableHead>Nombre</TableHead>
               <TableHead>Sucursal</TableHead>
               <TableHead>Rol</TableHead>
-              <TableHead className="text-right">Comisión %</TableHead>
               <TableHead>Teléfono</TableHead>
               <TableHead>PIN</TableHead>
               <TableHead>Estado</TableHead>
@@ -342,7 +343,7 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
           <TableBody>
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                   No hay barberos registrados
                 </TableCell>
               </TableRow>
@@ -368,7 +369,6 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
                       ? roles.find((r) => r.id === barber.role_id)?.name ?? roleLabels[barber.role]
                       : roleLabels[barber.role]}
                   </TableCell>
-                  <TableCell className="text-right">{barber.commission_pct}%</TableCell>
                   <TableCell className="text-muted-foreground">{barber.phone ?? '—'}</TableCell>
                   <TableCell className="font-mono text-muted-foreground">
                     {barber.pin ? '••••' : '—'}
@@ -446,11 +446,7 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
               </div>
 
               {/* Detalles */}
-              <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
-                <div>
-                  <p className="font-medium text-foreground">{barber.commission_pct}%</p>
-                  <p>Comisión</p>
-                </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                 <div>
                   <p className="font-mono font-medium text-foreground">{barber.pin ? '••••' : '—'}</p>
                   <p>PIN</p>
@@ -715,16 +711,6 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
               </Select>
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="grid gap-2">
-                <Label>Comisión %</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={form.commission_pct}
-                  onChange={(e) => setForm({ ...form, commission_pct: e.target.value })}
-                />
-              </div>
               <div className="grid gap-2">
                 <Label>PIN de la Barbería (4 dígitos)</Label>
                 <Input

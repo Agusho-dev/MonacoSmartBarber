@@ -11,6 +11,9 @@ export interface MonthlyFinancial {
   commissions: number
   fixedExpenses: number
   variableExpenses: number
+  bonuses: number
+  advances: number
+  salaryPayments: number
   totalExpenses: number
   netProfit: number
   cuts: number
@@ -32,6 +35,9 @@ export interface FinancialSummary {
     commissions: number
     fixedExpenses: number
     variableExpenses: number
+    bonuses: number
+    advances: number
+    salaryPayments: number
     netProfit: number
     cuts: number
   }
@@ -94,8 +100,19 @@ export async function fetchFinancialData(
   if (branchId) eq = eq.eq('branch_id', branchId)
   const { data: variableExpenses } = await eq
 
+  // Salary reports (bonos, adelantos, pagos) en rango
+  let sq = supabase
+    .from('salary_reports')
+    .select('type, amount, report_date, status')
+    .in('type', ['bonus', 'advance', 'commission', 'base_salary', 'hybrid_deficit'])
+    .eq('status', 'paid')
+    .gte('report_date', startDateStr.slice(0, 10))
+    .lte('report_date', endDateStr.slice(0, 10))
+  if (branchId) sq = sq.eq('branch_id', branchId)
+  const { data: salaryReports } = await sq
+
   // Initialize all months using local time to group
-  const monthMap = new Map<string, { revenue: number; commissions: number; cuts: number; variableExp: number }>()
+  const monthMap = new Map<string, { revenue: number; commissions: number; cuts: number; variableExp: number; bonuses: number; advances: number; salaryPayments: number }>()
   for (let i = 0; i < monthsBack; i++) {
     let year = localNow.getFullYear()
     let monthIndex = localNow.getMonth() - i
@@ -105,7 +122,7 @@ export async function fetchFinancialData(
     }
     const d = new Date(year, monthIndex, 1)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    monthMap.set(key, { revenue: 0, commissions: 0, cuts: 0, variableExp: 0 })
+    monthMap.set(key, { revenue: 0, commissions: 0, cuts: 0, variableExp: 0, bonuses: 0, advances: 0, salaryPayments: 0 })
   }
 
   const TZ = 'America/Argentina/Buenos_Aires'
@@ -139,25 +156,56 @@ export async function fetchFinancialData(
     }
   }
 
+  // Group salary reports by local month
+  for (const sr of salaryReports ?? []) {
+    const key = sr.report_date.slice(0, 7) // "YYYY-MM"
+    const m = monthMap.get(key)
+    if (!m) continue
+    const amt = Math.abs(Number(sr.amount))
+    if (sr.type === 'bonus') {
+      // Bonos: dinero que sale del negocio hacia el barbero → egreso
+      m.bonuses += amt
+      m.salaryPayments += amt
+    } else if (sr.type === 'advance') {
+      // Adelantos: dinero ya entregado, se descuenta del barbero → a favor del negocio
+      m.advances += amt
+    } else {
+      // commission, base_salary, hybrid_deficit pagados → egreso salarial
+      m.salaryPayments += Number(sr.amount)
+    }
+  }
+
   const months: MonthlyFinancial[] = [...monthMap.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([ym, d]) => ({
-      month: ym,
-      label: monthLabel(ym),
-      revenue: d.revenue,
-      commissions: d.commissions,
-      fixedExpenses: monthlyFixed,
-      variableExpenses: d.variableExp,
-      totalExpenses: d.commissions + monthlyFixed + d.variableExp,
-      netProfit: d.revenue - d.commissions - monthlyFixed - d.variableExp,
-      cuts: d.cuts,
-    }))
+    .map(([ym, d]) => {
+      // Egresos totales = comisiones + fijos + variables + bonos + pagos salariales
+      // Los adelantos se restan porque son dinero a favor del negocio (ya entregado, se descuenta)
+      const totalExp = d.commissions + monthlyFixed + d.variableExp + d.bonuses + d.salaryPayments
+      const net = d.revenue - totalExp + d.advances
+      return {
+        month: ym,
+        label: monthLabel(ym),
+        revenue: d.revenue,
+        commissions: d.commissions,
+        fixedExpenses: monthlyFixed,
+        variableExpenses: d.variableExp,
+        bonuses: d.bonuses,
+        advances: d.advances,
+        salaryPayments: d.salaryPayments,
+        totalExpenses: totalExp,
+        netProfit: net,
+        cuts: d.cuts,
+      }
+    })
 
   const totalRevenue = months.reduce((s, m) => s + m.revenue, 0)
   const totalCuts = months.reduce((s, m) => s + m.cuts, 0)
   const totalCommissions = months.reduce((s, m) => s + m.commissions, 0)
   const totalFixedAll = monthlyFixed * monthsBack
   const totalVariable = months.reduce((s, m) => s + m.variableExpenses, 0)
+  const totalBonuses = months.reduce((s, m) => s + m.bonuses, 0)
+  const totalAdvances = months.reduce((s, m) => s + m.advances, 0)
+  const totalSalaryPayments = months.reduce((s, m) => s + m.salaryPayments, 0)
 
   const avgRevPerCut = totalCuts > 0 ? totalRevenue / totalCuts : 0
   const avgCommPerCut = totalCuts > 0 ? totalCommissions / totalCuts : 0
@@ -177,7 +225,10 @@ export async function fetchFinancialData(
       commissions: totalCommissions,
       fixedExpenses: totalFixedAll,
       variableExpenses: totalVariable,
-      netProfit: totalRevenue - totalCommissions - totalFixedAll - totalVariable,
+      bonuses: totalBonuses,
+      advances: totalAdvances,
+      salaryPayments: totalSalaryPayments,
+      netProfit: totalRevenue - totalCommissions - totalFixedAll - totalVariable - totalBonuses - totalSalaryPayments + totalAdvances,
       cuts: totalCuts,
     },
   }

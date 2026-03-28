@@ -155,13 +155,24 @@ export async function completeService(
   }
 
   // 3. Calculate proper amount and commission from the selected service(s)
-  //    Commission priority: staff_service_commissions → services.default_commission_pct → staff.commission_pct
+  //    Commission priority: staff_service_commissions → services.default_commission_pct → salary_configs → staff.commission_pct
   let amount = 0
   let commissionAmount = 0
   const allServiceIds = [
     ...(serviceId ? [serviceId] : []),
     ...(extraServiceIds || [])
   ]
+
+  // Obtener comisión global: salary_configs como fuente primaria, visit.commission_pct (staff) como fallback
+  const { data: barberSalaryConfig } = await supabase
+    .from('salary_configs')
+    .select('commission_pct')
+    .eq('staff_id', visit.barber_id)
+    .single()
+
+  const globalCommPct = barberSalaryConfig?.commission_pct != null
+    ? Number(barberSalaryConfig.commission_pct)
+    : Number(visit.commission_pct)
 
   if (allServiceIds.length > 0) {
     // Fetch service prices and default commissions
@@ -189,14 +200,14 @@ export async function completeService(
         const price = Number(s.price)
         amount += price
 
-        // Resolve commission: barber override → service default → staff global
+        // Resolve commission: barber override → service default → salary_configs → staff
         let commPct: number
         if (overrideMap.has(s.id)) {
           commPct = overrideMap.get(s.id)!
         } else if (Number(s.default_commission_pct) > 0) {
           commPct = Number(s.default_commission_pct)
         } else {
-          commPct = Number(visit.commission_pct)
+          commPct = globalCommPct
         }
 
         commissionAmount += price * (commPct / 100)
@@ -204,53 +215,13 @@ export async function completeService(
     }
   }
 
-  // 3.5 Calculate product prices and commissions
+  // 3.5 Calculate product prices and commissions using shared function
   if (productsToSell && productsToSell.length > 0) {
-    const productIds = productsToSell.map(p => p.id)
-    const { data: dbProducts } = await supabase
-      .from('products')
-      .select('id, sale_price, barber_commission, stock')
-      .in('id', productIds)
-
-    if (dbProducts) {
-      const productSales = []
-      
-      for (const p of productsToSell) {
-        const dbp = dbProducts.find((x: any) => x.id === p.id)
-        if (!dbp) continue
-        
-        const qty = p.quantity
-        const price = Number(dbp.sale_price)
-        const comm = Number(dbp.barber_commission)
-        
-        amount += price * qty
-        commissionAmount += comm * qty
-        
-        productSales.push({
-          visit_id: visit.id,
-          product_id: p.id,
-          barber_id: visit.barber_id,
-          branch_id: visit.branch_id,
-          quantity: qty,
-          unit_price: price,
-          commission_amount: comm * qty,
-        })
-        
-        // Decrement stock if stock is not null
-        if (dbp.stock !== null) {
-          // A simple update since this happens in an administrative context
-          await supabase.from('products').update({
-            stock: dbp.stock - qty
-          }).eq('id', p.id)
-        }
-      }
-      
-      if (productSales.length > 0) {
-        const { error: salesError } = await supabase.from('product_sales').insert(productSales)
-        if (salesError) {
-          console.error('Error inserting product_sales:', salesError)
-        }
-      }
+    const { processProductSales } = await import('./sales')
+    const productResult = await processProductSales(supabase, visit.id, visit.barber_id, visit.branch_id, productsToSell)
+    if (!('error' in productResult)) {
+      amount += productResult.totalAmount
+      commissionAmount += productResult.totalCommission
     }
   }
 

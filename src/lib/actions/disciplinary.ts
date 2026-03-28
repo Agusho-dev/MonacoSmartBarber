@@ -133,3 +133,81 @@ export async function getBarberDisciplinarySummary(branchId: string) {
 
   return { summary, fromDate }
 }
+
+/**
+ * Verifica si un barbero llegó tarde comparando la hora actual contra su horario.
+ * Si detecta tardanza, crea automáticamente un evento disciplinario.
+ * Extraída de attendance.ts para mantener toda la lógica disciplinaria en un solo lugar.
+ */
+export async function checkTardiness(staffId: string, branchId: string) {
+  const supabase = createAdminClient()
+
+  const now = new Date()
+  const argTimeOptions = { timeZone: 'America/Argentina/Buenos_Aires', hour12: false } as const
+
+  // Hora actual "HH:MM:SS"
+  const currentTimeStr = now.toLocaleTimeString('en-US', argTimeOptions)
+
+  // Día de la semana (0-6, donde 0 = domingo)
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    weekday: 'short'
+  }).formatToParts(now)
+  const argDayStr = parts.find(p => p.type === 'weekday')?.value || ''
+  const dowMap: Record<string, number> = { 'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6 }
+  const dow = dowMap[argDayStr] ?? now.getDay()
+
+  // Fecha "YYYY-MM-DD"
+  const ymdFormat = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(now)
+
+  // Obtener bloques de horario del día
+  const { data: schedules } = await supabase
+    .from('staff_schedules')
+    .select('start_time, end_time, block_index')
+    .eq('staff_id', staffId)
+    .eq('day_of_week', dow)
+    .eq('is_active', true)
+    .order('block_index', { ascending: true })
+
+  if (!schedules || schedules.length === 0) return
+
+  // Parsear hora actual a minutos
+  const [h1, m1] = currentTimeStr.split(':').map(Number)
+  const currentMins = h1 * 60 + m1
+
+  // Encontrar el bloque relevante
+  let relevantBlock: { start_time: string; end_time: string } | null = null
+  for (const block of schedules) {
+    const [sh, sm] = block.start_time.split(':').map(Number)
+    const [eh, em] = block.end_time.split(':').map(Number)
+    const blockStart = sh * 60 + sm
+    const blockEnd = eh * 60 + em
+
+    if (currentMins < blockStart) break
+    if (currentMins >= blockStart && currentMins <= blockEnd) {
+      relevantBlock = block
+      break
+    }
+  }
+
+  if (!relevantBlock) return
+
+  const [sh, sm] = relevantBlock.start_time.split(':').map(Number)
+  const startMins = sh * 60 + sm
+
+  if (currentMins <= startMins) return
+
+  // Verificar que no haya tardanza ya registrada hoy
+  const { count } = await supabase
+    .from('disciplinary_events')
+    .select('id', { count: 'exact', head: true })
+    .eq('staff_id', staffId)
+    .eq('branch_id', branchId)
+    .eq('event_type', 'late')
+    .eq('event_date', ymdFormat)
+
+  if (count && count > 0) return
+
+  const notes = `Llegada tarde a las ${currentTimeStr} (Horario: ${relevantBlock.start_time})`
+  await createDisciplinaryEvent(staffId, branchId, 'late', ymdFormat, notes, null, 'system')
+}

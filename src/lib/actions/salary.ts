@@ -55,7 +55,15 @@ export async function upsertSalaryConfig(staffId: string, scheme: SalaryScheme, 
       { onConflict: 'staff_id' }
     )
   if (error) return { error: error.message }
+
+  // Sincronizar staff.commission_pct para mantener compatibilidad con triggers de visits
+  await supabase
+    .from('staff')
+    .update({ commission_pct: commissionPct })
+    .eq('id', staffId)
+
   revalidatePath('/dashboard/sueldos')
+  revalidatePath('/dashboard/barberos')
   return { success: true }
 }
 
@@ -207,8 +215,8 @@ export async function createManualSalaryReport(
 }
 
 /**
- * Genera un reporte de comisión calculando el total de visitas del día indicado.
- * Usa el commission_pct de salary_configs o, como fallback, el de staff.
+ * Genera un reporte de comisión sumando commission_amount de visitas del día.
+ * Usa la comisión ya calculada en cada visita (fuente de verdad desde completeService).
  */
 export async function generateCommissionReport(
   staffId: string,
@@ -221,10 +229,23 @@ export async function generateCommissionReport(
 
   const supabase = await createClient()
 
-  // Sumar los montos de visitas completadas en el día indicado
+  // Verificar que no exista ya un reporte de comisión para este día
+  const { count: existingCount } = await supabase
+    .from('salary_reports')
+    .select('id', { count: 'exact', head: true })
+    .eq('staff_id', staffId)
+    .eq('branch_id', branchId)
+    .eq('type', 'commission')
+    .eq('report_date', reportDate)
+
+  if (existingCount && existingCount > 0) {
+    return { error: 'Ya existe un reporte de comisión para este día.' }
+  }
+
+  // Sumar commission_amount de visitas completadas en el día (fuente de verdad)
   const { data: visits, error: visitsError } = await supabase
     .from('visits')
-    .select('amount')
+    .select('commission_amount, amount')
     .eq('barber_id', staffId)
     .eq('branch_id', branchId)
     .gte('completed_at', `${reportDate}T00:00:00.000Z`)
@@ -235,39 +256,12 @@ export async function generateCommissionReport(
     return { error: 'Error al calcular las comisiones del día.' }
   }
 
+  const commissionAmount = (visits ?? []).reduce((sum, v) => sum + Number(v.commission_amount ?? 0), 0)
   const totalRevenue = (visits ?? []).reduce((sum, v) => sum + Number(v.amount), 0)
 
-  if (totalRevenue === 0) {
+  if (commissionAmount <= 0) {
     return { error: 'No hay comisiones para este día.' }
   }
-
-  // Obtener el porcentaje de comisión desde salary_configs o desde staff como fallback
-  const { data: salaryConfig } = await supabase
-    .from('salary_configs')
-    .select('commission_pct')
-    .eq('staff_id', staffId)
-    .single()
-
-  let commissionPct: number
-
-  if (salaryConfig?.commission_pct != null) {
-    commissionPct = salaryConfig.commission_pct
-  } else {
-    const { data: staffData, error: staffError } = await supabase
-      .from('staff')
-      .select('commission_pct')
-      .eq('id', staffId)
-      .single()
-
-    if (staffError || !staffData) {
-      console.error('Error al obtener porcentaje de comisión del barbero:', staffError)
-      return { error: 'Error al obtener la configuración de comisión del barbero.' }
-    }
-
-    commissionPct = staffData.commission_pct
-  }
-
-  const commissionAmount = totalRevenue * (commissionPct / 100)
 
   const { error: insertError } = await supabase
     .from('salary_reports')
@@ -287,7 +281,7 @@ export async function generateCommissionReport(
   }
 
   revalidatePath('/dashboard/sueldos')
-  return { success: true, data: { commissionAmount, commissionPct, totalRevenue } }
+  return { success: true, data: { commissionAmount, totalRevenue } }
 }
 
 /**
@@ -554,34 +548,22 @@ export async function generateCheckoutCommissionReport(
   const shiftStart = clockInLog?.created_at ?? `${todayStr}T00:00:00.000Z`
   const shiftEnd = now.toISOString()
 
-  // Verificar que no exista ya un reporte de comisión para este día
-  const { count: existingCount } = await supabase
-    .from('salary_reports')
-    .select('id', { count: 'exact', head: true })
-    .eq('staff_id', staffId)
-    .eq('branch_id', branchId)
-    .eq('type', 'commission')
-    .eq('report_date', todayStr)
-
-  if (existingCount && existingCount > 0) {
-    return { success: true, skipped: true }
-  }
-
-  // Sumar commission_amount de visitas en el turno
+  // Sumar commission_amount de TODAS las visitas del día completo
+  // (no solo del turno, para incluir ventas directas de productos)
   const { data: visits } = await supabase
     .from('visits')
     .select('commission_amount')
     .eq('barber_id', staffId)
     .eq('branch_id', branchId)
-    .gte('completed_at', shiftStart)
-    .lte('completed_at', shiftEnd)
+    .gte('completed_at', `${todayStr}T00:00:00.000Z`)
+    .lt('completed_at', `${todayStr}T23:59:59.999Z`)
 
   const totalCommission = (visits ?? []).reduce(
     (sum, v) => sum + Number(v.commission_amount ?? 0), 0
   )
 
   if (totalCommission <= 0) {
-    return { success: true, skipped: true, reason: 'Sin comisiones en el turno' }
+    return { success: true, skipped: true, reason: 'Sin comisiones en el día' }
   }
 
   // Obtener configuración salarial para registrar el esquema en las notas
@@ -593,6 +575,40 @@ export async function generateCheckoutCommissionReport(
 
   const scheme = salaryConfig?.scheme ?? 'commission'
 
+  // Verificar si ya existe un reporte de comisión para hoy (puede venir de venta de productos)
+  const { data: existingReport } = await supabase
+    .from('salary_reports')
+    .select('id, amount')
+    .eq('staff_id', staffId)
+    .eq('branch_id', branchId)
+    .eq('type', 'commission')
+    .eq('report_date', todayStr)
+    .eq('status', 'pending')
+    .maybeSingle()
+
+  if (existingReport) {
+    // Actualizar el reporte existente con el total real del día
+    if (Math.round(Number(existingReport.amount)) === Math.round(totalCommission)) {
+      return { success: true, skipped: true }
+    }
+    const { error: updateError } = await supabase
+      .from('salary_reports')
+      .update({
+        amount: totalCommission,
+        notes: `Generado automáticamente al checkout (${scheme})`,
+        period_start: shiftStart,
+        period_end: shiftEnd,
+      })
+      .eq('id', existingReport.id)
+
+    if (updateError) {
+      console.error('Error al actualizar reporte de comisión:', updateError)
+      return { error: updateError.message }
+    }
+    return { success: true, data: { totalCommission, scheme, updated: true } }
+  }
+
+  // No existe reporte para hoy, crear uno nuevo
   const { error: insertError } = await supabase
     .from('salary_reports')
     .insert({
@@ -753,6 +769,129 @@ export async function settleHybridPeriod(
       deficit,
     }
   }
+}
+
+// ─── Historial de pagos agrupado por mes/semana ─────────────────────────────
+
+export interface GroupedBatchWeek {
+  weekLabel: string
+  weekStart: string
+  batches: { batch: SalaryPaymentBatch; reports: SalaryReport[] }[]
+}
+
+export interface GroupedBatchMonth {
+  monthKey: string
+  monthLabel: string
+  weeks: GroupedBatchWeek[]
+  totalAmount: number
+}
+
+function getISOWeekNumber(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  const dayNum = d.getUTCDay() || 7
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum)
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
+  return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
+}
+
+function getWeekStart(date: Date): string {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = day === 0 ? 6 : day - 1
+  d.setDate(d.getDate() - diff)
+  return d.toISOString().slice(0, 10)
+}
+
+const MONTH_NAMES: Record<string, string> = {
+  '01': 'Enero', '02': 'Febrero', '03': 'Marzo', '04': 'Abril',
+  '05': 'Mayo', '06': 'Junio', '07': 'Julio', '08': 'Agosto',
+  '09': 'Septiembre', '10': 'Octubre', '11': 'Noviembre', '12': 'Diciembre',
+}
+
+/**
+ * Obtiene el historial de pagos agrupado por mes y semana.
+ * Útil tanto para la sección de sueldos como para perfiles de barberos.
+ */
+export async function getPaymentBatchesGrouped(staffId: string, branchId: string): Promise<{
+  error?: string
+  data?: GroupedBatchMonth[]
+}> {
+  if (!staffId || !branchId) {
+    return { error: 'El barbero y la sucursal son obligatorios.' }
+  }
+
+  const supabase = await createClient()
+
+  const { data: batches, error: batchesError } = await supabase
+    .from('salary_payment_batches')
+    .select('*')
+    .eq('staff_id', staffId)
+    .eq('branch_id', branchId)
+    .order('paid_at', { ascending: false })
+
+  if (batchesError) {
+    return { error: 'Error al obtener el historial de pagos.' }
+  }
+
+  if (!batches || batches.length === 0) {
+    return { data: [] }
+  }
+
+  const batchIds = batches.map((b) => b.id)
+  const { data: reports } = await supabase
+    .from('salary_reports')
+    .select('*')
+    .in('batch_id', batchIds)
+    .order('report_date', { ascending: false })
+
+  const reportsByBatch = (reports ?? []).reduce<Record<string, SalaryReport[]>>((acc, report) => {
+    const r = report as SalaryReport
+    if (!acc[r.batch_id!]) acc[r.batch_id!] = []
+    acc[r.batch_id!].push(r)
+    return acc
+  }, {})
+
+  // Agrupar por mes → semana
+  const monthMap = new Map<string, Map<string, { batch: SalaryPaymentBatch; reports: SalaryReport[] }[]>>()
+
+  for (const batch of batches as SalaryPaymentBatch[]) {
+    const paidDate = new Date(batch.paid_at)
+    const monthKey = batch.paid_at.slice(0, 7) // YYYY-MM
+    const weekStart = getWeekStart(paidDate)
+
+    if (!monthMap.has(monthKey)) monthMap.set(monthKey, new Map())
+    const weekMap = monthMap.get(monthKey)!
+    if (!weekMap.has(weekStart)) weekMap.set(weekStart, [])
+    weekMap.get(weekStart)!.push({ batch, reports: reportsByBatch[batch.id] ?? [] })
+  }
+
+  const result: GroupedBatchMonth[] = [...monthMap.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([monthKey, weekMap]) => {
+      const [y, m] = monthKey.split('-')
+      const weeks: GroupedBatchWeek[] = [...weekMap.entries()]
+        .sort(([a], [b]) => b.localeCompare(a))
+        .map(([weekStart, weekBatches]) => {
+          const ws = new Date(weekStart + 'T12:00')
+          const weekNum = getISOWeekNumber(ws)
+          return {
+            weekLabel: `Semana ${weekNum}`,
+            weekStart,
+            batches: weekBatches,
+          }
+        })
+      const totalAmount = weeks.reduce(
+        (sum, w) => sum + w.batches.reduce((s, b) => s + b.batch.total_amount, 0), 0
+      )
+      return {
+        monthKey,
+        monthLabel: `${MONTH_NAMES[m] ?? m} ${y}`,
+        weeks,
+        totalAmount,
+      }
+    })
+
+  return { data: result }
 }
 
 // ─── Consultas de comisiones para el dashboard de finanzas ──────────────────
