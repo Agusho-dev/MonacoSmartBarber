@@ -1345,8 +1345,18 @@ export default function CheckinPage() {
 
   // ── Render ──
 
+  const BG_COLORS: Record<string, { background: string; color: string }> = {
+    white:    { background: '#ffffff', color: '#18181b' },
+    black:    { background: '#09090b', color: '#f4f4f5' },
+    graphite: { background: '#3f3f46', color: '#f4f4f5' },
+  }
+  const branchBg = selectedBranch?.checkin_bg_color ? BG_COLORS[selectedBranch.checkin_bg_color] : undefined
+
   return (
-    <div className="h-dvh flex flex-col items-center select-none overflow-y-auto overflow-x-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)] py-2 md:py-4">
+    <div
+      className="h-dvh flex flex-col items-center select-none overflow-y-auto overflow-x-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)] py-2 md:py-4"
+      style={branchBg}
+    >
       {backButton}
       {/* ═══════════════ BRANCH SELECTION ═══════════════ */}
       {step === 'branch' && (

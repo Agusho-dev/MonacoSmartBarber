@@ -31,6 +31,12 @@ interface Props {
   branches: Branch[]
 }
 
+const BG_COLOR_OPTIONS = [
+  { value: 'graphite', label: 'Grafito', bg: 'bg-zinc-700', text: 'text-white' },
+  { value: 'black',    label: 'Negro',   bg: 'bg-zinc-950', text: 'text-white' },
+  { value: 'white',    label: 'Blanco',  bg: 'bg-white',    text: 'text-zinc-900 border border-zinc-200' },
+] as const
+
 const emptyForm = {
   name: '',
   address: '',
@@ -38,6 +44,7 @@ const emptyForm = {
   business_hours_open: '09:00',
   business_hours_close: '21:00',
   business_days: [1, 2, 3, 4, 5, 6] as number[],
+  checkin_bg_color: null as 'white' | 'black' | 'graphite' | null,
 }
 
 export function SucursalesClient({ branches }: Props) {
@@ -68,6 +75,7 @@ export function SucursalesClient({ branches }: Props) {
       business_hours_open: branch.business_hours_open?.slice(0, 5) ?? '09:00',
       business_hours_close: branch.business_hours_close?.slice(0, 5) ?? '21:00',
       business_days: branch.business_days ?? [1, 2, 3, 4, 5, 6],
+      checkin_bg_color: branch.checkin_bg_color ?? null,
     })
     setDialogOpen(true)
   }
@@ -86,6 +94,7 @@ export function SucursalesClient({ branches }: Props) {
       business_hours_open: form.business_hours_open,
       business_hours_close: form.business_hours_close,
       business_days: form.business_days,
+      checkin_bg_color: form.checkin_bg_color,
     }
 
     if (editingId) {
@@ -300,6 +309,35 @@ export function SucursalesClient({ branches }: Props) {
                     )
                   })}
                 </div>
+              </div>
+            </div>
+            <div className="border-t pt-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Color de la terminal</p>
+              <p className="text-xs text-muted-foreground mb-3">Deja en "Por defecto" para usar el color global de configuración.</p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, checkin_bg_color: null })}
+                  className={`flex-1 rounded-lg h-10 flex items-center justify-center text-xs font-medium transition-all border ${
+                    form.checkin_bg_color === null
+                      ? 'ring-2 ring-primary ring-offset-1 border-primary'
+                      : 'border-input text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  Por defecto
+                </button>
+                {BG_COLOR_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setForm({ ...form, checkin_bg_color: opt.value })}
+                    className={`flex-1 rounded-lg h-10 flex items-center justify-center text-xs font-medium transition-all ${opt.bg} ${opt.text} ${
+                      form.checkin_bg_color === opt.value ? 'ring-2 ring-primary ring-offset-1' : 'opacity-50 hover:opacity-70'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
