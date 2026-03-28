@@ -159,7 +159,7 @@ export interface StaffServiceCommission {
 
 export interface Product {
   id: string
-  branch_id: string
+  branch_id: string | null
   name: string
   cost: number
   sale_price: number
@@ -631,7 +631,7 @@ export interface Database {
       clients: { Row: Client; Insert: Partial<Client> & Pick<Client, 'phone' | 'name'>; Update: Partial<Client> }
       services: { Row: Service; Insert: Partial<Service> & Pick<Service, 'name' | 'price'>; Update: Partial<Service> }
       staff_service_commissions: { Row: StaffServiceCommission; Insert: Partial<StaffServiceCommission> & Pick<StaffServiceCommission, 'staff_id' | 'service_id' | 'commission_pct'>; Update: Partial<StaffServiceCommission> }
-      products: { Row: Product; Insert: Partial<Product> & Pick<Product, 'branch_id' | 'name'>; Update: Partial<Product> }
+      products: { Row: Product; Insert: Partial<Product> & Pick<Product, 'name'>; Update: Partial<Product> }
       product_sales: { Row: ProductSale; Insert: Partial<ProductSale> & Pick<ProductSale, 'product_id' | 'barber_id' | 'branch_id' | 'unit_price'>; Update: Partial<ProductSale> }
       queue_entries: { Row: QueueEntry; Insert: Partial<QueueEntry> & Pick<QueueEntry, 'branch_id' | 'client_id' | 'position'>; Update: Partial<QueueEntry> }
       visits: { Row: Visit; Insert: Partial<Visit> & Pick<Visit, 'branch_id' | 'client_id' | 'barber_id' | 'amount' | 'started_at' | 'completed_at'>; Update: Partial<Visit> }
