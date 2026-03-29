@@ -4,6 +4,8 @@ import { getBarberSession } from '@/lib/actions/auth'
 import { fetchBarberPerformance } from '@/lib/actions/barber-panel'
 import { RendimientoClient } from './rendimiento-client'
 
+export const dynamic = 'force-dynamic'
+
 export const metadata: Metadata = {
     title: 'Mi Rendimiento | Monaco Smart Barber',
 }

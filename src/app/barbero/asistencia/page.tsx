@@ -4,6 +4,8 @@ import { getBarberSession } from '@/lib/actions/auth'
 import { fetchBarberAttendance } from '@/lib/actions/barber-panel'
 import { AsistenciaClient } from './asistencia-client'
 
+export const dynamic = 'force-dynamic'
+
 export const metadata: Metadata = {
     title: 'Mi Asistencia | Monaco Smart Barber',
 }

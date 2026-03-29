@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
 import {
   DndContext,
   DragOverlay,
@@ -898,10 +899,27 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_logs' }, () =>
         fetchSchedules()
       )
-      .subscribe()
+      .subscribe((status) => {
+        // Re-fetch everything on reconnection
+        if (status === 'SUBSCRIBED') {
+          fetchQueue()
+          fetchBarbers()
+          fetchSchedules()
+        }
+      })
 
     return () => { supabase.removeChannel(channel) }
   }, [supabase, fetchQueue, fetchBarbers, fetchSchedules])
+
+  // Refresh data when returning to tab or as polling fallback
+  useVisibilityRefresh(
+    useCallback(() => {
+      fetchQueue()
+      fetchBarbers()
+      fetchSchedules()
+    }, [fetchQueue, fetchBarbers, fetchSchedules]),
+    30_000
+  )
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)

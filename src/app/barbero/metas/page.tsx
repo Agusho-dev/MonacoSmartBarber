@@ -4,6 +4,8 @@ import { getBarberSession } from '@/lib/actions/auth'
 import { fetchBarberGoals } from '@/lib/actions/barber-panel'
 import { MetasClient } from './metas-client'
 
+export const dynamic = 'force-dynamic'
+
 export const metadata: Metadata = {
     title: 'Mis Metas | Monaco Smart Barber',
 }

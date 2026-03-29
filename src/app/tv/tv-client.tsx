@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
 import type { QueueEntry, StaffStatus, StaffSchedule, Staff } from '@/lib/types/database'
 import { assignDynamicBarbers } from '@/lib/barber-utils'
+import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
 import {
   Select,
   SelectContent,
@@ -348,12 +349,29 @@ export function TvClient({
         },
         () => fetchSchedules()
       )
-      .subscribe()
+      .subscribe((status) => {
+        // Re-fetch everything on reconnection
+        if (status === 'SUBSCRIBED') {
+          fetchQueue()
+          fetchBarbers()
+          fetchSchedules()
+        }
+      })
 
     return () => {
       supabase.removeChannel(channel)
     }
   }, [supabase, fetchQueue, fetchBarbers, fetchSchedules])
+
+  // Refresh data when returning to tab or as polling fallback
+  useVisibilityRefresh(
+    useCallback(() => {
+      fetchQueue()
+      fetchBarbers()
+      fetchSchedules()
+    }, [fetchQueue, fetchBarbers, fetchSchedules]),
+    30_000
+  )
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 30_000)

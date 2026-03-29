@@ -4,6 +4,8 @@ import { getBarberSession } from '@/lib/actions/auth'
 import { fetchBarberHistory } from '@/lib/actions/barber-panel'
 import { HistorialClient } from './historial-client'
 
+export const dynamic = 'force-dynamic'
+
 export const metadata: Metadata = {
     title: 'Mi Historial | Monaco Smart Barber',
 }

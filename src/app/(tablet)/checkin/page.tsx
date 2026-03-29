@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
 import { checkinClient, checkinClientByFace, reassignMyBarber } from '@/lib/actions/queue'
 import { registerBarberClockIn, registerBarberClockOut } from '@/lib/actions/attendance'
 import { verifyBarberPin } from '@/lib/actions/auth'
@@ -442,7 +443,12 @@ export default function CheckinPage() {
           if (!cancelled) loadBarberData(branchId)
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        // Re-fetch everything on reconnection
+        if (status === 'SUBSCRIBED' && !cancelled) {
+          loadBarberData(branchId)
+        }
+      })
 
     return () => {
       cancelled = true

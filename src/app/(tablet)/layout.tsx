@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { FullscreenButton } from '@/components/ui/fullscreen-button'
 
+export const dynamic = 'force-dynamic'
+
 const BG_CLASSES = {
   white: 'barber-theme bg-background text-foreground',
   black: 'bg-zinc-950 text-zinc-100',

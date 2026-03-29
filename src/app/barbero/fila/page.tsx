@@ -4,6 +4,8 @@ import { getBarberSession } from '@/lib/actions/auth'
 import { createClient } from '@/lib/supabase/server'
 import { QueuePanel } from '@/components/barber/queue-panel'
 
+export const dynamic = 'force-dynamic'
+
 export const metadata: Metadata = {
   title: 'Fila | Monaco Smart Barber',
 }

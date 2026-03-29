@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { ArrowLeft, Banknote, CreditCard, ArrowRightLeft, Wallet } from 'lucide-react'
 import type { PaymentMethod } from '@/lib/types/database'
 
+export const dynamic = 'force-dynamic'
+
 export const metadata: Metadata = {
   title: 'Facturación del día | Monaco Smart Barber',
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
 import { startService, cancelQueueEntry, reassignBarber } from '@/lib/actions/queue'
 import { fetchBarberDayStats } from '@/lib/actions/barber'
 import { logoutBarber } from '@/lib/actions/auth'
@@ -388,14 +389,35 @@ export function QueuePanel({
           fetchBarbersAndSchedules()
         }
       )
-      .subscribe((status, err) => {
-        console.log('Realtime channel status:', status, err)
+      .subscribe((status) => {
+        // Re-fetch everything on reconnection
+        if (status === 'SUBSCRIBED') {
+          fetchQueue()
+          refreshStats()
+          fetchBarbersAndSchedules()
+          fetchBreakRequestStatus()
+          fetchPendingBreakRequests()
+          fetchHiddenStatus()
+        }
       })
 
     return () => {
       supabase.removeChannel(channel)
     }
   }, [supabase, session.branch_id, session.staff_id, fetchQueue, refreshStats, fetchBarbersAndSchedules, fetchBreakRequestStatus, fetchPendingBreakRequests, fetchHiddenStatus])
+
+  // Refresh data when returning to tab or as polling fallback (critical for low-end tablets)
+  useVisibilityRefresh(
+    useCallback(() => {
+      fetchQueue()
+      refreshStats()
+      fetchBarbersAndSchedules()
+      fetchBreakRequestStatus()
+      fetchPendingBreakRequests()
+      fetchHiddenStatus()
+    }, [fetchQueue, refreshStats, fetchBarbersAndSchedules, fetchBreakRequestStatus, fetchPendingBreakRequests, fetchHiddenStatus]),
+    30_000
+  )
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)
