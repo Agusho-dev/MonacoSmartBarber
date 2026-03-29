@@ -59,11 +59,12 @@ const PERIOD_OPTIONS = [
 ]
 
 const COLORS = {
-  revenue: 'var(--chart-2)',
-  fixed: 'var(--chart-3)',
-  commissions: 'var(--chart-4)',
-  variable: 'var(--chart-5)',
-  netProfit: 'var(--primary)',
+  revenue: '#22d3ee',    // cyan — ingresos
+  fixed: '#f87171',      // rojo — gastos fijos
+  variable: '#fb923c',   // naranja — gastos variables
+  commissions: '#a78bfa',// violeta — comisiones
+  salaries: '#e879f9',   // fucsia — sueldos fijos
+  netProfit: '#4ade80',  // verde — resultado neto
   grid: '#262626',
   axis: '#737373',
 }
@@ -111,6 +112,7 @@ export function FinanzasClient({
     fixedExpenses: true,
     variableExpenses: true,
     commissions: true,
+    baseSalaryPaid: true,
     netProfit: true,
   })
 
@@ -304,6 +306,7 @@ export function FinanzasClient({
               { key: 'fixedExpenses', label: 'G. Fijos', color: COLORS.fixed },
               { key: 'variableExpenses', label: 'G. Variables', color: COLORS.variable },
               { key: 'commissions', label: 'Comisiones', color: COLORS.commissions },
+              { key: 'baseSalaryPaid', label: 'Sueldos fijos', color: COLORS.salaries },
               { key: 'netProfit', label: 'Resultado', color: COLORS.netProfit },
             ].map(({ key, label, color }) => (
               <button
@@ -387,6 +390,15 @@ export function FinanzasClient({
                       dataKey="commissions"
                       name="Comisiones"
                       fill={COLORS.commissions}
+                      radius={[4, 4, 0, 0]}
+                      animationDuration={800}
+                    />
+                  )}
+                  {visibleSeries.baseSalaryPaid && (
+                    <Bar
+                      dataKey="baseSalaryPaid"
+                      name="Sueldos fijos"
+                      fill={COLORS.salaries}
                       radius={[4, 4, 0, 0]}
                       animationDuration={800}
                     />

@@ -64,6 +64,7 @@ export async function upsertSalaryConfig(staffId: string, scheme: SalaryScheme, 
 
   revalidatePath('/dashboard/sueldos')
   revalidatePath('/dashboard/barberos')
+  revalidatePath('/dashboard/finanzas')
   return { success: true }
 }
 

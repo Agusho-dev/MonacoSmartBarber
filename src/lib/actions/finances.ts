@@ -14,6 +14,7 @@ export interface MonthlyFinancial {
   bonuses: number
   advances: number
   salaryPayments: number
+  baseSalaryPaid: number   // sueldos fijos y híbridos pagados (base_salary + hybrid_deficit)
   totalExpenses: number
   netProfit: number
   cuts: number
@@ -167,7 +168,7 @@ export async function fetchFinancialData(
     }
     const d = new Date(year, monthIndex, 1)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    monthMap.set(key, { revenue: 0, commissions: 0, cuts: 0, variableExp: 0, bonuses: 0, advances: 0, salaryPayments: 0 })
+    monthMap.set(key, { revenue: 0, commissions: 0, cuts: 0, variableExp: 0, bonuses: 0, advances: 0, salaryPayments: 0, baseSalaryPaid: 0 })
   }
 
   const TZ = 'America/Argentina/Buenos_Aires'
@@ -217,7 +218,11 @@ export async function fetchFinancialData(
       m.advances += amt
     } else {
       // commission, base_salary, hybrid_deficit pagados → egreso salarial
-      m.salaryPayments += Math.abs(Number(sr.amount))
+      const absAmt = Math.abs(Number(sr.amount))
+      m.salaryPayments += absAmt
+      if (sr.type === 'base_salary' || sr.type === 'hybrid_deficit') {
+        m.baseSalaryPaid += absAmt
+      }
     }
   }
 
@@ -240,6 +245,7 @@ export async function fetchFinancialData(
         bonuses: d.bonuses,
         advances: d.advances,
         salaryPayments: d.salaryPayments,
+        baseSalaryPaid: d.baseSalaryPaid,
         totalExpenses: totalExp,
         netProfit: net,
         cuts: d.cuts,

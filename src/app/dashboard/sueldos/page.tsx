@@ -16,22 +16,29 @@ export interface BarberWithConfig {
 }
 
 export default async function SueldosPage() {
-  const supabase = await createAdminClient()
+  const supabase = createAdminClient()
 
-  const [{ data: branches }, { data: barbersRaw }] = await Promise.all([
+  const [{ data: branches }, { data: barbersRaw }, { data: salaryConfigsRaw }] = await Promise.all([
     supabase.from('branches').select('*').eq('is_active', true).order('name'),
     supabase
       .from('staff')
-      .select('id, full_name, commission_pct, branch_id, salary_configs(*)')
+      .select('id, full_name, commission_pct, branch_id')
       .eq('role', 'barber')
       .eq('is_active', true)
       .order('full_name'),
+    supabase.from('salary_configs').select('*'),
   ])
+
+  const configsByStaffId = new Map((salaryConfigsRaw ?? []).map((c) => [c.staff_id, c]))
+  const barbers: BarberWithConfig[] = (barbersRaw ?? []).map((b) => {
+    const cfg = configsByStaffId.get(b.id)
+    return { ...b, salary_configs: cfg ? [cfg] : [] }
+  })
 
   return (
     <SueldosClient
       branches={branches ?? []}
-      barbers={(barbersRaw ?? []) as BarberWithConfig[]}
+      barbers={barbers}
     />
   )
 }

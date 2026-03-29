@@ -1,8 +1,9 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { fetchFinancialData, getFixedExpenses } from '@/lib/actions/finances'
 import { getCommissionSummary } from '@/lib/actions/salary'
 import { FinanzasTabsClient } from './finanzas-tabs-client'
 import type { Metadata } from 'next'
+import type { BarberWithConfig } from '../sueldos/page'
 
 export const metadata: Metadata = {
   title: 'Finanzas | Monaco Smart Barber',
@@ -42,6 +43,8 @@ export default async function FinanzasPage() {
     isOwnerOrAdmin
   )
 
+  const admin = createAdminClient()
+
   const [
     financialData,
     fixedExpenses,
@@ -49,6 +52,7 @@ export default async function FinanzasPage() {
     { data: branches },
     { data: accounts },
     { data: barbersRaw },
+    { data: salaryConfigsRaw },
     { data: expenseTickets },
   ] = await Promise.all([
     fetchFinancialData(6),
@@ -59,12 +63,13 @@ export default async function FinanzasPage() {
       .from('payment_accounts')
       .select('*, branch:branches(name)')
       .order('name'),
-    supabase
+    admin
       .from('staff')
-      .select('id, full_name, commission_pct, branch_id, salary_configs(*)')
+      .select('id, full_name, commission_pct, branch_id')
       .eq('role', 'barber')
       .eq('is_active', true)
       .order('full_name'),
+    admin.from('salary_configs').select('*'),
     supabase
       .from('expense_tickets')
       .select('*, created_by_staff:created_by(full_name), payment_account:payment_accounts(name, alias_or_cbu)')
@@ -72,12 +77,19 @@ export default async function FinanzasPage() {
       .limit(100),
   ])
 
+  // Mergear salary_configs con barbers manualmente (evita problemas con el embedded select de PostgREST)
+  const configsByStaffId = new Map((salaryConfigsRaw ?? []).map((c) => [c.staff_id, c]))
+  const barbers: BarberWithConfig[] = (barbersRaw ?? []).map((b) => {
+    const cfg = configsByStaffId.get(b.id)
+    return { ...b, salary_configs: cfg ? [cfg] : [] }
+  })
+
   return (
     <FinanzasTabsClient
       initialData={financialData}
       branches={branches ?? []}
       accounts={accounts ?? []}
-      barbers={barbersRaw ?? []}
+      barbers={barbers}
       expenseTickets={expenseTickets ?? []}
       fixedExpenses={fixedExpenses}
       commissionSummary={commissionSummary}

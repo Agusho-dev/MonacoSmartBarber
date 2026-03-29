@@ -1,12 +1,14 @@
 'use client'
 
 import { useState, useTransition, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   upsertSalaryConfig,
   getSalaryReports,
   getPaymentBatchesGrouped,
   createManualSalaryReport,
   generateCommissionReport,
+  generateBaseSalaryReport,
   deleteSalaryReport,
   paySelectedReports,
 } from '@/lib/actions/salary'
@@ -136,6 +138,7 @@ function formatBatchDate(dateStr: string) {
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export function SueldosClient({ branches, barbers }: Props) {
+  const router = useRouter()
   const { selectedBranchId: storeBranchId, setSelectedBranchId: setStoreBranchId } =
     useBranchStore()
 
@@ -154,6 +157,9 @@ export function SueldosClient({ branches, barbers }: Props) {
   // Barbero activo en el sidebar
   const [activeBarberId, setActiveBarberId] = useState<string | null>(null)
   const activeBarber = branchBarbers.find((b) => b.id === activeBarberId) ?? branchBarbers[0] ?? null
+
+  // Override local de salary configs (para reflejar cambios sin esperar router.refresh)
+  const [localSalaryConfigs, setLocalSalaryConfigs] = useState<Record<string, SalaryConfig>>({})
 
   // Datos cargados por server action al seleccionar barbero
   const [reports, setReports] = useState<SalaryReport[]>([])
@@ -189,6 +195,14 @@ export function SueldosClient({ branches, barbers }: Props) {
     notes: string
     date: string
   }>({ type: 'bonus', amount: '', notes: '', date: todayIso() })
+
+  // Registrar sueldo fijo
+  const [fixedSalaryDialogOpen, setFixedSalaryDialogOpen] = useState(false)
+  const [fixedSalaryPeriod, setFixedSalaryPeriod] = useState<{ start: string; end: string }>({
+    start: firstOfMonthIso(),
+    end: todayIso(),
+  })
+  const [fixedSalaryError, setFixedSalaryError] = useState<string | null>(null)
 
   // Confirmación de pago
   const [payDialogOpen, setPayDialogOpen] = useState(false)
@@ -282,7 +296,7 @@ export function SueldosClient({ branches, barbers }: Props) {
 
   function openConfig() {
     if (!activeBarber) return
-    const cfg: SalaryConfig | undefined = activeBarber.salary_configs?.[0]
+    const cfg: SalaryConfig | undefined = localSalaryConfigs[activeBarber.id] ?? activeBarber.salary_configs?.[0]
     setConfigForm({
       scheme: (cfg?.scheme ?? 'fixed') as SalaryScheme,
       base_amount: String(cfg?.base_amount ?? 0),
@@ -294,18 +308,56 @@ export function SueldosClient({ branches, barbers }: Props) {
   function handleSaveConfig(e: React.FormEvent) {
     e.preventDefault()
     if (!activeBarber) return
+    const scheme = configForm.scheme
+    const baseAmount = parseFloat(configForm.base_amount)
+    const commissionPct = parseFloat(configForm.commission_pct)
     startTransition(async () => {
       const r = await upsertSalaryConfig(
         activeBarber.id,
-        configForm.scheme,
-        parseFloat(configForm.base_amount),
-        parseFloat(configForm.commission_pct)
+        scheme,
+        baseAmount,
+        commissionPct
       )
       if (r.error) {
         toast.error(r.error)
       } else {
+        // Actualizar estado local inmediatamente sin esperar router.refresh
+        const existingConfig = localSalaryConfigs[activeBarber.id] ?? activeBarber.salary_configs?.[0]
+        setLocalSalaryConfigs((prev) => ({
+          ...prev,
+          [activeBarber.id]: {
+            id: existingConfig?.id ?? '',
+            staff_id: activeBarber.id,
+            scheme,
+            base_amount: baseAmount,
+            commission_pct: commissionPct,
+            created_at: existingConfig?.created_at ?? new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        }))
         toast.success('Configuración guardada')
         setConfigOpen(false)
+        router.refresh()
+      }
+    })
+  }
+
+  function handleGenerateFixedSalary() {
+    if (!activeBarber || !selectedBranchId) return
+    setFixedSalaryError(null)
+    startTransition(async () => {
+      const r = await generateBaseSalaryReport(
+        activeBarber.id,
+        selectedBranchId,
+        fixedSalaryPeriod.start,
+        fixedSalaryPeriod.end
+      )
+      if (r.error) {
+        setFixedSalaryError(r.error)
+      } else {
+        toast.success('Sueldo fijo registrado como pendiente')
+        setFixedSalaryDialogOpen(false)
+        await loadBarberData(activeBarber.id)
       }
     })
   }
@@ -416,7 +468,8 @@ export function SueldosClient({ branches, barbers }: Props) {
   // ─── Render ────────────────────────────────────────────────────────────────
 
   const currentBarber = activeBarber
-  const currentConfig: SalaryConfig | undefined = currentBarber?.salary_configs?.[0]
+  const currentConfig: SalaryConfig | undefined =
+    (currentBarber ? localSalaryConfigs[currentBarber.id] : undefined) ?? currentBarber?.salary_configs?.[0]
 
   return (
     <div className="flex flex-col h-full gap-0">
@@ -456,7 +509,7 @@ export function SueldosClient({ branches, barbers }: Props) {
                   const isActive =
                     currentBarber?.id === barber.id ||
                     (!activeBarberId && barber.id === branchBarbers[0]?.id)
-                  const cfg: SalaryConfig | undefined = barber.salary_configs?.[0]
+                  const cfg: SalaryConfig | undefined = localSalaryConfigs[barber.id] ?? barber.salary_configs?.[0]
 
                   return (
                     <button
@@ -561,7 +614,21 @@ export function SueldosClient({ branches, barbers }: Props) {
                   className="flex-1 flex flex-col min-h-0 mt-0 px-6"
                 >
                   {/* Barra de acciones */}
-                  <div className="flex items-center gap-2 py-3 shrink-0">
+                  <div className="flex items-center gap-2 py-3 shrink-0 flex-wrap">
+                    {(currentConfig?.scheme === 'fixed' || currentConfig?.scheme === 'hybrid') && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setFixedSalaryPeriod({ start: firstOfMonthIso(), end: todayIso() })
+                          setFixedSalaryError(null)
+                          setFixedSalaryDialogOpen(true)
+                        }}
+                      >
+                        <Banknote className="size-3.5 mr-1.5" />
+                        Registrar sueldo
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       variant="outline"
@@ -955,6 +1022,86 @@ export function SueldosClient({ branches, barbers }: Props) {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: Registrar sueldo fijo ──────────────────────────────────── */}
+      <Dialog
+        open={fixedSalaryDialogOpen}
+        onOpenChange={(o) => {
+          if (!o) {
+            setFixedSalaryDialogOpen(false)
+            setFixedSalaryError(null)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Registrar sueldo fijo</DialogTitle>
+            <DialogDescription>
+              Genera un reporte de sueldo base de {formatCurrency(currentConfig?.base_amount ?? 0)} para {currentBarber?.full_name}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="fixed-salary-start">Inicio del período</Label>
+                <Input
+                  id="fixed-salary-start"
+                  type="date"
+                  className="mt-1.5"
+                  value={fixedSalaryPeriod.start}
+                  max={fixedSalaryPeriod.end}
+                  onChange={(e) => {
+                    setFixedSalaryPeriod((p) => ({ ...p, start: e.target.value }))
+                    setFixedSalaryError(null)
+                  }}
+                />
+              </div>
+              <div>
+                <Label htmlFor="fixed-salary-end">Fin del período</Label>
+                <Input
+                  id="fixed-salary-end"
+                  type="date"
+                  className="mt-1.5"
+                  value={fixedSalaryPeriod.end}
+                  min={fixedSalaryPeriod.start}
+                  max={todayIso()}
+                  onChange={(e) => {
+                    setFixedSalaryPeriod((p) => ({ ...p, end: e.target.value }))
+                    setFixedSalaryError(null)
+                  }}
+                />
+              </div>
+            </div>
+            <div className="rounded-lg bg-muted/50 px-4 py-3 text-sm">
+              <span className="text-muted-foreground">Monto a registrar: </span>
+              <span className="font-semibold">{formatCurrency(currentConfig?.base_amount ?? 0)}</span>
+            </div>
+            {fixedSalaryError && (
+              <div className="flex items-center gap-2 rounded-lg bg-destructive/10 border border-destructive/30 px-3 py-2.5 text-sm text-destructive">
+                <AlertCircle className="size-4 shrink-0" />
+                {fixedSalaryError}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setFixedSalaryDialogOpen(false)
+                setFixedSalaryError(null)
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleGenerateFixedSalary}
+              disabled={isPending || !fixedSalaryPeriod.start || !fixedSalaryPeriod.end}
+            >
+              Registrar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -115,12 +115,13 @@ export function FinanzasTabsClient({
                 {activeTab === 'cuentas' && (
                     <CuentasClient accounts={accounts} branches={branches} />
                 )}
-                {activeTab === 'sueldos' && (
+                {/* SueldosClient siempre montado para preservar estado local */}
+                <div className={activeTab !== 'sueldos' ? 'hidden' : ''}>
                     <SueldosClient
                         branches={branches}
                         barbers={barbers}
                     />
-                )}
+                </div>
                 {activeTab === 'egresos' && (
                     <EgresosClient
                         expenseTickets={expenseTickets}
