@@ -1083,198 +1083,168 @@ export function QueuePanel({
 
       <main className="flex flex-1 flex-col overflow-hidden sm:flex-row">
 
-        {/* ── MOBILE: tab layout ── */}
-        <div className="flex flex-1 flex-col overflow-hidden sm:hidden">
-          <Tabs value={mobilePanelTab} onValueChange={(v) => setMobilePanelTab(v as 'queue' | 'active')} className="flex flex-1 flex-col overflow-hidden">
-            <div className="px-3 pt-2 pb-1">
-              <TabsList className="w-full">
-                <TabsTrigger value="queue" className="flex-1 py-2 text-sm font-medium">
-                  Fila
-                  <Badge variant="secondary" className="ml-1.5 px-1.5 text-xs">
-                    {myWaitingEntries.filter(e => !e.is_break).length}
+        {/* ── MOBILE: unified layout ── */}
+        <div className="flex flex-1 flex-col overflow-hidden sm:hidden bg-background">
+          <Tabs defaultValue="my-queue" className="flex flex-1 flex-col overflow-hidden h-full">
+            <div className="px-3 pt-3 pb-2 bg-card border-b">
+              <TabsList className="w-full h-11 bg-muted/80 p-1">
+                <TabsTrigger value="my-queue" className="flex-1 text-sm h-9">
+                  Mi fila
+                  <Badge variant="secondary" className="ml-2 px-1.5 py-0 min-w-5 h-5 flex items-center justify-center text-[11px] font-bold shadow-sm bg-background">
+                    {myWaitingEntries.filter((e) => !e.is_break).length}
                   </Badge>
                 </TabsTrigger>
-                <TabsTrigger value="active" className="flex-1 py-2 text-sm font-medium relative">
-                  {myActiveBreak ? 'Descanso' : 'En atención'}
-                  {(myActiveEntry || myActiveBreak) && (
-                    <span className="ml-1.5 flex size-2 rounded-full bg-primary animate-pulse" />
-                  )}
+                <TabsTrigger value="general-queue" className="flex-1 text-sm h-9">
+                  General
+                  <Badge variant="secondary" className="ml-2 px-1.5 py-0 min-w-5 h-5 flex items-center justify-center text-[11px] font-bold shadow-sm bg-background">
+                    {allWaitingEntries.filter((e) => !e.is_break).length}
+                  </Badge>
                 </TabsTrigger>
               </TabsList>
             </div>
 
-            {/* Mobile queue tabs (Mi fila / General) inside the Fila tab */}
-            <TabsContent value="queue" className="mt-0 flex-1 overflow-hidden">
-              <Tabs defaultValue="my-queue" className="flex flex-1 flex-col overflow-hidden h-full">
-                <div className="px-3 pb-1">
-                  <TabsList className="w-full h-8">
-                    <TabsTrigger value="my-queue" className="flex-1 text-xs h-6">
-                      Mi fila
-                      <Badge variant="secondary" className="ml-1 px-1 text-[10px]">
-                        {myWaitingEntries.filter(e => !e.is_break).length}
-                      </Badge>
-                    </TabsTrigger>
-                    <TabsTrigger value="general-queue" className="flex-1 text-xs h-6">
-                      General
-                      <Badge variant="secondary" className="ml-1 px-1 text-[10px]">
-                        {allWaitingEntries.filter(e => !e.is_break).length}
-                      </Badge>
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
-                <Separator />
-                <TabsContent value="my-queue" className="mt-0 flex-1 overflow-hidden">
-                  <ScrollArea className="h-full">
-                    <div className="space-y-2 p-3">
-                      {loading ? (
-                        Array.from({ length: 3 }).map((_, i) => (
-                          <Skeleton key={i} className="h-[72px] w-full rounded-xl" />
-                        ))
-                      ) : myWaitingEntries.length === 0 ? (
-                        renderEmptyQueue()
-                      ) : (
-                        myWaitingEntries.map((e) => renderQueueEntry(e, false))
-                      )}
-                      {!loading && renderInProgressOthers()}
-                    </div>
-                  </ScrollArea>
-                </TabsContent>
-                <TabsContent value="general-queue" className="mt-0 flex-1 overflow-hidden">
-                  <ScrollArea className="h-full">
-                    <div className="space-y-2 p-3">
-                      {loading ? (
-                        Array.from({ length: 3 }).map((_, i) => (
-                          <Skeleton key={i} className="h-[72px] w-full rounded-xl" />
-                        ))
-                      ) : allWaitingEntries.length === 0 ? (
-                        renderEmptyQueue()
-                      ) : (
-                        allWaitingEntries.map((e) => renderQueueEntry(e, true))
-                      )}
-                      {!loading && renderInProgressOthers()}
-                    </div>
-                  </ScrollArea>
-                </TabsContent>
-              </Tabs>
-            </TabsContent>
-
-            {/* Mobile active client tab */}
-            <TabsContent value="active" className="mt-0 flex-1 overflow-hidden">
+            <TabsContent value="my-queue" className="mt-0 flex-1 overflow-hidden bg-muted/10">
               <ScrollArea className="h-full">
-                <div className="p-3">
-                  {/* Reuse same active client rendering */}
-                  {myActiveBreak ? (
-                    (() => {
-                      const breakElapsedMs = myActiveBreak.started_at ? now - new Date(myActiveBreak.started_at).getTime() : 0
-                      const breakDurationMs = (breakDurationMinutes ?? 0) * 60_000
-                      const isBreakOverdue = breakDurationMinutes !== null && breakDurationMinutes > 0 && breakElapsedMs > breakDurationMs
-                      const overdueMs = Math.max(0, breakElapsedMs - breakDurationMs)
-                      const formatOverdue = (ms: number) => {
-                        const totalSeconds = Math.floor(ms / 1000)
-                        const m = Math.floor(totalSeconds / 60)
-                        const s = totalSeconds % 60
-                        return `${m}m ${s}s`
-                      }
-                      return (
-                        <Card className={isBreakOverdue ? 'border-red-500/20 bg-red-500/5' : 'border-amber-500/20 bg-amber-500/5'}>
-                          <CardHeader className="p-4">
-                            <div className="flex items-center gap-3">
-                              <div className={`flex size-12 shrink-0 items-center justify-center rounded-xl ${isBreakOverdue ? 'bg-red-500/15 text-red-500' : 'bg-amber-500/15 text-amber-600'}`}>
-                                <Coffee className="size-6" />
-                              </div>
-                              <div>
-                                <CardTitle className={`text-xl ${isBreakOverdue ? 'text-red-500' : 'text-amber-600'}`}>
-                                  {isBreakOverdue ? 'Tiempo de demora' : 'Descanso'}
-                                </CardTitle>
-                                <p className="mt-0.5 text-sm text-muted-foreground">
-                                  {isBreakOverdue ? 'Superaste el tiempo ⚠️' : 'Disfrutá tu descanso ☕'}
-                                </p>
-                              </div>
-                            </div>
-                          </CardHeader>
-                          <CardContent className="space-y-4 p-4 pt-0">
-                            <div className={`flex items-center gap-3 rounded-xl px-4 py-3 ${isBreakOverdue ? 'bg-red-500/10 border border-red-500/20' : 'bg-secondary'}`}>
-                              <Clock className={`size-5 shrink-0 ${isBreakOverdue ? 'text-red-500' : 'text-muted-foreground'}`} />
-                              <p className={`text-3xl font-bold tabular-nums tracking-tight ${isBreakOverdue ? 'text-red-500' : ''}`}>
-                                {myActiveBreak.started_at ? (isBreakOverdue ? formatOverdue(overdueMs) : formatElapsed(myActiveBreak.started_at)) : '—'}
-                              </p>
-                            </div>
-                            <Button className="h-14 w-full text-lg" size="lg" onClick={handleCompleteBreak} disabled={actionLoading === myActiveBreak.id}>
-                              <Check className="mr-2 size-5" />
-                              Finalizar descanso
-                            </Button>
-                          </CardContent>
-                        </Card>
-                      )
-                    })()
-                  ) : myActiveEntry ? (
-                    <Card className="border-primary/20 bg-primary/3">
-                      <CardHeader className="p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground">
-                            #{myActiveEntry.position}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <CardTitle className="text-xl truncate">{myActiveEntry.client?.name ?? 'Cliente'}</CardTitle>
-                            {myActiveEntry.service && <p className="mt-0.5 text-sm font-medium text-primary">{myActiveEntry.service.name}</p>}
-                            <p className="mt-0.5 text-sm text-muted-foreground">{myActiveEntry.client?.phone}</p>
-                          </div>
-                          {myActiveEntry.reward_claimed && (
-                            <Badge variant="secondary" className="shrink-0 gap-1 bg-purple-500/15 text-purple-500 border-purple-500/20">
-                              <Gift className="size-3" />
-                              Premio
-                            </Badge>
-                          )}
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-3 p-4 pt-0">
-                        <div className="flex items-center gap-3 rounded-xl bg-secondary px-4 py-3">
-                          <Clock className="size-5 shrink-0 text-muted-foreground" />
-                          <div>
-                            <p className="text-xs text-muted-foreground">Tiempo de servicio</p>
-                            <p className="text-3xl font-bold tabular-nums tracking-tight">
-                              {myActiveEntry.started_at ? formatElapsed(myActiveEntry.started_at) : '—'}
-                            </p>
-                          </div>
-                        </div>
-                        <Accordion type="single" collapsible className="w-full">
-                          <AccordionItem value="history" className="border-none">
-                            <AccordionTrigger className="flex h-12 items-center justify-between rounded-lg border bg-card px-4 py-0 hover:bg-accent hover:no-underline [&[data-state=open]>svg]:rotate-180">
-                              <div className="flex items-center gap-2">
-                                <User className="size-4" />
-                                <span className="text-base font-medium">Historial y Fotos</span>
-                              </div>
-                            </AccordionTrigger>
-                            <AccordionContent className="pt-3 pb-1">
-                              {myActiveEntry.client?.notes && (
-                                <div className="rounded-lg bg-muted/50 p-3 border border-border/50 mb-3">
-                                  <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1"><User className="size-3" /> Observaciones</p>
-                                  <p className="text-sm italic text-foreground whitespace-pre-wrap">{myActiveEntry.client.notes}</p>
-                                </div>
-                              )}
-                              {myActiveEntry.client && <ClientHistory clientId={myActiveEntry.client.id} />}
-                            </AccordionContent>
-                          </AccordionItem>
-                        </Accordion>
-                        <Button className="h-14 w-full text-lg" size="lg" onClick={() => setCompletingEntry(myActiveEntry)}>
-                          <Check className="mr-2 size-5" />
-                          Finalizar
-                        </Button>
-                      </CardContent>
-                    </Card>
+                <div className="space-y-3 p-3 pb-8">
+                  {loading ? (
+                    Array.from({ length: 3 }).map((_, i) => (
+                      <Skeleton key={i} className="h-[72px] w-full rounded-xl" />
+                    ))
+                  ) : myWaitingEntries.length === 0 ? (
+                    renderEmptyQueue()
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
-                      <Scissors className="mb-3 size-12 opacity-15" />
-                      <p className="font-medium">Sin cliente en atención</p>
-                      <p className="mt-1 max-w-[220px] text-xs opacity-60">
-                        Seleccioná un cliente de la fila para comenzar
-                      </p>
-                    </div>
+                    myWaitingEntries.map((e) => renderQueueEntry(e, false))
                   )}
+                  {!loading && renderInProgressOthers()}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+            <TabsContent value="general-queue" className="mt-0 flex-1 overflow-hidden bg-muted/10">
+              <ScrollArea className="h-full">
+                <div className="space-y-3 p-3 pb-8">
+                  {loading ? (
+                    Array.from({ length: 3 }).map((_, i) => (
+                      <Skeleton key={i} className="h-[72px] w-full rounded-xl" />
+                    ))
+                  ) : allWaitingEntries.length === 0 ? (
+                    renderEmptyQueue()
+                  ) : (
+                    allWaitingEntries.map((e) => renderQueueEntry(e, true))
+                  )}
+                  {!loading && renderInProgressOthers()}
                 </div>
               </ScrollArea>
             </TabsContent>
           </Tabs>
+
+          {/* TIMER PARA ABAJO (Sticky Footer for Active Client) */}
+          {(myActiveEntry || myActiveBreak) && (
+            <div className="shrink-0 max-h-[60vh] overflow-y-auto border-t border-primary/20 bg-card shadow-[0_-8px_30px_rgba(0,0,0,0.12)] z-10 pb-safe">
+              <div className="p-3 sm:p-4">
+                {myActiveBreak ? (
+                  (() => {
+                    const breakElapsedMs = myActiveBreak.started_at ? now - new Date(myActiveBreak.started_at).getTime() : 0
+                    const breakDurationMs = (breakDurationMinutes ?? 0) * 60_000
+                    const isBreakOverdue = breakDurationMinutes !== null && breakDurationMinutes > 0 && breakElapsedMs > breakDurationMs
+                    const overdueMs = Math.max(0, breakElapsedMs - breakDurationMs)
+                    const formatOverdue = (ms: number) => {
+                      const totalSeconds = Math.floor(ms / 1000)
+                      const m = Math.floor(totalSeconds / 60)
+                      const s = totalSeconds % 60
+                      return `${m}m ${s}s`
+                    }
+                    return (
+                      <Card className={`border-none ${isBreakOverdue ? 'bg-red-500/10' : 'bg-amber-500/10'}`}>
+                        <CardHeader className="p-3 pb-2 flex-row items-center justify-between space-y-0">
+                          <CardTitle className={`text-lg flex items-center gap-2 ${isBreakOverdue ? 'text-red-600' : 'text-amber-700'}`}>
+                            <Coffee className={`size-5 ${isBreakOverdue ? 'text-red-500' : 'text-amber-600'}`} />
+                            {isBreakOverdue ? 'Demorado' : 'Descanso'}
+                          </CardTitle>
+                          <p className={`text-2xl font-bold tabular-nums tracking-tight ${isBreakOverdue ? 'text-red-600' : 'text-amber-700'}`}>
+                            {myActiveBreak.started_at ? (isBreakOverdue ? formatOverdue(overdueMs) : formatElapsed(myActiveBreak.started_at)) : '—'}
+                          </p>
+                        </CardHeader>
+                        <CardContent className="p-3 pt-1">
+                          <Button className={`h-12 w-full text-base font-semibold ${isBreakOverdue ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700 text-white'}`} size="lg" onClick={handleCompleteBreak} disabled={actionLoading === myActiveBreak.id}>
+                            <Check className="mr-2 size-5" />
+                            Finalizar descanso
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    )
+                  })()
+                ) : myActiveEntry ? (
+                  <Card className="border border-primary/30 bg-primary/5 shadow-sm">
+                    <CardHeader className="p-3 pb-2 flex flex-row items-start gap-3 space-y-0">
+                      <div className="flex size-11 pt-[2px] shrink-0 items-center justify-center rounded-lg bg-primary text-base font-bold text-primary-foreground shadow-sm">
+                        #{myActiveEntry.position}
+                      </div>
+                      <div className="min-w-0 flex-1 py-0.5">
+                        <CardTitle className="text-base sm:text-lg leading-tight truncate font-bold flex items-center gap-1.5">
+                          {myActiveEntry.client?.name ?? 'Cliente'}
+                        </CardTitle>
+                        <p className="text-xs font-semibold text-primary mt-0.5 truncate bg-primary/10 w-fit px-1.5 py-0.5 rounded-sm">
+                          {myActiveEntry.service?.name || 'Servicio'}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-[10px] text-muted-foreground font-bold tracking-widest uppercase mb-0.5">Tiempo</p>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <Clock className="size-4 shrink-0 text-primary animate-pulse" />
+                          <p className="text-2xl sm:text-3xl font-black tabular-nums tracking-tighter text-foreground">
+                            {myActiveEntry.started_at ? formatElapsed(myActiveEntry.started_at) : '—'}
+                          </p>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-3 pt-2 space-y-2.5">
+                      <Accordion type="single" collapsible className="w-full">
+                        <AccordionItem value="history" className="border-none">
+                          <AccordionTrigger className="flex h-10 items-center justify-between rounded-lg border border-primary/20 bg-background/60 px-3 py-0 hover:bg-background/80 hover:no-underline [&[data-state=open]>svg]:rotate-180 transition-colors">
+                            <span className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
+                              <User className="size-4 text-primary/70" />
+                              Historial y Ficha
+                            </span>
+                          </AccordionTrigger>
+                          <AccordionContent className="pt-2.5 pb-0">
+                            <div className="space-y-3 rounded-lg border bg-card/50 p-3 mb-3 shadow-inner">
+                              <div>
+                                <label className="mb-1 flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                                  <Instagram className="size-3" />
+                                  Instagram
+                                </label>
+                                <div className="text-sm font-medium">
+                                  {myActiveEntry.client?.instagram ? myActiveEntry.client.instagram : <span className="text-muted-foreground font-normal">No especificado</span>}
+                                </div>
+                              </div>
+                              <Separator className="bg-primary/10" />
+                              <div>
+                                <label className="mb-1 block text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                                  Observaciones
+                                </label>
+                                <div className="w-full rounded-md bg-background/50 border border-primary/10 px-2.5 py-2 text-sm text-foreground italic min-h-[40px]">
+                                  {myActiveEntry.client?.notes ? myActiveEntry.client.notes : <span className="text-muted-foreground not-italic">Ninguna</span>}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="px-1">
+                              {myActiveEntry.client && (
+                                <ClientHistory clientId={myActiveEntry.client.id} />
+                              )}
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                      <Button className="h-12 w-full text-base font-bold shadow-[0_4px_14px_rgba(var(--primary),0.3)]" size="lg" onClick={() => setCompletingEntry(myActiveEntry)}>
+                        <Check className="mr-2 size-5" />
+                        Finalizar Servicio
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ) : null}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── DESKTOP: side-by-side layout ── */}

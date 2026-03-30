@@ -171,6 +171,16 @@ export async function deleteService(id: string) {
     return { error: 'No se puede eliminar el servicio porque tiene visitas asociadas. Desactivalo en su lugar.' }
   }
 
+  // Verificar que no tenga clientes en fila o historial de fila
+  const { count: queueCount } = await supabase
+    .from('queue_entries')
+    .select('*', { count: 'exact', head: true })
+    .eq('service_id', id)
+
+  if (queueCount && queueCount > 0) {
+    return { error: 'No se puede eliminar el servicio porque tiene historial en la fila de espera. Desactivalo en su lugar.' }
+  }
+
   // Eliminar overrides de comisión primero
   await supabase
     .from('staff_service_commissions')
