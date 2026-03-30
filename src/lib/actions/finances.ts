@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getMonthBoundsStr, getLocalNow } from '@/lib/time-utils'
+import { validateBranchAccess, getOrgBranchIds } from './org'
 
 export interface MonthlyFinancial {
   month: string
@@ -106,20 +107,34 @@ export async function fetchFinancialData(
   const { start: startDateStr, end: endDateStr } = getMonthBoundsStr(monthsBack)
   const localNow = getLocalNow()
 
+  // Resolver el scope de branches para filtrar: una sucursal específica o todas las de la org
+  let orgBranchIds: string[] = []
+  if (!branchId) {
+    orgBranchIds = await getOrgBranchIds()
+  }
+
   // Visits en el rango — incluye barber_id para el desglose por barbero
   let vq = supabase
     .from('visits')
     .select('amount, commission_amount, completed_at, branch_id, service_id, queue_entry_id, barber_id')
     .gte('completed_at', startDateStr)
     .lte('completed_at', endDateStr)
-  if (branchId) vq = vq.eq('branch_id', branchId)
+  if (branchId) {
+    vq = vq.eq('branch_id', branchId)
+  } else {
+    vq = vq.in('branch_id', orgBranchIds)
+  }
   const { data: visits } = await vq
 
   // Todos los gastos fijos (activos e inactivos) con created_at para cálculo histórico preciso
   let fq = supabase
     .from('fixed_expenses')
     .select('amount, branch_id, created_at, is_active')
-  if (branchId) fq = fq.eq('branch_id', branchId)
+  if (branchId) {
+    fq = fq.eq('branch_id', branchId)
+  } else {
+    fq = fq.in('branch_id', orgBranchIds)
+  }
   const { data: allFixedExpenses } = await fq
 
   // Calcula los gastos fijos que existían al final de un mes dado
@@ -143,7 +158,11 @@ export async function fetchFinancialData(
     .select('amount, expense_date, branch_id')
     .gte('expense_date', startDateStr.slice(0, 10))
     .lte('expense_date', endDateStr.slice(0, 10))
-  if (branchId) eq = eq.eq('branch_id', branchId)
+  if (branchId) {
+    eq = eq.eq('branch_id', branchId)
+  } else {
+    eq = eq.in('branch_id', orgBranchIds)
+  }
   const { data: variableExpenses } = await eq
 
   // Reportes salariales (bonos, adelantos, pagos) en el rango
@@ -154,11 +173,15 @@ export async function fetchFinancialData(
     .eq('status', 'paid')
     .gte('report_date', startDateStr.slice(0, 10))
     .lte('report_date', endDateStr.slice(0, 10))
-  if (branchId) sq = sq.eq('branch_id', branchId)
+  if (branchId) {
+    sq = sq.eq('branch_id', branchId)
+  } else {
+    sq = sq.in('branch_id', orgBranchIds)
+  }
   const { data: salaryReports } = await sq
 
   // Inicializar todos los meses usando hora local para agrupar
-  const monthMap = new Map<string, { revenue: number; commissions: number; cuts: number; variableExp: number; bonuses: number; advances: number; salaryPayments: number }>()
+  const monthMap = new Map<string, { revenue: number; commissions: number; cuts: number; variableExp: number; bonuses: number; advances: number; salaryPayments: number; baseSalaryPaid: number }>()
   for (let i = 0; i < monthsBack; i++) {
     let year = localNow.getFullYear()
     let monthIndex = localNow.getMonth() - i
@@ -387,7 +410,12 @@ export async function getFixedExpenses(branchId?: string | null) {
     .from('fixed_expenses')
     .select('*, branch:branches(name)')
     .order('name')
-  if (branchId) q = q.eq('branch_id', branchId)
+  if (branchId) {
+    q = q.eq('branch_id', branchId)
+  } else {
+    const orgBranchIds = await getOrgBranchIds()
+    q = q.in('branch_id', orgBranchIds)
+  }
   const { data } = await q
   return data ?? []
 }
@@ -401,6 +429,10 @@ export async function upsertFixedExpense(data: {
   due_day?: number | null   // día de vencimiento del mes
   is_active?: boolean
 }) {
+  // Validar que la sucursal pertenece a la organización del usuario
+  const orgId = await validateBranchAccess(data.branch_id)
+  if (!orgId) return { error: 'No tienes acceso a esta sucursal' }
+
   const supabase = await createClient()
 
   if (data.id) {
@@ -433,6 +465,24 @@ export async function upsertFixedExpense(data: {
 
 export async function deleteFixedExpense(id: string) {
   const supabase = await createClient()
+
+  // Obtener el gasto para verificar a qué sucursal pertenece
+  const { data: expense, error: fetchError } = await supabase
+    .from('fixed_expenses')
+    .select('branch_id')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (fetchError) {
+    console.error('Error al obtener gasto fijo:', fetchError)
+    return { error: 'Error al verificar el gasto fijo' }
+  }
+  if (!expense) return { error: 'Gasto fijo no encontrado' }
+
+  // Validar que la sucursal del gasto pertenece a la organización del usuario
+  const orgId = await validateBranchAccess(expense.branch_id)
+  if (!orgId) return { error: 'No tienes acceso a esta sucursal' }
+
   const { error } = await supabase.from('fixed_expenses').delete().eq('id', id)
   if (error) return { error: error.message }
   revalidatePath('/dashboard/finanzas')

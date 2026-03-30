@@ -3,8 +3,12 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { IncentiveMetric, IncentivePeriod } from '@/lib/types/database'
+import { validateBranchAccess } from './org'
 
 export async function getIncentiveRules(branchId: string) {
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { data: [], error: 'No autorizado' }
+
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('incentive_rules')
@@ -29,6 +33,9 @@ export async function upsertIncentiveRule(formData: FormData) {
     return { error: 'Datos incompletos' }
   }
 
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
+
   if (id) {
     const { error } = await supabase
       .from('incentive_rules')
@@ -48,6 +55,11 @@ export async function upsertIncentiveRule(formData: FormData) {
 
 export async function toggleIncentiveRule(id: string, isActive: boolean) {
   const supabase = await createClient()
+  const { data: rule } = await supabase.from('incentive_rules').select('branch_id').eq('id', id).single()
+  if (!rule) return { error: 'Regla no encontrada' }
+  const orgId = await validateBranchAccess(rule.branch_id)
+  if (!orgId) return { error: 'No autorizado' }
+
   const { error } = await supabase
     .from('incentive_rules')
     .update({ is_active: isActive })
@@ -59,6 +71,11 @@ export async function toggleIncentiveRule(id: string, isActive: boolean) {
 
 export async function deleteIncentiveRule(id: string) {
   const supabase = await createClient()
+  const { data: rule } = await supabase.from('incentive_rules').select('branch_id').eq('id', id).single()
+  if (!rule) return { error: 'Regla no encontrada' }
+  const orgId = await validateBranchAccess(rule.branch_id)
+  if (!orgId) return { error: 'No autorizado' }
+
   const { error } = await supabase.from('incentive_rules').delete().eq('id', id)
   if (error) return { error: error.message }
   revalidatePath('/dashboard/incentivos')
@@ -67,6 +84,12 @@ export async function deleteIncentiveRule(id: string) {
 
 export async function logAchievement(staffId: string, ruleId: string, periodLabel: string, amountEarned: number, notes?: string) {
   const supabase = await createClient()
+  // Verificar que la regla pertenece a una branch de la org
+  const { data: rule } = await supabase.from('incentive_rules').select('branch_id').eq('id', ruleId).single()
+  if (!rule) return { error: 'Regla no encontrada' }
+  const orgId = await validateBranchAccess(rule.branch_id)
+  if (!orgId) return { error: 'No autorizado' }
+
   const { error } = await supabase.from('incentive_achievements').insert({
     staff_id: staffId,
     rule_id: ruleId,
@@ -80,6 +103,9 @@ export async function logAchievement(staffId: string, ruleId: string, periodLabe
 }
 
 export async function getBarberProgress(branchId: string, periodLabel: string) {
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { barbers: [], achievements: [], rules: [] }
+
   const supabase = await createClient()
 
   const [barbersRes, achievementsRes, rulesRes] = await Promise.all([

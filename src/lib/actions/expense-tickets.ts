@@ -3,8 +3,12 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getLocalDateStr } from '@/lib/time-utils'
+import { validateBranchAccess } from './org'
 
 export async function getExpenseTickets(branchId: string, startDate?: string, endDate?: string) {
+    const orgId = await validateBranchAccess(branchId)
+    if (!orgId) return { error: 'No autorizado' }
+
     const supabase = await createClient()
 
     let query = supabase
@@ -35,6 +39,9 @@ export async function createExpenseTicket(data: {
     expense_date?: string
     payment_account_id?: string | null
 }) {
+    const orgId = await validateBranchAccess(data.branch_id)
+    if (!orgId) return { error: 'No autorizado' }
+
     const supabase = await createClient()
 
     const { error } = await supabase.from('expense_tickets').insert([
@@ -59,6 +66,11 @@ export async function createExpenseTicket(data: {
 export async function deleteExpenseTicket(id: string) {
     const supabase = await createClient()
 
+    const { data: ticket } = await supabase.from('expense_tickets').select('branch_id').eq('id', id).single()
+    if (!ticket) return { error: 'Gasto no encontrado' }
+    const orgId = await validateBranchAccess(ticket.branch_id)
+    if (!orgId) return { error: 'No autorizado' }
+
     const { error } = await supabase
         .from('expense_tickets')
         .delete()
@@ -81,6 +93,11 @@ export async function updateExpenseTicket(
     }
 ) {
     const supabase = await createClient()
+
+    const { data: ticket } = await supabase.from('expense_tickets').select('branch_id').eq('id', id).single()
+    if (!ticket) return { error: 'Gasto no encontrado' }
+    const orgId = await validateBranchAccess(ticket.branch_id)
+    if (!orgId) return { error: 'No autorizado' }
 
     const { error } = await supabase
         .from('expense_tickets')

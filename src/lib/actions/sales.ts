@@ -3,6 +3,7 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { recordTransfer } from '@/lib/actions/paymentAccounts'
+import { validateBranchAccess } from './org'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 // ─── Función compartida para procesar venta de productos ────────────────────
@@ -106,6 +107,10 @@ export async function directProductSale(
   paymentAccountId?: string | null
 ) {
   const supabase = createAdminClient()
+
+  // Validar que el branch pertenece a la organización del usuario
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
 
   if (!productsToSell || productsToSell.length === 0) {
     return { error: 'No se seleccionaron productos' }

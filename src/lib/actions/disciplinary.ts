@@ -3,8 +3,12 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { DisciplinaryEventType, ConsequenceType } from '@/lib/types/database'
+import { validateBranchAccess } from './org'
 
 export async function getDisciplinaryRules(branchId: string) {
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { data: [], error: 'No autorizado' }
+
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('disciplinary_rules')
@@ -23,6 +27,9 @@ export async function upsertDisciplinaryRule(
   deductionAmount: number | null,
   description: string | null
 ) {
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
   const { error } = await supabase
     .from('disciplinary_rules')
@@ -37,6 +44,16 @@ export async function upsertDisciplinaryRule(
 
 export async function deleteDisciplinaryRule(id: string) {
   const supabase = await createClient()
+  // Obtener la regla para verificar ownership antes de borrar
+  const { data: rule } = await supabase
+    .from('disciplinary_rules')
+    .select('branch_id')
+    .eq('id', id)
+    .single()
+  if (!rule) return { error: 'Regla no encontrada' }
+  const orgId = await validateBranchAccess(rule.branch_id)
+  if (!orgId) return { error: 'No autorizado' }
+
   const { error } = await supabase.from('disciplinary_rules').delete().eq('id', id)
   if (error) return { error: error.message }
   revalidatePath('/dashboard/disciplina')
@@ -44,6 +61,9 @@ export async function deleteDisciplinaryRule(id: string) {
 }
 
 export async function getDisciplinaryEvents(branchId: string, fromDate?: string) {
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { data: [], error: 'No autorizado' }
+
   const supabase = await createClient()
   let query = supabase
     .from('disciplinary_events')
@@ -66,6 +86,12 @@ export async function createDisciplinaryEvent(
   createdBy: string | null,
   source: string = 'manual'
 ) {
+  // Las llamadas con source='system' provienen de checkTardiness (interno), sin contexto de usuario
+  if (source !== 'system') {
+    const orgId = await validateBranchAccess(branchId)
+    if (!orgId) return { error: 'No autorizado' }
+  }
+
   const supabase = source === 'system' ? createAdminClient() : await createClient()
 
   // Count previous occurrences this month
@@ -105,6 +131,9 @@ export async function createDisciplinaryEvent(
 }
 
 export async function getBarberDisciplinarySummary(branchId: string) {
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { summary: [], fromDate: '' }
+
   const supabase = await createClient()
   const startOfMonth = new Date()
   startOfMonth.setDate(1)

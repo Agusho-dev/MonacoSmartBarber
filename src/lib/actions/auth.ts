@@ -36,7 +36,7 @@ export async function loginWithPin(formData: FormData) {
 
   const { data: staff, error } = await supabase
     .from('staff')
-    .select('id, pin, full_name, branch_id, role, role_id')
+    .select('id, pin, full_name, branch_id, role, role_id, organization_id')
     .eq('id', staffId)
     .eq('is_active', true)
     .single()
@@ -95,6 +95,7 @@ export async function loginWithPin(formData: FormData) {
     staff_id: staff.id,
     full_name: staff.full_name,
     branch_id: staff.branch_id,
+    organization_id: staff.organization_id,
     role: staff.role,
     role_id: staff.role_id,
     permissions,
@@ -120,6 +121,7 @@ export async function getBarberSession() {
     staff_id: string
     full_name: string
     branch_id: string
+    organization_id: string
     role: string
     role_id: string | null
     permissions: Record<string, boolean>
@@ -135,7 +137,7 @@ export async function getBarberSession() {
 
   const { data: staff } = await supabase
     .from('staff')
-    .select('full_name, branch_id, role, role_id, is_active')
+    .select('full_name, branch_id, organization_id, role, role_id, is_active')
     .eq('id', parsed.staff_id)
     .single()
 
@@ -172,6 +174,7 @@ export async function getBarberSession() {
     staff_id: parsed.staff_id,
     full_name: staff.full_name,
     branch_id: staff.branch_id,
+    organization_id: staff.organization_id,
     role: staff.role,
     role_id: staff.role_id,
     permissions,

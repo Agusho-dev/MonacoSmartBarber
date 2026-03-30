@@ -18,6 +18,7 @@ import {
   Smartphone,
   GripVertical,
   Check,
+  ChevronDown,
 } from 'lucide-react'
 import {
   DndContext,
@@ -60,6 +61,7 @@ import { BranchScopeProvider } from '@/components/dashboard/branch-scope-provide
 import { MobileBottomNav } from '@/components/dashboard/mobile-bottom-nav'
 import { useBranchStore } from '@/stores/branch-store'
 import { createClient } from '@/lib/supabase/client'
+import { switchOrganization } from '@/lib/actions/org'
 
 const navItems = [
   { href: '/dashboard/fila', label: 'Fila', icon: ListOrdered, requiredPermissions: ['queue.view'] },
@@ -175,15 +177,61 @@ interface SidebarContentProps {
   onToggleEditMode: () => void
   userRole: string
   userFullName: string
+  organizationId: string | null
+  availableOrganizations: { id: string; name: string; slug: string }[]
   children: React.ReactNode
 }
 
-function SidebarContent({ isEditMode, onToggleEditMode, userRole, userFullName, children }: SidebarContentProps) {
+function SidebarContent({ isEditMode, onToggleEditMode, userRole, userFullName, organizationId, availableOrganizations, children }: SidebarContentProps) {
+  const currentOrg = availableOrganizations.find(o => o.id === organizationId)
+  
+  const handleSwitchOrg = async (orgId: string) => {
+    if (orgId === organizationId) return
+    const res = await switchOrganization(orgId)
+    if (res.success) {
+      window.location.reload()
+    } else {
+      console.error(res.error)
+    }
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-14 items-center gap-2 px-6">
-        <Scissors className="size-5" />
-        <span className="text-lg font-bold tracking-tight">Monaco</span>
+        {availableOrganizations.length > 1 ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="w-full justify-start gap-2 px-0 hover:bg-transparent">
+                <Scissors className="size-5 shrink-0" />
+                <span className="truncate text-lg font-bold tracking-tight">
+                  {currentOrg?.name || 'Monaco'}
+                </span>
+                <ChevronDown className="ml-auto size-4 opacity-50 shrink-0" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-full min-w-[200px]" align="start">
+              <DropdownMenuLabel>Organización activa</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {availableOrganizations.map((org) => (
+                <DropdownMenuItem 
+                  key={org.id} 
+                  onClick={() => handleSwitchOrg(org.id)}
+                  className="justify-between cursor-pointer"
+                >
+                  <span className="truncate pr-4">{org.name}</span>
+                  {org.id === organizationId && <Check className="size-4 shrink-0" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <>
+            <Scissors className="size-5 shrink-0" />
+            <span className="text-lg font-bold tracking-tight truncate flex-1">
+              {currentOrg?.name || 'Monaco'}
+            </span>
+          </>
+        )}
       </div>
       <Separator className="bg-sidebar-border" />
       <ScrollArea className="flex-1 py-4">
@@ -216,10 +264,12 @@ interface DashboardShellProps {
   user: { full_name: string; email: string | null; role: string }
   permissions: Record<string, boolean>
   allowedBranchIds: string[] | null
+  organizationId: string | null
+  availableOrganizations: { id: string; name: string; slug: string }[]
   children: React.ReactNode
 }
 
-export function DashboardShell({ user, permissions, allowedBranchIds, children }: DashboardShellProps) {
+export function DashboardShell({ user, permissions, allowedBranchIds, organizationId, availableOrganizations, children }: DashboardShellProps) {
   const pathname = usePathname()
   const router = useRouter()
   const touchStartX = useRef(0)
@@ -538,6 +588,8 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
           onToggleEditMode={() => setIsEditMode(p => !p)}
           userRole={user.role}
           userFullName={user.full_name}
+          organizationId={organizationId}
+          availableOrganizations={availableOrganizations}
         >
           {renderNavLinks()}
         </SidebarContent>
@@ -555,6 +607,8 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
             onToggleEditMode={() => setIsEditMode(p => !p)}
             userRole={user.role}
             userFullName={user.full_name}
+            organizationId={organizationId}
+            availableOrganizations={availableOrganizations}
           >
             {renderNavLinks()}
           </SidebarContent>
@@ -572,10 +626,10 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
             <Menu className="size-5" />
           </Button>
 
-          <div className="flex items-center gap-2 lg:hidden">
+          <div className="flex items-center gap-2 lg:hidden min-w-0 flex-1 px-4">
             <Scissors className="size-4 shrink-0" />
-            <span className="font-semibold truncate max-w-[160px]">
-              {currentNavIndex >= 0 ? orderedItems[currentNavIndex]?.label : 'Monaco'}
+            <span className="font-semibold truncate">
+              {currentNavIndex >= 0 ? orderedItems[currentNavIndex]?.label : (availableOrganizations.find(o => o.id === organizationId)?.name || 'Monaco')}
             </span>
           </div>
 
@@ -615,7 +669,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, children }
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
           >
-            <BranchScopeProvider allowedBranchIds={allowedBranchIds}>
+            <BranchScopeProvider allowedBranchIds={allowedBranchIds} organizationId={organizationId}>
               {children}
             </BranchScopeProvider>
           </main>

@@ -3,8 +3,12 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getLocalDateStr, getLocalDayBounds } from '@/lib/time-utils'
+import { validateBranchAccess, getOrgBranchIds } from './org'
 
 export async function getPaymentAccounts(branchId: string) {
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado', data: null }
+
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('payment_accounts')
@@ -32,6 +36,9 @@ export async function upsertPaymentAccount(formData: FormData) {
   const isActive = isActiveStr !== null ? isActiveStr === 'true' : true
 
   if (!branchId || !name) return { error: 'Nombre y sucursal son obligatorios' }
+
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
 
   if (id) {
     const { error } = await supabase
@@ -67,6 +74,11 @@ export async function upsertPaymentAccount(formData: FormData) {
 
 export async function togglePaymentAccount(id: string, isActive: boolean) {
   const supabase = createAdminClient()
+  const { data: acc } = await supabase.from('payment_accounts').select('branch_id').eq('id', id).single()
+  if (!acc) return { error: 'Cuenta no encontrada' }
+  const orgId = await validateBranchAccess(acc.branch_id)
+  if (!orgId) return { error: 'No autorizado' }
+
   const { error } = await supabase
     .from('payment_accounts')
     .update({ is_active: isActive })
@@ -78,6 +90,11 @@ export async function togglePaymentAccount(id: string, isActive: boolean) {
 
 export async function deletePaymentAccount(id: string) {
   const supabase = createAdminClient()
+  const { data: acc } = await supabase.from('payment_accounts').select('branch_id').eq('id', id).single()
+  if (!acc) return { error: 'Cuenta no encontrada' }
+  const orgId = await validateBranchAccess(acc.branch_id)
+  if (!orgId) return { error: 'No autorizado' }
+
   const { error } = await supabase
     .from('payment_accounts')
     .delete()
@@ -88,8 +105,10 @@ export async function deletePaymentAccount(id: string) {
 }
 
 export async function resetDailyAccumulation() {
+  const branchIds = await getOrgBranchIds()
+  if (branchIds.length === 0) return { error: 'No autorizado' }
+
   const supabase = createAdminClient()
-  // DB side, we update all accounts whose last_reset_date is less than current date
   const todayDate = getLocalDateStr()
 
   const { error } = await supabase
@@ -98,6 +117,7 @@ export async function resetDailyAccumulation() {
       accumulated_today: 0,
       last_reset_date: todayDate
     })
+    .in('branch_id', branchIds)
     .lt('last_reset_date', todayDate)
 
   if (error) return { error: error.message }
@@ -105,6 +125,9 @@ export async function resetDailyAccumulation() {
 }
 
 export async function getActiveAccountForTransfer(branchId: string, transferAmount: number) {
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { account_id: null, error: 'No autorizado' }
+
   const supabase = await createClient()
 
   // First ensure daily accumulations are reset if it's a new day
@@ -182,6 +205,11 @@ export async function recordTransfer(visitId: string, accountId: string, amount:
 export async function getAllAccountBalanceTotals(branchId?: string | null) {
   const supabase = await createClient()
 
+  if (branchId) {
+    const orgId = await validateBranchAccess(branchId)
+    if (!orgId) return []
+  }
+
   let accountsQuery = supabase
     .from('payment_accounts')
     .select('id, name')
@@ -190,6 +218,10 @@ export async function getAllAccountBalanceTotals(branchId?: string | null) {
 
   if (branchId) {
     accountsQuery = accountsQuery.eq('branch_id', branchId)
+  } else {
+    const orgBranchIds = await getOrgBranchIds()
+    if (orgBranchIds.length === 0) return []
+    accountsQuery = accountsQuery.in('branch_id', orgBranchIds)
   }
 
   const { data: accounts } = await accountsQuery

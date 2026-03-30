@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { getCurrentOrgId } from './org'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -25,7 +26,11 @@ async function requireOwner() {
         throw new Error('Solo el propietario puede gestionar roles')
     }
 
-    return { supabase, staffId: staff.id }
+    // Obtener el organization_id del usuario actual
+    const orgId = await getCurrentOrgId()
+    if (!orgId) throw new Error('Organización no encontrada')
+
+    return { supabase, staffId: staff.id, orgId }
 }
 
 // ---------------------------------------------------------------------------
@@ -35,9 +40,14 @@ async function requireOwner() {
 export async function getRoles() {
     const supabase = await createClient()
 
+    // Filtrar roles por organización
+    const orgId = await getCurrentOrgId()
+    if (!orgId) return { error: 'Organización no encontrada', data: null }
+
     const { data: roles, error } = await supabase
         .from('roles')
         .select('*, role_branch_scope(branch_id)')
+        .eq('organization_id', orgId)
         .order('name')
 
     if (error) return { error: error.message, data: null }
@@ -54,7 +64,7 @@ export async function createRole(input: {
     permissions: Record<string, boolean>
     branchIds: string[]
 }) {
-    const { supabase } = await requireOwner()
+    const { supabase, orgId } = await requireOwner()
 
     const { data: role, error: roleError } = await supabase
         .from('roles')
@@ -62,6 +72,7 @@ export async function createRole(input: {
             name: input.name,
             description: input.description || null,
             permissions: input.permissions,
+            organization_id: orgId,
         })
         .select('id')
         .single()
@@ -98,7 +109,7 @@ export async function updateRole(
         branchIds: string[]
     }
 ) {
-    const { supabase } = await requireOwner()
+    const { supabase, orgId } = await requireOwner()
 
     const { error: updateError } = await supabase
         .from('roles')
@@ -108,6 +119,7 @@ export async function updateRole(
             permissions: input.permissions,
         })
         .eq('id', roleId)
+        .eq('organization_id', orgId)
 
     if (updateError) return { error: updateError.message }
 
@@ -135,20 +147,25 @@ export async function updateRole(
 // ---------------------------------------------------------------------------
 
 export async function deleteRole(roleId: string) {
-    const { supabase } = await requireOwner()
+    const { supabase, orgId } = await requireOwner()
 
-    // Check if it's a system role
+    // Verificar que el rol pertenece a la organización y si es del sistema
     const { data: role } = await supabase
         .from('roles')
         .select('is_system')
         .eq('id', roleId)
+        .eq('organization_id', orgId)
         .single()
 
     if (role?.is_system) {
         return { error: 'No se pueden eliminar roles del sistema' }
     }
 
-    const { error } = await supabase.from('roles').delete().eq('id', roleId)
+    const { error } = await supabase
+        .from('roles')
+        .delete()
+        .eq('id', roleId)
+        .eq('organization_id', orgId)
 
     if (error) return { error: error.message }
 
@@ -161,12 +178,13 @@ export async function deleteRole(roleId: string) {
 // ---------------------------------------------------------------------------
 
 export async function assignRoleToStaff(staffId: string, roleId: string | null) {
-    const { supabase } = await requireOwner()
+    const { supabase, orgId } = await requireOwner()
 
     const { error } = await supabase
         .from('staff')
         .update({ role_id: roleId })
         .eq('id', staffId)
+        .eq('organization_id', orgId)
 
     if (error) return { error: error.message }
 

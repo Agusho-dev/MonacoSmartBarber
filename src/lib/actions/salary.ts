@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { SalaryScheme } from '@/lib/types/database'
+import { validateBranchAccess, getCurrentOrgId } from './org'
 
 // Tipos locales para las nuevas tablas (migración 037/044)
 export type SalaryReportType = 'commission' | 'base_salary' | 'bonus' | 'advance' | 'hybrid_deficit'
@@ -37,7 +38,20 @@ export interface SalaryPaymentBatch {
 // ─── Acciones originales (sin cambios) ───────────────────────────────────────
 
 export async function getSalaryConfig(staffId: string) {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return null
+
   const supabase = await createClient()
+
+  // Verificar que el barbero pertenece a la organización
+  const { data: staffRow } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('id', staffId)
+    .eq('organization_id', orgId)
+    .maybeSingle()
+  if (!staffRow) return null
+
   const { data } = await supabase
     .from('salary_configs')
     .select('*')
@@ -47,7 +61,20 @@ export async function getSalaryConfig(staffId: string) {
 }
 
 export async function upsertSalaryConfig(staffId: string, scheme: SalaryScheme, baseAmount: number, commissionPct: number) {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
+
+  // Verificar que el barbero pertenece a la organización
+  const { data: staffRow } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('id', staffId)
+    .eq('organization_id', orgId)
+    .maybeSingle()
+  if (!staffRow) return { error: 'No autorizado' }
+
   const { error } = await supabase
     .from('salary_configs')
     .upsert(
@@ -69,7 +96,19 @@ export async function upsertSalaryConfig(staffId: string, scheme: SalaryScheme, 
 }
 
 export async function calculateAndSaveSalary(staffId: string, periodStart: string, periodEnd: string) {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
+
+  // Verificar que el barbero pertenece a la organización
+  const { data: staffRow } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('id', staffId)
+    .eq('organization_id', orgId)
+    .maybeSingle()
+  if (!staffRow) return { error: 'No autorizado' }
 
   const { data: amount } = await supabase.rpc('calculate_barber_salary', {
     p_staff_id: staffId,
@@ -94,7 +133,22 @@ export async function calculateAndSaveSalary(staffId: string, periodStart: strin
 }
 
 export async function markSalaryAsPaid(paymentId: string, notes?: string) {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
+
+  // Verificar que el pago pertenece a la organización a través del staff
+  const { data: payment } = await supabase
+    .from('salary_payments')
+    .select('id, staff:staff(organization_id)')
+    .eq('id', paymentId)
+    .maybeSingle()
+  const staffOrg = payment?.staff as unknown as { organization_id: string | null } | null
+  if (!payment || staffOrg?.organization_id !== orgId) {
+    return { error: 'No autorizado' }
+  }
+
   const { error } = await supabase
     .from('salary_payments')
     .update({ is_paid: true, paid_at: new Date().toISOString(), notes: notes ?? null })
@@ -105,6 +159,9 @@ export async function markSalaryAsPaid(paymentId: string, notes?: string) {
 }
 
 export async function getSalaryHistory(branchId: string) {
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { data: [], error: 'No autorizado' }
+
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('salary_payments')
@@ -118,6 +175,9 @@ export async function getSalaryHistory(branchId: string) {
 }
 
 export async function getAllBarbersWithSalaryConfig(branchId: string) {
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { data: [], error: 'No autorizado' }
+
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('staff')
@@ -130,7 +190,20 @@ export async function getAllBarbersWithSalaryConfig(branchId: string) {
 }
 
 export async function previewSalary(staffId: string, periodStart: string, periodEnd: string) {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { amount: 0 }
+
   const supabase = await createClient()
+
+  // Verificar que el barbero pertenece a la organización
+  const { data: staffRow } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('id', staffId)
+    .eq('organization_id', orgId)
+    .maybeSingle()
+  if (!staffRow) return { amount: 0 }
+
   const { data: amount } = await supabase.rpc('calculate_barber_salary', {
     p_staff_id: staffId,
     p_period_start: periodStart,
@@ -146,6 +219,9 @@ export async function previewSalary(staffId: string, periodStart: string, period
  * ordenados por fecha descendente.
  */
 export async function getSalaryReports(staffId: string, branchId: string) {
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
 
   const { data, error } = await supabase
@@ -189,6 +265,9 @@ export async function createManualSalaryReport(
     return { error: 'La fecha del reporte es obligatoria.' }
   }
 
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
 
   // Los adelantos se registran como monto negativo
@@ -227,6 +306,9 @@ export async function generateCommissionReport(
   if (!staffId || !branchId || !reportDate) {
     return { error: 'El barbero, la sucursal y la fecha son obligatorios.' }
   }
+
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
 
   const supabase = await createClient()
 
@@ -299,6 +381,9 @@ export async function generateBaseSalaryReport(
     return { error: 'El barbero, la sucursal y el período son obligatorios.' }
   }
 
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
 
   const { data: salaryConfig, error: configError } = await supabase
@@ -358,6 +443,9 @@ export async function paySelectedReports(
   if (!staffId || !branchId) {
     return { error: 'El barbero y la sucursal son obligatorios.' }
   }
+
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
 
   const supabase = await createClient()
 
@@ -428,6 +516,9 @@ export async function getPaymentBatches(staffId: string, branchId: string) {
     return { error: 'El barbero y la sucursal son obligatorios.' }
   }
 
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
 
   const { data: batches, error: batchesError } = await supabase
@@ -483,17 +574,24 @@ export async function deleteSalaryReport(reportId: string) {
     return { error: 'El ID del reporte es obligatorio.' }
   }
 
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
 
-  // Verificar que el reporte existe y está pendiente antes de eliminar
+  // Verificar que el reporte existe, está pendiente y pertenece a la organización
   const { data: report, error: fetchError } = await supabase
     .from('salary_reports')
-    .select('id, status')
+    .select('id, status, staff:staff(organization_id)')
     .eq('id', reportId)
     .single()
 
   if (fetchError || !report) {
     return { error: 'Reporte no encontrado.' }
+  }
+
+  if ((report.staff as unknown as { organization_id: string | null } | null)?.organization_id !== orgId) {
+    return { error: 'No autorizado' }
   }
 
   if (report.status !== 'pending') {
@@ -650,6 +748,9 @@ export async function settleHybridPeriod(
   if (!staffId || !branchId || !periodStart || !periodEnd) {
     return { error: 'El barbero, la sucursal y el período son obligatorios.' }
   }
+
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
 
   const supabase = await createClient()
 
@@ -821,6 +922,9 @@ export async function getPaymentBatchesGrouped(staffId: string, branchId: string
     return { error: 'El barbero y la sucursal son obligatorios.' }
   }
 
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
 
   const { data: batches, error: batchesError } = await supabase
@@ -901,6 +1005,17 @@ export async function getPaymentBatchesGrouped(staffId: string, branchId: string
  * Obtiene el resumen de comisiones pagadas y pendientes para el dashboard.
  */
 export async function getCommissionSummary(branchId?: string | null) {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) {
+    return {
+      totalPending: 0,
+      totalPaid: 0,
+      pendingCount: 0,
+      paidCount: 0,
+      pendingByBarber: [],
+    }
+  }
+
   const supabase = await createClient()
 
   let pendingQuery = supabase
@@ -916,8 +1031,35 @@ export async function getCommissionSummary(branchId?: string | null) {
     .eq('status', 'paid')
 
   if (branchId) {
+    // Validar que el branch pertenece a la org antes de filtrar
+    const { data: branch } = await supabase
+      .from('branches')
+      .select('id')
+      .eq('id', branchId)
+      .eq('organization_id', orgId)
+      .maybeSingle()
+    if (!branch) {
+      return {
+        totalPending: 0,
+        totalPaid: 0,
+        pendingCount: 0,
+        paidCount: 0,
+        pendingByBarber: [],
+      }
+    }
     pendingQuery = pendingQuery.eq('branch_id', branchId)
     paidQuery = paidQuery.eq('branch_id', branchId)
+  } else {
+    // Sin branchId específico: limitar a los branches de la org
+    const { data: orgBranches } = await supabase
+      .from('branches')
+      .select('id')
+      .eq('organization_id', orgId)
+    const orgBranchIds = orgBranches?.map(b => b.id) ?? []
+    if (orgBranchIds.length > 0) {
+      pendingQuery = pendingQuery.in('branch_id', orgBranchIds)
+      paidQuery = paidQuery.in('branch_id', orgBranchIds)
+    }
   }
 
   const [{ data: pending }, { data: paid }] = await Promise.all([

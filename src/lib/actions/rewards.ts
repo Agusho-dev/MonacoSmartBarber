@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { validateBranchAccess } from './org'
 
 export async function updateRewardConfig(
   branchId: string,
@@ -12,15 +13,10 @@ export async function updateRewardConfig(
     is_active: boolean
   }
 ) {
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    return { error: 'No autorizado' }
-  }
 
   // Check if config exists
   const { data: existing } = await supabase

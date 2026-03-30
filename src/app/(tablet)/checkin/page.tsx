@@ -214,75 +214,29 @@ export default function CheckinPage() {
 
   const loadBarberData = useCallback(
     async (branchId: string) => {
-      const supabase = createClient()
       setLoadingBarbers(true)
 
-      const dayStart = new Date()
-      dayStart.setHours(0, 0, 0, 0)
+      const { getCheckinData } = await import('@/lib/actions/kiosk')
+      const res = await getCheckinData(branchId)
 
-      const [staffRes, queueRes, visitsRes, availableRes, openRes, attendanceRes, servicesRes, schedulesRes, settingsRes, monthlyVisitsRes] = await Promise.all([
-        supabase
-          .from('staff')
-          .select('*')
-          .eq('branch_id', branchId)
-          .eq('role', 'barber')
-          .eq('is_active', true)
-          .order('full_name'),
-        supabase
-          .from('queue_entries')
-          .select('*')
-          .eq('branch_id', branchId)
-          .in('status', ['waiting', 'in_progress']),
-        supabase
-          .from('visits')
-          .select('barber_id, started_at, completed_at')
-          .eq('branch_id', branchId)
-          .order('completed_at', { ascending: false })
-          .limit(200),
-        supabase.rpc('get_available_barbers_today', { p_branch_id: branchId }),
-        supabase.rpc('get_branch_open_status', { p_branch_id: branchId }),
-        supabase
-          .from('attendance_logs')
-          .select('staff_id, action_type')
-          .eq('branch_id', branchId)
-          .gte('recorded_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
-          .order('recorded_at', { ascending: false }),
-        supabase
-          .from('services')
-          .select('*')
-          .eq('is_active', true)
-          .in('availability', ['checkin', 'both'])
-          .or(`branch_id.eq.${branchId},branch_id.is.null`)
-          .order('name'),
-        supabase
-          .from('staff_schedules')
-          .select('*')
-          .eq('day_of_week', new Date().getDay())
-          .eq('is_active', true),
-        supabase
-          .from('app_settings')
-          .select('shift_end_margin_minutes, dynamic_cooldown_seconds')
-          .maybeSingle(),
-        supabase
-          .from('visits')
-          .select('barber_id')
-          .eq('branch_id', branchId)
-          .gte('completed_at', dayStart.toISOString())
-          .not('barber_id', 'is', null),
-      ])
+      if (res.error || !res.staff) {
+        setLoadingBarbers(false)
+        console.error('getCheckinData error:', res.error)
+        return
+      }
 
       let branchOpen = true
 
       // Track branch open status
-      if (openRes.data && openRes.data.length > 0) {
-        const status = openRes.data[0] as { is_open: boolean; opens_at: string; closes_at: string }
+      if (res.openStatus && res.openStatus.length > 0) {
+        const status = res.openStatus[0] as { is_open: boolean; opens_at: string; closes_at: string }
         branchOpen = status.is_open
         setBranchIsOpen(status.is_open)
         setBranchHours({ opens: status.opens_at, closes: status.closes_at })
       }
 
-      if (settingsRes?.data) {
-        const sd = settingsRes.data as { shift_end_margin_minutes?: number; dynamic_cooldown_seconds?: number }
+      if (res.settings) {
+        const sd = res.settings as { shift_end_margin_minutes?: number; dynamic_cooldown_seconds?: number }
         if (typeof sd.shift_end_margin_minutes === 'number' && sd.shift_end_margin_minutes >= 0) {
           setShiftEndMargin(sd.shift_end_margin_minutes)
         }
@@ -291,10 +245,10 @@ export default function CheckinPage() {
         }
       }
 
-      if (staffRes.data) {
+      if (res.staff) {
         const latestAttendance: Record<string, string> = {}
-        if (attendanceRes.data) {
-          attendanceRes.data.forEach((log: { staff_id: string; action_type: string }) => {
+        if (res.attendance) {
+          res.attendance.forEach((log: { staff_id: string; action_type: string }) => {
             if (!latestAttendance[log.staff_id]) {
               latestAttendance[log.staff_id] = log.action_type
             }
@@ -309,19 +263,18 @@ export default function CheckinPage() {
           return `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}:00`
         })()
 
-        const filtered = staffRes.data.filter((s) => {
-          if (s.status === 'blocked') return false
+        const filtered = (res.staff as Staff[]).filter((s) => {
           if (s.hidden_from_checkin) return false
 
           const lastAction = latestAttendance[s.id]
           if (lastAction === 'clock_in') return true
 
-          const barberBlocks = (schedulesRes?.data || [])
-            .filter((sched: StaffSchedule) => sched.staff_id === s.id)
-            .sort((a: StaffSchedule, b: StaffSchedule) => a.start_time.localeCompare(b.start_time))
+          const barberBlocks = (res.schedules || [])
+            .filter((sched: any) => sched.staff_id === s.id)
+            .sort((a: any, b: any) => a.start_time.localeCompare(b.start_time))
 
           if (lastAction === 'clock_out') {
-            const nextBlock = barberBlocks.find((block: StaffSchedule) => block.start_time > currentTimeStr)
+            const nextBlock = barberBlocks.find((block: any) => block.start_time > currentTimeStr)
             if (nextBlock) {
               notClocked.add(s.id)
               nextArrivals[s.id] = nextBlock.start_time
@@ -332,7 +285,7 @@ export default function CheckinPage() {
 
           if (barberBlocks.length > 0) {
             notClocked.add(s.id)
-            const nextBlock = barberBlocks.find((block: StaffSchedule) => block.end_time > currentTimeStr)
+            const nextBlock = barberBlocks.find((block: any) => block.end_time > currentTimeStr)
             if (nextBlock) {
               nextArrivals[s.id] = nextBlock.start_time
             }
@@ -345,32 +298,37 @@ export default function CheckinPage() {
         setNotClockedInBarbers(notClocked)
         setBarberNextArrival(nextArrivals)
       }
-      if (queueRes.data) setQueueEntries(queueRes.data)
-      if (visitsRes.data) {
+
+      if (res.queueEntries) setQueueEntries(res.queueEntries as QueueEntry[])
+
+      if (res.visits) {
         setBarberAvgMinutes(
           buildBarberAvgMinutes(
-            visitsRes.data as Pick<Visit, 'barber_id' | 'started_at' | 'completed_at'>[],
+            res.visits as Pick<Visit, 'barber_id' | 'started_at' | 'completed_at'>[],
             25
           )
         )
         // Derive last completed per barber (visits already sorted by completed_at desc)
         const lastMap: Record<string, string> = {}
-        for (const v of visitsRes.data as { barber_id: string; completed_at: string }[]) {
+        for (const v of res.visits as { barber_id: string; completed_at: string }[]) {
           if (v.completed_at && !lastMap[v.barber_id]) {
             lastMap[v.barber_id] = v.completed_at
           }
         }
         setLastCompletedAt(lastMap)
       }
-      if (servicesRes?.data) {
-        setServices(servicesRes.data as Service[])
+
+      if (res.services) {
+        setServices(res.services as Service[])
       }
-      if (schedulesRes?.data) {
-        setSchedules(schedulesRes.data as StaffSchedule[])
+
+      if (res.schedules) {
+        setSchedules(res.schedules as StaffSchedule[])
       }
-      if (monthlyVisitsRes?.data) {
+
+      if (res.monthlyVisits) {
         const counts: Record<string, number> = {}
-        for (const v of monthlyVisitsRes.data as { barber_id: string }[]) {
+        for (const v of res.monthlyVisits as { barber_id: string }[]) {
           counts[v.barber_id] = (counts[v.barber_id] || 0) + 1
         }
         setDailyServiceCounts(counts)
@@ -560,12 +518,13 @@ export default function CheckinPage() {
 
     setLookingUp(true)
     try {
-      const supabase = createClient()
-      const { data } = await supabase
-        .from('clients')
-        .select('id, name, phone, face_photo_url')
-        .eq('phone', ph)
-        .single()
+      if (!selectedBranch) {
+        setLookingUp(false)
+        return
+      }
+      
+      const { lookupClientByPhone } = await import('@/lib/actions/clients')
+      const { data } = await lookupClientByPhone(ph, selectedBranch.id)
 
       if (data) {
         setName(data.name)
@@ -574,14 +533,17 @@ export default function CheckinPage() {
 
         // Retroalimentación: si el cliente negó ser el match facial, guardar foto/descriptor al cliente real
         if (capturedScanPhoto) {
-          saveFacePhoto(data.id, capturedScanPhoto).catch(() => {})
-          setCapturedScanPhoto(null)
+           const { saveFacePhoto } = await import('@/lib/face-recognition')
+           saveFacePhoto(data.id, capturedScanPhoto).catch(() => {})
+           setCapturedScanPhoto(null)
         }
         if (faceDescriptor) {
-          enrollFaceDescriptor(data.id, faceDescriptor, 'checkin', 0.85).catch(() => {})
-          setFaceDescriptor(null)
+           const { enrollFaceDescriptor } = await import('@/lib/face-recognition')
+           enrollFaceDescriptor(data.id, faceDescriptor, 'checkin', 0.85).catch(() => {})
+           setFaceDescriptor(null)
         }
 
+        const supabase = createClient()
         const { data: faceData } = await supabase
           .from('client_face_descriptors')
           .select('id')
@@ -1491,6 +1453,7 @@ export default function CheckinPage() {
 
           <FaceCamera
             branchName={selectedBranch?.name}
+            orgId={selectedBranch?.organization_id}
             onMatch={handleFaceMatch}
             onNoMatch={handleFaceNoMatch}
             onManualEntry={handleFaceManualEntry}
@@ -1889,6 +1852,7 @@ export default function CheckinPage() {
           <FaceCamera
             branchName={selectedBranch?.name ?? 'Sucursal'}
             targetRole="staff"
+            orgId={selectedBranch?.organization_id}
             onMatch={(match) => {
               setStaffFaceMatch(match)
               goTo('staff_action_confirm')

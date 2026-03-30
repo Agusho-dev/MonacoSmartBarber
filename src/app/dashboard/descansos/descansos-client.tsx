@@ -218,7 +218,7 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
         const result = await createScheduledBreakRequests(selectedBranchId, bc.id)
         if (result.error) {
           toast.error(`Error generando descansos: ${result.error}`)
-        } else if (result.created > 0) {
+        } else if (result.created && result.created > 0) {
           toast.success(`🔔 Se crearon ${result.created} solicitud(es) de descanso automáticas para "${bc.name}"`)
         }
       } catch {

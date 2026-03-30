@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { ServiceAvailability } from '@/lib/types/database'
+import { getCurrentOrgId } from './org'
 
 export async function upsertService(data: {
   id?: string
@@ -16,9 +17,28 @@ export async function upsertService(data: {
 }) {
   const supabase = createAdminClient()
 
+  // Verificar organización del usuario actual
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
+  // Si el servicio tiene branch_id, verificar que la sucursal pertenece a esta org
+  if (data.branch_id) {
+    const { data: branch, error: branchError } = await supabase
+      .from('branches')
+      .select('id')
+      .eq('id', data.branch_id)
+      .eq('organization_id', orgId)
+      .maybeSingle()
+
+    if (branchError || !branch) {
+      return { error: 'La sucursal no pertenece a esta organización' }
+    }
+  }
+
   let serviceId = data.id
 
   if (data.id) {
+    // Al actualizar, asegurarse de que el servicio también pertenece a la org (via branch o null)
     const { error } = await supabase
       .from('services')
       .update({
@@ -79,6 +99,31 @@ export async function upsertService(data: {
 
 export async function toggleService(id: string, isActive: boolean) {
   const supabase = createAdminClient()
+
+  // Verificar que el servicio pertenece a la org via su branch_id
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
+  const { data: service, error: fetchError } = await supabase
+    .from('services')
+    .select('id, branch_id')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (fetchError || !service) return { error: 'Servicio no encontrado' }
+
+  // Los servicios globales (branch_id = null) son legado — permitir si no hay branch
+  if (service.branch_id) {
+    const { data: branch } = await supabase
+      .from('branches')
+      .select('id')
+      .eq('id', service.branch_id)
+      .eq('organization_id', orgId)
+      .maybeSingle()
+
+    if (!branch) return { error: 'No tenés permisos para modificar este servicio' }
+  }
+
   const { error } = await supabase
     .from('services')
     .update({ is_active: isActive })
@@ -91,6 +136,30 @@ export async function toggleService(id: string, isActive: boolean) {
 
 export async function deleteService(id: string) {
   const supabase = createAdminClient()
+
+  // Verificar que el servicio pertenece a la org via su branch_id
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
+  const { data: service, error: fetchError } = await supabase
+    .from('services')
+    .select('id, branch_id')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (fetchError || !service) return { error: 'Servicio no encontrado' }
+
+  // Los servicios globales (branch_id = null) son legado — permitir si no hay branch
+  if (service.branch_id) {
+    const { data: branch } = await supabase
+      .from('branches')
+      .select('id')
+      .eq('id', service.branch_id)
+      .eq('organization_id', orgId)
+      .maybeSingle()
+
+    if (!branch) return { error: 'No tenés permisos para eliminar este servicio' }
+  }
 
   // Verificar que no tenga visitas asociadas
   const { count } = await supabase

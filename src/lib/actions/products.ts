@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { directProductSale } from '@/lib/actions/sales'
+import { getCurrentOrgId, validateBranchAccess, getOrgBranchIds } from './org'
 
 const REVALIDATE_PATH = '/dashboard/servicios'
 
@@ -15,7 +16,15 @@ export async function getProducts(branchId?: string) {
         .order('name')
 
     if (branchId) {
+        // Validar que el branch pertenece a la organización del usuario
+        const orgId = await validateBranchAccess(branchId)
+        if (!orgId) return { error: 'No autorizado' }
         query = query.eq('branch_id', branchId)
+    } else {
+        // Sin branchId: filtrar solo productos de branches de la org
+        const orgBranchIds = await getOrgBranchIds()
+        if (orgBranchIds.length === 0) return { products: [] }
+        query = query.in('branch_id', orgBranchIds)
     }
 
     const { data, error } = await query
@@ -33,6 +42,12 @@ export async function upsertProduct(data: {
     stock: number | null
 }) {
     const supabase = createAdminClient()
+
+    // Validar que el branch_id pertenece a la organización si se proporciona
+    if (data.branch_id !== null) {
+        const orgId = await validateBranchAccess(data.branch_id)
+        if (!orgId) return { error: 'No autorizado' }
+    }
 
     if (data.id) {
         const { error } = await supabase
@@ -69,6 +84,24 @@ export async function upsertProduct(data: {
 
 export async function toggleProduct(id: string, isActive: boolean) {
     const supabase = createAdminClient()
+
+    // Verificar que el producto pertenece a un branch de la organización
+    const { data: product } = await supabase
+        .from('products')
+        .select('branch_id')
+        .eq('id', id)
+        .maybeSingle()
+
+    if (!product) return { error: 'Producto no encontrado' }
+
+    if (product.branch_id !== null) {
+        const orgId = await validateBranchAccess(product.branch_id)
+        if (!orgId) return { error: 'No autorizado' }
+    } else {
+        const orgId = await getCurrentOrgId()
+        if (!orgId) return { error: 'No autorizado' }
+    }
+
     const { error } = await supabase
         .from('products')
         .update({ is_active: isActive })
@@ -81,6 +114,23 @@ export async function toggleProduct(id: string, isActive: boolean) {
 
 export async function deleteProduct(id: string) {
     const supabase = createAdminClient()
+
+    // Verificar que el producto pertenece a un branch de la organización
+    const { data: product } = await supabase
+        .from('products')
+        .select('branch_id')
+        .eq('id', id)
+        .maybeSingle()
+
+    if (!product) return { error: 'Producto no encontrado' }
+
+    if (product.branch_id !== null) {
+        const orgId = await validateBranchAccess(product.branch_id)
+        if (!orgId) return { error: 'No autorizado' }
+    } else {
+        const orgId = await getCurrentOrgId()
+        if (!orgId) return { error: 'No autorizado' }
+    }
 
     // Verificar que no tenga ventas asociadas
     const { count } = await supabase
@@ -111,8 +161,17 @@ export async function getProductSales(branchId?: string, startDate?: string, end
         .order('sold_at', { ascending: false })
 
     if (branchId) {
+        // Validar que el branch pertenece a la organización del usuario
+        const orgId = await validateBranchAccess(branchId)
+        if (!orgId) return { error: 'No autorizado' }
         query = query.eq('branch_id', branchId)
+    } else {
+        // Sin branchId: filtrar solo ventas de branches de la org
+        const orgBranchIds = await getOrgBranchIds()
+        if (orgBranchIds.length === 0) return { sales: [] }
+        query = query.in('branch_id', orgBranchIds)
     }
+
     if (startDate) {
         query = query.gte('sold_at', startDate)
     }

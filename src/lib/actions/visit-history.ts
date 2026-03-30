@@ -2,6 +2,7 @@
 
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { validateBranchAccess, getOrgBranchIds } from './org'
 
 export async function saveVisitDetails(
   visitId: string,
@@ -148,6 +149,10 @@ export async function createManualVisit(params: {
   // se registran desde el panel de administración, sin sesión de barber PIN
   const supabase = createAdminClient()
 
+  // Validar que el branch pertenece a la organización del usuario
+  const orgId = await validateBranchAccess(params.branchId)
+  if (!orgId) return { error: 'No autorizado' }
+
   // 1. Obtener comisión global: salary_configs → staff.commission_pct como fallback
   const { data: salaryConfig } = await supabase
     .from('salary_configs')
@@ -241,6 +246,19 @@ export async function deleteVisit(
   visitId: string
 ): Promise<{ error?: string }> {
   const supabase = createAdminClient()
+
+  // Verificar que la visita pertenece a un branch de la organización
+  const { data: visit } = await supabase
+    .from('visits')
+    .select('branch_id')
+    .eq('id', visitId)
+    .maybeSingle()
+
+  if (!visit) return { error: 'Visita no encontrada' }
+
+  const orgBranchIds = await getOrgBranchIds()
+  if (!orgBranchIds.includes(visit.branch_id)) return { error: 'No autorizado' }
+
   const { error } = await supabase.from('visits').delete().eq('id', visitId)
   if (error) return { error: error.message }
 

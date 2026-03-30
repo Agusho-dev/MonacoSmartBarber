@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { getCurrentOrgId } from './org'
 
 const ARG_TZ = 'America/Argentina/Buenos_Aires'
 
@@ -91,18 +92,51 @@ export async function fetchStats(
   if (branchId) vq = vq.eq('branch_id', branchId)
   const { data: visits } = await vq
 
-  const { data: settings } = await supabase
-    .from('app_settings')
-    .select('lost_client_days, at_risk_client_days')
-    .single()
+  const orgIdForSettings = await getCurrentOrgId()
+  let settingsQuery = supabase.from('app_settings').select('lost_client_days, at_risk_client_days')
+  if (orgIdForSettings) settingsQuery = settingsQuery.eq('organization_id', orgIdForSettings)
+  const { data: settings } = await settingsQuery.maybeSingle()
   const lostDays = settings?.lost_client_days ?? 40
   const riskDays = settings?.at_risk_client_days ?? 25
 
-  const { count: newCount } = await supabase
-    .from('clients')
-    .select('id', { count: 'exact', head: true })
-    .gte('created_at', fromISO)
-    .lte('created_at', toISO)
+  // Obtener sucursales de la org para acotar conteos de clientes
+  const orgId = await getCurrentOrgId()
+  let orgBranchIds: string[] = []
+  if (orgId) {
+    const { data: orgBranches } = await supabase
+      .from('branches')
+      .select('id')
+      .eq('organization_id', orgId)
+    orgBranchIds = orgBranches?.map((b) => b.id) ?? []
+  }
+
+  // Contar clientes nuevos registrados en el periodo que tienen visitas en sucursales de la org
+  let newCount = 0
+  if (orgBranchIds.length > 0) {
+    const { data: newVisitRows } = await supabase
+      .from('visits')
+      .select('client_id')
+      .in('branch_id', orgBranchIds)
+      .gte('completed_at', fromISO)
+      .lte('completed_at', toISO)
+    const newClientIds = [...new Set(newVisitRows?.map((v) => v.client_id) ?? [])]
+    if (newClientIds.length > 0) {
+      const { count } = await supabase
+        .from('clients')
+        .select('id', { count: 'exact', head: true })
+        .in('id', newClientIds)
+        .gte('created_at', fromISO)
+        .lte('created_at', toISO)
+      newCount = count ?? 0
+    }
+  } else {
+    const { count } = await supabase
+      .from('clients')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', fromISO)
+      .lte('created_at', toISO)
+    newCount = count ?? 0
+  }
 
   const segFrom = new Date()
   segFrom.setDate(segFrom.getDate() - lostDays * 2)
@@ -113,10 +147,20 @@ export async function fetchStats(
   if (branchId) sq = sq.eq('branch_id', branchId)
   const { data: segVisits } = await sq
 
-  const { count: totalClients } = await supabase
-    .from('clients')
-    .select('id', { count: 'exact', head: true })
-
+  // Contar total de clientes con visitas en sucursales de la org
+  let totalClients: number | null = null
+  if (orgBranchIds.length > 0) {
+    const { data: orgClientRows } = await supabase
+      .from('visits')
+      .select('client_id')
+      .in('branch_id', orgBranchIds)
+    totalClients = new Set(orgClientRows?.map((v) => v.client_id) ?? []).size
+  } else {
+    const { count } = await supabase
+      .from('clients')
+      .select('id', { count: 'exact', head: true })
+    totalClients = count
+  }
   const safe = visits ?? []
 
   // Heatmap

@@ -2,13 +2,19 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { getCurrentOrgId } from './org'
 
 export async function updateAppSettings(formData: FormData) {
   const supabase = await createClient()
 
+  // Filtrar configuracion por organización
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
   const { data: existing } = await supabase
     .from('app_settings')
     .select('id')
+    .eq('organization_id', orgId)
     .maybeSingle()
 
   const businessDaysRaw = formData.get('business_days') as string
@@ -42,13 +48,13 @@ export async function updateAppSettings(formData: FormData) {
   } else {
     const { error } = await supabase
       .from('app_settings')
-      .insert([updateData])
+      .insert([{ ...updateData, organization_id: orgId }])
     opError = error
   }
 
   if (opError) return { error: opError.message }
 
-  // Sync to all branches since it applies to all of them globally
+  // Sincronizar con todas las sucursales de la organización
   const { error: branchError } = await supabase
     .from('branches')
     .update({
@@ -56,7 +62,7 @@ export async function updateAppSettings(formData: FormData) {
       business_hours_close: updateData.business_hours_close,
       business_days: updateData.business_days,
     })
-    .not('id', 'is', null) // Match all existing branches
+    .eq('organization_id', orgId)
 
   if (branchError) return { error: branchError.message }
 
@@ -78,6 +84,10 @@ export async function updateWaApiUrl(waApiUrl: string) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'No autorizado' }
 
+  // Filtrar configuracion por organización
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
   const value = waApiUrl.trim() || null
 
   if (value && !validateHttpsUrl(value)) {
@@ -87,6 +97,7 @@ export async function updateWaApiUrl(waApiUrl: string) {
   const { data: existing } = await supabase
     .from('app_settings')
     .select('id')
+    .eq('organization_id', orgId)
     .maybeSingle()
 
   let opError
@@ -99,7 +110,7 @@ export async function updateWaApiUrl(waApiUrl: string) {
   } else {
     const { error } = await supabase
       .from('app_settings')
-      .insert([{ wa_api_url: value }])
+      .insert([{ wa_api_url: value, organization_id: orgId }])
     opError = error
   }
 
@@ -119,9 +130,14 @@ export async function updateReviewAutoConfig(data: {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'No autorizado' }
 
+  // Filtrar configuracion por organización
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
   const { data: existing } = await supabase
     .from('app_settings')
     .select('id')
+    .eq('organization_id', orgId)
     .maybeSingle()
 
   const updateData = {
@@ -141,7 +157,7 @@ export async function updateReviewAutoConfig(data: {
   } else {
     const { error } = await supabase
       .from('app_settings')
-      .insert([updateData])
+      .insert([{ ...updateData, organization_id: orgId }])
     opError = error
   }
 

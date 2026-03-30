@@ -19,6 +19,7 @@ interface FaceCameraProps {
   onManualEntry: () => void
   branchName?: string
   targetRole?: 'client' | 'staff'
+  orgId?: string | null
 }
 
 type CameraState =
@@ -42,6 +43,7 @@ export function FaceCamera({
   onManualEntry,
   branchName,
   targetRole = 'client',
+  orgId,
 }: FaceCameraProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -166,7 +168,7 @@ export function FaceCamera({
       setState('matching')
       setLastDescriptor(detection.descriptor)
 
-      const match = await matchFaceInDB(detection.descriptor, targetRole)
+      const match = await matchFaceInDB(detection.descriptor, targetRole, orgId)
       if (!mountedRef.current) return
 
       if (match) {

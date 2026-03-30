@@ -1,13 +1,17 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
+
+// Barber panel usa PIN auth (no JWT), por lo que createClient() devuelve un anon client
+// que no puede leer tablas con RLS org-scoped. Usamos createAdminClient() ya que
+// los queries estan scoped por staffId + branchId del barber_session cookie.
 
 export async function fetchBarberPerformance(
     staffId: string,
     branchId: string,
     period: 'day' | 'week' | 'month' = 'day'
 ) {
-    const supabase = await createClient()
+    const supabase = createAdminClient()
     const now = new Date()
 
     let fromDate: Date
@@ -44,7 +48,7 @@ export async function fetchBarberPerformance(
 }
 
 export async function fetchBarberGoals(staffId: string, branchId: string) {
-    const supabase = await createClient()
+    const supabase = createAdminClient()
     const now = new Date()
     const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
@@ -80,7 +84,7 @@ export async function fetchBarberGoals(staffId: string, branchId: string) {
 }
 
 export async function fetchBarberAttendance(staffId: string, branchId: string) {
-    const supabase = await createClient()
+    const supabase = createAdminClient()
     const now = new Date()
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
 
@@ -118,7 +122,7 @@ export async function fetchBarberHistory(
     fromISO?: string,
     toISO?: string
 ) {
-    const supabase = await createClient()
+    const supabase = createAdminClient()
     const now = new Date()
     const from = fromISO || new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
     const to = toISO || now.toISOString()

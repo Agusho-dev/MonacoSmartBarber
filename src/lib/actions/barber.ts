@@ -3,6 +3,7 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { StaffStatus } from '@/lib/types/database'
+import { getCurrentOrgId } from './org'
 
 export async function toggleBarberStatus(staffId: string) {
   return { error: 'El estado de los barberos ahora se gestiona mediante el sistema de descansos.' }
@@ -11,10 +12,15 @@ export async function toggleBarberStatus(staffId: string) {
 export async function deactivateBarber(staffId: string) {
   const supabase = createAdminClient()
 
+  // Verificar organización para evitar modificar staff de otra org
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
   const { error: updateError } = await supabase
     .from('staff')
     .update({ is_active: false })
     .eq('id', staffId)
+    .eq('organization_id', orgId)
 
   if (updateError) {
     return { error: 'Error al desactivar barbero: ' + updateError.message }
@@ -63,10 +69,15 @@ export async function deactivateBarber(staffId: string) {
 export async function activateBarber(staffId: string) {
   const supabase = createAdminClient()
 
+  // Verificar organización para evitar modificar staff de otra org
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
   const { error } = await supabase
     .from('staff')
     .update({ is_active: true })
     .eq('id', staffId)
+    .eq('organization_id', orgId)
 
   if (error) {
     return { error: 'Error al activar barbero: ' + error.message }
@@ -82,10 +93,15 @@ export async function activateBarber(staffId: string) {
 export async function toggleBarberVisibility(staffId: string) {
   const supabase = createAdminClient()
 
+  // Verificar organización para evitar modificar staff de otra org
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
   const { data: staff, error: fetchError } = await supabase
     .from('staff')
     .select('hidden_from_checkin')
     .eq('id', staffId)
+    .eq('organization_id', orgId)
     .single()
 
   if (fetchError || !staff) {
@@ -98,6 +114,7 @@ export async function toggleBarberVisibility(staffId: string) {
     .from('staff')
     .update({ hidden_from_checkin: newValue })
     .eq('id', staffId)
+    .eq('organization_id', orgId)
 
   if (error) {
     return { error: 'Error al cambiar visibilidad: ' + error.message }
@@ -110,6 +127,9 @@ export async function toggleBarberVisibility(staffId: string) {
 }
 
 export async function fetchBarberDayStats(staffId: string, branchId: string) {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { servicesCount: 0, revenue: 0 }
+
   const supabase = await createClient()
 
   const today = new Date()
@@ -136,11 +156,16 @@ export async function manageStaffAccess(
 ) {
   const supabase = createAdminClient()
 
+  // Verificar organización para evitar modificar staff de otra org
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
   // 1. Get the current staff to check if they already have an auth_user_id
   const { data: staff, error: fetchError } = await supabase
     .from('staff')
     .select('auth_user_id')
     .eq('id', staffId)
+    .eq('organization_id', orgId)
     .single()
 
   if (fetchError || !staff) {
@@ -150,7 +175,10 @@ export async function manageStaffAccess(
   // 2. We need to check if we are creating a new user or updating an existing one
   if (staff.auth_user_id) {
     // UPDATING EXISTING USER
-    const updatePayload: { email: string; password?: string } = { email }
+    const updatePayload: { email: string; password?: string, app_metadata?: { organization_id: string } } = { 
+      email,
+      app_metadata: { organization_id: orgId } // sync org id
+    }
     if (password) {
       updatePayload.password = password
     }
@@ -168,7 +196,7 @@ export async function manageStaffAccess(
     }
 
     // Also update the email in the staff table just in case it differs
-    await supabase.from('staff').update({ email }).eq('id', staffId)
+    await supabase.from('staff').update({ email }).eq('id', staffId).eq('organization_id', orgId)
 
   } else {
     // CREATING NEW USER
@@ -180,6 +208,7 @@ export async function manageStaffAccess(
       email,
       password,
       email_confirm: true,
+      app_metadata: { organization_id: orgId } // ensure correct filtering inside JWT
     })
 
     if (createAuthError) {
@@ -190,17 +219,18 @@ export async function manageStaffAccess(
     }
 
     if (newUser?.user?.id) {
-      // Link the new auth user to the staff profile
+      // Vincular el nuevo usuario de auth con el perfil de staff
       const { error: linkError } = await supabase
         .from('staff')
         .update({
           auth_user_id: newUser.user.id,
-          email: email // explicitly update email in staff table too
+          email: email // actualizar email en staff también
         })
         .eq('id', staffId)
+        .eq('organization_id', orgId)
 
       if (linkError) {
-        // Rollback auth user creation if we couldn't link it
+        // Revertir creación de auth user si no se pudo vincular
         await supabase.auth.admin.deleteUser(newUser.user.id)
         return { error: 'Error al vincular el acceso con el perfil del staff.' }
       }
@@ -215,10 +245,15 @@ export async function manageStaffAccess(
 export async function updateBarberAvatar(staffId: string, avatarUrl: string) {
   const supabase = createAdminClient()
 
+  // Verificar organización para evitar modificar staff de otra org
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
   const { error } = await supabase
     .from('staff')
     .update({ avatar_url: avatarUrl })
     .eq('id', staffId)
+    .eq('organization_id', orgId)
 
   if (error) {
     return { error: 'Error al actualizar el avatar: ' + error.message }

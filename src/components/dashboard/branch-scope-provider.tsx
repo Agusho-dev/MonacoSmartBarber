@@ -5,27 +5,29 @@ import { useBranchStore } from '@/stores/branch-store'
 
 interface BranchScopeProviderProps {
   allowedBranchIds: string[] | null
+  organizationId: string | null
   children: React.ReactNode
 }
 
 /**
- * Initializes the branch store with the user's allowed branches on mount.
- * - null = unrestricted (owner/admin)
- * - string[] = only those branches are accessible
+ * Inicializa el store de sucursales con las sucursales permitidas del usuario al montar.
+ * - null = sin restricción (owner/admin)
+ * - string[] = solo esas sucursales son accesibles
  */
-export function BranchScopeProvider({ allowedBranchIds, children }: BranchScopeProviderProps) {
-  const { setAllowedBranchIds, setSelectedBranchId, selectedBranchId } = useBranchStore()
+export function BranchScopeProvider({ allowedBranchIds, organizationId, children }: BranchScopeProviderProps) {
+  const { setAllowedBranchIds, setSelectedBranchId, setOrganizationId, selectedBranchId } = useBranchStore()
 
   useEffect(() => {
+    setOrganizationId(organizationId)
     setAllowedBranchIds(allowedBranchIds)
 
-    // If restricted and current selection is not allowed, force to first allowed branch
+    // Si está restringido y la selección actual no está permitida, forzar a la primera sucursal permitida
     if (allowedBranchIds && allowedBranchIds.length > 0) {
       if (!selectedBranchId || !allowedBranchIds.includes(selectedBranchId)) {
         setSelectedBranchId(allowedBranchIds[0])
       }
     }
-  }, [allowedBranchIds, selectedBranchId, setAllowedBranchIds, setSelectedBranchId])
+  }, [allowedBranchIds, organizationId, selectedBranchId, setAllowedBranchIds, setOrganizationId, setSelectedBranchId])
 
   return <>{children}</>
 }

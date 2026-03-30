@@ -102,7 +102,8 @@ export async function detectFace(
 
 export async function matchFaceInDB(
   descriptor: Float32Array,
-  targetRole: 'client' | 'staff' = 'client'
+  targetRole: 'client' | 'staff' = 'client',
+  orgId?: string | null
 ): Promise<FaceMatchResult | null> {
   const supabase = createClient()
 
@@ -113,6 +114,7 @@ export async function matchFaceInDB(
     query_descriptor: JSON.stringify(descriptorArray),
     match_threshold: MATCH_THRESHOLD,
     max_results: 1,
+    p_org_id: orgId ?? null,
   })
 
   if (error || !data || data.length === 0) return null
@@ -133,17 +135,9 @@ export async function enrollFaceDescriptor(
   source: 'checkin' | 'barber' = 'checkin',
   qualityScore = 0
 ): Promise<boolean> {
-  const supabase = createClient()
   const descriptorArray = Array.from(descriptor)
-
-  const { error } = await supabase.from('client_face_descriptors').insert({
-    client_id: clientId,
-    descriptor: JSON.stringify(descriptorArray),
-    quality_score: qualityScore,
-    source,
-  })
-
-  return !error
+  const { enrollClientFace } = await import('@/lib/actions/clients')
+  return await enrollClientFace(clientId, descriptorArray, source, qualityScore)
 }
 
 export async function saveFacePhoto(
@@ -153,6 +147,7 @@ export async function saveFacePhoto(
   const supabase = createClient()
   const filename = `${clientId}/${crypto.randomUUID()}.webp`
 
+  // Storage allows upload because anon has rights to upload to face-references
   const { error: uploadError } = await supabase.storage
     .from('face-references')
     .upload(filename, photoBlob, {
@@ -167,10 +162,14 @@ export async function saveFacePhoto(
     .from('face-references')
     .getPublicUrl(filename)
 
-  await supabase
-    .from('clients')
-    .update({ face_photo_url: data.publicUrl })
-    .eq('id', clientId)
+  // Use Server Action to update the client's photo_url (bypasses RLS limits for anonymous users)
+  const { saveClientFacePhotoUrl } = await import('@/lib/actions/clients')
+  const success = await saveClientFacePhotoUrl(clientId, data.publicUrl)
+  
+  if (!success) {
+    console.error('Failed to save public URL to client record via Server Action')
+    return null
+  }
 
   return data.publicUrl
 }

@@ -12,11 +12,13 @@ async function requireAuth() {
 }
 
 async function getWaConfig(): Promise<{ url: string; apiKey: string } | null> {
+  const { getCurrentOrgId } = await import('./org')
+  const orgId = await getCurrentOrgId()
   const supabase = createAdminClient()
-  const { data } = await supabase
-    .from('app_settings')
-    .select('wa_api_url')
-    .maybeSingle()
+
+  let query = supabase.from('app_settings').select('wa_api_url')
+  if (orgId) query = query.eq('organization_id', orgId)
+  const { data } = await query.maybeSingle()
 
   const url = data?.wa_api_url as string | undefined
   const apiKey = process.env.WA_API_KEY

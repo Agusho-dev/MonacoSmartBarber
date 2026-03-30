@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { recordTransfer } from '@/lib/actions/paymentAccounts'
 
 export async function checkinClient(formData: FormData) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const name = (formData.get('name') as string).trim()
   const phone = (formData.get('phone') as string).trim()
   const branchId = formData.get('branch_id') as string
@@ -41,9 +41,24 @@ export async function checkinClient(formData: FormData) {
       return { alreadyInQueue: true, position: activeEntry.position, queueEntryId: activeEntry.id }
     }
   } else {
+    // Buscar la organizacion de la sucursal para poder insertar el cliente
+    const { data: branchResult } = await supabase
+      .from('branches')
+      .select('organization_id')
+      .eq('id', branchId)
+      .single()
+
+    if (!branchResult?.organization_id) {
+      return { error: 'Error: Sucursal u Organización no encontrada' }
+    }
+
     const { data: newClient, error } = await supabase
       .from('clients')
-      .insert({ name, phone })
+      .insert({ 
+        name, 
+        phone, 
+        organization_id: branchResult.organization_id 
+      })
       .select('id')
       .single()
 
@@ -93,7 +108,7 @@ export async function checkinClient(formData: FormData) {
 }
 
 export async function startService(queueEntryId: string, barberId: string) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { error } = await supabase
     .from('queue_entries')
@@ -340,9 +355,17 @@ export async function completeService(
   // 7. Envío automático de mensaje de reseña por WhatsApp
   //    Lee la config, crea review_request y programa el mensaje para enviarse después del delay
   if (visit.client_id) {
+    // Obtener org_id desde la branch de la visita para filtrar app_settings por organización
+    const { data: branch } = await supabase
+      .from('branches')
+      .select('organization_id')
+      .eq('id', visit.branch_id)
+      .single()
+
     const { data: settings } = await supabase
       .from('app_settings')
       .select('review_auto_send, review_delay_minutes, review_message_template, wa_api_url')
+      .eq('organization_id', branch?.organization_id)
       .maybeSingle()
 
     if (settings?.review_auto_send && settings?.wa_api_url) {
@@ -427,7 +450,7 @@ export async function completeService(
 }
 
 export async function cancelQueueEntry(queueEntryId: string) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { error } = await supabase
     .from('queue_entries')
@@ -447,7 +470,7 @@ export async function reassignBarber(
   queueEntryId: string,
   newBarberId: string | null
 ) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { error } = await supabase
     .from('queue_entries')
@@ -470,7 +493,7 @@ export async function checkinClientByFace(
   barberId: string | null,
   serviceId: string | null = null
 ) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { data: client } = await supabase
     .from('clients')
@@ -536,7 +559,7 @@ export async function reassignMyBarber(
   queueEntryId: string,
   newBarberId: string
 ) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { error } = await supabase
     .from('queue_entries')
@@ -557,7 +580,7 @@ export async function reassignMyBarber(
 export async function updateQueueOrder(
   updates: { id: string; position: number; barber_id?: string | null; is_dynamic?: boolean }[]
 ) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const promises = updates.map((update) => {
     const dataToUpdate: any = { position: update.position }
@@ -584,7 +607,7 @@ export async function updateQueueOrder(
 }
 
 export async function createBreakEntry(branchId: string, barberId: string, breakConfigName: string) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { data: position } = await supabase.rpc('next_queue_position', {
     p_branch_id: branchId,

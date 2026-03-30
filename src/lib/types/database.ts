@@ -22,8 +22,29 @@ export type TemplateCategory = 'marketing' | 'utility' | 'authentication'
 export type TemplateStatus = 'pending' | 'approved' | 'rejected'
 export type ScheduledMessageStatus = 'pending' | 'sent' | 'failed' | 'cancelled'
 
+export interface Organization {
+  id: string
+  name: string
+  slug: string
+  logo_url: string | null
+  is_active: boolean
+  settings: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface OrganizationMember {
+  id: string
+  organization_id: string
+  user_id: string
+  role: 'owner' | 'admin' | 'member'
+  created_at: string
+  organization?: Organization
+}
+
 export interface Branch {
   id: string
+  organization_id: string
   name: string
   address: string | null
   phone: string | null
@@ -66,6 +87,7 @@ export interface ClientReview {
 
 export interface Staff {
   id: string
+  organization_id: string
   auth_user_id: string | null
   branch_id: string | null
   role: UserRole
@@ -87,6 +109,7 @@ export interface Staff {
 
 export interface Role {
   id: string
+  organization_id: string
   name: string
   description: string | null
   permissions: Record<string, boolean>
@@ -105,6 +128,7 @@ export interface RoleBranchScope {
 
 export interface Client {
   id: string
+  organization_id: string
   phone: string
   name: string
   auth_user_id: string | null
@@ -243,6 +267,7 @@ export interface VisitPhoto {
 
 export interface ServiceTag {
   id: string
+  organization_id: string
   name: string
   is_active: boolean
   created_at: string
@@ -250,6 +275,7 @@ export interface ServiceTag {
 
 export interface RewardsConfig {
   id: string
+  organization_id: string
   branch_id: string | null
   points_per_visit: number
   redemption_threshold: number
@@ -290,6 +316,7 @@ export interface BranchOccupancy {
 
 export interface AppSettings {
   id: string
+  organization_id: string
   lost_client_days: number
   at_risk_client_days: number
   business_hours_open: string
@@ -626,12 +653,14 @@ export interface ScheduledMessage {
 export interface Database {
   public: {
     Tables: {
-      branches: { Row: Branch; Insert: Partial<Branch> & Pick<Branch, 'name'>; Update: Partial<Branch> }
+      organizations: { Row: Organization; Insert: Partial<Organization> & Pick<Organization, 'name' | 'slug'>; Update: Partial<Organization> }
+      organization_members: { Row: OrganizationMember; Insert: Partial<OrganizationMember> & Pick<OrganizationMember, 'organization_id' | 'user_id'>; Update: Partial<OrganizationMember> }
+      branches: { Row: Branch; Insert: Partial<Branch> & Pick<Branch, 'name' | 'organization_id'>; Update: Partial<Branch> }
       payment_accounts: { Row: PaymentAccount; Insert: Partial<PaymentAccount> & Pick<PaymentAccount, 'branch_id' | 'name'>; Update: Partial<PaymentAccount> }
       expense_tickets: { Row: ExpenseTicket; Insert: Partial<ExpenseTicket> & Pick<ExpenseTicket, 'branch_id' | 'amount' | 'category'>; Update: Partial<ExpenseTicket> }
       transfer_logs: { Row: TransferLog; Insert: Partial<TransferLog> & Pick<TransferLog, 'payment_account_id' | 'amount' | 'branch_id'>; Update: Partial<TransferLog> }
-      staff: { Row: Staff; Insert: Partial<Staff> & Pick<Staff, 'role' | 'full_name'>; Update: Partial<Staff> }
-      clients: { Row: Client; Insert: Partial<Client> & Pick<Client, 'phone' | 'name'>; Update: Partial<Client> }
+      staff: { Row: Staff; Insert: Partial<Staff> & Pick<Staff, 'role' | 'full_name' | 'organization_id'>; Update: Partial<Staff> }
+      clients: { Row: Client; Insert: Partial<Client> & Pick<Client, 'phone' | 'name' | 'organization_id'>; Update: Partial<Client> }
       services: { Row: Service; Insert: Partial<Service> & Pick<Service, 'name' | 'price'>; Update: Partial<Service> }
       staff_service_commissions: { Row: StaffServiceCommission; Insert: Partial<StaffServiceCommission> & Pick<StaffServiceCommission, 'staff_id' | 'service_id' | 'commission_pct'>; Update: Partial<StaffServiceCommission> }
       products: { Row: Product; Insert: Partial<Product> & Pick<Product, 'name'>; Update: Partial<Product> }
@@ -658,7 +687,7 @@ export interface Database {
       incentive_achievements: { Row: IncentiveAchievement; Insert: Partial<IncentiveAchievement> & Pick<IncentiveAchievement, 'staff_id' | 'rule_id' | 'period_label' | 'amount_earned'>; Update: Partial<IncentiveAchievement> }
       disciplinary_rules: { Row: DisciplinaryRule; Insert: Partial<DisciplinaryRule> & Pick<DisciplinaryRule, 'branch_id' | 'event_type' | 'occurrence_number'>; Update: Partial<DisciplinaryRule> }
       disciplinary_events: { Row: DisciplinaryEvent; Insert: Partial<DisciplinaryEvent> & Pick<DisciplinaryEvent, 'staff_id' | 'branch_id' | 'event_type'>; Update: Partial<DisciplinaryEvent> }
-      roles: { Row: Role; Insert: Partial<Role> & Pick<Role, 'name'>; Update: Partial<Role> }
+      roles: { Row: Role; Insert: Partial<Role> & Pick<Role, 'name' | 'organization_id'>; Update: Partial<Role> }
       role_branch_scope: { Row: RoleBranchScope; Insert: Partial<RoleBranchScope> & Pick<RoleBranchScope, 'role_id' | 'branch_id'>; Update: Partial<RoleBranchScope> }
       social_channels: { Row: SocialChannel; Insert: Partial<SocialChannel> & Pick<SocialChannel, 'branch_id' | 'platform' | 'platform_account_id' | 'display_name'>; Update: Partial<SocialChannel> }
       conversations: { Row: Conversation; Insert: Partial<Conversation> & Pick<Conversation, 'channel_id' | 'platform_user_id'>; Update: Partial<Conversation> }

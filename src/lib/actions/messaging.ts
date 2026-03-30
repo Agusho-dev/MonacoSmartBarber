@@ -1,6 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/server'
+import { getCurrentOrgId } from './org'
 import { revalidatePath } from 'next/cache'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -9,6 +10,22 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
 export async function getConversations(channelFilter?: string) {
   const supabase = createAdminClient()
 
+  // Filtrar conversaciones por canales que pertenecen a sucursales de esta org
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { data: [], error: 'No autorizado' }
+
+  const { data: orgBranches } = await supabase
+    .from('branches')
+    .select('id')
+    .eq('organization_id', orgId)
+  const branchIds = orgBranches?.map((b) => b.id) ?? []
+
+  const { data: orgChannels } = await supabase
+    .from('social_channels')
+    .select('id')
+    .in('branch_id', branchIds)
+  const channelIds = orgChannels?.map((c) => c.id) ?? []
+
   let query = supabase
     .from('conversations')
     .select(`
@@ -16,6 +33,7 @@ export async function getConversations(channelFilter?: string) {
       channel:social_channels(id, platform, display_name),
       client:clients(id, name, phone, instagram)
     `)
+    .in('channel_id', channelIds)
     .order('last_message_at', { ascending: false, nullsFirst: false })
 
   if (channelFilter && channelFilter !== 'all') {
@@ -164,6 +182,22 @@ export async function cancelScheduledMessage(id: string) {
 export async function getScheduledMessages() {
   const supabase = createAdminClient()
 
+  // Filtrar mensajes programados por canales de la org actual
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { data: [], error: 'No autorizado' }
+
+  const { data: orgBranches } = await supabase
+    .from('branches')
+    .select('id')
+    .eq('organization_id', orgId)
+  const branchIds = orgBranches?.map((b) => b.id) ?? []
+
+  const { data: orgChannels } = await supabase
+    .from('social_channels')
+    .select('id')
+    .in('branch_id', branchIds)
+  const channelIds = orgChannels?.map((c) => c.id) ?? []
+
   const { data, error } = await supabase
     .from('scheduled_messages')
     .select(`
@@ -173,6 +207,7 @@ export async function getScheduledMessages() {
       template:message_templates(name),
       created_by_staff:staff(full_name)
     `)
+    .in('channel_id', channelIds)
     .in('status', ['pending', 'sent', 'failed'])
     .order('scheduled_for', { ascending: true })
 
@@ -183,9 +218,20 @@ export async function getScheduledMessages() {
 export async function getChannels() {
   const supabase = createAdminClient()
 
+  // Obtener solo canales de sucursales que pertenecen a esta org
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { data: [], error: 'No autorizado' }
+
+  const { data: orgBranches } = await supabase
+    .from('branches')
+    .select('id')
+    .eq('organization_id', orgId)
+  const branchIds = orgBranches?.map((b) => b.id) ?? []
+
   const { data, error } = await supabase
     .from('social_channels')
     .select('*')
+    .in('branch_id', branchIds)
     .eq('is_active', true)
     .order('platform')
 
@@ -196,9 +242,26 @@ export async function getChannels() {
 export async function getTemplates(channelId?: string) {
   const supabase = createAdminClient()
 
+  // Limitar templates a canales de la org actual
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { data: [], error: 'No autorizado' }
+
+  const { data: orgBranches } = await supabase
+    .from('branches')
+    .select('id')
+    .eq('organization_id', orgId)
+  const branchIds = orgBranches?.map((b) => b.id) ?? []
+
+  const { data: orgChannels } = await supabase
+    .from('social_channels')
+    .select('id')
+    .in('branch_id', branchIds)
+  const channelIds = orgChannels?.map((c) => c.id) ?? []
+
   let query = supabase
     .from('message_templates')
     .select('*')
+    .in('channel_id', channelIds)
     .eq('status', 'approved')
     .order('name')
 
