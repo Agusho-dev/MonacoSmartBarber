@@ -3,6 +3,7 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { recordTransfer } from '@/lib/actions/paymentAccounts'
+import { validateBranchAccess } from './org'
 
 export async function checkinClient(formData: FormData) {
   const supabase = createAdminClient()
@@ -472,6 +473,19 @@ export async function reassignBarber(
 ) {
   const supabase = createAdminClient()
 
+  // Obtener branch_id de la entrada para validar acceso
+  const { data: entry } = await supabase
+    .from('queue_entries')
+    .select('branch_id')
+    .eq('id', queueEntryId)
+    .eq('status', 'waiting')
+    .single()
+
+  if (!entry) return { error: 'Entrada no encontrada' }
+
+  const orgAccess = await validateBranchAccess(entry.branch_id)
+  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+
   const { error } = await supabase
     .from('queue_entries')
     .update({ barber_id: newBarberId, is_dynamic: !newBarberId })
@@ -580,29 +594,28 @@ export async function reassignMyBarber(
 export async function updateQueueOrder(
   updates: { id: string; position: number; barber_id?: string | null; is_dynamic?: boolean }[]
 ) {
+  if (updates.length === 0) return { success: true }
+
   const supabase = createAdminClient()
 
-  const promises = updates.map((update) => {
-    const dataToUpdate: any = { position: update.position }
-    if (update.barber_id !== undefined) dataToUpdate.barber_id = update.barber_id
-    if (update.is_dynamic !== undefined) dataToUpdate.is_dynamic = update.is_dynamic
+  // Usar RPC para hacer todas las actualizaciones en una sola transacción
+  const payload = updates.map((u) => ({
+    id: u.id,
+    position: u.position,
+    ...(u.barber_id !== undefined && { barber_id: u.barber_id ?? '' }),
+    ...(u.is_dynamic !== undefined && { is_dynamic: u.is_dynamic }),
+  }))
 
-    return supabase
-      .from('queue_entries')
-      .update(dataToUpdate)
-      .eq('id', update.id)
+  const { error } = await supabase.rpc('batch_update_queue_entries', {
+    p_updates: payload,
   })
 
-  const results = await Promise.all(promises)
-  
-  const hasError = results.some((result) => result.error)
-
-  if (hasError) {
+  if (error) {
     return { error: 'Error al actualizar el orden de la fila' }
   }
 
-  revalidatePath('/barbero/fila')
-  revalidatePath('/dashboard/fila')
+  // No revalidatePath: la UI ya se actualizó optimísticamente
+  // y Realtime sincroniza a los demás clientes
   return { success: true }
 }
 

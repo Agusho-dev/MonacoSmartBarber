@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
 import {
   DndContext,
@@ -11,10 +11,13 @@ import {
   KeyboardSensor,
   useSensor,
   useSensors,
-  closestCorners,
+  pointerWithin,
+  closestCenter,
+  rectIntersection,
   type DragEndEvent,
   type DragStartEvent,
   type DragOverEvent,
+  type CollisionDetection,
   defaultDropAnimationSideEffects,
 } from '@dnd-kit/core'
 import {
@@ -83,6 +86,25 @@ interface FilaClientProps {
 }
 
 type ColumnId = string // 'breaks', 'dynamic', or barber.id
+
+/**
+ * Detección de colisiones personalizada para el kanban horizontal.
+ * Prioriza pointerWithin (el puntero está DENTRO de un droppable) para que
+ * arrastrar a una fila vacía funcione correctamente. Si no hay coincidencia
+ * (ej. el puntero está entre filas), usa rectIntersection y luego closestCenter como fallback.
+ */
+const kanbanCollisionDetection: CollisionDetection = (args) => {
+  // 1. ¿El puntero está dentro de algún droppable?
+  const pointerCollisions = pointerWithin(args)
+  if (pointerCollisions.length > 0) return pointerCollisions
+
+  // 2. ¿Hay intersección de rectangulos?
+  const rectCollisions = rectIntersection(args)
+  if (rectCollisions.length > 0) return rectCollisions
+
+  // 3. Fallback: el centro más cercano
+  return closestCenter(args)
+}
 
 // ─── Sortable QueueCard ────────────────────────────────────────────────────────
 
@@ -717,7 +739,7 @@ function BarberRow({
       {/* ── Fila de Clientes (Arrastrables con grid infinito css) ── */}
       <div
         ref={setNodeRef}
-        className="flex-1 flex flex-col md:flex-row isolate bg-zinc-900/10 md:min-w-max p-3 md:p-0 gap-2 md:gap-0"
+        className="flex-1 flex flex-col md:flex-row isolate bg-zinc-900/10 md:min-w-[260px] p-3 md:p-0 gap-2 md:gap-0"
         style={{
           backgroundSize: '260px 100%',
           backgroundImage: 'linear-gradient(to right, transparent 259px, rgba(39, 39, 42, 0.4) 259px, rgba(39, 39, 42, 0.4) 260px)'
@@ -771,6 +793,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   const [entries, setEntries] = useState<QueueEntry[]>(initialEntries)
   const [liveBarbers, setLiveBarbers] = useState<BarberRow[]>(barbers)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  // Ref que trackea el último estado confirmado de la DB (para comparar en drag & drop)
+  const confirmedEntriesRef = useRef<QueueEntry[]>(initialEntries)
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [now, setNow] = useState(Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
@@ -813,7 +837,11 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
       .select('*, client:clients(*), barber:staff(*)')
       .in('status', ['waiting', 'in_progress'])
       .order('position')
-    if (data) setEntries(data as QueueEntry[])
+    if (data) {
+      const typed = data as QueueEntry[]
+      setEntries(typed)
+      confirmedEntriesRef.current = typed
+    }
   }, [supabase])
 
   const fetchBarbers = useCallback(async () => {
@@ -1222,7 +1250,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
     waitingItems.forEach((entry, index) => {
       const newPos = index + 1
       
-      const dbEntry = initialEntries.find(e => e.id === entry.id) || entry 
+      const dbEntry = confirmedEntriesRef.current.find(e => e.id === entry.id) || entry
       const wasChanged = entry.position !== newPos || entry.barber_id !== dbEntry.barber_id || entry.is_dynamic !== dbEntry.is_dynamic
       
       if (wasChanged) {
@@ -1236,21 +1264,24 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
     })
 
     if (updates.length > 0) {
-      setActionLoading('reordering')
       const originalEntries = [...entries]
-      
+
       const locallyUpdated = finalEntries.map(e => {
         const update = updates.find(u => u.id === e.id)
         return update ? { ...e, position: update.position } : e
       })
       setEntries(locallyUpdated)
+      // Actualizar ref inmediatamente para que drags consecutivos funcionen sin esperar la DB
+      confirmedEntriesRef.current = locallyUpdated
 
-      const result = await updateQueueOrder(updates)
-      if ('error' in result) {
-        toast.error(result.error)
-        setEntries(originalEntries) // Rollback
-      }
-      setActionLoading(null)
+      // Fire-and-forget: la UI ya está actualizada, no bloquear el drag
+      updateQueueOrder(updates).then((result) => {
+        if ('error' in result) {
+          toast.error(result.error)
+          setEntries(originalEntries)
+          confirmedEntriesRef.current = originalEntries
+        }
+      })
     } else {
       setEntries(finalEntries)
     }
@@ -1310,7 +1341,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCorners}
+      collisionDetection={kanbanCollisionDetection}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
