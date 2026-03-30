@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import type { Metadata } from 'next'
 import { getBarberSession } from '@/lib/actions/auth'
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { QueuePanel } from '@/components/barber/queue-panel'
 
 export const dynamic = 'force-dynamic'
@@ -14,7 +14,7 @@ export default async function FilaPage() {
   const session = await getBarberSession()
   if (!session) redirect('/barbero/login')
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const [{ data: branch }, { data: breakConfigs }] = await Promise.all([
     supabase

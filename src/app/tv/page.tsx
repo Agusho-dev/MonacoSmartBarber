@@ -1,10 +1,10 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { TvClient } from './tv-client'
 
 export const dynamic = 'force-dynamic'
 
 export default async function TvPage() {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Initial data fetch
   const { data: initialEntries } = await supabase

@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { getBarberSession } from '@/lib/actions/auth'
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { formatCurrency } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Banknote, CreditCard, ArrowRightLeft, Wallet } from 'lucide-react'
@@ -30,7 +30,7 @@ export default async function BarberBillingPage() {
   const session = await getBarberSession()
   if (!session) redirect('/barbero/login')
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const today = new Date()
   const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString()
