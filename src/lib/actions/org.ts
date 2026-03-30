@@ -120,27 +120,39 @@ export async function switchOrganization(newOrgId: string) {
 
 /**
  * Obtiene el organization_id del usuario autenticado actual.
- * Wrapper que primero revisa la cookie, y si no existe obtiene el default y graba la cookie.
+ * Soporta tanto Supabase Auth (dashboard) como barber PIN session (panel barbero).
  */
 export async function getCurrentOrgId(): Promise<string | null> {
+  const cookieStore = await cookies()
+
+  // 1. Intentar con Supabase Auth (usuarios del dashboard)
   const { createClient } = await import('@/lib/supabase/server')
   const supabase = await createClient()
-
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
 
-  const cookieStore = await cookies()
-  const activeOrg = cookieStore.get('active_organization')?.value
-
-  if (activeOrg) {
-    // Podriamos validar si aun tiene acceso a activeOrg para mas seguridad, 
-    // pero RLS igual va a usar app_metadata del auth.uid().
-    return activeOrg
+  if (user) {
+    const activeOrg = cookieStore.get('active_organization')?.value
+    if (activeOrg) return activeOrg
+    return getOrganizationId(user.id)
   }
 
-  // Si no hay cookie, setear la default (el seteo real de la cookie deberia hacerse en middleware o login)
-  // Durante el Server-Side Rendering (layout) no podemos usar cookies().set()
-  const defaultOrgId = await getOrganizationId(user.id)
+  // 2. Fallback: barber PIN session (cookie barber_session)
+  const barberSession = cookieStore.get('barber_session')
+  if (barberSession) {
+    try {
+      const parsed = JSON.parse(barberSession.value)
+      if (parsed.staff_id) {
+        const adminClient = createAdminClient()
+        const { data: staff } = await adminClient
+          .from('staff')
+          .select('organization_id')
+          .eq('id', parsed.staff_id)
+          .eq('is_active', true)
+          .maybeSingle()
+        return staff?.organization_id ?? null
+      }
+    } catch { /* cookie invalida */ }
+  }
 
-  return defaultOrgId
+  return null
 }

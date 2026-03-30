@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 import { getCurrentOrgId, validateBranchAccess } from './org'
@@ -11,7 +11,7 @@ export async function getBreakConfigs(branchId: string) {
   const orgAccess = await validateBranchAccess(branchId)
   if (!orgAccess) return { data: [], error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('break_configs')
     .select('*')
@@ -21,7 +21,6 @@ export async function getBreakConfigs(branchId: string) {
 }
 
 export async function upsertBreakConfig(formData: FormData) {
-  const supabase = await createClient()
   const id = formData.get('id') as string | null
   const branchId = formData.get('branch_id') as string
   const name = (formData.get('name') as string).trim()
@@ -35,6 +34,8 @@ export async function upsertBreakConfig(formData: FormData) {
 
   const orgAccess = await validateBranchAccess(branchId)
   if (!orgAccess) return { error: 'No autorizado' }
+
+  const supabase = createAdminClient()
 
   if (id) {
     const { error } = await supabase
@@ -55,7 +56,7 @@ export async function upsertBreakConfig(formData: FormData) {
 }
 
 export async function deleteBreakConfig(id: string) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { data: config } = await supabase.from('break_configs').select('branch_id').eq('id', id).single()
   if (!config) return { error: 'Config no encontrada' }
   const orgAccess = await validateBranchAccess(config.branch_id)
@@ -140,7 +141,7 @@ export async function requestBreak(staffId: string, branchId: string, breakConfi
     const orgAccess = await validateBranchAccess(branchId)
     if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
 
-    const supabase = await createAdminClient()
+    const supabase = createAdminClient()
 
     const { data: existing } = await supabase
         .from('break_requests')
@@ -167,9 +168,8 @@ export async function requestBreak(staffId: string, branchId: string, breakConfi
 }
 
 export async function approveBreak(requestId: string, cutsBeforeBreak: number) {
-    const supabaseAuth = await createClient()
-    const approverId = await getApproverStaffId(supabaseAuth)
     const supabase = createAdminClient()
+    const approverId = await getApproverStaffId(supabase)
     if (!approverId) return { error: 'No autorizado' }
 
     const { data: req, error: fetchErr } = await supabase
@@ -229,9 +229,22 @@ export async function approveBreak(requestId: string, cutsBeforeBreak: number) {
 }
 
 export async function rejectBreak(requestId: string, notes?: string) {
-    const supabase = await createClient()
+    const supabase = createAdminClient()
     const approverId = await getApproverStaffId(supabase)
     if (!approverId) return { error: 'No autorizado' }
+
+    // Validar que la solicitud pertenece a la org del usuario
+    const { data: req } = await supabase
+        .from('break_requests')
+        .select('branch_id')
+        .eq('id', requestId)
+        .eq('status', 'pending')
+        .single()
+
+    if (!req) return { error: 'Solicitud no encontrada o ya procesada' }
+
+    const orgAccess = await validateBranchAccess(req.branch_id)
+    if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
 
     const { error } = await supabase
         .from('break_requests')
@@ -252,7 +265,7 @@ export async function rejectBreak(requestId: string, notes?: string) {
 }
 
 export async function cancelBreakRequest(requestId: string) {
-    const supabase = await createAdminClient()
+    const supabase = createAdminClient()
 
     const { data: req } = await supabase
         .from('break_requests')
@@ -288,7 +301,7 @@ export async function cancelBreakRequest(requestId: string) {
 }
 
 export async function completeBreakRequest(queueEntryId: string) {
-    const supabase = await createAdminClient()
+    const supabase = createAdminClient()
 
     const { data: entry } = await supabase
         .from('queue_entries')
@@ -350,7 +363,10 @@ export async function completeBreakRequest(queueEntryId: string) {
 }
 
 export async function getPendingBreakRequests(branchId: string) {
-    const supabase = await createClient()
+    const orgAccess = await validateBranchAccess(branchId)
+    if (!orgAccess) return { data: [], error: 'No autorizado' }
+
+    const supabase = createAdminClient()
     const { data, error } = await supabase
         .from('break_requests')
         .select('*, staff:staff_id(id, full_name), break_config:break_config_id(name, duration_minutes)')
@@ -362,7 +378,21 @@ export async function getPendingBreakRequests(branchId: string) {
 }
 
 export async function getBarberActiveBreakRequest(staffId: string) {
-    const supabase = await createClient()
+    const supabase = createAdminClient()
+
+    // Verificar que el staff pertenece a la org del usuario
+    const orgId = await getCurrentOrgId()
+    if (!orgId) return { data: null, error: 'No autorizado' }
+
+    const { data: staff } = await supabase
+        .from('staff')
+        .select('id')
+        .eq('id', staffId)
+        .eq('organization_id', orgId)
+        .maybeSingle()
+
+    if (!staff) return { data: null, error: 'Staff no encontrado en esta organización' }
+
     const { data, error } = await supabase
         .from('break_requests')
         .select('*, break_config:break_config_id(name, duration_minutes)')
