@@ -132,13 +132,168 @@
 /* Animación de entrada para transiciones mobile */
 @media (max-width: 1023px) {
   @keyframes pageSlideIn {
-    from {
-      opacity: 0;
-      transform: translateY(6px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
+}
+
+/* Animaciones del wizard de onboarding */
+@keyframes stepEnter {
+  from { opacity: 0; transform: translateX(28px) scale(0.98); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes stepExit {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to   { opacity: 0; transform: translateX(-28px) scale(0.98); }
+}
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.7); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+@keyframes pulseRing {
+  0%   { transform: scale(1);    opacity: 0.6; }
+  50%  { transform: scale(1.12); opacity: 0.2; }
+  100% { transform: scale(1);    opacity: 0.6; }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-8px); }
+}
+@keyframes confettiFall {
+  0%   { transform: translateY(-10px) rotate(0deg);   opacity: 1; }
+  100% { transform: translateY(300px) rotate(720deg); opacity: 0; }
+}
+
+.animate-step-enter  { animation: stepEnter 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.animate-step-exit   { animation: stepExit  0.3s ease-in forwards; }
+.animate-fade-up     { animation: fadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.animate-fade-in     { animation: fadeIn 0.4s ease forwards; }
+.animate-scale-in    { animation: scaleIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+.animate-float       { animation: float 3s ease-in-out infinite; }
+
+/* ── Auth/Onboarding premium animations ────────────────────────────────────── */
+
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-12px); }
+}
+@keyframes orb-pulse {
+  0%, 100% { transform: scale(1) translateX(0);    opacity: 0.4; }
+  50%       { transform: scale(1.15) translateX(10px); opacity: 0.6; }
+}
+@keyframes glow-badge {
+  0%, 100% { box-shadow: 0 0 12px oklch(0.78 0.12 85 / 0.3); }
+  50%       { box-shadow: 0 0 28px oklch(0.78 0.12 85 / 0.6); }
+}
+@keyframes slide-up-fade {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes shimmer-gold {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+@keyframes gradient-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes border-glow {
+  0%, 100% { opacity: 0.3; }
+  50%       { opacity: 0.7; }
+}
+@keyframes reveal-up {
+  from { opacity: 0; transform: translateY(24px) scale(0.96); filter: blur(4px); }
+  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+@keyframes reveal-left {
+  from { opacity: 0; transform: translateX(32px); filter: blur(4px); }
+  to   { opacity: 1; transform: translateX(0); filter: blur(0); }
+}
+@keyframes gold-shimmer-btn {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50%      { transform: scale(1.6); opacity: 0.3; }
+}
+@keyframes orb-drift {
+  0%   { transform: translate(0, 0) scale(1); }
+  33%  { transform: translate(30px, -20px) scale(1.1); }
+  66%  { transform: translate(-15px, 15px) scale(0.95); }
+  100% { transform: translate(0, 0) scale(1); }
+}
+@keyframes line-draw {
+  from { stroke-dashoffset: 200; }
+  to   { stroke-dashoffset: 0; }
+}
+@keyframes typewriter-cursor {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
+.animate-float-slow    { animation: float-slow 6s ease-in-out infinite; }
+.animate-glow-badge    { animation: glow-badge 2.5s ease-in-out infinite; }
+.animate-slide-up-fade { animation: slide-up-fade 0.4s ease-out forwards; }
+.animate-reveal-up     { animation: reveal-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.animate-reveal-left   { animation: reveal-left 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.animate-gradient-shift { animation: gradient-shift 8s ease infinite; background-size: 200% 200%; }
+.animate-pulse-dot     { animation: pulse-dot 2s ease-in-out infinite; }
+.animate-orb-drift     { animation: orb-drift 15s ease-in-out infinite; }
+
+/* Botón dorado con shimmer */
+.btn-gold {
+  background: linear-gradient(135deg, oklch(0.78 0.12 85), oklch(0.68 0.12 65), oklch(0.78 0.12 85));
+  background-size: 200% auto;
+  animation: gold-shimmer-btn 3s linear infinite;
+  color: oklch(0.07 0 0);
+  font-weight: 600;
+  border: none;
+  transition: all 0.3s ease;
+}
+.btn-gold:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 0 24px oklch(0.78 0.12 85 / 0.4), 0 4px 16px oklch(0 0 0 / 0.3);
+  transform: translateY(-1px);
+}
+.btn-gold:active {
+  transform: translateY(0);
+}
+
+/* Card glassmorphism mejorada */
+.glass-card {
+  background: oklch(0.1 0 0 / 0.6);
+  backdrop-filter: blur(24px) saturate(1.2);
+  border: 1px solid oklch(1 0 0 / 0.08);
+  position: relative;
+  overflow: hidden;
+}
+.glass-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 10%, oklch(0.78 0.12 85 / 0.6) 50%, transparent 90%);
+  animation: border-glow 3s ease-in-out infinite;
+}
+
+/* Variables de color gold */
+:root {
+  --gold: oklch(0.78 0.12 85);
+  --gold-dim: oklch(0.65 0.10 85);
 }
