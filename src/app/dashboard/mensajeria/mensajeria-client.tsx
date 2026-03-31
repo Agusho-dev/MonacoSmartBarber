@@ -330,6 +330,9 @@ export function MensajeriaClient({
         toast.error(result.error)
         setMessageInput(content)
         setMessages(prev => prev.filter(m => m.id !== tempMsg.id))
+      } else {
+        // Eliminar el temporal — el realtime va a agregar el mensaje real con estado correcto
+        setMessages(prev => prev.filter(m => m.id !== tempMsg.id))
       }
     })
   }

@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+}
 
 // GET: Meta verifica el webhook con un challenge
 export async function GET(req: NextRequest) {
@@ -17,7 +19,7 @@ export async function GET(req: NextRequest) {
     return new NextResponse('Bad Request', { status: 400 })
   }
 
-  // Buscamos la org que tiene ese verify_token
+  const supabase = getSupabase()
   const { data: config } = await supabase
     .from('organization_whatsapp_config')
     .select('id')
@@ -25,9 +27,11 @@ export async function GET(req: NextRequest) {
     .maybeSingle()
 
   if (!config) {
+    console.error('[WA Webhook] verify_token no encontrado:', token)
     return new NextResponse('Forbidden', { status: 403 })
   }
 
+  console.log('[WA Webhook] Verificación exitosa')
   return new NextResponse(challenge, { status: 200 })
 }
 
@@ -40,9 +44,13 @@ export async function POST(req: NextRequest) {
     return new NextResponse('Bad Request', { status: 400 })
   }
 
+  console.log('[WA Webhook] POST recibido, object:', body.object)
+
   if (body.object !== 'whatsapp_business_account') {
     return NextResponse.json({ ok: true })
   }
+
+  const supabase = getSupabase()
 
   for (const entry of body.entry ?? []) {
     for (const change of entry.changes ?? []) {
@@ -50,27 +58,39 @@ export async function POST(req: NextRequest) {
       const value = change.value
       const phoneNumberId: string = value.metadata?.phone_number_id
 
+      console.log('[WA Webhook] phoneNumberId:', phoneNumberId)
+      console.log('[WA Webhook] mensajes entrantes:', value.messages?.length ?? 0)
+      console.log('[WA Webhook] status updates:', value.statuses?.length ?? 0)
+
       if (!phoneNumberId) continue
 
       // Encontrar la org por phone_number_id
-      const { data: waConfig } = await supabase
+      const { data: waConfig, error: configErr } = await supabase
         .from('organization_whatsapp_config')
         .select('organization_id')
         .eq('whatsapp_phone_id', phoneNumberId)
         .maybeSingle()
 
-      if (!waConfig) continue
+      if (configErr) console.error('[WA Webhook] Error buscando config:', configErr.message)
+      if (!waConfig) {
+        console.error('[WA Webhook] No se encontró org para phoneNumberId:', phoneNumberId)
+        continue
+      }
 
       const orgId = waConfig.organization_id
+      console.log('[WA Webhook] orgId encontrado:', orgId)
 
-      // Encontrar o crear canal social de WhatsApp para esta org
+      // Encontrar canal WhatsApp de la org
       const { data: orgBranches } = await supabase
         .from('branches')
         .select('id')
         .eq('organization_id', orgId)
 
       const branchIds = orgBranches?.map((b: any) => b.id) ?? []
-      if (branchIds.length === 0) continue
+      if (branchIds.length === 0) {
+        console.error('[WA Webhook] No hay branches para orgId:', orgId)
+        continue
+      }
 
       let { data: waChannel } = await supabase
         .from('social_channels')
@@ -81,9 +101,9 @@ export async function POST(req: NextRequest) {
         .limit(1)
         .maybeSingle()
 
-      // Si no existe canal, crearlo automáticamente en el primer branch
       if (!waChannel) {
-        const { data: newChannel } = await supabase
+        console.log('[WA Webhook] Canal no existe, creando...')
+        const { data: newChannel, error: chErr } = await supabase
           .from('social_channels')
           .insert({
             branch_id: branchIds[0],
@@ -94,6 +114,7 @@ export async function POST(req: NextRequest) {
           })
           .select('id')
           .single()
+        if (chErr) console.error('[WA Webhook] Error creando canal:', chErr.message)
         waChannel = newChannel
       }
 
@@ -101,17 +122,18 @@ export async function POST(req: NextRequest) {
 
       // Procesar mensajes entrantes
       for (const message of value.messages ?? []) {
+        console.log('[WA Webhook] Procesando mensaje tipo:', message.type, 'from:', message.from)
+
         if (!['text', 'image', 'audio', 'video', 'document'].includes(message.type)) continue
 
-        const from: string         = message.from
+        const from: string          = message.from
         const platformMsgId: string = message.id
-        const timestamp: string    = message.timestamp
-        const text: string         = message.text?.body ?? ''
+        const timestamp: string     = message.timestamp
+        const text: string          = message.text?.body ?? ''
         const mediaUrl: string | undefined = message.image?.link ?? message.video?.link ?? message.audio?.link ?? message.document?.link
-
         const contentType = message.type === 'text' ? 'text' : message.type
 
-        // Buscar cliente por teléfono (últimos 10 dígitos para tolerancia de código de país)
+        // Buscar cliente por teléfono
         const phoneSuffix = from.slice(-10)
         const { data: client } = await supabase
           .from('clients')
@@ -119,6 +141,8 @@ export async function POST(req: NextRequest) {
           .eq('organization_id', orgId)
           .ilike('phone', `%${phoneSuffix}`)
           .maybeSingle()
+
+        console.log('[WA Webhook] Cliente encontrado:', client?.name ?? 'ninguno')
 
         // Buscar o crear conversación
         const { data: existingConv } = await supabase
@@ -143,7 +167,7 @@ export async function POST(req: NextRequest) {
             })
             .eq('id', convId)
         } else {
-          const { data: newConv } = await supabase
+          const { data: newConv, error: convErr } = await supabase
             .from('conversations')
             .insert({
               channel_id: waChannel.id,
@@ -158,19 +182,27 @@ export async function POST(req: NextRequest) {
             .select('id')
             .single()
 
+          if (convErr) {
+            console.error('[WA Webhook] Error creando conversación:', convErr.message)
+            continue
+          }
           if (!newConv) continue
           convId = newConv.id
+          console.log('[WA Webhook] Nueva conversación creada:', convId)
         }
 
-        // Evitar duplicados por platform_message_id
+        // Evitar duplicados
         const { data: existing } = await supabase
           .from('messages')
           .select('id')
           .eq('platform_message_id', platformMsgId)
           .maybeSingle()
-        if (existing) continue
+        if (existing) {
+          console.log('[WA Webhook] Mensaje duplicado, ignorando:', platformMsgId)
+          continue
+        }
 
-        await supabase.from('messages').insert({
+        const { error: msgErr } = await supabase.from('messages').insert({
           conversation_id: convId,
           direction: 'inbound',
           content_type: contentType,
@@ -180,12 +212,16 @@ export async function POST(req: NextRequest) {
           status: 'delivered',
           created_at: new Date(parseInt(timestamp) * 1000).toISOString(),
         })
+
+        if (msgErr) console.error('[WA Webhook] Error insertando mensaje:', msgErr.message)
+        else console.log('[WA Webhook] Mensaje insertado OK')
       }
 
-      // Procesar actualizaciones de estado (leído, entregado, fallido)
+      // Procesar actualizaciones de estado
       for (const statusUpdate of value.statuses ?? []) {
         const metaMsgId: string = statusUpdate.id
-        const newStatus: string = statusUpdate.status // 'sent' | 'delivered' | 'read' | 'failed'
+        const newStatus: string = statusUpdate.status
+        console.log('[WA Webhook] Status update:', metaMsgId, '→', newStatus)
 
         await supabase
           .from('messages')
