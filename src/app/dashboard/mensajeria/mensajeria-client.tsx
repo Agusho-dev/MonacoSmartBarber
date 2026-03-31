@@ -12,6 +12,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { sendMessage as sendMessageAction, markAsRead, cancelScheduledMessage } from '@/lib/actions/messaging'
 import { saveOrgWhatsAppConfig } from '@/lib/actions/whatsapp-meta'
+import { saveOrgInstagramConfig } from '@/lib/actions/instagram-meta'
 import { startConversation, updateConversationStatus, getClientVisits, scheduleMessageAuto } from '@/lib/actions/conversations'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -23,7 +24,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { toast } from 'sonner'
-import type { Conversation, Message, SocialChannel, Client, OrgWhatsAppConfig } from '@/lib/types/database'
+import type { Conversation, Message, SocialChannel, Client, OrgWhatsAppConfig, OrgInstagramConfig } from '@/lib/types/database'
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -143,6 +144,7 @@ interface Props {
   scheduledMessages: ScheduledWithRelations[]
   clients: Pick<Client, 'id' | 'name' | 'phone'>[]
   waConfig: OrgWhatsAppConfig | null
+  igConfig: OrgInstagramConfig | null
 }
 
 type SettingsTab = 'whatsapp' | 'instagram' | 'facebook'
@@ -156,6 +158,7 @@ export function MensajeriaClient({
   scheduledMessages: initialScheduled,
   clients,
   waConfig: initialWaConfig,
+  igConfig: initialIgConfig,
 }: Props) {
   const supabase = useMemo(() => createClient(), [])
 
@@ -202,6 +205,16 @@ export function MensajeriaClient({
   })
   const [showToken, setShowToken] = useState(false)
   const [savingConfig, startSavingConfig] = useTransition()
+
+  // Instagram config
+  const [igConfig, setIgConfig] = useState<OrgInstagramConfig | null>(initialIgConfig)
+  const [igConfigForm, setIgConfigForm] = useState({
+    instagram_page_id: initialIgConfig?.instagram_page_id ?? '',
+    instagram_page_access_token: initialIgConfig?.instagram_page_access_token ?? '',
+    instagram_account_id: initialIgConfig?.instagram_account_id ?? '',
+  })
+  const [showIgToken, setShowIgToken] = useState(false)
+  const [savingIgConfig, startSavingIgConfig] = useTransition()
 
   // ── Load messages ──
   const loadMessages = useCallback(async (convId: string) => {
@@ -406,6 +419,21 @@ export function MensajeriaClient({
     })
   }
 
+  // ── Save Instagram config ──
+  const handleSaveIgConfig = () => {
+    if (!igConfigForm.instagram_page_id || !igConfigForm.instagram_page_access_token) {
+      toast.error('Completá el Page ID y el Access Token'); return
+    }
+    startSavingIgConfig(async () => {
+      const result = await saveOrgInstagramConfig(igConfigForm as any)
+      if (result.error) { toast.error(result.error) }
+      else {
+        toast.success('Instagram conectado — el canal fue creado automáticamente')
+        if (result.data) setIgConfig(result.data as any)
+      }
+    })
+  }
+
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text).then(() => toast.success(`${label} copiado`))
   }
@@ -423,8 +451,10 @@ export function MensajeriaClient({
   }
 
   const isConfigured = !!(waConfig?.whatsapp_access_token && waConfig?.whatsapp_phone_id && waConfig?.whatsapp_business_id)
+  const isInstagramConfigured = !!(igConfig?.instagram_page_id && igConfig?.instagram_page_access_token)
   const activeConvName = activeConv ? (activeConv.client?.name || activeConv.platform_user_name || activeConv.platform_user_id) : ''
   const webhookUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/webhooks/whatsapp` : '/api/webhooks/whatsapp'
+  const webhookUrlInstagram = typeof window !== 'undefined' ? `${window.location.origin}/api/webhooks/instagram` : '/api/webhooks/instagram'
 
   // ─────────────────────────────────────────────
   // Render
@@ -503,7 +533,19 @@ export function MensajeriaClient({
                       <button key={conv.id}
                         onClick={() => { setActiveConv(conv); setShowMobileChat(true); setShowProfile(false) }}
                         className={`flex w-full items-center gap-3 px-3 py-3 transition-colors border-b border-white/4 ${isActive ? 'bg-[#2A3942]' : 'hover:bg-[#202C33]'}`}>
-                        <Avatar name={name} size={10} />
+                        <div className="relative shrink-0">
+                          <Avatar name={name} size={10} />
+                          {conv.channel?.platform === 'instagram' && (
+                            <span className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-[#111B21] flex items-center justify-center">
+                              <Instagram className="size-2.5 text-pink-400" />
+                            </span>
+                          )}
+                          {conv.channel?.platform === 'facebook' && (
+                            <span className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-[#111B21] flex items-center justify-center">
+                              <Facebook className="size-2.5 text-blue-400" />
+                            </span>
+                          )}
+                        </div>
                         <div className="min-w-0 flex-1 text-left">
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-1.5 min-w-0">
@@ -846,7 +888,12 @@ export function MensajeriaClient({
                       {isConfigured ? '●' : '○'}
                     </span>
                   )}
-                  {tab !== 'whatsapp' && <span className="text-[9px] px-1 rounded-full bg-white/5 text-[#8696A0]">pronto</span>}
+                  {tab === 'instagram' && (
+                    <span className={`text-[9px] px-1 rounded-full ${isInstagramConfigured ? 'bg-pink-500/20 text-pink-400' : 'bg-white/5 text-[#8696A0]'}`}>
+                      {isInstagramConfigured ? '●' : '○'}
+                    </span>
+                  )}
+                  {tab === 'facebook' && <span className="text-[9px] px-1 rounded-full bg-white/5 text-[#8696A0]">pronto</span>}
                 </button>
               ))}
             </div>
@@ -956,26 +1003,107 @@ export function MensajeriaClient({
 
             {/* Instagram tab */}
             {settingsTab === 'instagram' && (
-              <div className="flex flex-col items-center justify-center py-16 text-center gap-4">
-                <div className="size-16 rounded-full bg-linear-to-br from-pink-500/20 to-purple-500/20 border border-pink-500/20 flex items-center justify-center">
-                  <Instagram className="size-8 text-pink-400" />
+              <div className="space-y-6">
+                <div className="flex items-center gap-2">
+                  <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${isInstagramConfigured ? 'bg-pink-500/10 text-pink-400 border border-pink-500/20' : 'bg-orange-500/10 text-orange-400 border border-orange-500/20'}`}>
+                    {isInstagramConfigured ? <Wifi className="size-3" /> : <WifiOff className="size-3" />}
+                    {isInstagramConfigured ? 'Conectado' : 'Sin configurar'}
+                  </div>
                 </div>
-                <div>
-                  <p className="font-semibold text-white mb-1">Instagram DMs</p>
-                  <p className="text-sm text-[#8696A0] max-w-xs leading-relaxed">
-                    Próximamente podrás conectar tu cuenta de Instagram Business y gestionar todos tus mensajes directos desde aquí.
+
+                {/* Paso 1: Webhook */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="size-5 rounded-full bg-pink-500/10 flex items-center justify-center text-pink-400 font-bold text-[10px]">1</div>
+                    <h3 className="text-xs font-semibold text-[#8696A0] uppercase tracking-wider">Configurar Webhook en Meta</h3>
+                  </div>
+                  <p className="text-xs text-[#8696A0] leading-relaxed pl-7">
+                    En Meta Developer Console → <strong className="text-white">Instagram → Webhooks</strong>, suscribite al campo <code className="text-pink-400">messages</code>.
                   </p>
+                  <div className="pl-7 space-y-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] text-[#8696A0]">URL de devolución de llamada</Label>
+                      <div className="flex items-center gap-2">
+                        <input readOnly className="flex-1 rounded-lg bg-[#202C33] px-3 py-2 text-xs text-white outline-none font-mono truncate" value={webhookUrlInstagram} />
+                        <button className="shrink-0 p-2 rounded-lg bg-[#202C33] hover:bg-[#2A3942] text-[#8696A0] hover:text-white transition-colors" onClick={() => copyToClipboard(webhookUrlInstagram, 'URL')}>
+                          <Copy className="size-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] text-[#8696A0]">Token de verificación</Label>
+                      {igConfig?.verify_token ? (
+                        <div className="flex items-center gap-2">
+                          <input readOnly className="flex-1 rounded-lg bg-[#202C33] px-3 py-2 text-xs text-white outline-none font-mono truncate" value={igConfig.verify_token} />
+                          <button className="shrink-0 p-2 rounded-lg bg-[#202C33] hover:bg-[#2A3942] text-[#8696A0] hover:text-white transition-colors" onClick={() => copyToClipboard(igConfig.verify_token, 'Token')}>
+                            <Copy className="size-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="rounded-lg bg-[#202C33] px-3 py-2.5 text-xs text-[#8696A0] italic">
+                          Se genera al guardar las credenciales →
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div className="rounded-lg bg-[#202C33] border border-white/5 p-4 text-left w-full space-y-2">
-                  <p className="text-xs font-medium text-white">¿Qué vas a poder hacer?</p>
-                  {['Ver y responder DMs de Instagram', 'Historial completo de conversaciones', 'Integración con perfiles de clientes', 'Envío masivo a seguidores'].map(f => (
-                    <div key={f} className="flex items-center gap-2">
-                      <div className="size-1.5 rounded-full bg-pink-400" />
-                      <span className="text-xs text-[#8696A0]">{f}</span>
+
+                <Separator className="bg-white/5" />
+
+                {/* Paso 2: Credenciales */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="size-5 rounded-full bg-pink-500/10 flex items-center justify-center text-pink-400 font-bold text-[10px]">2</div>
+                    <h3 className="text-xs font-semibold text-[#8696A0] uppercase tracking-wider">Credenciales Instagram API</h3>
+                  </div>
+                  <div className="pl-7 space-y-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] text-[#8696A0]">Facebook Page ID <span className="text-pink-400">*</span></Label>
+                      <input type="text" className="w-full rounded-lg bg-[#202C33] px-3 py-2 text-sm text-white placeholder:text-[#8696A0] outline-none focus:ring-1 focus:ring-pink-500/40"
+                        placeholder="123456789012345" value={igConfigForm.instagram_page_id}
+                        onChange={(e) => setIgConfigForm(prev => ({ ...prev, instagram_page_id: e.target.value }))} />
+                      <p className="text-[10px] text-[#8696A0]">El ID de la Página de Facebook conectada a tu Instagram Business</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] text-[#8696A0]">Page Access Token <span className="text-pink-400">*</span></Label>
+                      <div className="relative">
+                        <input type={showIgToken ? 'text' : 'password'}
+                          className="w-full rounded-lg bg-[#202C33] px-3 py-2 pr-10 text-sm text-white placeholder:text-[#8696A0] outline-none focus:ring-1 focus:ring-pink-500/40"
+                          placeholder="EAA..." value={igConfigForm.instagram_page_access_token}
+                          onChange={(e) => setIgConfigForm(prev => ({ ...prev, instagram_page_access_token: e.target.value }))} />
+                        <button className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8696A0] hover:text-white" onClick={() => setShowIgToken(v => !v)}>
+                          {showIgToken ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-[#8696A0]">Token con permiso <code className="text-pink-400">instagram_manage_messages</code></p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] text-[#8696A0]">Instagram Account ID <span className="text-[#8696A0] font-normal">(opcional)</span></Label>
+                      <input type="text" className="w-full rounded-lg bg-[#202C33] px-3 py-2 text-sm text-white placeholder:text-[#8696A0] outline-none focus:ring-1 focus:ring-pink-500/40"
+                        placeholder="17841400000000000" value={igConfigForm.instagram_account_id}
+                        onChange={(e) => setIgConfigForm(prev => ({ ...prev, instagram_account_id: e.target.value }))} />
+                    </div>
+                    <Button className="w-full bg-pink-600 hover:bg-pink-500 text-white" onClick={handleSaveIgConfig} disabled={savingIgConfig}>
+                      {savingIgConfig ? 'Guardando...' : 'Guardar credenciales'}
+                    </Button>
+                  </div>
+                </div>
+
+                <Separator className="bg-white/5" />
+                <div className="rounded-lg bg-[#1A2530] border border-white/5 p-3 space-y-1.5">
+                  <p className="text-[11px] font-medium text-white">Requisitos previos</p>
+                  {[
+                    'Cuenta de Instagram Business o Creator',
+                    'Página de Facebook conectada a la cuenta IG',
+                    'App de Meta con instagram_manage_messages',
+                    'Suscripción al webhook del producto Instagram',
+                  ].map(r => (
+                    <div key={r} className="flex items-start gap-2">
+                      <div className="size-1.5 rounded-full bg-pink-400 mt-1.5 shrink-0" />
+                      <span className="text-[11px] text-[#8696A0]">{r}</span>
                     </div>
                   ))}
                 </div>
-                <Badge variant="outline" className="border-pink-500/30 text-pink-400 bg-pink-500/5">Próximamente</Badge>
               </div>
             )}
 

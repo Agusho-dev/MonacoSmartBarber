@@ -82,6 +82,11 @@ export async function sendMessage(
     return sendMetaWhatsAppMessage(conv.platform_user_id, content, conversationId, staffId)
   }
 
+  if (platform === 'instagram') {
+    const { sendInstagramMessage } = await import('./instagram-meta')
+    return sendInstagramMessage(conv.platform_user_id, content, conversationId, staffId)
+  }
+
   return { error: 'Plataforma no soportada aún' }
 }
 

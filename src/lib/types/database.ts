@@ -54,6 +54,18 @@ export interface OrgWhatsAppConfig {
   updated_at: string
 }
 
+export interface OrgInstagramConfig {
+  id: string
+  organization_id: string
+  instagram_page_id: string | null
+  instagram_page_access_token: string | null
+  instagram_account_id: string | null
+  verify_token: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
 export interface Branch {
   id: string
   organization_id: string

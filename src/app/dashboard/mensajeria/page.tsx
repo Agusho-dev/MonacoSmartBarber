@@ -14,6 +14,7 @@ export default async function MensajeriaPage() {
     { data: scheduled },
     { data: clients },
     { data: waConfig },
+    { data: igConfig },
   ] = await Promise.all([
     supabase
       .from('conversations')
@@ -52,6 +53,14 @@ export default async function MensajeriaPage() {
           .maybeSingle()
           .then((r) => ({ data: r.data }))
       : Promise.resolve({ data: null }),
+    orgId
+      ? supabase
+          .from('organization_instagram_config')
+          .select('*')
+          .eq('organization_id', orgId)
+          .maybeSingle()
+          .then((r) => ({ data: r.data }))
+      : Promise.resolve({ data: null }),
   ])
 
   return (
@@ -61,6 +70,7 @@ export default async function MensajeriaPage() {
       scheduledMessages={scheduled ?? []}
       clients={clients ?? []}
       waConfig={waConfig ?? null}
+      igConfig={igConfig ?? null}
     />
   )
 }
