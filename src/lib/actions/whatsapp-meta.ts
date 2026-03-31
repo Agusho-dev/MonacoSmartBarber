@@ -45,6 +45,30 @@ export async function saveOrgWhatsAppConfig(config: {
 
   if (error) return { error: error.message }
 
+  // Crear/actualizar automáticamente el canal social de WhatsApp para esta org
+  // Un canal es el registro que vincula el número de WA con una sucursal
+  const { data: firstBranch } = await supabase
+    .from('branches')
+    .select('id')
+    .eq('organization_id', orgId)
+    .limit(1)
+    .maybeSingle()
+
+  if (firstBranch) {
+    await supabase
+      .from('social_channels')
+      .upsert(
+        {
+          branch_id: firstBranch.id,
+          platform: 'whatsapp',
+          platform_account_id: config.whatsapp_phone_id,
+          display_name: 'WhatsApp Business',
+          is_active: true,
+        },
+        { onConflict: 'branch_id, platform' }
+      )
+  }
+
   // Retornar la config completa (incluyendo verify_token generado) para mostrarlo en la UI
   const { data: saved } = await supabase
     .from('organization_whatsapp_config')
