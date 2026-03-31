@@ -5,7 +5,10 @@
       "mcp__supabase__apply_migration",
       "Bash(find /Users/ignaciobaldovino/MSB_FULL/MonacoSmartBarber/src -type f \\\\\\(-name *.ts -o -name *.tsx \\\\\\))",
       "Bash(xargs cat:*)",
-      "Read(//Users/ignaciobaldovino/MSB_FULL/branding/**)"
+      "Read(//Users/ignaciobaldovino/MSB_FULL/branding/**)",
+      "Bash(for file:*)",
+      "Bash(do if:*)",
+      "Bash(then echo:*)"
     ]
   },
   "enabledMcpjsonServers": [

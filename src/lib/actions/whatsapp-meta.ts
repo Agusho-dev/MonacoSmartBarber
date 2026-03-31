@@ -102,7 +102,25 @@ export async function sendMetaWhatsAppMessage(
     return { error: 'WhatsApp no configurado. Completá las credenciales en Configuración.' }
   }
 
-  const phone = to.replace(/\D/g, '')
+  // Normalizar número a formato E.164 para Meta Cloud API (sin el +)
+  // Argentina: Meta espera 54XXXXXXXXXX (SIN el 9 intermedio)
+  // Ejemplos:
+  //   "3584402511"     → "543584402511"
+  //   "93584402511"    → "543584402511"  (quitar el 9)
+  //   "5493584402511"  → "543584402511"  (quitar el 9)
+  //   "+54 9 358..."   → "543584402511"
+  let phone = to.replace(/\D/g, '')
+  if (!phone.startsWith('54')) {
+    // Sin código de país — puede tener o no el 9 adelante
+    if (phone.startsWith('9') && phone.length === 11) {
+      phone = '54' + phone.slice(1) // quitar el 9: 93584402511 → 543584402511
+    } else {
+      phone = '54' + phone
+    }
+  } else if (phone.startsWith('549') && phone.length === 13) {
+    // Tiene 54 + 9 + 10 dígitos → quitar el 9: 5493584402511 → 543584402511
+    phone = '54' + phone.slice(3)
+  }
 
   let res: Response
   try {
