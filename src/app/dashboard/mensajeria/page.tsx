@@ -1,18 +1,19 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
+import { getCurrentOrgId } from '@/lib/actions/org'
 import { MensajeriaClient } from './mensajeria-client'
 
 export const dynamic = 'force-dynamic'
 
 export default async function MensajeriaPage() {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
+  const orgId = await getCurrentOrgId()
 
   const [
     { data: conversations },
     { data: channels },
     { data: scheduled },
-    { data: templates },
     { data: clients },
-    { data: appSettings },
+    { data: waConfig },
   ] = await Promise.all([
     supabase
       .from('conversations')
@@ -39,18 +40,18 @@ export default async function MensajeriaPage() {
       .in('status', ['pending', 'sent', 'failed'])
       .order('scheduled_for', { ascending: true }),
     supabase
-      .from('message_templates')
-      .select('*')
-      .eq('status', 'approved')
-      .order('name'),
-    supabase
       .from('clients')
       .select('id, name, phone')
+      .eq('organization_id', orgId ?? '')
       .order('name'),
-    supabase
-      .from('app_settings')
-      .select('*')
-      .maybeSingle(),
+    orgId
+      ? supabase
+          .from('organization_whatsapp_config')
+          .select('*')
+          .eq('organization_id', orgId)
+          .maybeSingle()
+          .then((r) => ({ data: r.data }))
+      : Promise.resolve({ data: null }),
   ])
 
   return (
@@ -58,9 +59,8 @@ export default async function MensajeriaPage() {
       initialConversations={conversations ?? []}
       channels={channels ?? []}
       scheduledMessages={scheduled ?? []}
-      templates={templates ?? []}
       clients={clients ?? []}
-      appSettings={appSettings}
+      waConfig={waConfig ?? null}
     />
   )
 }

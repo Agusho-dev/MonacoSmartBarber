@@ -64,30 +64,25 @@ export async function sendMessage(
   content: string,
   staffId?: string
 ) {
-  try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-message`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        conversation_id: conversationId,
-        content,
-        staff_id: staffId,
-      }),
-    })
+  const supabase = createAdminClient()
 
-    const result = await res.json()
-    revalidatePath('/dashboard/mensajeria')
-    
-    if (!result.success) {
-      return { error: result.error || 'Error al enviar mensaje' }
-    }
-    return { success: true }
-  } catch {
-    return { error: 'Error de conexión al enviar mensaje' }
+  // Obtener conversación para conocer el teléfono y la plataforma
+  const { data: conv } = await supabase
+    .from('conversations')
+    .select('platform_user_id, channel:social_channels(platform)')
+    .eq('id', conversationId)
+    .single()
+
+  if (!conv) return { error: 'Conversación no encontrada' }
+
+  const platform = (conv.channel as any)?.platform as string | undefined
+
+  if (platform === 'whatsapp') {
+    const { sendMetaWhatsAppMessage } = await import('./whatsapp-meta')
+    return sendMetaWhatsAppMessage(conv.platform_user_id, content, conversationId, staffId)
   }
+
+  return { error: 'Plataforma no soportada aún' }
 }
 
 export async function sendTemplateMessage(

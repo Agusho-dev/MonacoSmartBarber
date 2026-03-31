@@ -42,6 +42,18 @@ export interface OrganizationMember {
   organization?: Organization
 }
 
+export interface OrgWhatsAppConfig {
+  id: string
+  organization_id: string
+  whatsapp_access_token: string | null
+  whatsapp_phone_id: string | null
+  whatsapp_business_id: string | null
+  verify_token: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
 export interface Branch {
   id: string
   organization_id: string
