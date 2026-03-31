@@ -72,6 +72,49 @@ export async function getOrgBranchIds(): Promise<string[]> {
 import { cookies } from 'next/headers'
 
 /**
+ * Selecciona una organización por su slug (acceso público).
+ * Setea la cookie active_organization para que las páginas públicas
+ * (checkin, barbero, TV) sepan qué org usar.
+ */
+export async function selectOrganizationBySlug(slug: string) {
+  if (!slug?.trim()) return { error: 'El slug es requerido' }
+
+  const supabase = createAdminClient()
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('id, name, slug, logo_url, is_active')
+    .eq('slug', slug.toLowerCase().trim())
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!org) return { error: 'Barbería no encontrada' }
+
+  const cookieStore = await cookies()
+  cookieStore.set('active_organization', org.id, { maxAge: 60 * 60 * 24 * 365, path: '/' })
+
+  return { success: true, organization: org }
+}
+
+/**
+ * Obtiene la organización activa desde la cookie (para páginas públicas).
+ */
+export async function getActiveOrganization() {
+  const cookieStore = await cookies()
+  const orgId = cookieStore.get('active_organization')?.value
+  if (!orgId) return null
+
+  const supabase = createAdminClient()
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('id, name, slug, logo_url, is_active')
+    .eq('id', orgId)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  return org
+}
+
+/**
  * Permite cambiar la organizacion activa de la sesion actual.
  * Modifica el app_metadata del usuario y establece una cookie.
  */
