@@ -15,13 +15,15 @@ export default async function MensajeriaPage() {
     { data: clients },
     { data: waConfig },
     { data: igConfig },
+    { data: tags },
   ] = await Promise.all([
     supabase
       .from('conversations')
       .select(`
         *,
         channel:social_channels(id, platform, display_name, branch_id),
-        client:clients(id, name, phone, instagram, notes)
+        client:clients(id, name, phone, instagram, notes),
+        tags:conversation_tag_assignments(tag_id, tag:conversation_tags(id, name, color))
       `)
       .order('last_message_at', { ascending: false, nullsFirst: false }),
     supabase
@@ -61,6 +63,14 @@ export default async function MensajeriaPage() {
           .maybeSingle()
           .then((r) => ({ data: r.data }))
       : Promise.resolve({ data: null }),
+    orgId
+      ? supabase
+          .from('conversation_tags')
+          .select('*')
+          .eq('organization_id', orgId)
+          .order('name')
+          .then((r) => ({ data: r.data }))
+      : Promise.resolve({ data: [] }),
   ])
 
   return (
@@ -71,6 +81,7 @@ export default async function MensajeriaPage() {
       clients={clients ?? []}
       waConfig={waConfig ?? null}
       igConfig={igConfig ?? null}
+      initialTags={tags ?? []}
     />
   )
 }

@@ -14,6 +14,7 @@ import { sendMessage as sendMessageAction, markAsRead, cancelScheduledMessage } 
 import { saveOrgWhatsAppConfig } from '@/lib/actions/whatsapp-meta'
 import { saveOrgInstagramConfig } from '@/lib/actions/instagram-meta'
 import { startConversation, updateConversationStatus, getClientVisits, scheduleMessageAuto } from '@/lib/actions/conversations'
+import { createConversationTag, deleteConversationTag, assignConversationTag, removeConversationTag } from '@/lib/actions/tags'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -24,7 +25,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { toast } from 'sonner'
-import type { Conversation, Message, SocialChannel, Client, OrgWhatsAppConfig, OrgInstagramConfig } from '@/lib/types/database'
+import type { Conversation, Message, SocialChannel, Client, OrgWhatsAppConfig, OrgInstagramConfig, ConversationTag } from '@/lib/types/database'
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -118,6 +119,7 @@ function formatCurrency(amount: number) {
 interface ConversationWithRelations extends Conversation {
   channel?: SocialChannel & { branch_id?: string }
   client?: Client
+  tags?: Array<{ tag_id: string; tag: ConversationTag }>
 }
 
 interface ScheduledWithRelations {
@@ -145,9 +147,16 @@ interface Props {
   clients: Pick<Client, 'id' | 'name' | 'phone'>[]
   waConfig: OrgWhatsAppConfig | null
   igConfig: OrgInstagramConfig | null
+  initialTags: ConversationTag[]
 }
 
-type SettingsTab = 'whatsapp' | 'instagram' | 'facebook'
+type SettingsTab = 'whatsapp' | 'instagram' | 'facebook' | 'tags'
+type PlatformFilter = 'all' | 'whatsapp' | 'instagram'
+
+const TAG_COLORS = [
+  '#22C55E', '#EF4444', '#F97316', '#EAB308',
+  '#06B6D4', '#3B82F6', '#8B5CF6', '#EC4899', '#6B7280',
+]
 
 // ─────────────────────────────────────────────
 // Main Component
@@ -159,6 +168,7 @@ export function MensajeriaClient({
   clients,
   waConfig: initialWaConfig,
   igConfig: initialIgConfig,
+  initialTags,
 }: Props) {
   const supabase = useMemo(() => createClient(), [])
 
@@ -172,11 +182,20 @@ export function MensajeriaClient({
   const [messageInput, setMessageInput] = useState('')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed' | 'archived'>('all')
+  const [platformFilter, setPlatformFilter] = useState<PlatformFilter>('all')
   const [showMobileChat, setShowMobileChat] = useState(false)
   const [activeTab, setActiveTab] = useState<'inbox' | 'scheduled'>('inbox')
   const [isSending, startSending] = useTransition()
   const [isActing, startActing] = useTransition()
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Tags
+  const [tags, setTags] = useState<ConversationTag[]>(initialTags)
+  const [tagFilter, setTagFilter] = useState<string | null>(null)
+  const [newTagName, setNewTagName] = useState('')
+  const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0])
+  const [creatingTag, startCreatingTag] = useTransition()
+  const [taggingConv, startTaggingConv] = useTransition()
 
   // Client profile panel
   const [showProfile, setShowProfile] = useState(false)
@@ -293,14 +312,16 @@ export function MensajeriaClient({
   // ── Filtered conversations ──
   const filteredConversations = useMemo(() => {
     return conversations.filter(c => {
+      if (platformFilter !== 'all' && c.channel?.platform !== platformFilter) return false
       if (statusFilter !== 'all' && c.status !== statusFilter) return false
+      if (tagFilter && !c.tags?.some(t => t.tag_id === tagFilter)) return false
       if (!search) return true
       const s = search.toLowerCase()
       const name = (c.client?.name || c.platform_user_name || '').toLowerCase()
       const phone = (c.client?.phone || c.platform_user_id || '').toLowerCase()
       return name.includes(s) || phone.includes(s)
     })
-  }, [conversations, statusFilter, search])
+  }, [conversations, platformFilter, statusFilter, tagFilter, search])
 
   const filteredClientsForNewChat = useMemo(() => {
     if (!newChatSearch) return clients.slice(0, 20)
@@ -419,6 +440,62 @@ export function MensajeriaClient({
     })
   }
 
+  // ── Tag handlers ──
+  const handleCreateTag = () => {
+    if (!newTagName.trim()) { toast.error('Escribí un nombre para la etiqueta'); return }
+    startCreatingTag(async () => {
+      const result = await createConversationTag(newTagName.trim(), newTagColor)
+      if (result.error) { toast.error(result.error) }
+      else {
+        toast.success('Etiqueta creada')
+        if (result.data) setTags(prev => [...prev, result.data as ConversationTag].sort((a, b) => a.name.localeCompare(b.name)))
+        setNewTagName('')
+      }
+    })
+  }
+
+  const handleDeleteTag = (tagId: string) => {
+    startCreatingTag(async () => {
+      const result = await deleteConversationTag(tagId)
+      if (result.error) { toast.error(result.error) }
+      else {
+        setTags(prev => prev.filter(t => t.id !== tagId))
+        if (tagFilter === tagId) setTagFilter(null)
+        setConversations(prev => prev.map(c => ({ ...c, tags: c.tags?.filter(t => t.tag_id !== tagId) })))
+        toast.success('Etiqueta eliminada')
+      }
+    })
+  }
+
+  const handleToggleTag = (conversationId: string, tagId: string) => {
+    const conv = conversations.find(c => c.id === conversationId)
+    if (!conv) return
+    const hasTag = conv.tags?.some(t => t.tag_id === tagId)
+    startTaggingConv(async () => {
+      if (hasTag) {
+        const result = await removeConversationTag(conversationId, tagId)
+        if (result.error) { toast.error(result.error); return }
+        setConversations(prev => prev.map(c =>
+          c.id === conversationId ? { ...c, tags: c.tags?.filter(t => t.tag_id !== tagId) } : c
+        ))
+        if (activeConv?.id === conversationId) {
+          setActiveConv(prev => prev ? { ...prev, tags: prev.tags?.filter(t => t.tag_id !== tagId) } : prev)
+        }
+      } else {
+        const tag = tags.find(t => t.id === tagId)
+        if (!tag) return
+        const result = await assignConversationTag(conversationId, tagId)
+        if (result.error) { toast.error(result.error); return }
+        setConversations(prev => prev.map(c =>
+          c.id === conversationId ? { ...c, tags: [...(c.tags ?? []), { tag_id: tagId, tag }] } : c
+        ))
+        if (activeConv?.id === conversationId) {
+          setActiveConv(prev => prev ? { ...prev, tags: [...(prev.tags ?? []), { tag_id: tagId, tag }] } : prev)
+        }
+      }
+    })
+  }
+
   // ── Save Instagram config ──
   const handleSaveIgConfig = () => {
     if (!igConfigForm.instagram_page_id || !igConfigForm.instagram_page_access_token) {
@@ -467,25 +544,38 @@ export function MensajeriaClient({
       <div className={`flex flex-col border-r border-white/5 bg-[#111B21] w-full max-w-sm shrink-0 ${showMobileChat ? 'hidden lg:flex' : 'flex'}`}>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 bg-[#202C33]">
-          <div className="flex items-center gap-2.5">
-            <WhatsAppIcon className="size-5 text-green-400" />
-            <span className="font-semibold text-white">WhatsApp</span>
-            {isConfigured ? <Wifi className="size-3.5 text-green-400" /> : <WifiOff className="size-3.5 text-orange-400" />}
+        <div className="bg-[#202C33]">
+          <div className="flex items-center justify-between px-4 py-2.5">
+            <span className="font-semibold text-white text-sm">Mensajería</span>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="icon" className={`size-8 ${activeTab === 'scheduled' ? 'text-green-400' : 'text-[#8696A0] hover:text-white'}`}
+                onClick={() => setActiveTab(activeTab === 'scheduled' ? 'inbox' : 'scheduled')} title="Mensajes programados">
+                <Calendar className="size-4" />
+              </Button>
+              <Button variant="ghost" size="icon" className="size-8 text-[#8696A0] hover:text-white"
+                onClick={() => setShowSettings(true)} title="Configuración">
+                <Settings className="size-4" />
+              </Button>
+              <Button variant="ghost" size="icon" className="size-8 text-green-400 hover:text-green-300"
+                onClick={() => setShowNewChat(true)} title="Nueva conversación">
+                <Pencil className="size-4" />
+              </Button>
+            </div>
           </div>
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" className={`size-8 ${activeTab === 'scheduled' ? 'text-green-400' : 'text-[#8696A0] hover:text-white'}`}
-              onClick={() => setActiveTab(activeTab === 'scheduled' ? 'inbox' : 'scheduled')} title="Mensajes programados">
-              <Calendar className="size-4" />
-            </Button>
-            <Button variant="ghost" size="icon" className="size-8 text-[#8696A0] hover:text-white"
-              onClick={() => setShowSettings(true)} title="Configuración">
-              <Settings className="size-4" />
-            </Button>
-            <Button variant="ghost" size="icon" className="size-8 text-green-400 hover:text-green-300"
-              onClick={() => setShowNewChat(true)} title="Nueva conversación">
-              <Pencil className="size-4" />
-            </Button>
+          {/* Platform filter tabs */}
+          <div className="flex px-3 pb-2 gap-1">
+            {([
+              { key: 'all', label: 'Todos' },
+              { key: 'whatsapp', label: 'WhatsApp' },
+              { key: 'instagram', label: 'Instagram' },
+            ] as { key: PlatformFilter; label: string }[]).map(({ key, label }) => (
+              <button key={key} onClick={() => setPlatformFilter(key)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${platformFilter === key ? 'bg-[#2A3942] text-white' : 'text-[#8696A0] hover:text-white'}`}>
+                {key === 'whatsapp' && <WhatsAppIcon className="size-3 text-green-400" />}
+                {key === 'instagram' && <Instagram className="size-3 text-pink-400" />}
+                {label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -506,6 +596,18 @@ export function MensajeriaClient({
                   </button>
                 ))}
               </div>
+              {tags.length > 0 && (
+                <div className="flex gap-1 flex-wrap">
+                  {tags.map(tag => (
+                    <button key={tag.id} onClick={() => setTagFilter(tagFilter === tag.id ? null : tag.id)}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border ${tagFilter === tag.id ? 'text-white border-transparent' : 'text-[#8696A0] border-white/10 hover:border-white/20'}`}
+                      style={tagFilter === tag.id ? { backgroundColor: tag.color, borderColor: tag.color } : {}}>
+                      <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                      {tag.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <ScrollArea className="flex-1">
@@ -566,6 +668,16 @@ export function MensajeriaClient({
                               </span>
                             )}
                           </div>
+                          {conv.tags && conv.tags.length > 0 && (
+                            <div className="flex gap-1 mt-1 flex-wrap">
+                              {conv.tags.map(({ tag_id, tag }) => (
+                                <span key={tag_id} className="px-1.5 py-0.5 rounded-full text-[9px] font-medium text-white"
+                                  style={{ backgroundColor: tag?.color ?? '#6B7280' }}>
+                                  {tag?.name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </button>
                     )
@@ -824,6 +936,29 @@ export function MensajeriaClient({
 
               <Separator className="bg-white/5" />
 
+              {/* Etiquetas */}
+              {tags.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-semibold text-[#8696A0] uppercase tracking-wider">Etiquetas</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {tags.map(tag => {
+                      const assigned = activeConv.tags?.some(t => t.tag_id === tag.id)
+                      return (
+                        <button key={tag.id} onClick={() => handleToggleTag(activeConv.id, tag.id)}
+                          disabled={taggingConv}
+                          className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium transition-all border ${assigned ? 'text-white border-transparent' : 'text-[#8696A0] border-white/10 hover:border-white/25'}`}
+                          style={assigned ? { backgroundColor: tag.color } : {}}>
+                          <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                          {tag.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <Separator className="bg-white/5" />
+
               {/* Historial de visitas */}
               <div className="space-y-2">
                 <p className="text-[10px] font-semibold text-[#8696A0] uppercase tracking-wider">Últimas visitas</p>
@@ -875,25 +1010,15 @@ export function MensajeriaClient({
           <div className="px-6 py-4 border-b border-white/5 shrink-0">
             <p className="font-semibold text-white mb-3">Canales conectados</p>
             {/* Platform tabs */}
-            <div className="flex gap-1 bg-[#202C33] p-1 rounded-lg">
-              {(['whatsapp', 'instagram', 'facebook'] as SettingsTab[]).map(tab => (
+            <div className="grid grid-cols-4 gap-1 bg-[#202C33] p-1 rounded-lg">
+              {(['whatsapp', 'instagram', 'facebook', 'tags'] as SettingsTab[]).map(tab => (
                 <button key={tab} onClick={() => setSettingsTab(tab)}
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors ${settingsTab === tab ? 'bg-[#2A3942] text-white' : 'text-[#8696A0] hover:text-white'}`}>
+                  className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-md text-[10px] font-medium transition-colors ${settingsTab === tab ? 'bg-[#2A3942] text-white' : 'text-[#8696A0] hover:text-white'}`}>
                   {tab === 'whatsapp' && <WhatsAppIcon className="size-3.5 text-green-400" />}
                   {tab === 'instagram' && <Instagram className="size-3.5 text-pink-400" />}
                   {tab === 'facebook' && <Facebook className="size-3.5 text-blue-400" />}
-                  <span className="capitalize">{tab === 'whatsapp' ? 'WhatsApp' : tab === 'instagram' ? 'Instagram' : 'Facebook'}</span>
-                  {tab === 'whatsapp' && (
-                    <span className={`text-[9px] px-1 rounded-full ${isConfigured ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
-                      {isConfigured ? '●' : '○'}
-                    </span>
-                  )}
-                  {tab === 'instagram' && (
-                    <span className={`text-[9px] px-1 rounded-full ${isInstagramConfigured ? 'bg-pink-500/20 text-pink-400' : 'bg-white/5 text-[#8696A0]'}`}>
-                      {isInstagramConfigured ? '●' : '○'}
-                    </span>
-                  )}
-                  {tab === 'facebook' && <span className="text-[9px] px-1 rounded-full bg-white/5 text-[#8696A0]">pronto</span>}
+                  {tab === 'tags' && <span className="text-base leading-none">🏷️</span>}
+                  <span>{tab === 'whatsapp' ? 'WA' : tab === 'instagram' ? 'IG' : tab === 'facebook' ? 'FB' : 'Tags'}</span>
                 </button>
               ))}
             </div>
@@ -1129,6 +1254,76 @@ export function MensajeriaClient({
                   ))}
                 </div>
                 <Badge variant="outline" className="border-blue-500/30 text-blue-400 bg-blue-500/5">Próximamente</Badge>
+              </div>
+            )}
+
+            {/* Tags tab */}
+            {settingsTab === 'tags' && (
+              <div className="space-y-5">
+                <div>
+                  <p className="text-xs font-semibold text-white mb-1">Gestión de etiquetas</p>
+                  <p className="text-[11px] text-[#8696A0]">Las etiquetas se aplican a conversaciones de cualquier plataforma para organizar tu inbox.</p>
+                </div>
+
+                {/* Crear etiqueta */}
+                <div className="space-y-3">
+                  <Label className="text-[11px] text-[#8696A0] uppercase tracking-wider">Nueva etiqueta</Label>
+                  <div className="flex gap-2">
+                    <input
+                      className="flex-1 rounded-lg bg-[#202C33] px-3 py-2 text-sm text-white placeholder:text-[#8696A0] outline-none focus:ring-1 focus:ring-white/20"
+                      placeholder="Ej: VIP, Seguimiento, Nuevo cliente..."
+                      value={newTagName}
+                      onChange={e => setNewTagName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleCreateTag() }}
+                    />
+                    <Button size="sm" onClick={handleCreateTag} disabled={creatingTag || !newTagName.trim()}
+                      className="shrink-0 bg-white/10 hover:bg-white/15 text-white border-0">
+                      <Plus className="size-3.5" />
+                    </Button>
+                  </div>
+                  {/* Paleta de colores */}
+                  <div className="flex gap-2 flex-wrap">
+                    {TAG_COLORS.map(color => (
+                      <button key={color} onClick={() => setNewTagColor(color)}
+                        className={`size-6 rounded-full transition-transform hover:scale-110 ${newTagColor === color ? 'ring-2 ring-white ring-offset-1 ring-offset-[#111B21]' : ''}`}
+                        style={{ backgroundColor: color }} />
+                    ))}
+                  </div>
+                  {/* Preview */}
+                  {newTagName.trim() && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-[#8696A0]">Vista previa:</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-medium text-white" style={{ backgroundColor: newTagColor }}>
+                        {newTagName.trim()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <Separator className="bg-white/5" />
+
+                {/* Lista de etiquetas existentes */}
+                <div className="space-y-2">
+                  <Label className="text-[11px] text-[#8696A0] uppercase tracking-wider">Etiquetas creadas ({tags.length})</Label>
+                  {tags.length === 0 ? (
+                    <p className="text-xs text-[#8696A0] italic py-2">Todavía no creaste ninguna etiqueta</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {tags.map(tag => (
+                        <div key={tag.id} className="flex items-center justify-between gap-2 rounded-lg bg-[#202C33] px-3 py-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="size-3 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                            <span className="text-sm text-white truncate">{tag.name}</span>
+                          </div>
+                          <button onClick={() => handleDeleteTag(tag.id)} disabled={creatingTag}
+                            className="shrink-0 text-[#8696A0] hover:text-red-400 transition-colors">
+                            <X className="size-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

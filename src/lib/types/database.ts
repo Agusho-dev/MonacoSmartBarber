@@ -42,6 +42,21 @@ export interface OrganizationMember {
   organization?: Organization
 }
 
+export interface ConversationTag {
+  id: string
+  organization_id: string
+  name: string
+  color: string
+  created_at: string
+}
+
+export interface ConversationTagAssignment {
+  conversation_id: string
+  tag_id: string
+  tag?: ConversationTag
+  created_at: string
+}
+
 export interface OrgWhatsAppConfig {
   id: string
   organization_id: string
