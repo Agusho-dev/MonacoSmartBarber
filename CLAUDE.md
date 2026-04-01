@@ -15,7 +15,7 @@ npm run lint     # ESLint
 npm start        # Run production build
 ```
 
-No test framework is configured. Database migrations are applied with `supabase db push`.
+No test framework is configured. Database migrations are applied with `supabase db push`. Edge functions are deployed with `supabase functions deploy <name>`.
 
 ## Architecture
 
@@ -51,7 +51,7 @@ src/
 │   ├── barber/             # Barber panel components
 │   └── checkin/            # Check-in kiosk components
 ├── lib/
-│   ├── actions/            # Server actions (25 files, one per domain)
+│   ├── actions/            # Server actions (~35 files, one per domain)
 │   ├── supabase/           # Supabase client factories
 │   ├── types/database.ts   # All TypeScript interfaces for DB tables
 │   ├── permissions.ts      # Role-based permission checks
@@ -62,9 +62,26 @@ src/
     └── branch-store.ts     # Zustand store for branch filtering
 ```
 
+### Multi-tenant organizations
+
+Migrations 047+ added a multi-org layer. Each barber shop is an `organizations` row. Staff belong to an org via `organization_id` on the `staff` table; owners/admins can also belong via `organization_members`. `getCurrentOrgId()` in `src/lib/actions/org.ts` resolves the active org from the session cookie. The dashboard layout (`src/app/dashboard/layout.tsx`) uses this to scope all queries.
+
+Role-based access also supports per-branch scoping via the `role_branch_scope` table — non-owner roles can be restricted to specific branch IDs.
+
+### Messaging integrations
+
+`supabase/functions/wa-incoming/` handles inbound WhatsApp/Instagram webhooks (Meta Business API). `supabase/functions/process-scheduled-messages/` sends queued outbound messages on a cron. Server actions for messaging live in `src/lib/actions/messaging.ts`, `whatsapp-meta.ts`, `instagram-meta.ts`, `conversations.ts`, and `tags.ts`.
+
 ### Realtime
 
-Supabase Realtime WebSocket subscriptions on `queue_entries` power the live queue in the barber panel and TV display.
+Supabase Realtime WebSocket subscriptions on `queue_entries` and `staff` power the live queue in the barber panel and TV display.
+
+### Edge Functions
+
+`supabase/functions/` contains three Deno functions:
+- `wa-incoming` — inbound webhook for WhatsApp & Instagram messages
+- `process-scheduled-messages` — cron-triggered outbound message sender
+- `client-auth` — mobile app client authentication
 
 ## Conventions
 
@@ -78,7 +95,7 @@ Supabase Realtime WebSocket subscriptions on `queue_entries` power the live queu
 
 ## SQL Migrations
 
-Located in `supabase/migrations/`, numbered sequentially (`001_*.sql` through `035_*.sql`). Always use `IF NOT EXISTS`/`IF EXISTS` for idempotency. Comments in Spanish. Migrations 030-035 added mobile app support — changes to those tables affect the Flutter app.
+Located in `supabase/migrations/`, numbered sequentially (currently `001` through `056`). Always use `IF NOT EXISTS`/`IF EXISTS` for idempotency. Comments in Spanish. Migrations 030–036 added mobile app support; 047–051 added multi-tenant org support. Changes to those tables affect the Flutter mobile app (`../Monaco-mobile`).
 
 ## Environment Variables
 

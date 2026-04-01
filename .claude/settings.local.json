@@ -8,7 +8,20 @@
       "Read(//Users/ignaciobaldovino/MSB_FULL/branding/**)",
       "Bash(for file:*)",
       "Bash(do if:*)",
-      "Bash(then echo:*)"
+      "Bash(then echo:*)",
+      "Bash(grep -r \"DROP POLICY IF EXISTS\" /mnt/c/Users/Agust/MonacoSmartBarber-1/supabase/migrations/*.sql)",
+      "Bash(grep -r \"hardcoded\\\\|TODO\\\\|FIXME\\\\|HACK\\\\|XXX\" /mnt/c/Users/Agust/MonacoSmartBarber-1/src --include=*.ts --include=*.tsx)",
+      "Bash(grep -r \"console\\\\.\\\\\\(log\\\\|error\\\\|warn\\\\\\)\" /mnt/c/Users/Agust/MonacoSmartBarber-1/supabase/functions --include=*.ts)",
+      "Bash(grep -r \"CREATE POLICY\" /mnt/c/Users/Agust/MonacoSmartBarber-1/supabase/migrations/*.sql)",
+      "Bash(grep -r \"email.*verif\\\\|password.*reset\\\\|confirm.*email\\\\|2fa\\\\|mfa\\\\|otp\" /mnt/c/Users/Agust/MonacoSmartBarber-1/src --include=*.ts --include=*.tsx)",
+      "Bash(grep -l \"ENABLE ROW LEVEL SECURITY\\\\|RLS\\\\|POLICY\" /mnt/c/Users/Agust/MonacoSmartBarber-1/supabase/migrations/*.sql)",
+      "Bash(grep -r \"subscription\\\\|plan.*limit\\\\|feature.*limit\\\\|usage.*limit\" /mnt/c/Users/Agust/MonacoSmartBarber-1/supabase/migrations --include=*.sql)",
+      "Bash(grep -r \"function.*verify\\\\|HMAC\\\\|crypto\" /mnt/c/Users/Agust/MonacoSmartBarber-1/supabase --include=*.ts)",
+      "Bash(npm install:*)",
+      "Bash(node -e \"require\\(''react-markdown''\\); console.log\\(''ok''\\)\")",
+      "Bash(grep '\"\"react-markdown\"\"' package.json)",
+      "Bash(npx tsc:*)",
+      "Bash(wc -l /mnt/c/Users/Agust/MonacoSmartBarber-1/src/app/dashboard/*-client.tsx /mnt/c/Users/Agust/MonacoSmartBarber-1/src/app/dashboard/**/*-client.tsx /mnt/c/Users/Agust/MonacoSmartBarber-1/src/components/barber/*.tsx /mnt/c/Users/Agust/MonacoSmartBarber-1/src/components/checkin/*.tsx)"
     ]
   },
   "enabledMcpjsonServers": [
