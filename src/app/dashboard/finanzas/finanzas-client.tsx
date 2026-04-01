@@ -56,6 +56,7 @@ const PERIOD_OPTIONS = [
   { value: '6', label: '6 meses' },
   { value: '12', label: '12 meses' },
   { value: '24', label: '24 meses' },
+  { value: '0', label: 'Desde el inicio' },
 ]
 
 const COLORS = {
@@ -175,6 +176,12 @@ export function FinanzasClient({
 
   const { totals, breakEven } = data
   const isPositive = totals.netProfit >= 0
+
+  // Enriquecer cada mes con el ingreso del mes anterior para mostrarlo en el tooltip
+  const chartMonths = data.months.map((m, i) => ({
+    ...m,
+    prevRevenue: i > 0 ? data.months[i - 1].revenue : -1,
+  }))
 
   const balancePieData = accountBalances.filter(a => a.balance > 0)
   const totalExpensesPie = expensesByCategory.reduce((s, e) => s + e.amount, 0)
@@ -332,7 +339,7 @@ export function FinanzasClient({
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={280} className="md:!h-[350px]">
-                <ComposedChart data={data.months} barGap={0}>
+                <ComposedChart data={chartMonths} barGap={0}>
                   <CartesianGrid
                     strokeDasharray="3 3"
                     stroke={COLORS.grid}
@@ -826,6 +833,17 @@ function FinanceTooltip({
   label,
 }: Record<string, unknown>) {
   if (!active || !Array.isArray(payload) || payload.length === 0) return null
+  // Buscar variación de ingresos vs mes anterior desde el payload del gráfico
+  const revenueEntry = payload.find((p: Record<string, unknown>) => p.dataKey === 'revenue')
+  const currentRevenue = revenueEntry ? Number((revenueEntry as Record<string, unknown>).value) : null
+  const prevRevenue = revenueEntry
+    ? Number(((revenueEntry as Record<string, unknown>).payload as Record<string, unknown>)?.prevRevenue ?? -1)
+    : null
+  const hasPrev = prevRevenue !== null && prevRevenue >= 0
+  const pctChange = hasPrev && prevRevenue > 0 && currentRevenue !== null
+    ? Math.round(((currentRevenue - prevRevenue) / prevRevenue) * 100)
+    : null
+
   return (
     <div className="rounded-lg border bg-card p-3 shadow-md">
       <p className="mb-2 text-sm font-medium text-foreground">{String(label)}</p>
@@ -834,6 +852,11 @@ function FinanceTooltip({
           {String(p.name)}: {formatCurrency(Number(p.value))}
         </p>
       ))}
+      {pctChange !== null && (
+        <p className={`mt-1.5 text-xs font-medium border-t border-border pt-1.5 ${pctChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+          Ingresos: {pctChange >= 0 ? '+' : ''}{pctChange}% vs mes anterior
+        </p>
+      )}
     </div>
   )
 }

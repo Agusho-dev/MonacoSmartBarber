@@ -99,12 +99,10 @@ function monthLabel(ym: string): string {
 }
 
 export async function fetchFinancialData(
-  monthsBack: number,
+  monthsBack: number,   // 0 = desde el primer registro histórico
   branchId?: string | null
 ): Promise<FinancialSummary> {
   const supabase = await createClient()
-
-  const { start: startDateStr, end: endDateStr } = getMonthBoundsStr(monthsBack)
   const localNow = getLocalNow()
 
   // Resolver el scope de branches para filtrar: una sucursal específica o todas las de la org
@@ -112,6 +110,33 @@ export async function fetchFinancialData(
   if (!branchId) {
     orgBranchIds = await getOrgBranchIds()
   }
+
+  // Si monthsBack === 0, detectar el primer mes con registros para mostrar todo el historial
+  let actualMonthsBack = monthsBack
+  if (monthsBack === 0) {
+    let eq = supabase
+      .from('visits')
+      .select('completed_at')
+      .order('completed_at', { ascending: true })
+      .limit(1)
+    if (branchId) {
+      eq = eq.eq('branch_id', branchId)
+    } else {
+      eq = eq.in('branch_id', orgBranchIds)
+    }
+    const { data: earliest } = await eq
+    if (earliest && earliest.length > 0) {
+      const firstDate = new Date(earliest[0].completed_at)
+      const monthsDiff =
+        (localNow.getUTCFullYear() - firstDate.getUTCFullYear()) * 12 +
+        (localNow.getUTCMonth() - firstDate.getUTCMonth()) + 1
+      actualMonthsBack = Math.max(monthsDiff, 1)
+    } else {
+      actualMonthsBack = 12
+    }
+  }
+
+  const { start: startDateStr, end: endDateStr } = getMonthBoundsStr(actualMonthsBack)
 
   // Visits en el rango — incluye barber_id para el desglose por barbero
   let vq = supabase
@@ -182,9 +207,9 @@ export async function fetchFinancialData(
 
   // Inicializar todos los meses usando hora local para agrupar
   const monthMap = new Map<string, { revenue: number; commissions: number; cuts: number; variableExp: number; bonuses: number; advances: number; salaryPayments: number; baseSalaryPaid: number }>()
-  for (let i = 0; i < monthsBack; i++) {
-    let year = localNow.getFullYear()
-    let monthIndex = localNow.getMonth() - i
+  for (let i = 0; i < actualMonthsBack; i++) {
+    let year = localNow.getUTCFullYear()
+    let monthIndex = localNow.getUTCMonth() - i
     while (monthIndex < 0) {
       monthIndex += 12
       year -= 1
@@ -356,14 +381,22 @@ export async function fetchFinancialData(
     .filter(s => s.revenue > 0)
     .sort((a, b) => b.revenue - a.revenue)
 
-  // ── MoM: comparar el último mes vs el penúltimo ──
+  // ── MoM: comparar el último mes COMPLETO vs el penúltimo ──
   function pctChange(current: number, previous: number): number | null {
     if (previous === 0) return null
     return Math.round(((current - previous) / Math.abs(previous)) * 100)
   }
 
-  const lastMonth = months[months.length - 1]
-  const prevMonth = months.length >= 2 ? months[months.length - 2] : null
+  // Si el último mes del array es el mes actual sin datos (recién comenzó),
+  // la comparación significativa es el penúltimo vs el antepenúltimo.
+  const currentYM = `${localNow.getUTCFullYear()}-${String(localNow.getUTCMonth() + 1).padStart(2, '0')}`
+  const actualLastMonth = months[months.length - 1]
+  const currentMonthIsEmpty = actualLastMonth?.month === currentYM
+    && actualLastMonth.revenue === 0
+    && actualLastMonth.cuts === 0
+  const momBaseIdx = currentMonthIsEmpty ? months.length - 2 : months.length - 1
+  const lastMonth = months[momBaseIdx] ?? actualLastMonth
+  const prevMonth = momBaseIdx >= 1 ? months[momBaseIdx - 1] : null
 
   const momChange: MoMChange = {
     revenue: prevMonth ? pctChange(lastMonth.revenue, prevMonth.revenue) : null,
@@ -395,8 +428,8 @@ export async function fetchFinancialData(
     },
     // Nuevos campos
     momChange,
-    currentMonthCuts: lastMonth?.cuts ?? 0,
-    currentMonthRevenue: lastMonth?.revenue ?? 0,
+    currentMonthCuts: actualLastMonth?.cuts ?? 0,
+    currentMonthRevenue: actualLastMonth?.revenue ?? 0,
     barberPerformance,
     serviceRevenue,
   }
