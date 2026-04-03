@@ -142,7 +142,7 @@ function QueueCard({
   // Evitar error visual de dnd-kit origin
   const style = {
     transform: CSS.Transform.toString(transform),
-    transition,
+    transition: transition ?? 'transform 200ms cubic-bezier(0.25, 1, 0.5, 1)',
   }
 
   const isBreak = entry.is_break
@@ -825,7 +825,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 12 } }),
     useSensor(KeyboardSensor)
   )
 
@@ -1327,6 +1327,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   }
 
   const dropAnimation = {
+    duration: 250,
+    easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
     sideEffects: defaultDropAnimationSideEffects({
       styles: {
         active: {

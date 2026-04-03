@@ -123,7 +123,7 @@ export function FinanzasClient({
 }: Props) {
   const { selectedBranchId } = useBranchStore()
   const [data, setData] = useState(initialData)
-  const [period, setPeriod] = useState('6')
+  const [period, setPeriod] = useState('1')
   const [monthOffset, setMonthOffset] = useState(0) // 0 = mes actual, 1 = mes pasado, etc.
   const [isPending, startTransition] = useTransition()
   const [accountBalances, setAccountBalances] = useState<AccountBalance[]>([])
