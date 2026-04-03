@@ -100,10 +100,18 @@ function monthLabel(ym: string): string {
 
 export async function fetchFinancialData(
   monthsBack: number,   // 0 = desde el primer registro histórico
-  branchId?: string | null
+  branchId?: string | null,
+  endMonth?: string | null  // "YYYY-MM" — si se pasa, se usa como mes final en vez del actual
 ): Promise<FinancialSummary> {
   const supabase = await createClient()
-  const localNow = getLocalNow()
+  let localNow = getLocalNow()
+
+  // Si se especifica un mes final, usarlo como referencia en vez del mes actual
+  if (endMonth) {
+    const [ey, em] = endMonth.split('-').map(Number)
+    // Último día del mes solicitado, a las 23:59:59 UTC
+    localNow = new Date(Date.UTC(ey, em - 1, 15))
+  }
 
   // Resolver el scope de branches para filtrar: una sucursal específica o todas las de la org
   let orgBranchIds: string[] = []
@@ -136,36 +144,50 @@ export async function fetchFinancialData(
     }
   }
 
-  const { start: startDateStr, end: endDateStr } = getMonthBoundsStr(actualMonthsBack)
+  const { start: startDateStr, end: endDateStr } = getMonthBoundsStr(actualMonthsBack, 'America/Argentina/Buenos_Aires', localNow)
 
-  // Visits en el rango — incluye barber_id para el desglose por barbero
+  // ── Queries paralelas: todas las fuentes de datos del rango ──
+  const branchFilter = <T extends { eq: (col: string, val: string) => T; in: (col: string, vals: string[]) => T }>(q: T, col = 'branch_id') =>
+    branchId ? q.eq(col, branchId) : q.in(col, orgBranchIds)
+
   let vq = supabase
     .from('visits')
     .select('amount, commission_amount, completed_at, branch_id, service_id, queue_entry_id, barber_id')
     .gte('completed_at', startDateStr)
     .lte('completed_at', endDateStr)
-  if (branchId) {
-    vq = vq.eq('branch_id', branchId)
-  } else {
-    vq = vq.in('branch_id', orgBranchIds)
-  }
-  const { data: visits } = await vq
+  vq = branchFilter(vq)
 
-  // Todos los gastos fijos (activos e inactivos) con created_at para cálculo histórico preciso
   let fq = supabase
     .from('fixed_expenses')
     .select('amount, branch_id, created_at, is_active')
-  if (branchId) {
-    fq = fq.eq('branch_id', branchId)
-  } else {
-    fq = fq.in('branch_id', orgBranchIds)
-  }
-  const { data: allFixedExpenses } = await fq
+  fq = branchFilter(fq)
+
+  let eq = supabase
+    .from('expense_tickets')
+    .select('amount, expense_date, branch_id')
+    .gte('expense_date', startDateStr.slice(0, 10))
+    .lte('expense_date', endDateStr.slice(0, 10))
+  eq = branchFilter(eq)
+
+  let sq = supabase
+    .from('salary_reports')
+    .select('type, amount, report_date, status')
+    .in('type', ['bonus', 'advance', 'commission', 'base_salary', 'hybrid_deficit'])
+    .eq('status', 'paid')
+    .gte('report_date', startDateStr.slice(0, 10))
+    .lte('report_date', endDateStr.slice(0, 10))
+  sq = branchFilter(sq)
+
+  const [
+    { data: visits },
+    { data: allFixedExpenses },
+    { data: variableExpenses },
+    { data: salaryReports },
+  ] = await Promise.all([vq, fq, eq, sq])
 
   // Calcula los gastos fijos que existían al final de un mes dado
   function getHistoricalFixedForMonth(ym: string): number {
     const [y, m] = ym.split('-')
-    // Último instante del mes
     const monthEnd = new Date(Number(y), Number(m), 0, 23, 59, 59, 999)
     return (allFixedExpenses ?? [])
       .filter(e => new Date(e.created_at) <= monthEnd)
@@ -176,34 +198,6 @@ export async function fetchFinancialData(
   const currentMonthlyFixed = (allFixedExpenses ?? [])
     .filter(e => e.is_active)
     .reduce((s, e) => s + Number(e.amount), 0)
-
-  // Gastos variables (expense_tickets) en el rango
-  let eq = supabase
-    .from('expense_tickets')
-    .select('amount, expense_date, branch_id')
-    .gte('expense_date', startDateStr.slice(0, 10))
-    .lte('expense_date', endDateStr.slice(0, 10))
-  if (branchId) {
-    eq = eq.eq('branch_id', branchId)
-  } else {
-    eq = eq.in('branch_id', orgBranchIds)
-  }
-  const { data: variableExpenses } = await eq
-
-  // Reportes salariales (bonos, adelantos, pagos) en el rango
-  let sq = supabase
-    .from('salary_reports')
-    .select('type, amount, report_date, status')
-    .in('type', ['bonus', 'advance', 'commission', 'base_salary', 'hybrid_deficit'])
-    .eq('status', 'paid')
-    .gte('report_date', startDateStr.slice(0, 10))
-    .lte('report_date', endDateStr.slice(0, 10))
-  if (branchId) {
-    sq = sq.eq('branch_id', branchId)
-  } else {
-    sq = sq.in('branch_id', orgBranchIds)
-  }
-  const { data: salaryReports } = await sq
 
   // Inicializar todos los meses usando hora local para agrupar
   const monthMap = new Map<string, { revenue: number; commissions: number; cuts: number; variableExp: number; bonuses: number; advances: number; salaryPayments: number; baseSalaryPaid: number }>()
@@ -325,16 +319,31 @@ export async function fetchFinancialData(
     barberMap.set(v.barber_id, b)
   }
 
-  // Obtener nombres de barberos en una sola consulta
-  const barberIds = [...barberMap.keys()]
-  let staffNames: Record<string, string> = {}
-  if (barberIds.length > 0) {
-    const { data: staffData } = await supabase
-      .from('staff')
-      .select('id, full_name')
-      .in('id', barberIds)
-    staffNames = Object.fromEntries((staffData ?? []).map(s => [s.id, s.full_name]))
+  // ── Ingresos por servicio (agregar antes del fetch paralelo) ──
+  const serviceMap = new Map<string, { revenue: number; cuts: number }>()
+  for (const v of visits ?? []) {
+    const key = v.service_id ?? '__sin_servicio__'
+    const s = serviceMap.get(key) ?? { revenue: 0, cuts: 0 }
+    s.revenue += Number(v.amount)
+    if (v.service_id || v.queue_entry_id) s.cuts++
+    serviceMap.set(key, s)
   }
+
+  // Fetch paralelo: nombres de barberos + nombres de servicios
+  const barberIds = [...barberMap.keys()]
+  const serviceIds = [...serviceMap.keys()].filter((id): id is string => id !== '__sin_servicio__' && id !== null)
+
+  const [staffNamesRaw, serviceNamesRaw] = await Promise.all([
+    barberIds.length > 0
+      ? supabase.from('staff').select('id, full_name').in('id', barberIds).then(r => r.data)
+      : Promise.resolve(null),
+    serviceIds.length > 0
+      ? supabase.from('services').select('id, name').in('id', serviceIds).then(r => r.data)
+      : Promise.resolve(null),
+  ])
+
+  const staffNames: Record<string, string> = Object.fromEntries((staffNamesRaw ?? []).map(s => [s.id, s.full_name]))
+  const serviceNames: Record<string, string> = Object.fromEntries((serviceNamesRaw ?? []).map(s => [s.id, s.name]))
 
   const barberPerformance: BarberPerformance[] = [...barberMap.entries()]
     .map(([staffId, d]) => ({
@@ -348,27 +357,6 @@ export async function fetchFinancialData(
       marginPct: d.revenue > 0 ? Math.round(((d.revenue - d.commissions) / d.revenue) * 100) : 0,
     }))
     .sort((a, b) => b.revenue - a.revenue)
-
-  // ── Ingresos por servicio ──
-  const serviceMap = new Map<string, { revenue: number; cuts: number }>()
-  for (const v of visits ?? []) {
-    const key = v.service_id ?? '__sin_servicio__'
-    const s = serviceMap.get(key) ?? { revenue: 0, cuts: 0 }
-    s.revenue += Number(v.amount)
-    if (v.service_id || v.queue_entry_id) s.cuts++
-    serviceMap.set(key, s)
-  }
-
-  // Obtener nombres de servicios en una sola consulta
-  const serviceIds = [...serviceMap.keys()].filter((id): id is string => id !== '__sin_servicio__' && id !== null)
-  let serviceNames: Record<string, string> = {}
-  if (serviceIds.length > 0) {
-    const { data: servicesData } = await supabase
-      .from('services')
-      .select('id, name')
-      .in('id', serviceIds)
-    serviceNames = Object.fromEntries((servicesData ?? []).map(s => [s.id, s.name]))
-  }
 
   const serviceRevenue: ServiceRevenue[] = [...serviceMap.entries()]
     .map(([serviceId, d]) => ({

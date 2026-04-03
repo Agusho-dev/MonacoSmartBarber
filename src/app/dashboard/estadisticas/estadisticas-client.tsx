@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useEffect, useCallback } from 'react'
+import { useState, useTransition, useEffect, useCallback, useRef } from 'react'
 import { startOfMonth, endOfDay, format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
@@ -105,7 +105,13 @@ export function EstadisticasClient({ initialData, branches }: Props) {
     [from, to, selectedBranchId]
   )
 
+  // Evitar re-fetch duplicado en el primer render (los datos ya vienen del server)
+  const isFirstRender = useRef(true)
   useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
     refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranchId])

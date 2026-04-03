@@ -213,7 +213,6 @@ export async function getAllAccountBalanceTotals(branchId?: string | null) {
   let accountsQuery = supabase
     .from('payment_accounts')
     .select('id, name')
-    .eq('is_active', true)
     .order('sort_order')
 
   if (branchId) {
@@ -224,40 +223,36 @@ export async function getAllAccountBalanceTotals(branchId?: string | null) {
     accountsQuery = accountsQuery.in('branch_id', orgBranchIds)
   }
 
-  const { data: accounts } = await accountsQuery
-  const accountIds = accounts?.map(a => a.id) || []
-
-  // Fetch transfers and expenses for real accounts
-  const [
-    { data: allTransfers },
-    { data: allExpenses },
-  ] = await Promise.all([
-    accountIds.length > 0
-      ? supabase.from('transfer_logs').select('payment_account_id, amount').in('payment_account_id', accountIds)
-      : Promise.resolve({ data: [] }),
-    accountIds.length > 0
-      ? supabase.from('expense_tickets').select('payment_account_id, amount').in('payment_account_id', accountIds)
-      : Promise.resolve({ data: [] }),
-  ])
-  
-  // Calculate cash balance
-  // Income from cash visits
+  // Preparar query de cash en paralelo con la de cuentas
   let cashVisitsQuery = supabase
     .from('visits')
     .select('amount')
     .eq('payment_method', 'cash')
   if (branchId) cashVisitsQuery = cashVisitsQuery.eq('branch_id', branchId)
-  
-  // Expenses in cash (no payment account)
+
   let cashExpensesQuery = supabase
     .from('expense_tickets')
     .select('amount')
     .is('payment_account_id', null)
   if (branchId) cashExpensesQuery = cashExpensesQuery.eq('branch_id', branchId)
 
-  const [{ data: cashVisits }, { data: cashExpenses }] = await Promise.all([
+  // Fetch cuentas + cash en paralelo
+  const [{ data: accounts }, { data: cashVisits }, { data: cashExpenses }] = await Promise.all([
+    accountsQuery,
     cashVisitsQuery,
-    cashExpensesQuery
+    cashExpensesQuery,
+  ])
+
+  const accountIds = accounts?.map(a => a.id) || []
+
+  // Transfers + expenses de cuentas en paralelo
+  const [{ data: allTransfers }, { data: allExpenses }] = await Promise.all([
+    accountIds.length > 0
+      ? supabase.from('transfer_logs').select('payment_account_id, amount').in('payment_account_id', accountIds)
+      : Promise.resolve({ data: [] as { payment_account_id: string; amount: number }[] }),
+    accountIds.length > 0
+      ? supabase.from('expense_tickets').select('payment_account_id, amount').in('payment_account_id', accountIds)
+      : Promise.resolve({ data: [] as { payment_account_id: string; amount: number }[] }),
   ])
 
   const cashIncome = (cashVisits ?? []).reduce((s, v) => s + Number(v.amount), 0)

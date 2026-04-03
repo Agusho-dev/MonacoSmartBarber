@@ -44,8 +44,8 @@ export function getLocalDayBounds(timeZone = 'America/Argentina/Buenos_Aires'): 
   };
 }
 
-export function getMonthBoundsStr(monthsBack: number, timeZone = 'America/Argentina/Buenos_Aires'): { start: string, end: string } {
-    const localNow = getLocalNow(timeZone);
+export function getMonthBoundsStr(monthsBack: number, timeZone = 'America/Argentina/Buenos_Aires', referenceDate?: Date): { start: string, end: string } {
+    const localNow = referenceDate ?? getLocalNow(timeZone);
     const y = localNow.getUTCFullYear();
     const m = localNow.getUTCMonth(); // 0-11
     
