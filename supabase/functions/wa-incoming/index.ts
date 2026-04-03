@@ -21,8 +21,8 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json()
-    // body: { phone: "+549...", message: "texto", timestamp: 1234567890 }
-    const { phone, message, timestamp } = body
+    // body: { phone: "+549...", message: "texto", timestamp: 1234567890, org_id?: "uuid", branch_id?: "uuid" }
+    const { phone, message, timestamp, org_id, branch_id } = body
 
     if (!phone || !message) {
       return new Response(
@@ -31,29 +31,60 @@ Deno.serve(async (req: Request) => {
       )
     }
 
+    if (!org_id && !branch_id) {
+      return new Response(
+        JSON.stringify({ error: 'org_id o branch_id es requerido para identificar la organización' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
     const phoneClean = (phone as string).replace(/\D/g, '')
 
-    // Buscar canal WhatsApp activo
+    // Resolver organization_id desde org_id directo o desde branch_id
+    let organizationId: string | null = org_id || null
+    if (!organizationId && branch_id) {
+      const { data: branchData } = await supabase
+        .from('branches')
+        .select('organization_id')
+        .eq('id', branch_id)
+        .maybeSingle()
+      organizationId = branchData?.organization_id ?? null
+    }
+
+    if (!organizationId) {
+      return new Response(
+        JSON.stringify({ error: 'No se pudo resolver la organización' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Buscar canal WhatsApp activo filtrado por organización (via branch)
     const { data: waChannel } = await supabase
       .from('social_channels')
-      .select('id')
+      .select('id, branch_id')
       .eq('platform', 'whatsapp')
       .eq('is_active', true)
+      .in('branch_id', (await supabase
+        .from('branches')
+        .select('id')
+        .eq('organization_id', organizationId)
+      ).data?.map((b: { id: string }) => b.id) ?? [])
       .limit(1)
       .maybeSingle()
 
     if (!waChannel) {
       return new Response(
-        JSON.stringify({ error: 'No hay canal WhatsApp configurado' }),
+        JSON.stringify({ error: 'No hay canal WhatsApp configurado para esta organización' }),
         { status: 422, headers: { 'Content-Type': 'application/json' } }
       )
     }
 
-    // Buscar cliente por teléfono
+    // Buscar cliente por teléfono dentro de la organización
     const { data: client } = await supabase
       .from('clients')
       .select('id, name')
       .eq('phone', phone)
+      .eq('organization_id', organizationId)
       .maybeSingle()
 
     // Buscar o crear conversación

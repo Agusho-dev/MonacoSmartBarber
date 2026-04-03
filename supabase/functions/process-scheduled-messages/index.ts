@@ -16,39 +16,79 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // Obtener config del microservicio WA
-    const { data: settings } = await supabase
-      .from('app_settings')
-      .select('wa_api_url')
-      .maybeSingle()
-
-    const waApiUrl = (settings as any)?.wa_api_url as string | null
     const waApiKey = Deno.env.get('WA_API_KEY')
 
     // Obtener mensajes pendientes cuyo scheduled_for ya pasó (máx 10 por tick)
+    // Incluir channel_id para resolver la org de cada mensaje
     const { data: pendingMessages, error } = await supabase
       .from('scheduled_messages')
-      .select('id, phone, content, client_id')
+      .select('id, phone, content, client_id, channel_id')
       .eq('status', 'pending')
       .lte('scheduled_for', new Date().toISOString())
       .limit(10)
 
     if (error) throw error
 
-    // Buscar canal WhatsApp activo una sola vez, fuera del loop
-    const { data: waChannel } = await supabase
-      .from('social_channels')
-      .select('id')
-      .eq('platform', 'whatsapp')
-      .eq('is_active', true)
-      .limit(1)
-      .maybeSingle()
+    // Cache de configuración por org_id para no repetir queries
+    const orgSettingsCache = new Map<string, { wa_api_url: string | null }>()
+    const orgChannelCache = new Map<string, { id: string } | null>()
 
     const results: Array<{ id: string; sent: boolean; error: string | null }> = []
 
     for (const msg of (pendingMessages ?? [])) {
       let sent = false
       let errorMsg: string | null = null
+
+      // Resolver organization_id del mensaje:
+      // 1. Via channel_id -> social_channels.branch_id -> branches.organization_id
+      // 2. Fallback: via client_id -> clients.organization_id
+      let orgId: string | null = null
+
+      if (msg.channel_id) {
+        const { data: channelData } = await supabase
+          .from('social_channels')
+          .select('branch_id')
+          .eq('id', msg.channel_id)
+          .maybeSingle()
+        if (channelData?.branch_id) {
+          const { data: branchData } = await supabase
+            .from('branches')
+            .select('organization_id')
+            .eq('id', channelData.branch_id)
+            .maybeSingle()
+          orgId = branchData?.organization_id ?? null
+        }
+      }
+
+      if (!orgId && msg.client_id) {
+        const { data: clientData } = await supabase
+          .from('clients')
+          .select('organization_id')
+          .eq('id', msg.client_id)
+          .maybeSingle()
+        orgId = clientData?.organization_id ?? null
+      }
+
+      if (!orgId) {
+        errorMsg = 'No se pudo resolver la organización del mensaje programado'
+        await supabase
+          .from('scheduled_messages')
+          .update({ status: 'failed', error_message: errorMsg })
+          .eq('id', msg.id)
+        results.push({ id: msg.id, sent: false, error: errorMsg })
+        continue
+      }
+
+      // Obtener config del microservicio WA para esta org (con cache)
+      if (!orgSettingsCache.has(orgId)) {
+        const { data: settings } = await supabase
+          .from('app_settings')
+          .select('wa_api_url')
+          .eq('organization_id', orgId)
+          .maybeSingle()
+        orgSettingsCache.set(orgId, { wa_api_url: (settings as any)?.wa_api_url ?? null })
+      }
+      const waApiUrl = orgSettingsCache.get(orgId)!.wa_api_url
 
       // Enviar vía WA Microservice si está configurado y el mensaje tiene teléfono directo
       if (waApiUrl && waApiKey && msg.phone) {
@@ -76,6 +116,30 @@ Deno.serve(async (req: Request) => {
 
       // Si se envió, crear conversación + mensaje para que aparezca en el dashboard
       if (sent) {
+        // Buscar canal WhatsApp activo para esta org (con cache)
+        if (!orgChannelCache.has(orgId)) {
+          // Obtener branch_ids de esta org
+          const { data: orgBranches } = await supabase
+            .from('branches')
+            .select('id')
+            .eq('organization_id', orgId)
+          const branchIds = orgBranches?.map((b: { id: string }) => b.id) ?? []
+
+          if (branchIds.length > 0) {
+            const { data: ch } = await supabase
+              .from('social_channels')
+              .select('id')
+              .eq('platform', 'whatsapp')
+              .eq('is_active', true)
+              .in('branch_id', branchIds)
+              .limit(1)
+              .maybeSingle()
+            orgChannelCache.set(orgId, ch)
+          } else {
+            orgChannelCache.set(orgId, null)
+          }
+        }
+        const waChannel = orgChannelCache.get(orgId)
 
         if (waChannel) {
           const phoneClean = (msg.phone as string).replace(/\D/g, '')

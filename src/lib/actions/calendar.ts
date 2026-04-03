@@ -1,9 +1,31 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { validateBranchAccess } from './org'
+
+/**
+ * Resuelve el branch_id de un staff y valida que pertenece a la org activa.
+ * Retorna el branch_id si es válido, o null si no tiene acceso.
+ */
+async function validateStaffOrgAccess(staffId: string): Promise<string | null> {
+  const supabase = createAdminClient()
+  const { data: staff } = await supabase
+    .from('staff')
+    .select('branch_id')
+    .eq('id', staffId)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!staff?.branch_id) return null
+  const orgAccess = await validateBranchAccess(staff.branch_id)
+  return orgAccess ? staff.branch_id : null
+}
 
 export async function getStaffSchedules(staffId: string) {
+  const branchId = await validateStaffOrgAccess(staffId)
+  if (!branchId) return { data: [], error: 'No autorizado' }
+
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('staff_schedules')
@@ -24,6 +46,9 @@ export async function saveScheduleBlocks(
   dayOfWeek: number,
   blocks: ScheduleBlock[]
 ) {
+  const branchId = await validateStaffOrgAccess(staffId)
+  if (!branchId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
 
   const { error: delError } = await supabase
@@ -61,6 +86,9 @@ export async function upsertSchedule(staffId: string, dayOfWeek: number, startTi
 }
 
 export async function deleteSchedule(staffId: string, dayOfWeek: number) {
+  const branchId = await validateStaffOrgAccess(staffId)
+  if (!branchId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
   const { error } = await supabase
     .from('staff_schedules')
@@ -73,6 +101,9 @@ export async function deleteSchedule(staffId: string, dayOfWeek: number) {
 }
 
 export async function getScheduleExceptions(staffId: string) {
+  const branchId = await validateStaffOrgAccess(staffId)
+  if (!branchId) return { data: [], error: 'No autorizado' }
+
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('staff_schedule_exceptions')
@@ -84,6 +115,9 @@ export async function getScheduleExceptions(staffId: string) {
 }
 
 export async function upsertException(staffId: string, exceptionDate: string, isAbsent: boolean, reason: string | null) {
+  const branchId = await validateStaffOrgAccess(staffId)
+  if (!branchId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
   const { error } = await supabase
     .from('staff_schedule_exceptions')
@@ -97,6 +131,9 @@ export async function upsertException(staffId: string, exceptionDate: string, is
 }
 
 export async function deleteException(staffId: string, exceptionDate: string) {
+  const branchId = await validateStaffOrgAccess(staffId)
+  if (!branchId) return { error: 'No autorizado' }
+
   const supabase = await createClient()
   const { error } = await supabase
     .from('staff_schedule_exceptions')
@@ -109,12 +146,18 @@ export async function deleteException(staffId: string, exceptionDate: string) {
 }
 
 export async function getAvailableBarbersToday(branchId: string) {
+  const orgAccess = await validateBranchAccess(branchId)
+  if (!orgAccess) return { data: [], error: 'No autorizado' }
+
   const supabase = await createClient()
   const { data, error } = await supabase.rpc('get_available_barbers_today', { p_branch_id: branchId })
   return { data: data ?? [], error }
 }
 
 export async function getAllBarbersWithSchedules(branchId: string) {
+  const orgAccess = await validateBranchAccess(branchId)
+  if (!orgAccess) return { data: [], error: 'No autorizado' }
+
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('staff')

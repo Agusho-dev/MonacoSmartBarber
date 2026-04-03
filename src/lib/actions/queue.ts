@@ -17,6 +17,18 @@ export async function checkinClient(formData: FormData) {
     return { error: 'Todos los campos son obligatorios' }
   }
 
+  // Operación pública del kiosko: verificar que la sucursal exista y obtener su organización
+  const { data: branchResult } = await supabase
+    .from('branches')
+    .select('id, organization_id')
+    .eq('id', branchId)
+    .eq('is_active', true)
+    .single()
+
+  if (!branchResult?.organization_id) {
+    return { error: 'Sucursal no encontrada o inactiva' }
+  }
+
   let clientId: string
 
   const { data: existingClient } = await supabase
@@ -42,23 +54,12 @@ export async function checkinClient(formData: FormData) {
       return { alreadyInQueue: true, position: activeEntry.position, queueEntryId: activeEntry.id }
     }
   } else {
-    // Buscar la organizacion de la sucursal para poder insertar el cliente
-    const { data: branchResult } = await supabase
-      .from('branches')
-      .select('organization_id')
-      .eq('id', branchId)
-      .single()
-
-    if (!branchResult?.organization_id) {
-      return { error: 'Error: Sucursal u Organización no encontrada' }
-    }
-
     const { data: newClient, error } = await supabase
       .from('clients')
-      .insert({ 
-        name, 
-        phone, 
-        organization_id: branchResult.organization_id 
+      .insert({
+        name,
+        phone,
+        organization_id: branchResult.organization_id
       })
       .select('id')
       .single()
@@ -111,6 +112,18 @@ export async function checkinClient(formData: FormData) {
 export async function startService(queueEntryId: string, barberId: string) {
   const supabase = createAdminClient()
 
+  // Obtener la entrada para validar que la sucursal pertenece a la org activa
+  const { data: entry } = await supabase
+    .from('queue_entries')
+    .select('branch_id')
+    .eq('id', queueEntryId)
+    .maybeSingle()
+
+  if (!entry) return { error: 'Entrada no encontrada' }
+
+  const orgAccess = await validateBranchAccess(entry.branch_id)
+  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+
   const { error } = await supabase
     .from('queue_entries')
     .update({
@@ -142,6 +155,18 @@ export async function completeService(
   // Use admin client because barber pin authentications do not set a Supabase Auth session
   // This causes RLS on visits and client_points to fail when the queue trigger fires using SECURITY INVOKER
   const supabase = createAdminClient()
+
+  // Obtener la entrada para validar que la sucursal pertenece a la org activa
+  const { data: entryForValidation } = await supabase
+    .from('queue_entries')
+    .select('branch_id')
+    .eq('id', queueEntryId)
+    .maybeSingle()
+
+  if (!entryForValidation) return { error: 'Entrada no encontrada' }
+
+  const orgAccess = await validateBranchAccess(entryForValidation.branch_id)
+  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
 
   // 1. Complete the queue entry – this fires the on_queue_completed trigger
   //    which creates a visit record with amount=0 as placeholder
@@ -453,6 +478,18 @@ export async function completeService(
 export async function cancelQueueEntry(queueEntryId: string) {
   const supabase = createAdminClient()
 
+  // Obtener la entrada para validar que la sucursal pertenece a la org activa
+  const { data: entry } = await supabase
+    .from('queue_entries')
+    .select('branch_id')
+    .eq('id', queueEntryId)
+    .maybeSingle()
+
+  if (!entry) return { error: 'Entrada no encontrada' }
+
+  const orgAccess = await validateBranchAccess(entry.branch_id)
+  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+
   const { error } = await supabase
     .from('queue_entries')
     .update({ status: 'cancelled' })
@@ -508,6 +545,16 @@ export async function checkinClientByFace(
   serviceId: string | null = null
 ) {
   const supabase = createAdminClient()
+
+  // Operación pública del kiosko: verificar que la sucursal exista y esté activa
+  const { data: branchCheck } = await supabase
+    .from('branches')
+    .select('id')
+    .eq('id', branchId)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!branchCheck) return { error: 'Sucursal no encontrada o inactiva' }
 
   const { data: client } = await supabase
     .from('clients')
@@ -575,6 +622,36 @@ export async function reassignMyBarber(
 ) {
   const supabase = createAdminClient()
 
+  // Operación pública del kiosko: verificar que la entrada y la sucursal existan
+  const { data: entry } = await supabase
+    .from('queue_entries')
+    .select('branch_id')
+    .eq('id', queueEntryId)
+    .maybeSingle()
+
+  if (!entry) return { error: 'Entrada no encontrada' }
+
+  // Verificar que la sucursal esté activa (validación mínima para operaciones públicas)
+  const { data: branchCheck } = await supabase
+    .from('branches')
+    .select('id')
+    .eq('id', entry.branch_id)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!branchCheck) return { error: 'Sucursal no encontrada o inactiva' }
+
+  // Verificar que el nuevo barbero pertenece a la misma sucursal
+  const { data: barberCheck } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('id', newBarberId)
+    .eq('branch_id', entry.branch_id)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!barberCheck) return { error: 'Barbero no disponible en esta sucursal' }
+
   const { error } = await supabase
     .from('queue_entries')
     .update({ barber_id: newBarberId, is_dynamic: !newBarberId })
@@ -597,6 +674,18 @@ export async function updateQueueOrder(
   if (updates.length === 0) return { success: true }
 
   const supabase = createAdminClient()
+
+  // Validar que la primera entrada pertenece a una sucursal de la org activa
+  const { data: firstEntry } = await supabase
+    .from('queue_entries')
+    .select('branch_id')
+    .eq('id', updates[0].id)
+    .maybeSingle()
+
+  if (!firstEntry) return { error: 'Entrada no encontrada' }
+
+  const orgAccess = await validateBranchAccess(firstEntry.branch_id)
+  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
 
   // Usar RPC para hacer todas las actualizaciones en una sola transacción
   const payload = updates.map((u) => ({
@@ -621,6 +710,10 @@ export async function updateQueueOrder(
 
 export async function createBreakEntry(branchId: string, barberId: string, breakConfigName: string) {
   const supabase = createAdminClient()
+
+  // Validar que la sucursal pertenece a la org activa
+  const orgAccess = await validateBranchAccess(branchId)
+  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
 
   const { data: position } = await supabase.rpc('next_queue_position', {
     p_branch_id: branchId,

@@ -6,6 +6,17 @@ export async function getCheckinData(branchId: string) {
   if (!branchId) return { error: 'No branch provided' }
 
   const supabase = createAdminClient()
+
+  // Operación pública del kiosko: verificar que la sucursal exista y esté activa
+  const { data: branchCheck } = await supabase
+    .from('branches')
+    .select('id')
+    .eq('id', branchId)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!branchCheck) return { error: 'Sucursal no encontrada o inactiva' }
+
   const dayStart = new Date()
   dayStart.setHours(0, 0, 0, 0)
 

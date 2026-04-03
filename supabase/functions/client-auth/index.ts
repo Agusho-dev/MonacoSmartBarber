@@ -26,6 +26,8 @@ interface AuthRequest {
   device_id:     string
   device_secret: string
   name?:         string   // solo en registro inicial
+  org_id?:       string   // organization_id explícito
+  branch_id?:    string   // alternativa: resolver org desde la sucursal
 }
 
 interface AuthResponse {
@@ -50,12 +52,19 @@ Deno.serve(async (req) => {
 
   try {
     const body: AuthRequest = await req.json()
-    const { phone, device_id, device_secret, name } = body
+    const { phone, device_id, device_secret, name, org_id, branch_id } = body
 
     // Validaciones básicas
     if (!phone || !device_id || !device_secret) {
       return new Response(
         JSON.stringify({ error: 'phone, device_id y device_secret son requeridos' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (!org_id && !branch_id) {
+      return new Response(
+        JSON.stringify({ error: 'org_id o branch_id es requerido para identificar la organización' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -83,11 +92,45 @@ Deno.serve(async (req) => {
 
     const email = `${normalizedPhone}@monaco.internal`
 
-    // 1. Buscar cliente existente por teléfono
+    // Resolver organization_id desde org_id directo o desde branch_id
+    let organizationId: string | null = org_id || null
+    if (!organizationId && branch_id) {
+      const { data: branchData } = await adminClient
+        .from('branches')
+        .select('organization_id')
+        .eq('id', branch_id)
+        .maybeSingle()
+      organizationId = branchData?.organization_id ?? null
+    }
+
+    if (!organizationId) {
+      return new Response(
+        JSON.stringify({ error: 'No se pudo resolver la organización' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Verificar que la organización existe y está activa
+    const { data: orgData } = await adminClient
+      .from('organizations')
+      .select('id')
+      .eq('id', organizationId)
+      .eq('is_active', true)
+      .maybeSingle()
+
+    if (!orgData) {
+      return new Response(
+        JSON.stringify({ error: 'Organización no encontrada o inactiva' }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // 1. Buscar cliente existente por teléfono dentro de la organización
     const { data: existingClient } = await adminClient
       .from('clients')
       .select('id, auth_user_id, name')
       .eq('phone', normalizedPhone)
+      .eq('organization_id', organizationId)
       .maybeSingle()
 
     let authUserId: string
@@ -156,11 +199,12 @@ Deno.serve(async (req) => {
 
     // --- CLIENTE SIN CUENTA AUTH (o cliente nuevo) ---
 
-    // Crear usuario en Supabase Auth
+    // Crear usuario en Supabase Auth con organization_id en app_metadata
     const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
       email,
       password: device_secret,
       email_confirm: true,  // auto-confirmar sin email
+      app_metadata: { organization_id: organizationId },
     })
 
     if (createError) {
@@ -179,11 +223,12 @@ Deno.serve(async (req) => {
         }
         authUserId = retrySignIn.session.user.id
 
-        // Buscar cliente y vincularlo si aún no está vinculado
+        // Buscar cliente y vincularlo si aún no está vinculado (scoped por org)
         const { data: unlinkedClient } = await adminClient
           .from('clients')
           .select('id')
           .eq('phone', normalizedPhone)
+          .eq('organization_id', organizationId)
           .maybeSingle()
 
         if (unlinkedClient) {
@@ -193,15 +238,25 @@ Deno.serve(async (req) => {
             .eq('id', unlinkedClient.id)
           clientId = unlinkedClient.id
         } else {
-          // Crear cliente si no existe
+          // Crear cliente si no existe — asignar organization_id
           const { data: newClient } = await adminClient
             .from('clients')
-            .insert({ phone: normalizedPhone, name: name || normalizedPhone, auth_user_id: authUserId })
+            .insert({
+              phone: normalizedPhone,
+              name: name || normalizedPhone,
+              auth_user_id: authUserId,
+              organization_id: organizationId,
+            })
             .select('id')
             .single()
           clientId = newClient!.id
           isNewClient = true
         }
+
+        // Asegurar que app_metadata tenga organization_id
+        await adminClient.auth.admin.updateUserById(authUserId, {
+          app_metadata: { organization_id: organizationId },
+        })
 
         return new Response(
           JSON.stringify({
@@ -231,13 +286,14 @@ Deno.serve(async (req) => {
         .eq('id', existingClient.id)
       clientId = existingClient.id
     } else {
-      // Cliente completamente nuevo
+      // Cliente completamente nuevo — asignar organization_id
       const { data: newClientData, error: clientError } = await adminClient
         .from('clients')
         .insert({
-          phone:        normalizedPhone,
-          name:         name || normalizedPhone,
-          auth_user_id: authUserId,
+          phone:           normalizedPhone,
+          name:            name || normalizedPhone,
+          auth_user_id:    authUserId,
+          organization_id: organizationId,
         })
         .select('id')
         .single()
