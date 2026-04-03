@@ -33,10 +33,10 @@ interface Props {
 
 export function ConfiguracionClient({ appSettings }: Props) {
   return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold tracking-tight">Configuración</h2>
+    <div className="space-y-4 lg:space-y-6">
+      <h2 className="text-xl lg:text-2xl font-bold tracking-tight">Configuración</h2>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-4 lg:gap-6 lg:grid-cols-2">
         <BusinessHoursCard settings={appSettings} />
         <ThresholdsCard settings={appSettings} />
         <ShiftEndMarginCard settings={appSettings} />

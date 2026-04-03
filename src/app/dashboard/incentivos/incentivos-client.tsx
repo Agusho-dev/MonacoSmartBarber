@@ -152,20 +152,18 @@ export function IncentivosClient({ rules, barbers, achievements, defaultPeriod }
   const periodAchievements = achievements.filter(() => true)
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-4 lg:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Metas e Incentivos</h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <h1 className="text-xl lg:text-2xl font-bold">Metas e Incentivos</h1>
+          <p className="text-sm text-muted-foreground mt-1 hidden sm:block">
             Configurá las metas y registrá logros de los barberos para calcular premios.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button onClick={openCreate}>
-            <Plus className="size-4 mr-2" />
-            Nueva regla
-          </Button>
-        </div>
+        <Button onClick={openCreate} size="sm" className="w-full sm:w-auto">
+          <Plus className="size-4 mr-2" />
+          Nueva regla
+        </Button>
       </div>
 
       <Tabs defaultValue="reglas">
@@ -187,20 +185,20 @@ export function IncentivosClient({ rules, barbers, achievements, defaultPeriod }
           ) : (
             <div className="divide-y rounded-xl border bg-card">
               {branchRules.map((rule) => (
-                <div key={rule.id} className="flex items-center gap-4 px-5 py-4">
-                  <Trophy className="size-5 text-yellow-500 shrink-0" />
+                <div key={rule.id} className="flex items-start sm:items-center gap-3 px-3 py-3 sm:px-5 sm:py-4">
+                  <Trophy className="size-5 text-yellow-500 shrink-0 mt-0.5 sm:mt-0" />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-medium">{rule.name}</p>
-                      <Badge variant="secondary" className="text-xs">{PERIOD_LABELS[rule.period]}</Badge>
-                      {!rule.is_active && <Badge variant="secondary" className="text-xs">Inactiva</Badge>}
+                    <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                      <p className="font-medium text-sm sm:text-base">{rule.name}</p>
+                      <Badge variant="secondary" className="text-[10px] sm:text-xs">{PERIOD_LABELS[rule.period]}</Badge>
+                      {!rule.is_active && <Badge variant="secondary" className="text-[10px] sm:text-xs">Inactiva</Badge>}
                     </div>
-                    <p className="text-sm text-muted-foreground">
-                      {METRIC_LABELS[rule.metric]} ≥ {rule.threshold} → Premio: {formatCurrency(rule.reward_amount)}
+                    <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
+                      {METRIC_LABELS[rule.metric]} ≥ {rule.threshold} → {formatCurrency(rule.reward_amount)}
                     </p>
-                    {rule.description && <p className="text-xs text-muted-foreground mt-0.5">{rule.description}</p>}
+                    {rule.description && <p className="text-xs text-muted-foreground mt-0.5 hidden sm:block">{rule.description}</p>}
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1 sm:gap-2 shrink-0">
                     <Switch checked={rule.is_active} onCheckedChange={() => handleToggle(rule.id, rule.is_active)} />
                     <Button variant="ghost" size="icon" onClick={() => openEdit(rule)}>
                       <Pencil className="size-4" />
@@ -285,7 +283,7 @@ export function IncentivosClient({ rules, barbers, achievements, defaultPeriod }
               <Label>Descripción <span className="text-muted-foreground">(opcional)</span></Label>
               <Textarea className="mt-1.5 resize-none" rows={2} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <Label>Métrica</Label>
                 <Select value={form.metric} onValueChange={(v) => setForm((f) => ({ ...f, metric: v as IncentiveMetric }))}>
@@ -309,7 +307,7 @@ export function IncentivosClient({ rules, barbers, achievements, defaultPeriod }
                 </Select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <Label>Meta ({form.metric === 'haircut_count' ? 'cant. cortes' : 'cant. posts'})</Label>
                 <Input type="number" min="1" className="mt-1.5" value={form.threshold} onChange={(e) => setForm((f) => ({ ...f, threshold: e.target.value }))} required />

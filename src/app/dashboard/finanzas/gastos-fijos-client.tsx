@@ -171,21 +171,22 @@ export function GastosFijosClient({ fixedExpenses, branches }: Props) {
         branches.find(b => b.id === id)?.name ?? 'Desconocida'
 
     return (
-        <div className="space-y-6">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-4 lg:space-y-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h2 className="text-xl font-bold tracking-tight">Gastos Fijos</h2>
-                    <p className="text-sm text-muted-foreground">
-                        Gastos recurrentes mensuales — Total activo: {formatCurrency(totalActive)}/mes
+                    <h2 className="text-lg lg:text-xl font-bold tracking-tight">Gastos Fijos</h2>
+                    <p className="text-xs sm:text-sm text-muted-foreground">
+                        Total activo: <span className="font-medium text-foreground">{formatCurrency(totalActive)}/mes</span>
                     </p>
                 </div>
-                <Button onClick={openAdd}>
+                <Button onClick={openAdd} size="sm" className="w-full sm:w-auto">
                     <Plus className="mr-2 size-4" />
                     Agregar gasto fijo
                 </Button>
             </div>
 
-            <div className="rounded-md border bg-card">
+            {/* Vista desktop */}
+            <div className="hidden md:block rounded-md border bg-card">
                 <Table>
                     <TableHeader>
                         <TableRow>
@@ -249,6 +250,42 @@ export function GastosFijosClient({ fixedExpenses, branches }: Props) {
                         )}
                     </TableBody>
                 </Table>
+            </div>
+
+            {/* Vista mobile */}
+            <div className="md:hidden space-y-2">
+                {filtered.length === 0 ? (
+                    <div className="py-10 text-center text-sm text-muted-foreground">
+                        No hay gastos fijos registrados
+                    </div>
+                ) : (
+                    filtered.map((expense) => (
+                        <div key={expense.id} className={`rounded-lg border p-3 ${!expense.is_active ? 'opacity-50' : ''}`}>
+                            <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                    <p className="font-medium text-sm">{expense.name}</p>
+                                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                        <span className="text-xs text-muted-foreground">{expense.branch?.name ?? getBranchName(expense.branch_id)}</span>
+                                        {expense.category && <Badge variant="outline" className="text-[10px]">{expense.category}</Badge>}
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                    <span className="font-medium text-sm">{formatCurrency(expense.amount)}</span>
+                                    <Button variant="ghost" size="icon-xs" onClick={() => openEdit(expense)}>
+                                        <Pencil className="size-3" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon-xs" onClick={() => setDeleteId(expense.id)}>
+                                        <Trash2 className="size-3" />
+                                    </Button>
+                                </div>
+                            </div>
+                            <div className="mt-1.5 flex items-center gap-3 text-xs text-muted-foreground">
+                                {expense.due_day != null && <span>Vence día {expense.due_day}</span>}
+                                <span>{expense.is_active ? 'Activo' : 'Inactivo'}</span>
+                            </div>
+                        </div>
+                    ))
+                )}
             </div>
 
             {/* Dialog de creación/edición */}

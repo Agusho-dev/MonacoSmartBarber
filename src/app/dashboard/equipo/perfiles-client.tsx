@@ -275,9 +275,12 @@ export function PerfilesClient({
   }, [salaryConfigs])
 
   return (
-    <div className="flex gap-4 h-[calc(100vh-220px)]">
+    <div className="flex gap-4 h-auto lg:h-[calc(100vh-220px)]">
       {/* Sidebar de barberos */}
-      <div className="w-72 shrink-0 flex flex-col gap-3">
+      <div className={cn(
+        'w-full lg:w-72 shrink-0 flex flex-col gap-3',
+        selectedBarber ? 'hidden lg:flex' : 'flex'
+      )}>
         {/* Buscador */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
@@ -370,7 +373,21 @@ export function PerfilesClient({
       </div>
 
       {/* Panel derecho */}
-      <div className="flex-1 overflow-y-auto min-w-0">
+      <div className={cn(
+        'flex-1 overflow-y-auto min-w-0',
+        selectedBarber ? 'block' : 'hidden lg:block'
+      )}>
+        {selectedBarber && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="lg:hidden mb-3 -ml-1 text-muted-foreground"
+            onClick={() => setSelectedBarber(null)}
+          >
+            <ChevronRight className="size-4 rotate-180 mr-1" />
+            Volver a la lista
+          </Button>
+        )}
         {selectedBarber ? (
           <BarberDetailPanel
             barber={selectedBarber}

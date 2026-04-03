@@ -129,11 +129,11 @@ export function SucursalesClient({ branches }: Props) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="space-y-4 lg:space-y-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-xl font-bold tracking-tight lg:text-2xl">Sucursales</h2>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="text-xl lg:text-2xl font-bold tracking-tight">Sucursales</h2>
+          <p className="text-sm text-muted-foreground hidden sm:block">
             Gestión de locales y sucursales
           </p>
         </div>

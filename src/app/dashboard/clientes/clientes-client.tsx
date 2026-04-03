@@ -318,19 +318,19 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="space-y-4 lg:space-y-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Clientes</h2>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="text-xl lg:text-2xl font-bold tracking-tight">Clientes</h2>
+          <p className="text-sm text-muted-foreground hidden sm:block">
             Base de datos y segmentación de clientes
           </p>
         </div>
         <BranchSelector branches={branches} allowAll />
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative max-w-sm flex-1">
+      <div className="flex flex-col gap-2 sm:gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             className="pl-9"
@@ -340,7 +340,7 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
           />
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-1.5 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 pb-1 sm:pb-0">
           {(['all', 'nuevo', 'regular', 'vip', 'en_riesgo', 'perdido'] as const).map((seg) => {
             const isActive = segmentFilter === seg
             if (seg === 'all') {
@@ -514,7 +514,7 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
         open={!!detailClient}
         onOpenChange={(open) => !open && setDetailClient(null)}
       >
-        <SheetContent className="w-full !max-w-[480px] overflow-y-auto p-0">
+        <SheetContent className="w-full sm:!max-w-[480px] overflow-y-auto p-0">
           {detailClient && (() => {
             const segment = getSegment(detailClient)
             const segCfg = segmentConfig[segment]
@@ -524,7 +524,7 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
             return (
               <>
                 {/* Header with gradient accent */}
-                <div className="relative border-b bg-gradient-to-b from-white/[0.03] to-transparent px-6 pb-5 pt-6">
+                <div className="relative border-b bg-gradient-to-b from-white/[0.03] to-transparent px-4 pb-4 pt-5 sm:px-6 sm:pb-5 sm:pt-6">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h2 className="truncate text-xl font-bold tracking-tight">
@@ -559,7 +559,7 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
                 </div>
 
                 {/* Content */}
-                <div className="space-y-5 px-6 py-5">
+                <div className="space-y-4 sm:space-y-5 px-4 py-4 sm:px-6 sm:py-5">
                   {/* Action buttons */}
                   <div className="grid grid-cols-2 gap-2">
                     <Button

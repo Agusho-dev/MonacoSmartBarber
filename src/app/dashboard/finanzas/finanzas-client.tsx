@@ -262,9 +262,9 @@ export function FinanzasClient({
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <h2 className="text-xl font-bold tracking-tight lg:text-2xl">Finanzas</h2>
+    <div className="space-y-4 lg:space-y-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-lg lg:text-2xl font-bold tracking-tight">Resumen financiero</h2>
         <div className="flex flex-wrap items-center gap-2">
           <BranchSelector branches={branches} />
           <Select value={period} onValueChange={handlePeriodChange}>

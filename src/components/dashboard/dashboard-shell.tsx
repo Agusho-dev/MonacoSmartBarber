@@ -616,24 +616,23 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
       </Sheet>
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex h-14 shrink-0 items-center gap-4 border-b px-4 lg:px-6">
+        <header className="flex h-12 lg:h-14 shrink-0 items-center gap-2 lg:gap-4 border-b px-3 lg:px-6">
           <Button
             variant="ghost"
             size="icon"
-            className="lg:hidden"
+            className="lg:hidden size-9"
             onClick={() => setMobileOpen(true)}
           >
             <Menu className="size-5" />
           </Button>
 
-          <div className="flex items-center gap-2 lg:hidden min-w-0 flex-1 px-4">
-            <Scissors className="size-4 shrink-0" />
-            <span className="font-semibold truncate">
+          <div className="flex items-center gap-2 lg:hidden min-w-0 flex-1">
+            <span className="font-semibold text-sm truncate">
               {currentNavIndex >= 0 ? orderedItems[currentNavIndex]?.label : (availableOrganizations.find(o => o.id === organizationId)?.name || 'Monaco')}
             </span>
           </div>
 
-          <div className="flex-1" />
+          <div className="flex-1 hidden lg:block" />
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -665,7 +664,8 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
         <div className="relative flex-1 overflow-hidden">
           <main
             ref={mainRef}
-            className="h-full overflow-y-auto overflow-x-hidden p-4 pb-16 lg:p-6 lg:pb-6"
+            className="h-full overflow-y-auto overflow-x-hidden p-3 lg:p-6 lg:pb-6"
+            style={{ paddingBottom: 'calc(4.5rem + env(safe-area-inset-bottom, 0px))' }}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
           >

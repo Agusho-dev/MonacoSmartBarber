@@ -72,30 +72,31 @@ export function FinanzasTabsClient({
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 lg:space-y-6">
             <div>
-                <h1 className="text-2xl font-bold tracking-tight">Finanzas</h1>
-                <p className="text-muted-foreground">
+                <h1 className="text-xl lg:text-2xl font-bold tracking-tight">Finanzas</h1>
+                <p className="text-sm text-muted-foreground hidden sm:block">
                     Resumen financiero, cuentas de cobro y sueldos
                 </p>
             </div>
 
             {/* Tab navigation — scrollable en mobile */}
-            <div className="overflow-x-auto">
-                <div className="flex gap-1 rounded-lg border bg-muted/50 p-1 min-w-max">
+            <div className="overflow-x-auto -mx-3 px-3 lg:mx-0 lg:px-0">
+                <div className="flex gap-1 rounded-lg border bg-muted/50 p-1 w-fit">
                     {visibleTabs.map((tab) => (
                         <button
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
                             className={cn(
-                                'flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium whitespace-nowrap transition-all',
+                                'flex items-center gap-1.5 sm:gap-2 rounded-md px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium whitespace-nowrap transition-all',
                                 activeTab === tab.id
                                     ? 'bg-background text-foreground shadow-sm'
                                     : 'text-muted-foreground hover:text-foreground'
                             )}
                         >
-                            <tab.icon className="size-4" />
-                            {tab.label}
+                            <tab.icon className="size-3.5 sm:size-4" />
+                            <span className="hidden sm:inline">{tab.label}</span>
+                            <span className="sm:hidden">{tab.label.split(' ')[0]}</span>
                         </button>
                     ))}
                 </div>

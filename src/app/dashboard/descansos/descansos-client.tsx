@@ -100,14 +100,14 @@ function BreakRequestCard({ request }: { request: BreakRequestRow }) {
   }
 
   return (
-    <div className="flex flex-col gap-3 px-5 py-4">
-      <div className="flex items-center gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-600 font-semibold text-sm">
+    <div className="flex flex-col gap-2.5 px-3 py-3 sm:gap-3 sm:px-5 sm:py-4">
+      <div className="flex items-center gap-2.5 sm:gap-3">
+        <div className="flex size-8 sm:size-9 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-600 font-semibold text-xs sm:text-sm">
           {staffName.charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="font-medium truncate">{staffName}</p>
-          <div className="flex items-center gap-2 flex-wrap mt-0.5">
+          <p className="font-medium text-sm sm:text-base truncate">{staffName}</p>
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap mt-0.5">
             <Badge variant="outline" className={`text-xs ${isPending ? 'bg-yellow-500/15 text-yellow-500 border-yellow-500/30' : 'bg-green-500/15 text-green-600 border-green-500/30'}`}>
               {isPending ? 'Pendiente' : 'Aprobado'}
             </Badge>
@@ -123,27 +123,31 @@ function BreakRequestCard({ request }: { request: BreakRequestRow }) {
         </div>
       </div>
       {isPending && (
-        <div className="flex items-center gap-2 ml-12">
-          <div className="flex items-center gap-2 flex-1">
+        <div className="flex flex-wrap items-center gap-2 ml-0 sm:ml-12">
+          <div className="flex items-center gap-2 flex-1 min-w-[160px]">
             <Label className="text-xs text-muted-foreground whitespace-nowrap">Luego de</Label>
             <Input
               type="number"
               min="0"
               step="1"
-              className="w-20 h-8 text-sm"
+              className="w-16 sm:w-20 h-8 text-sm"
               value={cutsInput}
               onChange={(e) => setCutsInput(e.target.value)}
             />
             <span className="text-xs text-muted-foreground">cortes</span>
           </div>
-          <Button size="sm" variant="outline" className="text-green-600 border-green-500/30 hover:bg-green-500/10" onClick={handleApprove}>
-            <CheckCircle2 className="size-4 mr-1.5" />
-            Aprobar
-          </Button>
-          <Button size="sm" variant="outline" className="text-red-500 border-red-500/30 hover:bg-red-500/10" onClick={handleReject}>
-            <XCircle className="size-4 mr-1.5" />
-            Rechazar
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" className="text-green-600 border-green-500/30 hover:bg-green-500/10" onClick={handleApprove}>
+              <CheckCircle2 className="size-4 mr-1" />
+              <span className="hidden sm:inline">Aprobar</span>
+              <span className="sm:hidden">OK</span>
+            </Button>
+            <Button size="sm" variant="outline" className="text-red-500 border-red-500/30 hover:bg-red-500/10" onClick={handleReject}>
+              <XCircle className="size-4 mr-1" />
+              <span className="hidden sm:inline">Rechazar</span>
+              <span className="sm:hidden">No</span>
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -236,20 +240,18 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
   }, [checkScheduledBreaks])
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-5 lg:space-y-8">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Descansos</h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <h1 className="text-xl lg:text-2xl font-bold">Descansos</h1>
+          <p className="text-sm text-muted-foreground mt-1 hidden sm:block">
             Configurá tipos de descanso y gestioná solicitudes de los barberos.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button onClick={openCreate}>
-            <Plus className="size-4 mr-2" />
-            Nuevo tipo
-          </Button>
-        </div>
+        <Button onClick={openCreate} size="sm" className="w-full sm:w-auto">
+          <Plus className="size-4 mr-2" />
+          Nuevo tipo
+        </Button>
       </div>
 
       {/* Break config types */}
@@ -265,7 +267,7 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
         ) : (
           <div className="divide-y rounded-xl border bg-card">
             {branchConfigs.map((bc) => (
-              <div key={bc.id} className="flex items-center gap-4 px-5 py-4">
+              <div key={bc.id} className="flex items-center gap-3 px-3 py-3 sm:gap-4 sm:px-5 sm:py-4">
                 <Coffee className="size-5 text-muted-foreground shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="font-medium">{bc.name}</p>
