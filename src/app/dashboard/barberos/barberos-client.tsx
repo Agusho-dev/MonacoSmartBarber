@@ -317,9 +317,9 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 lg:space-y-6">
       <div className="flex items-center justify-end">
-        <Button onClick={openAdd} size="sm">
+        <Button onClick={openAdd} size="sm" className="w-full sm:w-auto">
           <Plus className="size-4 mr-2" />
           Agregar barbero
         </Button>

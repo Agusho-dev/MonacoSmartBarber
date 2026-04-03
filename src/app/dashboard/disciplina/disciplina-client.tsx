@@ -292,25 +292,23 @@ export function DisciplinaClient({
   const lateRules = branchRules.filter((r) => r.event_type === 'late')
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-4 lg:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Faltas y Tardanzas</h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <h1 className="text-xl lg:text-2xl font-bold">Faltas y Tardanzas</h1>
+          <p className="text-sm text-muted-foreground mt-1 hidden sm:block">
             Configurá las reglas disciplinarias y registrá eventos por personal.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button onClick={() => { setEventForm({ staff_id: '', event_type: 'absence', event_date: new Date().toISOString().slice(0, 10), notes: '' }); setEventDialog(true) }}>
-            <Plus className="size-4 mr-2" />
-            Registrar evento
-          </Button>
-        </div>
+        <Button size="sm" className="w-full sm:w-auto" onClick={() => { setEventForm({ staff_id: '', event_type: 'absence', event_date: new Date().toISOString().slice(0, 10), notes: '' }); setEventDialog(true) }}>
+          <Plus className="size-4 mr-2" />
+          Registrar evento
+        </Button>
       </div>
 
       {/* Overdue breaks section — only shown when there are active overruns */}
       {overdueBreaks.length > 0 && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-5 space-y-3">
+        <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 sm:p-5 space-y-3">
           <div className="flex items-center gap-2">
             <Coffee className="size-5 text-red-500 shrink-0" />
             <h2 className="font-semibold text-red-500">Tiempos de descanso excedidos</h2>
@@ -346,24 +344,26 @@ export function DisciplinaClient({
       )}
 
       <Tabs defaultValue="eventos">
-        <TabsList>
-          <TabsTrigger value="eventos">Eventos del mes</TabsTrigger>
-          <TabsTrigger value="resumen">Resumen por personal</TabsTrigger>
-          <TabsTrigger value="descansos" className="flex items-center gap-1.5">
-            <Coffee className="size-3.5" />
-            Descansos excedidos
-            {filteredOvertimeHistory.length > 0 && (
-              <Badge variant="secondary" className="ml-1 px-1.5 text-xs bg-red-500/15 text-red-500">
-                {filteredOvertimeHistory.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="reglas">Reglas disciplinarias</TabsTrigger>
-          <TabsTrigger value="asistencia" className="flex items-center gap-1.5">
-            <LogIn className="size-3.5" />
-            Asistencia
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto -mx-3 px-3 lg:mx-0 lg:px-0">
+          <TabsList className="min-w-max">
+            <TabsTrigger value="eventos" className="text-xs sm:text-sm whitespace-nowrap">Eventos</TabsTrigger>
+            <TabsTrigger value="resumen" className="text-xs sm:text-sm whitespace-nowrap">Resumen</TabsTrigger>
+            <TabsTrigger value="descansos" className="flex items-center gap-1.5 text-xs sm:text-sm whitespace-nowrap">
+              <Coffee className="size-3 sm:size-3.5" />
+              Descansos
+              {filteredOvertimeHistory.length > 0 && (
+                <Badge variant="secondary" className="ml-0.5 px-1.5 text-[10px] sm:text-xs bg-red-500/15 text-red-500">
+                  {filteredOvertimeHistory.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="reglas" className="text-xs sm:text-sm whitespace-nowrap">Reglas</TabsTrigger>
+            <TabsTrigger value="asistencia" className="flex items-center gap-1.5 text-xs sm:text-sm whitespace-nowrap">
+              <LogIn className="size-3 sm:size-3.5" />
+              Asistencia
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         {/* Eventos del mes */}
         <TabsContent value="eventos" className="mt-4">
@@ -377,7 +377,7 @@ export function DisciplinaClient({
           ) : (
             <div className="divide-y rounded-xl border bg-card">
               {branchEvents.map((evt) => (
-                <div key={evt.id} className="flex items-center gap-4 px-5 py-4">
+                <div key={evt.id} className="flex items-center gap-3 px-3 py-3 sm:gap-4 sm:px-5 sm:py-4">
                   {evt.event_type === 'absence'
                     ? <UserX className="size-5 text-red-500 shrink-0" />
                     : <Clock className="size-5 text-yellow-500 shrink-0" />}
@@ -413,7 +413,7 @@ export function DisciplinaClient({
           ) : (
             <div className="divide-y rounded-xl border bg-card">
               {barberSummary.map((b) => (
-                <div key={b.id} className="flex items-center gap-4 px-5 py-4">
+                <div key={b.id} className="flex items-center gap-3 px-3 py-3 sm:gap-4 sm:px-5 sm:py-4">
                   <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-sm">
                     {b.full_name.charAt(0)}
                   </div>
@@ -425,17 +425,17 @@ export function DisciplinaClient({
                       </Badge>
                     )}
                   </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <div className="flex items-center gap-1.5 text-sm">
-                      <UserX className="size-4 text-red-500" />
+                  <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                    <div className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm">
+                      <UserX className="size-3.5 sm:size-4 text-red-500" />
                       <span className={b.absences > 0 ? 'text-red-500 font-semibold' : 'text-muted-foreground'}>
-                        {b.absences} {b.absences === 1 ? 'falta' : 'faltas'}
+                        {b.absences}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5 text-sm">
-                      <Clock className="size-4 text-yellow-500" />
+                    <div className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm">
+                      <Clock className="size-3.5 sm:size-4 text-yellow-500" />
                       <span className={b.lates > 0 ? 'text-yellow-500 font-semibold' : 'text-muted-foreground'}>
-                        {b.lates} tardanza{b.lates !== 1 ? 's' : ''}
+                        {b.lates}
                       </span>
                     </div>
                   </div>
@@ -477,7 +477,7 @@ export function DisciplinaClient({
                 </p>
                 <div className="divide-y rounded-xl border bg-card">
                   {overtimeSummary.map(({ barber, count, totalSeconds }) => (
-                    <div key={(barber as { id?: string } | null)?.id ?? 'unknown'} className="flex items-center gap-4 px-5 py-3">
+                    <div key={(barber as { id?: string } | null)?.id ?? 'unknown'} className="flex items-center gap-3 px-3 py-2.5 sm:gap-4 sm:px-5 sm:py-3">
                       <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-500 font-semibold text-sm">
                         {((barber as { full_name?: string } | null)?.full_name ?? 'B').charAt(0).toUpperCase()}
                       </div>
@@ -503,7 +503,7 @@ export function DisciplinaClient({
                 </p>
                 <div className="divide-y rounded-xl border bg-card">
                   {filteredOvertimeHistory.map((r) => (
-                    <div key={r.id} className="flex items-center gap-4 px-5 py-4">
+                    <div key={r.id} className="flex items-center gap-3 px-3 py-3 sm:gap-4 sm:px-5 sm:py-4">
                       <Coffee className="size-4 text-red-500 shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="font-medium">
@@ -546,7 +546,7 @@ export function DisciplinaClient({
                 const staffMember = staffNameMap.get(log.staff_id)
                 const isClockIn = log.action_type === 'clock_in'
                 return (
-                  <div key={log.id} className="flex items-center gap-4 px-5 py-3">
+                  <div key={log.id} className="flex items-center gap-3 px-3 py-2.5 sm:gap-4 sm:px-5 sm:py-3">
                     <div className={`flex size-9 shrink-0 items-center justify-center rounded-full ${isClockIn ? 'bg-emerald-500/15 text-emerald-500' : 'bg-blue-500/15 text-blue-500'}`}>
                       {isClockIn ? <LogIn className="size-4" /> : <LogOut className="size-4" />}
                     </div>
@@ -608,7 +608,7 @@ export function DisciplinaClient({
                 ) : (
                   <div className="divide-y rounded-xl border bg-card">
                     {typeRules.map((rule) => (
-                      <div key={rule.id} className="flex items-center gap-4 px-5 py-3">
+                      <div key={rule.id} className="flex items-center gap-3 px-3 py-2.5 sm:gap-4 sm:px-5 sm:py-3">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm">
                             Ocurrencia #{rule.occurrence_number}
@@ -657,7 +657,7 @@ export function DisciplinaClient({
             <DialogTitle>{ruleForm.id ? 'Editar regla' : 'Nueva regla disciplinaria'}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleRuleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <Label>Tipo de evento</Label>
                 <Select value={ruleForm.event_type} onValueChange={(v) => setRuleForm((f) => ({ ...f, event_type: v as DisciplinaryEventType }))}>
@@ -718,7 +718,7 @@ export function DisciplinaClient({
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <Label>Tipo</Label>
                 <Select value={eventForm.event_type} onValueChange={(v) => setEventForm((f) => ({ ...f, event_type: v as DisciplinaryEventType }))}>

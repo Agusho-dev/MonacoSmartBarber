@@ -240,15 +240,14 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
     }
 
     return (
-        <div className="space-y-6">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-4 lg:space-y-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h2 className="text-xl font-bold tracking-tight">Registro de Egresos</h2>
-                    <p className="text-sm text-muted-foreground">
-                        Registrá la salida de dinero para gastos e insumos
-                        {filteredTickets.length > 0 && (
-                            <> · <span className="font-medium text-foreground">{filteredTickets.length} registros · Total: {formatCurrency(filteredTotal)}</span></>
-                        )}
+                    <h2 className="text-lg lg:text-xl font-bold tracking-tight">Registro de Egresos</h2>
+                    <p className="text-xs sm:text-sm text-muted-foreground">
+                        {filteredTickets.length > 0
+                            ? <><span className="font-medium text-foreground">{filteredTickets.length} registros · Total: {formatCurrency(filteredTotal)}</span></>
+                            : 'Registrá la salida de dinero para gastos e insumos'}
                     </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -309,7 +308,8 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                 </div>
             </div>
 
-            <div className="rounded-md border bg-card">
+            {/* Vista desktop: tabla */}
+            <div className="hidden md:block rounded-md border bg-card">
                 <Table>
                     <TableHeader>
                         <TableRow>
@@ -375,6 +375,43 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                         )}
                     </TableBody>
                 </Table>
+            </div>
+
+            {/* Vista mobile: cards */}
+            <div className="md:hidden space-y-2">
+                {filteredTickets.length === 0 ? (
+                    <div className="py-10 text-center text-sm text-muted-foreground">
+                        No hay egresos registrados en esta sucursal
+                    </div>
+                ) : (
+                    filteredTickets.map((t) => (
+                        <div key={t.id} className="rounded-lg border p-3">
+                            <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <Badge variant="outline" className="text-[10px]">{t.category}</Badge>
+                                        <span className="text-xs text-muted-foreground">
+                                            {format(new Date(t.expense_date), "d MMM", { locale: es })}
+                                        </span>
+                                    </div>
+                                    <p className="mt-1 text-sm truncate">{t.description || '-'}</p>
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                        {getBranchName(t.branch_id)} · {t.created_by_staff?.full_name || 'Admin'}
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                    <span className="font-medium text-sm text-destructive">-{formatCurrency(t.amount)}</span>
+                                    <Button variant="ghost" size="icon-xs" onClick={() => openEdit(t)}>
+                                        <Pencil className="size-3" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon-xs" onClick={() => setDeleteId(t.id)}>
+                                        <Trash2 className="size-3" />
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+                    ))
+                )}
             </div>
 
             {/* Dialog de creación/edición */}

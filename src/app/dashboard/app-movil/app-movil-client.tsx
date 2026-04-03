@@ -122,12 +122,12 @@ export function AppMovilClient({
   initialBillboard,
 }: Props) {
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <div className="flex items-center gap-3">
-        <Smartphone className="size-6 shrink-0 text-primary lg:size-7" />
+    <div className="mx-auto max-w-6xl space-y-4 lg:space-y-6">
+      <div className="flex items-center gap-2.5 sm:gap-3">
+        <Smartphone className="size-5 sm:size-6 shrink-0 text-primary lg:size-7" />
         <div>
-          <h1 className="text-2xl font-bold tracking-tight lg:text-3xl">APP Móvil</h1>
-          <p className="text-sm text-muted-foreground lg:text-base">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight lg:text-3xl">APP Móvil</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground lg:text-base hidden sm:block">
             Configurá los contenidos y recompensas que ven los clientes en la app.
           </p>
         </div>

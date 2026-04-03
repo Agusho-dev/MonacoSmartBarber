@@ -35,7 +35,7 @@ export function MobileBottomNav({ orderedItems, currentIndex }: MobileBottomNavP
 
   return (
     <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border">
-      <div className="flex items-center justify-between px-4 py-2" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
+      <div className="flex items-center justify-between px-3 py-1.5" style={{ paddingBottom: 'max(0.375rem, env(safe-area-inset-bottom))' }}>
         <button
           onClick={() => currentIndex > 0 && router.push(orderedItems[currentIndex - 1].href)}
           disabled={currentIndex === 0}

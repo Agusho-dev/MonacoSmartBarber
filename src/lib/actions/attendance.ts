@@ -1,12 +1,36 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { checkTardiness } from './disciplinary'
 import { revalidatePath } from 'next/cache'
 import { generateCheckoutCommissionReport } from './salary'
 
+/**
+ * Valida que el staffId pertenece al branchId indicado y que ambos existen.
+ * Retorna true si es válido, false si no.
+ * El panel barbero usa PIN auth (sin sesión Supabase), por lo que no se puede
+ * usar el cliente SSR para estas operaciones.
+ */
+async function validateStaffBelongsToBranch(staffId: string, branchId: string): Promise<boolean> {
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('id', staffId)
+    .eq('branch_id', branchId)
+    .eq('is_active', true)
+    .maybeSingle()
+  return !!data
+}
+
 export async function registerBarberClockIn(staffId: string, branchId: string, faceVerified: boolean) {
-    const supabase = await createClient()
+    // Validar que el barbero pertenece a la sucursal antes de registrar asistencia
+    const isValid = await validateStaffBelongsToBranch(staffId, branchId)
+    if (!isValid) {
+        return { error: 'Barbero no encontrado en esta sucursal' }
+    }
+
+    const supabase = createAdminClient()
 
     const { error: logError } = await supabase.from('attendance_logs').insert({
         staff_id: staffId,
@@ -29,7 +53,13 @@ export async function registerBarberClockIn(staffId: string, branchId: string, f
 }
 
 export async function registerBarberClockOut(staffId: string, branchId: string, faceVerified: boolean) {
-    const supabase = await createClient()
+    // Validar que el barbero pertenece a la sucursal antes de registrar asistencia
+    const isValid = await validateStaffBelongsToBranch(staffId, branchId)
+    if (!isValid) {
+        return { error: 'Barbero no encontrado en esta sucursal' }
+    }
+
+    const supabase = createAdminClient()
 
     const { error: logError } = await supabase.from('attendance_logs').insert({
         staff_id: staffId,

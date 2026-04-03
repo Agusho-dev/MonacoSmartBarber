@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useEffect, useCallback, useMemo } from 'react'
+import { useState, useTransition, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   ComposedChart,
   Bar,
@@ -49,15 +49,36 @@ import {
   ShoppingBag,
   Users,
   Download,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 
 const PERIOD_OPTIONS = [
+  { value: '1', label: '1 mes' },
   { value: '3', label: '3 meses' },
   { value: '6', label: '6 meses' },
   { value: '12', label: '12 meses' },
   { value: '24', label: '24 meses' },
   { value: '0', label: 'Desde el inicio' },
 ]
+
+const MONTH_NAMES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+]
+
+/** Devuelve "YYYY-MM" desplazado `offset` meses desde hoy (0 = mes actual, 1 = mes pasado) */
+function getMonthFromOffset(offset: number): string {
+  const d = new Date()
+  d.setDate(1)
+  d.setMonth(d.getMonth() - offset)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function formatMonthLabel(ym: string): string {
+  const [y, m] = ym.split('-')
+  return `${MONTH_NAMES[Number(m) - 1]} ${y}`
+}
 
 const COLORS = {
   revenue: '#22d3ee',    // cyan — ingresos
@@ -102,7 +123,8 @@ export function FinanzasClient({
 }: Props) {
   const { selectedBranchId } = useBranchStore()
   const [data, setData] = useState(initialData)
-  const [period, setPeriod] = useState('6')
+  const [period, setPeriod] = useState('1')
+  const [monthOffset, setMonthOffset] = useState(0) // 0 = mes actual, 1 = mes pasado, etc.
   const [isPending, startTransition] = useTransition()
   const [accountBalances, setAccountBalances] = useState<AccountBalance[]>([])
   const [expenseAccountFilter, setExpenseAccountFilter] = useState<string>('__all__')
@@ -122,28 +144,45 @@ export function FinanzasClient({
   }
 
   const refresh = useCallback(
-    (p?: string) => {
+    (p?: string, offset?: number) => {
       const months = Number(p ?? period)
+      const currentOffset = offset ?? monthOffset
+      // Solo pasar endMonth cuando estamos en modo 1 mes y hay offset
+      const endMonth = months === 1 ? getMonthFromOffset(currentOffset) : null
       startTransition(async () => {
         const [newData, newBalances] = await Promise.all([
-          fetchFinancialData(months, selectedBranchId),
+          fetchFinancialData(months, selectedBranchId, endMonth),
           getAllAccountBalanceTotals(selectedBranchId),
         ])
         setData(newData)
         setAccountBalances(newBalances)
       })
     },
-    [period, selectedBranchId]
+    [period, monthOffset, selectedBranchId]
   )
 
+  // Evitar re-fetch duplicado en el primer render (los datos ya vienen del server)
+  const isFirstRender = useRef(true)
   useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
     refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranchId])
 
   const handlePeriodChange = (v: string) => {
     setPeriod(v)
-    refresh(v)
+    if (v !== '1') setMonthOffset(0)
+    refresh(v, v === '1' ? monthOffset : 0)
+  }
+
+  const handleMonthNav = (direction: 'prev' | 'next') => {
+    const newOffset = direction === 'prev' ? monthOffset + 1 : monthOffset - 1
+    if (newOffset < 0) return // No ir al futuro
+    setMonthOffset(newOffset)
+    refresh('1', newOffset)
   }
 
   const expensesByCategory = useMemo(() => {
@@ -223,9 +262,9 @@ export function FinanzasClient({
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <h2 className="text-xl font-bold tracking-tight lg:text-2xl">Finanzas</h2>
+    <div className="space-y-4 lg:space-y-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-lg lg:text-2xl font-bold tracking-tight">Resumen financiero</h2>
         <div className="flex flex-wrap items-center gap-2">
           <BranchSelector branches={branches} />
           <Select value={period} onValueChange={handlePeriodChange}>
@@ -240,6 +279,25 @@ export function FinanzasClient({
               ))}
             </SelectContent>
           </Select>
+          {period === '1' && (
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" className="size-8" onClick={() => handleMonthNav('prev')}>
+                <ChevronLeft className="size-4" />
+              </Button>
+              <span className="min-w-[130px] text-center text-sm font-medium">
+                {formatMonthLabel(getMonthFromOffset(monthOffset))}
+              </span>
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-8"
+                onClick={() => handleMonthNav('next')}
+                disabled={monthOffset === 0}
+              >
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+          )}
           <Button variant="outline" size="sm" onClick={exportToCSV}>
             <Download className="mr-1.5 size-3.5" />
             Exportar CSV

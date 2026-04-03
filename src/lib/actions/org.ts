@@ -1,5 +1,6 @@
 'use server'
 
+import { cache } from 'react'
 import { createAdminClient } from '@/lib/supabase/server'
 
 /**
@@ -54,9 +55,9 @@ export async function validateBranchAccess(branchId: string): Promise<string | n
 
 /**
  * Obtiene los IDs de branches que pertenecen a la org del usuario.
- * Util para filtrar queries que necesitan scope por branches de la org.
+ * Cacheado con React cache() para deduplicar dentro del mismo request.
  */
-export async function getOrgBranchIds(): Promise<string[]> {
+export const getOrgBranchIds = cache(async function getOrgBranchIds(): Promise<string[]> {
   const orgId = await getCurrentOrgId()
   if (!orgId) return []
 
@@ -67,7 +68,7 @@ export async function getOrgBranchIds(): Promise<string[]> {
     .eq('organization_id', orgId)
 
   return branches?.map(b => b.id) ?? []
-}
+})
 
 import { cookies } from 'next/headers'
 
@@ -164,8 +165,9 @@ export async function switchOrganization(newOrgId: string) {
 /**
  * Obtiene el organization_id del usuario autenticado actual.
  * Soporta tanto Supabase Auth (dashboard) como barber PIN session (panel barbero).
+ * Cacheado con React cache() para deduplicar llamadas dentro del mismo request.
  */
-export async function getCurrentOrgId(): Promise<string | null> {
+export const getCurrentOrgId = cache(async function getCurrentOrgId(): Promise<string | null> {
   const cookieStore = await cookies()
 
   // 1. Intentar con Supabase Auth (usuarios del dashboard)
@@ -198,4 +200,4 @@ export async function getCurrentOrgId(): Promise<string | null> {
   }
 
   return null
-}
+})

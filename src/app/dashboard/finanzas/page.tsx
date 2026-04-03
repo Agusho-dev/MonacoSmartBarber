@@ -55,7 +55,7 @@ export default async function FinanzasPage() {
     { data: salaryConfigsRaw },
     { data: expenseTickets },
   ] = await Promise.all([
-    fetchFinancialData(6),
+    fetchFinancialData(1),
     getFixedExpenses(),
     getCommissionSummary(),
     supabase.from('branches').select('*').eq('is_active', true).order('name'),

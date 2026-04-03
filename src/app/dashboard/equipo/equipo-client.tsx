@@ -181,12 +181,12 @@ export function EquipoClient({
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 lg:space-y-6">
             {/* Header con BranchSelector */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold tracking-tight">Equipo</h1>
-                    <p className="text-muted-foreground">
+                    <h1 className="text-xl lg:text-2xl font-bold tracking-tight">Equipo</h1>
+                    <p className="text-sm text-muted-foreground hidden sm:block">
                         Gestión de barberos, descansos, incentivos y disciplina
                     </p>
                 </div>
@@ -200,13 +200,13 @@ export function EquipoClient({
                         onClick={() => handleSegmentChange('administracion')}
                         aria-pressed={activeSegment === 'administracion'}
                         className={cn(
-                            'flex flex-1 sm:flex-none items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200',
+                            'flex flex-1 sm:flex-none items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200',
                             activeSegment === 'administracion'
                                 ? 'bg-background text-foreground shadow-sm'
                                 : 'text-muted-foreground hover:text-foreground'
                         )}
                     >
-                        <LayoutGrid className="size-4" />
+                        <LayoutGrid className="size-3.5 sm:size-4" />
                         Administración
                     </button>
                 )}
@@ -215,13 +215,13 @@ export function EquipoClient({
                         onClick={() => handleSegmentChange('perfiles')}
                         aria-pressed={activeSegment === 'perfiles'}
                         className={cn(
-                            'flex flex-1 sm:flex-none items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200',
+                            'flex flex-1 sm:flex-none items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200',
                             activeSegment === 'perfiles'
                                 ? 'bg-background text-foreground shadow-sm'
                                 : 'text-muted-foreground hover:text-foreground'
                         )}
                     >
-                        <UserCircle2 className="size-4" />
+                        <UserCircle2 className="size-3.5 sm:size-4" />
                         Perfiles
                     </button>
                 )}
@@ -229,21 +229,21 @@ export function EquipoClient({
 
             {/* Sub-tabs solo visibles en el segmento Administración */}
             {activeSegment === 'administracion' && visibleAdminTabs.length > 0 && (
-                <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">
-                    <div className="flex gap-1 rounded-lg border bg-muted/30 p-1 flex-nowrap min-w-max">
+                <div className="overflow-x-auto -mx-3 px-3 lg:mx-0 lg:px-0 scrollbar-hide">
+                    <div className="flex gap-1 rounded-lg border bg-muted/30 p-1 flex-nowrap w-fit">
                         {visibleAdminTabs.map((tab) => (
                             <button
                                 key={tab.id}
                                 onClick={() => handleTabChange(tab.id)}
                                 title={tab.label}
                                 className={cn(
-                                    'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-all whitespace-nowrap',
+                                    'flex items-center gap-1.5 sm:gap-2 rounded-md px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all whitespace-nowrap',
                                     activeTab === tab.id
                                         ? 'bg-background text-foreground shadow-sm'
                                         : 'text-muted-foreground hover:text-foreground'
                                 )}
                             >
-                                <tab.icon className="size-4 shrink-0" />
+                                <tab.icon className="size-3.5 sm:size-4 shrink-0" />
                                 <span className="hidden sm:inline">{tab.label}</span>
                             </button>
                         ))}

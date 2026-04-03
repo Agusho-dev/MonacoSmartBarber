@@ -52,6 +52,7 @@ import {
   Plus,
   TrendingUp,
   ChevronRight,
+  ChevronLeft,
   Banknote,
   AlertCircle,
   FileDown,
@@ -472,10 +473,10 @@ export function SueldosClient({ branches, barbers }: Props) {
     (currentBarber ? localSalaryConfigs[currentBarber.id] : undefined) ?? currentBarber?.salary_configs?.[0]
 
   return (
-    <div className="flex flex-col h-full gap-0">
+    <div className="flex flex-col h-full gap-0 -m-3 lg:-m-0">
       {/* Header de página */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-        <h1 className="text-xl font-semibold tracking-tight">Sueldos</h1>
+      <div className="flex items-center justify-between px-4 lg:px-6 py-3 lg:py-4 border-b border-border shrink-0">
+        <h1 className="text-lg lg:text-xl font-semibold tracking-tight">Sueldos</h1>
         <Select value={selectedBranchId} onValueChange={setStoreBranchId}>
           <SelectTrigger className="w-40 h-8 text-sm">
             <SelectValue placeholder="Sucursal" />
@@ -494,7 +495,10 @@ export function SueldosClient({ branches, barbers }: Props) {
       <div className="flex flex-1 min-h-0 overflow-hidden">
 
         {/* ── Sidebar de barberos ─────────────────────────────────────────── */}
-        <aside className="w-60 shrink-0 border-r border-border flex flex-col overflow-hidden">
+        <aside className={cn(
+          'w-full lg:w-60 shrink-0 border-r border-border flex flex-col overflow-hidden',
+          activeBarberId ? 'hidden lg:flex' : 'flex'
+        )}>
           <div className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider border-b border-border">
             Barberos
           </div>
@@ -562,7 +566,10 @@ export function SueldosClient({ branches, barbers }: Props) {
         </aside>
 
         {/* ── Panel principal ──────────────────────────────────────────────── */}
-        <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <main className={cn(
+          'flex-1 flex flex-col min-w-0 overflow-hidden',
+          activeBarberId ? 'flex' : 'hidden lg:flex'
+        )}>
           {!currentBarber ? (
             <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
               Seleccioná una sucursal con barberos
@@ -570,8 +577,16 @@ export function SueldosClient({ branches, barbers }: Props) {
           ) : (
             <>
               {/* Header del barbero */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+              <div className="flex items-center justify-between px-4 lg:px-6 py-3 lg:py-4 border-b border-border shrink-0">
                 <div className="flex items-center gap-3">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="lg:hidden size-8 -ml-1"
+                    onClick={() => setActiveBarberId(null)}
+                  >
+                    <ChevronLeft className="size-4" />
+                  </Button>
                   <div className="size-9 rounded-full bg-muted flex items-center justify-center text-sm font-semibold">
                     {currentBarber.full_name.charAt(0).toUpperCase()}
                   </div>

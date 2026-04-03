@@ -142,7 +142,7 @@ function QueueCard({
   // Evitar error visual de dnd-kit origin
   const style = {
     transform: CSS.Transform.toString(transform),
-    transition,
+    transition: transition ?? 'transform 200ms cubic-bezier(0.25, 1, 0.5, 1)',
   }
 
   const isBreak = entry.is_break
@@ -593,13 +593,13 @@ function DynamicColumn({
       ref={setNodeRef}
       className="flex flex-col w-full md:w-[260px] md:shrink-0 bg-zinc-950 border-b md:border-b-0 md:border-r border-zinc-800/80"
     >
-      <div className="p-4 border-b border-zinc-800/80 bg-zinc-950 sticky top-0 z-40 shadow-sm">
+      <div className="p-3 md:p-4 border-b border-zinc-800/80 bg-zinc-950 sticky top-0 z-40 shadow-sm">
         <div className="flex items-center gap-2 h-6">
           <Zap className="size-4 text-yellow-400" />
           <h3 className="font-semibold text-zinc-100 text-sm md:text-base">Dinámicos</h3>
         </div>
       </div>
-      <div className="flex-1 p-3 flex flex-col gap-3 md:min-h-[500px]">
+      <div className="flex-1 p-2 md:p-3 flex flex-col gap-2 md:gap-3 md:min-h-[500px]">
         <SortableContext items={entryIds} strategy={verticalListSortingStrategy}>
           {entries.map((entry) => (
             <QueueCard
@@ -708,9 +708,9 @@ function BarberRow({
   return (
     <div className={`flex flex-col md:flex-row md:min-h-[100px] md:items-stretch border-b border-zinc-800/80 ${isUnavailable ? 'opacity-60' : ''}`}>
       {/* ── Info Barbero (Celda Fija y Sticky) ── */}
-      <div className="md:sticky md:left-[260px] z-20 w-full md:w-[200px] md:shrink-0 border-b md:border-b-0 md:border-r border-zinc-800/80 bg-zinc-950 p-3 flex items-center justify-start md:shadow-[8px_0_16px_-12px_rgba(0,0,0,0.8)]">
-        <div className="flex flex-row items-center gap-3 text-left w-full">
-          <div className="relative h-12 w-12 shrink-0">
+      <div className="md:sticky md:left-[260px] z-20 w-full md:w-[200px] md:shrink-0 border-b md:border-b-0 md:border-r border-zinc-800/80 bg-zinc-950 px-3 py-2 md:p-3 flex items-center justify-start md:shadow-[8px_0_16px_-12px_rgba(0,0,0,0.8)]">
+        <div className="flex flex-row items-center gap-2.5 md:gap-3 text-left w-full">
+          <div className="relative h-10 w-10 md:h-12 md:w-12 shrink-0">
             <div className="h-full w-full rounded-full bg-zinc-800 overflow-hidden ring-2 ring-zinc-800">
               {barber.avatar_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -739,7 +739,7 @@ function BarberRow({
       {/* ── Fila de Clientes (Arrastrables con grid infinito css) ── */}
       <div
         ref={setNodeRef}
-        className="flex-1 flex flex-col md:flex-row isolate bg-zinc-900/10 md:min-w-[260px] p-3 md:p-0 gap-2 md:gap-0"
+        className="flex-1 flex flex-col md:flex-row isolate bg-zinc-900/10 md:min-w-[260px] p-2 md:p-0 gap-1.5 md:gap-0"
         style={{
           backgroundSize: '260px 100%',
           backgroundImage: 'linear-gradient(to right, transparent 259px, rgba(39, 39, 42, 0.4) 259px, rgba(39, 39, 42, 0.4) 260px)'
@@ -825,7 +825,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 12 } }),
     useSensor(KeyboardSensor)
   )
 
@@ -1327,6 +1327,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   }
 
   const dropAnimation = {
+    duration: 250,
+    easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
     sideEffects: defaultDropAnimationSideEffects({
       styles: {
         active: {
@@ -1351,14 +1353,14 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
         fetchQueue() // reset visual state
       }}
     >
-      <div className="flex h-[calc(100dvh-5rem)] flex-col gap-4 overflow-hidden p-1">
-        
+      <div className="flex h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-5rem)] flex-col gap-2 lg:gap-4 overflow-hidden p-1">
+
         {/* Encabezado y Descansos (Top Bar) */}
-        <div className="flex shrink-0 flex-col gap-3 px-2">
+        <div className="flex shrink-0 flex-col gap-2 lg:gap-3 px-2">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
-              <h2 className="text-xl font-bold tracking-tight">Fila en vivo</h2>
-              <p className="text-xs text-muted-foreground">
+              <h2 className="text-lg lg:text-xl font-bold tracking-tight">Fila en vivo</h2>
+              <p className="text-xs text-muted-foreground hidden sm:block">
                 Arrastrá clientes o descansos libremente para asignarlos o reordenarlos.
               </p>
             </div>
@@ -1546,20 +1548,20 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
             </Dialog>
           </div>
           
-          <div className="flex items-center gap-3 overflow-x-auto pb-2">
+          <div className="flex items-center gap-2 lg:gap-3 overflow-x-auto pb-1 lg:pb-2 -mx-1 px-1">
             <a
               href="/dashboard/equipo?tab=descansos"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 text-amber-500 text-sm font-bold border border-amber-500/20 shrink-0 transition-colors active:bg-amber-500/20"
+              className="flex items-center gap-1.5 lg:gap-2 px-2.5 lg:px-3 py-1.5 lg:py-2 rounded-lg bg-amber-500/10 text-amber-500 text-xs lg:text-sm font-bold border border-amber-500/20 shrink-0 transition-colors active:bg-amber-500/20"
             >
-              <Pause className="size-4" />
+              <Pause className="size-3.5 lg:size-4" />
               {breakConfigs.filter((c) => !selectedBranchId || c.branch_id === selectedBranchId).length > 0
-                ? 'Plantillas de Descanso'
-                : 'No hay descansos configurados'}
+                ? 'Descansos'
+                : 'Sin descansos'}
             </a>
             {breakConfigs
               .filter((c) => !selectedBranchId || c.branch_id === selectedBranchId)
               .map((config) => (
-                <div key={config.id} className="w-48 shrink-0">
+                <div key={config.id} className="w-40 lg:w-48 shrink-0">
                   <BreakTemplateCard config={config} />
                 </div>
               ))}
@@ -1567,7 +1569,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
         </div>
 
         {/* Tablero Kanban (Grid Layout) */}
-        <div className="flex flex-1 overflow-auto bg-zinc-950/40 border-t border-zinc-800/80 mt-2 relative md:overflow-x-auto overflow-y-auto">
+        <div className="flex flex-1 overflow-auto bg-zinc-950/40 border-t border-zinc-800/80 mt-1 lg:mt-2 relative md:overflow-x-auto overflow-y-auto">
           <div className="flex flex-col md:flex-row md:min-w-max w-full md:h-full">
 
             {/* Columna Dinámicos (Sticky a la izquierda) */}

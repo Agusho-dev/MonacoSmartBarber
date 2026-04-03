@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, useEffect, useRef, useCallback } from 'react'
+import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   upsertBreakConfig,
   deleteBreakConfig,
@@ -9,7 +10,6 @@ import {
   approveBreak,
   rejectBreak,
 } from '@/lib/actions/break-requests'
-import { createScheduledBreakRequests } from '@/lib/actions/scheduled-breaks'
 import type { Branch, BreakConfig } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -64,6 +64,7 @@ interface Props {
 const EMPTY_FORM = { id: '', branch_id: '', name: '', duration_minutes: '30', scheduled_time: '' }
 
 function BreakRequestCard({ request }: { request: BreakRequestRow }) {
+  const router = useRouter()
   const [, startTransition] = useTransition()
   const [cutsInput, setCutsInput] = useState('0')
   const staffName = request.staff?.full_name ?? 'Barbero'
@@ -87,7 +88,7 @@ function BreakRequestCard({ request }: { request: BreakRequestRow }) {
       const r = await approveBreak(request.id, cuts)
       if (r.error) { toast.error(r.error) } else {
         toast.success(`Descanso aprobado para ${staffName}${cuts > 0 ? ` en ${cuts} corte${cuts > 1 ? 's' : ''}` : ' (inmediato)'}`)
-        window.location.reload()
+        router.refresh()
       }
     })
   }
@@ -95,19 +96,19 @@ function BreakRequestCard({ request }: { request: BreakRequestRow }) {
   function handleReject() {
     startTransition(async () => {
       const r = await rejectBreak(request.id)
-      if (r.error) { toast.error(r.error) } else { toast.success('Solicitud rechazada'); window.location.reload() }
+      if (r.error) { toast.error(r.error) } else { toast.success('Solicitud rechazada'); router.refresh() }
     })
   }
 
   return (
-    <div className="flex flex-col gap-3 px-5 py-4">
-      <div className="flex items-center gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-600 font-semibold text-sm">
+    <div className="flex flex-col gap-2.5 px-3 py-3 sm:gap-3 sm:px-5 sm:py-4">
+      <div className="flex items-center gap-2.5 sm:gap-3">
+        <div className="flex size-8 sm:size-9 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-600 font-semibold text-xs sm:text-sm">
           {staffName.charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="font-medium truncate">{staffName}</p>
-          <div className="flex items-center gap-2 flex-wrap mt-0.5">
+          <p className="font-medium text-sm sm:text-base truncate">{staffName}</p>
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap mt-0.5">
             <Badge variant="outline" className={`text-xs ${isPending ? 'bg-yellow-500/15 text-yellow-500 border-yellow-500/30' : 'bg-green-500/15 text-green-600 border-green-500/30'}`}>
               {isPending ? 'Pendiente' : 'Aprobado'}
             </Badge>
@@ -123,27 +124,31 @@ function BreakRequestCard({ request }: { request: BreakRequestRow }) {
         </div>
       </div>
       {isPending && (
-        <div className="flex items-center gap-2 ml-12">
-          <div className="flex items-center gap-2 flex-1">
+        <div className="flex flex-wrap items-center gap-2 ml-0 sm:ml-12">
+          <div className="flex items-center gap-2 flex-1 min-w-[160px]">
             <Label className="text-xs text-muted-foreground whitespace-nowrap">Luego de</Label>
             <Input
               type="number"
               min="0"
               step="1"
-              className="w-20 h-8 text-sm"
+              className="w-16 sm:w-20 h-8 text-sm"
               value={cutsInput}
               onChange={(e) => setCutsInput(e.target.value)}
             />
             <span className="text-xs text-muted-foreground">cortes</span>
           </div>
-          <Button size="sm" variant="outline" className="text-green-600 border-green-500/30 hover:bg-green-500/10" onClick={handleApprove}>
-            <CheckCircle2 className="size-4 mr-1.5" />
-            Aprobar
-          </Button>
-          <Button size="sm" variant="outline" className="text-red-500 border-red-500/30 hover:bg-red-500/10" onClick={handleReject}>
-            <XCircle className="size-4 mr-1.5" />
-            Rechazar
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" className="text-green-600 border-green-500/30 hover:bg-green-500/10" onClick={handleApprove}>
+              <CheckCircle2 className="size-4 mr-1" />
+              <span className="hidden sm:inline">Aprobar</span>
+              <span className="sm:hidden">OK</span>
+            </Button>
+            <Button size="sm" variant="outline" className="text-red-500 border-red-500/30 hover:bg-red-500/10" onClick={handleReject}>
+              <XCircle className="size-4 mr-1" />
+              <span className="hidden sm:inline">Rechazar</span>
+              <span className="sm:hidden">No</span>
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -155,9 +160,6 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
   const [form, setForm] = useState(EMPTY_FORM)
   const [, startTransition] = useTransition()
   const { selectedBranchId } = useBranchStore()
-
-  // Track fired scheduled break configs to prevent double-firing
-  const firedScheduledRef = useRef<Set<string>>(new Set())
 
   const branchConfigs = breakConfigs.filter((bc) => bc.branch_id === selectedBranchId)
 
@@ -196,60 +198,19 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
     })
   }
 
-  // Auto-fire scheduled break requests
-  const checkScheduledBreaks = useCallback(async () => {
-    if (!selectedBranchId) return
-    const now = new Date()
-    const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-
-    for (const bc of branchConfigs) {
-      if (!bc.scheduled_time) continue
-      // Compare HH:MM portion only
-      const scheduledHHMM = bc.scheduled_time.substring(0, 5)
-      if (scheduledHHMM !== currentHHMM) continue
-      // Build a daily key so it only fires once per day per config
-      const dailyKey = `${bc.id}-${now.toISOString().substring(0, 10)}`
-      if (firedScheduledRef.current.has(dailyKey)) continue
-
-      // Mark as fired immediately to prevent double-firing
-      firedScheduledRef.current.add(dailyKey)
-
-      try {
-        const result = await createScheduledBreakRequests(selectedBranchId, bc.id)
-        if (result.error) {
-          toast.error(`Error generando descansos: ${result.error}`)
-        } else if (result.created && result.created > 0) {
-          toast.success(`🔔 Se crearon ${result.created} solicitud(es) de descanso automáticas para "${bc.name}"`)
-        }
-      } catch {
-        // Remove from fired so it can retry next interval
-        firedScheduledRef.current.delete(dailyKey)
-      }
-    }
-  }, [selectedBranchId, branchConfigs])
-
-  useEffect(() => {
-    // Check immediately and then every 30 seconds
-    checkScheduledBreaks()
-    const interval = setInterval(checkScheduledBreaks, 30_000)
-    return () => clearInterval(interval)
-  }, [checkScheduledBreaks])
-
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-5 lg:space-y-8">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Descansos</h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <h1 className="text-xl lg:text-2xl font-bold">Descansos</h1>
+          <p className="text-sm text-muted-foreground mt-1 hidden sm:block">
             Configurá tipos de descanso y gestioná solicitudes de los barberos.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button onClick={openCreate}>
-            <Plus className="size-4 mr-2" />
-            Nuevo tipo
-          </Button>
-        </div>
+        <Button onClick={openCreate} size="sm" className="w-full sm:w-auto">
+          <Plus className="size-4 mr-2" />
+          Nuevo tipo
+        </Button>
       </div>
 
       {/* Break config types */}
@@ -265,7 +226,7 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
         ) : (
           <div className="divide-y rounded-xl border bg-card">
             {branchConfigs.map((bc) => (
-              <div key={bc.id} className="flex items-center gap-4 px-5 py-4">
+              <div key={bc.id} className="flex items-center gap-3 px-3 py-3 sm:gap-4 sm:px-5 sm:py-4">
                 <Coffee className="size-5 text-muted-foreground shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="font-medium">{bc.name}</p>

@@ -6,11 +6,41 @@ import { createAdminClient } from '@/lib/supabase/server'
 // que no puede leer tablas con RLS org-scoped. Usamos createAdminClient() ya que
 // los queries estan scoped por staffId + branchId del barber_session cookie.
 
+/**
+ * Valida que el staffId pertenece a la misma organización que el branchId.
+ * Previene que un barbero de una org acceda a datos de otra org con su staffId.
+ * Retorna true si la combinación es válida.
+ */
+async function validateBarberBranchOwnership(staffId: string, branchId: string): Promise<boolean> {
+  const supabase = createAdminClient()
+  const [{ data: staff }, { data: branch }] = await Promise.all([
+    supabase
+      .from('staff')
+      .select('organization_id')
+      .eq('id', staffId)
+      .eq('is_active', true)
+      .maybeSingle(),
+    supabase
+      .from('branches')
+      .select('organization_id')
+      .eq('id', branchId)
+      .eq('is_active', true)
+      .maybeSingle(),
+  ])
+
+  if (!staff?.organization_id || !branch?.organization_id) return false
+  return staff.organization_id === branch.organization_id
+}
+
 export async function fetchBarberPerformance(
     staffId: string,
     branchId: string,
     period: 'day' | 'week' | 'month' = 'day'
 ) {
+    // Verificar que el barbero y la sucursal pertenecen a la misma organización
+    const isValid = await validateBarberBranchOwnership(staffId, branchId)
+    if (!isValid) return { cuts: 0, revenue: 0, commission: 0, avgTicket: 0, visits: [] }
+
     const supabase = createAdminClient()
     const now = new Date()
 
@@ -48,6 +78,9 @@ export async function fetchBarberPerformance(
 }
 
 export async function fetchBarberGoals(staffId: string, branchId: string) {
+    const isValid = await validateBarberBranchOwnership(staffId, branchId)
+    if (!isValid) return { rules: [], achievements: [], currentCuts: 0, currentPeriod: '' }
+
     const supabase = createAdminClient()
     const now = new Date()
     const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -84,6 +117,9 @@ export async function fetchBarberGoals(staffId: string, branchId: string) {
 }
 
 export async function fetchBarberAttendance(staffId: string, branchId: string) {
+    const isValid = await validateBarberBranchOwnership(staffId, branchId)
+    if (!isValid) return { logs: [], events: [], absences: 0, lates: 0 }
+
     const supabase = createAdminClient()
     const now = new Date()
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -122,6 +158,9 @@ export async function fetchBarberHistory(
     fromISO?: string,
     toISO?: string
 ) {
+    const isValid = await validateBarberBranchOwnership(staffId, branchId)
+    if (!isValid) return { visits: [] }
+
     const supabase = createAdminClient()
     const now = new Date()
     const from = fromISO || new Date(now.getFullYear(), now.getMonth(), 1).toISOString()

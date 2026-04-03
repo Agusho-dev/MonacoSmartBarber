@@ -300,31 +300,33 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
   // ═══════════════════════════════════════════════════════════════════════════
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 lg:space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-xl font-bold tracking-tight lg:text-2xl">Servicios y Productos</h2>
-          <p className="text-sm text-muted-foreground">Catálogo de servicios, productos y precios</p>
+          <h2 className="text-xl lg:text-2xl font-bold tracking-tight">Servicios y Productos</h2>
+          <p className="text-sm text-muted-foreground hidden sm:block">Catálogo de servicios, productos y precios</p>
         </div>
         <BranchSelector branches={branches} />
       </div>
 
       <Tabs defaultValue="services" className="w-full">
-        <TabsList className="mb-4">
-          <TabsTrigger value="services" className="flex items-center gap-2">
-            <Sparkles className="size-4" />
-            Servicios
-          </TabsTrigger>
-          <TabsTrigger value="products" className="flex items-center gap-2">
-            <Package className="size-4" />
-            Productos
-          </TabsTrigger>
-          <TabsTrigger value="product-sales" className="flex items-center gap-2">
-            <ShoppingCart className="size-4" />
-            Ventas
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto -mx-3 px-3 lg:mx-0 lg:px-0">
+          <TabsList className="mb-4 min-w-max">
+            <TabsTrigger value="services" className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
+              <Sparkles className="size-3.5 sm:size-4" />
+              Servicios
+            </TabsTrigger>
+            <TabsTrigger value="products" className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
+              <Package className="size-3.5 sm:size-4" />
+              Productos
+            </TabsTrigger>
+            <TabsTrigger value="product-sales" className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
+              <ShoppingCart className="size-3.5 sm:size-4" />
+              Ventas
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         {/* ════════════════════════ TAB: SERVICIOS ════════════════════════ */}
         <TabsContent value="services" className="space-y-6 m-0">

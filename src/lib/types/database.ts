@@ -95,7 +95,7 @@ export interface Branch {
   business_days: number[]
   timezone: string
   google_review_url?: string | null
-  checkin_bg_color: 'white' | 'black' | 'graphite' | null
+  checkin_bg_color: string | null
   created_at: string
   updated_at: string
 }
@@ -370,7 +370,7 @@ export interface AppSettings {
   review_delay_minutes: number
   review_message_template: string | null
   wa_api_url: string | null
-  checkin_bg_color: 'white' | 'black' | 'graphite'
+  checkin_bg_color: string
   updated_at: string
 }
 

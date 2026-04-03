@@ -1,4 +1,4 @@
-# Deuda Técnica — Monaco Smart Barber SaaS
+# Deuda Técnica — BarberOS SaaS
 
 **Fecha de análisis:** 2026-04-01
 **Versión:** 2.0 (auditoría profunda)

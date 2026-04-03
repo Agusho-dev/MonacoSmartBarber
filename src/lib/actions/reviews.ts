@@ -1,6 +1,7 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { validateBranchAccess } from './org'
 
 export async function createReviewRequest(
     clientId: string,
@@ -8,6 +9,10 @@ export async function createReviewRequest(
     visitId: string,
     barberId: string | null
 ) {
+    // Validar que la sucursal pertenece a la org del usuario autenticado
+    const orgAccess = await validateBranchAccess(branchId)
+    if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+
     const supabase = await createClient()
 
     const { data: existing } = await supabase
@@ -39,7 +44,8 @@ export async function createReviewRequest(
 }
 
 export async function getReviewRequestInfo(token: string) {
-    const supabase = await createClient()
+    // Operación pública (acceso por token único): no requiere auth de org
+    const supabase = createAdminClient()
     const { data, error } = await supabase
         .from('review_requests')
         .select('*, branch:branches(name, google_review_url)')
@@ -57,7 +63,8 @@ export async function submitReview(
     comment: string | null,
     redirectedToGoogle: boolean
 ) {
-    const supabase = await createClient()
+    // Operación pública (acceso por token): usamos admin client para no depender de sesión
+    const supabase = createAdminClient()
 
     const { data: reqData } = await supabase
         .from('review_requests')

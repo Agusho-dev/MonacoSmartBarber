@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useEffect, useCallback } from 'react'
+import { useState, useTransition, useEffect, useCallback, useRef } from 'react'
 import { startOfMonth, endOfDay, format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
@@ -105,7 +105,13 @@ export function EstadisticasClient({ initialData, branches }: Props) {
     [from, to, selectedBranchId]
   )
 
+  // Evitar re-fetch duplicado en el primer render (los datos ya vienen del server)
+  const isFirstRender = useRef(true)
   useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
     refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranchId])
@@ -146,16 +152,16 @@ export function EstadisticasClient({ initialData, branches }: Props) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <h2 className="text-xl font-bold tracking-tight lg:text-2xl">Estadísticas</h2>
+    <div className="space-y-4 lg:space-y-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-xl lg:text-2xl font-bold tracking-tight">Estadísticas</h2>
         <div className="flex flex-wrap items-center gap-2">
           <BranchSelector branches={branches} />
           <Button variant="outline" size="sm" onClick={handleExportCSV}>
-            <FileDown className="mr-2 size-4" /> CSV
+            <FileDown className="mr-1.5 size-3.5" /> CSV
           </Button>
           <Button variant="outline" size="sm" onClick={handleExportPDF}>
-            <FileDown className="mr-2 size-4" /> PDF
+            <FileDown className="mr-1.5 size-3.5" /> PDF
           </Button>
         </div>
       </div>
@@ -242,7 +248,7 @@ function SummaryCard({
         </div>
       </CardHeader>
       <CardContent>
-        <p className="text-3xl font-bold">{value}</p>
+        <p className="text-2xl lg:text-3xl font-bold">{value}</p>
       </CardContent>
     </Card>
   )
@@ -288,17 +294,17 @@ function TrendsTab({ data }: { data: StatsData }) {
   }))
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="grid gap-4 lg:gap-6 lg:grid-cols-2">
       <Card>
         <CardHeader>
-          <CardTitle>Ingresos diarios</CardTitle>
+          <CardTitle className="text-base lg:text-lg">Ingresos diarios</CardTitle>
           <CardDescription>Evolución durante el período</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-2 sm:px-6">
           {chartData.length === 0 ? (
             <EmptyChart />
           ) : (
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={240}>
               <AreaChart data={chartData}>
                 <CartesianGrid
                   strokeDasharray="3 3"
@@ -336,14 +342,14 @@ function TrendsTab({ data }: { data: StatsData }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Cortes diarios</CardTitle>
+          <CardTitle className="text-base lg:text-lg">Cortes diarios</CardTitle>
           <CardDescription>Cantidad de servicios completados</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-2 sm:px-6">
           {chartData.length === 0 ? (
             <EmptyChart />
           ) : (
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={240}>
               <BarChart data={chartData}>
                 <CartesianGrid
                   strokeDasharray="3 3"
@@ -379,13 +385,13 @@ function TrendsTab({ data }: { data: StatsData }) {
 
       <Card className="lg:col-span-2">
         <CardHeader>
-          <CardTitle>Ingresos por método de pago</CardTitle>
+          <CardTitle className="text-base lg:text-lg">Ingresos por método de pago</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-2 sm:px-6">
           {methodData.length === 0 ? (
             <EmptyChart />
           ) : (
-            <ResponsiveContainer width="100%" height={250}>
+            <ResponsiveContainer width="100%" height={200}>
               <BarChart data={methodData} layout="vertical">
                 <CartesianGrid
                   strokeDasharray="3 3"
@@ -523,10 +529,10 @@ function HeatmapTab() {
             <div className="size-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <div className="min-w-[600px]">
+          <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
+            <div className="min-w-[520px]">
               <div className="mb-2 flex">
-                <div className="w-16 shrink-0" />
+                <div className="w-12 sm:w-16 shrink-0" />
                 {hours.map((h) => (
                   <div
                     key={h}
@@ -538,7 +544,7 @@ function HeatmapTab() {
               </div>
               {dayRows.map(({ dayIdx, label }) => (
                 <div key={dayIdx} className="mb-1 flex items-center">
-                  <div className="w-16 shrink-0 text-xs text-muted-foreground">
+                  <div className="w-12 sm:w-16 shrink-0 text-[10px] sm:text-xs text-muted-foreground">
                     {label}
                   </div>
                   {hours.map((hour) => {
@@ -735,20 +741,20 @@ function SegmentationTab({ data }: { data: StatsData }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
         {segments.map((seg) => (
-          <Card key={seg.label}>
-            <CardHeader>
-              <CardDescription>{seg.label}</CardDescription>
+          <Card key={seg.label} className="gap-2">
+            <CardHeader className="pb-0">
+              <CardDescription className="text-xs">{seg.label}</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center gap-3">
-                <div className={`rounded-lg bg-muted p-2 ${seg.color}`}>
-                  <seg.icon className="size-5" />
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className={`rounded-lg bg-muted p-1.5 sm:p-2 ${seg.color}`}>
+                  <seg.icon className="size-4 sm:size-5" />
                 </div>
                 <div>
-                  <p className="text-3xl font-bold">{seg.value}</p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xl sm:text-3xl font-bold">{seg.value}</p>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground hidden sm:block">
                     {seg.description}
                   </p>
                 </div>
