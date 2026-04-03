@@ -1,5 +1,7 @@
 // Recibe mensajes entrantes del microservicio Baileys
 // y los inserta en la base de datos para aparecer en /dashboard/mensajeria
+// Nota: Este endpoint es para el microservicio Baileys (no-oficial).
+// Los mensajes de Meta Cloud API llegan via /api/webhooks/whatsapp.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -21,8 +23,8 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json()
-    // body: { phone: "+549...", message: "texto", timestamp: 1234567890 }
-    const { phone, message, timestamp } = body
+    // body: { phone: "+549...", message: "texto", timestamp: 1234567890, phone_number_id?: "..." }
+    const { phone, message, timestamp, phone_number_id } = body
 
     if (!phone || !message) {
       return new Response(
@@ -33,14 +35,81 @@ Deno.serve(async (req: Request) => {
 
     const phoneClean = (phone as string).replace(/\D/g, '')
 
-    // Buscar canal WhatsApp activo
-    const { data: waChannel } = await supabase
-      .from('social_channels')
-      .select('id')
-      .eq('platform', 'whatsapp')
-      .eq('is_active', true)
-      .limit(1)
-      .maybeSingle()
+    // Buscar canal WhatsApp activo — filtrado por org si tenemos phone_number_id
+    let waChannel: { id: string } | null = null
+    let orgId: string | null = null
+
+    if (phone_number_id) {
+      // Resolver org desde la config de WA
+      const { data: waConfig } = await supabase
+        .from('organization_whatsapp_config')
+        .select('organization_id')
+        .eq('whatsapp_phone_id', phone_number_id)
+        .maybeSingle()
+
+      if (waConfig) {
+        orgId = waConfig.organization_id
+        const { data: branches } = await supabase
+          .from('branches')
+          .select('id')
+          .eq('organization_id', orgId)
+        const branchIds = branches?.map((b: any) => b.id) ?? []
+
+        if (branchIds.length > 0) {
+          const { data: channel } = await supabase
+            .from('social_channels')
+            .select('id')
+            .in('branch_id', branchIds)
+            .eq('platform', 'whatsapp')
+            .eq('is_active', true)
+            .limit(1)
+            .maybeSingle()
+          waChannel = channel
+        }
+      }
+    }
+
+    // Fallback: buscar por teléfono del cliente para inferir la org
+    if (!waChannel) {
+      const { data: client } = await supabase
+        .from('clients')
+        .select('organization_id')
+        .eq('phone', phone)
+        .maybeSingle()
+
+      if (client?.organization_id) {
+        orgId = client.organization_id
+        const { data: branches } = await supabase
+          .from('branches')
+          .select('id')
+          .eq('organization_id', orgId)
+        const branchIds = branches?.map((b: any) => b.id) ?? []
+
+        if (branchIds.length > 0) {
+          const { data: channel } = await supabase
+            .from('social_channels')
+            .select('id')
+            .in('branch_id', branchIds)
+            .eq('platform', 'whatsapp')
+            .eq('is_active', true)
+            .limit(1)
+            .maybeSingle()
+          waChannel = channel
+        }
+      }
+    }
+
+    // Último recurso: primer canal activo (single-tenant legacy)
+    if (!waChannel) {
+      const { data: channel } = await supabase
+        .from('social_channels')
+        .select('id')
+        .eq('platform', 'whatsapp')
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle()
+      waChannel = channel
+    }
 
     if (!waChannel) {
       return new Response(
@@ -49,12 +118,15 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    // Buscar cliente por teléfono
-    const { data: client } = await supabase
+    // Buscar cliente por teléfono (filtrado por org si lo tenemos)
+    let clientQuery = supabase
       .from('clients')
       .select('id, name')
       .eq('phone', phone)
-      .maybeSingle()
+    if (orgId) {
+      clientQuery = clientQuery.eq('organization_id', orgId)
+    }
+    const { data: client } = await clientQuery.maybeSingle()
 
     // Buscar o crear conversación
     let convId: string
@@ -73,12 +145,10 @@ Deno.serve(async (req: Request) => {
           unread_count: (existingConv.unread_count || 0) + 1,
           last_message_at: new Date().toISOString(),
           client_id: (client as any)?.id ?? null,
-          // Renovar ventana de 24hs al recibir mensaje
           can_reply_until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         })
         .eq('id', convId)
     } else {
-      // Crear nueva conversación
       const { data: newConv, error: convError } = await supabase
         .from('conversations')
         .insert({

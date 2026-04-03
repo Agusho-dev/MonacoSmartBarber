@@ -25,6 +25,7 @@ export async function saveOrgInstagramConfig(config: {
   instagram_page_id: string
   instagram_page_access_token: string
   instagram_account_id?: string
+  app_secret?: string
 }) {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'No autorizado' }
@@ -38,6 +39,7 @@ export async function saveOrgInstagramConfig(config: {
         instagram_page_id: config.instagram_page_id,
         instagram_page_access_token: config.instagram_page_access_token,
         instagram_account_id: config.instagram_account_id ?? null,
+        app_secret: config.app_secret || null,
         is_active: true,
       },
       { onConflict: 'organization_id' }
