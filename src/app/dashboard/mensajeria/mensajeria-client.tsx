@@ -221,6 +221,7 @@ export function MensajeriaClient({
     whatsapp_access_token: initialWaConfig?.whatsapp_access_token ?? '',
     whatsapp_phone_id: initialWaConfig?.whatsapp_phone_id ?? '',
     whatsapp_business_id: initialWaConfig?.whatsapp_business_id ?? '',
+    app_secret: initialWaConfig?.app_secret ?? '',
   })
   const [showToken, setShowToken] = useState(false)
   const [savingConfig, startSavingConfig] = useTransition()
@@ -231,6 +232,7 @@ export function MensajeriaClient({
     instagram_page_id: initialIgConfig?.instagram_page_id ?? '',
     instagram_page_access_token: initialIgConfig?.instagram_page_access_token ?? '',
     instagram_account_id: initialIgConfig?.instagram_account_id ?? '',
+    app_secret: initialIgConfig?.app_secret ?? '',
   })
   const [showIgToken, setShowIgToken] = useState(false)
   const [savingIgConfig, startSavingIgConfig] = useTransition()
@@ -1112,6 +1114,13 @@ export function MensajeriaClient({
                         placeholder="868078746261917" value={configForm.whatsapp_business_id ?? ''}
                         onChange={(e) => setConfigForm(prev => ({ ...prev, whatsapp_business_id: e.target.value }))} />
                     </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] text-[#8696A0]">App Secret <span className="text-[#8696A0] font-normal">(para verificación HMAC)</span></Label>
+                      <input type="password" className="w-full rounded-lg bg-[#202C33] px-3 py-2 text-sm text-white placeholder:text-[#8696A0] outline-none focus:ring-1 focus:ring-green-500/40"
+                        placeholder="abc123..." value={configForm.app_secret ?? ''}
+                        onChange={(e) => setConfigForm(prev => ({ ...prev, app_secret: e.target.value }))} />
+                      <p className="text-[10px] text-[#8696A0]">Meta App → Configuración → Básica → Clave secreta de la app</p>
+                    </div>
                     <Button className="w-full bg-green-600 hover:bg-green-500 text-white" onClick={handleSaveConfig} disabled={savingConfig}>
                       {savingConfig ? 'Guardando...' : 'Guardar credenciales'}
                     </Button>
@@ -1207,6 +1216,13 @@ export function MensajeriaClient({
                       <input type="text" className="w-full rounded-lg bg-[#202C33] px-3 py-2 text-sm text-white placeholder:text-[#8696A0] outline-none focus:ring-1 focus:ring-pink-500/40"
                         placeholder="17841400000000000" value={igConfigForm.instagram_account_id}
                         onChange={(e) => setIgConfigForm(prev => ({ ...prev, instagram_account_id: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] text-[#8696A0]">App Secret <span className="text-[#8696A0] font-normal">(para verificación HMAC)</span></Label>
+                      <input type="password" className="w-full rounded-lg bg-[#202C33] px-3 py-2 text-sm text-white placeholder:text-[#8696A0] outline-none focus:ring-1 focus:ring-pink-500/40"
+                        placeholder="abc123..." value={igConfigForm.app_secret ?? ''}
+                        onChange={(e) => setIgConfigForm(prev => ({ ...prev, app_secret: e.target.value }))} />
+                      <p className="text-[10px] text-[#8696A0]">Meta App → Configuración → Básica → Clave secreta de la app</p>
                     </div>
                     <Button className="w-full bg-pink-600 hover:bg-pink-500 text-white" onClick={handleSaveIgConfig} disabled={savingIgConfig}>
                       {savingIgConfig ? 'Guardando...' : 'Guardar credenciales'}

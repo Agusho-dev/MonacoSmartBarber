@@ -1,5 +1,7 @@
 // Recibe mensajes entrantes del microservicio Baileys
 // y los inserta en la base de datos para aparecer en /dashboard/mensajeria
+// Nota: Este endpoint es para el microservicio Baileys (no-oficial).
+// Los mensajes de Meta Cloud API llegan via /api/webhooks/whatsapp.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -104,12 +106,10 @@ Deno.serve(async (req: Request) => {
           unread_count: (existingConv.unread_count || 0) + 1,
           last_message_at: new Date().toISOString(),
           client_id: (client as any)?.id ?? null,
-          // Renovar ventana de 24hs al recibir mensaje
           can_reply_until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         })
         .eq('id', convId)
     } else {
-      // Crear nueva conversación
       const { data: newConv, error: convError } = await supabase
         .from('conversations')
         .insert({

@@ -25,6 +25,7 @@ export async function saveOrgWhatsAppConfig(config: {
   whatsapp_access_token: string
   whatsapp_phone_id: string
   whatsapp_business_id: string
+  app_secret?: string
 }) {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'No autorizado' }
@@ -38,6 +39,7 @@ export async function saveOrgWhatsAppConfig(config: {
         whatsapp_access_token: config.whatsapp_access_token,
         whatsapp_phone_id: config.whatsapp_phone_id,
         whatsapp_business_id: config.whatsapp_business_id,
+        app_secret: config.app_secret || null,
         is_active: true,
       },
       { onConflict: 'organization_id' }

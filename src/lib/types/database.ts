@@ -63,6 +63,7 @@ export interface OrgWhatsAppConfig {
   whatsapp_access_token: string | null
   whatsapp_phone_id: string | null
   whatsapp_business_id: string | null
+  app_secret: string | null
   verify_token: string
   is_active: boolean
   created_at: string
@@ -75,6 +76,7 @@ export interface OrgInstagramConfig {
   instagram_page_id: string | null
   instagram_page_access_token: string | null
   instagram_account_id: string | null
+  app_secret: string | null
   verify_token: string
   is_active: boolean
   created_at: string

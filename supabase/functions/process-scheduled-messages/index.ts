@@ -1,4 +1,4 @@
-// Procesa mensajes programados pendientes vía WA Microservice (Baileys)
+// Procesa mensajes programados pendientes vía Meta Cloud API
 // Ejecutado por pg_cron cada 1 minuto o llamado manualmente
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -7,6 +7,8 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 )
+
+const META_API_VERSION = 'v22.0'
 
 Deno.serve(async (req: Request) => {
   // Verificar authorization
@@ -111,14 +113,74 @@ Deno.serve(async (req: Request) => {
           errorMsg = `Error de conexión: ${e.message}`
         }
       } else {
-        errorMsg = 'Microservicio WA no configurado o falta teléfono en el mensaje'
+        // Enviar vía Meta Cloud API
+        const { data: waConfig } = await supabase
+          .from('organization_whatsapp_config')
+          .select('whatsapp_access_token, whatsapp_phone_id')
+          .eq('organization_id', orgId)
+          .eq('is_active', true)
+          .maybeSingle()
+
+        if (!waConfig?.whatsapp_access_token || !waConfig?.whatsapp_phone_id) {
+          errorMsg = 'Config de WhatsApp no encontrada para esta organización'
+        } else if (!msg.phone) {
+          errorMsg = 'Falta teléfono en el mensaje programado'
+        } else {
+          // Normalizar teléfono para Meta Cloud API
+          let phone = (msg.phone as string).replace(/\D/g, '')
+          if (!phone.startsWith('54')) {
+            if (phone.startsWith('9') && phone.length === 11) {
+              phone = '54' + phone.slice(1)
+            } else {
+              phone = '54' + phone
+            }
+          } else if (phone.startsWith('549') && phone.length === 13) {
+            phone = '54' + phone.slice(3)
+          }
+
+          // Enviar vía Meta Cloud API con timeout
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 15000)
+
+          try {
+            const res = await fetch(
+              `https://graph.facebook.com/${META_API_VERSION}/${waConfig.whatsapp_phone_id}/messages`,
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${waConfig.whatsapp_access_token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  messaging_product: 'whatsapp',
+                  to: phone,
+                  type: 'text',
+                  text: { body: msg.content },
+                }),
+                signal: controller.signal,
+              }
+            )
+            clearTimeout(timeout)
+
+            const result = await res.json()
+            if (res.ok && result.messages?.[0]?.id) {
+              sent = true
+            } else {
+              errorMsg = result.error?.message || `Error HTTP ${res.status}`
+            }
+          } catch (e: any) {
+            clearTimeout(timeout)
+            errorMsg = e.name === 'AbortError'
+              ? 'Timeout al contactar Meta API (15s)'
+              : `Error de conexión: ${e.message}`
+          }
+        }
       }
 
       // Si se envió, crear conversación + mensaje para que aparezca en el dashboard
       if (sent) {
         // Buscar canal WhatsApp activo para esta org (con cache)
         if (!orgChannelCache.has(orgId)) {
-          // Obtener branch_ids de esta org
           const { data: orgBranches } = await supabase
             .from('branches')
             .select('id')
@@ -143,10 +205,7 @@ Deno.serve(async (req: Request) => {
 
         if (waChannel) {
           const phoneClean = (msg.phone as string).replace(/\D/g, '')
-
-          // Buscar o crear conversación
           let convId: string | null = null
-
           const { data: existingConv } = await supabase
             .from('conversations')
             .select('id')
@@ -173,7 +232,6 @@ Deno.serve(async (req: Request) => {
           }
 
           if (convId) {
-            // Insertar mensaje saliente en la conversación
             await supabase.from('messages').insert({
               conversation_id: convId,
               direction: 'outbound',
@@ -182,7 +240,6 @@ Deno.serve(async (req: Request) => {
               status: 'sent',
             })
 
-            // Actualizar last_message_at de la conversación
             await supabase
               .from('conversations')
               .update({ last_message_at: new Date().toISOString() })
