@@ -275,7 +275,7 @@ export function PerfilesClient({
   }, [salaryConfigs])
 
   return (
-    <div className="flex gap-4 h-auto lg:h-[calc(100vh-220px)]">
+    <div className="flex gap-4 h-auto lg:h-full">
       {/* Sidebar de barberos */}
       <div className={cn(
         'w-full lg:w-72 shrink-0 flex flex-col gap-3',

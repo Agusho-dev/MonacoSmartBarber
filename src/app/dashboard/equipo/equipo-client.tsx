@@ -181,9 +181,9 @@ export function EquipoClient({
     }
 
     return (
-        <div className="space-y-4 lg:space-y-6">
+        <div className="space-y-4 lg:space-y-6 lg:flex lg:flex-col lg:h-[calc(100dvh-80px)] lg:overflow-hidden">
             {/* Header con BranchSelector */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between lg:shrink-0">
                 <div>
                     <h1 className="text-xl lg:text-2xl font-bold tracking-tight">Equipo</h1>
                     <p className="text-sm text-muted-foreground hidden sm:block">
@@ -194,7 +194,7 @@ export function EquipoClient({
             </div>
 
             {/* Segmented control — Administración / Perfiles */}
-            <div className="flex gap-1 p-1 bg-muted/50 rounded-xl border w-full sm:w-fit">
+            <div className="flex gap-1 p-1 bg-muted/50 rounded-xl border w-full sm:w-fit lg:shrink-0">
                 {visibleAdminTabs.length > 0 && (
                     <button
                         onClick={() => handleSegmentChange('administracion')}
@@ -229,7 +229,7 @@ export function EquipoClient({
 
             {/* Sub-tabs solo visibles en el segmento Administración */}
             {activeSegment === 'administracion' && visibleAdminTabs.length > 0 && (
-                <div className="overflow-x-auto -mx-3 px-3 lg:mx-0 lg:px-0 scrollbar-hide">
+                <div className="overflow-x-auto -mx-3 px-3 lg:mx-0 lg:px-0 scrollbar-hide lg:shrink-0">
                     <div className="flex gap-1 rounded-lg border bg-muted/30 p-1 flex-nowrap w-fit">
                         {visibleAdminTabs.map((tab) => (
                             <button
@@ -252,7 +252,7 @@ export function EquipoClient({
             )}
 
             {/* Contenido del tab activo */}
-            <div key={activeTab} className="animate-in fade-in-0 duration-200">
+            <div key={activeTab} className="animate-in fade-in-0 duration-200 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
                 {activeTab === 'barberos' && (
                     <BarberosClient
                         barbers={barbers as Parameters<typeof BarberosClient>[0]['barbers']}
