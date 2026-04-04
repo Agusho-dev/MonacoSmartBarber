@@ -1,23 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import { ClientesClient } from './clientes-client'
-
-const PAGE_SIZE = 1000
-
-async function fetchAll<T>(
-  queryFn: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>
-): Promise<T[]> {
-  const all: T[] = []
-  let from = 0
-  while (true) {
-    const { data } = await queryFn(from, from + PAGE_SIZE - 1)
-    if (!data || data.length === 0) break
-    all.push(...data)
-    if (data.length < PAGE_SIZE) break
-    from += PAGE_SIZE
-  }
-  return all
-}
 
 export default async function ClientesPage() {
   const supabase = createAdminClient()

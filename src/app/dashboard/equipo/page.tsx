@@ -1,4 +1,5 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import { EquipoClient } from './equipo-client'
 import type { Metadata } from 'next'
 import type { Role } from '@/lib/types/database'
@@ -62,7 +63,7 @@ export default async function EquipoPage() {
         { data: breakRequests },
         { data: activeBreakEntries },
         { data: breakOvertimeHistory },
-        { data: serviceHistory },
+        serviceHistory,
         { data: attendanceLogs },
         { data: salaryConfigs },
         { data: calendarBarbers },
@@ -111,12 +112,14 @@ export default async function EquipoPage() {
             .gt('overtime_seconds', 0)
             .gte('actual_completed_at', thirtyDaysAgoStr)
             .order('actual_completed_at', { ascending: false }),
-        supabase
-            .from('visits')
-            .select('id, amount, payment_method, commission_amount, started_at, completed_at, branch_id, service:services(name), client:clients(name), barber:staff(id, full_name)')
-            .gte('completed_at', twelveMonthsAgoStr)
-            .order('completed_at', { ascending: false })
-            .limit(5000),
+        fetchAll((from, to) =>
+            createAdminClient()
+                .from('visits')
+                .select('id, amount, payment_method, commission_amount, started_at, completed_at, branch_id, service:services(name), client:clients(name), barber:staff(id, full_name)')
+                .gte('completed_at', twelveMonthsAgoStr)
+                .order('completed_at', { ascending: false })
+                .range(from, to)
+        ),
         supabase
             .from('attendance_logs')
             .select('id, staff_id, branch_id, action_type, recorded_at, face_verified')
@@ -171,7 +174,7 @@ export default async function EquipoPage() {
             roles={(roles as Role[]) ?? []}
             isOwner={isOwner}
             permissions={userPermissions}
-            serviceHistory={serviceHistory ?? []}
+            serviceHistory={serviceHistory}
             salaryConfigs={salaryConfigs ?? []}
             calendarBarbers={calendarBarbers ?? []}
         />

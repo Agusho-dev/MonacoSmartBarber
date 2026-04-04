@@ -1,6 +1,7 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import { getCurrentOrgId } from './org'
 
 const ARG_TZ = 'America/Argentina/Buenos_Aires'
@@ -21,6 +22,7 @@ function toArgDayHour(isoString: string): { day: number; hour: number } {
   const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
   return { day: dayMap[p.weekday] ?? 0, hour: parseInt(p.hour) }
 }
+
 
 export interface HeatmapCell {
   day: number
@@ -76,31 +78,11 @@ export async function fetchStats(
   toISO: string,
   branchId?: string | null
 ): Promise<StatsData> {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) throw new Error('No autorizado')
-
-  let vq = supabase
-    .from('visits')
-    .select(
-      'id, branch_id, client_id, barber_id, amount, payment_method, completed_at, commission_amount, barber:staff(full_name)'
-    )
-    .gte('completed_at', fromISO)
-    .lte('completed_at', toISO)
-    .order('completed_at')
-  if (branchId) vq = vq.eq('branch_id', branchId)
-  const { data: visits } = await vq
-
-  const orgIdForSettings = await getCurrentOrgId()
-  let settingsQuery = supabase.from('app_settings').select('lost_client_days, at_risk_client_days')
-  if (orgIdForSettings) settingsQuery = settingsQuery.eq('organization_id', orgIdForSettings)
-  const { data: settings } = await settingsQuery.maybeSingle()
-  const lostDays = settings?.lost_client_days ?? 40
-  const riskDays = settings?.at_risk_client_days ?? 25
-
-  // Obtener sucursales de la org para acotar conteos de clientes
   const orgId = await getCurrentOrgId()
+
+  // Obtener sucursales de la org
   let orgBranchIds: string[] = []
   if (orgId) {
     const { data: orgBranches } = await supabase
@@ -110,58 +92,64 @@ export async function fetchStats(
     orgBranchIds = orgBranches?.map((b) => b.id) ?? []
   }
 
-  // Contar clientes nuevos registrados en el periodo que tienen visitas en sucursales de la org
-  let newCount = 0
-  if (orgBranchIds.length > 0) {
-    const { data: newVisitRows } = await supabase
+  // Visitas del periodo (paginadas)
+  const visits = await fetchAll((from, to) => {
+    let q = supabase
       .from('visits')
-      .select('client_id')
-      .in('branch_id', orgBranchIds)
+      .select(
+        'id, branch_id, client_id, barber_id, amount, payment_method, completed_at, commission_amount, barber:staff(full_name)'
+      )
       .gte('completed_at', fromISO)
       .lte('completed_at', toISO)
-    const newClientIds = [...new Set(newVisitRows?.map((v) => v.client_id) ?? [])]
-    if (newClientIds.length > 0) {
-      const { count } = await supabase
-        .from('clients')
-        .select('id', { count: 'exact', head: true })
-        .in('id', newClientIds)
-        .gte('created_at', fromISO)
-        .lte('created_at', toISO)
-      newCount = count ?? 0
-    }
-  } else {
+      .order('completed_at')
+      .range(from, to)
+    if (branchId) q = q.eq('branch_id', branchId)
+    return q
+  })
+
+  // Settings de la org
+  let settingsQuery = supabase.from('app_settings').select('lost_client_days, at_risk_client_days')
+  if (orgId) settingsQuery = settingsQuery.eq('organization_id', orgId)
+  const { data: settings } = await settingsQuery.maybeSingle()
+  const lostDays = settings?.lost_client_days ?? 40
+  const riskDays = settings?.at_risk_client_days ?? 25
+
+  // Clientes nuevos: registrados en el periodo con visitas en la org
+  let newCount = 0
+  if (orgId) {
     const { count } = await supabase
       .from('clients')
       .select('id', { count: 'exact', head: true })
+      .eq('organization_id', orgId)
       .gte('created_at', fromISO)
       .lte('created_at', toISO)
     newCount = count ?? 0
   }
 
+  // Visitas para segmentación (periodo extendido, paginadas)
   const segFrom = new Date()
   segFrom.setDate(segFrom.getDate() - lostDays * 2)
-  let sq = supabase
-    .from('visits')
-    .select('client_id, completed_at')
-    .gte('completed_at', segFrom.toISOString())
-  if (branchId) sq = sq.eq('branch_id', branchId)
-  const { data: segVisits } = await sq
-
-  // Contar total de clientes con visitas en sucursales de la org
-  let totalClients: number | null = null
-  if (orgBranchIds.length > 0) {
-    const { data: orgClientRows } = await supabase
+  const segVisits = await fetchAll((from, to) => {
+    let q = supabase
       .from('visits')
-      .select('client_id')
-      .in('branch_id', orgBranchIds)
-    totalClients = new Set(orgClientRows?.map((v) => v.client_id) ?? []).size
-  } else {
+      .select('client_id, completed_at')
+      .gte('completed_at', segFrom.toISOString())
+      .range(from, to)
+    if (branchId) q = q.eq('branch_id', branchId)
+    return q
+  })
+
+  // Total de clientes registrados en la org
+  let totalClients = 0
+  if (orgId) {
     const { count } = await supabase
       .from('clients')
       .select('id', { count: 'exact', head: true })
-    totalClients = count
+      .eq('organization_id', orgId)
+    totalClients = count ?? 0
   }
-  const safe = visits ?? []
+
+  const safe = visits
 
   // Heatmap
   const heatMap = new Map<string, number>()
@@ -234,7 +222,7 @@ export async function fetchStats(
   const now = Date.now()
   const lastVisitMap = new Map<string, number>()
   const visitCountMap = new Map<string, number>()
-  for (const v of segVisits ?? []) {
+  for (const v of segVisits) {
     const ts = new Date(v.completed_at).getTime()
     const prev = lastVisitMap.get(v.client_id) || 0
     if (ts > prev) lastVisitMap.set(v.client_id, ts)
@@ -266,7 +254,7 @@ export async function fetchStats(
       recurring,
       at_risk: atRisk,
       lost,
-      total: totalClients ?? 0,
+      total: totalClients,
     },
     totals: {
       revenue: totalRevenue,
@@ -282,20 +270,21 @@ export async function fetchWeekHeatmap(
   weekEndISO: string,
   branchId?: string | null
 ): Promise<HeatmapCell[]> {
-  const supabase = await createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) throw new Error('No autorizado')
+  const supabase = createAdminClient()
 
-  let q = supabase
-    .from('visits')
-    .select('completed_at')
-    .gte('completed_at', weekStartISO)
-    .lte('completed_at', weekEndISO)
-  if (branchId) q = q.eq('branch_id', branchId)
-  const { data } = await q
+  const data = await fetchAll((from, to) => {
+    let q = supabase
+      .from('visits')
+      .select('completed_at')
+      .gte('completed_at', weekStartISO)
+      .lte('completed_at', weekEndISO)
+      .range(from, to)
+    if (branchId) q = q.eq('branch_id', branchId)
+    return q
+  })
 
   const heatMap = new Map<string, number>()
-  for (const v of data ?? []) {
+  for (const v of data) {
     const { day, hour } = toArgDayHour(v.completed_at)
     const key = `${day}-${hour}`
     heatMap.set(key, (heatMap.get(key) || 0) + 1)
