@@ -66,6 +66,9 @@ export async function POST(req: NextRequest) {
     return new NextResponse('Bad Request', { status: 400 })
   }
 
+  // Log temporal para debug — ELIMINAR después de diagnosticar
+  console.log('[IG Webhook] body.object:', body.object, 'entries:', JSON.stringify(body.entry?.map((e: any) => ({ id: e.id, messaging: e.messaging?.length ?? 0, changes: e.changes?.length ?? 0 }))))
+
   if (body.object !== 'instagram') {
     return NextResponse.json({ ok: true })
   }
@@ -75,6 +78,9 @@ export async function POST(req: NextRequest) {
 
   for (const entry of body.entry ?? []) {
     const pageId: string = entry.id
+
+    // Log temporal para debug: ver qué entry.id envía Meta
+    console.log('[IG Webhook] entry.id:', pageId, 'entry keys:', Object.keys(entry))
 
     // Buscar org por page_id
     // Instagram webhooks envían el Page ID de Facebook conectado como entry.id
