@@ -1,32 +1,58 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
+import { getCurrentOrgId } from '@/lib/actions/org'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import { ClientesClient } from './clientes-client'
 
 export default async function ClientesPage() {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
+  const orgId = await getCurrentOrgId()
 
-  const [{ data: clients }, { data: visits }, { data: points }, { data: branches }] =
-    await Promise.all([
-      supabase.from('clients').select('*').order('name'),
+  if (!orgId) {
+    return <div className="p-8 text-center text-muted-foreground">Organización no encontrada</div>
+  }
+
+  const { data: orgBranches } = await supabase
+    .from('branches')
+    .select('id, name')
+    .eq('organization_id', orgId)
+    .eq('is_active', true)
+    .order('name')
+
+  const branchIds = (orgBranches ?? []).map((b) => b.id)
+
+  const [clients, visits, points] = await Promise.all([
+    fetchAll((from, to) =>
       supabase
-        .from('visits')
-        .select(
-          'id, client_id, branch_id, amount, completed_at, notes, tags, barber_id, service:services(name), barber:staff(full_name)'
+        .from('clients')
+        .select('*')
+        .eq('organization_id', orgId)
+        .order('name')
+        .range(from, to)
+    ),
+    branchIds.length > 0
+      ? fetchAll((from, to) =>
+          supabase
+            .from('visits')
+            .select(
+              'id, client_id, branch_id, amount, completed_at, notes, tags, barber_id, service:services(name), barber:staff(full_name)'
+            )
+            .in('branch_id', branchIds)
+            .order('completed_at', { ascending: false })
+            .range(from, to)
         )
-        .order('completed_at', { ascending: false }),
-      supabase.from('client_points').select('client_id, points_balance'),
-      supabase
-        .from('branches')
-        .select('id, name')
-        .eq('is_active', true)
-        .order('name'),
-    ])
+      : [],
+    supabase
+      .from('client_points')
+      .select('client_id, points_balance')
+      .then(({ data }) => data ?? []),
+  ])
 
   return (
     <ClientesClient
-      clients={clients ?? []}
-      visits={(visits as any) ?? []}
-      points={points ?? []}
-      branches={branches ?? []}
+      clients={clients}
+      visits={visits as any}
+      points={points as any}
+      branches={orgBranches ?? []}
     />
   )
 }

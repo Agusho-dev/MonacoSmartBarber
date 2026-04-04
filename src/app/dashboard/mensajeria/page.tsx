@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import { MensajeriaClient } from './mensajeria-client'
 
 export const dynamic = 'force-dynamic'
@@ -12,7 +13,7 @@ export default async function MensajeriaPage() {
     { data: conversations },
     { data: channels },
     { data: scheduled },
-    { data: clients },
+    clients,
     { data: waConfig },
     { data: igConfig },
     { data: tags },
@@ -42,11 +43,14 @@ export default async function MensajeriaPage() {
       `)
       .in('status', ['pending', 'sent', 'failed'])
       .order('scheduled_for', { ascending: true }),
-    supabase
-      .from('clients')
-      .select('id, name, phone')
-      .eq('organization_id', orgId ?? '')
-      .order('name'),
+    fetchAll((from, to) =>
+      supabase
+        .from('clients')
+        .select('id, name, phone')
+        .eq('organization_id', orgId ?? '')
+        .order('name')
+        .range(from, to)
+    ),
     orgId
       ? supabase
           .from('organization_whatsapp_config')
@@ -78,7 +82,7 @@ export default async function MensajeriaPage() {
       initialConversations={conversations ?? []}
       channels={channels ?? []}
       scheduledMessages={scheduled ?? []}
-      clients={clients ?? []}
+      clients={clients}
       waConfig={waConfig ?? null}
       igConfig={igConfig ?? null}
       initialTags={tags ?? []}
