@@ -22,7 +22,8 @@
       "Bash(grep '\"\"react-markdown\"\"' package.json)",
       "Bash(npx tsc:*)",
       "Bash(wc -l /mnt/c/Users/Agust/MonacoSmartBarber-1/src/app/dashboard/*-client.tsx /mnt/c/Users/Agust/MonacoSmartBarber-1/src/app/dashboard/**/*-client.tsx /mnt/c/Users/Agust/MonacoSmartBarber-1/src/components/barber/*.tsx /mnt/c/Users/Agust/MonacoSmartBarber-1/src/components/checkin/*.tsx)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "mcp__supabase__list_extensions"
     ]
   },
   "enabledMcpjsonServers": [

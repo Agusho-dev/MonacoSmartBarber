@@ -23,8 +23,8 @@ export async function updateAppSettings(formData: FormData) {
     : [1, 2, 3, 4, 5, 6]
 
   const rawBgColor = formData.get('checkin_bg_color') as string | null
-  const validBgColors = ['white', 'black', 'graphite']
-  const checkinBgColor = rawBgColor && validBgColors.includes(rawBgColor) ? rawBgColor : 'graphite'
+  const hexRegex = /^#[0-9a-fA-F]{6}$/
+  const checkinBgColor = rawBgColor && hexRegex.test(rawBgColor) ? rawBgColor : '#3f3f46'
 
   const updateData = {
     lost_client_days: Number(formData.get('lost_client_days')),
@@ -65,6 +65,27 @@ export async function updateAppSettings(formData: FormData) {
     .eq('organization_id', orgId)
 
   if (branchError) return { error: branchError.message }
+
+  revalidatePath('/dashboard/configuracion')
+  return { success: true }
+}
+
+export async function updateBranchCheckinColor(branchId: string, color: string | null) {
+  const supabase = await createClient()
+
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
+  const hexRegex = /^#[0-9a-fA-F]{6}$/
+  const checkinBgColor = color && hexRegex.test(color) ? color : null
+
+  const { error } = await supabase
+    .from('branches')
+    .update({ checkin_bg_color: checkinBgColor })
+    .eq('id', branchId)
+    .eq('organization_id', orgId)
+
+  if (error) return { error: error.message }
 
   revalidatePath('/dashboard/configuracion')
   return { success: true }

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, useEffect, useRef, useCallback } from 'react'
+import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   upsertBreakConfig,
   deleteBreakConfig,
@@ -9,7 +10,6 @@ import {
   approveBreak,
   rejectBreak,
 } from '@/lib/actions/break-requests'
-import { createScheduledBreakRequests } from '@/lib/actions/scheduled-breaks'
 import type { Branch, BreakConfig } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -64,6 +64,7 @@ interface Props {
 const EMPTY_FORM = { id: '', branch_id: '', name: '', duration_minutes: '30', scheduled_time: '' }
 
 function BreakRequestCard({ request }: { request: BreakRequestRow }) {
+  const router = useRouter()
   const [, startTransition] = useTransition()
   const [cutsInput, setCutsInput] = useState('0')
   const staffName = request.staff?.full_name ?? 'Barbero'
@@ -87,7 +88,7 @@ function BreakRequestCard({ request }: { request: BreakRequestRow }) {
       const r = await approveBreak(request.id, cuts)
       if (r.error) { toast.error(r.error) } else {
         toast.success(`Descanso aprobado para ${staffName}${cuts > 0 ? ` en ${cuts} corte${cuts > 1 ? 's' : ''}` : ' (inmediato)'}`)
-        window.location.reload()
+        router.refresh()
       }
     })
   }
@@ -95,7 +96,7 @@ function BreakRequestCard({ request }: { request: BreakRequestRow }) {
   function handleReject() {
     startTransition(async () => {
       const r = await rejectBreak(request.id)
-      if (r.error) { toast.error(r.error) } else { toast.success('Solicitud rechazada'); window.location.reload() }
+      if (r.error) { toast.error(r.error) } else { toast.success('Solicitud rechazada'); router.refresh() }
     })
   }
 
@@ -160,9 +161,6 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
   const [, startTransition] = useTransition()
   const { selectedBranchId } = useBranchStore()
 
-  // Track fired scheduled break configs to prevent double-firing
-  const firedScheduledRef = useRef<Set<string>>(new Set())
-
   const branchConfigs = breakConfigs.filter((bc) => bc.branch_id === selectedBranchId)
 
   function openCreate() {
@@ -199,45 +197,6 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
       else toast.success('Configuración eliminada')
     })
   }
-
-  // Auto-fire scheduled break requests
-  const checkScheduledBreaks = useCallback(async () => {
-    if (!selectedBranchId) return
-    const now = new Date()
-    const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-
-    for (const bc of branchConfigs) {
-      if (!bc.scheduled_time) continue
-      // Compare HH:MM portion only
-      const scheduledHHMM = bc.scheduled_time.substring(0, 5)
-      if (scheduledHHMM !== currentHHMM) continue
-      // Build a daily key so it only fires once per day per config
-      const dailyKey = `${bc.id}-${now.toISOString().substring(0, 10)}`
-      if (firedScheduledRef.current.has(dailyKey)) continue
-
-      // Mark as fired immediately to prevent double-firing
-      firedScheduledRef.current.add(dailyKey)
-
-      try {
-        const result = await createScheduledBreakRequests(selectedBranchId, bc.id)
-        if (result.error) {
-          toast.error(`Error generando descansos: ${result.error}`)
-        } else if (result.created && result.created > 0) {
-          toast.success(`🔔 Se crearon ${result.created} solicitud(es) de descanso automáticas para "${bc.name}"`)
-        }
-      } catch {
-        // Remove from fired so it can retry next interval
-        firedScheduledRef.current.delete(dailyKey)
-      }
-    }
-  }, [selectedBranchId, branchConfigs])
-
-  useEffect(() => {
-    // Check immediately and then every 30 seconds
-    checkScheduledBreaks()
-    const interval = setInterval(checkScheduledBreaks, 30_000)
-    return () => clearInterval(interval)
-  }, [checkScheduledBreaks])
 
   return (
     <div className="space-y-5 lg:space-y-8">

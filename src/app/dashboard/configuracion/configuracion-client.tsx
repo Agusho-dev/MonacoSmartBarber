@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
-import { updateAppSettings } from '@/lib/actions/settings'
+import { updateAppSettings, updateBranchCheckinColor } from '@/lib/actions/settings'
 import type { AppSettings } from '@/lib/types/database'
 import {
   Card,
@@ -27,11 +27,18 @@ const DAY_OPTIONS = [
   { value: 0, label: 'Dom' },
 ]
 
-interface Props {
-  appSettings: AppSettings | null
+interface BranchColor {
+  id: string
+  name: string
+  checkin_bg_color: string | null
 }
 
-export function ConfiguracionClient({ appSettings }: Props) {
+interface Props {
+  appSettings: AppSettings | null
+  branches: BranchColor[]
+}
+
+export function ConfiguracionClient({ appSettings, branches }: Props) {
   return (
     <div className="space-y-4 lg:space-y-6">
       <h2 className="text-xl lg:text-2xl font-bold tracking-tight">Configuración</h2>
@@ -42,7 +49,7 @@ export function ConfiguracionClient({ appSettings }: Props) {
         <ShiftEndMarginCard settings={appSettings} />
         <NextClientAlertCard settings={appSettings} />
         <DynamicCooldownCard settings={appSettings} />
-        <CheckinBgColorCard settings={appSettings} />
+        <CheckinBgColorCard settings={appSettings} branches={branches} />
       </div>
     </div>
   )
@@ -374,21 +381,61 @@ function NextClientAlertCard({ settings }: { settings: AppSettings | null }) {
 
 /* ─── Checkin BG Color (global default) ─── */
 
-const BG_COLOR_OPTIONS = [
-  { value: 'graphite', label: 'Grafito', bg: 'bg-zinc-700', text: 'text-white' },
-  { value: 'black',    label: 'Negro',   bg: 'bg-zinc-950', text: 'text-white' },
-  { value: 'white',    label: 'Blanco',  bg: 'bg-white',    text: 'text-zinc-900 border border-zinc-200' },
+const PRESET_COLORS_CONFIG = [
+  { value: '#3f3f46', label: 'Grafito' },
+  { value: '#09090b', label: 'Negro' },
+  { value: '#ffffff', label: 'Blanco' },
+  { value: '#1e3a5f', label: 'Azul' },
+  { value: '#4a1942', label: 'Morado' },
+  { value: '#1a3c2a', label: 'Verde' },
 ]
 
-function CheckinBgColorCard({ settings }: { settings: AppSettings | null }) {
-  const [color, setColor] = useState<'white' | 'black' | 'graphite'>(
-    (settings?.checkin_bg_color ?? 'graphite') as 'white' | 'black' | 'graphite'
+function ColorPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex flex-wrap gap-1.5">
+        {PRESET_COLORS_CONFIG.map((opt) => {
+          const isLight = opt.value === '#ffffff'
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onChange(opt.value)}
+              className={`rounded-lg h-8 w-8 transition-all ${
+                isLight ? 'border border-zinc-200' : ''
+              } ${
+                value === opt.value ? 'ring-2 ring-primary ring-offset-1' : 'opacity-50 hover:opacity-80'
+              }`}
+              style={{ backgroundColor: opt.value }}
+              title={opt.label}
+            />
+          )
+        })}
+      </div>
+      <input
+        type="color"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-8 w-10 cursor-pointer rounded-md border border-input bg-transparent p-0.5"
+      />
+      <span className="font-mono text-[11px] text-muted-foreground">{value}</span>
+    </div>
+  )
+}
+
+function CheckinBgColorCard({ settings, branches }: { settings: AppSettings | null; branches: BranchColor[] }) {
+  const [globalColor, setGlobalColor] = useState(
+    settings?.checkin_bg_color ?? '#3f3f46'
+  )
+  const [branchColors, setBranchColors] = useState<Record<string, string | null>>(
+    Object.fromEntries(branches.map((b) => [b.id, b.checkin_bg_color]))
   )
   const [isPending, startTransition] = useTransition()
+  const [savingBranch, setSavingBranch] = useState<string | null>(null)
 
-  const handleSave = () => {
+  const handleSaveGlobal = () => {
     const fd = new FormData()
-    fd.set('checkin_bg_color', color)
+    fd.set('checkin_bg_color', globalColor)
     fd.set('lost_client_days', String(settings?.lost_client_days ?? 40))
     fd.set('at_risk_client_days', String(settings?.at_risk_client_days ?? 25))
     fd.set('business_hours_open', settings?.business_hours_open ?? '09:00')
@@ -401,43 +448,116 @@ function CheckinBgColorCard({ settings }: { settings: AppSettings | null }) {
     startTransition(async () => {
       const result = await updateAppSettings(fd)
       if (result.error) toast.error(result.error)
-      else toast.success('Color de terminal actualizado')
+      else toast.success('Color global actualizado')
+    })
+  }
+
+  const handleSaveBranch = (branchId: string) => {
+    const color = branchColors[branchId]
+    setSavingBranch(branchId)
+    startTransition(async () => {
+      const result = await updateBranchCheckinColor(branchId, color)
+      setSavingBranch(null)
+      if (result.error) toast.error(result.error)
+      else toast.success('Color de sucursal actualizado')
     })
   }
 
   return (
-    <Card>
+    <Card className="lg:col-span-2">
       <CardHeader>
         <div className="flex items-center gap-2">
           <Monitor className="size-5 text-muted-foreground" />
           <CardTitle>Color de la terminal</CardTitle>
         </div>
         <CardDescription>
-          Color de fondo por defecto del kiosk de check-in. Se puede sobreescribir por sucursal.
+          Color de fondo del kiosk de check-in. Configurá un color global y opcionalmente sobreescribilo por sucursal.
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="flex gap-3">
-          {BG_COLOR_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => setColor(opt.value as 'white' | 'black' | 'graphite')}
-              className={`flex-1 rounded-xl h-16 flex items-center justify-center font-medium text-sm transition-all ${opt.bg} ${opt.text} ${
-                color === opt.value ? 'ring-2 ring-primary ring-offset-2' : 'opacity-60 hover:opacity-80'
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+      <CardContent className="space-y-6">
+        {/* Color global */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-semibold">Color global (por defecto)</Label>
+            <Button size="sm" onClick={handleSaveGlobal} disabled={isPending}>
+              <Save className="mr-1.5 size-3.5" />
+              Guardar
+            </Button>
+          </div>
+          <ColorPicker value={globalColor} onChange={setGlobalColor} />
         </div>
+
+        {/* Colores por sucursal */}
+        {branches.length > 0 && (
+          <div className="space-y-3 border-t pt-4">
+            <Label className="text-sm font-semibold">Por sucursal</Label>
+            <p className="text-xs text-muted-foreground">
+              Dejá en &quot;Global&quot; para usar el color por defecto, o elegí un color específico para cada sucursal.
+            </p>
+            <div className="space-y-3">
+              {branches.map((branch) => {
+                const branchColor = branchColors[branch.id]
+                const isCustom = branchColor !== null
+                return (
+                  <div key={branch.id} className="flex flex-col gap-2 rounded-lg border p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="size-4 rounded-full border border-white/20"
+                          style={{ backgroundColor: branchColor ?? globalColor }}
+                        />
+                        <span className="text-sm font-medium">{branch.name}</span>
+                        {!isCustom && (
+                          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">Global</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isCustom && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs h-7"
+                            onClick={() => {
+                              setBranchColors({ ...branchColors, [branch.id]: null })
+                            }}
+                          >
+                            Usar global
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => handleSaveBranch(branch.id)}
+                          disabled={isPending || savingBranch === branch.id}
+                        >
+                          <Save className="mr-1 size-3" />
+                          {savingBranch === branch.id ? 'Guardando...' : 'Guardar'}
+                        </Button>
+                      </div>
+                    </div>
+                    {isCustom && (
+                      <ColorPicker
+                        value={branchColor}
+                        onChange={(v) => setBranchColors({ ...branchColors, [branch.id]: v })}
+                      />
+                    )}
+                    {!isCustom && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-fit text-xs h-7"
+                        onClick={() => setBranchColors({ ...branchColors, [branch.id]: globalColor })}
+                      >
+                        Personalizar color
+                      </Button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </CardContent>
-      <CardFooter>
-        <Button onClick={handleSave} disabled={isPending}>
-          <Save className="mr-2 size-4" />
-          {isPending ? 'Guardando...' : 'Guardar color'}
-        </Button>
-      </CardFooter>
     </Card>
   )
 }

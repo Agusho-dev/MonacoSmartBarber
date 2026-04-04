@@ -1,6 +1,6 @@
 'use server'
 
-import { createAdminClient } from '@/lib/supabase/server'
+import { createAdminClient, createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 import { getCurrentOrgId, validateBranchAccess } from './org'
@@ -71,16 +71,19 @@ export async function deleteBreakConfig(id: string) {
 
 // ─── Helpers internos ───────────────────────────────────────────────────────
 
-async function getApproverStaffId(supabase: ReturnType<typeof createAdminClient>) {
+async function getApproverStaffId(adminSupabase: ReturnType<typeof createAdminClient>) {
+    // Usar el server client (con cookies) para obtener la sesión del usuario autenticado
+    const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
-        const { data: staff } = await supabase
+        const { data: staff } = await adminSupabase
             .from('staff')
             .select('id')
             .eq('auth_user_id', user.id)
             .single()
         if (staff) return staff.id
     }
+    // Fallback para panel de barbero (usa cookie de sesión)
     const cookieStore = await cookies()
     const session = cookieStore.get('barber_session')
     if (session) {

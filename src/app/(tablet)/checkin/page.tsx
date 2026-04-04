@@ -1313,12 +1313,14 @@ export default function CheckinPage() {
 
   // ── Render ──
 
-  const BG_COLORS: Record<string, { background: string; color: string }> = {
-    white:    { background: '#ffffff', color: '#18181b' },
-    black:    { background: '#09090b', color: '#f4f4f5' },
-    graphite: { background: '#3f3f46', color: '#f4f4f5' },
-  }
-  const branchBg = selectedBranch?.checkin_bg_color ? BG_COLORS[selectedBranch.checkin_bg_color] : undefined
+  const branchBg = selectedBranch?.checkin_bg_color ? (() => {
+    const hex = selectedBranch.checkin_bg_color!
+    const r = parseInt(hex.slice(1, 3), 16)
+    const g = parseInt(hex.slice(3, 5), 16)
+    const b = parseInt(hex.slice(5, 7), 16)
+    const isLight = (r * 299 + g * 587 + b * 114) / 1000 > 128
+    return { background: hex, color: isLight ? '#18181b' : '#f4f4f5' }
+  })() : undefined
 
   return (
     <div
