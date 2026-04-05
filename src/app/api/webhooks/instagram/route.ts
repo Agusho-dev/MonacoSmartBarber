@@ -157,16 +157,32 @@ export async function POST(req: NextRequest) {
 
     if (!igChannel) continue
 
-    // Procesar mensajes — Instagram puede usar entry.messaging o entry.changes
-    const messagingEvents = entry.messaging ?? []
+    // Normalizar eventos: Instagram puede enviar entry.messaging o entry.changes
+    const messagingEvents: any[] = []
 
-    // Si viene via entry.changes (suscripción tipo Page), extraer mensajes
-    if (messagingEvents.length === 0 && entry.changes) {
+    // Formato estándar: entry.messaging (array de eventos)
+    if (entry.messaging?.length > 0) {
+      messagingEvents.push(...entry.messaging)
+    }
+
+    // Formato alternativo: entry.changes (usado en algunas suscripciones)
+    if (entry.changes?.length > 0) {
       for (const change of entry.changes) {
-        if (change.field === 'messages' && change.value) {
-          messagingEvents.push(change.value)
+        if (change.field === 'messaging' || change.field === 'messages') {
+          const val = change.value
+          // changes.value puede ser un evento individual o contener un array
+          if (val?.sender && val?.message) {
+            messagingEvents.push(val)
+          } else if (Array.isArray(val)) {
+            messagingEvents.push(...val)
+          }
         }
       }
+    }
+
+    if (messagingEvents.length === 0) {
+      console.warn('[IG Webhook] Sin eventos de mensajería en entry. Keys:', Object.keys(entry),
+        'changes:', JSON.stringify(entry.changes?.map((c: any) => ({ field: c.field, valueKeys: Object.keys(c.value ?? {}) }))))
     }
 
     for (const messaging of messagingEvents) {
@@ -176,10 +192,24 @@ export async function POST(req: NextRequest) {
       const senderId: string = messaging.sender?.id
       const recipientId: string = messaging.recipient?.id
       const platformMsgId: string = messaging.message?.mid
-      const timestamp: number = messaging.timestamp
+      const rawTimestamp = messaging.timestamp
       const text: string = messaging.message?.text ?? ''
 
-      if (!senderId || !platformMsgId) continue
+      if (!senderId || !platformMsgId) {
+        console.warn('[IG Webhook] Evento sin sender o mid, keys:', Object.keys(messaging))
+        continue
+      }
+
+      // Parsear timestamp de forma robusta (puede ser segundos, milisegundos, o string ISO)
+      let msgDate: Date
+      if (typeof rawTimestamp === 'number') {
+        msgDate = rawTimestamp > 1e12 ? new Date(rawTimestamp) : new Date(rawTimestamp * 1000)
+      } else if (typeof rawTimestamp === 'string') {
+        msgDate = new Date(rawTimestamp)
+      } else {
+        msgDate = new Date()
+      }
+      const createdAt = isNaN(msgDate.getTime()) ? new Date().toISOString() : msgDate.toISOString()
 
       // El remitente es el usuario de Instagram (no la cuenta business)
       const from = senderId === entryId ? recipientId : senderId
@@ -252,7 +282,7 @@ export async function POST(req: NextRequest) {
         content: text || null,
         platform_message_id: platformMsgId,
         status: 'delivered',
-        created_at: new Date(timestamp * 1000).toISOString(),
+        created_at: createdAt,
       })
       if (msgErr) {
         console.error('[IG Webhook] Error insertando mensaje:', msgErr.message)
