@@ -67,7 +67,9 @@ export async function POST(req: NextRequest) {
   }
 
   // Log temporal para debug — ELIMINAR después de diagnosticar
-  console.log('[IG Webhook] body.object:', body.object, 'entries:', JSON.stringify(body.entry?.map((e: any) => ({ id: e.id, messaging: e.messaging?.length ?? 0, changes: e.changes?.length ?? 0 }))))
+  const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY
+  const keyPrefix = process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0, 10) ?? 'MISSING'
+  console.log('[IG Webhook] body.object:', body.object, 'serviceKey:', hasServiceKey, 'keyPrefix:', keyPrefix, 'entries:', JSON.stringify(body.entry?.map((e: any) => ({ id: e.id, messaging: e.messaging?.length ?? 0, changes: e.changes?.length ?? 0 }))))
 
   if (body.object !== 'instagram') {
     return NextResponse.json({ ok: true })
@@ -87,21 +89,24 @@ export async function POST(req: NextRequest) {
     // Intentamos buscar por instagram_page_id primero, luego por instagram_account_id
     let igConfig: { organization_id: string; app_secret: string | null } | null = null
 
-    const { data: configByPageId } = await supabase
+    const { data: configByPageId, error: errPage } = await supabase
       .from('organization_instagram_config')
       .select('organization_id, app_secret')
       .eq('instagram_page_id', pageId)
       .maybeSingle()
 
+    if (errPage) console.log('[IG Webhook] Error buscando por page_id:', errPage.message, errPage.code)
+
     if (configByPageId) {
       igConfig = configByPageId
     } else {
       // Fallback: buscar por instagram_account_id (IG Business Account ID)
-      const { data: configByAccountId } = await supabase
+      const { data: configByAccountId, error: errAccount } = await supabase
         .from('organization_instagram_config')
         .select('organization_id, app_secret')
         .eq('instagram_account_id', pageId)
         .maybeSingle()
+      if (errAccount) console.log('[IG Webhook] Error buscando por account_id:', errAccount.message, errAccount.code)
       igConfig = configByAccountId
     }
 
