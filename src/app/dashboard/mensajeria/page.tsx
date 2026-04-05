@@ -9,6 +9,18 @@ export default async function MensajeriaPage() {
   const supabase = createAdminClient()
   const orgId = await getCurrentOrgId()
 
+  // Obtener branches de la org para filtrar por tenant
+  const { data: orgBranches } = orgId
+    ? await supabase.from('branches').select('id').eq('organization_id', orgId)
+    : { data: [] }
+  const branchIds = orgBranches?.map((b) => b.id) ?? []
+
+  // Obtener canales de las branches de esta org
+  const { data: orgChannels } = branchIds.length > 0
+    ? await supabase.from('social_channels').select('id').in('branch_id', branchIds)
+    : { data: [] }
+  const channelIds = orgChannels?.map((c) => c.id) ?? []
+
   const [
     { data: conversations },
     { data: channels },
@@ -18,31 +30,40 @@ export default async function MensajeriaPage() {
     { data: igConfig },
     { data: tags },
   ] = await Promise.all([
-    supabase
-      .from('conversations')
-      .select(`
-        *,
-        channel:social_channels(id, platform, display_name, branch_id),
-        client:clients(id, name, phone, instagram, notes),
-        tags:conversation_tag_assignments(tag_id, tag:conversation_tags(id, name, color))
-      `)
-      .order('last_message_at', { ascending: false, nullsFirst: false }),
-    supabase
-      .from('social_channels')
-      .select('*')
-      .eq('is_active', true)
-      .order('platform'),
-    supabase
-      .from('scheduled_messages')
-      .select(`
-        *,
-        channel:social_channels(platform, display_name),
-        client:clients(name, phone),
-        template:message_templates(name),
-        created_by_staff:staff(full_name)
-      `)
-      .in('status', ['pending', 'sent', 'failed'])
-      .order('scheduled_for', { ascending: true }),
+    channelIds.length > 0
+      ? supabase
+          .from('conversations')
+          .select(`
+            *,
+            channel:social_channels(id, platform, display_name, branch_id),
+            client:clients(id, name, phone, instagram, notes),
+            tags:conversation_tag_assignments(tag_id, tag:conversation_tags(id, name, color))
+          `)
+          .in('channel_id', channelIds)
+          .order('last_message_at', { ascending: false, nullsFirst: false })
+      : Promise.resolve({ data: [] }),
+    branchIds.length > 0
+      ? supabase
+          .from('social_channels')
+          .select('*')
+          .in('branch_id', branchIds)
+          .eq('is_active', true)
+          .order('platform')
+      : Promise.resolve({ data: [] }),
+    channelIds.length > 0
+      ? supabase
+          .from('scheduled_messages')
+          .select(`
+            *,
+            channel:social_channels(platform, display_name),
+            client:clients(name, phone),
+            template:message_templates(name),
+            created_by_staff:staff(full_name)
+          `)
+          .in('channel_id', channelIds)
+          .in('status', ['pending', 'sent', 'failed'])
+          .order('scheduled_for', { ascending: true })
+      : Promise.resolve({ data: [] }),
     fetchAll((from, to) =>
       supabase
         .from('clients')

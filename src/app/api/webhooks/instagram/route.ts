@@ -66,12 +66,16 @@ export async function POST(req: NextRequest) {
     return new NextResponse('Bad Request', { status: 400 })
   }
 
-  // Log temporal para debug — ELIMINAR después de diagnosticar
-  const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY
-  const keyPrefix = process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0, 10) ?? 'MISSING'
-  console.log('[IG Webhook] body.object:', body.object, 'serviceKey:', hasServiceKey, 'keyPrefix:', keyPrefix, 'entries:', JSON.stringify(body.entry?.map((e: any) => ({ id: e.id, messaging: e.messaging?.length ?? 0, changes: e.changes?.length ?? 0 }))))
+  // Log diagnóstico: qué envía Meta (sin datos sensibles)
+  console.log('[IG Webhook] object:', body.object, 'entries:', body.entry?.length ?? 0,
+    'entry_ids:', body.entry?.map((e: any) => e.id),
+    'has_messaging:', body.entry?.map((e: any) => (e.messaging?.length ?? 0)),
+    'has_changes:', body.entry?.map((e: any) => (e.changes?.length ?? 0)))
 
-  if (body.object !== 'instagram') {
+  // Aceptar tanto 'instagram' como 'page' — Meta puede enviar cualquiera
+  // dependiendo de la configuración del webhook
+  if (body.object !== 'instagram' && body.object !== 'page') {
+    console.log('[IG Webhook] Ignorando object:', body.object)
     return NextResponse.json({ ok: true })
   }
 
@@ -79,49 +83,40 @@ export async function POST(req: NextRequest) {
   const signature = req.headers.get('x-hub-signature-256')
 
   for (const entry of body.entry ?? []) {
-    const pageId: string = entry.id
+    const entryId: string = entry.id
 
-    // Log temporal para debug: ver qué entry.id envía Meta
-    console.log('[IG Webhook] entry.id:', pageId, 'entry keys:', Object.keys(entry))
-
-    // Buscar org por page_id
-    // Instagram webhooks envían el Page ID de Facebook conectado como entry.id
-    // Intentamos buscar por instagram_page_id primero, luego por instagram_account_id
+    // Buscar org por cualquier ID que Meta envíe como entry.id
+    // Puede ser: Facebook Page ID, Instagram Account ID, o IG-scoped ID
     let igConfig: { organization_id: string; app_secret: string | null } | null = null
 
-    const { data: configByPageId, error: errPage } = await supabase
+    const { data: configByPageId } = await supabase
       .from('organization_instagram_config')
       .select('organization_id, app_secret')
-      .eq('instagram_page_id', pageId)
+      .eq('instagram_page_id', entryId)
       .maybeSingle()
-
-    if (errPage) console.log('[IG Webhook] Error buscando por page_id:', errPage.message, errPage.code)
 
     if (configByPageId) {
       igConfig = configByPageId
     } else {
-      // Fallback: buscar por instagram_account_id (IG Business Account ID)
-      const { data: configByAccountId, error: errAccount } = await supabase
+      const { data: configByAccountId } = await supabase
         .from('organization_instagram_config')
         .select('organization_id, app_secret')
-        .eq('instagram_account_id', pageId)
+        .eq('instagram_account_id', entryId)
         .maybeSingle()
-      if (errAccount) console.log('[IG Webhook] Error buscando por account_id:', errAccount.message, errAccount.code)
       igConfig = configByAccountId
     }
 
     if (!igConfig) {
-      console.log('[IG Webhook] NO se encontró config para entry.id:', pageId)
+      console.warn('[IG Webhook] Config no encontrada para entry.id:', entryId)
       continue
     }
-    console.log('[IG Webhook] Config encontrada, orgId:', igConfig.organization_id)
 
     // Verificar HMAC si app_secret está configurado
-    // TODO: hacer estricto una vez confirmado que funciona
+    // TODO: hacer estricto (continue en vez de warn) una vez confirmado
     if (igConfig.app_secret && signature) {
       const valid = await verifyHmacSignature(rawBody, signature, igConfig.app_secret)
       if (!valid) {
-        console.warn('[IG Webhook] HMAC no coincide — verificar app_secret. Continuando de todas formas.')
+        console.warn('[IG Webhook] HMAC no coincide — verificar app_secret')
       }
     }
 
@@ -151,7 +146,7 @@ export async function POST(req: NextRequest) {
         .insert({
           branch_id: branchIds[0],
           platform: 'instagram',
-          platform_account_id: pageId,
+          platform_account_id: entryId,
           display_name: 'Instagram Business',
           is_active: true,
         })
@@ -160,20 +155,23 @@ export async function POST(req: NextRequest) {
       igChannel = newChannel
     }
 
-    if (!igChannel) {
-      console.log('[IG Webhook] NO se encontró/creó canal IG')
-      continue
-    }
-    console.log('[IG Webhook] Canal encontrado:', igChannel.id)
+    if (!igChannel) continue
 
-    // Procesar mensajes entrantes (messaging array)
-    console.log('[IG Webhook] Mensajes en entry.messaging:', entry.messaging?.length ?? 0)
-    for (const messaging of entry.messaging ?? []) {
-      // Ignorar echo (mensajes enviados por la página misma)
-      if (messaging.message?.is_echo) {
-        console.log('[IG Webhook] Mensaje echo, ignorando')
-        continue
+    // Procesar mensajes — Instagram puede usar entry.messaging o entry.changes
+    const messagingEvents = entry.messaging ?? []
+
+    // Si viene via entry.changes (suscripción tipo Page), extraer mensajes
+    if (messagingEvents.length === 0 && entry.changes) {
+      for (const change of entry.changes) {
+        if (change.field === 'messages' && change.value) {
+          messagingEvents.push(change.value)
+        }
       }
+    }
+
+    for (const messaging of messagingEvents) {
+      // Ignorar echo (mensajes enviados por la página misma)
+      if (messaging.message?.is_echo) continue
 
       const senderId: string = messaging.sender?.id
       const recipientId: string = messaging.recipient?.id
@@ -181,16 +179,10 @@ export async function POST(req: NextRequest) {
       const timestamp: number = messaging.timestamp
       const text: string = messaging.message?.text ?? ''
 
-      console.log('[IG Webhook] sender:', senderId, 'recipient:', recipientId, 'mid:', platformMsgId, 'text:', text?.slice(0, 30))
+      if (!senderId || !platformMsgId) continue
 
-      if (!senderId || !platformMsgId) {
-        console.log('[IG Webhook] Faltan senderId o platformMsgId, skip')
-        continue
-      }
-
-      // El remitente es el usuario (no la página)
-      const from = senderId === pageId ? recipientId : senderId
-      console.log('[IG Webhook] from (usuario):', from)
+      // El remitente es el usuario de Instagram (no la cuenta business)
+      const from = senderId === entryId ? recipientId : senderId
 
       // Deduplicación ANTES de crear/actualizar conversación
       const { data: existingMsg } = await supabase
@@ -200,7 +192,7 @@ export async function POST(req: NextRequest) {
         .maybeSingle()
       if (existingMsg) continue
 
-      // Buscar cliente por instagram handle (filtrado por org)
+      // Buscar cliente por instagram ID (filtrado por org)
       const { data: client } = await supabase
         .from('clients')
         .select('id, name')
@@ -247,11 +239,10 @@ export async function POST(req: NextRequest) {
           .single()
 
         if (convErr || !newConv) {
-          console.log('[IG Webhook] Error creando conversación:', convErr?.message)
+          console.error('[IG Webhook] Error creando conversación:', convErr?.message)
           continue
         }
         convId = newConv.id
-        console.log('[IG Webhook] Conversación creada:', convId)
       }
 
       const { error: msgErr } = await supabase.from('messages').insert({
@@ -263,8 +254,9 @@ export async function POST(req: NextRequest) {
         status: 'delivered',
         created_at: new Date(timestamp * 1000).toISOString(),
       })
-      if (msgErr) console.log('[IG Webhook] Error insertando mensaje:', msgErr.message)
-      else console.log('[IG Webhook] Mensaje insertado OK en conv:', convId)
+      if (msgErr) {
+        console.error('[IG Webhook] Error insertando mensaje:', msgErr.message)
+      }
     }
   }
 

@@ -104,8 +104,9 @@ export async function sendInstagramMessage(
 
   let res: Response
   try {
+    // Instagram Messaging API usa graph.instagram.com con /me/messages
     res = await fetch(
-      `https://graph.facebook.com/${META_API_VERSION}/${igConfig.instagram_page_id}/messages`,
+      `https://graph.instagram.com/${META_API_VERSION}/me/messages`,
       {
         method: 'POST',
         headers: {
@@ -115,7 +116,6 @@ export async function sendInstagramMessage(
         body: JSON.stringify({
           recipient: { id: to },
           message: { text: content },
-          messaging_type: 'RESPONSE',
         }),
       }
     )
