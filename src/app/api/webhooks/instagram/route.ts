@@ -105,7 +105,11 @@ export async function POST(req: NextRequest) {
       igConfig = configByAccountId
     }
 
-    if (!igConfig) continue
+    if (!igConfig) {
+      console.log('[IG Webhook] NO se encontró config para entry.id:', pageId)
+      continue
+    }
+    console.log('[IG Webhook] Config encontrada, orgId:', igConfig.organization_id)
 
     // Verificar HMAC si app_secret está configurado
     if (igConfig.app_secret) {
@@ -151,12 +155,20 @@ export async function POST(req: NextRequest) {
       igChannel = newChannel
     }
 
-    if (!igChannel) continue
+    if (!igChannel) {
+      console.log('[IG Webhook] NO se encontró/creó canal IG')
+      continue
+    }
+    console.log('[IG Webhook] Canal encontrado:', igChannel.id)
 
     // Procesar mensajes entrantes (messaging array)
+    console.log('[IG Webhook] Mensajes en entry.messaging:', entry.messaging?.length ?? 0)
     for (const messaging of entry.messaging ?? []) {
       // Ignorar echo (mensajes enviados por la página misma)
-      if (messaging.message?.is_echo) continue
+      if (messaging.message?.is_echo) {
+        console.log('[IG Webhook] Mensaje echo, ignorando')
+        continue
+      }
 
       const senderId: string = messaging.sender?.id
       const recipientId: string = messaging.recipient?.id
@@ -164,10 +176,16 @@ export async function POST(req: NextRequest) {
       const timestamp: number = messaging.timestamp
       const text: string = messaging.message?.text ?? ''
 
-      if (!senderId || !platformMsgId) continue
+      console.log('[IG Webhook] sender:', senderId, 'recipient:', recipientId, 'mid:', platformMsgId, 'text:', text?.slice(0, 30))
+
+      if (!senderId || !platformMsgId) {
+        console.log('[IG Webhook] Faltan senderId o platformMsgId, skip')
+        continue
+      }
 
       // El remitente es el usuario (no la página)
       const from = senderId === pageId ? recipientId : senderId
+      console.log('[IG Webhook] from (usuario):', from)
 
       // Deduplicación ANTES de crear/actualizar conversación
       const { data: existingMsg } = await supabase
@@ -223,11 +241,15 @@ export async function POST(req: NextRequest) {
           .select('id')
           .single()
 
-        if (convErr || !newConv) continue
+        if (convErr || !newConv) {
+          console.log('[IG Webhook] Error creando conversación:', convErr?.message)
+          continue
+        }
         convId = newConv.id
+        console.log('[IG Webhook] Conversación creada:', convId)
       }
 
-      await supabase.from('messages').insert({
+      const { error: msgErr } = await supabase.from('messages').insert({
         conversation_id: convId,
         direction: 'inbound',
         content_type: 'text',
@@ -236,6 +258,8 @@ export async function POST(req: NextRequest) {
         status: 'delivered',
         created_at: new Date(timestamp * 1000).toISOString(),
       })
+      if (msgErr) console.log('[IG Webhook] Error insertando mensaje:', msgErr.message)
+      else console.log('[IG Webhook] Mensaje insertado OK en conv:', convId)
     }
   }
 
