@@ -242,6 +242,61 @@ export async function manageStaffAccess(
   return { success: true }
 }
 
+export async function softDeleteStaff(staffId: string) {
+  const supabase = createAdminClient()
+
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
+  // Verificar que el staff pertenece a la org
+  const { data: staff, error: fetchError } = await supabase
+    .from('staff')
+    .select('id, is_active')
+    .eq('id', staffId)
+    .eq('organization_id', orgId)
+    .is('deleted_at', null)
+    .single()
+
+  if (fetchError || !staff) {
+    return { error: 'No se encontró el miembro del equipo.' }
+  }
+
+  // Reasignar clientes en cola si estaba activo
+  if (staff.is_active) {
+    await supabase
+      .from('queue_entries')
+      .update({ barber_id: null, is_dynamic: true })
+      .eq('barber_id', staffId)
+      .eq('status', 'waiting')
+      .eq('is_break', false)
+
+    // Cancelar entradas de descanso
+    await supabase
+      .from('queue_entries')
+      .update({ status: 'cancelled' })
+      .eq('barber_id', staffId)
+      .eq('is_break', true)
+      .in('status', ['waiting', 'in_progress'])
+  }
+
+  // Soft-delete: marcar como eliminado e inactivo
+  const { error } = await supabase
+    .from('staff')
+    .update({ deleted_at: new Date().toISOString(), is_active: false })
+    .eq('id', staffId)
+    .eq('organization_id', orgId)
+
+  if (error) {
+    return { error: 'Error al eliminar: ' + error.message }
+  }
+
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
+  revalidatePath('/dashboard/barberos')
+  revalidatePath('/checkin')
+  return { success: true }
+}
+
 export async function updateBarberAvatar(staffId: string, avatarUrl: string) {
   const supabase = createAdminClient()
 
