@@ -7,11 +7,11 @@ import {
   Search, Send, Clock, Calendar, X, Plus, ArrowLeft,
   CheckCheck, Check, AlertCircle, Settings, Copy, Eye, EyeOff,
   MessageSquare, Wifi, WifiOff, ExternalLink, User, ChevronRight,
-  Archive, CheckCircle2, RotateCcw, Pencil, Instagram, Facebook,
+  Archive, CheckCircle2, RotateCcw, Pencil, Instagram, Facebook, FileText, RefreshCw,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { sendMessage as sendMessageAction, markAsRead, cancelScheduledMessage } from '@/lib/actions/messaging'
-import { saveOrgWhatsAppConfig } from '@/lib/actions/whatsapp-meta'
+import { sendMessage as sendMessageAction, markAsRead, cancelScheduledMessage, sendTemplateToConversation, sendTemplateToClient } from '@/lib/actions/messaging'
+import { saveOrgWhatsAppConfig, syncWhatsAppTemplates } from '@/lib/actions/whatsapp-meta'
 import { saveOrgInstagramConfig } from '@/lib/actions/instagram-meta'
 import { startConversation, updateConversationStatus, getClientVisits, scheduleMessageAuto } from '@/lib/actions/conversations'
 import { createConversationTag, deleteConversationTag, assignConversationTag, removeConversationTag } from '@/lib/actions/tags'
@@ -154,6 +154,15 @@ interface ClientVisit {
   barber?: { full_name: string } | null
 }
 
+interface WaTemplate {
+  id: string
+  name: string
+  language: string
+  category: string
+  status: string
+  components: any
+}
+
 interface Props {
   initialConversations: ConversationWithRelations[]
   channels: SocialChannel[]
@@ -250,6 +259,13 @@ export function MensajeriaClient({
   })
   const [showIgToken, setShowIgToken] = useState(false)
   const [savingIgConfig, startSavingIgConfig] = useTransition()
+
+  // Templates
+  const [waTemplates, setWaTemplates] = useState<WaTemplate[]>([])
+  const [showTemplateDialog, setShowTemplateDialog] = useState(false)
+  const [syncingTemplates, startSyncingTemplates] = useTransition()
+  const [sendingTemplate, startSendingTemplate] = useTransition()
+  const [templateTarget, setTemplateTarget] = useState<{ type: 'conversation'; conversationId: string } | { type: 'client'; clientId: string } | null>(null)
 
   // ── Load messages ──
   const loadMessages = useCallback(async (convId: string) => {
@@ -464,6 +480,50 @@ export function MensajeriaClient({
       else {
         toast.success('Configuración guardada — el canal WhatsApp fue creado automáticamente')
         if (result.data) setWaConfig(result.data as any)
+      }
+    })
+  }
+
+  // ── Template handlers ──
+  const handleSyncTemplates = () => {
+    startSyncingTemplates(async () => {
+      const result = await syncWhatsAppTemplates()
+      if (result.error) { toast.error(result.error); return }
+      if (result.data) {
+        setWaTemplates(result.data.map((t, i) => ({ id: `tpl-${i}`, ...t })))
+        toast.success(`${result.data.length} template(s) sincronizado(s)`)
+      }
+    })
+  }
+
+  const handleOpenTemplateDialog = (target: typeof templateTarget) => {
+    setTemplateTarget(target)
+    setShowTemplateDialog(true)
+    if (waTemplates.length === 0) handleSyncTemplates()
+  }
+
+  const handleSendTemplate = (tpl: WaTemplate) => {
+    if (!templateTarget) return
+    startSendingTemplate(async () => {
+      let result: { success?: boolean; error?: string }
+      if (templateTarget.type === 'conversation') {
+        result = await sendTemplateToConversation(
+          templateTarget.conversationId,
+          tpl.name,
+          tpl.language
+        )
+      } else {
+        result = await sendTemplateToClient(
+          templateTarget.clientId,
+          tpl.name,
+          tpl.language
+        )
+      }
+      if (result.error) { toast.error(result.error) }
+      else {
+        toast.success('Template enviado')
+        setShowTemplateDialog(false)
+        setTemplateTarget(null)
       }
     })
   }
@@ -849,7 +909,18 @@ export function MensajeriaClient({
                   <div className="flex flex-col items-center justify-center py-16 text-[#8696A0]">
                     <MessageSquare className="mb-2 size-8 opacity-20" />
                     <p className="text-xs">No hay mensajes aún</p>
-                    <p className="text-[10px] mt-1 opacity-60">Para iniciar una conversación en WA necesitás un template aprobado</p>
+                    {activeConv.channel?.platform === 'whatsapp' && (
+                      <>
+                        <p className="text-[10px] mt-1 opacity-60">Enviá un template aprobado para iniciar la conversación</p>
+                        <button
+                          onClick={() => handleOpenTemplateDialog({ type: 'conversation', conversationId: activeConv.id })}
+                          className="mt-3 flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs transition-colors"
+                        >
+                          <FileText className="size-3.5" />
+                          Enviar template
+                        </button>
+                      </>
+                    )}
                   </div>
                 ) : (
                   groupedMessages().map(({ date, msgs }) => (
@@ -891,9 +962,27 @@ export function MensajeriaClient({
               ) : !canReply ? (
                 <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-3 py-2 text-center">
                   <p className="text-xs text-yellow-400">Ventana de 24h expirada — solo podés enviar templates aprobados</p>
+                  {activeConv.channel?.platform === 'whatsapp' && (
+                    <button
+                      onClick={() => handleOpenTemplateDialog({ type: 'conversation', conversationId: activeConv.id })}
+                      className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-green-600 hover:bg-green-500 text-white text-xs transition-colors"
+                    >
+                      <FileText className="size-3" />
+                      Enviar template
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="flex items-end gap-2">
+                  {activeConv.channel?.platform === 'whatsapp' && (
+                    <button
+                      onClick={() => handleOpenTemplateDialog({ type: 'conversation', conversationId: activeConv.id })}
+                      className="size-10 shrink-0 rounded-full bg-[#2A3942] hover:bg-[#3A4952] flex items-center justify-center transition-colors"
+                      title="Enviar template"
+                    >
+                      <FileText className="size-4 text-[#8696A0]" />
+                    </button>
+                  )}
                   <textarea rows={1}
                     className="flex-1 rounded-lg bg-[#2A3942] px-3 py-2.5 text-sm text-white placeholder:text-[#8696A0] outline-none resize-none focus:ring-1 focus:ring-green-500/40 min-h-10 max-h-30 overflow-y-auto"
                     placeholder="Escribí un mensaje..."
@@ -1461,6 +1550,81 @@ export function MensajeriaClient({
             <Button variant="ghost" onClick={() => setShowScheduleDialog(false)} className="text-[#8696A0] hover:text-white">Cancelar</Button>
             <Button className="bg-green-600 hover:bg-green-500 text-white" onClick={handleSchedule} disabled={isSending}>Programar</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ Template picker dialog ═══ */}
+      <Dialog open={showTemplateDialog} onOpenChange={setShowTemplateDialog}>
+        <DialogContent className="bg-[#202C33] border-white/10 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-white flex items-center gap-2">
+              <FileText className="size-4" />
+              Enviar template de WhatsApp
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-[#8696A0]">
+                Templates aprobados por Meta
+              </p>
+              <button
+                onClick={handleSyncTemplates}
+                disabled={syncingTemplates}
+                className="flex items-center gap-1 text-xs text-green-400 hover:text-green-300 disabled:opacity-50"
+              >
+                <RefreshCw className={`size-3 ${syncingTemplates ? 'animate-spin' : ''}`} />
+                Sincronizar
+              </button>
+            </div>
+
+            {syncingTemplates && waTemplates.length === 0 ? (
+              <div className="flex justify-center py-8">
+                <div className="size-5 animate-spin rounded-full border-2 border-white/10 border-t-green-400" />
+              </div>
+            ) : waTemplates.length === 0 ? (
+              <div className="text-center py-8 text-[#8696A0]">
+                <FileText className="size-8 mx-auto mb-2 opacity-20" />
+                <p className="text-xs">No se encontraron templates aprobados</p>
+                <p className="text-[10px] mt-1 opacity-60">Creá un template en Meta Business y hacé clic en Sincronizar</p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                {waTemplates.map((tpl) => (
+                  <div
+                    key={tpl.id}
+                    className="rounded-lg border border-white/10 bg-white/5 p-3 hover:bg-white/10 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-white">{tpl.name}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-400">
+                            {tpl.language}
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400">
+                            {tpl.category}
+                          </span>
+                        </div>
+                        {/* Mostrar preview del body del template */}
+                        {tpl.components?.map((comp: any, i: number) => (
+                          comp.type === 'BODY' && comp.text ? (
+                            <p key={i} className="text-[11px] text-[#8696A0] mt-1.5 line-clamp-3">{comp.text}</p>
+                          ) : null
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => handleSendTemplate(tpl)}
+                        disabled={sendingTemplate}
+                        className="shrink-0 px-3 py-1.5 rounded-md bg-green-600 hover:bg-green-500 disabled:opacity-40 text-white text-xs transition-colors"
+                      >
+                        {sendingTemplate ? '...' : 'Enviar'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

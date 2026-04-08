@@ -191,3 +191,210 @@ export async function sendMetaWhatsAppMessage(
   revalidatePath('/dashboard/mensajeria')
   return { success: true }
 }
+
+// Normaliza un teléfono argentino al formato E.164 sin + (para Meta Cloud API)
+function normalizeArgPhone(raw: string): string {
+  let phone = raw.replace(/\D/g, '')
+  if (!phone.startsWith('54')) {
+    if (phone.startsWith('9') && phone.length === 11) {
+      phone = '54' + phone.slice(1)
+    } else {
+      phone = '54' + phone
+    }
+  } else if (phone.startsWith('549') && phone.length === 13) {
+    phone = '54' + phone.slice(3)
+  }
+  return phone
+}
+
+// Envía un mensaje de template vía Meta Cloud API
+export async function sendMetaWhatsAppTemplate(
+  to: string,
+  templateName: string,
+  languageCode: string,
+  conversationId: string,
+  components?: Record<string, unknown>[],
+  staffId?: string
+): Promise<{ success?: boolean; error?: string }> {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'No autorizado' }
+
+  const supabase = createAdminClient()
+
+  const { data: waConfig } = await supabase
+    .from('organization_whatsapp_config')
+    .select('whatsapp_access_token, whatsapp_phone_id')
+    .eq('organization_id', orgId)
+    .maybeSingle()
+
+  if (!waConfig?.whatsapp_access_token || !waConfig?.whatsapp_phone_id) {
+    return { error: 'WhatsApp no configurado. Completá las credenciales en Configuración.' }
+  }
+
+  const phone = normalizeArgPhone(to)
+
+  const templatePayload: Record<string, unknown> = {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'template',
+    template: {
+      name: templateName,
+      language: { code: languageCode },
+      ...(components && components.length > 0 ? { components } : {}),
+    },
+  }
+
+  let res: Response
+  try {
+    res = await fetch(
+      `https://graph.facebook.com/${META_API_VERSION}/${waConfig.whatsapp_phone_id}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${waConfig.whatsapp_access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(templatePayload),
+      }
+    )
+  } catch {
+    await supabase.from('messages').insert({
+      conversation_id: conversationId,
+      direction: 'outbound',
+      content_type: 'template',
+      content: `[Template: ${templateName}]`,
+      template_name: templateName,
+      status: 'failed',
+      error_message: 'Error de red al contactar Meta API',
+      sent_by_staff_id: staffId ?? null,
+    })
+    return { error: 'Error de red al contactar Meta API' }
+  }
+
+  const result = await res.json()
+
+  if (!res.ok) {
+    const errMsg: string = result.error?.message ?? 'Error al enviar template'
+    await supabase.from('messages').insert({
+      conversation_id: conversationId,
+      direction: 'outbound',
+      content_type: 'template',
+      content: `[Template: ${templateName}]`,
+      template_name: templateName,
+      status: 'failed',
+      error_message: errMsg,
+      sent_by_staff_id: staffId ?? null,
+    })
+    return { error: errMsg }
+  }
+
+  const platformMsgId: string | undefined = result.messages?.[0]?.id
+
+  await supabase.from('messages').insert({
+    conversation_id: conversationId,
+    direction: 'outbound',
+    content_type: 'template',
+    content: `[Template: ${templateName}]`,
+    template_name: templateName,
+    platform_message_id: platformMsgId ?? null,
+    status: 'sent',
+    sent_by_staff_id: staffId ?? null,
+  })
+
+  await supabase
+    .from('conversations')
+    .update({
+      last_message_at: new Date().toISOString(),
+      can_reply_until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    })
+    .eq('id', conversationId)
+
+  revalidatePath('/dashboard/mensajeria')
+  return { success: true }
+}
+
+// Sincroniza templates aprobados desde Meta y los guarda en la tabla message_templates
+export async function syncWhatsAppTemplates(): Promise<{
+  data?: Array<{ name: string; language: string; category: string; status: string; components: unknown }>
+  error?: string
+}> {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'No autorizado' }
+
+  const supabase = createAdminClient()
+
+  const { data: waConfig } = await supabase
+    .from('organization_whatsapp_config')
+    .select('whatsapp_access_token, whatsapp_business_id')
+    .eq('organization_id', orgId)
+    .maybeSingle()
+
+  if (!waConfig?.whatsapp_access_token || !waConfig?.whatsapp_business_id) {
+    return { error: 'WhatsApp no configurado' }
+  }
+
+  // Obtener templates desde Meta
+  const res = await fetch(
+    `https://graph.facebook.com/${META_API_VERSION}/${waConfig.whatsapp_business_id}/message_templates?limit=100`,
+    {
+      headers: { Authorization: `Bearer ${waConfig.whatsapp_access_token}` },
+      signal: AbortSignal.timeout(10000),
+    }
+  )
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    return { error: err.error?.message ?? 'Error al obtener templates de Meta' }
+  }
+
+  const { data: metaTemplates } = await res.json()
+  if (!Array.isArray(metaTemplates)) return { error: 'Respuesta inesperada de Meta' }
+
+  // Obtener el canal WhatsApp de la org
+  const { data: orgBranches } = await supabase
+    .from('branches')
+    .select('id')
+    .eq('organization_id', orgId)
+  const branchIds = orgBranches?.map((b: { id: string }) => b.id) ?? []
+
+  const { data: waChannel } = await supabase
+    .from('social_channels')
+    .select('id')
+    .in('branch_id', branchIds)
+    .eq('platform', 'whatsapp')
+    .eq('is_active', true)
+    .limit(1)
+    .maybeSingle()
+
+  if (!waChannel) return { error: 'Canal WhatsApp no encontrado' }
+
+  // Guardar/actualizar en DB solo los aprobados
+  const approved = metaTemplates.filter((t: any) => t.status === 'APPROVED')
+
+  for (const tpl of approved) {
+    await supabase
+      .from('message_templates')
+      .upsert(
+        {
+          channel_id: waChannel.id,
+          name: tpl.name,
+          language: tpl.language,
+          category: (tpl.category as string).toLowerCase(),
+          status: 'approved',
+          components: tpl.components,
+        },
+        { onConflict: 'channel_id, name' }
+      )
+  }
+
+  revalidatePath('/dashboard/mensajeria')
+  return {
+    data: approved.map((t: any) => ({
+      name: t.name,
+      language: t.language,
+      category: t.category,
+      status: t.status,
+      components: t.components,
+    })),
+  }
+}

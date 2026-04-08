@@ -4,9 +4,6 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from './org'
 import { revalidatePath } from 'next/cache'
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
-
 export async function getConversations(channelFilter?: string) {
   const supabase = createAdminClient()
 
@@ -90,39 +87,126 @@ export async function sendMessage(
   return { error: 'Plataforma no soportada aún' }
 }
 
-export async function sendTemplateMessage(
-  clientId: string,
-  channelId: string,
+// Envía un template de WA a una conversación existente
+export async function sendTemplateToConversation(
+  conversationId: string,
   templateName: string,
-  templateParams?: Record<string, unknown>,
+  languageCode: string,
+  components?: Record<string, unknown>[],
   staffId?: string
 ) {
-  try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-message`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        client_id: clientId,
-        channel_id: channelId,
-        template_name: templateName,
-        template_params: templateParams,
-        staff_id: staffId,
-      }),
-    })
+  const supabase = createAdminClient()
 
-    const result = await res.json()
-    revalidatePath('/dashboard/mensajeria')
-    
-    if (!result.success) {
-      return { error: result.error || 'Error al enviar template' }
+  const { data: conv } = await supabase
+    .from('conversations')
+    .select('platform_user_id, channel:social_channels(platform)')
+    .eq('id', conversationId)
+    .single()
+
+  if (!conv) return { error: 'Conversación no encontrada' }
+
+  const platform = (conv.channel as any)?.platform as string | undefined
+  if (platform !== 'whatsapp') return { error: 'Templates solo disponibles para WhatsApp' }
+
+  const { sendMetaWhatsAppTemplate } = await import('./whatsapp-meta')
+  return sendMetaWhatsAppTemplate(
+    conv.platform_user_id,
+    templateName,
+    languageCode,
+    conversationId,
+    components,
+    staffId
+  )
+}
+
+// Inicia una conversación nueva con un cliente vía template
+export async function sendTemplateToClient(
+  clientId: string,
+  templateName: string,
+  languageCode: string,
+  components?: Record<string, unknown>[],
+  staffId?: string
+) {
+  const supabase = createAdminClient()
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'No autorizado' }
+
+  // Obtener teléfono del cliente
+  const { data: client } = await supabase
+    .from('clients')
+    .select('id, name, phone')
+    .eq('id', clientId)
+    .eq('organization_id', orgId)
+    .single()
+
+  if (!client?.phone) return { error: 'El cliente no tiene teléfono registrado' }
+
+  // Obtener canal WA
+  const { data: orgBranches } = await supabase
+    .from('branches')
+    .select('id')
+    .eq('organization_id', orgId)
+  const branchIds = orgBranches?.map((b: { id: string }) => b.id) ?? []
+
+  const { data: waChannel } = await supabase
+    .from('social_channels')
+    .select('id')
+    .in('branch_id', branchIds)
+    .eq('platform', 'whatsapp')
+    .eq('is_active', true)
+    .limit(1)
+    .maybeSingle()
+
+  if (!waChannel) return { error: 'Canal WhatsApp no encontrado' }
+
+  // Normalizar teléfono para platform_user_id
+  let phone = client.phone.replace(/\D/g, '')
+  if (!phone.startsWith('54')) {
+    if (phone.startsWith('9') && phone.length === 11) {
+      phone = '54' + phone.slice(1)
+    } else {
+      phone = '54' + phone
     }
-    return { success: true }
-  } catch {
-    return { error: 'Error de conexión al enviar template' }
+  } else if (phone.startsWith('549') && phone.length === 13) {
+    phone = '54' + phone.slice(3)
   }
+
+  // Buscar o crear conversación
+  let { data: conv } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('channel_id', waChannel.id)
+    .eq('platform_user_id', phone)
+    .maybeSingle()
+
+  if (!conv) {
+    const { data: newConv, error: convErr } = await supabase
+      .from('conversations')
+      .insert({
+        channel_id: waChannel.id,
+        client_id: clientId,
+        platform_user_id: phone,
+        platform_user_name: client.name || phone,
+        status: 'open',
+        unread_count: 0,
+        last_message_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single()
+
+    if (convErr || !newConv) return { error: 'Error al crear conversación' }
+    conv = newConv
+  }
+
+  const { sendMetaWhatsAppTemplate } = await import('./whatsapp-meta')
+  return sendMetaWhatsAppTemplate(
+    phone,
+    templateName,
+    languageCode,
+    conv.id,
+    components,
+    staffId
+  )
 }
 
 export async function markAsRead(conversationId: string) {
