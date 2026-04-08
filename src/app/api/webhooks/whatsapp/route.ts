@@ -38,11 +38,18 @@ export async function GET(req: NextRequest) {
   const token     = searchParams.get('hub.verify_token')
   const challenge = searchParams.get('hub.challenge')
 
+  const supabase = getSupabase()
+
+  // DEBUG: Loguear verificación
+  await supabase.from('webhook_debug_log').insert({
+    endpoint: 'whatsapp', method: 'GET',
+    body: { mode, token_prefix: token?.slice(0, 8), has_challenge: !!challenge },
+  })
+
   if (mode !== 'subscribe' || !token || !challenge) {
     return new NextResponse('Bad Request', { status: 400 })
   }
 
-  const supabase = getSupabase()
   const { data: config } = await supabase
     .from('organization_whatsapp_config')
     .select('id')
@@ -50,6 +57,10 @@ export async function GET(req: NextRequest) {
     .maybeSingle()
 
   if (!config) {
+    await supabase.from('webhook_debug_log').insert({
+      endpoint: 'whatsapp', method: 'GET',
+      error: `verify_token not found in DB. Token prefix: ${token.slice(0, 8)}`,
+    })
     return new NextResponse('Forbidden', { status: 403 })
   }
 
@@ -59,18 +70,38 @@ export async function GET(req: NextRequest) {
 // POST: Meta envía mensajes entrantes y actualizaciones de estado
 export async function POST(req: NextRequest) {
   const rawBody = await req.text()
+  const supabase = getSupabase()
+
+  // DEBUG: Loguear todo request que llegue al webhook
   let body: any
   try {
     body = JSON.parse(rawBody)
   } catch {
+    await supabase.from('webhook_debug_log').insert({
+      endpoint: 'whatsapp', method: 'POST',
+      body: { raw: rawBody.slice(0, 500) },
+      error: 'JSON parse failed',
+    })
     return new NextResponse('Bad Request', { status: 400 })
   }
+
+  await supabase.from('webhook_debug_log').insert({
+    endpoint: 'whatsapp', method: 'POST',
+    body: {
+      object: body.object,
+      entry_count: body.entry?.length,
+      first_entry_id: body.entry?.[0]?.id,
+      first_change_field: body.entry?.[0]?.changes?.[0]?.field,
+      phone_number_id: body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id,
+      messages_count: body.entry?.[0]?.changes?.[0]?.value?.messages?.length ?? 0,
+      statuses_count: body.entry?.[0]?.changes?.[0]?.value?.statuses?.length ?? 0,
+    },
+  })
 
   if (body.object !== 'whatsapp_business_account') {
     return NextResponse.json({ ok: true })
   }
 
-  const supabase = getSupabase()
   const signature = req.headers.get('x-hub-signature-256')
 
   for (const entry of body.entry ?? []) {

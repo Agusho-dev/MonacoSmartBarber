@@ -8,6 +8,31 @@ function getSupabase() {
   )
 }
 
+// Obtener el nombre/username del usuario de Instagram vía Graph API
+async function fetchIgUserProfile(userId: string, accessToken: string): Promise<{ name: string | null; username: string | null }> {
+  try {
+    const res = await fetch(
+      `https://graph.instagram.com/${userId}?fields=name,username&access_token=${encodeURIComponent(accessToken)}`,
+      { signal: AbortSignal.timeout(5000) }
+    )
+    if (!res.ok) {
+      // Fallback: intentar con graph.facebook.com (para IG-scoped IDs)
+      const fbRes = await fetch(
+        `https://graph.facebook.com/v21.0/${userId}?fields=name,username&access_token=${encodeURIComponent(accessToken)}`,
+        { signal: AbortSignal.timeout(5000) }
+      )
+      if (!fbRes.ok) return { name: null, username: null }
+      const fbData = await fbRes.json()
+      return { name: fbData.name ?? null, username: fbData.username ?? null }
+    }
+    const data = await res.json()
+    return { name: data.name ?? null, username: data.username ?? null }
+  } catch (err) {
+    console.warn('[IG Webhook] Error obteniendo perfil de usuario:', (err as Error).message)
+    return { name: null, username: null }
+  }
+}
+
 // Verifica la firma HMAC-SHA256 del payload enviado por Meta
 async function verifyHmacSignature(
   body: string,
@@ -87,11 +112,11 @@ export async function POST(req: NextRequest) {
 
     // Buscar org por cualquier ID que Meta envíe como entry.id
     // Puede ser: Facebook Page ID, Instagram Account ID, o IG-scoped ID
-    let igConfig: { organization_id: string; app_secret: string | null } | null = null
+    let igConfig: { organization_id: string; app_secret: string | null; instagram_page_access_token: string | null } | null = null
 
     const { data: configByPageId } = await supabase
       .from('organization_instagram_config')
-      .select('organization_id, app_secret')
+      .select('organization_id, app_secret, instagram_page_access_token')
       .eq('instagram_page_id', entryId)
       .maybeSingle()
 
@@ -100,7 +125,7 @@ export async function POST(req: NextRequest) {
     } else {
       const { data: configByAccountId } = await supabase
         .from('organization_instagram_config')
-        .select('organization_id, app_secret')
+        .select('organization_id, app_secret, instagram_page_access_token')
         .eq('instagram_account_id', entryId)
         .maybeSingle()
       igConfig = configByAccountId
@@ -230,10 +255,21 @@ export async function POST(req: NextRequest) {
         .eq('instagram', from)
         .maybeSingle()
 
+      // Intentar obtener el nombre del perfil de Instagram si no hay cliente vinculado
+      let displayName: string = client?.name ?? from
+      if (!client?.name && igConfig.instagram_page_access_token) {
+        const profile = await fetchIgUserProfile(from, igConfig.instagram_page_access_token)
+        if (profile.name) {
+          displayName = profile.name
+        } else if (profile.username) {
+          displayName = `@${profile.username}`
+        }
+      }
+
       // Buscar o crear conversación
       const { data: existingConv } = await supabase
         .from('conversations')
-        .select('id, unread_count')
+        .select('id, unread_count, platform_user_name')
         .eq('channel_id', igChannel.id)
         .eq('platform_user_id', from)
         .maybeSingle()
@@ -243,6 +279,8 @@ export async function POST(req: NextRequest) {
 
       if (existingConv) {
         convId = existingConv.id
+        // Actualizar nombre si antes era el ID numérico y ahora tenemos uno mejor
+        const shouldUpdateName = existingConv.platform_user_name === from && displayName !== from
         await supabase
           .from('conversations')
           .update({
@@ -250,6 +288,7 @@ export async function POST(req: NextRequest) {
             last_message_at: new Date().toISOString(),
             client_id: client?.id ?? null,
             can_reply_until: replyUntil,
+            ...(shouldUpdateName ? { platform_user_name: displayName } : {}),
           })
           .eq('id', convId)
       } else {
@@ -259,7 +298,7 @@ export async function POST(req: NextRequest) {
             channel_id: igChannel.id,
             client_id: client?.id ?? null,
             platform_user_id: from,
-            platform_user_name: client?.name ?? from,
+            platform_user_name: displayName,
             status: 'open',
             unread_count: 1,
             last_message_at: new Date().toISOString(),

@@ -32,7 +32,19 @@ import type { Conversation, Message, SocialChannel, Client, OrgWhatsAppConfig, O
 // ─────────────────────────────────────────────
 
 function initials(name: string) {
+  // Si es un ID numérico puro (IG user), mostrar "IG"
+  if (/^\d+$/.test(name.trim())) return 'IG'
   return name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() || '?'
+}
+
+// Formatear nombre para mostrar — si es un ID numérico, mostrar algo más amigable
+function displayName(name: string | undefined | null, platform?: string): string {
+  if (!name) return platform === 'instagram' ? 'Usuario de Instagram' : 'Sin nombre'
+  // Si es un ID numérico puro (IG-scoped user ID), mostrar versión amigable
+  if (/^\d{10,}$/.test(name.trim())) {
+    return platform === 'instagram' ? 'Usuario de Instagram' : `ID: ${name.slice(0, 8)}…`
+  }
+  return name
 }
 
 const AVATAR_COLORS = [
@@ -44,12 +56,14 @@ function avatarColor(name: string) {
   return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length]
 }
 
-function Avatar({ name, size = 10 }: { name: string; size?: number }) {
+function Avatar({ name, size = 10, platform }: { name: string; size?: number; platform?: string }) {
   const sz = `size-${size}`
   const text = size <= 8 ? 'text-xs' : 'text-sm'
+  const isIgFallback = name === 'Usuario de Instagram' || /^\d{10,}$/.test(name)
+  const bgColor = isIgFallback ? 'bg-gradient-to-br from-purple-500 to-pink-500' : avatarColor(name)
   return (
-    <div className={`${sz} ${avatarColor(name)} rounded-full flex items-center justify-center text-white font-semibold ${text} shrink-0`}>
-      {initials(name)}
+    <div className={`${sz} ${bgColor} rounded-full flex items-center justify-center text-white font-semibold ${text} shrink-0`}>
+      {isIgFallback ? <Instagram className={size <= 8 ? 'size-3.5' : 'size-4'} /> : initials(name)}
     </div>
   )
 }
@@ -303,9 +317,21 @@ export function MensajeriaClient({
         const updated = payload.new as Message
         setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, status: updated.status } : m))
       })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversations' }, (payload) => {
-        const newConv = payload.new as ConversationWithRelations
-        setConversations(prev => prev.some(c => c.id === newConv.id) ? prev : [newConv, ...prev])
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversations' }, async (payload) => {
+        const newConvRaw = payload.new as ConversationWithRelations
+        // Realtime no trae relaciones — fetch completo para obtener channel, client, tags
+        const { data: fullConv } = await supabase
+          .from('conversations')
+          .select(`
+            *,
+            channel:social_channels(id, platform, display_name, branch_id),
+            client:clients(id, name, phone, instagram, notes),
+            tags:conversation_tag_assignments(tag_id, tag:conversation_tags(id, name, color))
+          `)
+          .eq('id', newConvRaw.id)
+          .single()
+        const conv = (fullConv ?? newConvRaw) as ConversationWithRelations
+        setConversations(prev => prev.some(c => c.id === conv.id) ? prev : [conv, ...prev])
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
@@ -531,7 +557,7 @@ export function MensajeriaClient({
 
   const isConfigured = !!(waConfig?.whatsapp_access_token && waConfig?.whatsapp_phone_id && waConfig?.whatsapp_business_id)
   const isInstagramConfigured = !!(igConfig?.instagram_page_id && igConfig?.instagram_page_access_token)
-  const activeConvName = activeConv ? (activeConv.client?.name || activeConv.platform_user_name || activeConv.platform_user_id) : ''
+  const activeConvName = activeConv ? displayName(activeConv.client?.name || activeConv.platform_user_name || activeConv.platform_user_id, activeConv.channel?.platform) : ''
   const webhookUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/webhooks/whatsapp` : '/api/webhooks/whatsapp'
   const webhookUrlInstagram = typeof window !== 'undefined' ? `${window.location.origin}/api/webhooks/instagram` : '/api/webhooks/instagram'
 
@@ -543,7 +569,7 @@ export function MensajeriaClient({
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-[#111B21]">
 
       {/* ═══ LEFT — Conversation list ═══ */}
-      <div className={`flex flex-col border-r border-white/5 bg-[#111B21] w-full max-w-sm shrink-0 ${showMobileChat ? 'hidden lg:flex' : 'flex'}`}>
+      <div className={`flex flex-col border-r border-white/5 bg-[#111B21] w-full lg:w-[340px] lg:max-w-sm shrink-0 overflow-hidden ${showMobileChat ? 'hidden lg:flex' : 'flex'}`}>
 
         {/* Header */}
         <div className="bg-[#202C33]">
@@ -612,17 +638,17 @@ export function MensajeriaClient({
               )}
             </div>
 
-            <ScrollArea className="flex-1">
+            <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
               {filteredConversations.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-[#8696A0]">
                   <MessageSquare className="mb-3 size-10 opacity-20" />
-                  <p className="text-sm">{!isConfigured ? 'Configurá WhatsApp para empezar' : 'No hay conversaciones'}</p>
-                  {!isConfigured && (
+                  <p className="text-sm">{!(isConfigured || isInstagramConfigured) ? 'Configurá WhatsApp o Instagram para empezar' : 'No hay conversaciones'}</p>
+                  {!(isConfigured || isInstagramConfigured) && (
                     <button className="mt-2 text-xs text-green-400 hover:underline" onClick={() => setShowSettings(true)}>
                       Ir a configuración →
                     </button>
                   )}
-                  {isConfigured && (
+                  {(isConfigured || isInstagramConfigured) && (
                     <button className="mt-2 text-xs text-green-400 hover:underline" onClick={() => setShowNewChat(true)}>
                       Iniciar una conversación →
                     </button>
@@ -632,7 +658,8 @@ export function MensajeriaClient({
                 <div>
                   {filteredConversations.map(conv => {
                     const isActive = activeConv?.id === conv.id
-                    const name = conv.client?.name || conv.platform_user_name || conv.platform_user_id
+                    const rawName = conv.client?.name || conv.platform_user_name || conv.platform_user_id
+                    const name = displayName(rawName, conv.channel?.platform)
                     return (
                       <button key={conv.id}
                         onClick={() => { setActiveConv(conv); setShowMobileChat(true); setShowProfile(false) }}
@@ -663,7 +690,9 @@ export function MensajeriaClient({
                             )}
                           </div>
                           <div className="flex items-center justify-between gap-2 mt-0.5">
-                            <p className="truncate text-xs text-[#8696A0]">{conv.client?.phone || conv.platform_user_id}</p>
+                            <p className="truncate text-xs text-[#8696A0]">
+                              {conv.client?.phone || (conv.channel?.platform === 'instagram' ? (conv.client?.instagram || 'Instagram DM') : conv.platform_user_id)}
+                            </p>
                             {conv.unread_count > 0 && (
                               <span className="shrink-0 min-w-4.5 h-4.5 flex items-center justify-center rounded-full bg-green-500 text-[10px] font-semibold text-white px-1">
                                 {conv.unread_count}
@@ -686,7 +715,7 @@ export function MensajeriaClient({
                   })}
                 </div>
               )}
-            </ScrollArea>
+            </div>
           </>
         ) : (
           /* Scheduled tab */
@@ -696,7 +725,7 @@ export function MensajeriaClient({
                 <Plus className="mr-1.5 size-3" /> Programar mensaje
               </Button>
             </div>
-            <ScrollArea className="flex-1">
+            <div className="flex-1 overflow-y-auto min-h-0">
               {scheduled.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-[#8696A0]">
                   <Calendar className="mb-3 size-10 opacity-20" />
@@ -728,7 +757,7 @@ export function MensajeriaClient({
                   ))}
                 </div>
               )}
-            </ScrollArea>
+            </div>
           </>
         )}
       </div>
@@ -738,15 +767,15 @@ export function MensajeriaClient({
         {!activeConv ? (
           <div className="flex h-full flex-col items-center justify-center gap-4 bg-[#0B141A]">
             <div className="flex size-24 items-center justify-center rounded-full bg-white/5 border border-white/10">
-              <WhatsAppIcon className="size-12 text-green-500/50" />
+              <MessageSquare className="size-12 text-green-500/50" />
             </div>
             <div className="text-center">
-              <p className="text-lg font-semibold text-white/70">WhatsApp Web</p>
+              <p className="text-lg font-semibold text-white/70">Mensajería</p>
               <p className="text-sm text-[#8696A0] mt-1">
-                {isConfigured ? 'Seleccioná una conversación o iniciá una nueva' : 'Configurá tus credenciales de Meta API para comenzar'}
+                {(isConfigured || isInstagramConfigured) ? 'Seleccioná una conversación o iniciá una nueva' : 'Configurá WhatsApp o Instagram para comenzar'}
               </p>
               <div className="flex items-center justify-center gap-2 mt-4">
-                {isConfigured && (
+                {(isConfigured || isInstagramConfigured) && (
                   <Button variant="outline" size="sm" className="border-green-500/30 text-green-400 hover:bg-green-500/10"
                     onClick={() => setShowNewChat(true)}>
                     <Plus className="mr-1.5 size-3.5" /> Nueva conversación
@@ -772,7 +801,9 @@ export function MensajeriaClient({
                 <Avatar name={activeConvName} size={9} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-white">{activeConvName}</p>
-                  <p className="text-[11px] text-[#8696A0]">{activeConv.client?.phone || activeConv.platform_user_id}</p>
+                  <p className="text-[11px] text-[#8696A0]">
+                    {activeConv.client?.phone || (activeConv.channel?.platform === 'instagram' ? (activeConv.client?.instagram || 'Instagram DM') : activeConv.platform_user_id)}
+                  </p>
                 </div>
               </button>
               <div className="flex items-center gap-1 shrink-0">
@@ -808,7 +839,7 @@ export function MensajeriaClient({
             </div>
 
             {/* Messages */}
-            <ScrollArea className="flex-1 px-[5%]">
+            <div className="flex-1 overflow-y-auto min-h-0 px-[5%]">
               <div className="py-4 space-y-0.5">
                 {loadingMessages ? (
                   <div className="flex justify-center py-12">
@@ -848,7 +879,7 @@ export function MensajeriaClient({
                 )}
                 <div ref={messagesEndRef} />
               </div>
-            </ScrollArea>
+            </div>
 
             {/* Input */}
             <div className="px-4 py-3 bg-[#202C33]">
