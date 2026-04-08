@@ -68,7 +68,7 @@ export default async function EquipoPage() {
         { data: salaryConfigs },
         { data: calendarBarbers },
     ] = await Promise.all([
-        supabase.from('staff').select('*, branch:branches(*)').order('full_name'),
+        supabase.from('staff').select('*, branch:branches(*)').is('deleted_at', null).order('full_name'),
         supabase.from('branches').select('*').eq('is_active', true).order('name'),
         supabase
             .from('visits')

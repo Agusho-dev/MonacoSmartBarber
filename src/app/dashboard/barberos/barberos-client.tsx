@@ -306,11 +306,12 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('¿Estás seguro de que querés eliminar a este miembro del equipo? Esta acción no se puede revertir.')) return
+    if (!confirm('¿Estás seguro de que querés eliminar a este miembro del equipo? Su historial de cortes y registros se mantendrá.')) return
 
-    const { error } = await supabase.from('staff').delete().eq('id', id)
-    if (error) {
-      alert('No se pudo eliminar el miembro del equipo. Es posible que tenga registros asociados (cortes de pelo, caja, etc). Considerá cambiar su estado a inactivo en su lugar.\nDetalles: ' + error.message)
+    const { softDeleteStaff } = await import('@/lib/actions/barber')
+    const result = await softDeleteStaff(id)
+    if (result.error) {
+      alert(result.error)
     } else {
       router.refresh()
     }

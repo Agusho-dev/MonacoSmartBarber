@@ -14,6 +14,7 @@ export default async function BarberosPage() {
     supabase
       .from('staff')
       .select('*, branch:branches(*)')
+      .is('deleted_at', null)
       .order('full_name'),
     supabase.from('branches').select('*').eq('is_active', true).order('name'),
     supabase
