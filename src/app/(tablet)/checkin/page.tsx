@@ -159,21 +159,19 @@ export default function CheckinPage() {
   const nameInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    const supabase = createClient()
-    supabase
-      .from('branches')
-      .select('*')
-      .eq('is_active', true)
-      .then(({ data }) => {
-        if (data) {
-          setBranches(data)
+    // Cargar branches filtradas por org via server action
+    const loadBranches = async () => {
+      const { getPublicBranches } = await import('@/lib/actions/org')
+      const data = await getPublicBranches()
+      if (data) {
+          setBranches(data as Branch[])
 
           // Prioridad 1: parámetro ?branch= en la URL (viene del dashboard)
           const branchParam = searchParams.get('branch')
           if (branchParam) {
-            const found = data.find((b) => b.id === branchParam)
+            const found = data.find((b: Branch) => b.id === branchParam)
             if (found) {
-              setSelectedBranch(found)
+              setSelectedBranch(found as Branch)
               setStep('home')
               return
             }
@@ -196,8 +194,9 @@ export default function CheckinPage() {
           } catch {
             localStorage.removeItem(LOCALSTORAGE_KEY)
           }
-        }
-      })
+      }
+    }
+    loadBranches()
   }, [])
 
   useEffect(() => {
@@ -489,6 +488,10 @@ export default function CheckinPage() {
     try {
       localStorage.setItem(LOCALSTORAGE_KEY, JSON.stringify(branch))
     } catch { /* ignore */ }
+    // Setear cookie de org para que futuros loads filtren correctamente
+    import('@/lib/actions/org').then(({ setActiveOrgFromBranch }) => {
+      setActiveOrgFromBranch(branch.id)
+    })
     goTo('home')
   }
 

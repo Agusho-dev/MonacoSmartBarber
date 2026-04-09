@@ -35,11 +35,12 @@ export async function checkinClient(formData: FormData) {
     .from('clients')
     .select('id')
     .eq('phone', phone)
-    .single()
+    .eq('organization_id', branchResult.organization_id)
+    .maybeSingle()
 
   if (existingClient) {
     clientId = existingClient.id
-    await supabase.from('clients').update({ name }).eq('id', clientId)
+    await supabase.from('clients').update({ name }).eq('id', clientId).eq('organization_id', branchResult.organization_id)
 
     const { data: activeEntry } = await supabase
       .from('queue_entries')
@@ -546,20 +547,21 @@ export async function checkinClientByFace(
 ) {
   const supabase = createAdminClient()
 
-  // Operación pública del kiosko: verificar que la sucursal exista y esté activa
+  // Operación pública del kiosko: verificar que la sucursal exista y obtener su organización
   const { data: branchCheck } = await supabase
     .from('branches')
-    .select('id')
+    .select('id, organization_id')
     .eq('id', branchId)
     .eq('is_active', true)
     .maybeSingle()
 
-  if (!branchCheck) return { error: 'Sucursal no encontrada o inactiva' }
+  if (!branchCheck?.organization_id) return { error: 'Sucursal no encontrada o inactiva' }
 
   const { data: client } = await supabase
     .from('clients')
     .select('id, name')
     .eq('id', clientId)
+    .eq('organization_id', branchCheck.organization_id)
     .single()
 
   if (!client) {

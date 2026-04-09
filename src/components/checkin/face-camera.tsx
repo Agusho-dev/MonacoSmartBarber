@@ -206,7 +206,7 @@ export function FaceCamera({
       consecutiveMatchRef.current = null
       scanTimerRef.current = setTimeout(runScanLoop, SCAN_INTERVAL_MS)
     }
-  }, [state, drawFaceOverlay, onMatch, targetRole])
+  }, [state, drawFaceOverlay, onMatch, targetRole, orgId])
 
   useEffect(() => {
     if (state === 'scanning') {

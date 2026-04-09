@@ -41,10 +41,13 @@ export default async function ClientesPage() {
             .range(from, to)
         )
       : [],
-    supabase
-      .from('client_points')
-      .select('client_id, points_balance')
-      .then(({ data }) => data ?? []),
+    branchIds.length > 0
+      ? supabase
+          .from('client_points')
+          .select('client_id, points_balance')
+          .in('branch_id', branchIds)
+          .then(({ data }) => data ?? [])
+      : Promise.resolve([]),
   ])
 
   return (

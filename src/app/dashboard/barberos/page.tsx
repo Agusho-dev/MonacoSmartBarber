@@ -1,8 +1,14 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
+import { getCurrentOrgId, getOrgBranchIds } from '@/lib/actions/org'
+import { redirect } from 'next/navigation'
 import { BarberosClient } from './barberos-client'
 
 export default async function BarberosPage() {
-  const supabase = await createClient()
+  const orgId = await getCurrentOrgId()
+  if (!orgId) redirect('/login')
+  const branchIds = await getOrgBranchIds()
+
+  const supabase = createAdminClient()
 
   const now = new Date()
   const todayStr = now.toISOString().slice(0, 10)
@@ -14,15 +20,14 @@ export default async function BarberosPage() {
     supabase
       .from('staff')
       .select('*, branch:branches(*)')
+      .eq('organization_id', orgId)
       .is('deleted_at', null)
       .order('full_name'),
-    supabase.from('branches').select('*').eq('is_active', true).order('name'),
-    supabase
-      .from('visits')
-      .select('barber_id, amount')
-      .gte('completed_at', todayStr)
-      .lt('completed_at', tomorrowStr),
-    supabase.from('roles').select('*').order('name'),
+    supabase.from('branches').select('*').eq('organization_id', orgId).eq('is_active', true).order('name'),
+    branchIds.length > 0
+      ? supabase.from('visits').select('barber_id, amount').in('branch_id', branchIds).gte('completed_at', todayStr).lt('completed_at', tomorrowStr)
+      : Promise.resolve({ data: [] }),
+    supabase.from('roles').select('*').eq('organization_id', orgId).order('name'),
   ])
 
   return (

@@ -48,16 +48,13 @@ export default function BarberLoginPage() {
   const [loginBlock, setLoginBlock] = useState<LoginBlock>(null)
 
   useEffect(() => {
-    const supabase = createClient()
-    supabase
-      .from("branches")
-      .select("*")
-      .eq("is_active", true)
-      .order("name")
-      .then(({ data }) => {
-        setBranches(data ?? [])
-        setLoadingBranches(false)
-      })
+    const load = async () => {
+      const { getPublicBranches } = await import("@/lib/actions/org")
+      const data = await getPublicBranches()
+      setBranches((data ?? []) as Branch[])
+      setLoadingBranches(false)
+    }
+    load()
   }, [])
 
   useEffect(() => {
@@ -83,6 +80,10 @@ export default function BarberLoginPage() {
       setSelectedBranch(branch)
       setBarbers([])
       setStep("barber")
+      // Setear cookie de org para que futuros loads filtren correctamente
+      import("@/lib/actions/org").then(({ setActiveOrgFromBranch }) => {
+        setActiveOrgFromBranch(branchId)
+      })
     }
   }
 

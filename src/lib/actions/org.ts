@@ -73,6 +73,53 @@ export const getOrgBranchIds = cache(async function getOrgBranchIds(): Promise<s
 import { cookies } from 'next/headers'
 
 /**
+ * Retorna las sucursales activas filtradas por la organización activa.
+ * Si hay cookie active_organization, filtra por esa org.
+ * Si se pasa orgId explícito, usa ese.
+ * Usado por páginas públicas (kiosk, login barbero, TV).
+ */
+export async function getPublicBranches(orgId?: string) {
+  const cookieStore = await cookies()
+  const activeOrgId = orgId || cookieStore.get('active_organization')?.value
+
+  const supabase = createAdminClient()
+
+  let query = supabase
+    .from('branches')
+    .select('*')
+    .eq('is_active', true)
+    .order('name')
+
+  if (activeOrgId) {
+    query = query.eq('organization_id', activeOrgId)
+  }
+
+  const { data } = await query
+  return data ?? []
+}
+
+/**
+ * Setea la cookie active_organization a partir de un branch_id.
+ * Útil cuando el kiosk/TV/barbero selecciona una sucursal.
+ */
+export async function setActiveOrgFromBranch(branchId: string) {
+  const supabase = createAdminClient()
+  const { data: branch } = await supabase
+    .from('branches')
+    .select('organization_id')
+    .eq('id', branchId)
+    .maybeSingle()
+
+  if (!branch?.organization_id) return
+
+  const cookieStore = await cookies()
+  cookieStore.set('active_organization', branch.organization_id, {
+    maxAge: 60 * 60 * 24 * 365,
+    path: '/',
+  })
+}
+
+/**
  * Selecciona una organización por su slug (acceso público).
  * Setea la cookie active_organization para que las páginas públicas
  * (checkin, barbero, TV) sepan qué org usar.

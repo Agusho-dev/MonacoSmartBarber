@@ -1,4 +1,6 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { getCurrentOrgId, getOrgBranchIds } from '@/lib/actions/org'
+import { redirect } from 'next/navigation'
 import { fetchFinancialData, getFixedExpenses } from '@/lib/actions/finances'
 import { getCommissionSummary } from '@/lib/actions/salary'
 import { FinanzasTabsClient } from './finanzas-tabs-client'
@@ -10,6 +12,10 @@ export const metadata: Metadata = {
 }
 
 export default async function FinanzasPage() {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) redirect('/login')
+  const branchIds = await getOrgBranchIds()
+
   const supabase = await createClient()
 
   // Get user permissions
@@ -58,23 +64,21 @@ export default async function FinanzasPage() {
     fetchFinancialData(1),
     getFixedExpenses(),
     getCommissionSummary(),
-    supabase.from('branches').select('*').eq('is_active', true).order('name'),
-    supabase
-      .from('payment_accounts')
-      .select('*, branch:branches(name)')
-      .order('name'),
+    supabase.from('branches').select('*').eq('organization_id', orgId).eq('is_active', true).order('name'),
+    branchIds.length > 0
+      ? supabase.from('payment_accounts').select('*, branch:branches(name)').in('branch_id', branchIds).order('name')
+      : Promise.resolve({ data: [] }),
     admin
       .from('staff')
       .select('id, full_name, commission_pct, branch_id')
+      .eq('organization_id', orgId)
       .eq('role', 'barber')
       .eq('is_active', true)
       .order('full_name'),
-    admin.from('salary_configs').select('*'),
-    supabase
-      .from('expense_tickets')
-      .select('*, created_by_staff:created_by(full_name), payment_account:payment_accounts(name, alias_or_cbu)')
-      .order('expense_date', { ascending: false })
-      .limit(100),
+    admin.from('salary_configs').select('*, staff!inner(organization_id)').eq('staff.organization_id', orgId),
+    branchIds.length > 0
+      ? supabase.from('expense_tickets').select('*, created_by_staff:created_by(full_name), payment_account:payment_accounts(name, alias_or_cbu)').in('branch_id', branchIds).order('expense_date', { ascending: false }).limit(100)
+      : Promise.resolve({ data: [] }),
   ])
 
   // Mergear salary_configs con barbers manualmente (evita problemas con el embedded select de PostgREST)
