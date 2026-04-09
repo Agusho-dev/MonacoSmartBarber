@@ -7,7 +7,7 @@ let modelsLoaded = false
 let modelsLoading: Promise<void> | null = null
 
 const MODEL_URL = '/models'
-const DETECTION_SCORE_THRESHOLD = 0.65
+const DETECTION_SCORE_THRESHOLD = 0.3 // umbral más permisivo para detectar caras con poca luz o ángulo
 const MATCH_THRESHOLD = 0.40 // umbral estricto para evitar falsos positivos con caras nuevas
 
 async function loadFaceApi(): Promise<FaceApiModule> {
