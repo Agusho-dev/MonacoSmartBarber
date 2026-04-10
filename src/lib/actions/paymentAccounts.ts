@@ -104,12 +104,19 @@ export async function deletePaymentAccount(id: string) {
   return { success: true }
 }
 
-export async function resetDailyAccumulation() {
+/**
+ * Reinicia el acumulado de las cuentas de cobro al inicio de cada mes.
+ * El reset automático real lo hace pg_cron (migración 069) el día 1 a las 00:00 AR.
+ * Esta función actúa como red de seguridad: si por alguna razón el cron no corrió,
+ * se reinicia perezosamente cuando el mes de last_reset_date es anterior al mes actual.
+ */
+export async function resetMonthlyAccumulation() {
   const branchIds = await getOrgBranchIds()
   if (branchIds.length === 0) return { error: 'No autorizado' }
 
   const supabase = createAdminClient()
-  const todayDate = getLocalDateStr()
+  const todayDate = getLocalDateStr() // YYYY-MM-DD en hora local
+  const firstOfMonth = `${todayDate.slice(0, 7)}-01` // YYYY-MM-01
 
   const { error } = await supabase
     .from('payment_accounts')
@@ -118,7 +125,7 @@ export async function resetDailyAccumulation() {
       last_reset_date: todayDate
     })
     .in('branch_id', branchIds)
-    .lt('last_reset_date', todayDate)
+    .lt('last_reset_date', firstOfMonth)
 
   if (error) return { error: error.message }
   return { success: true }
@@ -130,8 +137,8 @@ export async function getActiveAccountForTransfer(branchId: string, transferAmou
 
   const supabase = await createClient()
 
-  // First ensure daily accumulations are reset if it's a new day
-  await resetDailyAccumulation()
+  // Red de seguridad: reinicia el acumulado si cambió el mes
+  await resetMonthlyAccumulation()
 
   // Get all active accounts for the branch ordered by sort_order
   const { data: accounts, error } = await supabase

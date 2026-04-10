@@ -220,24 +220,26 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
     let savedStaffId = editingId
 
     if (editingId) {
-      const { error } = await supabase.from('staff').update(data).eq('id', editingId)
-      if (error) {
-        alert('Error al actualizar staff: ' + error.message)
+      const { updateStaffMember } = await import('@/lib/actions/barber')
+      const result = await updateStaffMember(editingId, data)
+      if (result.error) {
+        alert(result.error)
         setSaving(false)
         return
       }
     } else {
-      const { data: inserted, error } = await supabase.from('staff').insert(data).select('id').single()
-      if (error) {
-        alert('Error al crear staff: ' + error.message)
+      const { createStaffMember } = await import('@/lib/actions/barber')
+      const result = await createStaffMember(data)
+      if (result.error) {
+        alert(result.error)
         setSaving(false)
         return
       }
-      if (inserted) {
-        savedStaffId = inserted.id
+      if (result.data) {
+        savedStaffId = result.data.id
         // Auto-crear salary_configs con esquema comisión y 30% por defecto
         const { upsertSalaryConfig } = await import('@/lib/actions/salary')
-        await upsertSalaryConfig(inserted.id, 'commission', 0, 30)
+        await upsertSalaryConfig(result.data.id, 'commission', 0, 30)
       }
     }
 

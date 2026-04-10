@@ -53,7 +53,12 @@ const EMPTY_FORM = { id: '', branch_id: '', name: '', alias_or_cbu: '', daily_li
 export function CuentasClient({ accounts, branches }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
+  const [filterBranchId, setFilterBranchId] = useState<string>('all')
   const [, startTransition] = useTransition()
+
+  const filteredAccounts = filterBranchId === 'all'
+    ? accounts
+    : accounts.filter((a) => a.branch_id === filterBranchId)
 
   // Balance dialog state
   const [balanceDialogOpen, setBalanceDialogOpen] = useState(false)
@@ -145,21 +150,40 @@ export function CuentasClient({ accounts, branches }: Props) {
         </Button>
       </div>
 
-      {accounts.length === 0 ? (
+      <div className="space-y-2 max-w-xs">
+        <Label>Sucursal</Label>
+        <Select value={filterBranchId} onValueChange={setFilterBranchId}>
+          <SelectTrigger>
+            <SelectValue placeholder="Todas" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas las sucursales</SelectItem>
+            {branches.map((b) => (
+              <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {filteredAccounts.length === 0 ? (
         <div className="rounded-xl border bg-card p-12 text-center">
           <Wallet className="size-10 mx-auto mb-4 text-muted-foreground" />
-          <p className="font-medium">No hay cuentas configuradas</p>
+          <p className="font-medium">
+            {filterBranchId === 'all' ? 'No hay cuentas configuradas' : 'No hay cuentas en esta sucursal'}
+          </p>
           <p className="text-sm text-muted-foreground mt-1 mb-4">
-            Agregá cuentas bancarias o alias para que los barberos las usen al cerrar cada servicio.
+            {filterBranchId === 'all'
+              ? 'Agregá cuentas bancarias o alias para que los barberos las usen al cerrar cada servicio.'
+              : 'Elegí otra sucursal o creá una cuenta nueva para esta.'}
           </p>
           <Button onClick={openCreate} variant="outline">
             <Plus className="size-4 mr-2" />
-            Agregar primera cuenta
+            {filterBranchId === 'all' ? 'Agregar primera cuenta' : 'Agregar cuenta'}
           </Button>
         </div>
       ) : (
         <div className="divide-y rounded-xl border bg-card">
-          {accounts.map((acc) => (
+          {filteredAccounts.map((acc) => (
             <div key={acc.id} className="flex items-center gap-4 px-5 py-4">
               <div className="flex size-10 items-center justify-center rounded-full bg-muted shrink-0">
                 <Wallet className="size-5 text-muted-foreground" />
