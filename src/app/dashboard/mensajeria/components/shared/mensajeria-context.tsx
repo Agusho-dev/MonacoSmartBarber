@@ -179,6 +179,22 @@ export function MensajeriaProvider({
   const [sendingTemplate, startSendingTemplate] = useTransition()
   const [templateTarget, setTemplateTarget] = useState<{ type: 'conversation'; conversationId: string } | { type: 'client'; clientId: string } | null>(null)
 
+  useEffect(() => {
+    const channelIds = initialConversations
+      .map(c => c.channel_id)
+      .filter((v, i, a) => a.indexOf(v) === i)
+    if (channelIds.length === 0) return
+    supabase
+      .from('message_templates')
+      .select('id, name, language, category, status, components')
+      .in('channel_id', channelIds)
+      .eq('status', 'approved')
+      .then(({ data }) => {
+        if (data && data.length > 0) setWaTemplates(data as WaTemplate[])
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Load messages
   const loadMessages = useCallback(async (convId: string) => {
     setLoadingMessages(true)

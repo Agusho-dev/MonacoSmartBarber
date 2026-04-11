@@ -218,13 +218,25 @@ Deno.serve(async (req: Request) => {
         const waChannel = orgChannelCache.get(orgId)
 
         if (waChannel) {
-          const phoneClean = (msg.phone as string).replace(/\D/g, '')
+          // Normalizar al formato internacional que usa Meta (ej: 5493835411954)
+          // para que coincida con el platform_user_id del webhook de WhatsApp
+          let phoneNorm = (msg.phone as string).replace(/\D/g, '')
+          if (!phoneNorm.startsWith('54')) {
+            if (phoneNorm.startsWith('9') && phoneNorm.length === 11) {
+              phoneNorm = '54' + phoneNorm.slice(1)
+            } else {
+              phoneNorm = '54' + phoneNorm
+            }
+          } else if (phoneNorm.startsWith('549') && phoneNorm.length === 13) {
+            phoneNorm = '54' + phoneNorm.slice(3)
+          }
+
           let convId: string | null = null
           const { data: existingConv } = await supabase
             .from('conversations')
             .select('id')
             .eq('channel_id', waChannel.id)
-            .eq('platform_user_id', phoneClean)
+            .eq('platform_user_id', phoneNorm)
             .maybeSingle()
 
           if (existingConv) {
@@ -235,7 +247,7 @@ Deno.serve(async (req: Request) => {
               .insert({
                 channel_id: waChannel.id,
                 client_id: msg.client_id,
-                platform_user_id: phoneClean,
+                platform_user_id: phoneNorm,
                 status: 'open',
                 unread_count: 0,
                 last_message_at: new Date().toISOString(),
