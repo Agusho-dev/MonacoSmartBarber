@@ -146,7 +146,7 @@ export function WorkflowNodeEditor({ node, onUpdateConfig, onUpdateLabel, onClos
         )}
 
         {node.node_type === 'send_template' && (
-          <SendTemplateConfig config={config} onChange={updateField} />
+          <SendTemplateConfig config={config} onUpdateConfig={onUpdateConfig} />
         )}
 
         {node.node_type === 'condition' && (
@@ -411,7 +411,7 @@ function SendListConfig({ config, onUpdateConfig }: { config: Record<string, unk
   )
 }
 
-function SendTemplateConfig({ config, onChange }: { config: Record<string, unknown>; onChange: (key: string, value: unknown) => void }) {
+function SendTemplateConfig({ config, onUpdateConfig }: { config: Record<string, unknown>; onUpdateConfig: (config: Record<string, unknown>) => void }) {
   const { waTemplates, handleSyncTemplates, syncingTemplates } = useMensajeria()
 
   useEffect(() => {
@@ -441,8 +441,11 @@ function SendTemplateConfig({ config, onChange }: { config: Record<string, unkno
             value={(config.template_name as string) || ''}
             onChange={e => {
               const selected = approvedTemplates.find(t => t.name === e.target.value)
-              onChange('template_name', e.target.value)
-              if (selected) onChange('language_code', selected.language)
+              onUpdateConfig({
+                ...config,
+                template_name: e.target.value,
+                language_code: selected?.language ?? (config.language_code as string) ?? 'es_AR',
+              })
             }}
             className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border"
           >
@@ -461,7 +464,7 @@ function SendTemplateConfig({ config, onChange }: { config: Record<string, unkno
           className="bg-muted border text-foreground text-sm"
           placeholder="es_AR"
           value={(config.language_code as string) || 'es_AR'}
-          onChange={e => onChange('language_code', e.target.value)}
+          onChange={e => onUpdateConfig({ ...config, language_code: e.target.value })}
           readOnly={!!((config.template_name as string))}
         />
       </div>

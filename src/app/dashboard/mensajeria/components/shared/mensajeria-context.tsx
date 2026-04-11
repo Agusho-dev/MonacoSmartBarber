@@ -242,6 +242,36 @@ export function MensajeriaProvider({
         const updated = payload.new as Message
         setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, status: updated.status } : m))
       })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversation_tag_assignments' }, async (payload) => {
+        const assignment = payload.new as { conversation_id: string; tag_id: string }
+        // Cargar info del tag
+        const { data: tag } = await supabase
+          .from('conversation_tags')
+          .select('*')
+          .eq('id', assignment.tag_id)
+          .single()
+        if (!tag) return
+        setConversations(prev => prev.map(c => {
+          if (c.id !== assignment.conversation_id) return c
+          if (c.tags?.some(t => t.tag_id === assignment.tag_id)) return c
+          return { ...c, tags: [...(c.tags ?? []), { tag_id: assignment.tag_id, tag }] }
+        }))
+        if (activeConv?.id === assignment.conversation_id) {
+          setActiveConv(prev => {
+            if (!prev || prev.tags?.some(t => t.tag_id === assignment.tag_id)) return prev
+            return { ...prev, tags: [...(prev.tags ?? []), { tag_id: assignment.tag_id, tag }] }
+          })
+        }
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'conversation_tag_assignments' }, (payload) => {
+        const old = payload.old as { conversation_id: string; tag_id: string }
+        setConversations(prev => prev.map(c =>
+          c.id === old.conversation_id ? { ...c, tags: c.tags?.filter(t => t.tag_id !== old.tag_id) } : c
+        ))
+        if (activeConv?.id === old.conversation_id) {
+          setActiveConv(prev => prev ? { ...prev, tags: prev.tags?.filter(t => t.tag_id !== old.tag_id) } : prev)
+        }
+      })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversations' }, async (payload) => {
         const newConvRaw = payload.new as ConversationWithRelations
         const { data: fullConv } = await supabase

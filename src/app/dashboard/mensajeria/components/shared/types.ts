@@ -52,4 +52,4 @@ export interface MensajeriaProps {
 
 export type SettingsTab = 'whatsapp' | 'instagram' | 'facebook' | 'tags'
 export type PlatformFilter = 'all' | 'whatsapp' | 'instagram'
-export type CrmSection = 'inbox' | 'broadcasts' | 'automations' | 'quick-replies' | 'settings'
+export type CrmSection = 'inbox' | 'broadcasts' | 'automations' | 'quick-replies' | 'alerts' | 'settings'
