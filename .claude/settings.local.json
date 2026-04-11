@@ -23,7 +23,21 @@
       "Bash(npx tsc:*)",
       "Bash(wc -l /mnt/c/Users/Agust/MonacoSmartBarber-1/src/app/dashboard/*-client.tsx /mnt/c/Users/Agust/MonacoSmartBarber-1/src/app/dashboard/**/*-client.tsx /mnt/c/Users/Agust/MonacoSmartBarber-1/src/components/barber/*.tsx /mnt/c/Users/Agust/MonacoSmartBarber-1/src/components/checkin/*.tsx)",
       "Bash(npm run:*)",
-      "mcp__supabase__list_extensions"
+      "Bash(npx supabase:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(npx next:*)",
+      "mcp__supabase__list_projects",
+      "mcp__supabase__get_logs",
+      "mcp__supabase__list_edge_functions",
+      "mcp__supabase__get_edge_function",
+      "Bash(gh api:*)",
+      "mcp__github__get_file_contents",
+      "WebFetch(domain:monaco-smart-barber.vercel.app)",
+      "Bash(curl:*)",
+      "Bash(grep:*)",
+      "Bash(find . -name \"*.sql\" -exec grep -l \"social_channels\\\\|conversations\\\\|messages\" {} \\\\;)",
+      "mcp__supabase__get_project_url"
     ]
   },
   "enabledMcpjsonServers": [

@@ -144,6 +144,7 @@ export async function updateReviewAutoConfig(data: {
   reviewAutoSend: boolean
   reviewDelayMinutes: number
   reviewMessageTemplate: string
+  reviewTemplateName: string
   waApiUrl: string
 }) {
   const supabase = await createClient()
@@ -165,6 +166,7 @@ export async function updateReviewAutoConfig(data: {
     review_auto_send: data.reviewAutoSend,
     review_delay_minutes: data.reviewDelayMinutes,
     review_message_template: data.reviewMessageTemplate || null,
+    review_template_name: data.reviewTemplateName?.trim() || null,
     wa_api_url: data.waApiUrl.trim() || null,
   }
 

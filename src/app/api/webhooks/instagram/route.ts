@@ -326,6 +326,71 @@ export async function POST(req: NextRequest) {
       if (msgErr) {
         console.error('[IG Webhook] Error insertando mensaje:', msgErr.message)
       }
+
+      // ── Auto-reply: evaluar reglas por palabra clave ──
+      if (text && igConfig.instagram_page_access_token) {
+        try {
+          const { data: rules } = await supabase
+            .from('auto_reply_rules')
+            .select('*')
+            .eq('organization_id', orgId)
+            .eq('is_active', true)
+            .in('platform', ['all', 'instagram'])
+            .order('priority', { ascending: false })
+
+          if (rules && rules.length > 0) {
+            const lowerText = text.toLowerCase()
+            for (const rule of rules) {
+              const keywords: string[] = rule.keywords ?? []
+              const matched = rule.match_mode === 'exact'
+                ? keywords.some((kw: string) => lowerText === kw.toLowerCase())
+                : keywords.some((kw: string) => lowerText.includes(kw.toLowerCase()))
+
+              if (matched && rule.response_type === 'text' && rule.response_text) {
+                // Enviar respuesta via Instagram Messaging API
+                const sendRes = await fetch(
+                  `https://graph.instagram.com/v21.0/me/messages`,
+                  {
+                    method: 'POST',
+                    headers: {
+                      Authorization: `Bearer ${igConfig.instagram_page_access_token}`,
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                      recipient: { id: from },
+                      message: { text: rule.response_text },
+                    }),
+                  }
+                )
+                const sendData = await sendRes.json()
+                const platformReplyId = sendData.message_id ?? null
+
+                // Guardar mensaje de auto-respuesta
+                await supabase.from('messages').insert({
+                  conversation_id: convId,
+                  direction: 'outbound',
+                  content_type: 'text',
+                  content: rule.response_text,
+                  platform_message_id: platformReplyId,
+                  status: platformReplyId ? 'sent' : 'failed',
+                  error_message: platformReplyId ? null : JSON.stringify(sendData).slice(0, 500),
+                  created_at: new Date().toISOString(),
+                })
+
+                // Actualizar last_message_at en la conversación
+                await supabase
+                  .from('conversations')
+                  .update({ last_message_at: new Date().toISOString() })
+                  .eq('id', convId)
+
+                break // Solo responder con la primera regla que matchee
+              }
+            }
+          }
+        } catch (autoReplyErr) {
+          console.error('[IG Webhook] Error en auto-reply:', autoReplyErr)
+        }
+      }
     }
   }
 

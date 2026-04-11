@@ -378,91 +378,100 @@ export async function completeService(
     }
   }
 
-  // 7. Envío automático de mensaje de reseña por WhatsApp
-  //    Lee la config, crea review_request y programa el mensaje para enviarse después del delay
+  // 7. Reglas post-servicio: buscar reglas con trigger_type='post_service' y programar mensajes
   if (visit.client_id) {
-    // Obtener org_id desde la branch de la visita para filtrar app_settings por organización
-    const { data: branch } = await supabase
-      .from('branches')
-      .select('organization_id')
-      .eq('id', visit.branch_id)
-      .single()
-
-    const { data: settings } = await supabase
-      .from('app_settings')
-      .select('review_auto_send, review_delay_minutes, review_message_template, wa_api_url')
-      .eq('organization_id', branch?.organization_id)
-      .maybeSingle()
-
-    if (settings?.review_auto_send && settings?.wa_api_url) {
-      const { data: client } = await supabase
-        .from('clients')
-        .select('name, phone')
-        .eq('id', visit.client_id)
+    try {
+      const { data: branch } = await supabase
+        .from('branches')
+        .select('organization_id')
+        .eq('id', visit.branch_id)
         .single()
 
-      if (client?.phone) {
-        // Crear review_request para generar el token de reseña
-        const token = crypto.randomUUID()
-        const expiresAt = new Date()
-        expiresAt.setDate(expiresAt.getDate() + 7)
-
-        const { data: reviewRequest } = await supabase
-          .from('review_requests')
-          .insert({
-            client_id: visit.client_id,
-            branch_id: visit.branch_id,
-            visit_id: visit.id,
-            barber_id: visit.barber_id,
-            token,
-            status: 'pending',
-            expires_at: expiresAt.toISOString(),
-          })
-          .select('token')
+      const visitOrgId = branch?.organization_id
+      if (visitOrgId) {
+        const { data: client } = await supabase
+          .from('clients')
+          .select('name, phone')
+          .eq('id', visit.client_id)
           .single()
 
-        if (reviewRequest) {
-          const effectiveServiceId = serviceId || visit.service_id
+        if (client?.phone) {
+          // Buscar reglas post_service activas para esta org
+          const { data: postServiceRules } = await supabase
+            .from('auto_reply_rules')
+            .select('*')
+            .eq('organization_id', visitOrgId)
+            .eq('trigger_type', 'post_service')
+            .eq('is_active', true)
+            .order('priority', { ascending: false })
 
-          const [{ data: barber }, { data: service }] = await Promise.all([
-            visit.barber_id
-              ? supabase.from('staff').select('full_name').eq('id', visit.barber_id).single()
-              : Promise.resolve({ data: null }),
-            effectiveServiceId
-              ? supabase.from('services').select('name').eq('id', effectiveServiceId).single()
-              : Promise.resolve({ data: null }),
-          ])
+          // También verificar la config legacy de app_settings como fallback
+          const { data: settings } = await supabase
+            .from('app_settings')
+            .select('review_auto_send, review_delay_minutes, review_template_name')
+            .eq('organization_id', visitOrgId)
+            .maybeSingle()
 
-          const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://monaco.app'
-          const reviewUrl = `${appUrl}/review/${reviewRequest.token}`
+          // Ejecutar reglas post_service
+          if (postServiceRules && postServiceRules.length > 0) {
+            for (const rule of postServiceRules) {
+              const delayMinutes = (rule.trigger_config as any)?.delay_minutes ?? 10
+              const scheduledFor = new Date()
+              scheduledFor.setMinutes(scheduledFor.getMinutes() + delayMinutes)
 
-          const template = settings?.review_message_template ||
-            '¡Hola {nombre}! Gracias por visitarnos 💈. Dejanos tu reseña: {link_resena}'
+              if (rule.response_type === 'template' && rule.response_template_name) {
+                const { error: schedErr } = await supabase.from('scheduled_messages').insert({
+                  client_id: visit.client_id,
+                  template_name: rule.response_template_name,
+                  template_language: rule.response_template_language || 'es_AR',
+                  scheduled_for: scheduledFor.toISOString(),
+                  phone: client.phone,
+                  status: 'pending',
+                })
+                if (schedErr) {
+                  console.error('[PostService] Error programando template:', schedErr.message)
+                } else {
+                  console.log('[PostService] Template programado para', client.phone, 'regla:', rule.name)
+                }
+              } else if (rule.response_text) {
+                const { error: schedErr } = await supabase.from('scheduled_messages').insert({
+                  client_id: visit.client_id,
+                  content: rule.response_text,
+                  scheduled_for: scheduledFor.toISOString(),
+                  phone: client.phone,
+                  status: 'pending',
+                })
+                if (schedErr) {
+                  console.error('[PostService] Error programando texto:', schedErr.message)
+                } else {
+                  console.log('[PostService] Texto programado para', client.phone, 'regla:', rule.name)
+                }
+              }
+            }
+          } else if (settings?.review_auto_send && settings.review_template_name) {
+            // Fallback legacy: usar app_settings si no hay reglas post_service
+            const delayMinutes = settings.review_delay_minutes ?? 15
+            const scheduledFor = new Date()
+            scheduledFor.setMinutes(scheduledFor.getMinutes() + delayMinutes)
 
-          // Formatear nombre: primera palabra, primera letra mayúscula y resto minúscula
-          // Ej: "JUAN PEREZ" → "Juan", "jUan" → "Juan", "martin soba" → "Martin"
-          const firstName = client.name.trim().split(/\s+/)[0]
-          const formattedName = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase()
-
-          const message = template
-            .replaceAll('{nombre}', formattedName)
-            .replaceAll('{barbero}', barber?.full_name || 'tu barbero')
-            .replaceAll('{servicio}', service?.name || 'el servicio')
-            .replaceAll('{link_resena}', reviewUrl)
-
-          const delayMinutes = settings?.review_delay_minutes ?? 15
-          const scheduledFor = new Date()
-          scheduledFor.setMinutes(scheduledFor.getMinutes() + delayMinutes)
-
-          await supabase.from('scheduled_messages').insert({
-            client_id: visit.client_id,
-            content: message,
-            scheduled_for: scheduledFor.toISOString(),
-            phone: client.phone,
-            status: 'pending',
-          })
+            const { error: schedErr } = await supabase.from('scheduled_messages').insert({
+              client_id: visit.client_id,
+              template_name: settings.review_template_name,
+              template_language: 'es_AR',
+              scheduled_for: scheduledFor.toISOString(),
+              phone: client.phone,
+              status: 'pending',
+            })
+            if (schedErr) {
+              console.error('[AutoSend] Error creando scheduled_message:', schedErr.message)
+            } else {
+              console.log('[AutoSend] Legacy template programado para', client.phone)
+            }
+          }
         }
       }
+    } catch (err) {
+      console.error('[PostService] Error en reglas post-servicio:', err)
     }
   }
 

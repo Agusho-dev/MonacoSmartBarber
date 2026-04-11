@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
       // Encontrar la org por phone_number_id
       const { data: waConfig } = await supabase
         .from('organization_whatsapp_config')
-        .select('organization_id, app_secret')
+        .select('organization_id, app_secret, whatsapp_access_token, whatsapp_phone_id')
         .eq('whatsapp_phone_id', phoneNumberId)
         .maybeSingle()
 
@@ -247,6 +247,73 @@ export async function POST(req: NextRequest) {
           status: 'delivered',
           created_at: new Date(parseInt(timestamp) * 1000).toISOString(),
         })
+
+        // ── Auto-reply: evaluar reglas por palabra clave ──
+        if (text && contentType === 'text' && waConfig.whatsapp_access_token && waConfig.whatsapp_phone_id) {
+          try {
+            const { data: rules } = await supabase
+              .from('auto_reply_rules')
+              .select('*')
+              .eq('organization_id', orgId)
+              .eq('is_active', true)
+              .in('platform', ['all', 'whatsapp'])
+              .order('priority', { ascending: false })
+
+            if (rules && rules.length > 0) {
+              const lowerText = text.toLowerCase()
+              for (const rule of rules) {
+                const keywords: string[] = rule.keywords ?? []
+                const matched = rule.match_mode === 'exact'
+                  ? keywords.some((kw: string) => lowerText === kw.toLowerCase())
+                  : keywords.some((kw: string) => lowerText.includes(kw.toLowerCase()))
+
+                if (matched && rule.response_type === 'text' && rule.response_text) {
+                  // Enviar respuesta via Meta Cloud API
+                  const sendRes = await fetch(
+                    `https://graph.facebook.com/v21.0/${waConfig.whatsapp_phone_id}/messages`,
+                    {
+                      method: 'POST',
+                      headers: {
+                        Authorization: `Bearer ${waConfig.whatsapp_access_token}`,
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify({
+                        messaging_product: 'whatsapp',
+                        to: from,
+                        type: 'text',
+                        text: { body: rule.response_text },
+                      }),
+                    }
+                  )
+                  const sendData = await sendRes.json()
+                  const platformReplyId = sendData.messages?.[0]?.id ?? null
+
+                  // Guardar mensaje de auto-respuesta
+                  await supabase.from('messages').insert({
+                    conversation_id: convId,
+                    direction: 'outbound',
+                    content_type: 'text',
+                    content: rule.response_text,
+                    platform_message_id: platformReplyId,
+                    status: platformReplyId ? 'sent' : 'failed',
+                    error_message: platformReplyId ? null : JSON.stringify(sendData).slice(0, 500),
+                    created_at: new Date().toISOString(),
+                  })
+
+                  // Actualizar last_message_at en la conversación
+                  await supabase
+                    .from('conversations')
+                    .update({ last_message_at: new Date().toISOString() })
+                    .eq('id', convId)
+
+                  break // Solo responder con la primera regla que matchee
+                }
+              }
+            }
+          } catch (autoReplyErr) {
+            console.error('[WA Webhook] Error en auto-reply:', autoReplyErr)
+          }
+        }
       }
 
       // Procesar actualizaciones de estado

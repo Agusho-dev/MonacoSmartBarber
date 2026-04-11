@@ -24,7 +24,7 @@ Deno.serve(async (req: Request) => {
     // Incluir channel_id para resolver la org de cada mensaje
     const { data: pendingMessages, error } = await supabase
       .from('scheduled_messages')
-      .select('id, phone, content, client_id, channel_id')
+      .select('id, phone, content, client_id, channel_id, template_name, template_language')
       .eq('status', 'pending')
       .lte('scheduled_for', new Date().toISOString())
       .limit(10)
@@ -142,6 +142,25 @@ Deno.serve(async (req: Request) => {
           const controller = new AbortController()
           const timeout = setTimeout(() => controller.abort(), 15000)
 
+          // Determinar payload: template o texto libre
+          const isTemplate = !!msg.template_name
+          const payload = isTemplate
+            ? {
+                messaging_product: 'whatsapp',
+                to: phone,
+                type: 'template',
+                template: {
+                  name: msg.template_name,
+                  language: { code: msg.template_language || 'es_AR' },
+                },
+              }
+            : {
+                messaging_product: 'whatsapp',
+                to: phone,
+                type: 'text',
+                text: { body: msg.content },
+              }
+
           try {
             const res = await fetch(
               `https://graph.facebook.com/${META_API_VERSION}/${waConfig.whatsapp_phone_id}/messages`,
@@ -151,12 +170,7 @@ Deno.serve(async (req: Request) => {
                   Authorization: `Bearer ${waConfig.whatsapp_access_token}`,
                   'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                  messaging_product: 'whatsapp',
-                  to: phone,
-                  type: 'text',
-                  text: { body: msg.content },
-                }),
+                body: JSON.stringify(payload),
                 signal: controller.signal,
               }
             )
@@ -235,8 +249,9 @@ Deno.serve(async (req: Request) => {
             await supabase.from('messages').insert({
               conversation_id: convId,
               direction: 'outbound',
-              content_type: 'text',
-              content: msg.content,
+              content_type: msg.template_name ? 'template' : 'text',
+              content: msg.content || (msg.template_name ? `[Template: ${msg.template_name}]` : null),
+              template_name: msg.template_name || null,
               status: 'sent',
             })
 

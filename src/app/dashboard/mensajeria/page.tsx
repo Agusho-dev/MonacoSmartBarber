@@ -29,6 +29,7 @@ export default async function MensajeriaPage() {
     { data: waConfig },
     { data: igConfig },
     { data: tags },
+    { data: appSettings },
   ] = await Promise.all([
     channelIds.length > 0
       ? supabase
@@ -96,6 +97,14 @@ export default async function MensajeriaPage() {
           .order('name')
           .then((r) => ({ data: r.data }))
       : Promise.resolve({ data: [] }),
+    orgId
+      ? supabase
+          .from('app_settings')
+          .select('review_auto_send, review_delay_minutes, review_template_name')
+          .eq('organization_id', orgId)
+          .maybeSingle()
+          .then((r) => ({ data: r.data }))
+      : Promise.resolve({ data: null }),
   ])
 
   return (
@@ -107,6 +116,7 @@ export default async function MensajeriaPage() {
       waConfig={waConfig ?? null}
       igConfig={igConfig ?? null}
       initialTags={tags ?? []}
+      appSettings={appSettings ?? null}
     />
   )
 }
