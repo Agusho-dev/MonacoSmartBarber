@@ -35,7 +35,7 @@ type CameraState =
 const SCAN_INTERVAL_MS = 200
 const MATCH_HOLD_MS = 1000
 const CONSECUTIVE_MATCHES_REQUIRED = 2 // confirmaciones consecutivas antes de aceptar un match
-const MIN_FACE_WIDTH_RATIO = 0.18 // cara debe ocupar al menos 18% del ancho del video
+const MIN_FACE_WIDTH_RATIO = 0.08 // cara debe ocupar al menos 8% del ancho del video
 
 export function FaceCamera({
   onMatch,
@@ -152,19 +152,19 @@ export function FaceCamera({
       const faceCenterX = x + width / 2
       const faceCenterY = y + height / 2
 
-      // Cara centrada, tamaño mínimo y score suficiente
+      // Cara centrada, tamaño mínimo
       isFaceValid = (
-        faceCenterX > videoW * 0.30 &&
-        faceCenterX < videoW * 0.70 &&
-        faceCenterY > videoH * 0.20 &&
-        faceCenterY < videoH * 0.80 &&
+        faceCenterX > videoW * 0.20 &&
+        faceCenterX < videoW * 0.80 &&
+        faceCenterY > videoH * 0.15 &&
+        faceCenterY < videoH * 0.85 &&
         width >= videoW * MIN_FACE_WIDTH_RATIO
       )
     }
 
     drawFaceOverlay(detection, isFaceValid)
 
-    if (detection && isFaceValid && detection.score > 0.65) {
+    if (detection && isFaceValid) {
       setState('matching')
       setLastDescriptor(detection.descriptor)
 
@@ -206,7 +206,7 @@ export function FaceCamera({
       consecutiveMatchRef.current = null
       scanTimerRef.current = setTimeout(runScanLoop, SCAN_INTERVAL_MS)
     }
-  }, [state, drawFaceOverlay, onMatch, targetRole])
+  }, [state, drawFaceOverlay, onMatch, targetRole, orgId])
 
   useEffect(() => {
     if (state === 'scanning') {

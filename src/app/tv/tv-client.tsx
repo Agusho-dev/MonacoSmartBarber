@@ -196,12 +196,16 @@ interface TvClientProps {
   initialEntries: QueueEntry[]
   barbers: BarberRow[]
   branches: BranchRow[]
+  orgBranchIds: string[]
+  orgId: string | null
 }
 
 export function TvClient({
   initialEntries,
   barbers,
   branches,
+  orgBranchIds,
+  orgId,
 }: TvClientProps) {
   const { selectedBranchId, setSelectedBranchId } = useBranchStore()
   const [entries, setEntries] = useState<QueueEntry[]>(initialEntries)
@@ -224,90 +228,27 @@ export function TvClient({
   }, [branches, selectedBranchId, setSelectedBranchId])
 
   const fetchQueue = useCallback(async () => {
-    const query = supabase
-      .from('queue_entries')
-      .select('*, client:clients(*), barber:staff(*)')
-      .in('status', ['waiting', 'in_progress'])
-      .order('position')
-
-    const { data } = await query
+    const { refreshTvQueue } = await import('@/lib/actions/tv')
+    const { entries: data } = await refreshTvQueue(orgBranchIds)
     if (data) setEntries(data as QueueEntry[])
-  }, [supabase])
+  }, [orgBranchIds])
 
   const fetchBarbers = useCallback(async () => {
-    const { data } = await supabase
-      .from('staff')
-      .select('id, full_name, branch_id, status, is_active, avatar_url')
-      .eq('role', 'barber')
-      .eq('is_active', true)
-      .order('full_name')
-
+    const { refreshTvBarbers } = await import('@/lib/actions/tv')
+    const { barbers: data } = await refreshTvBarbers(orgBranchIds)
     if (data) setLiveBarbers(data as BarberRow[])
-  }, [supabase])
+  }, [orgBranchIds])
 
   const fetchSchedules = useCallback(async () => {
-    const dayStart = new Date()
-    dayStart.setHours(0, 0, 0, 0)
-
-    const [schedRes, settingsRes, monthlyVisitsRes, lastVisitsRes, attendanceRes] = await Promise.all([
-      supabase
-        .from('staff_schedules')
-        .select('*')
-        .eq('day_of_week', new Date().getDay())
-        .eq('is_active', true),
-      supabase
-        .from('app_settings')
-        .select('shift_end_margin_minutes, dynamic_cooldown_seconds')
-        .maybeSingle(),
-      supabase
-        .from('visits')
-        .select('barber_id')
-        .gte('completed_at', dayStart.toISOString())
-        .not('barber_id', 'is', null),
-      supabase
-        .from('visits')
-        .select('barber_id, completed_at')
-        .not('barber_id', 'is', null)
-        .order('completed_at', { ascending: false })
-        .limit(200),
-      supabase
-        .from('attendance_logs')
-        .select('staff_id, action_type')
-        .gte('recorded_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
-        .order('recorded_at', { ascending: false }),
-    ])
-    if (schedRes.data) setSchedules(schedRes.data as StaffSchedule[])
-    if (settingsRes.data) {
-      const sd = settingsRes.data as { shift_end_margin_minutes?: number; dynamic_cooldown_seconds?: number }
-      if (typeof sd.shift_end_margin_minutes === 'number' && sd.shift_end_margin_minutes >= 0) setShiftEndMargin(sd.shift_end_margin_minutes)
-      if (typeof sd.dynamic_cooldown_seconds === 'number' && sd.dynamic_cooldown_seconds >= 0) setDynamicCooldownMs(sd.dynamic_cooldown_seconds * 1000)
-    }
-    if (monthlyVisitsRes?.data) {
-      const counts: Record<string, number> = {}
-      for (const v of monthlyVisitsRes.data as { barber_id: string }[]) {
-        counts[v.barber_id] = (counts[v.barber_id] || 0) + 1
-      }
-      setDailyServiceCounts(counts)
-    }
-    if (lastVisitsRes?.data) {
-      const lastMap: Record<string, string> = {}
-      for (const v of lastVisitsRes.data as { barber_id: string; completed_at: string }[]) {
-        if (!lastMap[v.barber_id]) {
-          lastMap[v.barber_id] = v.completed_at
-        }
-      }
-      setLastCompletedAt(lastMap)
-    }
-    if (attendanceRes.data) {
-      const latest: Record<string, string> = {}
-      attendanceRes.data.forEach((log: { staff_id: string; action_type: string }) => {
-        if (!latest[log.staff_id]) {
-          latest[log.staff_id] = log.action_type
-        }
-      })
-      setLatestAttendance(latest)
-    }
-  }, [supabase])
+    const { refreshTvSchedules } = await import('@/lib/actions/tv')
+    const result = await refreshTvSchedules(orgBranchIds, orgId || '')
+    setSchedules(result.schedules as StaffSchedule[])
+    if (result.shiftEndMargin >= 0) setShiftEndMargin(result.shiftEndMargin)
+    if (result.dynamicCooldownSeconds >= 0) setDynamicCooldownMs(result.dynamicCooldownSeconds * 1000)
+    setDailyServiceCounts(result.dailyServiceCounts)
+    setLastCompletedAt(result.lastCompletedAt)
+    setLatestAttendance(result.latestAttendance)
+  }, [orgBranchIds, orgId])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect

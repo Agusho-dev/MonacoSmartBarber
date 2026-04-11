@@ -6,21 +6,30 @@ import { revalidatePath } from 'next/cache'
 import { generateCheckoutCommissionReport } from './salary'
 
 /**
- * Valida que el staffId pertenece al branchId indicado y que ambos existen.
- * Retorna true si es válido, false si no.
+ * Valida que el staffId pertenece al branchId indicado, que ambos existen,
+ * y que pertenecen a la misma organización.
  * El panel barbero usa PIN auth (sin sesión Supabase), por lo que no se puede
  * usar el cliente SSR para estas operaciones.
  */
 async function validateStaffBelongsToBranch(staffId: string, branchId: string): Promise<boolean> {
   const supabase = createAdminClient()
-  const { data } = await supabase
-    .from('staff')
-    .select('id')
-    .eq('id', staffId)
-    .eq('branch_id', branchId)
-    .eq('is_active', true)
-    .maybeSingle()
-  return !!data
+  const [{ data: staff }, { data: branch }] = await Promise.all([
+    supabase
+      .from('staff')
+      .select('id, organization_id')
+      .eq('id', staffId)
+      .eq('branch_id', branchId)
+      .eq('is_active', true)
+      .maybeSingle(),
+    supabase
+      .from('branches')
+      .select('organization_id')
+      .eq('id', branchId)
+      .eq('is_active', true)
+      .maybeSingle(),
+  ])
+  if (!staff?.organization_id || !branch?.organization_id) return false
+  return staff.organization_id === branch.organization_id
 }
 
 export async function registerBarberClockIn(staffId: string, branchId: string, faceVerified: boolean) {

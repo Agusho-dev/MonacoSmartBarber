@@ -126,6 +126,60 @@ export async function toggleBarberVisibility(staffId: string) {
   return { success: true, hidden: newValue }
 }
 
+export async function createStaffMember(data: {
+  full_name: string
+  branch_id: string | null
+  pin: string | null
+  role: string
+  role_id: string | null
+  email: string | null
+  phone: string | null
+}) {
+  const supabase = createAdminClient()
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
+  const { data: inserted, error } = await supabase
+    .from('staff')
+    .insert({ ...data, organization_id: orgId })
+    .select('id')
+    .single()
+
+  if (error) {
+    return { error: 'Error al crear staff: ' + error.message }
+  }
+
+  revalidatePath('/dashboard/barberos')
+  return { success: true, data: inserted }
+}
+
+export async function updateStaffMember(staffId: string, data: {
+  full_name: string
+  branch_id: string | null
+  pin: string | null
+  role: string
+  role_id: string | null
+  email: string | null
+  phone: string | null
+}) {
+  const supabase = createAdminClient()
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
+  const { error } = await supabase
+    .from('staff')
+    .update(data)
+    .eq('id', staffId)
+    .eq('organization_id', orgId)
+
+  if (error) {
+    return { error: 'Error al actualizar staff: ' + error.message }
+  }
+
+  revalidatePath('/dashboard/barberos')
+  return { success: true }
+}
+
 export async function fetchBarberDayStats(staffId: string, branchId: string) {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { servicesCount: 0, revenue: 0 }

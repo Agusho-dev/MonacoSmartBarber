@@ -1,17 +1,14 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
+import { getCurrentOrgId, getOrgBranchIds } from '@/lib/actions/org'
 import { redirect } from 'next/navigation'
 import { AppMovilClient } from './app-movil-client'
 
 export default async function AppMovilPage() {
-  const supabase = await createClient()
+  const orgId = await getCurrentOrgId()
+  if (!orgId) redirect('/login')
+  const branchIds = await getOrgBranchIds()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    redirect('/login')
-  }
+  const supabase = createAdminClient()
 
   const [
     { data: branches },
@@ -19,10 +16,14 @@ export default async function AppMovilPage() {
     { data: catalog },
     { data: billboard },
   ] = await Promise.all([
-    supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
-    supabase.from('rewards_config').select('*'),
-    supabase.from('reward_catalog').select('*').order('created_at', { ascending: false }),
-    supabase.from('billboard_items').select('*, branch:branches(name)').order('sort_order'),
+    supabase.from('branches').select('id, name').eq('organization_id', orgId).eq('is_active', true).order('name'),
+    branchIds.length > 0
+      ? supabase.from('rewards_config').select('*').in('branch_id', branchIds)
+      : Promise.resolve({ data: [] }),
+    supabase.from('reward_catalog').select('*').eq('organization_id', orgId).order('created_at', { ascending: false }),
+    branchIds.length > 0
+      ? supabase.from('billboard_items').select('*, branch:branches(name)').in('branch_id', branchIds).order('sort_order')
+      : Promise.resolve({ data: [] }),
   ])
 
   return (

@@ -89,6 +89,8 @@ export interface Branch {
   name: string
   address: string | null
   phone: string | null
+  latitude: number | null
+  longitude: number | null
   is_active: boolean
   business_hours_open: string
   business_hours_close: string

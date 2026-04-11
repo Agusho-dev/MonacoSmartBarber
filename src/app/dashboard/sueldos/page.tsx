@@ -1,4 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
+import { getCurrentOrgId } from '@/lib/actions/org'
+import { redirect } from 'next/navigation'
 import { SueldosClient } from './sueldos-client'
 import type { Metadata } from 'next'
 import type { SalaryConfig } from '@/lib/types/database'
@@ -16,17 +18,21 @@ export interface BarberWithConfig {
 }
 
 export default async function SueldosPage() {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) redirect('/login')
+
   const supabase = createAdminClient()
 
   const [{ data: branches }, { data: barbersRaw }, { data: salaryConfigsRaw }] = await Promise.all([
-    supabase.from('branches').select('*').eq('is_active', true).order('name'),
+    supabase.from('branches').select('*').eq('organization_id', orgId).eq('is_active', true).order('name'),
     supabase
       .from('staff')
       .select('id, full_name, commission_pct, branch_id')
+      .eq('organization_id', orgId)
       .eq('role', 'barber')
       .eq('is_active', true)
       .order('full_name'),
-    supabase.from('salary_configs').select('*'),
+    supabase.from('salary_configs').select('*, staff!inner(organization_id)').eq('staff.organization_id', orgId),
   ])
 
   const configsByStaffId = new Map((salaryConfigsRaw ?? []).map((c) => [c.staff_id, c]))

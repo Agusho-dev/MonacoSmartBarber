@@ -1,4 +1,6 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { getCurrentOrgId, getOrgBranchIds } from '@/lib/actions/org'
+import { redirect } from 'next/navigation'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { EquipoClient } from './equipo-client'
 import type { Metadata } from 'next'
@@ -9,6 +11,10 @@ export const metadata: Metadata = {
 }
 
 export default async function EquipoPage() {
+    const orgId = await getCurrentOrgId()
+    if (!orgId) redirect('/login')
+    const branchIds = await getOrgBranchIds()
+
     const supabase = await createClient()
 
     const now = new Date()
@@ -68,67 +74,58 @@ export default async function EquipoPage() {
         { data: salaryConfigs },
         { data: calendarBarbers },
     ] = await Promise.all([
-        supabase.from('staff').select('*, branch:branches(*)').is('deleted_at', null).order('full_name'),
-        supabase.from('branches').select('*').eq('is_active', true).order('name'),
-        supabase
-            .from('visits')
-            .select('barber_id, amount')
-            .gte('completed_at', todayStr)
-            .lt('completed_at', tomorrowStr),
-        supabase.from('break_configs').select('*').order('name'),
-        supabase.from('incentive_rules').select('*').order('name'),
+        supabase.from('staff').select('*, branch:branches(*)').eq('organization_id', orgId).is('deleted_at', null).order('full_name'),
+        supabase.from('branches').select('*').eq('organization_id', orgId).eq('is_active', true).order('name'),
+        branchIds.length > 0
+            ? supabase.from('visits').select('barber_id, amount').in('branch_id', branchIds).gte('completed_at', todayStr).lt('completed_at', tomorrowStr)
+            : Promise.resolve({ data: [] }),
+        branchIds.length > 0
+            ? supabase.from('break_configs').select('*').in('branch_id', branchIds).order('name')
+            : Promise.resolve({ data: [] }),
+        branchIds.length > 0
+            ? supabase.from('incentive_rules').select('*').in('branch_id', branchIds).order('name')
+            : Promise.resolve({ data: [] }),
         supabase
             .from('incentive_achievements')
             .select('*, rule:incentive_rules(name)')
             .eq('period_label', defaultPeriod),
-        supabase
-            .from('disciplinary_rules')
-            .select('*')
-            .order('event_type')
-            .order('occurrence_number'),
-        supabase
-            .from('disciplinary_events')
-            .select('*, staff:staff(id, full_name, branch_id)')
-            .gte('event_date', fromDate)
-            .order('event_date', { ascending: false }),
+        branchIds.length > 0
+            ? supabase.from('disciplinary_rules').select('*').in('branch_id', branchIds).order('event_type').order('occurrence_number')
+            : Promise.resolve({ data: [] }),
+        branchIds.length > 0
+            ? supabase.from('disciplinary_events').select('*, staff:staff(id, full_name, branch_id)').in('branch_id', branchIds).gte('event_date', fromDate).order('event_date', { ascending: false })
+            : Promise.resolve({ data: [] }),
         supabase
             .from('roles')
             .select('*, role_branch_scope(branch_id)')
+            .eq('organization_id', orgId)
             .order('name'),
-        supabase
-            .from('break_requests')
-            .select('*, staff:staff_id(id, full_name), break_config:break_config_id(name, duration_minutes)')
-            .in('status', ['pending', 'approved'])
-            .order('requested_at', { ascending: true }),
-        supabase
-            .from('queue_entries')
-            .select('id, barber_id, branch_id, started_at, break_request_id, barber:staff(id, full_name, branch_id), break_request:break_requests(id, branch_id, break_config:break_configs(name, duration_minutes))')
-            .eq('is_break', true)
-            .eq('status', 'in_progress'),
-        supabase
-            .from('break_requests')
-            .select('*, staff:staff_id(id, full_name, branch_id), break_config:break_config_id(name, duration_minutes)')
-            .eq('status', 'completed')
-            .gt('overtime_seconds', 0)
-            .gte('actual_completed_at', thirtyDaysAgoStr)
-            .order('actual_completed_at', { ascending: false }),
+        branchIds.length > 0
+            ? supabase.from('break_requests').select('*, staff:staff_id(id, full_name), break_config:break_config_id(name, duration_minutes)').in('branch_id', branchIds).in('status', ['pending', 'approved']).order('requested_at', { ascending: true })
+            : Promise.resolve({ data: [] }),
+        branchIds.length > 0
+            ? supabase.from('queue_entries').select('id, barber_id, branch_id, started_at, break_request_id, barber:staff(id, full_name, branch_id), break_request:break_requests(id, branch_id, break_config:break_configs(name, duration_minutes))').in('branch_id', branchIds).eq('is_break', true).eq('status', 'in_progress')
+            : Promise.resolve({ data: [] }),
+        branchIds.length > 0
+            ? supabase.from('break_requests').select('*, staff:staff_id(id, full_name, branch_id), break_config:break_config_id(name, duration_minutes)').in('branch_id', branchIds).eq('status', 'completed').gt('overtime_seconds', 0).gte('actual_completed_at', thirtyDaysAgoStr).order('actual_completed_at', { ascending: false })
+            : Promise.resolve({ data: [] }),
         fetchAll((from, to) =>
             createAdminClient()
                 .from('visits')
                 .select('id, amount, payment_method, commission_amount, started_at, completed_at, branch_id, service:services(name), client:clients(name), barber:staff(id, full_name)')
+                .eq('organization_id', orgId)
                 .gte('completed_at', twelveMonthsAgoStr)
                 .order('completed_at', { ascending: false })
                 .range(from, to)
         ),
-        supabase
-            .from('attendance_logs')
-            .select('id, staff_id, branch_id, action_type, recorded_at, face_verified')
-            .gte('recorded_at', fromDate)
-            .order('recorded_at', { ascending: false }),
-        supabase.from('salary_configs').select('*'),
+        branchIds.length > 0
+            ? supabase.from('attendance_logs').select('id, staff_id, branch_id, action_type, recorded_at, face_verified').in('branch_id', branchIds).gte('recorded_at', fromDate).order('recorded_at', { ascending: false })
+            : Promise.resolve({ data: [] }),
+        supabase.from('salary_configs').select('*, staff!inner(organization_id)').eq('staff.organization_id', orgId),
         supabase
             .from('staff')
             .select('id, full_name, branch_id, staff_schedules(*), staff_schedule_exceptions(*)')
+            .eq('organization_id', orgId)
             .eq('role', 'barber')
             .eq('is_active', true)
             .order('full_name'),

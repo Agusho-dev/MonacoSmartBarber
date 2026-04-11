@@ -7,10 +7,10 @@ export async function getCheckinData(branchId: string) {
 
   const supabase = createAdminClient()
 
-  // Operación pública del kiosko: verificar que la sucursal exista y esté activa
+  // Operación pública del kiosko: verificar que la sucursal exista y obtener su org
   const { data: branchCheck } = await supabase
     .from('branches')
-    .select('id')
+    .select('id, organization_id')
     .eq('id', branchId)
     .eq('is_active', true)
     .maybeSingle()
@@ -63,6 +63,7 @@ export async function getCheckinData(branchId: string) {
       supabase
         .from('app_settings')
         .select('shift_end_margin_minutes, dynamic_cooldown_seconds')
+        .eq('organization_id', branchCheck.organization_id)
         .maybeSingle(),
       supabase
         .from('visits')

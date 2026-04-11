@@ -93,18 +93,29 @@ export async function fetchStats(
   }
 
   // Visitas del periodo (paginadas)
+  const filterBranchIds = branchId ? [branchId] : orgBranchIds
+  if (filterBranchIds.length === 0) {
+    return {
+      heatmap: [],
+      ranking: [],
+      trends: [],
+      revenueByMethod: [],
+      segmentation: { new_count: 0, recurring: 0, at_risk: 0, lost: 0, total: 0 },
+      totals: { revenue: 0, cuts: 0, avgTicket: 0, clients: 0 },
+    }
+  }
+
   const visits = await fetchAll((from, to) => {
-    let q = supabase
+    return supabase
       .from('visits')
       .select(
         'id, branch_id, client_id, barber_id, amount, payment_method, completed_at, commission_amount, barber:staff(full_name)'
       )
+      .in('branch_id', filterBranchIds)
       .gte('completed_at', fromISO)
       .lte('completed_at', toISO)
       .order('completed_at')
       .range(from, to)
-    if (branchId) q = q.eq('branch_id', branchId)
-    return q
   })
 
   // Settings de la org
@@ -130,13 +141,12 @@ export async function fetchStats(
   const segFrom = new Date()
   segFrom.setDate(segFrom.getDate() - lostDays * 2)
   const segVisits = await fetchAll((from, to) => {
-    let q = supabase
+    return supabase
       .from('visits')
       .select('client_id, completed_at')
+      .in('branch_id', filterBranchIds)
       .gte('completed_at', segFrom.toISOString())
       .range(from, to)
-    if (branchId) q = q.eq('branch_id', branchId)
-    return q
   })
 
   // Total de clientes registrados en la org
@@ -272,15 +282,25 @@ export async function fetchWeekHeatmap(
 ): Promise<HeatmapCell[]> {
   const supabase = createAdminClient()
 
+  const orgId = await getCurrentOrgId()
+  let filterBranchIds: string[] = branchId ? [branchId] : []
+  if (!branchId && orgId) {
+    const { data: orgBranches } = await supabase
+      .from('branches')
+      .select('id')
+      .eq('organization_id', orgId)
+    filterBranchIds = orgBranches?.map((b) => b.id) ?? []
+  }
+  if (filterBranchIds.length === 0) return []
+
   const data = await fetchAll((from, to) => {
-    let q = supabase
+    return supabase
       .from('visits')
       .select('completed_at')
+      .in('branch_id', filterBranchIds)
       .gte('completed_at', weekStartISO)
       .lte('completed_at', weekEndISO)
       .range(from, to)
-    if (branchId) q = q.eq('branch_id', branchId)
-    return q
   })
 
   const heatMap = new Map<string, number>()
