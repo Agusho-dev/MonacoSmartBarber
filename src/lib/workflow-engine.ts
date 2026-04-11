@@ -816,11 +816,15 @@ function resolveVariables(
 ): string {
   const firstName = context.client_first_name ?? ''
   const fullName = context.client_name ?? ''
-  const lastReply = context.last_text_reply ?? ''
+  const buttonTitle = context.last_button_title ?? ''
+  const lastTextReply = context.last_text_reply ?? ''
+  // {respuesta} debe funcionar tanto para texto libre como para botones:
+  // si el cliente apretó un botón, usamos el título del botón.
+  const lastReply = lastTextReply || buttonTitle
   return text
     .replace(/\{platform\}/g, params.platform)
     .replace(/\{user_id\}/g, params.platformUserId)
-    .replace(/\{last_button\}/g, context.last_button_title ?? '')
+    .replace(/\{last_button\}/g, buttonTitle)
     .replace(/\{last_reply\}/g, lastReply)
     .replace(/\{respuesta\}/g, lastReply)
     .replace(/\{nombre\}/g, firstName)
