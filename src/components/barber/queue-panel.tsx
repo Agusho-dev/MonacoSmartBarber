@@ -438,11 +438,20 @@ export function QueuePanel({
   )
 
   // "Mi fila": clients that have no barber assigned or are assigned to me (including ghost breaks)
-  const myWaitingEntries = dynamicEntries.filter(
-    (e) =>
-      e.status === 'waiting' &&
-      (!e.barber_id || e.barber_id === session.staff_id)
-  )
+  // Ordenado por checked_in_at (quien lleva más tiempo esperando primero),
+  // no por position que puede divergir del tiempo real de espera tras reasignaciones dinámicas.
+  // Los breaks mantienen su orden por position para respetar la ubicación configurada.
+  const myWaitingEntries = dynamicEntries
+    .filter(
+      (e) =>
+        e.status === 'waiting' &&
+        (!e.barber_id || e.barber_id === session.staff_id)
+    )
+    .sort((a, b) => {
+      if (a.is_break !== b.is_break) return a.is_break ? 1 : -1
+      if (a.is_break && b.is_break) return a.position - b.position
+      return new Date(a.checked_in_at).getTime() - new Date(b.checked_in_at).getTime()
+    })
 
   // "Fila general": ALL waiting clients
   const allWaitingEntries = dynamicEntries.filter((e) => e.status === 'waiting')

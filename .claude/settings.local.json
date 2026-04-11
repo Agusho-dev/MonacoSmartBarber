@@ -25,7 +25,10 @@
       "Bash(npm run:*)",
       "mcp__supabase__list_extensions",
       "Bash(ls /Users/ignaciobaldovino/MSB_FULL/MonacoSmartBarber/src/lib/actions/*.ts)",
-      "Bash(xargs -I{} basename {})"
+      "Bash(xargs -I{} basename {})",
+      "Bash(find:*)",
+      "Bash(npx next:*)",
+      "mcp__supabase__get_logs"
     ]
   },
   "enabledMcpjsonServers": [
