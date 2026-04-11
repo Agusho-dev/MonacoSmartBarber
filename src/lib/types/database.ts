@@ -704,6 +704,7 @@ export interface ScheduledMessage {
 export interface AutomationWorkflow {
   id: string
   organization_id: string
+  branch_id: string | null
   name: string
   description: string | null
   is_active: boolean

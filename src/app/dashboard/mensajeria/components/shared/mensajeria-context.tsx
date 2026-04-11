@@ -63,6 +63,7 @@ interface MensajeriaContextValue {
   setIgConfig: React.Dispatch<React.SetStateAction<OrgInstagramConfig | null>>
   clients: Pick<Client, 'id' | 'name' | 'phone'>[]
   appSettings: ReviewAutoSettings | null
+  branches: { id: string; name: string }[]
 
   // Templates
   waTemplates: WaTemplate[]
@@ -119,6 +120,7 @@ export function MensajeriaProvider({
   igConfig: initialIgConfig,
   initialTags,
   appSettings,
+  branches,
 }: {
   children: React.ReactNode
   initialConversations: ConversationWithRelations[]
@@ -128,6 +130,7 @@ export function MensajeriaProvider({
   igConfig: OrgInstagramConfig | null
   initialTags: ConversationTag[]
   appSettings: ReviewAutoSettings | null
+  branches: { id: string; name: string }[]
 }) {
   const supabase = useMemo(() => createClient(), [])
 
@@ -500,7 +503,7 @@ export function MensajeriaProvider({
     scheduled, setScheduled,
     waConfig, setWaConfig,
     igConfig, setIgConfig,
-    clients, appSettings,
+    clients, appSettings, branches,
     waTemplates, setWaTemplates,
     showTemplateDialog, setShowTemplateDialog,
     templateTarget, setTemplateTarget,

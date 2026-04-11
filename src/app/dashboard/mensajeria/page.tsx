@@ -11,7 +11,7 @@ export default async function MensajeriaPage() {
 
   // Obtener branches de la org para filtrar por tenant
   const { data: orgBranches } = orgId
-    ? await supabase.from('branches').select('id').eq('organization_id', orgId)
+    ? await supabase.from('branches').select('id, name').eq('organization_id', orgId).order('name')
     : { data: [] }
   const branchIds = orgBranches?.map((b) => b.id) ?? []
 
@@ -117,6 +117,7 @@ export default async function MensajeriaPage() {
       igConfig={igConfig ?? null}
       initialTags={tags ?? []}
       appSettings={appSettings ?? null}
+      branches={(orgBranches ?? []) as { id: string; name: string }[]}
     />
   )
 }

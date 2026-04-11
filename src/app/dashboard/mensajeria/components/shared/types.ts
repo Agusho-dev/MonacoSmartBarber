@@ -48,6 +48,7 @@ export interface MensajeriaProps {
   igConfig: OrgInstagramConfig | null
   initialTags: ConversationTag[]
   appSettings: ReviewAutoSettings | null
+  branches: { id: string; name: string }[]
 }
 
 export type SettingsTab = 'whatsapp' | 'instagram' | 'facebook' | 'tags'

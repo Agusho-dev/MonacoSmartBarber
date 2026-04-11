@@ -3,7 +3,7 @@
 import { useState, useEffect, useTransition } from 'react'
 import {
   Zap, Plus, Pencil, Trash2, MessageSquare, Clock, CalendarDays, GitBranch,
-  Play, Pause, MoreVertical, Bell,
+  Play, Pause, MoreVertical, Bell, MapPin, Globe,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -33,13 +33,16 @@ const CHANNEL_OPTIONS = [
   { value: 'instagram', label: 'Instagram' },
 ]
 
+type WorkflowWithBranch = AutomationWorkflow & { branch?: { id: string; name: string } | null }
+
 export function WorkflowList() {
-  const { waTemplates, handleSyncTemplates, syncingTemplates } = useMensajeria()
-  const [workflows, setWorkflows] = useState<AutomationWorkflow[]>([])
+  const { waTemplates, handleSyncTemplates, syncingTemplates, branches } = useMensajeria()
+  const [workflows, setWorkflows] = useState<WorkflowWithBranch[]>([])
   const [loading, setLoading] = useState(true)
   const [alertCount, setAlertCount] = useState(0)
   const [showNewDialog, setShowNewDialog] = useState(false)
   const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null)
+  const [branchFilter, setBranchFilter] = useState<string | null>(null)
 
   // New workflow form
   const [formName, setFormName] = useState('')
@@ -51,6 +54,7 @@ export function WorkflowList() {
   const [formTemplateName, setFormTemplateName] = useState('')
   const [formDelayMinutes, setFormDelayMinutes] = useState(15)
   const [formDelayDays, setFormDelayDays] = useState(7)
+  const [formBranchId, setFormBranchId] = useState<string>('')
 
   const [isCreating, startCreating] = useTransition()
   const [isToggling, startToggling] = useTransition()
@@ -76,6 +80,7 @@ export function WorkflowList() {
     setFormTemplateName('')
     setFormDelayMinutes(15)
     setFormDelayDays(7)
+    setFormBranchId('')
   }
 
   const buildTriggerConfig = () => {
@@ -114,6 +119,7 @@ export function WorkflowList() {
         channels: [formChannel],
         trigger_type: formTriggerType,
         trigger_config: buildTriggerConfig(),
+        branch_id: formBranchId || null,
       })
       if (result.error) { toast.error(result.error); return }
       if (result.data) {
@@ -160,6 +166,10 @@ export function WorkflowList() {
     return channels.map(c => c === 'whatsapp' ? 'WPP' : c === 'instagram' ? 'IG' : c).join(', ')
   }
 
+  const filteredWorkflows = branchFilter
+    ? workflows.filter(wf => !wf.branch_id || wf.branch_id === branchFilter)
+    : workflows
+
   // Si hay un workflow abierto en el builder, mostrar el builder
   if (editingWorkflowId) {
     return (
@@ -178,19 +188,46 @@ export function WorkflowList() {
     <div className="flex flex-1 min-w-0">
       {/* Lista */}
       <div className="flex flex-col bg-background w-full lg:max-w-md shrink-0 border-r border">
-        <div className="flex items-center justify-between px-4 py-3 bg-card border-b border">
-          <div className="flex items-center gap-2">
-            <Zap className="size-4 text-amber-400" />
-            <span className="font-semibold text-foreground text-sm">Automatizaciones</span>
-            {alertCount > 0 && (
-              <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400">
-                <Bell className="size-2.5" /> {alertCount}
-              </span>
-            )}
+        <div className="px-4 py-3 bg-card border-b border space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Zap className="size-4 text-amber-400" />
+              <span className="font-semibold text-foreground text-sm">Automatizaciones</span>
+              {alertCount > 0 && (
+                <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400">
+                  <Bell className="size-2.5" /> {alertCount}
+                </span>
+              )}
+            </div>
+            <Button size="sm" onClick={() => setShowNewDialog(true)} className="h-7 text-xs bg-green-600 hover:bg-green-500 text-white">
+              <Plus className="size-3 mr-1" /> Nuevo workflow
+            </Button>
           </div>
-          <Button size="sm" onClick={() => setShowNewDialog(true)} className="h-7 text-xs bg-green-600 hover:bg-green-500 text-white">
-            <Plus className="size-3 mr-1" /> Nuevo workflow
-          </Button>
+          {branches.length > 1 && (
+            <div className="flex gap-1 flex-wrap">
+              <button
+                onClick={() => setBranchFilter(null)}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border ${
+                  !branchFilter ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : 'text-muted-foreground border-transparent hover:border-border'
+                }`}
+              >
+                <Globe className="size-2.5" />
+                Todas
+              </button>
+              {branches.map(b => (
+                <button
+                  key={b.id}
+                  onClick={() => setBranchFilter(branchFilter === b.id ? null : b.id)}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border ${
+                    branchFilter === b.id ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'text-muted-foreground border-transparent hover:border-border'
+                  }`}
+                >
+                  <MapPin className="size-2.5" />
+                  {b.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto min-h-0">
@@ -198,7 +235,7 @@ export function WorkflowList() {
             <div className="flex justify-center py-12">
               <div className="size-6 animate-spin rounded-full border-2 border-muted border-t-green-400" />
             </div>
-          ) : workflows.length === 0 ? (
+          ) : filteredWorkflows.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
               <Zap className="mb-3 size-10 opacity-20" />
               <p className="text-sm">Sin automatizaciones</p>
@@ -206,7 +243,7 @@ export function WorkflowList() {
             </div>
           ) : (
             <div>
-              {workflows.map(wf => (
+              {filteredWorkflows.map(wf => (
                 <div
                   key={wf.id}
                   className="px-4 py-3 border-b border space-y-2 hover:bg-muted/50 transition-colors cursor-pointer"
@@ -248,6 +285,17 @@ export function WorkflowList() {
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                       {channelLabel(wf.channels)}
                     </span>
+                    {wf.branch ? (
+                      <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400">
+                        <MapPin className="size-2.5" />
+                        {wf.branch.name}
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">
+                        <Globe className="size-2.5" />
+                        General
+                      </span>
+                    )}
                     {wf.trigger_type === 'keyword' && (
                       <div className="flex gap-1">
                         {((wf.trigger_config as Record<string, unknown>).keywords as string[] || []).slice(0, 3).map((kw, i) => (
@@ -315,6 +363,23 @@ export function WorkflowList() {
                 ))}
               </select>
             </div>
+
+            {/* Sucursal */}
+            {branches.length > 1 && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Sucursal</Label>
+                <select value={formBranchId} onChange={e => setFormBranchId(e.target.value)}
+                  className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border">
+                  <option value="">Todas las sucursales (general)</option>
+                  {branches.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-muted-foreground">
+                  Los workflows generales aplican a todas las sucursales. Seleccioná una para limitar a esa sucursal.
+                </p>
+              </div>
+            )}
 
             {/* Trigger type */}
             <div className="space-y-1.5">

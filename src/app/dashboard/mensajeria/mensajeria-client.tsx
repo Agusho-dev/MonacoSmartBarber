@@ -72,6 +72,7 @@ export function MensajeriaClient(props: MensajeriaProps) {
       igConfig={props.igConfig}
       initialTags={props.initialTags}
       appSettings={props.appSettings}
+      branches={props.branches}
     >
       <div className="flex h-full min-h-0 overflow-hidden bg-background">
 

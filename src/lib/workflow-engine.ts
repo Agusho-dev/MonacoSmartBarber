@@ -80,6 +80,28 @@ function getSupabase(): SupabaseClient {
   )
 }
 
+// Resuelve la branch_id de una conversación a través del canal social.
+async function getConversationBranchId(
+  supabase: SupabaseClient,
+  conversationId: string
+): Promise<string | null> {
+  const { data } = await supabase
+    .from('conversations')
+    .select('channel:social_channels(branch_id)')
+    .eq('id', conversationId)
+    .maybeSingle()
+  const channel = data?.channel as { branch_id?: string } | { branch_id?: string }[] | null
+  const branchId = Array.isArray(channel) ? channel[0]?.branch_id : channel?.branch_id
+  return branchId ?? null
+}
+
+// Filtra workflows por branch: incluye los de esa branch + los generales (sin branch).
+function matchesBranch(wf: { branch_id?: string | null }, branchId: string | null): boolean {
+  if (!wf.branch_id) return true // workflow general → aplica a todas
+  if (!branchId) return true // no se pudo resolver branch → no filtrar
+  return wf.branch_id === branchId
+}
+
 // ─── Punto de entrada principal ──────────────────────────────────
 
 /**
@@ -104,9 +126,11 @@ export async function evaluateIncomingMessage(params: {
   const supabase = getSupabase()
   const { orgId, conversationId, text, platform, messageType, interactivePayload } = params
 
-  // Cacheamos el nombre del cliente para inyectar en el contexto de todas las
-  // ejecuciones disparadas por este mensaje. Se hace una sola query.
-  const clientInfo = await fetchClientInfo(supabase, conversationId)
+  // Cacheamos el nombre del cliente y la branch de la conversación
+  const [clientInfo, branchId] = await Promise.all([
+    fetchClientInfo(supabase, conversationId),
+    getConversationBranchId(supabase, conversationId),
+  ])
 
   try {
     // 1. Chequear si hay un workflow en estado waiting_reply para esta conversación
@@ -173,6 +197,8 @@ export async function evaluateIncomingMessage(params: {
       if (matchedWorkflows && matchedWorkflows.length > 0) {
         const lowerText = text.toLowerCase()
         for (const wf of matchedWorkflows) {
+          // Chequear branch (workflows de esa branch + generales)
+          if (!matchesBranch(wf, branchId)) continue
           // Chequear canal
           const channels = wf.channels as string[]
           if (!channels.includes('all') && !channels.includes(platform)) continue
@@ -211,6 +237,8 @@ export async function evaluateIncomingMessage(params: {
 
         if (templateWorkflows && templateWorkflows.length > 0) {
           for (const wf of templateWorkflows) {
+            // Chequear branch
+            if (!matchesBranch(wf, branchId)) continue
             const channels = wf.channels as string[]
             if (!channels.includes('all') && !channels.includes(platform)) continue
 

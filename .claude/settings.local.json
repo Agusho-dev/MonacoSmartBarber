@@ -43,7 +43,8 @@
       "Bash(ls /Users/ignaciobaldovino/MSB_FULL/MonacoSmartBarber/src/lib/actions/*.ts)",
       "Bash(xargs -I{} basename {})",
       "mcp__supabase__list_migrations",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(ls:*)"
     ]
   },
   "enabledMcpjsonServers": [

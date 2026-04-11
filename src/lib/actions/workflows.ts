@@ -15,20 +15,27 @@ async function requireOrgId(): Promise<{ orgId: string } | { error: string }> {
 
 // ─── Workflows CRUD ──────────────────────────────────────────────
 
-export async function getWorkflows() {
+export async function getWorkflows(branchId?: string | null) {
   const result = await requireOrgId()
   if ('error' in result) return { data: [], error: result.error }
 
   const supabase = createAdminClient()
-  const { data, error } = await supabase
+  let query = supabase
     .from('automation_workflows')
-    .select('*')
+    .select('*, branch:branches(id, name)')
     .eq('organization_id', result.orgId)
     .order('priority', { ascending: false })
     .order('created_at', { ascending: false })
 
+  // Si se filtra por branch, mostrar los de esa branch + los generales (sin branch)
+  if (branchId) {
+    query = query.or(`branch_id.eq.${branchId},branch_id.is.null`)
+  }
+
+  const { data, error } = await query
+
   if (error) return { data: [], error: error.message }
-  return { data: (data ?? []) as AutomationWorkflow[], error: null }
+  return { data: (data ?? []) as (AutomationWorkflow & { branch?: { id: string; name: string } | null })[], error: null }
 }
 
 export async function getWorkflow(id: string) {
@@ -67,6 +74,7 @@ export async function createWorkflow(input: {
   trigger_type: string
   trigger_config: Record<string, unknown>
   priority?: number
+  branch_id?: string | null
 }) {
   const result = await requireOrgId()
   if ('error' in result) return { data: null, error: result.error }
@@ -84,6 +92,7 @@ export async function createWorkflow(input: {
       trigger_type: input.trigger_type,
       trigger_config: input.trigger_config,
       priority: input.priority ?? 0,
+      branch_id: input.branch_id || null,
     })
     .select()
     .single()
