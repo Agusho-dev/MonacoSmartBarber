@@ -175,6 +175,86 @@ export async function deleteWorkflow(id: string) {
   return { success: true }
 }
 
+export async function duplicateWorkflow(id: string) {
+  const result = await requireOrgId()
+  if ('error' in result) return { data: null, error: result.error }
+
+  const supabase = createAdminClient()
+
+  const { data: original, error: wfErr } = await supabase
+    .from('automation_workflows')
+    .select('*')
+    .eq('id', id)
+    .eq('organization_id', result.orgId)
+    .single()
+
+  if (wfErr || !original) return { data: null, error: wfErr?.message ?? 'Workflow no encontrado' }
+
+  const [{ data: nodes }, { data: edges }] = await Promise.all([
+    supabase.from('workflow_nodes').select('*').eq('workflow_id', id),
+    supabase.from('workflow_edges').select('*').eq('workflow_id', id),
+  ])
+
+  const { data: newWf, error: insertErr } = await supabase
+    .from('automation_workflows')
+    .insert({
+      organization_id: result.orgId,
+      name: `${original.name} (copia)`,
+      description: original.description,
+      channels: original.channels,
+      trigger_type: original.trigger_type,
+      trigger_config: original.trigger_config,
+      priority: original.priority,
+      branch_id: original.branch_id,
+      is_active: false,
+    })
+    .select()
+    .single()
+
+  if (insertErr || !newWf) return { data: null, error: insertErr?.message ?? 'Error al duplicar' }
+
+  if (nodes && nodes.length > 0) {
+    const idMap = new Map<string, string>()
+    const newNodes = nodes.map(n => {
+      const newId = crypto.randomUUID()
+      idMap.set(n.id, newId)
+      return {
+        id: newId,
+        workflow_id: newWf.id,
+        node_type: n.node_type,
+        label: n.label,
+        config: n.config,
+        position_x: n.position_x,
+        position_y: n.position_y,
+        width: n.width ?? 200,
+        height: n.height ?? 80,
+        is_entry_point: n.is_entry_point,
+      }
+    })
+
+    await supabase.from('workflow_nodes').insert(newNodes)
+
+    if (edges && edges.length > 0) {
+      const newEdges = edges
+        .filter(e => idMap.has(e.source_node_id) && idMap.has(e.target_node_id))
+        .map((e, i) => ({
+          workflow_id: newWf.id,
+          source_node_id: idMap.get(e.source_node_id)!,
+          target_node_id: idMap.get(e.target_node_id)!,
+          source_handle: e.source_handle || 'default',
+          label: e.label || null,
+          condition_value: e.condition_value || null,
+          sort_order: e.sort_order ?? i,
+        }))
+
+      await supabase.from('workflow_edges').insert(newEdges)
+    }
+  }
+
+  revalidatePath('/dashboard/mensajeria')
+  return { data: newWf as AutomationWorkflow, error: null }
+}
+
 export async function toggleWorkflow(id: string, isActive: boolean) {
   const result = await requireOrgId()
   if ('error' in result) return { error: result.error }

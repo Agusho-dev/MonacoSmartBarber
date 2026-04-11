@@ -3,7 +3,7 @@
 import { useState, useEffect, useTransition } from 'react'
 import {
   Zap, Plus, Pencil, Trash2, MessageSquare, Clock, CalendarDays, GitBranch,
-  Play, Pause, MoreVertical, Bell, MapPin, Globe,
+  Play, Pause, MoreVertical, Bell, MapPin, Globe, Copy,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -14,7 +14,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import {
   getWorkflows, createWorkflow, deleteWorkflow, toggleWorkflow,
-  getUnreadAlertCount,
+  duplicateWorkflow, getUnreadAlertCount,
 } from '@/lib/actions/workflows'
 import type { AutomationWorkflow } from '@/lib/types/database'
 import { useMensajeria } from '../shared/mensajeria-context'
@@ -138,6 +138,18 @@ export function WorkflowList() {
     if (result.error) { toast.error(result.error); return }
     setWorkflows(prev => prev.filter(w => w.id !== id))
     toast.success('Workflow eliminado')
+  }
+
+  const handleDuplicate = (id: string) => {
+    startCreating(async () => {
+      const result = await duplicateWorkflow(id)
+      if (result.error) { toast.error(result.error); return }
+      if (result.data) {
+        setWorkflows(prev => [result.data!, ...prev])
+        toast.success('Workflow duplicado')
+        setEditingWorkflowId(result.data.id)
+      }
+    })
   }
 
   const handleToggle = (id: string, isActive: boolean) => {
@@ -265,10 +277,13 @@ export function WorkflowList() {
                       >
                         <span className={`absolute top-0.5 left-0.5 size-4 rounded-full bg-white transition-transform ${wf.is_active ? 'translate-x-4' : ''}`} />
                       </button>
-                      <button onClick={() => setEditingWorkflowId(wf.id)} className="text-muted-foreground hover:text-foreground">
+                      <button onClick={() => handleDuplicate(wf.id)} className="text-muted-foreground hover:text-blue-400" title="Duplicar" disabled={isCreating}>
+                        <Copy className="size-3.5" />
+                      </button>
+                      <button onClick={() => setEditingWorkflowId(wf.id)} className="text-muted-foreground hover:text-foreground" title="Editar">
                         <Pencil className="size-3.5" />
                       </button>
-                      <button onClick={() => handleDelete(wf.id)} className="text-muted-foreground hover:text-red-400">
+                      <button onClick={() => handleDelete(wf.id)} className="text-muted-foreground hover:text-red-400" title="Eliminar">
                         <Trash2 className="size-3.5" />
                       </button>
                     </div>
