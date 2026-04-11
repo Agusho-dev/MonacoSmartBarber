@@ -266,6 +266,38 @@ export async function evaluateIncomingMessage(params: {
   }
 }
 
+// Verifica si el nodo inmediatamente siguiente espera una respuesta del usuario
+// (condition con button_response, wait_reply, o send_buttons).
+async function nextNodeExpectsReply(
+  supabase: SupabaseClient,
+  workflowId: string,
+  currentNodeId: string,
+): Promise<boolean> {
+  const { data: edges } = await supabase
+    .from('workflow_edges')
+    .select('target_node_id')
+    .eq('workflow_id', workflowId)
+    .eq('source_node_id', currentNodeId)
+    .limit(1)
+
+  if (!edges || edges.length === 0) return false
+
+  const { data: nextNode } = await supabase
+    .from('workflow_nodes')
+    .select('node_type, config')
+    .eq('id', edges[0].target_node_id)
+    .maybeSingle()
+
+  if (!nextNode) return false
+
+  if (nextNode.node_type === 'wait_reply') return true
+  if (nextNode.node_type === 'condition') {
+    const condType = (nextNode.config as Record<string, unknown>)?.type as string | undefined
+    return condType === 'button_response'
+  }
+  return false
+}
+
 // ─── Iniciar ejecución de workflow ───────────────────────────────
 
 async function startWorkflowExecution(
@@ -462,7 +494,19 @@ async function executeNode(
         const languageCode = config.language_code as string || 'es_AR'
         await sendWhatsAppTemplate(supabase, params, templateName, languageCode)
         await logExecution(supabase, executionId, node.id, node.node_type, 'success', { templateName })
-        await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+
+        // Si el siguiente nodo espera interacción del usuario (condition con
+        // button_response o wait_reply), pausar en waiting_reply en vez de avanzar
+        // inmediatamente — el template tiene botones y necesitamos la respuesta.
+        const shouldWait = await nextNodeExpectsReply(supabase, workflowId, node.id)
+        if (shouldWait) {
+          await supabase
+            .from('workflow_executions')
+            .update({ status: 'waiting_reply', current_node_id: node.id, updated_at: new Date().toISOString() })
+            .eq('id', executionId)
+        } else {
+          await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+        }
         break
       }
 

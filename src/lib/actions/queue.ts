@@ -413,7 +413,7 @@ export async function completeService(
             .eq('organization_id', visitOrgId)
             .maybeSingle()
 
-          // Ejecutar reglas post_service
+          // Ejecutar reglas post_service (auto_reply_rules legacy)
           if (postServiceRules && postServiceRules.length > 0) {
             for (const rule of postServiceRules) {
               const delayMinutes = (rule.trigger_config as any)?.delay_minutes ?? 10
@@ -449,8 +449,102 @@ export async function completeService(
                 }
               }
             }
-          } else if (settings?.review_auto_send && settings.review_template_name) {
-            // Fallback legacy: usar app_settings si no hay reglas post_service
+          }
+
+          // Buscar automation_workflows con trigger post_service
+          const { data: postServiceWorkflows } = await supabase
+            .from('automation_workflows')
+            .select('id, trigger_config, branch_id')
+            .eq('organization_id', visitOrgId)
+            .eq('trigger_type', 'post_service')
+            .eq('is_active', true)
+            .order('priority', { ascending: false })
+
+          if (postServiceWorkflows && postServiceWorkflows.length > 0) {
+            for (const wf of postServiceWorkflows) {
+              if (wf.branch_id && wf.branch_id !== visit.branch_id) continue
+
+              const delayMinutes = (wf.trigger_config as any)?.delay_minutes ?? 10
+              const scheduledFor = new Date()
+              scheduledFor.setMinutes(scheduledFor.getMinutes() + delayMinutes)
+
+              const [{ data: entryNode }, { data: edges }] = await Promise.all([
+                supabase
+                  .from('workflow_nodes')
+                  .select('id')
+                  .eq('workflow_id', wf.id)
+                  .eq('is_entry_point', true)
+                  .limit(1)
+                  .maybeSingle(),
+                supabase
+                  .from('workflow_edges')
+                  .select('source_node_id, target_node_id')
+                  .eq('workflow_id', wf.id)
+                  .order('sort_order')
+              ])
+
+              if (!entryNode || !edges || edges.length === 0) continue
+
+              const firstEdge = edges.find((e: any) => e.source_node_id === entryNode.id)
+              if (!firstEdge) continue
+              const { data: firstActionNode } = await supabase
+                .from('workflow_nodes')
+                .select('id, node_type, config')
+                .eq('id', firstEdge.target_node_id)
+                .single()
+
+              if (!firstActionNode) continue
+
+              // Buscar el nodo siguiente al primer action (para workflow_trigger_data)
+              const { data: nextEdges } = await supabase
+                .from('workflow_edges')
+                .select('target_node_id')
+                .eq('workflow_id', wf.id)
+                .eq('source_node_id', firstActionNode.id)
+                .order('sort_order')
+                .limit(1)
+
+              const nextNodeId = nextEdges?.[0]?.target_node_id ?? null
+
+              const insertData: Record<string, unknown> = {
+                client_id: visit.client_id,
+                phone: client.phone,
+                scheduled_for: scheduledFor.toISOString(),
+                status: 'pending',
+                workflow_id: wf.id,
+                workflow_trigger_data: {
+                  client_name: client.name,
+                  branch_id: visit.branch_id,
+                  visit_id: visit.id,
+                  entry_node_id: entryNode.id,
+                  first_action_node_id: firstActionNode.id,
+                  next_node_id: nextNodeId,
+                },
+              }
+
+              const actionConfig = firstActionNode.config as Record<string, unknown>
+              if (firstActionNode.node_type === 'send_template') {
+                insertData.template_name = actionConfig.template_name as string
+                insertData.template_language = (actionConfig.language_code as string) || 'es_AR'
+              } else if (firstActionNode.node_type === 'send_message') {
+                insertData.content = actionConfig.text as string
+              }
+
+              const { error: schedErr } = await supabase
+                .from('scheduled_messages')
+                .insert(insertData)
+
+              if (schedErr) {
+                console.error('[PostService:Workflow] Error programando workflow:', schedErr.message)
+              } else {
+                console.log('[PostService:Workflow] Workflow', wf.id, 'programado para', client.phone)
+              }
+            }
+          } else if (
+            !(postServiceRules && postServiceRules.length > 0) &&
+            settings?.review_auto_send && settings.review_template_name
+          ) {
+            // Fallback legacy: usar app_settings si no hay reglas ni workflows post_service
             const delayMinutes = settings.review_delay_minutes ?? 15
             const scheduledFor = new Date()
             scheduledFor.setMinutes(scheduledFor.getMinutes() + delayMinutes)

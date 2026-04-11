@@ -24,7 +24,7 @@ Deno.serve(async (req: Request) => {
     // Incluir channel_id para resolver la org de cada mensaje
     const { data: pendingMessages, error } = await supabase
       .from('scheduled_messages')
-      .select('id, phone, content, client_id, channel_id, template_name, template_language')
+      .select('id, phone, content, client_id, channel_id, template_name, template_language, workflow_id, workflow_trigger_data')
       .eq('status', 'pending')
       .lte('scheduled_for', new Date().toISOString())
       .limit(10)
@@ -259,6 +259,70 @@ Deno.serve(async (req: Request) => {
               .from('conversations')
               .update({ last_message_at: new Date().toISOString() })
               .eq('id', convId)
+
+            // Si el mensaje pertenece a un workflow, crear workflow_execution
+            // para que el motor de workflows procese la respuesta del cliente
+            if (msg.workflow_id && msg.workflow_trigger_data) {
+              try {
+                const triggerData = msg.workflow_trigger_data as Record<string, any>
+                const nextNodeId = triggerData.next_node_id as string | null
+                const entryNodeId = triggerData.entry_node_id as string | null
+                const firstActionNodeId = triggerData.first_action_node_id as string | null
+                const clientName = (triggerData.client_name as string) ?? ''
+                const firstName = clientName.split(/\s+/)[0] ?? ''
+
+                // Cancelar ejecuciones activas previas de esta conversación
+                await supabase
+                  .from('workflow_executions')
+                  .update({ status: 'cancelled', completed_at: new Date().toISOString() })
+                  .eq('conversation_id', convId)
+                  .in('status', ['active', 'waiting_reply'])
+
+                // Determinar el nodo actual: si hay un nodo siguiente, usarlo;
+                // si no, el workflow se completa después de este envío
+                const currentNodeId = nextNodeId ?? firstActionNodeId
+                const execStatus = nextNodeId ? 'waiting_reply' : 'completed'
+
+                const { data: execution } = await supabase
+                  .from('workflow_executions')
+                  .insert({
+                    workflow_id: msg.workflow_id,
+                    conversation_id: convId,
+                    current_node_id: currentNodeId,
+                    status: execStatus,
+                    context: {
+                      client_name: clientName,
+                      client_first_name: firstName,
+                    },
+                    triggered_by: 'post_service',
+                    completed_at: execStatus === 'completed' ? new Date().toISOString() : null,
+                  })
+                  .select('id')
+                  .single()
+
+                if (execution && entryNodeId) {
+                  await supabase.from('workflow_execution_log').insert({
+                    execution_id: execution.id,
+                    node_id: entryNodeId,
+                    node_type: 'trigger',
+                    status: 'success',
+                    output_data: { triggered_by: 'post_service' },
+                  })
+                }
+                if (execution && firstActionNodeId) {
+                  const nodeType = msg.template_name ? 'send_template' : 'send_message'
+                  await supabase.from('workflow_execution_log').insert({
+                    execution_id: execution.id,
+                    node_id: firstActionNodeId,
+                    node_type: nodeType,
+                    status: 'success',
+                    output_data: { template_name: msg.template_name, content: msg.content },
+                  })
+                }
+              } catch (wfErr: any) {
+                console.error('[Workflow] Error creando ejecución:', wfErr.message)
+              }
+            }
           }
         }
       }
