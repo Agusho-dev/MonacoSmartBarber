@@ -22,6 +22,12 @@ export type TemplateCategory = 'marketing' | 'utility' | 'authentication'
 export type TemplateStatus = 'pending' | 'approved' | 'rejected'
 export type ScheduledMessageStatus = 'pending' | 'sent' | 'failed' | 'cancelled'
 
+// Workflow automation types
+export type WorkflowTriggerType = 'keyword' | 'template_reply' | 'button_response' | 'post_service' | 'days_after_visit'
+export type WorkflowNodeType = 'trigger' | 'send_message' | 'send_media' | 'send_buttons' | 'send_list' | 'send_template' | 'add_tag' | 'remove_tag' | 'condition' | 'wait_reply' | 'crm_alert' | 'delay'
+export type WorkflowExecutionStatus = 'active' | 'waiting_reply' | 'completed' | 'cancelled' | 'error'
+export type CrmAlertType = 'info' | 'warning' | 'urgent'
+
 export interface Organization {
   id: string
   name: string
@@ -691,6 +697,95 @@ export interface ScheduledMessage {
   client?: Client
   template?: MessageTemplate
   created_by_staff?: Staff
+}
+
+// ─── Workflow Automation ─────────────────────────────────────────
+
+export interface AutomationWorkflow {
+  id: string
+  organization_id: string
+  name: string
+  description: string | null
+  is_active: boolean
+  channels: string[]
+  trigger_type: WorkflowTriggerType
+  trigger_config: Record<string, unknown>
+  priority: number
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkflowNode {
+  id: string
+  workflow_id: string
+  node_type: WorkflowNodeType
+  label: string
+  config: Record<string, unknown>
+  position_x: number
+  position_y: number
+  width: number
+  height: number
+  is_entry_point: boolean
+  created_at: string
+}
+
+export interface WorkflowEdge {
+  id: string
+  workflow_id: string
+  source_node_id: string
+  target_node_id: string
+  source_handle: string
+  label: string | null
+  condition_value: string | null
+  sort_order: number
+}
+
+export interface WorkflowExecution {
+  id: string
+  workflow_id: string
+  conversation_id: string
+  current_node_id: string | null
+  status: WorkflowExecutionStatus
+  context: Record<string, unknown>
+  triggered_by: string | null
+  triggered_message_id: string | null
+  started_at: string
+  completed_at: string | null
+  updated_at: string
+}
+
+export interface WorkflowExecutionLog {
+  id: string
+  execution_id: string
+  node_id: string
+  node_type: string
+  status: 'success' | 'error' | 'skipped'
+  input_data: Record<string, unknown>
+  output_data: Record<string, unknown>
+  error_message: string | null
+  executed_at: string
+}
+
+export interface CrmAlert {
+  id: string
+  organization_id: string
+  conversation_id: string | null
+  workflow_execution_id: string | null
+  alert_type: CrmAlertType
+  title: string
+  message: string | null
+  metadata: Record<string, unknown>
+  is_read: boolean
+  read_by: string | null
+  read_at: string | null
+  created_at: string
+}
+
+// Workflow con sus relaciones (nodos + edges)
+export interface WorkflowWithGraph extends AutomationWorkflow {
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
 }
 
 export interface Database {

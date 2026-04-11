@@ -85,6 +85,7 @@ export async function POST(req: NextRequest) {
     return new NextResponse('Bad Request', { status: 400 })
   }
 
+  const msgs = body.entry?.[0]?.changes?.[0]?.value?.messages ?? []
   await supabase.from('webhook_debug_log').insert({
     endpoint: 'whatsapp', method: 'POST',
     body: {
@@ -93,8 +94,16 @@ export async function POST(req: NextRequest) {
       first_entry_id: body.entry?.[0]?.id,
       first_change_field: body.entry?.[0]?.changes?.[0]?.field,
       phone_number_id: body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id,
-      messages_count: body.entry?.[0]?.changes?.[0]?.value?.messages?.length ?? 0,
+      messages_count: msgs.length,
       statuses_count: body.entry?.[0]?.changes?.[0]?.value?.statuses?.length ?? 0,
+      // DEBUG temporal: capturamos los mensajes crudos para diagnosticar botones
+      messages_raw: msgs.map((m: any) => ({
+        type: m.type,
+        text: m.text,
+        button: m.button,
+        interactive: m.interactive,
+        context: m.context,
+      })),
     },
   })
 
@@ -167,16 +176,46 @@ export async function POST(req: NextRequest) {
 
       if (!waChannel) continue
 
-      // Procesar mensajes entrantes
+      // Procesar mensajes entrantes (incluye interactive para botones/listas)
       for (const message of value.messages ?? []) {
-        if (!['text', 'image', 'audio', 'video', 'document'].includes(message.type)) continue
+        if (!['text', 'image', 'audio', 'video', 'document', 'interactive', 'button'].includes(message.type)) continue
 
         const from: string          = message.from
         const platformMsgId: string = message.id
         const timestamp: string     = message.timestamp
-        const text: string          = message.text?.body ?? ''
+
+        // Extraer texto según tipo de mensaje
+        let text: string = ''
+        let interactivePayload: { type?: string; button_reply?: { id: string; title: string }; list_reply?: { id: string; title: string; description?: string } } | undefined
+
+        if (message.type === 'text') {
+          text = message.text?.body ?? ''
+        } else if (message.type === 'interactive') {
+          // Respuesta a botones o listas interactivas
+          if (message.interactive?.type === 'button_reply') {
+            interactivePayload = {
+              type: 'button_reply',
+              button_reply: message.interactive.button_reply,
+            }
+            text = message.interactive.button_reply?.title ?? ''
+          } else if (message.interactive?.type === 'list_reply') {
+            interactivePayload = {
+              type: 'list_reply',
+              list_reply: message.interactive.list_reply,
+            }
+            text = message.interactive.list_reply?.title ?? ''
+          }
+        } else if (message.type === 'button') {
+          // Respuesta a botones de templates (Quick Reply)
+          interactivePayload = {
+            type: 'button_reply',
+            button_reply: { id: message.button?.payload ?? '', title: message.button?.text ?? '' },
+          }
+          text = message.button?.text ?? ''
+        }
+
         const mediaUrl: string | undefined = message.image?.link ?? message.video?.link ?? message.audio?.link ?? message.document?.link
-        const contentType = message.type === 'text' ? 'text' : message.type
+        const contentType = message.type === 'text' ? 'text' : message.type === 'interactive' || message.type === 'button' ? 'text' : message.type
 
         // Deduplicación ANTES de crear/actualizar conversación
         const { data: existingMsg } = await supabase
@@ -248,70 +287,25 @@ export async function POST(req: NextRequest) {
           created_at: new Date(parseInt(timestamp) * 1000).toISOString(),
         })
 
-        // ── Auto-reply: evaluar reglas por palabra clave ──
-        if (text && contentType === 'text' && waConfig.whatsapp_access_token && waConfig.whatsapp_phone_id) {
+        // ── Workflow Engine: evaluar reglas y workflows ──
+        if (waConfig.whatsapp_access_token && waConfig.whatsapp_phone_id) {
           try {
-            const { data: rules } = await supabase
-              .from('auto_reply_rules')
-              .select('*')
-              .eq('organization_id', orgId)
-              .eq('is_active', true)
-              .in('platform', ['all', 'whatsapp'])
-              .order('priority', { ascending: false })
-
-            if (rules && rules.length > 0) {
-              const lowerText = text.toLowerCase()
-              for (const rule of rules) {
-                const keywords: string[] = rule.keywords ?? []
-                const matched = rule.match_mode === 'exact'
-                  ? keywords.some((kw: string) => lowerText === kw.toLowerCase())
-                  : keywords.some((kw: string) => lowerText.includes(kw.toLowerCase()))
-
-                if (matched && rule.response_type === 'text' && rule.response_text) {
-                  // Enviar respuesta via Meta Cloud API
-                  const sendRes = await fetch(
-                    `https://graph.facebook.com/v21.0/${waConfig.whatsapp_phone_id}/messages`,
-                    {
-                      method: 'POST',
-                      headers: {
-                        Authorization: `Bearer ${waConfig.whatsapp_access_token}`,
-                        'Content-Type': 'application/json',
-                      },
-                      body: JSON.stringify({
-                        messaging_product: 'whatsapp',
-                        to: from,
-                        type: 'text',
-                        text: { body: rule.response_text },
-                      }),
-                    }
-                  )
-                  const sendData = await sendRes.json()
-                  const platformReplyId = sendData.messages?.[0]?.id ?? null
-
-                  // Guardar mensaje de auto-respuesta
-                  await supabase.from('messages').insert({
-                    conversation_id: convId,
-                    direction: 'outbound',
-                    content_type: 'text',
-                    content: rule.response_text,
-                    platform_message_id: platformReplyId,
-                    status: platformReplyId ? 'sent' : 'failed',
-                    error_message: platformReplyId ? null : JSON.stringify(sendData).slice(0, 500),
-                    created_at: new Date().toISOString(),
-                  })
-
-                  // Actualizar last_message_at en la conversación
-                  await supabase
-                    .from('conversations')
-                    .update({ last_message_at: new Date().toISOString() })
-                    .eq('id', convId)
-
-                  break // Solo responder con la primera regla que matchee
-                }
-              }
-            }
-          } catch (autoReplyErr) {
-            console.error('[WA Webhook] Error en auto-reply:', autoReplyErr)
+            const { evaluateIncomingMessage } = await import('@/lib/workflow-engine')
+            await evaluateIncomingMessage({
+              orgId,
+              conversationId: convId,
+              text,
+              platform: 'whatsapp',
+              messageType: message.type,
+              interactivePayload,
+              waConfig: {
+                whatsapp_access_token: waConfig.whatsapp_access_token,
+                whatsapp_phone_id: waConfig.whatsapp_phone_id,
+              },
+              platformUserId: from,
+            })
+          } catch (engineErr) {
+            console.error('[WA Webhook] Error en workflow engine:', engineErr)
           }
         }
       }

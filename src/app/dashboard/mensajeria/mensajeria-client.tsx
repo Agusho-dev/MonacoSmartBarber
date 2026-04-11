@@ -11,14 +11,14 @@ import { NewChatDialog } from './components/dialogs/new-chat-dialog'
 import { ScheduleDialog } from './components/dialogs/schedule-dialog'
 import { TemplatePicker } from './components/dialogs/template-picker'
 import { BroadcastSection } from './components/broadcasts/broadcast-section'
-import { AutoReplySection } from './components/auto-replies/auto-reply-section'
+import { WorkflowList } from './components/workflows/workflow-list'
 import { QuickReplySection } from './components/quick-replies/quick-reply-section'
 import type { MensajeriaProps, CrmSection } from './components/shared/types'
 
 const NAV_ITEMS: { key: CrmSection; icon: React.ElementType; label: string }[] = [
   { key: 'inbox', icon: MessageSquare, label: 'Inbox' },
   { key: 'broadcasts', icon: Megaphone, label: 'Difusiones' },
-  { key: 'automations', icon: Zap, label: 'Reglas' },
+  { key: 'automations', icon: Zap, label: 'Workflows' },
   { key: 'quick-replies', icon: MessageCircle, label: 'Rápidos' },
   { key: 'settings', icon: Settings, label: 'Config' },
 ]
@@ -47,7 +47,7 @@ export function MensajeriaClient(props: MensajeriaProps) {
       initialTags={props.initialTags}
       appSettings={props.appSettings}
     >
-      <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-background">
+      <div className="flex h-full min-h-0 overflow-hidden bg-background">
 
         {/* ═══ NAV BAR — Iconos de sección ═══ */}
         <div className="hidden lg:flex flex-col items-center w-14 shrink-0 bg-background border-r border py-3 gap-1">
@@ -106,7 +106,7 @@ export function MensajeriaClient(props: MensajeriaProps) {
         )}
 
         {section === 'broadcasts' && <BroadcastSection />}
-        {section === 'automations' && <AutoReplySection />}
+        {section === 'automations' && <WorkflowList />}
         {section === 'quick-replies' && <QuickReplySection />}
 
         {/* ═══ Dialogs & Sheets ═══ */}

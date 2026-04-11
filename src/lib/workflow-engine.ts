@@ -1,0 +1,893 @@
+/**
+ * Motor de ejecución de workflows de automatización.
+ *
+ * Se ejecuta dentro de los webhooks (route handlers), NO como server action.
+ * Recibe un SupabaseClient con service_role y el orgId directamente.
+ *
+ * Flujo:
+ * 1. evaluateIncomingMessage() — punto de entrada, decide si hay workflow activo o trigger nuevo
+ * 2. executeNode() — ejecuta un nodo y avanza al siguiente
+ * 3. handleInteractiveReply() — procesa respuestas de botones/listas
+ */
+
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
+
+const META_API_VERSION = 'v22.0'
+
+// ─── Tipos internos ──────────────────────────────────────────────
+
+interface WaConfig {
+  whatsapp_access_token: string
+  whatsapp_phone_id: string
+}
+
+interface IgConfig {
+  instagram_page_access_token: string
+}
+
+interface WorkflowNode {
+  id: string
+  workflow_id: string
+  node_type: string
+  label: string
+  config: Record<string, unknown>
+  is_entry_point: boolean
+}
+
+interface WorkflowEdge {
+  id: string
+  source_node_id: string
+  target_node_id: string
+  source_handle: string
+  condition_value: string | null
+}
+
+interface ExecutionContext {
+  last_button_id?: string
+  last_button_title?: string
+  last_text_reply?: string
+  client_name?: string
+  client_first_name?: string
+  variables?: Record<string, string>
+  [key: string]: unknown
+}
+
+// Devuelve el nombre completo y el primer nombre del contacto de una conversación.
+// Prioriza clients.name (si la conversación está linkeada a un cliente), y si no
+// cae en platform_user_name (display name del provider).
+async function fetchClientInfo(
+  supabase: SupabaseClient,
+  conversationId: string
+): Promise<{ fullName: string; firstName: string }> {
+  const { data } = await supabase
+    .from('conversations')
+    .select('platform_user_name, client:clients(name)')
+    .eq('id', conversationId)
+    .maybeSingle()
+  const rawClient = data?.client as { name?: string } | { name?: string }[] | null | undefined
+  const clientName = Array.isArray(rawClient) ? rawClient[0]?.name : rawClient?.name
+  const fullName = (clientName ?? data?.platform_user_name ?? '').trim()
+  const firstName = fullName.split(/\s+/)[0] ?? ''
+  return { fullName, firstName }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────
+
+function getSupabase(): SupabaseClient {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+}
+
+// ─── Punto de entrada principal ──────────────────────────────────
+
+/**
+ * Evalúa un mensaje entrante y ejecuta el workflow correspondiente.
+ * Llamado desde los webhooks de WhatsApp e Instagram.
+ */
+export async function evaluateIncomingMessage(params: {
+  orgId: string
+  conversationId: string
+  text: string
+  platform: 'whatsapp' | 'instagram'
+  messageType: string // 'text' | 'interactive' | 'button'
+  interactivePayload?: {
+    type?: string // 'button_reply' | 'list_reply'
+    button_reply?: { id: string; title: string }
+    list_reply?: { id: string; title: string; description?: string }
+  }
+  waConfig?: WaConfig | null
+  igConfig?: IgConfig | null
+  platformUserId: string // número de teléfono o ID del usuario
+}): Promise<void> {
+  const supabase = getSupabase()
+  const { orgId, conversationId, text, platform, messageType, interactivePayload } = params
+
+  // Cacheamos el nombre del cliente para inyectar en el contexto de todas las
+  // ejecuciones disparadas por este mensaje. Se hace una sola query.
+  const clientInfo = await fetchClientInfo(supabase, conversationId)
+
+  try {
+    // 1. Chequear si hay un workflow en estado waiting_reply para esta conversación
+    const { data: activeExec } = await supabase
+      .from('workflow_executions')
+      .select('*, current_node:workflow_nodes(*)')
+      .eq('conversation_id', conversationId)
+      .in('status', ['waiting_reply'])
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (activeExec) {
+      // Hay un workflow esperando respuesta — procesar
+      const node = activeExec.current_node as WorkflowNode | null
+      if (node) {
+        const ctx: ExecutionContext = (activeExec.context as ExecutionContext) ?? {}
+        // Refrescar identidad del cliente en el contexto si cambió o falta
+        if (clientInfo.fullName) ctx.client_name = clientInfo.fullName
+        if (clientInfo.firstName) ctx.client_first_name = clientInfo.firstName
+
+        if (messageType === 'interactive' || messageType === 'button') {
+          // Respuesta interactiva (botón o lista)
+          const buttonReply = interactivePayload?.button_reply ?? interactivePayload?.list_reply
+          if (buttonReply) {
+            ctx.last_button_id = buttonReply.id
+            ctx.last_button_title = buttonReply.title
+          }
+        } else {
+          // Respuesta de texto
+          ctx.last_text_reply = text
+        }
+
+        // Actualizar contexto y seguir ejecutando
+        await supabase
+          .from('workflow_executions')
+          .update({
+            status: 'active',
+            context: ctx,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', activeExec.id)
+
+        // Log
+        await logExecution(supabase, activeExec.id, node.id, node.node_type, 'success', { reply: text || interactivePayload })
+
+        // El nodo wait_reply terminó. Buscar el siguiente edge.
+        // Si el nodo actual es wait_reply, el siguiente nodo debería ser un condition o un send_message
+        await advanceFromNode(supabase, activeExec.id, activeExec.workflow_id, node.id, ctx, params)
+        return
+      }
+    }
+
+    // 2. No hay workflow activo — buscar por keyword trigger
+    if (text && messageType === 'text') {
+      const { data: matchedWorkflows } = await supabase
+        .from('automation_workflows')
+        .select('*')
+        .eq('organization_id', orgId)
+        .eq('is_active', true)
+        .eq('trigger_type', 'keyword')
+        .order('priority', { ascending: false })
+
+      if (matchedWorkflows && matchedWorkflows.length > 0) {
+        const lowerText = text.toLowerCase()
+        for (const wf of matchedWorkflows) {
+          // Chequear canal
+          const channels = wf.channels as string[]
+          if (!channels.includes('all') && !channels.includes(platform)) continue
+
+          // Chequear keywords
+          const config = wf.trigger_config as Record<string, unknown>
+          const keywords = (config.keywords as string[]) ?? []
+          const matchMode = (config.match_mode as string) ?? 'contains'
+
+          const matched = matchMode === 'exact'
+            ? keywords.some(kw => lowerText === kw.toLowerCase())
+            : keywords.some(kw => lowerText.includes(kw.toLowerCase()))
+
+          if (matched) {
+            await startWorkflowExecution(supabase, wf.id, conversationId, 'keyword', params, {
+              client_name: clientInfo.fullName,
+              client_first_name: clientInfo.firstName,
+            })
+            return
+          }
+        }
+      }
+    }
+
+    // 3. Si es un interactive reply sin workflow activo, buscar por template_reply trigger
+    if (messageType === 'interactive' || messageType === 'button') {
+      const buttonReply = interactivePayload?.button_reply ?? interactivePayload?.list_reply
+      if (buttonReply) {
+        const { data: templateWorkflows } = await supabase
+          .from('automation_workflows')
+          .select('*')
+          .eq('organization_id', orgId)
+          .eq('is_active', true)
+          .eq('trigger_type', 'template_reply')
+          .order('priority', { ascending: false })
+
+        if (templateWorkflows && templateWorkflows.length > 0) {
+          for (const wf of templateWorkflows) {
+            const channels = wf.channels as string[]
+            if (!channels.includes('all') && !channels.includes(platform)) continue
+
+            // Iniciar workflow con contexto del botón
+            const initialContext: ExecutionContext = {
+              last_button_id: buttonReply.id,
+              last_button_title: buttonReply.title,
+              client_name: clientInfo.fullName,
+              client_first_name: clientInfo.firstName,
+            }
+            await startWorkflowExecution(supabase, wf.id, conversationId, 'template_reply', params, initialContext)
+            return
+          }
+        }
+      }
+    }
+
+    // 4. Fallback: ejecutar auto_reply_rules legacy (retrocompatibilidad)
+    // Esto mantiene las reglas viejas funcionando hasta que se migren
+    if (text && messageType === 'text') {
+      await executeLegacyAutoReply(supabase, orgId, conversationId, text, platform, params)
+    }
+  } catch (err) {
+    console.error('[WorkflowEngine] Error evaluando mensaje:', err)
+  }
+}
+
+// ─── Iniciar ejecución de workflow ───────────────────────────────
+
+async function startWorkflowExecution(
+  supabase: SupabaseClient,
+  workflowId: string,
+  conversationId: string,
+  triggeredBy: string,
+  params: Parameters<typeof evaluateIncomingMessage>[0],
+  initialContext?: ExecutionContext
+): Promise<void> {
+  // Cancelar ejecuciones activas previas de esta conversación
+  await supabase
+    .from('workflow_executions')
+    .update({ status: 'cancelled', completed_at: new Date().toISOString() })
+    .eq('conversation_id', conversationId)
+    .in('status', ['active', 'waiting_reply'])
+
+  // Buscar nodo de entrada
+  const { data: entryNode } = await supabase
+    .from('workflow_nodes')
+    .select('*')
+    .eq('workflow_id', workflowId)
+    .eq('is_entry_point', true)
+    .limit(1)
+    .maybeSingle()
+
+  if (!entryNode) {
+    console.warn('[WorkflowEngine] Workflow sin nodo de entrada:', workflowId)
+    return
+  }
+
+  // Crear ejecución
+  const { data: execution } = await supabase
+    .from('workflow_executions')
+    .insert({
+      workflow_id: workflowId,
+      conversation_id: conversationId,
+      current_node_id: entryNode.id,
+      status: 'active',
+      context: initialContext ?? {},
+      triggered_by: triggeredBy,
+    })
+    .select('id')
+    .single()
+
+  if (!execution) return
+
+  // El trigger node no hace nada por sí mismo, avanzar al siguiente
+  await logExecution(supabase, execution.id, entryNode.id, 'trigger', 'success', { triggeredBy })
+  await advanceFromNode(supabase, execution.id, workflowId, entryNode.id, initialContext ?? {}, params)
+}
+
+// ─── Avanzar desde un nodo al siguiente ──────────────────────────
+
+async function advanceFromNode(
+  supabase: SupabaseClient,
+  executionId: string,
+  workflowId: string,
+  currentNodeId: string,
+  context: ExecutionContext,
+  params: Parameters<typeof evaluateIncomingMessage>[0]
+): Promise<void> {
+  // Buscar edges que salen del nodo actual
+  const { data: edges } = await supabase
+    .from('workflow_edges')
+    .select('*')
+    .eq('workflow_id', workflowId)
+    .eq('source_node_id', currentNodeId)
+    .order('sort_order')
+
+  if (!edges || edges.length === 0) {
+    // No hay siguiente — workflow completado
+    await supabase
+      .from('workflow_executions')
+      .update({ status: 'completed', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', executionId)
+    return
+  }
+
+  // Determinar qué edge seguir
+  let targetNodeId: string | null = null
+
+  // Si el nodo actual tiene edges con condition_value, matchear
+  const conditionalEdges = edges.filter(e => e.condition_value)
+  if (conditionalEdges.length > 0 && context.last_button_id) {
+    // Buscar edge que matchee el botón presionado
+    const matchedEdge = conditionalEdges.find(e => e.condition_value === context.last_button_id)
+    if (matchedEdge) {
+      targetNodeId = matchedEdge.target_node_id
+    } else {
+      // Buscar edge "default" (sin condition_value)
+      const defaultEdge = edges.find(e => !e.condition_value || e.source_handle === 'default')
+      if (defaultEdge) targetNodeId = defaultEdge.target_node_id
+    }
+  } else {
+    // Sin condiciones — tomar el primer edge (default)
+    targetNodeId = edges[0].target_node_id
+  }
+
+  if (!targetNodeId) {
+    await supabase
+      .from('workflow_executions')
+      .update({ status: 'completed', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', executionId)
+    return
+  }
+
+  // Cargar el nodo target y ejecutarlo
+  const { data: nextNode } = await supabase
+    .from('workflow_nodes')
+    .select('*')
+    .eq('id', targetNodeId)
+    .single()
+
+  if (!nextNode) {
+    await supabase
+      .from('workflow_executions')
+      .update({ status: 'error', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', executionId)
+    return
+  }
+
+  // Actualizar current_node_id
+  await supabase
+    .from('workflow_executions')
+    .update({ current_node_id: nextNode.id, context, updated_at: new Date().toISOString() })
+    .eq('id', executionId)
+
+  // Ejecutar el nodo
+  await executeNode(supabase, executionId, workflowId, nextNode as WorkflowNode, context, params)
+}
+
+// ─── Ejecutar un nodo ────────────────────────────────────────────
+
+async function executeNode(
+  supabase: SupabaseClient,
+  executionId: string,
+  workflowId: string,
+  node: WorkflowNode,
+  context: ExecutionContext,
+  params: Parameters<typeof evaluateIncomingMessage>[0]
+): Promise<void> {
+  const config = node.config
+
+  try {
+    switch (node.node_type) {
+      case 'send_message': {
+        const text = resolveVariables(config.text as string || '', context, params)
+        await sendPlatformMessage(supabase, params, text)
+        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { text })
+        await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+        break
+      }
+
+      case 'send_media': {
+        const caption = resolveVariables(config.caption as string || '', context, params)
+        const mediaUrl = config.media_url as string
+        const mediaType = config.media_type as string || 'image'
+        await sendPlatformMedia(supabase, params, mediaUrl, mediaType, caption)
+        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { mediaUrl, mediaType })
+        await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+        break
+      }
+
+      case 'send_buttons': {
+        const body = resolveVariables(config.body as string || '', context, params)
+        const buttons = config.buttons as Array<{ id: string; title: string }>
+        await sendWhatsAppButtons(supabase, params, body, buttons)
+        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { body, buttons })
+        // Después de enviar botones, poner en espera
+        await supabase
+          .from('workflow_executions')
+          .update({ status: 'waiting_reply', current_node_id: node.id, updated_at: new Date().toISOString() })
+          .eq('id', executionId)
+        break
+      }
+
+      case 'send_list': {
+        const body = resolveVariables(config.body as string || '', context, params)
+        const buttonText = config.button_text as string || 'Ver opciones'
+        const sections = config.sections as Array<{ title: string; rows: Array<{ id: string; title: string; description?: string }> }>
+        await sendWhatsAppList(supabase, params, body, buttonText, sections)
+        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { body })
+        // Después de enviar lista, poner en espera
+        await supabase
+          .from('workflow_executions')
+          .update({ status: 'waiting_reply', current_node_id: node.id, updated_at: new Date().toISOString() })
+          .eq('id', executionId)
+        break
+      }
+
+      case 'send_template': {
+        const templateName = config.template_name as string
+        const languageCode = config.language_code as string || 'es_AR'
+        await sendWhatsAppTemplate(supabase, params, templateName, languageCode)
+        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { templateName })
+        await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+        break
+      }
+
+      case 'add_tag': {
+        const tagId = config.tag_id as string
+        if (tagId) {
+          await supabase
+            .from('conversation_tag_assignments')
+            .upsert(
+              { conversation_id: params.conversationId, tag_id: tagId },
+              { onConflict: 'conversation_id,tag_id' }
+            )
+        }
+        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { tagId })
+        await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+        break
+      }
+
+      case 'remove_tag': {
+        const tagId = config.tag_id as string
+        if (tagId) {
+          await supabase
+            .from('conversation_tag_assignments')
+            .delete()
+            .eq('conversation_id', params.conversationId)
+            .eq('tag_id', tagId)
+        }
+        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { tagId })
+        await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+        break
+      }
+
+      case 'condition': {
+        // El nodo condition evalúa el contexto y deja que advanceFromNode resuelva el edge correcto
+        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { context })
+        await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+        break
+      }
+
+      case 'wait_reply': {
+        // Poner en espera
+        await supabase
+          .from('workflow_executions')
+          .update({ status: 'waiting_reply', current_node_id: node.id, updated_at: new Date().toISOString() })
+          .eq('id', executionId)
+        await logExecution(supabase, executionId, node.id, node.node_type, 'success', {})
+        break
+      }
+
+      case 'crm_alert': {
+        const alertType = (config.alert_type as string) || 'info'
+        const title = resolveVariables(config.title as string || 'Alerta del workflow', context, params)
+        const message = resolveVariables(config.message as string || '', context, params)
+
+        // Obtener org_id del workflow
+        const { data: wf } = await supabase
+          .from('automation_workflows')
+          .select('organization_id')
+          .eq('id', workflowId)
+          .single()
+
+        if (wf) {
+          await supabase.from('crm_alerts').insert({
+            organization_id: wf.organization_id,
+            conversation_id: params.conversationId,
+            workflow_execution_id: executionId,
+            alert_type: alertType,
+            title,
+            message,
+            metadata: {
+              workflow_id: workflowId,
+              button_pressed: context.last_button_title,
+              platform: params.platform,
+            },
+          })
+        }
+        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { alertType, title })
+        await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+        break
+      }
+
+      case 'delay': {
+        const seconds = (config.seconds as number) ?? 5
+        // Esperar con setTimeout (funciona en el contexto del webhook, máx ~10s recomendado)
+        if (seconds <= 10) {
+          await new Promise(resolve => setTimeout(resolve, seconds * 1000))
+          await logExecution(supabase, executionId, node.id, node.node_type, 'success', { seconds })
+          await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+        } else {
+          // Para delays largos, dejar en waiting y procesarlo con un cron
+          await supabase
+            .from('workflow_executions')
+            .update({
+              status: 'waiting_reply',
+              current_node_id: node.id,
+              context: { ...context, delay_until: new Date(Date.now() + seconds * 1000).toISOString() },
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', executionId)
+          await logExecution(supabase, executionId, node.id, node.node_type, 'success', { seconds, deferred: true })
+        }
+        break
+      }
+
+      default:
+        console.warn('[WorkflowEngine] Tipo de nodo no soportado:', node.node_type)
+        await logExecution(supabase, executionId, node.id, node.node_type, 'skipped', {})
+        await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+    }
+  } catch (err) {
+    console.error('[WorkflowEngine] Error ejecutando nodo:', node.id, err)
+    await logExecution(supabase, executionId, node.id, node.node_type, 'error', {}, (err as Error).message)
+    await supabase
+      .from('workflow_executions')
+      .update({ status: 'error', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', executionId)
+  }
+}
+
+// ─── Funciones de envío por plataforma ───────────────────────────
+
+async function sendPlatformMessage(
+  supabase: SupabaseClient,
+  params: Parameters<typeof evaluateIncomingMessage>[0],
+  text: string
+): Promise<void> {
+  if (params.platform === 'whatsapp' && params.waConfig) {
+    const res = await fetch(
+      `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${params.waConfig.whatsapp_access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to: params.platformUserId,
+          type: 'text',
+          text: { body: text },
+        }),
+      }
+    )
+    const data = await res.json()
+    const platformMsgId = data.messages?.[0]?.id ?? null
+
+    await supabase.from('messages').insert({
+      conversation_id: params.conversationId,
+      direction: 'outbound',
+      content_type: 'text',
+      content: text,
+      platform_message_id: platformMsgId,
+      status: platformMsgId ? 'sent' : 'failed',
+      error_message: platformMsgId ? null : JSON.stringify(data).slice(0, 500),
+    })
+
+    await supabase
+      .from('conversations')
+      .update({ last_message_at: new Date().toISOString() })
+      .eq('id', params.conversationId)
+  } else if (params.platform === 'instagram' && params.igConfig) {
+    const res = await fetch(
+      `https://graph.instagram.com/${META_API_VERSION}/me/messages`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${params.igConfig.instagram_page_access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recipient: { id: params.platformUserId },
+          message: { text },
+        }),
+      }
+    )
+    const data = await res.json()
+    const platformMsgId = data.message_id ?? null
+
+    await supabase.from('messages').insert({
+      conversation_id: params.conversationId,
+      direction: 'outbound',
+      content_type: 'text',
+      content: text,
+      platform_message_id: platformMsgId,
+      status: platformMsgId ? 'sent' : 'failed',
+    })
+
+    await supabase
+      .from('conversations')
+      .update({ last_message_at: new Date().toISOString() })
+      .eq('id', params.conversationId)
+  }
+}
+
+async function sendPlatformMedia(
+  supabase: SupabaseClient,
+  params: Parameters<typeof evaluateIncomingMessage>[0],
+  mediaUrl: string,
+  mediaType: string,
+  caption: string
+): Promise<void> {
+  if (params.platform === 'whatsapp' && params.waConfig) {
+    const typeMap: Record<string, string> = { image: 'image', video: 'video', document: 'document', audio: 'audio' }
+    const waType = typeMap[mediaType] || 'document'
+
+    const mediaPayload: Record<string, unknown> = { link: mediaUrl }
+    if (caption) mediaPayload.caption = caption
+
+    const res = await fetch(
+      `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${params.waConfig.whatsapp_access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to: params.platformUserId,
+          type: waType,
+          [waType]: mediaPayload,
+        }),
+      }
+    )
+    const data = await res.json()
+    const platformMsgId = data.messages?.[0]?.id ?? null
+
+    await supabase.from('messages').insert({
+      conversation_id: params.conversationId,
+      direction: 'outbound',
+      content_type: mediaType,
+      content: caption || null,
+      media_url: mediaUrl,
+      platform_message_id: platformMsgId,
+      status: platformMsgId ? 'sent' : 'failed',
+    })
+  }
+}
+
+async function sendWhatsAppButtons(
+  supabase: SupabaseClient,
+  params: Parameters<typeof evaluateIncomingMessage>[0],
+  body: string,
+  buttons: Array<{ id: string; title: string }>
+): Promise<void> {
+  if (!params.waConfig) return
+
+  // WhatsApp soporta máximo 3 botones por mensaje interactivo
+  const waButtons = buttons.slice(0, 3).map(btn => ({
+    type: 'reply',
+    reply: { id: btn.id, title: btn.title.slice(0, 20) },
+  }))
+
+  const res = await fetch(
+    `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${params.waConfig.whatsapp_access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to: params.platformUserId,
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          body: { text: body },
+          action: { buttons: waButtons },
+        },
+      }),
+    }
+  )
+  const data = await res.json()
+  const platformMsgId = data.messages?.[0]?.id ?? null
+
+  await supabase.from('messages').insert({
+    conversation_id: params.conversationId,
+    direction: 'outbound',
+    content_type: 'template',
+    content: body,
+    platform_message_id: platformMsgId,
+    status: platformMsgId ? 'sent' : 'failed',
+  })
+}
+
+async function sendWhatsAppList(
+  supabase: SupabaseClient,
+  params: Parameters<typeof evaluateIncomingMessage>[0],
+  body: string,
+  buttonText: string,
+  sections: Array<{ title: string; rows: Array<{ id: string; title: string; description?: string }> }>
+): Promise<void> {
+  if (!params.waConfig) return
+
+  const res = await fetch(
+    `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${params.waConfig.whatsapp_access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to: params.platformUserId,
+        type: 'interactive',
+        interactive: {
+          type: 'list',
+          body: { text: body },
+          action: {
+            button: buttonText,
+            sections,
+          },
+        },
+      }),
+    }
+  )
+  const data = await res.json()
+  const platformMsgId = data.messages?.[0]?.id ?? null
+
+  await supabase.from('messages').insert({
+    conversation_id: params.conversationId,
+    direction: 'outbound',
+    content_type: 'template',
+    content: body,
+    platform_message_id: platformMsgId,
+    status: platformMsgId ? 'sent' : 'failed',
+  })
+}
+
+async function sendWhatsAppTemplate(
+  supabase: SupabaseClient,
+  params: Parameters<typeof evaluateIncomingMessage>[0],
+  templateName: string,
+  languageCode: string
+): Promise<void> {
+  if (!params.waConfig) return
+
+  const res = await fetch(
+    `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${params.waConfig.whatsapp_access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to: params.platformUserId,
+        type: 'template',
+        template: {
+          name: templateName,
+          language: { code: languageCode },
+        },
+      }),
+    }
+  )
+  const data = await res.json()
+  const platformMsgId = data.messages?.[0]?.id ?? null
+
+  await supabase.from('messages').insert({
+    conversation_id: params.conversationId,
+    direction: 'outbound',
+    content_type: 'template',
+    content: `[Template: ${templateName}]`,
+    template_name: templateName,
+    platform_message_id: platformMsgId,
+    status: platformMsgId ? 'sent' : 'failed',
+  })
+}
+
+// ─── Variables en mensajes ───────────────────────────────────────
+
+function resolveVariables(
+  text: string,
+  context: ExecutionContext,
+  params: Parameters<typeof evaluateIncomingMessage>[0]
+): string {
+  const firstName = context.client_first_name ?? ''
+  const fullName = context.client_name ?? ''
+  const lastReply = context.last_text_reply ?? ''
+  return text
+    .replace(/\{platform\}/g, params.platform)
+    .replace(/\{user_id\}/g, params.platformUserId)
+    .replace(/\{last_button\}/g, context.last_button_title ?? '')
+    .replace(/\{last_reply\}/g, lastReply)
+    .replace(/\{respuesta\}/g, lastReply)
+    .replace(/\{nombre\}/g, firstName)
+    .replace(/\{nombre_completo\}/g, fullName)
+}
+
+// ─── Logging ─────────────────────────────────────────────────────
+
+async function logExecution(
+  supabase: SupabaseClient,
+  executionId: string,
+  nodeId: string,
+  nodeType: string,
+  status: 'success' | 'error' | 'skipped',
+  outputData: Record<string, unknown>,
+  errorMessage?: string
+): Promise<void> {
+  await supabase.from('workflow_execution_log').insert({
+    execution_id: executionId,
+    node_id: nodeId,
+    node_type: nodeType,
+    status,
+    output_data: outputData,
+    error_message: errorMessage ?? null,
+  })
+}
+
+// ─── Legacy auto-reply fallback ──────────────────────────────────
+
+async function executeLegacyAutoReply(
+  supabase: SupabaseClient,
+  orgId: string,
+  conversationId: string,
+  text: string,
+  platform: string,
+  params: Parameters<typeof evaluateIncomingMessage>[0]
+): Promise<void> {
+  const { data: rules } = await supabase
+    .from('auto_reply_rules')
+    .select('*')
+    .eq('organization_id', orgId)
+    .eq('is_active', true)
+    .in('platform', ['all', platform])
+    .order('priority', { ascending: false })
+
+  if (!rules || rules.length === 0) return
+
+  const lowerText = text.toLowerCase()
+  for (const rule of rules) {
+    const keywords: string[] = rule.keywords ?? []
+    const matched = rule.match_mode === 'exact'
+      ? keywords.some((kw: string) => lowerText === kw.toLowerCase())
+      : keywords.some((kw: string) => lowerText.includes(kw.toLowerCase()))
+
+    if (matched && rule.response_type === 'text' && rule.response_text) {
+      await sendPlatformMessage(supabase, params, rule.response_text)
+
+      // Tag assignment
+      if (rule.tag_client_id) {
+        await supabase
+          .from('conversation_tag_assignments')
+          .upsert(
+            { conversation_id: conversationId, tag_id: rule.tag_client_id },
+            { onConflict: 'conversation_id,tag_id' }
+          )
+      }
+      break
+    }
+  }
+}

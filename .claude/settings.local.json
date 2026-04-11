@@ -41,7 +41,9 @@
       "Bash(grep:*)",
       "Bash(find . -name \"*.sql\" -exec grep -l \"social_channels\\\\|conversations\\\\|messages\" {} \\\\;)",
       "Bash(ls /Users/ignaciobaldovino/MSB_FULL/MonacoSmartBarber/src/lib/actions/*.ts)",
-      "Bash(xargs -I{} basename {})"
+      "Bash(xargs -I{} basename {})",
+      "mcp__supabase__list_migrations",
+      "Bash(wc:*)"
     ]
   },
   "enabledMcpjsonServers": [
