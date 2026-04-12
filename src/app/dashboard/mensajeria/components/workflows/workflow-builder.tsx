@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback, useTransitio
 import {
   ArrowLeft, Save, Plus, ZoomIn, ZoomOut, Maximize2,
   MessageSquare, Image, LayoutGrid, List, Tag,
-  GitBranch, Bell, Clock, Send, Trash2,
+  GitBranch, Bell, Clock, Send, Trash2, Pencil,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
@@ -430,12 +430,17 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
             <Button variant="ghost" size="sm" onClick={onBack} className="h-7 px-2">
               <ArrowLeft className="size-4" />
             </Button>
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-foreground truncate">{workflow.name}</h2>
-              {workflow.description && (
-                <p className="text-[10px] text-muted-foreground truncate">{workflow.description}</p>
-              )}
-            </div>
+            <EditableName
+              value={workflow.name}
+              onSave={async (newName) => {
+                const res = await updateWorkflow(workflow.id, { name: newName })
+                if (res.error) { toast.error(res.error); return }
+                setWorkflow(prev => prev ? { ...prev, name: newName } : prev)
+              }}
+            />
+            {workflow.description && (
+              <p className="text-[10px] text-muted-foreground truncate">{workflow.description}</p>
+            )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {/* Zoom controls */}
@@ -748,4 +753,40 @@ function getDefaultConfig(type: string): Record<string, unknown> {
     default:
       return {}
   }
+}
+
+function EditableName({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { setDraft(value) }, [value])
+  useEffect(() => { if (editing) inputRef.current?.select() }, [editing])
+
+  const commit = () => {
+    setEditing(false)
+    const trimmed = draft.trim()
+    if (trimmed && trimmed !== value) onSave(trimmed)
+    else setDraft(value)
+  }
+
+  if (!editing) {
+    return (
+      <button onClick={() => setEditing(true)} className="group flex items-center gap-1.5 min-w-0">
+        <h2 className="text-sm font-semibold text-foreground truncate">{value}</h2>
+        <Pencil className="size-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+      </button>
+    )
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      value={draft}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setDraft(value); setEditing(false) } }}
+      className="text-sm font-semibold text-foreground bg-muted border rounded px-2 py-0.5 outline-none focus:ring-1 focus:ring-ring w-48"
+    />
+  )
 }
