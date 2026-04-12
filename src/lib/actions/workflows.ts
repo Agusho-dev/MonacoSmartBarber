@@ -133,6 +133,7 @@ export async function updateWorkflow(id: string, input: {
   trigger_config?: Record<string, unknown>
   priority?: number
   is_active?: boolean
+  branch_id?: string | null
 }) {
   const result = await requireOrgId()
   if ('error' in result) return { error: result.error }
@@ -147,6 +148,7 @@ export async function updateWorkflow(id: string, input: {
   if (input.trigger_config !== undefined) update.trigger_config = input.trigger_config
   if (input.priority !== undefined) update.priority = input.priority
   if (input.is_active !== undefined) update.is_active = input.is_active
+  if (input.branch_id !== undefined) update.branch_id = input.branch_id
 
   const { error } = await supabase
     .from('automation_workflows')

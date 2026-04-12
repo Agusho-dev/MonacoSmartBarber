@@ -4,13 +4,14 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback, useTransitio
 import {
   ArrowLeft, Save, Plus, ZoomIn, ZoomOut, Maximize2,
   MessageSquare, Image, LayoutGrid, List, Tag,
-  GitBranch, Bell, Clock, Send, Trash2, Pencil,
+  GitBranch, Bell, Clock, Send, Trash2, Pencil, MapPin,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { getWorkflow, saveWorkflowGraph, updateWorkflow } from '@/lib/actions/workflows'
 import type { WorkflowNode, WorkflowEdge, WorkflowWithGraph, WorkflowNodeType } from '@/lib/types/database'
 import { WorkflowNodeEditor } from './workflow-node-editor'
+import { useMensajeria } from '../shared/mensajeria-context'
 
 // ─── Constantes ──────────────────────────────────────────────────
 
@@ -46,6 +47,7 @@ interface Props {
 }
 
 export function WorkflowBuilder({ workflowId, onBack }: Props) {
+  const { branches } = useMensajeria()
   const [workflow, setWorkflow] = useState<WorkflowWithGraph | null>(null)
   const [nodes, setNodes] = useState<WorkflowNode[]>([])
   const [edges, setEdges] = useState<WorkflowEdge[]>([])
@@ -430,16 +432,36 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
             <Button variant="ghost" size="sm" onClick={onBack} className="h-7 px-2">
               <ArrowLeft className="size-4" />
             </Button>
-            <EditableName
-              value={workflow.name}
-              onSave={async (newName) => {
-                const res = await updateWorkflow(workflow.id, { name: newName })
-                if (res.error) { toast.error(res.error); return }
-                setWorkflow(prev => prev ? { ...prev, name: newName } : prev)
-              }}
-            />
-            {workflow.description && (
-              <p className="text-[10px] text-muted-foreground truncate">{workflow.description}</p>
+            <div className="min-w-0">
+              <EditableName
+                value={workflow.name}
+                onSave={async (newName) => {
+                  const res = await updateWorkflow(workflow.id, { name: newName })
+                  if (res.error) { toast.error(res.error); return }
+                  setWorkflow(prev => prev ? { ...prev, name: newName } : prev)
+                }}
+              />
+              {workflow.description && (
+                <p className="text-[10px] text-muted-foreground truncate">{workflow.description}</p>
+              )}
+            </div>
+            {branches.length > 1 && (
+              <select
+                value={workflow.branch_id ?? ''}
+                onChange={async (e) => {
+                  const newBranchId = e.target.value || null
+                  const res = await updateWorkflow(workflow.id, { branch_id: newBranchId })
+                  if (res.error) { toast.error(res.error); return }
+                  setWorkflow(prev => prev ? { ...prev, branch_id: newBranchId } : prev)
+                  toast.success(newBranchId ? `Sucursal: ${branches.find(b => b.id === newBranchId)?.name}` : 'Aplica a todas las sucursales')
+                }}
+                className="h-7 rounded-md bg-muted border px-2 text-xs text-foreground outline-none shrink-0"
+              >
+                <option value="">Todas las sucursales</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
