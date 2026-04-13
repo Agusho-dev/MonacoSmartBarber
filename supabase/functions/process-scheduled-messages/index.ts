@@ -9,9 +9,9 @@ const supabase = createClient(
 )
 
 const META_API_VERSION = 'v22.0'
+const BATCH_SIZE = 50
 
 Deno.serve(async (req: Request) => {
-  // Verificar authorization
   const authHeader = req.headers.get('Authorization')
   if (authHeader !== `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`) {
     return new Response('Unauthorized', { status: 401 })
@@ -20,20 +20,22 @@ Deno.serve(async (req: Request) => {
   try {
     const waApiKey = Deno.env.get('WA_API_KEY')
 
-    // Obtener mensajes pendientes cuyo scheduled_for ya pasó (máx 10 por tick)
-    // Incluir channel_id para resolver la org de cada mensaje
     const { data: pendingMessages, error } = await supabase
       .from('scheduled_messages')
-      .select('id, phone, content, client_id, channel_id, template_name, template_language, workflow_id, workflow_trigger_data')
+      .select('id, phone, content, client_id, channel_id, template_name, template_language, template_params, workflow_id, workflow_trigger_data, broadcast_id')
       .eq('status', 'pending')
       .lte('scheduled_for', new Date().toISOString())
-      .limit(10)
+      .limit(BATCH_SIZE)
 
     if (error) throw error
 
-    // Cache de configuración por org_id para no repetir queries
+    // Cache de configuración por org_id
     const orgSettingsCache = new Map<string, { wa_api_url: string | null }>()
     const orgChannelCache = new Map<string, { id: string }[]>()
+    const orgConfigCache = new Map<string, { whatsapp_access_token: string; whatsapp_phone_id: string } | null>()
+
+    // Contadores de broadcast para actualizar al final
+    const broadcastCounters = new Map<string, { sent: number; failed: number }>()
 
     const results: Array<{ id: string; sent: boolean; error: string | null }> = []
 
@@ -41,9 +43,7 @@ Deno.serve(async (req: Request) => {
       let sent = false
       let errorMsg: string | null = null
 
-      // Resolver organization_id del mensaje:
-      // 1. Via channel_id -> social_channels.branch_id -> branches.organization_id
-      // 2. Fallback: via client_id -> clients.organization_id
+      // Resolver organization_id
       let orgId: string | null = null
 
       if (msg.channel_id) {
@@ -78,10 +78,11 @@ Deno.serve(async (req: Request) => {
           .update({ status: 'failed', error_message: errorMsg })
           .eq('id', msg.id)
         results.push({ id: msg.id, sent: false, error: errorMsg })
+        trackBroadcast(broadcastCounters, msg.broadcast_id, false)
         continue
       }
 
-      // Obtener config del microservicio WA para esta org (con cache)
+      // Obtener config del microservicio WA (con cache)
       if (!orgSettingsCache.has(orgId)) {
         const { data: settings } = await supabase
           .from('app_settings')
@@ -92,8 +93,8 @@ Deno.serve(async (req: Request) => {
       }
       const waApiUrl = orgSettingsCache.get(orgId)!.wa_api_url
 
-      // Enviar vía WA Microservice si está configurado y el mensaje tiene teléfono directo
       if (waApiUrl && waApiKey && msg.phone) {
+        // Envío vía microservicio WA (Baileys)
         try {
           const res = await fetch(`${waApiUrl}/send`, {
             method: 'POST',
@@ -113,53 +114,37 @@ Deno.serve(async (req: Request) => {
           errorMsg = `Error de conexión: ${e.message}`
         }
       } else {
-        // Enviar vía Meta Cloud API
-        const { data: waConfig } = await supabase
-          .from('organization_whatsapp_config')
-          .select('whatsapp_access_token, whatsapp_phone_id')
-          .eq('organization_id', orgId)
-          .eq('is_active', true)
-          .maybeSingle()
+        // Envío vía Meta Cloud API
+        if (!orgConfigCache.has(orgId)) {
+          const { data: waConfig } = await supabase
+            .from('organization_whatsapp_config')
+            .select('whatsapp_access_token, whatsapp_phone_id')
+            .eq('organization_id', orgId)
+            .eq('is_active', true)
+            .maybeSingle()
+          orgConfigCache.set(orgId, waConfig ?? null)
+        }
+        const waConfig = orgConfigCache.get(orgId)
 
         if (!waConfig?.whatsapp_access_token || !waConfig?.whatsapp_phone_id) {
           errorMsg = 'Config de WhatsApp no encontrada para esta organización'
         } else if (!msg.phone) {
           errorMsg = 'Falta teléfono en el mensaje programado'
         } else {
-          // Normalizar teléfono para Meta Cloud API
-          let phone = (msg.phone as string).replace(/\D/g, '')
-          if (!phone.startsWith('54')) {
-            if (phone.startsWith('9') && phone.length === 11) {
-              phone = '54' + phone.slice(1)
-            } else {
-              phone = '54' + phone
-            }
-          } else if (phone.startsWith('549') && phone.length === 13) {
-            phone = '54' + phone.slice(3)
-          }
+          const phone = normalizePhone(msg.phone)
 
-          // Enviar vía Meta Cloud API con timeout
-          const controller = new AbortController()
-          const timeout = setTimeout(() => controller.abort(), 15000)
-
-          // Determinar payload: template o texto libre
           const isTemplate = !!msg.template_name
           const payload = isTemplate
-            ? {
-                messaging_product: 'whatsapp',
-                to: phone,
-                type: 'template',
-                template: {
-                  name: msg.template_name,
-                  language: { code: msg.template_language || 'es_AR' },
-                },
-              }
+            ? buildTemplatePayload(phone, msg.template_name, msg.template_language, msg.template_params)
             : {
                 messaging_product: 'whatsapp',
                 to: phone,
                 type: 'text',
                 text: { body: msg.content },
               }
+
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 15000)
 
           try {
             const res = await fetch(
@@ -191,159 +176,9 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // Si se envió, crear conversación + mensaje para que aparezca en el dashboard
+      // Registrar en conversaciones si fue exitoso
       if (sent) {
-        // Buscar canales WhatsApp activos para esta org (con cache)
-        if (!orgChannelCache.has(orgId)) {
-          const { data: orgBranches } = await supabase
-            .from('branches')
-            .select('id')
-            .eq('organization_id', orgId)
-          const branchIds = orgBranches?.map((b: { id: string }) => b.id) ?? []
-
-          if (branchIds.length > 0) {
-            const { data: channels } = await supabase
-              .from('social_channels')
-              .select('id')
-              .eq('platform', 'whatsapp')
-              .eq('is_active', true)
-              .in('branch_id', branchIds)
-            orgChannelCache.set(orgId, channels ?? [])
-          } else {
-            orgChannelCache.set(orgId, [])
-          }
-        }
-        const waChannels = orgChannelCache.get(orgId) as { id: string }[]
-        const waChannel = waChannels[0] ?? null
-
-        if (waChannel) {
-          // Normalizar al formato internacional que usa Meta (ej: 5493835411954)
-          // para que coincida con el platform_user_id del webhook de WhatsApp
-          let phoneNorm = (msg.phone as string).replace(/\D/g, '')
-          if (!phoneNorm.startsWith('54')) {
-            if (phoneNorm.startsWith('9') && phoneNorm.length === 11) {
-              phoneNorm = '54' + phoneNorm.slice(1)
-            } else {
-              phoneNorm = '54' + phoneNorm
-            }
-          } else if (phoneNorm.startsWith('549') && phoneNorm.length === 13) {
-            phoneNorm = '54' + phoneNorm.slice(3)
-          }
-
-          // Buscar conversación existente por sufijo para evitar duplicados
-          // por diferencia de formato (ej: 54xxx vs 549xxx)
-          // IMPORTANTE: limit(1) antes de maybeSingle() para evitar error 406
-          // cuando hay múltiples conversaciones con el mismo sufijo de teléfono
-          const phoneSuffix = phoneNorm.slice(-10)
-          const allChannelIds = waChannels.map(c => c.id)
-          let convId: string | null = null
-          const { data: existingConv } = await supabase
-            .from('conversations')
-            .select('id')
-            .in('channel_id', allChannelIds)
-            .ilike('platform_user_id', `%${phoneSuffix}`)
-            .order('last_message_at', { ascending: false, nullsFirst: false })
-            .limit(1)
-            .maybeSingle()
-
-          if (existingConv) {
-            convId = existingConv.id
-          } else {
-            const { data: newConv } = await supabase
-              .from('conversations')
-              .insert({
-                channel_id: waChannel.id,
-                client_id: msg.client_id,
-                platform_user_id: phoneNorm,
-                status: 'open',
-                unread_count: 0,
-                last_message_at: new Date().toISOString(),
-              })
-              .select('id')
-              .single()
-            convId = newConv?.id ?? null
-          }
-
-          if (convId) {
-            await supabase.from('messages').insert({
-              conversation_id: convId,
-              direction: 'outbound',
-              content_type: msg.template_name ? 'template' : 'text',
-              content: msg.content || (msg.template_name ? `[Template: ${msg.template_name}]` : null),
-              template_name: msg.template_name || null,
-              status: 'sent',
-            })
-
-            await supabase
-              .from('conversations')
-              .update({ last_message_at: new Date().toISOString() })
-              .eq('id', convId)
-
-            // Si el mensaje pertenece a un workflow, crear workflow_execution
-            // para que el motor de workflows procese la respuesta del cliente
-            if (msg.workflow_id && msg.workflow_trigger_data) {
-              try {
-                const triggerData = msg.workflow_trigger_data as Record<string, any>
-                const nextNodeId = triggerData.next_node_id as string | null
-                const entryNodeId = triggerData.entry_node_id as string | null
-                const firstActionNodeId = triggerData.first_action_node_id as string | null
-                const clientName = (triggerData.client_name as string) ?? ''
-                const firstName = clientName.split(/\s+/)[0] ?? ''
-
-                // Cancelar ejecuciones activas previas de esta conversación
-                await supabase
-                  .from('workflow_executions')
-                  .update({ status: 'cancelled', completed_at: new Date().toISOString() })
-                  .eq('conversation_id', convId)
-                  .in('status', ['active', 'waiting_reply'])
-
-                // Determinar el nodo actual: si hay un nodo siguiente, usarlo;
-                // si no, el workflow se completa después de este envío
-                const currentNodeId = nextNodeId ?? firstActionNodeId
-                const execStatus = nextNodeId ? 'waiting_reply' : 'completed'
-
-                const { data: execution } = await supabase
-                  .from('workflow_executions')
-                  .insert({
-                    workflow_id: msg.workflow_id,
-                    conversation_id: convId,
-                    current_node_id: currentNodeId,
-                    status: execStatus,
-                    context: {
-                      client_name: clientName,
-                      client_first_name: firstName,
-                    },
-                    triggered_by: 'post_service',
-                    completed_at: execStatus === 'completed' ? new Date().toISOString() : null,
-                  })
-                  .select('id')
-                  .single()
-
-                if (execution && entryNodeId) {
-                  await supabase.from('workflow_execution_log').insert({
-                    execution_id: execution.id,
-                    node_id: entryNodeId,
-                    node_type: 'trigger',
-                    status: 'success',
-                    output_data: { triggered_by: 'post_service' },
-                  })
-                }
-                if (execution && firstActionNodeId) {
-                  const nodeType = msg.template_name ? 'send_template' : 'send_message'
-                  await supabase.from('workflow_execution_log').insert({
-                    execution_id: execution.id,
-                    node_id: firstActionNodeId,
-                    node_type: nodeType,
-                    status: 'success',
-                    output_data: { template_name: msg.template_name, content: msg.content },
-                  })
-                }
-              } catch (wfErr: any) {
-                console.error('[Workflow] Error creando ejecución:', wfErr.message)
-              }
-            }
-          }
-        }
+        await recordInConversation(msg, orgId, orgChannelCache)
       }
 
       // Actualizar estado del scheduled_message
@@ -356,8 +191,12 @@ Deno.serve(async (req: Request) => {
         })
         .eq('id', msg.id)
 
+      trackBroadcast(broadcastCounters, msg.broadcast_id, sent)
       results.push({ id: msg.id, sent, error: errorMsg })
     }
+
+    // Actualizar contadores de broadcasts procesados
+    await updateBroadcastCounters(broadcastCounters)
 
     return new Response(
       JSON.stringify({ processed: results.length, results }),
@@ -370,3 +209,260 @@ Deno.serve(async (req: Request) => {
     )
   }
 })
+
+// Normaliza un teléfono argentino al formato internacional de Meta
+function normalizePhone(raw: string): string {
+  let phone = raw.replace(/\D/g, '')
+  if (!phone.startsWith('54')) {
+    if (phone.startsWith('9') && phone.length === 11) {
+      phone = '54' + phone.slice(1)
+    } else {
+      phone = '54' + phone
+    }
+  } else if (phone.startsWith('549') && phone.length === 13) {
+    phone = '54' + phone.slice(3)
+  }
+  return phone
+}
+
+// Construye el payload de template con componentes/variables para Meta Cloud API
+function buildTemplatePayload(
+  phone: string,
+  templateName: string,
+  templateLanguage: string | null,
+  templateParams: any
+) {
+  const payload: any = {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'template',
+    template: {
+      name: templateName,
+      language: { code: templateLanguage || 'es_AR' },
+    },
+  }
+
+  // Si hay template_params, convertirlos al formato de Meta Cloud API components
+  if (templateParams && Array.isArray(templateParams) && templateParams.length > 0) {
+    payload.template.components = templateParams.map((comp: any) => ({
+      type: comp.type,
+      parameters: comp.parameters?.map((p: any) => {
+        if (p.type === 'text') return { type: 'text', text: p.text || '' }
+        if (p.type === 'image') return { type: 'image', image: p.image }
+        if (p.type === 'document') return { type: 'document', document: p.document }
+        if (p.type === 'video') return { type: 'video', video: p.video }
+        return p
+      }) ?? [],
+    }))
+  }
+
+  return payload
+}
+
+// Registra el mensaje enviado en la tabla de conversaciones para que aparezca en el inbox
+async function recordInConversation(msg: any, orgId: string, orgChannelCache: Map<string, { id: string }[]>) {
+  if (!orgChannelCache.has(orgId)) {
+    const { data: orgBranches } = await supabase
+      .from('branches')
+      .select('id')
+      .eq('organization_id', orgId)
+    const branchIds = orgBranches?.map((b: { id: string }) => b.id) ?? []
+
+    if (branchIds.length > 0) {
+      const { data: channels } = await supabase
+        .from('social_channels')
+        .select('id')
+        .eq('platform', 'whatsapp')
+        .eq('is_active', true)
+        .in('branch_id', branchIds)
+      orgChannelCache.set(orgId, channels ?? [])
+    } else {
+      orgChannelCache.set(orgId, [])
+    }
+  }
+  const waChannels = orgChannelCache.get(orgId) as { id: string }[]
+  const waChannel = waChannels[0] ?? null
+  if (!waChannel) return
+
+  const phoneNorm = normalizePhone(msg.phone)
+  const phoneSuffix = phoneNorm.slice(-10)
+  const allChannelIds = waChannels.map(c => c.id)
+
+  const { data: existingConv } = await supabase
+    .from('conversations')
+    .select('id')
+    .in('channel_id', allChannelIds)
+    .ilike('platform_user_id', `%${phoneSuffix}`)
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle()
+
+  let convId: string | null = null
+  if (existingConv) {
+    convId = existingConv.id
+  } else {
+    const { data: newConv } = await supabase
+      .from('conversations')
+      .insert({
+        channel_id: waChannel.id,
+        client_id: msg.client_id,
+        platform_user_id: phoneNorm,
+        status: 'open',
+        unread_count: 0,
+        last_message_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single()
+    convId = newConv?.id ?? null
+  }
+
+  if (!convId) return
+
+  await supabase.from('messages').insert({
+    conversation_id: convId,
+    direction: 'outbound',
+    content_type: msg.template_name ? 'template' : 'text',
+    content: msg.content || (msg.template_name ? `[Template: ${msg.template_name}]` : null),
+    template_name: msg.template_name || null,
+    status: 'sent',
+  })
+
+  await supabase
+    .from('conversations')
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', convId)
+
+  // Workflow execution
+  if (msg.workflow_id && msg.workflow_trigger_data) {
+    try {
+      const triggerData = msg.workflow_trigger_data as Record<string, any>
+      const nextNodeId = triggerData.next_node_id as string | null
+      const entryNodeId = triggerData.entry_node_id as string | null
+      const firstActionNodeId = triggerData.first_action_node_id as string | null
+      const clientName = (triggerData.client_name as string) ?? ''
+      const firstName = clientName.split(/\s+/)[0] ?? ''
+
+      await supabase
+        .from('workflow_executions')
+        .update({ status: 'cancelled', completed_at: new Date().toISOString() })
+        .eq('conversation_id', convId)
+        .in('status', ['active', 'waiting_reply'])
+
+      const currentNodeId = nextNodeId ?? firstActionNodeId
+      const execStatus = nextNodeId ? 'waiting_reply' : 'completed'
+
+      const { data: execution } = await supabase
+        .from('workflow_executions')
+        .insert({
+          workflow_id: msg.workflow_id,
+          conversation_id: convId,
+          current_node_id: currentNodeId,
+          status: execStatus,
+          context: { client_name: clientName, client_first_name: firstName },
+          triggered_by: 'post_service',
+          completed_at: execStatus === 'completed' ? new Date().toISOString() : null,
+        })
+        .select('id')
+        .single()
+
+      if (execution && entryNodeId) {
+        await supabase.from('workflow_execution_log').insert({
+          execution_id: execution.id,
+          node_id: entryNodeId,
+          node_type: 'trigger',
+          status: 'success',
+          output_data: { triggered_by: 'post_service' },
+        })
+      }
+      if (execution && firstActionNodeId) {
+        await supabase.from('workflow_execution_log').insert({
+          execution_id: execution.id,
+          node_id: firstActionNodeId,
+          node_type: msg.template_name ? 'send_template' : 'send_message',
+          status: 'success',
+          output_data: { template_name: msg.template_name, content: msg.content },
+        })
+      }
+    } catch (wfErr: any) {
+      console.error('[Workflow] Error creando ejecución:', wfErr.message)
+    }
+  }
+}
+
+// Acumula contadores por broadcast_id
+function trackBroadcast(counters: Map<string, { sent: number; failed: number }>, broadcastId: string | null, sent: boolean) {
+  if (!broadcastId) return
+  const existing = counters.get(broadcastId) ?? { sent: 0, failed: 0 }
+  if (sent) existing.sent++
+  else existing.failed++
+  counters.set(broadcastId, existing)
+}
+
+// Actualiza contadores de broadcasts y marca como completado si corresponde
+async function updateBroadcastCounters(counters: Map<string, { sent: number; failed: number }>) {
+  for (const [broadcastId, counts] of counters) {
+    // Incrementar contadores atómicamente
+    const { data: broadcast } = await supabase
+      .from('broadcasts')
+      .select('audience_count, sent_count, failed_count')
+      .eq('id', broadcastId)
+      .single()
+
+    if (!broadcast) continue
+
+    const newSent = (broadcast.sent_count ?? 0) + counts.sent
+    const newFailed = (broadcast.failed_count ?? 0) + counts.failed
+    const total = broadcast.audience_count ?? 0
+    const allProcessed = (newSent + newFailed) >= total
+
+    await supabase
+      .from('broadcasts')
+      .update({
+        sent_count: newSent,
+        delivered_count: newSent,
+        failed_count: newFailed,
+        ...(allProcessed ? { status: 'sent', completed_at: new Date().toISOString() } : {}),
+      })
+      .eq('id', broadcastId)
+
+    // Actualizar estados individuales de broadcast_recipients
+    if (counts.sent > 0) {
+      const { data: sentMsgs } = await supabase
+        .from('scheduled_messages')
+        .select('client_id')
+        .eq('broadcast_id', broadcastId)
+        .eq('status', 'sent')
+        .limit(counts.sent)
+
+      if (sentMsgs) {
+        const clientIds = sentMsgs.map(m => m.client_id)
+        await supabase
+          .from('broadcast_recipients')
+          .update({ status: 'sent', sent_at: new Date().toISOString() })
+          .eq('broadcast_id', broadcastId)
+          .in('client_id', clientIds)
+          .eq('status', 'pending')
+      }
+    }
+
+    if (counts.failed > 0) {
+      const { data: failedMsgs } = await supabase
+        .from('scheduled_messages')
+        .select('client_id, error_message')
+        .eq('broadcast_id', broadcastId)
+        .eq('status', 'failed')
+        .limit(counts.failed)
+
+      if (failedMsgs) {
+        for (const fm of failedMsgs) {
+          await supabase
+            .from('broadcast_recipients')
+            .update({ status: 'failed', error_message: fm.error_message })
+            .eq('broadcast_id', broadcastId)
+            .eq('client_id', fm.client_id)
+            .eq('status', 'pending')
+        }
+      }
+    }
+  }
+}

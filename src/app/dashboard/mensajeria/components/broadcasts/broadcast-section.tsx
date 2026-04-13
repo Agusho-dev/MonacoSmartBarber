@@ -1,15 +1,22 @@
 'use client'
 
-import { useState, useEffect, useTransition } from 'react'
-import { Megaphone, Plus, Send, Users, Clock, X, ChevronRight, ChevronLeft, Check, AlertCircle, Tag } from 'lucide-react'
+import { useState, useEffect, useTransition, useMemo } from 'react'
+import {
+  Megaphone, Plus, Send, Users, Clock, X, ChevronRight, ChevronLeft,
+  Check, AlertCircle, Tag, MapPin, Calendar, Hash, Variable,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
-import { getBroadcasts, createBroadcast, sendBroadcast, cancelBroadcast } from '@/lib/actions/broadcasts'
+import {
+  getBroadcasts, createBroadcast, sendBroadcast, cancelBroadcast,
+} from '@/lib/actions/broadcasts'
+import type { TemplateVariable } from '@/lib/actions/broadcasts'
 import { previewAudience } from '@/lib/actions/client-segments'
 import { useMensajeria } from '../shared/mensajeria-context'
+import { extractTemplateVariables } from '../shared/helpers'
 import type { AudienceFilters } from '@/lib/actions/client-segments'
 
 interface Broadcast {
@@ -41,8 +48,32 @@ const CONTACT_RANGES = [
   { label: '+3 meses', maxDays: undefined, minDays: 90 },
 ]
 
+// lastVisitMaxDays = "no viene hace al menos X días" (filtro de abandono)
+// lastVisitMinDays = "vino dentro de los últimos X días" (filtro de recencia)
+const VISIT_RANGES: Array<{
+  label: string
+  lastVisitMaxDays?: number  // cliente no viene hace >= X días
+  lastVisitMinDays?: number  // cliente vino hace <= X días
+  minVisits?: number
+  maxVisits?: number
+}> = [
+  { label: 'Sin filtro' },
+  { label: 'Vino esta semana', lastVisitMinDays: 7 },
+  { label: 'Vino este mes', lastVisitMinDays: 30 },
+  { label: 'No viene hace 1-2 meses', lastVisitMaxDays: 30, lastVisitMinDays: 60 },
+  { label: 'No viene hace +2 meses', lastVisitMaxDays: 60 },
+  { label: 'Nunca vino', minVisits: 0, maxVisits: 0 },
+]
+
+// Placeholders de personalización disponibles
+const PERSONALIZATION_VARS = [
+  { key: '{{nombre}}', label: 'Nombre completo', example: 'Juan Pérez' },
+  { key: '{{primer_nombre}}', label: 'Primer nombre', example: 'Juan' },
+  { key: '{{telefono}}', label: 'Teléfono', example: '3515551234' },
+]
+
 export function BroadcastSection() {
-  const { waTemplates, handleSyncTemplates, syncingTemplates, tags } = useMensajeria()
+  const { waTemplates, handleSyncTemplates, syncingTemplates, tags, branches } = useMensajeria()
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([])
   const [loading, setLoading] = useState(true)
   const [showWizard, setShowWizard] = useState(false)
@@ -52,14 +83,36 @@ export function BroadcastSection() {
   const [name, setName] = useState('')
   const [selectedSegments, setSelectedSegments] = useState<string[]>([])
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
+  const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>([])
   const [contactRange, setContactRange] = useState(0)
+  const [visitRange, setVisitRange] = useState(0)
+  const [minVisits, setMinVisits] = useState('')
+  const [maxVisits, setMaxVisits] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState('')
   const [scheduledFor, setScheduledFor] = useState('')
   const [audienceCount, setAudienceCount] = useState<number | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
 
+  // Template variables
+  const [templateVarValues, setTemplateVarValues] = useState<Record<string, Record<string, string>>>({})
+
   const [isCreating, startCreating] = useTransition()
   const [isSending, startSending] = useTransition()
+
+  // Obtener template seleccionado
+  const selectedTpl = useMemo(
+    () => waTemplates.find(t => t.name === selectedTemplate),
+    [waTemplates, selectedTemplate]
+  )
+
+  // Extraer variables del template seleccionado
+  const templateVars = useMemo(() => {
+    if (!selectedTpl?.components) return { header: [], body: [] }
+    return extractTemplateVariables(selectedTpl.components)
+  }, [selectedTpl])
+
+  const hasVariables = templateVars.header.length > 0 || templateVars.body.length > 0
+  const totalSteps = hasVariables ? 4 : 3
 
   // Load broadcasts
   useEffect(() => {
@@ -77,40 +130,76 @@ export function BroadcastSection() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showWizard])
 
-  // Preview audience
-  useEffect(() => {
-    if (!showWizard || wizardStep !== 1) return
-    const filters: AudienceFilters = {
+  const buildFilters = (): AudienceFilters => {
+    const vr = VISIT_RANGES[visitRange]
+    return {
       segments: selectedSegments.length > 0 ? selectedSegments : undefined,
       tagIds: selectedTagIds.length > 0 ? selectedTagIds : undefined,
+      branchIds: selectedBranchIds.length > 0 ? selectedBranchIds : undefined,
       lastContactDays: CONTACT_RANGES[contactRange].maxDays,
       lastContactMin: CONTACT_RANGES[contactRange].minDays,
+      lastVisitMaxDays: vr?.lastVisitMaxDays,
+      lastVisitMinDays: vr?.lastVisitMinDays,
+      minVisits: minVisits ? parseInt(minVisits) : vr?.minVisits,
+      maxVisits: maxVisits ? parseInt(maxVisits) : vr?.maxVisits,
       hasPhone: true,
     }
+  }
+
+  // Preview audience (debounced)
+  useEffect(() => {
+    if (!showWizard || wizardStep !== 1) return
     setPreviewLoading(true)
     const timer = setTimeout(() => {
-      previewAudience(filters).then(result => {
+      previewAudience(buildFilters()).then(result => {
         setAudienceCount(result.count)
         setPreviewLoading(false)
       })
-    }, 300)
+    }, 400)
     return () => clearTimeout(timer)
-  }, [showWizard, wizardStep, selectedSegments, selectedTagIds, contactRange])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showWizard, wizardStep, selectedSegments, selectedTagIds, selectedBranchIds, contactRange, visitRange, minVisits, maxVisits])
+
+  // Construir template_components para Meta API
+  const buildTemplateComponents = (): TemplateVariable[] => {
+    const components: TemplateVariable[] = []
+    const vals = templateVarValues
+
+    if (templateVars.header.length > 0) {
+      components.push({
+        type: 'header',
+        parameters: templateVars.header.map(v => ({
+          type: 'text' as const,
+          text: vals.header?.[v] || `{{${v}}}`,
+        })),
+      })
+    }
+
+    if (templateVars.body.length > 0) {
+      components.push({
+        type: 'body',
+        parameters: templateVars.body.map(v => ({
+          type: 'text' as const,
+          text: vals.body?.[v] || `{{${v}}}`,
+        })),
+      })
+    }
+
+    return components
+  }
 
   const handleCreate = () => {
     if (!name.trim()) { toast.error('Nombre requerido'); return }
     if (!selectedTemplate) { toast.error('Seleccioná un template'); return }
+
     startCreating(async () => {
-      const filters: AudienceFilters = {
-        segments: selectedSegments.length > 0 ? selectedSegments : undefined,
-        tagIds: selectedTagIds.length > 0 ? selectedTagIds : undefined,
-        lastContactDays: CONTACT_RANGES[contactRange].maxDays,
-        lastContactMin: CONTACT_RANGES[contactRange].minDays,
-        hasPhone: true,
-      }
+      const filters = buildFilters()
+      const tplComponents = hasVariables ? buildTemplateComponents() : undefined
       const result = await createBroadcast({
         name: name.trim(),
         templateName: selectedTemplate,
+        templateLanguage: selectedTpl?.language || 'es_AR',
+        templateComponents: tplComponents,
         audienceFilters: filters,
         scheduledFor: scheduledFor || undefined,
       })
@@ -143,14 +232,23 @@ export function BroadcastSection() {
     setName('')
     setSelectedSegments([])
     setSelectedTagIds([])
+    setSelectedBranchIds([])
     setContactRange(0)
+    setVisitRange(0)
+    setMinVisits('')
+    setMaxVisits('')
     setSelectedTemplate('')
     setScheduledFor('')
     setAudienceCount(null)
+    setTemplateVarValues({})
   }
 
   const toggleSegment = (seg: string) => {
     setSelectedSegments(prev => prev.includes(seg) ? prev.filter(s => s !== seg) : [...prev, seg])
+  }
+
+  const toggleBranch = (branchId: string) => {
+    setSelectedBranchIds(prev => prev.includes(branchId) ? prev.filter(id => id !== branchId) : [...prev, branchId])
   }
 
   const statusLabel = (status: string) => {
@@ -162,6 +260,25 @@ export function BroadcastSection() {
       case 'cancelled': return { text: 'Cancelada', cls: 'bg-red-500/10 text-red-400' }
       default: return { text: status, cls: 'bg-white/10 text-muted-foreground' }
     }
+  }
+
+  const canAdvanceFromStep2 = !!selectedTemplate
+  const canAdvanceFromStep3 = !hasVariables || templateVars.body.every(v => templateVarValues.body?.[v]?.trim()) &&
+    templateVars.header.every(v => templateVarValues.header?.[v]?.trim())
+
+  // Determinar el paso correcto según si hay variables
+  const getStepContent = (step: number) => {
+    if (!hasVariables) {
+      // 3 pasos: Audiencia → Template → Confirmar
+      if (step === 1) return 'audience'
+      if (step === 2) return 'template'
+      return 'confirm'
+    }
+    // 4 pasos: Audiencia → Template → Variables → Confirmar
+    if (step === 1) return 'audience'
+    if (step === 2) return 'template'
+    if (step === 3) return 'variables'
+    return 'confirm'
   }
 
   return (
@@ -203,7 +320,7 @@ export function BroadcastSection() {
                       {b.template_name && <span>📋 {b.template_name}</span>}
                       {b.audience_count > 0 && <span className="flex items-center gap-1"><Users className="size-3" /> {b.audience_count}</span>}
                     </div>
-                    {b.status === 'sent' && (
+                    {(b.status === 'sent' || b.status === 'sending') && (
                       <div className="flex gap-3 text-[10px]">
                         <span className="text-green-400">Enviados: {b.sent_count}</span>
                         <span className="text-blue-400">Entregados: {b.delivered_count}</span>
@@ -257,15 +374,15 @@ export function BroadcastSection() {
                 <span className="font-semibold text-white text-sm">Nueva difusión</span>
               </div>
               <div className="flex items-center gap-1.5">
-                {[1, 2, 3].map(s => (
-                  <div key={s} className={`size-2 rounded-full ${wizardStep >= s ? 'bg-green-400' : 'bg-white/10'}`} />
+                {Array.from({ length: totalSteps }, (_, i) => i + 1).map(s => (
+                  <div key={s} className={`size-2 rounded-full transition-colors ${wizardStep >= s ? 'bg-green-400' : 'bg-white/10'}`} />
                 ))}
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-6">
-              {/* Step 1: Audiencia */}
-              {wizardStep === 1 && (
+              {/* Step: Audiencia */}
+              {getStepContent(wizardStep) === 'audience' && (
                 <div className="space-y-6 max-w-lg">
                   <div className="space-y-2">
                     <Label className="text-xs text-muted-foreground uppercase tracking-wider">Nombre de la difusión</Label>
@@ -276,6 +393,32 @@ export function BroadcastSection() {
                     />
                   </div>
 
+                  {/* Sucursales */}
+                  {branches.length > 1 && (
+                    <div className="space-y-3">
+                      <Label className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                        <MapPin className="size-3" /> Sucursales
+                      </Label>
+                      <div className="flex flex-wrap gap-2">
+                        {branches.map(branch => (
+                          <button key={branch.id} onClick={() => toggleBranch(branch.id)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border ${
+                              selectedBranchIds.includes(branch.id)
+                                ? 'text-white border-transparent bg-purple-600'
+                                : 'text-muted-foreground border hover:border-foreground/20'
+                            }`}>
+                            <MapPin className="size-2.5" />
+                            {branch.name}
+                          </button>
+                        ))}
+                      </div>
+                      {selectedBranchIds.length === 0 && (
+                        <p className="text-[10px] text-muted-foreground">Sin filtro = clientes de todas las sucursales</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Segmentos */}
                   <div className="space-y-3">
                     <Label className="text-xs text-muted-foreground uppercase tracking-wider">Segmentos de clientes</Label>
                     <div className="flex flex-wrap gap-2">
@@ -299,7 +442,9 @@ export function BroadcastSection() {
                   {/* Tags */}
                   {tags.length > 0 && (
                     <div className="space-y-3">
-                      <Label className="text-xs text-muted-foreground uppercase tracking-wider">Etiquetas</Label>
+                      <Label className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                        <Tag className="size-3" /> Etiquetas
+                      </Label>
                       <div className="flex flex-wrap gap-2">
                         {tags.map(tag => (
                           <button key={tag.id}
@@ -318,8 +463,11 @@ export function BroadcastSection() {
                     </div>
                   )}
 
+                  {/* Último contacto */}
                   <div className="space-y-3">
-                    <Label className="text-xs text-muted-foreground uppercase tracking-wider">Último contacto</Label>
+                    <Label className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                      <Clock className="size-3" /> Último contacto (mensaje)
+                    </Label>
                     <div className="flex flex-wrap gap-2">
                       {CONTACT_RANGES.map((range, i) => (
                         <button key={i} onClick={() => setContactRange(i)}
@@ -331,6 +479,46 @@ export function BroadcastSection() {
                           {range.label}
                         </button>
                       ))}
+                    </div>
+                  </div>
+
+                  {/* Última visita */}
+                  <div className="space-y-3">
+                    <Label className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                      <Calendar className="size-3" /> Última visita (corte)
+                    </Label>
+                    <div className="flex flex-wrap gap-2">
+                      {VISIT_RANGES.map((range, i) => (
+                        <button key={i} onClick={() => setVisitRange(i)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all border ${
+                            visitRange === i
+                              ? 'text-white border-transparent bg-cyan-600'
+                              : 'text-muted-foreground border hover:border-foreground/20'
+                          }`}>
+                          {range.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Rango de visitas manuales */}
+                  <div className="space-y-3">
+                    <Label className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                      <Hash className="size-3" /> Cantidad de visitas (opcional)
+                    </Label>
+                    <div className="flex items-center gap-3">
+                      <Input
+                        type="number" min={0} placeholder="Mín"
+                        className="bg-card border text-white w-24"
+                        value={minVisits} onChange={e => setMinVisits(e.target.value)}
+                      />
+                      <span className="text-xs text-muted-foreground">a</span>
+                      <Input
+                        type="number" min={0} placeholder="Máx"
+                        className="bg-card border text-white w-24"
+                        value={maxVisits} onChange={e => setMaxVisits(e.target.value)}
+                      />
+                      <span className="text-xs text-muted-foreground">visitas</span>
                     </div>
                   </div>
 
@@ -349,13 +537,13 @@ export function BroadcastSection() {
                 </div>
               )}
 
-              {/* Step 2: Mensaje */}
-              {wizardStep === 2 && (
+              {/* Step: Template */}
+              {getStepContent(wizardStep) === 'template' && (
                 <div className="space-y-6 max-w-lg">
                   <div>
-                    <p className="text-xs font-semibold text-white mb-1">Seleccioná un template</p>
+                    <p className="text-xs font-semibold text-white mb-1">Seleccioná un template aprobado</p>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      WhatsApp requiere templates aprobados por Meta para envíos masivos fuera de la ventana de 24h.
+                      Solo se muestran templates aprobados por Meta. Los templates con variables ({"{{1}}"}, {"{{2}}"}) se personalizan en el siguiente paso.
                     </p>
                   </div>
                   {syncingTemplates ? (
@@ -371,35 +559,135 @@ export function BroadcastSection() {
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {waTemplates.map(tpl => (
-                        <button key={tpl.id} onClick={() => setSelectedTemplate(tpl.name)}
-                          className={`w-full text-left rounded-lg border p-3 transition-colors ${
-                            selectedTemplate === tpl.name
-                              ? 'border-green-500 bg-green-500/5'
-                              : 'border bg-white/5 hover:bg-white/10'
-                          }`}>
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-medium text-white">{tpl.name}</p>
-                            {selectedTemplate === tpl.name && <Check className="size-4 text-green-400" />}
-                          </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-400">{tpl.language}</span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400">{tpl.category}</span>
-                          </div>
-                          {tpl.components?.map((comp: any, i: number) => (
-                            comp.type === 'BODY' && comp.text ? (
-                              <p key={i} className="text-[11px] text-muted-foreground mt-1.5 line-clamp-2">{comp.text}</p>
-                            ) : null
-                          ))}
-                        </button>
+                      {waTemplates.filter(t => t.status === 'approved').map(tpl => {
+                        const vars = extractTemplateVariables(tpl.components ?? [])
+                        const varCount = vars.header.length + vars.body.length
+                        return (
+                          <button key={tpl.id} onClick={() => {
+                            setSelectedTemplate(tpl.name)
+                            setTemplateVarValues({})
+                          }}
+                            className={`w-full text-left rounded-lg border p-3 transition-colors ${
+                              selectedTemplate === tpl.name
+                                ? 'border-green-500 bg-green-500/5'
+                                : 'border bg-white/5 hover:bg-white/10'
+                            }`}>
+                            <div className="flex items-center justify-between">
+                              <p className="text-sm font-medium text-white">{tpl.name}</p>
+                              <div className="flex items-center gap-2">
+                                {varCount > 0 && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400 flex items-center gap-0.5">
+                                    <Variable className="size-2.5" /> {varCount} var{varCount > 1 ? 's' : ''}
+                                  </span>
+                                )}
+                                {selectedTemplate === tpl.name && <Check className="size-4 text-green-400" />}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-400">{tpl.language}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400">{tpl.category}</span>
+                            </div>
+                            {tpl.components?.map((comp: any, i: number) => (
+                              comp.type === 'BODY' && comp.text ? (
+                                <p key={i} className="text-[11px] text-muted-foreground mt-1.5 line-clamp-2">{comp.text}</p>
+                              ) : null
+                            ))}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Step: Variables de template */}
+              {getStepContent(wizardStep) === 'variables' && selectedTpl && (
+                <div className="space-y-6 max-w-lg">
+                  <div>
+                    <p className="text-xs font-semibold text-white mb-1 flex items-center gap-1.5">
+                      <Variable className="size-3.5" /> Variables del template
+                    </p>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      Completá el valor de cada variable. Podés usar placeholders dinámicos que se reemplazan por cada cliente.
+                    </p>
+                  </div>
+
+                  {/* Placeholders disponibles */}
+                  <div className="rounded-lg bg-purple-500/5 border border-purple-500/20 p-3 space-y-2">
+                    <p className="text-[10px] text-purple-400 font-semibold uppercase tracking-wider">Personalización automática</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {PERSONALIZATION_VARS.map(v => (
+                        <span key={v.key} className="text-[10px] px-2 py-1 rounded bg-purple-500/10 text-purple-300 font-mono cursor-help"
+                          title={`Ejemplo: ${v.example}`}>
+                          {v.key} <span className="text-purple-500">= {v.label}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Preview del template */}
+                  <div className="rounded-lg bg-card border p-4 space-y-3">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Vista previa del template</p>
+                    {selectedTpl.components?.map((comp: any, i: number) => {
+                      if (comp.type === 'HEADER' && comp.text) {
+                        return <p key={i} className="text-sm font-bold text-white">{comp.text}</p>
+                      }
+                      if (comp.type === 'BODY' && comp.text) {
+                        return <p key={i} className="text-xs text-muted-foreground whitespace-pre-wrap">{comp.text}</p>
+                      }
+                      if (comp.type === 'FOOTER' && comp.text) {
+                        return <p key={i} className="text-[10px] text-muted-foreground/60 italic">{comp.text}</p>
+                      }
+                      return null
+                    })}
+                  </div>
+
+                  {/* Inputs para header variables */}
+                  {templateVars.header.length > 0 && (
+                    <div className="space-y-3">
+                      <Label className="text-xs text-muted-foreground uppercase tracking-wider">Variables del encabezado</Label>
+                      {templateVars.header.map(v => (
+                        <div key={`header-${v}`} className="space-y-1">
+                          <label className="text-[11px] text-white font-medium">{'{{' + v + '}}'}</label>
+                          <Input
+                            className="bg-card border text-white font-mono text-xs"
+                            placeholder={`Ej: {{primer_nombre}} o texto fijo`}
+                            value={templateVarValues.header?.[v] ?? ''}
+                            onChange={e => setTemplateVarValues(prev => ({
+                              ...prev,
+                              header: { ...prev.header, [v]: e.target.value },
+                            }))}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Inputs para body variables */}
+                  {templateVars.body.length > 0 && (
+                    <div className="space-y-3">
+                      <Label className="text-xs text-muted-foreground uppercase tracking-wider">Variables del cuerpo</Label>
+                      {templateVars.body.map(v => (
+                        <div key={`body-${v}`} className="space-y-1">
+                          <label className="text-[11px] text-white font-medium">{'{{' + v + '}}'}</label>
+                          <Input
+                            className="bg-card border text-white font-mono text-xs"
+                            placeholder={`Ej: {{primer_nombre}}, texto fijo, etc.`}
+                            value={templateVarValues.body?.[v] ?? ''}
+                            onChange={e => setTemplateVarValues(prev => ({
+                              ...prev,
+                              body: { ...prev.body, [v]: e.target.value },
+                            }))}
+                          />
+                        </div>
                       ))}
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Step 3: Confirmar */}
-              {wizardStep === 3 && (
+              {/* Step: Confirmar */}
+              {getStepContent(wizardStep) === 'confirm' && (
                 <div className="space-y-6 max-w-lg">
                   <p className="text-xs font-semibold text-white">Resumen de la difusión</p>
                   <div className="space-y-3 rounded-lg bg-card border border p-4">
@@ -415,6 +703,17 @@ export function BroadcastSection() {
                       <span className="text-xs text-muted-foreground">Template</span>
                       <span className="text-sm text-white">{selectedTemplate || '—'}</span>
                     </div>
+                    {selectedBranchIds.length > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground">Sucursales</span>
+                        <div className="flex gap-1 flex-wrap justify-end">
+                          {selectedBranchIds.map(id => {
+                            const br = branches.find(b => b.id === id)
+                            return <span key={id} className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400">{br?.name ?? id.slice(0, 8)}</span>
+                          })}
+                        </div>
+                      </div>
+                    )}
                     {selectedSegments.length > 0 && (
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-muted-foreground">Segmentos</span>
@@ -423,6 +722,19 @@ export function BroadcastSection() {
                             <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/10 text-white">{s}</span>
                           ))}
                         </div>
+                      </div>
+                    )}
+                    {hasVariables && (
+                      <div className="border-t border pt-3 space-y-2">
+                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Variables</span>
+                        {Object.entries(templateVarValues).map(([section, vars]) => (
+                          Object.entries(vars).map(([key, val]) => (
+                            <div key={`${section}-${key}`} className="flex items-center justify-between">
+                              <span className="text-[11px] text-muted-foreground font-mono">{section}.{'{{' + key + '}}'}</span>
+                              <span className="text-[11px] text-white font-mono">{val || '—'}</span>
+                            </div>
+                          ))
+                        ))}
                       </div>
                     )}
                   </div>
@@ -455,9 +767,12 @@ export function BroadcastSection() {
                 <ChevronLeft className="size-4 mr-1" />
                 {wizardStep > 1 ? 'Anterior' : 'Cancelar'}
               </Button>
-              {wizardStep < 3 ? (
+              {wizardStep < totalSteps ? (
                 <Button onClick={() => setWizardStep(s => s + 1)}
-                  disabled={wizardStep === 2 && !selectedTemplate}
+                  disabled={
+                    (getStepContent(wizardStep) === 'template' && !canAdvanceFromStep2) ||
+                    (getStepContent(wizardStep) === 'variables' && !canAdvanceFromStep3)
+                  }
                   className="bg-green-600 hover:bg-green-500 text-white">
                   Siguiente <ChevronRight className="size-4 ml-1" />
                 </Button>

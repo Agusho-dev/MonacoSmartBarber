@@ -5,6 +5,19 @@ import { getCurrentOrgId } from './org'
 import { revalidatePath } from 'next/cache'
 import type { AudienceFilters } from './client-segments'
 
+// Estructura de variables por componente de template (Meta Cloud API format)
+export interface TemplateVariable {
+  type: 'header' | 'body'
+  parameters: Array<{
+    type: 'text' | 'image' | 'document' | 'video'
+    text?: string
+    // Para media
+    image?: { link: string }
+    document?: { link: string; filename?: string }
+    video?: { link: string }
+  }>
+}
+
 async function requireOrgId(): Promise<{ orgId: string } | { error: string }> {
   const orgId = await getCurrentOrgId()
   if (!orgId) {
@@ -35,6 +48,7 @@ export async function createBroadcast(input: {
   name: string
   templateName: string
   templateLanguage?: string
+  templateComponents?: TemplateVariable[]
   audienceFilters: AudienceFilters
   scheduledFor?: string
 }) {
@@ -54,6 +68,7 @@ export async function createBroadcast(input: {
       message_type: 'template',
       template_name: input.templateName,
       template_language: input.templateLanguage || 'es_AR',
+      template_components: input.templateComponents ?? null,
       audience_filters: input.audienceFilters,
       scheduled_for: input.scheduledFor || null,
     })
@@ -72,7 +87,6 @@ export async function sendBroadcast(broadcastId: string) {
 
   const supabase = createAdminClient()
 
-  // Obtener el broadcast
   const { data: broadcast } = await supabase
     .from('broadcasts')
     .select('*')
@@ -80,7 +94,7 @@ export async function sendBroadcast(broadcastId: string) {
     .eq('organization_id', orgId)
     .single()
 
-  if (!broadcast) return { error: 'Difusion no encontrada' }
+  if (!broadcast) return { error: 'Difusión no encontrada' }
   if (broadcast.status !== 'draft') return { error: 'Solo se pueden enviar difusiones en borrador' }
 
   // Resolver la audiencia
@@ -89,7 +103,23 @@ export async function sendBroadcast(broadcastId: string) {
   if (filterErr) return { error: filterErr }
   if (clients.length === 0) return { error: 'No hay clientes que coincidan con los filtros' }
 
-  // Crear recipients en lotes (Supabase tiene límites de payload)
+  // Obtener nombres de clientes para personalización de variables
+  const clientIds = clients.map(c => c.id)
+  const clientNameMap = new Map<string, string>()
+
+  const PAGE = 500
+  for (let i = 0; i < clientIds.length; i += PAGE) {
+    const chunk = clientIds.slice(i, i + PAGE)
+    const { data: clientRows } = await supabase
+      .from('clients')
+      .select('id, name')
+      .in('id', chunk)
+    if (clientRows) {
+      for (const c of clientRows) clientNameMap.set(c.id, c.name)
+    }
+  }
+
+  // Crear recipients en lotes
   const BATCH = 500
   const recipients = clients.map(c => ({
     broadcast_id: broadcastId,
@@ -126,18 +156,35 @@ export async function sendBroadcast(broadcastId: string) {
     channelId = ch?.id ?? null
   }
 
-  // Crear scheduled_messages para cada destinatario
+  // Template components base del broadcast
+  const baseComponents = (broadcast.template_components as TemplateVariable[] | null) ?? []
+
+  // Crear scheduled_messages con variables personalizadas por cliente
   const scheduledFor = broadcast.scheduled_for || new Date().toISOString()
-  const scheduledRows = clients.map(c => ({
-    client_id: c.id,
-    phone: c.phone,
-    template_name: broadcast.template_name,
-    template_language: broadcast.template_language || 'es_AR',
-    scheduled_for: scheduledFor,
-    status: 'pending',
-    broadcast_id: broadcastId,
-    channel_id: channelId,
-  }))
+
+  const scheduledRows = clients.map(c => {
+    const clientName = clientNameMap.get(c.id) ?? ''
+    const firstName = clientName.split(/\s+/)[0] ?? ''
+
+    // Reemplazar placeholders {{nombre}}, {{telefono}} en las variables
+    const resolvedComponents = resolveTemplateVariables(baseComponents, {
+      nombre: clientName,
+      primer_nombre: firstName,
+      telefono: c.phone,
+    })
+
+    return {
+      client_id: c.id,
+      phone: c.phone,
+      template_name: broadcast.template_name,
+      template_language: broadcast.template_language || 'es_AR',
+      template_params: resolvedComponents.length > 0 ? resolvedComponents : null,
+      scheduled_for: scheduledFor,
+      status: 'pending',
+      broadcast_id: broadcastId,
+      channel_id: channelId,
+    }
+  })
 
   for (let i = 0; i < scheduledRows.length; i += BATCH) {
     const batch = scheduledRows.slice(i, i + BATCH)
@@ -185,4 +232,44 @@ export async function cancelBroadcast(broadcastId: string) {
 
   revalidatePath('/dashboard/mensajeria')
   return { success: true }
+}
+
+// Reemplaza placeholders dinámicos en los parámetros de un template
+function resolveTemplateVariables(
+  components: TemplateVariable[],
+  vars: Record<string, string>
+): TemplateVariable[] {
+  if (components.length === 0) return []
+
+  return components.map(comp => ({
+    ...comp,
+    parameters: comp.parameters.map(param => {
+      if (param.type !== 'text' || !param.text) return param
+      let resolved = param.text
+      for (const [key, val] of Object.entries(vars)) {
+        resolved = resolved.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'gi'), val)
+      }
+      return { ...param, text: resolved }
+    }),
+  }))
+}
+
+// Obtener templates filtrados por canal (sucursal)
+export async function getTemplatesByChannel(channelId?: string) {
+  const result = await requireOrgId()
+  if ('error' in result) return { data: [], error: result.error }
+
+  const supabase = createAdminClient()
+  let query = supabase
+    .from('message_templates')
+    .select('id, name, language, category, status, components, channel_id')
+    .eq('status', 'approved')
+
+  if (channelId) {
+    query = query.eq('channel_id', channelId)
+  }
+
+  const { data, error } = await query.order('name')
+  if (error) return { data: [], error: error.message }
+  return { data: data ?? [], error: null }
 }

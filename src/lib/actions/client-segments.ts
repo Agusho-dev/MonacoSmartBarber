@@ -10,6 +10,11 @@ export interface AudienceFilters {
   tagIds?: string[]             // conversation tag IDs
   manualClientIds?: string[]    // manually selected client IDs
   hasPhone?: boolean            // only clients with phone number
+  branchIds?: string[]          // filtrar por sucursales donde el cliente tuvo visitas
+  lastVisitMaxDays?: number     // máx días desde la última visita
+  lastVisitMinDays?: number     // mín días desde la última visita
+  minVisits?: number            // mínimo de visitas totales
+  maxVisits?: number            // máximo de visitas totales
 }
 
 interface ClientWithSegment {
@@ -197,6 +202,16 @@ async function getFilteredClients(orgId: string, filters: AudienceFilters): Prom
     }
   })
 
+  // Filtro por sucursal: solo clientes que visitaron alguna de las branches seleccionadas
+  if (filters.branchIds && filters.branchIds.length > 0) {
+    const branchVisits = await batchIn<{ client_id: string }>(
+      supabase, 'visits', 'client_id', 'client_id', clientIds,
+      (q: any) => q.in('branch_id', filters.branchIds!).not('completed_at', 'is', null)
+    )
+    const visitedSet = new Set(branchVisits.map(v => v.client_id))
+    enriched = enriched.filter(c => visitedSet.has(c.id))
+  }
+
   // Aplicar filtros
   if (filters.hasPhone !== false) {
     enriched = enriched.filter(c => !!c.phone)
@@ -209,7 +224,7 @@ async function getFilteredClients(orgId: string, filters: AudienceFilters): Prom
   if (filters.lastContactDays != null) {
     const cutoff = new Date(now.getTime() - filters.lastContactDays * 86400000)
     enriched = enriched.filter(c => {
-      if (!c.lastContactDate) return true // Sin contacto = incluir
+      if (!c.lastContactDate) return true
       return new Date(c.lastContactDate) <= cutoff
     })
   }
@@ -220,6 +235,34 @@ async function getFilteredClients(orgId: string, filters: AudienceFilters): Prom
       if (!c.lastContactDate) return false
       return new Date(c.lastContactDate) >= cutoff
     })
+  }
+
+  // Filtro por última visita (días)
+  if (filters.lastVisitMaxDays != null) {
+    const cutoff = new Date(now.getTime() - filters.lastVisitMaxDays * 86400000)
+    enriched = enriched.filter(c => {
+      const vd = visitMap.get(c.id)
+      if (!vd?.lastDate) return true
+      return new Date(vd.lastDate) <= cutoff
+    })
+  }
+
+  if (filters.lastVisitMinDays != null) {
+    const cutoff = new Date(now.getTime() - filters.lastVisitMinDays * 86400000)
+    enriched = enriched.filter(c => {
+      const vd = visitMap.get(c.id)
+      if (!vd?.lastDate) return false
+      return new Date(vd.lastDate) >= cutoff
+    })
+  }
+
+  // Filtro por cantidad de visitas
+  if (filters.minVisits != null) {
+    enriched = enriched.filter(c => c.totalVisits >= filters.minVisits!)
+  }
+
+  if (filters.maxVisits != null) {
+    enriched = enriched.filter(c => c.totalVisits <= filters.maxVisits!)
   }
 
   if (filters.manualClientIds && filters.manualClientIds.length > 0) {

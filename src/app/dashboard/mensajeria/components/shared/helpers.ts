@@ -55,3 +55,22 @@ export function formatDateSeparator(date: string) {
 export function formatCurrency(amount: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(amount)
 }
+
+// Extraer las variables ({{1}}, {{2}}, etc.) de los componentes de un template de Meta
+export function extractTemplateVariables(components: any[]): {
+  header: string[]
+  body: string[]
+} {
+  const result = { header: [] as string[], body: [] as string[] }
+  if (!components) return result
+
+  for (const comp of components) {
+    if (!comp.text) continue
+    const matches = comp.text.match(/\{\{(\d+)\}\}/g) ?? []
+    const vars = matches.map((m: string) => m.replace(/[{}]/g, ''))
+    if (comp.type === 'HEADER') result.header = vars
+    if (comp.type === 'BODY') result.body = vars
+  }
+
+  return result
+}
