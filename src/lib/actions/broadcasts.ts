@@ -89,7 +89,8 @@ export async function sendBroadcast(broadcastId: string) {
   if (filterErr) return { error: filterErr }
   if (clients.length === 0) return { error: 'No hay clientes que coincidan con los filtros' }
 
-  // Crear recipients
+  // Crear recipients en lotes (Supabase tiene límites de payload)
+  const BATCH = 500
   const recipients = clients.map(c => ({
     broadcast_id: broadcastId,
     client_id: c.id,
@@ -97,11 +98,13 @@ export async function sendBroadcast(broadcastId: string) {
     status: 'pending',
   }))
 
-  const { error: recipErr } = await supabase
-    .from('broadcast_recipients')
-    .insert(recipients)
-
-  if (recipErr) return { error: 'Error al crear destinatarios: ' + recipErr.message }
+  for (let i = 0; i < recipients.length; i += BATCH) {
+    const batch = recipients.slice(i, i + BATCH)
+    const { error: recipErr } = await supabase
+      .from('broadcast_recipients')
+      .insert(batch)
+    if (recipErr) return { error: 'Error al crear destinatarios: ' + recipErr.message }
+  }
 
   // Obtener canal WA para scheduled_messages
   const { data: orgBranches } = await supabase
@@ -136,11 +139,13 @@ export async function sendBroadcast(broadcastId: string) {
     channel_id: channelId,
   }))
 
-  const { error: schedErr } = await supabase
-    .from('scheduled_messages')
-    .insert(scheduledRows)
-
-  if (schedErr) return { error: 'Error al programar mensajes: ' + schedErr.message }
+  for (let i = 0; i < scheduledRows.length; i += BATCH) {
+    const batch = scheduledRows.slice(i, i + BATCH)
+    const { error: schedErr } = await supabase
+      .from('scheduled_messages')
+      .insert(batch)
+    if (schedErr) return { error: 'Error al programar mensajes: ' + schedErr.message }
+  }
 
   // Actualizar broadcast
   await supabase

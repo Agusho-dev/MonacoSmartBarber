@@ -85,39 +85,79 @@ export async function getFilteredClientIds(filters: AudienceFilters): Promise<{
   }
 }
 
+async function fetchAllRows<T>(
+  queryFn: (from: number, to: number) => PromiseLike<{ data: T[] | null }>
+): Promise<T[]> {
+  const PAGE = 1000
+  const all: T[] = []
+  let offset = 0
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data } = await queryFn(offset, offset + PAGE - 1)
+    if (!data || data.length === 0) break
+    all.push(...data)
+    if (data.length < PAGE) break
+    offset += PAGE
+  }
+  return all
+}
+
+async function batchIn<T>(
+  supabase: ReturnType<typeof createAdminClient>,
+  table: string,
+  selectCols: string,
+  inColumn: string,
+  inValues: string[],
+  extraFilters?: (q: any) => any
+): Promise<T[]> {
+  const BATCH = 500
+  const all: T[] = []
+  for (let i = 0; i < inValues.length; i += BATCH) {
+    const chunk = inValues.slice(i, i + BATCH)
+    let q = supabase.from(table).select(selectCols).in(inColumn, chunk)
+    if (extraFilters) q = extraFilters(q)
+    const { data } = await q
+    if (data) all.push(...(data as T[]))
+  }
+  return all
+}
+
 async function getFilteredClients(orgId: string, filters: AudienceFilters): Promise<ClientWithSegment[]> {
   const supabase = createAdminClient()
 
-  // Obtener todos los clientes de la org con teléfono
-  const { data: rawClients } = await supabase
-    .from('clients')
-    .select('id, name, phone, instagram, created_at')
-    .eq('organization_id', orgId)
-    .order('name')
+  // Obtener TODOS los clientes de la org (paginado para superar el límite de 1000)
+  const rawClients = await fetchAllRows<{
+    id: string; name: string; phone: string | null; instagram: string | null; created_at: string
+  }>((from, to) =>
+    supabase
+      .from('clients')
+      .select('id, name, phone, instagram, created_at')
+      .eq('organization_id', orgId)
+      .order('name')
+      .range(from, to)
+  )
 
-  if (!rawClients || rawClients.length === 0) return []
+  if (rawClients.length === 0) return []
 
   const clientIds = rawClients.map(c => c.id)
 
-  // Obtener visitas agrupadas por cliente
-  const { data: visits } = await supabase
-    .from('visits')
-    .select('client_id, completed_at')
-    .in('client_id', clientIds)
-    .not('completed_at', 'is', null)
+  // Obtener visitas en lotes para evitar límites de URL y filas
+  const visits = await batchIn<{ client_id: string; completed_at: string }>(
+    supabase, 'visits', 'client_id, completed_at', 'client_id', clientIds,
+    (q: any) => q.not('completed_at', 'is', null)
+  )
 
-  // Obtener último mensaje por cliente (via conversations)
-  const { data: conversations } = await supabase
-    .from('conversations')
-    .select('client_id, last_message_at')
-    .in('client_id', clientIds)
-    .not('last_message_at', 'is', null)
+  // Obtener último mensaje por cliente (via conversations) en lotes
+  const conversations = await batchIn<{ client_id: string; last_message_at: string }>(
+    supabase, 'conversations', 'client_id, last_message_at', 'client_id', clientIds,
+    (q: any) => q.not('last_message_at', 'is', null)
+  )
 
   // Agregar datos de visitas
   const now = new Date()
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000)
   const visitMap = new Map<string, { total: number; last30: number; lastDate: string | null }>()
-  for (const v of visits ?? []) {
+  for (const v of visits) {
     const entry = visitMap.get(v.client_id) ?? { total: 0, last30: 0, lastDate: null }
     entry.total++
     if (new Date(v.completed_at) >= thirtyDaysAgo) entry.last30++
@@ -127,7 +167,7 @@ async function getFilteredClients(orgId: string, filters: AudienceFilters): Prom
 
   // Último mensaje por cliente
   const msgMap = new Map<string, string>()
-  for (const c of conversations ?? []) {
+  for (const c of conversations) {
     if (c.client_id) {
       const existing = msgMap.get(c.client_id)
       if (!existing || c.last_message_at > existing) {
