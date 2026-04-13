@@ -272,6 +272,7 @@ export interface QueueEntry {
   is_dynamic: boolean
   break_request_id: string | null
   checked_in_at: string
+  priority_order: string
   started_at: string | null
   completed_at: string | null
   created_at: string

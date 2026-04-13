@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
-import { startService, cancelQueueEntry, reassignBarber } from '@/lib/actions/queue'
+import { startService, attendNextClient, cancelQueueEntry, reassignBarber } from '@/lib/actions/queue'
 import { fetchBarberDayStats } from '@/lib/actions/barber'
 import { logoutBarber } from '@/lib/actions/auth'
 import {
@@ -154,7 +154,7 @@ export function QueuePanel({
   const [approveLoading, setApproveLoading] = useState<string | null>(null)
   const [approveCutsInputs, setApproveCutsInputs] = useState<Record<string, string>>({})
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
-  const [dynamicCooldownMs, setDynamicCooldownMs] = useState(60_000)
+  const [dynamicCooldownMs, setDynamicCooldownMs] = useState(120_000)
 
   const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false)
   const [deactivateLoading, setDeactivateLoading] = useState<string | null>(null)
@@ -438,9 +438,9 @@ export function QueuePanel({
   )
 
   // "Mi fila": clients that have no barber assigned or are assigned to me (including ghost breaks)
-  // Ordenado por checked_in_at (quien lleva más tiempo esperando primero),
-  // no por position que puede divergir del tiempo real de espera tras reasignaciones dinámicas.
+  // Ordenado por priority_order (fuente única de verdad para el FIFO global).
   // Los breaks mantienen su orden por position para respetar la ubicación configurada.
+  // Nota: la asignación real ocurre en el servidor via attendNextClient(), esto es solo visualización.
   const myWaitingEntries = dynamicEntries
     .filter(
       (e) =>
@@ -450,7 +450,7 @@ export function QueuePanel({
     .sort((a, b) => {
       if (a.is_break !== b.is_break) return a.is_break ? 1 : -1
       if (a.is_break && b.is_break) return a.position - b.position
-      return new Date(a.checked_in_at).getTime() - new Date(b.checked_in_at).getTime()
+      return new Date(a.priority_order).getTime() - new Date(b.priority_order).getTime()
     })
 
   // "Fila general": ALL waiting clients
@@ -602,8 +602,13 @@ export function QueuePanel({
 
   async function handleStartService(entryId: string) {
     setActionLoading(entryId)
-    const result = await startService(entryId, session.staff_id)
-    if ('error' in result) toast.error(result.error)
+    // Asignación atómica en el servidor: el backend decide quién es el siguiente (FIFO global)
+    const result = await attendNextClient(session.staff_id, session.branch_id)
+    if ('error' in result) {
+      toast.error(result.error)
+    } else if (!result.entryId) {
+      toast.info('No hay clientes en espera')
+    }
     await fetchQueue()
     setActionLoading(null)
   }

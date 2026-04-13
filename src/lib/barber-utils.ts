@@ -153,7 +153,7 @@ export function assignDynamicBarbers(
   dailyServiceCounts: Record<string, number> = {},
   lastCompletedAt: Record<string, string> = {},
   notClockedInIds: Set<string> = new Set(),
-  cooldownMs = 60_000
+  cooldownMs = 120_000
 ): DynamicQueueEntry[] {
   const result: DynamicQueueEntry[] = []
 
@@ -180,9 +180,18 @@ export function assignDynamicBarbers(
     const lastCompleted = lastCompletedAt[b.id]
     if (lastCompleted) {
       const elapsedMs = currentTime - new Date(lastCompleted).getTime()
-      // Cooldown configurable: tratar temporalmente como ocupado sumándole +1 carga para no robar clientes en camino
+      // Cooldown progresivo: penalización mayor cuanto más reciente fue el último corte
+      // Evita que barberos rápidos encadenen cortes sin pausa
       if (elapsedMs > 0 && elapsedMs < cooldownMs) {
-        barberLoad.set(b.id, barberLoad.get(b.id)! + 1)
+        let cooldownLoad: number
+        if (elapsedMs < 30_000) {
+          cooldownLoad = 3  // <30s: cliente probablemente aún en camino
+        } else if (elapsedMs < 60_000) {
+          cooldownLoad = 2  // 30-60s: probable
+        } else {
+          cooldownLoad = 1  // 60-120s: bajo
+        }
+        barberLoad.set(b.id, barberLoad.get(b.id)! + cooldownLoad)
       }
     }
   }

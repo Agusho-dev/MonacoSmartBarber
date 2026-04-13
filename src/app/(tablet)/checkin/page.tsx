@@ -112,7 +112,7 @@ export default function CheckinPage() {
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [now, setNow] = useState(Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
-  const [dynamicCooldownMs, setDynamicCooldownMs] = useState(60_000)
+  const [dynamicCooldownMs, setDynamicCooldownMs] = useState(120_000)
   const [notClockedInBarbers, setNotClockedInBarbers] = useState<Set<string>>(new Set())
   const [barberNextArrival, setBarberNextArrival] = useState<Record<string, string>>({})
 

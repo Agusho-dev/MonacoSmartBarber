@@ -16,6 +16,41 @@ export async function deactivateBarber(staffId: string) {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'Organización no encontrada' }
 
+  // Proteger servicio en progreso: no permitir desactivar si tiene un corte activo
+  const { data: inProgressEntry } = await supabase
+    .from('queue_entries')
+    .select('id, client_id, branch_id')
+    .eq('barber_id', staffId)
+    .eq('status', 'in_progress')
+    .eq('is_break', false)
+    .maybeSingle()
+
+  if (inProgressEntry) {
+    // Buscar otro barbero activo en la misma sucursal para reasignar
+    const { data: otherBarber } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('branch_id', inProgressEntry.branch_id)
+      .eq('role', 'barber')
+      .eq('is_active', true)
+      .eq('organization_id', orgId)
+      .neq('id', staffId)
+      .limit(1)
+      .maybeSingle()
+
+    if (!otherBarber) {
+      return {
+        error: 'No se puede desactivar: tiene un servicio en progreso y no hay otro barbero activo para reasignarlo. Finalizá o reasigná el corte primero.',
+      }
+    }
+
+    // Reasignar el servicio en progreso a otro barbero
+    await supabase
+      .from('queue_entries')
+      .update({ barber_id: otherBarber.id })
+      .eq('id', inProgressEntry.id)
+  }
+
   const { error: updateError } = await supabase
     .from('staff')
     .update({ is_active: false })
@@ -26,6 +61,7 @@ export async function deactivateBarber(staffId: string) {
     return { error: 'Error al desactivar barbero: ' + updateError.message }
   }
 
+  // Reasignar clientes waiting al pool dinámico, preservando priority_order
   const { data: waitingEntries, error: queueError } = await supabase
     .from('queue_entries')
     .select('id')
@@ -51,7 +87,7 @@ export async function deactivateBarber(staffId: string) {
     }
   }
 
-  // Cancel any break-related ghost entries for the deactivated barber
+  // Cancelar ghost entries de descanso del barbero desactivado
   await supabase
     .from('queue_entries')
     .update({ status: 'cancelled' })

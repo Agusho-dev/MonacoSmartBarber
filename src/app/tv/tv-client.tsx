@@ -213,7 +213,7 @@ export function TvClient({
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [now, setNow] = useState(() => Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
-  const [dynamicCooldownMs, setDynamicCooldownMs] = useState(60_000)
+  const [dynamicCooldownMs, setDynamicCooldownMs] = useState(120_000)
   const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
   const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
   const [latestAttendance, setLatestAttendance] = useState<Record<string, string>>({})

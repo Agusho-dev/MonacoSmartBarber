@@ -75,6 +75,7 @@ export async function checkinClient(formData: FormData) {
     p_branch_id: branchId,
   })
 
+  const now = new Date().toISOString()
   const { data: queueEntry, error: queueError } = await supabase
     .from('queue_entries')
     .insert({
@@ -85,6 +86,7 @@ export async function checkinClient(formData: FormData) {
       position: position ?? 1,
       status: 'waiting',
       is_dynamic: !barberId,
+      priority_order: now,
     })
     .select('id')
     .single()
@@ -142,6 +144,51 @@ export async function startService(queueEntryId: string, barberId: string) {
 
   revalidatePath('/barbero/fila')
   return { success: true }
+}
+
+/**
+ * Asigna atómicamente el próximo cliente al barbero e inicia el servicio.
+ * Usa FIFO global: el cliente con menor priority_order que esté
+ * asignado a este barbero o sea dinámico (barber_id IS NULL).
+ * SELECT ... FOR UPDATE SKIP LOCKED previene race conditions entre barberos.
+ */
+export async function attendNextClient(barberId: string, branchId: string) {
+  const supabase = createAdminClient()
+
+  const orgAccess = await validateBranchAccess(branchId)
+  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+
+  // 1. Asignar atómicamente el próximo cliente (FIFO global con lock)
+  const { data: entryId, error: assignError } = await supabase.rpc('assign_next_client', {
+    p_barber_id: barberId,
+    p_branch_id: branchId,
+  })
+
+  if (assignError) {
+    return { error: 'Error al asignar próximo cliente: ' + assignError.message }
+  }
+
+  if (!entryId) {
+    return { success: true, entryId: null }
+  }
+
+  // 2. Iniciar servicio
+  const { error: startError } = await supabase
+    .from('queue_entries')
+    .update({
+      status: 'in_progress',
+      started_at: new Date().toISOString(),
+    })
+    .eq('id', entryId)
+    .eq('status', 'waiting')
+
+  if (startError) {
+    return { error: 'Error al iniciar servicio' }
+  }
+
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
+  return { success: true, entryId }
 }
 
 export async function completeService(
@@ -688,6 +735,7 @@ export async function checkinClientByFace(
     p_branch_id: branchId,
   })
 
+  const nowFace = new Date().toISOString()
   const { data: queueEntry, error: queueError } = await supabase
     .from('queue_entries')
     .insert({
@@ -698,6 +746,7 @@ export async function checkinClientByFace(
       position: position ?? 1,
       status: 'waiting',
       is_dynamic: !barberId,
+      priority_order: nowFace,
     })
     .select('id')
     .single()
@@ -774,7 +823,7 @@ export async function reassignMyBarber(
 }
 
 export async function updateQueueOrder(
-  updates: { id: string; position: number; barber_id?: string | null; is_dynamic?: boolean }[]
+  updates: { id: string; position: number; barber_id?: string | null; is_dynamic?: boolean; priority_order?: string }[]
 ) {
   if (updates.length === 0) return { success: true }
 
@@ -798,6 +847,7 @@ export async function updateQueueOrder(
     position: u.position,
     ...(u.barber_id !== undefined && { barber_id: u.barber_id ?? '' }),
     ...(u.is_dynamic !== undefined && { is_dynamic: u.is_dynamic }),
+    ...(u.priority_order !== undefined && { priority_order: u.priority_order }),
   }))
 
   const { error } = await supabase.rpc('batch_update_queue_entries', {
@@ -835,6 +885,7 @@ export async function createBreakEntry(branchId: string, barberId: string, break
 
   const shouldStartImmediately = !currentService
 
+  const nowBreak = new Date().toISOString()
   const { data: queueEntry, error } = await supabase
     .from('queue_entries')
     .insert({
@@ -842,9 +893,10 @@ export async function createBreakEntry(branchId: string, barberId: string, break
       barber_id: barberId,
       position: position ?? 1,
       status: shouldStartImmediately ? 'in_progress' : 'waiting',
-      started_at: shouldStartImmediately ? new Date().toISOString() : null,
+      started_at: shouldStartImmediately ? nowBreak : null,
       is_break: true,
       is_dynamic: false,
+      priority_order: nowBreak,
     })
     .select('id')
     .single()

@@ -96,23 +96,26 @@ async function getApproverStaffId(adminSupabase: ReturnType<typeof createAdminCl
 }
 
 /**
- * Calcula la posición correcta para una entrada ghost de descanso en la cola.
+ * Calcula la posición y priority_order correctos para una entrada ghost de descanso.
+ * Usa priority_order como fuente de verdad para el FIFO global unificado.
  */
 async function calculateGhostPosition(
     supabase: ReturnType<typeof createAdminClient>,
     staffId: string,
     branchId: string,
     cutsBeforeBreak: number
-): Promise<number> {
+): Promise<{ position: number; priorityOrder: string }> {
     const { data: entries } = await supabase
         .from('queue_entries')
-        .select('id, position, barber_id, status, is_break')
+        .select('id, position, priority_order, barber_id, status, is_break')
         .eq('branch_id', branchId)
         .in('status', ['waiting', 'in_progress'])
-        .order('position')
+        .order('priority_order')
 
-    if (!entries || entries.length === 0) return 1
+    const now = new Date().toISOString()
+    if (!entries || entries.length === 0) return { position: 1, priorityOrder: now }
 
+    // Clientes reales esperando que este barbero atendería (asignados a él o dinámicos)
     const barberWaiting = entries.filter(
         e => e.status === 'waiting' && !e.is_break && (!e.barber_id || e.barber_id === staffId)
     )
@@ -123,19 +126,33 @@ async function calculateGhostPosition(
         )
         if (barberInProgress) {
             if (cutsBeforeBreak === 0 && barberWaiting.length > 0) {
-                return barberWaiting[0].position
+                return {
+                    position: barberWaiting[0].position,
+                    priorityOrder: barberWaiting[0].priority_order,
+                }
             }
-            return barberInProgress.position + 1
+            return {
+                position: barberInProgress.position + 1,
+                priorityOrder: barberInProgress.priority_order,
+            }
         }
         if (entries.length > 0) {
-            return Math.max(...entries.map(e => e.position)) + 1
+            return {
+                position: Math.max(...entries.map(e => e.position)) + 1,
+                priorityOrder: now,
+            }
         }
-        return 1
+        return { position: 1, priorityOrder: now }
     }
 
     const targetIdx = Math.min(cutsBeforeBreak, barberWaiting.length)
     const targetEntry = barberWaiting[targetIdx - 1]
-    return targetEntry.position + 1
+    // priority_order 1ms después del target para insertar el break justo después
+    const targetTime = new Date(targetEntry.priority_order).getTime()
+    return {
+        position: targetEntry.position + 1,
+        priorityOrder: new Date(targetTime + 1).toISOString(),
+    }
 }
 
 // ─── Solicitudes de descanso ────────────────────────────────────────────────
@@ -199,7 +216,7 @@ export async function approveBreak(requestId: string, cutsBeforeBreak: number) {
 
     if (updateErr) return { error: updateErr.message }
 
-    const ghostPosition = await calculateGhostPosition(supabase, req.staff_id, req.branch_id, cutsBeforeBreak)
+    const ghost = await calculateGhostPosition(supabase, req.staff_id, req.branch_id, cutsBeforeBreak)
 
     const { data: currentService } = await supabase
         .from('queue_entries')
@@ -210,17 +227,19 @@ export async function approveBreak(requestId: string, cutsBeforeBreak: number) {
         .maybeSingle()
 
     const shouldStartImmediately = cutsBeforeBreak === 0 && !currentService
+    const nowTs = new Date().toISOString()
 
     const { error: insertErr } = await supabase.from('queue_entries').insert({
         branch_id: req.branch_id,
         client_id: null,
         barber_id: req.staff_id,
         status: shouldStartImmediately ? 'in_progress' : 'waiting',
-        position: ghostPosition,
+        position: ghost.position,
+        priority_order: ghost.priorityOrder,
         is_break: true,
         break_request_id: req.id,
-        checked_in_at: new Date().toISOString(),
-        started_at: shouldStartImmediately ? new Date().toISOString() : null,
+        checked_in_at: nowTs,
+        started_at: shouldStartImmediately ? nowTs : null,
     })
 
     if (insertErr) return { error: insertErr.message }

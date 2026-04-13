@@ -29,7 +29,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { createClient } from '@/lib/supabase/client'
-import { cancelQueueEntry, updateQueueOrder, createBreakEntry, startService, checkinClient } from '@/lib/actions/queue'
+import { cancelQueueEntry, updateQueueOrder, createBreakEntry, startService, attendNextClient, checkinClient } from '@/lib/actions/queue'
 import { searchClients } from '@/lib/actions/clients'
 import { CompleteServiceDialog } from '@/components/barber/complete-service-dialog'
 import { useBranchStore } from '@/stores/branch-store'
@@ -1245,20 +1245,30 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
     const waitingItems = finalEntries.filter(e => e.status === 'waiting' && (!selectedBranchId || e.branch_id === selectedBranchId))
     
     // Lista de updates para Supabase
-    const updates: { id: string; position: number; barber_id?: string | null; is_dynamic?: boolean }[] = []
-    
+    const updates: { id: string; position: number; barber_id?: string | null; is_dynamic?: boolean; priority_order?: string }[] = []
+
+    // Calcular priority_order sintéticos: tomar el más antiguo como base y espaciar 1s entre cada uno
+    const sortedByPriority = [...waitingItems].sort((a, b) =>
+      new Date(a.priority_order).getTime() - new Date(b.priority_order).getTime()
+    )
+    const basePriority = sortedByPriority.length > 0
+      ? new Date(sortedByPriority[0].priority_order).getTime()
+      : Date.now()
+
     waitingItems.forEach((entry, index) => {
       const newPos = index + 1
-      
+      const newPriorityOrder = new Date(basePriority + index * 1000).toISOString()
+
       const dbEntry = confirmedEntriesRef.current.find(e => e.id === entry.id) || entry
       const wasChanged = entry.position !== newPos || entry.barber_id !== dbEntry.barber_id || entry.is_dynamic !== dbEntry.is_dynamic
-      
+
       if (wasChanged) {
         updates.push({
           id: entry.id,
           position: newPos,
           barber_id: entry.barber_id,
-          is_dynamic: entry.is_dynamic
+          is_dynamic: entry.is_dynamic,
+          priority_order: newPriorityOrder,
         })
       }
     })
@@ -1268,7 +1278,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
 
       const locallyUpdated = finalEntries.map(e => {
         const update = updates.find(u => u.id === e.id)
-        return update ? { ...e, position: update.position } : e
+        return update ? { ...e, position: update.position, ...(update.priority_order && { priority_order: update.priority_order }) } : e
       })
       setEntries(locallyUpdated)
       // Actualizar ref inmediatamente para que drags consecutivos funcionen sin esperar la DB
