@@ -23,8 +23,8 @@ export type TemplateStatus = 'pending' | 'approved' | 'rejected'
 export type ScheduledMessageStatus = 'pending' | 'sent' | 'failed' | 'cancelled'
 
 // Workflow automation types
-export type WorkflowTriggerType = 'keyword' | 'template_reply' | 'button_response' | 'post_service' | 'days_after_visit'
-export type WorkflowNodeType = 'trigger' | 'send_message' | 'send_media' | 'send_buttons' | 'send_list' | 'send_template' | 'add_tag' | 'remove_tag' | 'condition' | 'wait_reply' | 'crm_alert' | 'delay'
+export type WorkflowTriggerType = 'keyword' | 'template_reply' | 'button_response' | 'post_service' | 'days_after_visit' | 'message_received'
+export type WorkflowNodeType = 'trigger' | 'send_message' | 'send_media' | 'send_buttons' | 'send_list' | 'send_template' | 'add_tag' | 'remove_tag' | 'condition' | 'wait_reply' | 'crm_alert' | 'delay' | 'ai_response' | 'handoff_human' | 'http_request'
 export type WorkflowExecutionStatus = 'active' | 'waiting_reply' | 'completed' | 'cancelled' | 'error'
 export type CrmAlertType = 'info' | 'warning' | 'urgent'
 

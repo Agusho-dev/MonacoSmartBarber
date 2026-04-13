@@ -5,6 +5,7 @@ import {
   ArrowLeft, Save, Plus, ZoomIn, ZoomOut, Maximize2,
   MessageSquare, Image, LayoutGrid, List, Tag,
   GitBranch, Bell, Clock, Send, Trash2, Pencil, MapPin, Settings2, CalendarDays,
+  Bot, UserCheck, Globe, Inbox,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -12,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
-import { getWorkflow, saveWorkflowGraph, updateWorkflow } from '@/lib/actions/workflows'
+import { getWorkflow, saveWorkflowGraph, updateWorkflow, syncTriggerToWorkflow } from '@/lib/actions/workflows'
 import type { WorkflowNode, WorkflowEdge, WorkflowWithGraph, WorkflowNodeType, WorkflowTriggerType } from '@/lib/types/database'
 import { WorkflowNodeEditor } from './workflow-node-editor'
 import { useMensajeria } from '../shared/mensajeria-context'
@@ -31,6 +32,9 @@ const NODE_TYPES = [
   { type: 'add_tag', label: 'Agregar etiqueta', icon: Tag, color: '#14b8a6', category: 'Acciones' },
   { type: 'remove_tag', label: 'Quitar etiqueta', icon: Tag, color: '#f43f5e', category: 'Acciones' },
   { type: 'crm_alert', label: 'Alerta CRM', icon: Bell, color: '#ef4444', category: 'Acciones' },
+  { type: 'ai_response', label: 'Respuesta IA', icon: Bot, color: '#a855f7', category: 'IA' },
+  { type: 'handoff_human', label: 'Derivar a humano', icon: UserCheck, color: '#f97316', category: 'IA' },
+  { type: 'http_request', label: 'HTTP Request', icon: Globe, color: '#0ea5e9', category: 'Acciones' },
 ] as const
 
 function getNodeMeta(type: string) {
@@ -38,6 +42,7 @@ function getNodeMeta(type: string) {
 }
 
 const TRIGGER_TYPES = [
+  { value: 'message_received', label: 'Cualquier mensaje', icon: Inbox, description: 'Se activa con cualquier mensaje recibido (sin filtro)' },
   { value: 'keyword', label: 'Palabra clave', icon: MessageSquare, description: 'Responde cuando un mensaje contiene palabras clave' },
   { value: 'template_reply', label: 'Respuesta a template', icon: GitBranch, description: 'Se activa cuando un cliente responde a un template' },
   { value: 'post_service', label: 'Post-servicio', icon: Clock, description: 'Envía un mensaje después de completar un servicio' },
@@ -330,6 +335,15 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
 
   const handleSave = () => {
     startSaving(async () => {
+      // Sincronizar trigger node config al registro del workflow
+      const triggerNode = nodes.find(n => n.is_entry_point)
+      if (triggerNode) {
+        const triggerType = (triggerNode.config.trigger_type as string) ?? workflow?.trigger_type ?? 'message_received'
+        const triggerConfig = { ...triggerNode.config }
+        delete triggerConfig.trigger_type
+        await syncTriggerToWorkflow(workflowId, triggerType, triggerConfig)
+        setWorkflow(prev => prev ? { ...prev, trigger_type: triggerType as typeof prev.trigger_type, trigger_config: triggerConfig } : prev)
+      }
       const result = await saveWorkflowGraph(workflowId, nodes, edges)
       if (result.error) { toast.error(result.error); return }
       toast.success('Workflow guardado')
@@ -647,6 +661,15 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
                       {node.node_type === 'send_list' && (
                         <span>Lista de opciones</span>
                       )}
+                      {node.node_type === 'ai_response' && (
+                        <span>IA: {(node.config.model as string) || 'sin modelo'}</span>
+                      )}
+                      {node.node_type === 'handoff_human' && (
+                        <span>Transferir a agente humano</span>
+                      )}
+                      {node.node_type === 'http_request' && (
+                        <span>{(node.config.method as string) || 'POST'} {(node.config.url as string)?.slice(0, 25) || 'sin URL'}</span>
+                      )}
                     </div>
                   </div>
 
@@ -714,7 +737,7 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
                   className="absolute left-1/2 bottom-full mb-3 -translate-x-1/2 w-64 max-h-[min(60vh,420px)] overflow-y-auto bg-card border rounded-xl shadow-2xl p-2 space-y-1"
                   onPointerDown={e => e.stopPropagation()}
                 >
-                  {['Mensajes', 'Lógica', 'Acciones'].map(category => (
+                  {['Mensajes', 'Lógica', 'IA', 'Acciones'].map(category => (
                     <div key={category}>
                       <p className="text-[10px] text-muted-foreground font-medium px-2 py-1 sticky top-0 bg-card">{category}</p>
                       {NODE_TYPES.filter(n => n.category === category).map(nt => {
@@ -745,7 +768,14 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
       {selectedNode && (
         <WorkflowNodeEditor
           node={selectedNode}
-          onUpdateConfig={(config) => updateNodeConfig(selectedNode.id, config)}
+          workflow={workflow}
+          onUpdateConfig={(config) => {
+            updateNodeConfig(selectedNode.id, config)
+            // Si es el trigger node, sincronizar trigger_type al estado del workflow
+            if (selectedNode.is_entry_point && config.trigger_type) {
+              setWorkflow(prev => prev ? { ...prev, trigger_type: config.trigger_type as typeof prev.trigger_type } : prev)
+            }
+          }}
           onUpdateLabel={(label) => updateNodeLabel(selectedNode.id, label)}
           onClose={() => setSelectedNodeId(null)}
           onDelete={() => deleteNode(selectedNode.id)}
@@ -1059,6 +1089,12 @@ function getDefaultConfig(type: string): Record<string, unknown> {
       return { tag_id: '' }
     case 'crm_alert':
       return { alert_type: 'info', title: '', message: '' }
+    case 'ai_response':
+      return { model: 'gpt-4o-mini', system_prompt: '', temperature: 0.7, max_tokens: 500 }
+    case 'handoff_human':
+      return { assign_to: 'auto', client_message: 'Te estamos transfiriendo con un agente...', create_alert: true, alert_type: 'urgent' }
+    case 'http_request':
+      return { url: '', method: 'POST', headers: {}, body_template: '', response_variable: 'http_response' }
     default:
       return {}
   }

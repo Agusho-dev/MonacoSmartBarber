@@ -28,6 +28,7 @@ export default async function MensajeriaPage() {
     clients,
     { data: waConfig },
     { data: igConfig },
+    { data: aiConfig },
     { data: tags },
     { data: appSettings },
   ] = await Promise.all([
@@ -91,6 +92,14 @@ export default async function MensajeriaPage() {
       : Promise.resolve({ data: null }),
     orgId
       ? supabase
+          .from('organization_ai_config')
+          .select('*')
+          .eq('organization_id', orgId)
+          .maybeSingle()
+          .then((r) => ({ data: r.data }))
+      : Promise.resolve({ data: null }),
+    orgId
+      ? supabase
           .from('conversation_tags')
           .select('*')
           .eq('organization_id', orgId)
@@ -115,6 +124,7 @@ export default async function MensajeriaPage() {
       clients={clients}
       waConfig={waConfig ?? null}
       igConfig={igConfig ?? null}
+      aiConfig={aiConfig ?? null}
       initialTags={tags ?? []}
       appSettings={appSettings ?? null}
       branches={(orgBranches ?? []) as { id: string; name: string }[]}

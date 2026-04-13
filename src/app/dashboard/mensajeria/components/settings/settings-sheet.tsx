@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import {
-  Copy, Eye, EyeOff, Wifi, WifiOff, ExternalLink, Instagram, Facebook, Plus, X,
+  Copy, Eye, EyeOff, Wifi, WifiOff, ExternalLink, Instagram, Facebook, Plus, X, Bot,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -12,6 +12,7 @@ import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { toast } from 'sonner'
 import { saveOrgWhatsAppConfig } from '@/lib/actions/whatsapp-meta'
 import { saveOrgInstagramConfig } from '@/lib/actions/instagram-meta'
+import { saveOrgAiConfig } from '@/lib/actions/ai-config'
 import { WhatsAppIcon } from '../shared/icons'
 import { TAG_COLORS } from '../shared/helpers'
 import { useMensajeria } from '../shared/mensajeria-context'

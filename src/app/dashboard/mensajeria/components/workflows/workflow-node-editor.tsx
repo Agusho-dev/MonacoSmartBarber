@@ -1,13 +1,13 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
-import { X, Plus, Trash2, MessageSquare, Tag, Bell, Image, LayoutGrid, GitBranch, Clock, Send, List as ListIcon, User, MessageCircleReply, Hash } from 'lucide-react'
+import { X, Plus, Trash2, MessageSquare, Tag, Bell, Image, LayoutGrid, GitBranch, Clock, Send, List as ListIcon, User, MessageCircleReply, Hash, Bot, UserCheck, Globe, Inbox, CalendarDays } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useMensajeria } from '../shared/mensajeria-context'
-import type { WorkflowNode } from '@/lib/types/database'
+import type { WorkflowNode, AutomationWorkflow } from '@/lib/types/database'
 
 // ─── Variables disponibles en mensajes ──────────────────────────
 
@@ -24,6 +24,8 @@ const MESSAGE_VARIABLES: VariableDef[] = [
   { token: '{respuesta}', label: 'Respuesta', description: 'Texto de la última respuesta recibida', icon: MessageCircleReply, color: '#3b82f6' },
   { token: '{last_button}', label: 'Botón', description: 'Último botón presionado', icon: LayoutGrid, color: '#8b5cf6' },
   { token: '{platform}', label: 'Canal', description: 'whatsapp / instagram', icon: Hash, color: '#f59e0b' },
+  { token: '{ai_response}', label: 'Respuesta IA', description: 'Última respuesta generada por IA', icon: Bot, color: '#a855f7' },
+  { token: '{http_response}', label: 'HTTP Response', description: 'Respuesta del último HTTP request', icon: Globe, color: '#0ea5e9' },
 ]
 
 /**
@@ -90,13 +92,14 @@ function VariableChips({
 
 interface Props {
   node: WorkflowNode
+  workflow?: AutomationWorkflow | null
   onUpdateConfig: (config: Record<string, unknown>) => void
   onUpdateLabel: (label: string) => void
   onClose: () => void
   onDelete: () => void
 }
 
-export function WorkflowNodeEditor({ node, onUpdateConfig, onUpdateLabel, onClose, onDelete }: Props) {
+export function WorkflowNodeEditor({ node, workflow, onUpdateConfig, onUpdateLabel, onClose, onDelete }: Props) {
   const { tags } = useMensajeria()
   const config = node.config
 
@@ -129,6 +132,10 @@ export function WorkflowNodeEditor({ node, onUpdateConfig, onUpdateLabel, onClos
         </div>
 
         {/* Node-specific config */}
+        {node.node_type === 'trigger' && (
+          <TriggerConfig config={config} onUpdateConfig={onUpdateConfig} />
+        )}
+
         {node.node_type === 'send_message' && (
           <SendMessageConfig config={config} onChange={updateField} />
         )}
@@ -169,6 +176,18 @@ export function WorkflowNodeEditor({ node, onUpdateConfig, onUpdateLabel, onClos
 
         {node.node_type === 'crm_alert' && (
           <CrmAlertConfig config={config} onChange={updateField} />
+        )}
+
+        {node.node_type === 'ai_response' && (
+          <AiResponseConfig config={config} onChange={updateField} />
+        )}
+
+        {node.node_type === 'handoff_human' && (
+          <HandoffHumanConfig config={config} onChange={updateField} />
+        )}
+
+        {node.node_type === 'http_request' && (
+          <HttpRequestConfig config={config} onUpdateConfig={onUpdateConfig} />
         )}
 
         {/* Delete button */}
@@ -631,6 +650,340 @@ function CrmAlertConfig({ config, onChange }: { config: Record<string, unknown>;
   )
 }
 
+// ─── Trigger config ─────────────────────────────────────────────
+
+const TRIGGER_TYPE_OPTIONS = [
+  { value: 'message_received', label: 'Cualquier mensaje', icon: Inbox, description: 'Se activa con cualquier mensaje recibido' },
+  { value: 'keyword', label: 'Palabra clave', icon: MessageSquare, description: 'Responde cuando un mensaje contiene palabras clave' },
+  { value: 'template_reply', label: 'Respuesta a template', icon: GitBranch, description: 'Se activa cuando un cliente responde a un template' },
+  { value: 'post_service', label: 'Post-servicio', icon: Clock, description: 'Envía mensaje después de completar un servicio' },
+  { value: 'days_after_visit', label: 'Seguimiento', icon: CalendarDays, description: 'Envía mensaje X días después de la última visita' },
+]
+
+function TriggerConfig({ config, onUpdateConfig }: { config: Record<string, unknown>; onUpdateConfig: (config: Record<string, unknown>) => void }) {
+  const { waTemplates, handleSyncTemplates, syncingTemplates } = useMensajeria()
+  const triggerType = (config.trigger_type as string) || 'message_received'
+
+  const setTriggerType = (type: string) => {
+    onUpdateConfig({ ...config, trigger_type: type })
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Tipo de activación</Label>
+        <div className="grid gap-1.5">
+          {TRIGGER_TYPE_OPTIONS.map(t => {
+            const Icon = t.icon
+            const isSelected = triggerType === t.value
+            return (
+              <button key={t.value} onClick={() => setTriggerType(t.value)}
+                className={`flex items-start gap-2.5 p-2.5 rounded-lg border transition-colors text-left ${
+                  isSelected ? 'border-amber-500/50 bg-amber-500/5' : 'border-transparent bg-muted hover:border-border'
+                }`}>
+                <Icon className={`size-3.5 mt-0.5 shrink-0 ${isSelected ? 'text-amber-400' : 'text-muted-foreground'}`} />
+                <div>
+                  <p className={`text-xs font-medium ${isSelected ? 'text-foreground' : 'text-muted-foreground'}`}>{t.label}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{t.description}</p>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {triggerType === 'keyword' && (
+        <>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Palabras clave (separadas por coma)</Label>
+            <Input className="bg-muted border text-foreground text-sm" placeholder="horarios, precios, abierto"
+              value={((config.keywords as string[]) ?? []).join(', ')}
+              onChange={e => onUpdateConfig({ ...config, keywords: e.target.value.split(',').map(k => k.trim().toLowerCase()).filter(Boolean), trigger_type: triggerType })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Modo de coincidencia</Label>
+            <select value={(config.match_mode as string) || 'contains'}
+              onChange={e => onUpdateConfig({ ...config, match_mode: e.target.value, trigger_type: triggerType })}
+              className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border">
+              <option value="contains">Contiene la palabra</option>
+              <option value="exact">Coincidencia exacta</option>
+            </select>
+          </div>
+        </>
+      )}
+
+      {triggerType === 'template_reply' && (
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Template de Meta</Label>
+          {syncingTemplates ? (
+            <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-lg">
+              <div className="size-4 animate-spin rounded-full border-2 border-muted-foreground border-t-green-400" />
+              <span className="text-xs text-muted-foreground">Cargando templates...</span>
+            </div>
+          ) : waTemplates.length === 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">No se encontraron templates.</p>
+              <Button size="sm" variant="outline" onClick={handleSyncTemplates} className="h-7 text-xs">
+                Sincronizar templates
+              </Button>
+            </div>
+          ) : (
+            <select
+              value={(config.template_name as string) || ''}
+              onChange={e => onUpdateConfig({ ...config, template_name: e.target.value, trigger_type: triggerType })}
+              className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border"
+            >
+              <option value="">Seleccionar template...</option>
+              {waTemplates.filter(t => t.status === 'APPROVED').map(tpl => (
+                <option key={tpl.name} value={tpl.name}>
+                  {tpl.name} ({tpl.language}) — {tpl.category}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+
+      {triggerType === 'post_service' && (
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Demora después del servicio</Label>
+          <div className="flex items-center gap-2">
+            <Input type="number" min={0} max={1440} className="bg-muted border text-foreground text-sm w-24"
+              value={(config.delay_minutes as number) ?? 15}
+              onChange={e => onUpdateConfig({ ...config, delay_minutes: parseInt(e.target.value) || 0, trigger_type: triggerType })} />
+            <span className="text-xs text-muted-foreground">minutos</span>
+          </div>
+        </div>
+      )}
+
+      {triggerType === 'days_after_visit' && (
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Días después de la última visita</Label>
+          <div className="flex items-center gap-2">
+            <Input type="number" min={1} max={365} className="bg-muted border text-foreground text-sm w-24"
+              value={(config.delay_days as number) ?? 7}
+              onChange={e => onUpdateConfig({ ...config, delay_days: parseInt(e.target.value) || 1, trigger_type: triggerType })} />
+            <span className="text-xs text-muted-foreground">días</span>
+          </div>
+        </div>
+      )}
+
+      {triggerType === 'message_received' && (
+        <p className="text-[10px] text-muted-foreground">
+          El workflow se activará con cualquier mensaje entrante. Los workflows con triggers más específicos (palabra clave, template) tienen prioridad.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─── AI Response config ─────────────────────────────────────────
+
+function AiResponseConfig({ config, onChange }: { config: Record<string, unknown>; onChange: (key: string, value: unknown) => void }) {
+  const promptRef = useRef<HTMLTextAreaElement>(null)
+  const promptValue = (config.system_prompt as string) || ''
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Modelo de IA</Label>
+        <select
+          value={(config.model as string) || 'gpt-4o-mini'}
+          onChange={e => onChange('model', e.target.value)}
+          className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border"
+        >
+          <optgroup label="OpenAI">
+            <option value="gpt-4o-mini">GPT-4o Mini</option>
+            <option value="gpt-4o">GPT-4o</option>
+            <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
+            <option value="gpt-4.1">GPT-4.1</option>
+          </optgroup>
+          <optgroup label="Anthropic">
+            <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
+            <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+          </optgroup>
+        </select>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Prompt del sistema</Label>
+        <Textarea
+          ref={promptRef}
+          className="bg-muted border text-foreground resize-none text-sm"
+          rows={5}
+          placeholder="Sos un asistente de la barbería Monaco. Respondé consultas sobre horarios, servicios y precios..."
+          value={promptValue}
+          onChange={e => onChange('system_prompt', e.target.value)}
+        />
+        <div className="pt-1 space-y-1.5">
+          <p className="text-[10px] text-muted-foreground">Arrastrá o clickeá para insertar:</p>
+          <VariableChips textareaRef={promptRef} value={promptValue} onChange={v => onChange('system_prompt', v)} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Temperatura</Label>
+          <Input
+            type="number"
+            min={0}
+            max={2}
+            step={0.1}
+            className="bg-muted border text-foreground text-sm"
+            value={(config.temperature as number) ?? 0.7}
+            onChange={e => onChange('temperature', parseFloat(e.target.value) || 0.7)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Max tokens</Label>
+          <Input
+            type="number"
+            min={50}
+            max={4000}
+            step={50}
+            className="bg-muted border text-foreground text-sm"
+            value={(config.max_tokens as number) ?? 500}
+            onChange={e => onChange('max_tokens', parseInt(e.target.value) || 500)}
+          />
+        </div>
+      </div>
+
+      <p className="text-[10px] text-muted-foreground">
+        La IA recibirá el mensaje del cliente y responderá según el prompt. La respuesta se envía automáticamente y queda disponible como {'{ai_response}'}.
+      </p>
+    </div>
+  )
+}
+
+// ─── Handoff to human config ────────────────────────────────────
+
+function HandoffHumanConfig({ config, onChange }: { config: Record<string, unknown>; onChange: (key: string, value: unknown) => void }) {
+  const msgRef = useRef<HTMLTextAreaElement>(null)
+  const msgValue = (config.client_message as string) || ''
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Asignar a</Label>
+        <select
+          value={(config.assign_to as string) || 'auto'}
+          onChange={e => onChange('assign_to', e.target.value)}
+          className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border"
+        >
+          <option value="auto">Automático (primer operador disponible)</option>
+        </select>
+        <p className="text-[10px] text-muted-foreground">
+          La asignación automática crea una alerta para que cualquier operador tome la conversación.
+        </p>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Mensaje al cliente</Label>
+        <Textarea
+          ref={msgRef}
+          className="bg-muted border text-foreground resize-none text-sm"
+          rows={3}
+          placeholder="Te estamos transfiriendo con un agente..."
+          value={msgValue}
+          onChange={e => onChange('client_message', e.target.value)}
+        />
+        <VariableChips textareaRef={msgRef} value={msgValue} onChange={v => onChange('client_message', v)} />
+      </div>
+
+      <div className="flex items-center justify-between">
+        <Label className="text-xs text-muted-foreground">Crear alerta CRM</Label>
+        <button
+          onClick={() => onChange('create_alert', !(config.create_alert ?? true))}
+          className={`relative w-9 h-5 rounded-full transition-colors ${(config.create_alert ?? true) ? 'bg-green-500' : 'bg-muted'}`}
+        >
+          <span className={`absolute top-0.5 left-0.5 size-4 rounded-full bg-white transition-transform ${(config.create_alert ?? true) ? 'translate-x-4' : ''}`} />
+        </button>
+      </div>
+
+      {(config.create_alert ?? true) && (
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Tipo de alerta</Label>
+          <select
+            value={(config.alert_type as string) || 'urgent'}
+            onChange={e => onChange('alert_type', e.target.value)}
+            className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border"
+          >
+            <option value="info">Informativa</option>
+            <option value="warning">Advertencia</option>
+            <option value="urgent">Urgente</option>
+          </select>
+        </div>
+      )}
+
+      <p className="text-[10px] text-muted-foreground">
+        Al derivar, el workflow se detiene y un operador toma el control de la conversación manualmente.
+      </p>
+    </div>
+  )
+}
+
+// ─── HTTP Request config ────────────────────────────────────────
+
+function HttpRequestConfig({ config, onUpdateConfig }: { config: Record<string, unknown>; onUpdateConfig: (config: Record<string, unknown>) => void }) {
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
+  const bodyValue = (config.body_template as string) || ''
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">URL</Label>
+        <Input
+          className="bg-muted border text-foreground text-sm"
+          placeholder="https://api.ejemplo.com/webhook"
+          value={(config.url as string) || ''}
+          onChange={e => onUpdateConfig({ ...config, url: e.target.value })}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Método</Label>
+        <select
+          value={(config.method as string) || 'POST'}
+          onChange={e => onUpdateConfig({ ...config, method: e.target.value })}
+          className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border"
+        >
+          <option value="GET">GET</option>
+          <option value="POST">POST</option>
+          <option value="PUT">PUT</option>
+          <option value="PATCH">PATCH</option>
+          <option value="DELETE">DELETE</option>
+        </select>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Body (JSON)</Label>
+        <Textarea
+          ref={bodyRef}
+          className="bg-muted border text-foreground resize-none text-sm font-mono"
+          rows={4}
+          placeholder='{"message": "{respuesta}", "client": "{nombre}"}'
+          value={bodyValue}
+          onChange={e => onUpdateConfig({ ...config, body_template: e.target.value })}
+        />
+        <VariableChips textareaRef={bodyRef} value={bodyValue} onChange={v => onUpdateConfig({ ...config, body_template: v })} />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Variable de respuesta</Label>
+        <Input
+          className="bg-muted border text-foreground text-sm font-mono"
+          placeholder="http_response"
+          value={(config.response_variable as string) || 'http_response'}
+          onChange={e => onUpdateConfig({ ...config, response_variable: e.target.value })}
+        />
+        <p className="text-[10px] text-muted-foreground">
+          La respuesta del servidor se guarda en esta variable y se puede usar en nodos siguientes como {'{http_response}'}.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 // ─── Node icon helper ────────────────────────────────────────────
 
 function NodeIcon({ type }: { type: string }) {
@@ -647,6 +1000,9 @@ function NodeIcon({ type }: { type: string }) {
     add_tag: Tag,
     remove_tag: Tag,
     crm_alert: Bell,
+    ai_response: Bot,
+    handoff_human: UserCheck,
+    http_request: Globe,
   }
   const Icon = iconMap[type] ?? MessageSquare
   return <Icon className="size-4 text-muted-foreground" />

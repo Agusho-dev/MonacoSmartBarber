@@ -1,4 +1,5 @@
 import type { Conversation, Message, SocialChannel, Client, OrgWhatsAppConfig, OrgInstagramConfig, ConversationTag } from '@/lib/types/database'
+import type { OrgAiConfig } from '@/lib/actions/ai-config'
 
 export interface ConversationWithRelations extends Conversation {
   channel?: SocialChannel & { branch_id?: string }
@@ -46,6 +47,7 @@ export interface MensajeriaProps {
   clients: Pick<Client, 'id' | 'name' | 'phone'>[]
   waConfig: OrgWhatsAppConfig | null
   igConfig: OrgInstagramConfig | null
+  aiConfig: OrgAiConfig | null
   initialTags: ConversationTag[]
   appSettings: ReviewAutoSettings | null
   branches: { id: string; name: string }[]

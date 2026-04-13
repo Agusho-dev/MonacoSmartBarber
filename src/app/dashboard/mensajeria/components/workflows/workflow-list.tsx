@@ -3,7 +3,7 @@
 import { useState, useEffect, useTransition } from 'react'
 import {
   Zap, Plus, Pencil, Trash2, MessageSquare, Clock, CalendarDays, GitBranch,
-  Play, Pause, MoreVertical, Bell, MapPin, Globe, Copy,
+  Play, Pause, MoreVertical, Bell, MapPin, Globe, Copy, Inbox,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -21,6 +21,7 @@ import { useMensajeria } from '../shared/mensajeria-context'
 import { WorkflowBuilder } from './workflow-builder'
 
 const TRIGGER_TYPES = [
+  { value: 'message_received', label: 'Cualquier mensaje', icon: Inbox, description: 'Se activa con cualquier mensaje recibido (sin filtro)' },
   { value: 'keyword', label: 'Palabra clave', icon: MessageSquare, description: 'Responde cuando un mensaje contiene palabras clave' },
   { value: 'template_reply', label: 'Respuesta a template', icon: GitBranch, description: 'Se activa cuando un cliente responde a un template (ej: botones de reseña)' },
   { value: 'post_service', label: 'Post-servicio', icon: Clock, description: 'Envía un mensaje después de completar un servicio' },
@@ -47,7 +48,8 @@ export function WorkflowList() {
   // New workflow form
   const [formName, setFormName] = useState('')
   const [formDescription, setFormDescription] = useState('')
-  const [formTriggerType, setFormTriggerType] = useState('keyword')
+  const [createEmpty, setCreateEmpty] = useState(true)
+  const [formTriggerType, setFormTriggerType] = useState('message_received')
   const [formChannel, setFormChannel] = useState('all')
   const [formKeywords, setFormKeywords] = useState('')
   const [formMatchMode, setFormMatchMode] = useState('contains')
@@ -73,7 +75,8 @@ export function WorkflowList() {
   const resetForm = () => {
     setFormName('')
     setFormDescription('')
-    setFormTriggerType('keyword')
+    setCreateEmpty(true)
+    setFormTriggerType('message_received')
     setFormChannel('all')
     setFormKeywords('')
     setFormMatchMode('contains')
@@ -104,16 +107,23 @@ export function WorkflowList() {
 
   const handleCreate = () => {
     if (!formName.trim()) { toast.error('El nombre es requerido'); return }
-    if (formTriggerType === 'keyword') {
-      const kws = formKeywords.split(',').filter(k => k.trim())
-      if (kws.length === 0) { toast.error('Las palabras clave son requeridas'); return }
-    }
-    if (formTriggerType === 'template_reply' && !formTemplateName.trim()) {
-      toast.error('El nombre del template es requerido'); return
+
+    if (!createEmpty) {
+      if (formTriggerType === 'keyword') {
+        const kws = formKeywords.split(',').filter(k => k.trim())
+        if (kws.length === 0) { toast.error('Las palabras clave son requeridas'); return }
+      }
+      if (formTriggerType === 'template_reply' && !formTemplateName.trim()) {
+        toast.error('El nombre del template es requerido'); return
+      }
     }
 
     startCreating(async () => {
-      const result = await createWorkflow({
+      const result = await createWorkflow(createEmpty ? {
+        name: formName,
+        description: formDescription || undefined,
+        branch_id: formBranchId || null,
+      } : {
         name: formName,
         description: formDescription || undefined,
         channels: [formChannel],
@@ -126,9 +136,8 @@ export function WorkflowList() {
         setWorkflows(prev => [result.data!, ...prev])
         setShowNewDialog(false)
         resetForm()
-        // Abrir el builder directamente
         setEditingWorkflowId(result.data.id)
-        toast.success('Workflow creado. Configurá los pasos.')
+        toast.success(createEmpty ? 'Workflow creado. Configurá el trigger y los pasos.' : 'Workflow creado. Configurá los pasos.')
       }
     })
   }
@@ -162,6 +171,7 @@ export function WorkflowList() {
 
   const triggerIcon = (type: string) => {
     switch (type) {
+      case 'message_received': return <Inbox className="size-3.5 text-cyan-400" />
       case 'template_reply': return <GitBranch className="size-3.5 text-purple-400" />
       case 'post_service': return <Clock className="size-3.5 text-amber-400" />
       case 'days_after_visit': return <CalendarDays className="size-3.5 text-blue-400" />
@@ -368,17 +378,6 @@ export function WorkflowList() {
                 value={formDescription} onChange={e => setFormDescription(e.target.value)} />
             </div>
 
-            {/* Canal */}
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Canal</Label>
-              <select value={formChannel} onChange={e => setFormChannel(e.target.value)}
-                className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border">
-                {CHANNEL_OPTIONS.map(c => (
-                  <option key={c.value} value={c.value}>{c.label}</option>
-                ))}
-              </select>
-            </div>
-
             {/* Sucursal */}
             {branches.length > 1 && (
               <div className="space-y-1.5">
@@ -390,11 +389,49 @@ export function WorkflowList() {
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
                 </select>
-                <p className="text-[10px] text-muted-foreground">
-                  Los workflows generales aplican a todas las sucursales. Seleccioná una para limitar a esa sucursal.
-                </p>
               </div>
             )}
+
+            {/* Modo de creación */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Configuración del trigger</Label>
+              <div className="flex rounded-lg border bg-muted p-0.5 gap-0.5">
+                <button
+                  onClick={() => setCreateEmpty(true)}
+                  className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                    createEmpty ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Configurar en el canvas
+                </button>
+                <button
+                  onClick={() => setCreateEmpty(false)}
+                  className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                    !createEmpty ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Configurar ahora
+                </button>
+              </div>
+              {createEmpty && (
+                <p className="text-[10px] text-muted-foreground">
+                  El workflow se creará con trigger &quot;Mensaje recibido&quot;. Podés cambiarlo desde el canvas.
+                </p>
+              )}
+            </div>
+
+            {!createEmpty && (
+              <>
+                {/* Canal */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Canal</Label>
+                  <select value={formChannel} onChange={e => setFormChannel(e.target.value)}
+                    className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border">
+                    {CHANNEL_OPTIONS.map(c => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                  </select>
+                </div>
 
             {/* Trigger type */}
             <div className="space-y-1.5">
@@ -495,6 +532,8 @@ export function WorkflowList() {
                   <span className="text-xs text-muted-foreground">días</span>
                 </div>
               </div>
+            )}
+              </>
             )}
           </div>
           <DialogFooter>

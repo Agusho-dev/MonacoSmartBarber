@@ -9,6 +9,7 @@ import { startConversation, updateConversationStatus, getClientVisits, scheduleM
 import { createConversationTag, deleteConversationTag, assignConversationTag, removeConversationTag } from '@/lib/actions/tags'
 import { toast } from 'sonner'
 import type { Message, ConversationTag, OrgWhatsAppConfig, OrgInstagramConfig, Client } from '@/lib/types/database'
+import type { OrgAiConfig } from '@/lib/actions/ai-config'
 import type { ConversationWithRelations, ScheduledWithRelations, ClientVisit, WaTemplate, ReviewAutoSettings, PlatformFilter } from './types'
 
 export interface QuickReply {
@@ -71,6 +72,8 @@ interface MensajeriaContextValue {
   setWaConfig: React.Dispatch<React.SetStateAction<OrgWhatsAppConfig | null>>
   igConfig: OrgInstagramConfig | null
   setIgConfig: React.Dispatch<React.SetStateAction<OrgInstagramConfig | null>>
+  aiConfig: OrgAiConfig | null
+  setAiConfig: React.Dispatch<React.SetStateAction<OrgAiConfig | null>>
   clients: Pick<Client, 'id' | 'name' | 'phone'>[]
   appSettings: ReviewAutoSettings | null
   branches: { id: string; name: string }[]
@@ -131,6 +134,7 @@ export function MensajeriaProvider({
   clients,
   waConfig: initialWaConfig,
   igConfig: initialIgConfig,
+  aiConfig: initialAiConfig,
   initialTags,
   appSettings,
   branches,
@@ -141,6 +145,7 @@ export function MensajeriaProvider({
   clients: Pick<Client, 'id' | 'name' | 'phone'>[]
   waConfig: OrgWhatsAppConfig | null
   igConfig: OrgInstagramConfig | null
+  aiConfig: OrgAiConfig | null
   initialTags: ConversationTag[]
   appSettings: ReviewAutoSettings | null
   branches: { id: string; name: string }[]
@@ -184,6 +189,7 @@ export function MensajeriaProvider({
   // Configs
   const [waConfig, setWaConfig] = useState<OrgWhatsAppConfig | null>(initialWaConfig)
   const [igConfig, setIgConfig] = useState<OrgInstagramConfig | null>(initialIgConfig)
+  const [aiConfig, setAiConfig] = useState<OrgAiConfig | null>(initialAiConfig)
 
   // Templates
   const [waTemplates, setWaTemplates] = useState<WaTemplate[]>([])
@@ -555,6 +561,7 @@ export function MensajeriaProvider({
     scheduled, setScheduled,
     waConfig, setWaConfig,
     igConfig, setIgConfig,
+    aiConfig, setAiConfig,
     clients, appSettings, branches,
     waTemplates, setWaTemplates,
     showTemplateDialog, setShowTemplateDialog,

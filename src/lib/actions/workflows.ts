@@ -70,9 +70,9 @@ export async function getWorkflow(id: string) {
 export async function createWorkflow(input: {
   name: string
   description?: string
-  channels: string[]
-  trigger_type: string
-  trigger_config: Record<string, unknown>
+  channels?: string[]
+  trigger_type?: string
+  trigger_config?: Record<string, unknown>
   priority?: number
   branch_id?: string | null
 }) {
@@ -81,6 +81,10 @@ export async function createWorkflow(input: {
 
   if (!input.name.trim()) return { data: null, error: 'El nombre es requerido' }
 
+  const triggerType = input.trigger_type ?? 'message_received'
+  const triggerConfig = input.trigger_config ?? {}
+  const channels = input.channels ?? ['all']
+
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('automation_workflows')
@@ -88,9 +92,9 @@ export async function createWorkflow(input: {
       organization_id: result.orgId,
       name: input.name.trim(),
       description: input.description?.trim() || null,
-      channels: input.channels,
-      trigger_type: input.trigger_type,
-      trigger_config: input.trigger_config,
+      channels,
+      trigger_type: triggerType,
+      trigger_config: triggerConfig,
       priority: input.priority ?? 0,
       branch_id: input.branch_id || null,
     })
@@ -103,8 +107,8 @@ export async function createWorkflow(input: {
   await supabase.from('workflow_nodes').insert({
     workflow_id: data.id,
     node_type: 'trigger',
-    label: getTriggerLabel(input.trigger_type),
-    config: input.trigger_config,
+    label: getTriggerLabel(triggerType),
+    config: { trigger_type: triggerType, ...triggerConfig },
     position_x: 400,
     position_y: 80,
     is_entry_point: true,
@@ -121,8 +125,20 @@ function getTriggerLabel(type: string): string {
     case 'button_response': return 'Respuesta de botón'
     case 'post_service': return 'Post-servicio'
     case 'days_after_visit': return 'Seguimiento'
+    case 'message_received': return 'Mensaje recibido'
     default: return 'Trigger'
   }
+}
+
+export async function syncTriggerToWorkflow(
+  workflowId: string,
+  triggerType: string,
+  triggerConfig: Record<string, unknown>
+) {
+  return updateWorkflow(workflowId, {
+    trigger_type: triggerType,
+    trigger_config: triggerConfig,
+  })
 }
 
 export async function updateWorkflow(id: string, input: {

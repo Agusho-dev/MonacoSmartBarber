@@ -70,6 +70,7 @@ export function MensajeriaClient(props: MensajeriaProps) {
       clients={props.clients}
       waConfig={props.waConfig}
       igConfig={props.igConfig}
+      aiConfig={props.aiConfig}
       initialTags={props.initialTags}
       appSettings={props.appSettings}
       branches={props.branches}

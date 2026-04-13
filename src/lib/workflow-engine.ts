@@ -293,7 +293,33 @@ export async function evaluateIncomingMessage(params: {
       }
     }
 
-    // 4. Fallback: ejecutar auto_reply_rules legacy (retrocompatibilidad)
+    // 4. Trigger genérico: message_received (cualquier mensaje, menor prioridad)
+    {
+      const { data: anyMsgWorkflows } = await supabase
+        .from('automation_workflows')
+        .select('*')
+        .eq('organization_id', orgId)
+        .eq('is_active', true)
+        .eq('trigger_type', 'message_received')
+        .order('priority', { ascending: false })
+
+      if (anyMsgWorkflows && anyMsgWorkflows.length > 0) {
+        for (const wf of anyMsgWorkflows) {
+          if (!matchesBranch(wf, branchId)) continue
+          const channels = wf.channels as string[]
+          if (!channels.includes('all') && !channels.includes(platform)) continue
+
+          await startWorkflowExecution(supabase, wf.id, conversationId, 'message_received', params, {
+            client_name: clientInfo.fullName,
+            client_first_name: clientInfo.firstName,
+            last_text_reply: text,
+          })
+          return
+        }
+      }
+    }
+
+    // 5. Fallback: ejecutar auto_reply_rules legacy (retrocompatibilidad)
     // Esto mantiene las reglas viejas funcionando hasta que se migren
     if (text && messageType === 'text') {
       await executeLegacyAutoReply(supabase, orgId, conversationId, text, platform, params)
@@ -650,6 +676,106 @@ async function executeNode(
         break
       }
 
+      case 'ai_response': {
+        const model = (config.model as string) || 'gpt-4o-mini'
+        const systemPrompt = resolveVariables(config.system_prompt as string || '', context, params)
+        const temperature = (config.temperature as number) ?? 0.7
+        const maxTokens = (config.max_tokens as number) ?? 500
+        const userMessage = context.last_text_reply || context.last_button_title || ''
+
+        const aiResponse = await callAiModel({ model, systemPrompt, userMessage, temperature, maxTokens })
+
+        await sendPlatformMessage(supabase, params, aiResponse)
+
+        context.variables = context.variables ?? {}
+        context.variables.ai_response = aiResponse
+
+        await supabase
+          .from('workflow_executions')
+          .update({ context, updated_at: new Date().toISOString() })
+          .eq('id', executionId)
+
+        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { model, response_preview: aiResponse.slice(0, 200) })
+        await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+        break
+      }
+
+      case 'handoff_human': {
+        const clientMessage = resolveVariables(config.client_message as string || '', context, params)
+        if (clientMessage) {
+          await sendPlatformMessage(supabase, params, clientMessage)
+        }
+
+        if (config.create_alert !== false) {
+          const { data: wf } = await supabase
+            .from('automation_workflows')
+            .select('organization_id')
+            .eq('id', workflowId)
+            .single()
+
+          if (wf) {
+            await supabase.from('crm_alerts').insert({
+              organization_id: wf.organization_id,
+              conversation_id: params.conversationId,
+              workflow_execution_id: executionId,
+              alert_type: (config.alert_type as string) || 'urgent',
+              title: 'Transferencia a agente humano',
+              message: `El workflow derivó esta conversación a un agente. Cliente: ${context.client_name || 'Desconocido'}`,
+              metadata: {
+                workflow_id: workflowId,
+                assign_to: config.assign_to,
+                platform: params.platform,
+              },
+            })
+          }
+        }
+
+        // Marcar ejecución como completada — el humano toma el control
+        await supabase
+          .from('workflow_executions')
+          .update({ status: 'completed', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+          .eq('id', executionId)
+
+        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { assign_to: config.assign_to })
+        // NO avanzar — el workflow se detiene aquí
+        break
+      }
+
+      case 'http_request': {
+        const url = resolveVariables(config.url as string || '', context, params)
+        const method = (config.method as string) || 'POST'
+        const headers = (config.headers as Record<string, string>) ?? {}
+        const bodyTemplate = resolveVariables(config.body_template as string || '', context, params)
+        const responseVar = (config.response_variable as string) || 'http_response'
+
+        try {
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 10000)
+          const resp = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body: method !== 'GET' ? bodyTemplate : undefined,
+            signal: controller.signal,
+          })
+          clearTimeout(timeout)
+          const responseText = await resp.text()
+
+          context.variables = context.variables ?? {}
+          context.variables[responseVar] = responseText
+
+          await supabase
+            .from('workflow_executions')
+            .update({ context, updated_at: new Date().toISOString() })
+            .eq('id', executionId)
+
+          await logExecution(supabase, executionId, node.id, node.node_type, 'success', { url, status: resp.status })
+        } catch (err) {
+          await logExecution(supabase, executionId, node.id, node.node_type, 'error', { url }, (err as Error).message)
+        }
+        await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+        break
+      }
+
       default:
         console.warn('[WorkflowEngine] Tipo de nodo no soportado:', node.node_type)
         await logExecution(supabase, executionId, node.id, node.node_type, 'skipped', {})
@@ -920,6 +1046,78 @@ async function sendWhatsAppTemplate(
 
 // ─── Variables en mensajes ───────────────────────────────────────
 
+// ─── AI Model caller ────────────────────────────────────────────
+
+async function callAiModel(opts: {
+  model: string
+  systemPrompt: string
+  userMessage: string
+  temperature: number
+  maxTokens: number
+}): Promise<string> {
+  const { model, systemPrompt, userMessage, temperature, maxTokens } = opts
+
+  if (model.startsWith('claude')) {
+    // Anthropic API
+    const apiKey = process.env.ANTHROPIC_API_KEY
+    if (!apiKey) throw new Error('ANTHROPIC_API_KEY no configurada')
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        temperature,
+        system: systemPrompt || undefined,
+        messages: [{ role: 'user', content: userMessage }],
+      }),
+    })
+
+    if (!resp.ok) {
+      const errText = await resp.text()
+      throw new Error(`Anthropic API error ${resp.status}: ${errText.slice(0, 200)}`)
+    }
+
+    const data = await resp.json() as { content: Array<{ type: string; text: string }> }
+    return data.content?.[0]?.text ?? ''
+  } else {
+    // OpenAI API
+    const apiKey = process.env.OPENAI_API_KEY
+    if (!apiKey) throw new Error('OPENAI_API_KEY no configurada')
+
+    const messages: Array<{ role: string; content: string }> = []
+    if (systemPrompt) messages.push({ role: 'system', content: systemPrompt })
+    messages.push({ role: 'user', content: userMessage })
+
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+      }),
+    })
+
+    if (!resp.ok) {
+      const errText = await resp.text()
+      throw new Error(`OpenAI API error ${resp.status}: ${errText.slice(0, 200)}`)
+    }
+
+    const data = await resp.json() as { choices: Array<{ message: { content: string } }> }
+    return data.choices?.[0]?.message?.content ?? ''
+  }
+}
+
 function resolveVariables(
   text: string,
   context: ExecutionContext,
@@ -932,7 +1130,7 @@ function resolveVariables(
   // {respuesta} debe funcionar tanto para texto libre como para botones:
   // si el cliente apretó un botón, usamos el título del botón.
   const lastReply = lastTextReply || buttonTitle
-  return text
+  let result = text
     .replace(/\{platform\}/g, params.platform)
     .replace(/\{user_id\}/g, params.platformUserId)
     .replace(/\{last_button\}/g, buttonTitle)
@@ -940,6 +1138,15 @@ function resolveVariables(
     .replace(/\{respuesta\}/g, lastReply)
     .replace(/\{nombre\}/g, firstName)
     .replace(/\{nombre_completo\}/g, fullName)
+
+  // Sustituir variables dinámicas del contexto (ai_response, http_response, etc.)
+  if (context.variables) {
+    for (const [key, val] of Object.entries(context.variables)) {
+      result = result.replace(new RegExp(`\\{${key}\\}`, 'g'), val ?? '')
+    }
+  }
+
+  return result
 }
 
 // ─── Logging ─────────────────────────────────────────────────────
