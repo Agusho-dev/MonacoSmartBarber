@@ -172,7 +172,7 @@ export async function fetchFinancialData(
   let sq = supabase
     .from('salary_reports')
     .select('type, amount, report_date, status')
-    .in('type', ['bonus', 'advance', 'commission', 'base_salary', 'hybrid_deficit'])
+    .in('type', ['bonus', 'advance', 'commission', 'base_salary', 'hybrid_deficit', 'product_commission'])
     .eq('status', 'paid')
     .gte('report_date', startDateStr.slice(0, 10))
     .lte('report_date', endDateStr.slice(0, 10))

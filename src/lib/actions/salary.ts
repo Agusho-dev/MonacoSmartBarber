@@ -6,7 +6,7 @@ import type { SalaryScheme } from '@/lib/types/database'
 import { validateBranchAccess, getCurrentOrgId } from './org'
 
 // Tipos locales para las nuevas tablas (migración 037/044)
-export type SalaryReportType = 'commission' | 'base_salary' | 'bonus' | 'advance' | 'hybrid_deficit'
+export type SalaryReportType = 'commission' | 'base_salary' | 'bonus' | 'advance' | 'hybrid_deficit' | 'product_commission'
 export type SalaryReportStatus = 'pending' | 'paid'
 
 export interface SalaryReport {
@@ -775,13 +775,13 @@ export async function settleHybridPeriod(
     return { error: 'El monto base configurado no es válido.' }
   }
 
-  // Obtener comisiones pendientes del período
+  // Obtener comisiones pendientes del período (servicio + producto)
   const { data: pendingReports, error: reportsError } = await supabase
     .from('salary_reports')
     .select('id, amount')
     .eq('staff_id', staffId)
     .eq('branch_id', branchId)
-    .eq('type', 'commission')
+    .in('type', ['commission', 'product_commission'])
     .eq('status', 'pending')
     .gte('report_date', periodStart)
     .lte('report_date', periodEnd)
@@ -1022,13 +1022,13 @@ export async function getCommissionSummary(branchId?: string | null) {
   let pendingQuery = supabase
     .from('salary_reports')
     .select('amount, staff_id')
-    .eq('type', 'commission')
+    .in('type', ['commission', 'product_commission'])
     .eq('status', 'pending')
 
   let paidQuery = supabase
     .from('salary_reports')
     .select('amount, staff_id')
-    .eq('type', 'commission')
+    .in('type', ['commission', 'product_commission'])
     .eq('status', 'paid')
 
   if (branchId) {

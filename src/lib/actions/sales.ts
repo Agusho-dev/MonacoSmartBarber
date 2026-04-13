@@ -173,8 +173,7 @@ export async function directProductSale(
     await recordTransfer(visit.id, paymentAccountId, preAmount, branchId)
   }
 
-  // Actualizar o crear salary_report de comisión para que no se pierda
-  // si la venta ocurre después del checkout del barbero
+  // Actualizar o crear salary_report de comisión por producto
   if (preCommission > 0) {
     const todayStr = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/Argentina/Buenos_Aires',
@@ -185,29 +184,26 @@ export async function directProductSale(
       .select('id, amount')
       .eq('staff_id', barberId)
       .eq('branch_id', branchId)
-      .eq('type', 'commission')
+      .eq('type', 'product_commission')
       .eq('report_date', todayStr)
       .eq('status', 'pending')
       .maybeSingle()
 
     if (existing) {
-      // Sumar la comisión del producto al reporte existente
       await supabase
         .from('salary_reports')
         .update({ amount: Number(existing.amount) + preCommission })
         .eq('id', existing.id)
     } else {
-      // Crear reporte nuevo si no existe (barbero ya hizo checkout o no tiene reporte)
       await supabase
         .from('salary_reports')
         .insert({
           staff_id: barberId,
           branch_id: branchId,
-          type: 'commission',
+          type: 'product_commission',
           amount: preCommission,
           report_date: todayStr,
           status: 'pending',
-          notes: 'Comisión por venta directa de productos',
         })
     }
   }

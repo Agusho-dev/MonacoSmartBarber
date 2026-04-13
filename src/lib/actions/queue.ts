@@ -306,12 +306,14 @@ export async function completeService(
   }
 
   // 3.5 Calculate product prices and commissions using shared function
+  let productCommissionAmount = 0
   if (productsToSell && productsToSell.length > 0) {
     const { processProductSales } = await import('./sales')
     const productResult = await processProductSales(supabase, visit.id, visit.barber_id, visit.branch_id, productsToSell)
     if (!('error' in productResult)) {
       amount += productResult.totalAmount
-      commissionAmount += productResult.totalCommission
+      productCommissionAmount = productResult.totalCommission
+      commissionAmount += productCommissionAmount
     }
   }
 
@@ -618,14 +620,16 @@ export async function completeService(
     }
   }
 
-  // 8. Generar/actualizar salary_report de comisión diario al hacer checkout
-  if (commissionAmount > 0) {
-    try {
-      const todayStr = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'America/Argentina/Buenos_Aires',
-      }).format(new Date())
+  // 8. Generar/actualizar salary_reports separados: servicio y producto
+  const serviceCommissionAmount = commissionAmount - productCommissionAmount
+  try {
+    const todayStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Argentina/Buenos_Aires',
+    }).format(new Date())
 
-      const { data: existingReport } = await supabase
+    // 8a. Reporte de comisión por servicio
+    if (serviceCommissionAmount > 0) {
+      const { data: existingServiceReport } = await supabase
         .from('salary_reports')
         .select('id, amount')
         .eq('staff_id', visit.barber_id)
@@ -635,28 +639,57 @@ export async function completeService(
         .eq('status', 'pending')
         .maybeSingle()
 
-      if (existingReport) {
-        // Sumar la comisión de este servicio al reporte existente del día
+      if (existingServiceReport) {
         await supabase
           .from('salary_reports')
-          .update({ amount: Number(existingReport.amount) + commissionAmount })
-          .eq('id', existingReport.id)
+          .update({ amount: Number(existingServiceReport.amount) + serviceCommissionAmount })
+          .eq('id', existingServiceReport.id)
       } else {
-        // Crear reporte nuevo para el día
         await supabase
           .from('salary_reports')
           .insert({
             staff_id: visit.barber_id,
             branch_id: visit.branch_id,
             type: 'commission',
-            amount: commissionAmount,
+            amount: serviceCommissionAmount,
             report_date: todayStr,
             status: 'pending',
           })
       }
-    } catch (err) {
-      console.error('[SalaryReport] Error al generar reporte de comisión:', err)
     }
+
+    // 8b. Reporte de comisión por producto (separado)
+    if (productCommissionAmount > 0) {
+      const { data: existingProductReport } = await supabase
+        .from('salary_reports')
+        .select('id, amount')
+        .eq('staff_id', visit.barber_id)
+        .eq('branch_id', visit.branch_id)
+        .eq('type', 'product_commission')
+        .eq('report_date', todayStr)
+        .eq('status', 'pending')
+        .maybeSingle()
+
+      if (existingProductReport) {
+        await supabase
+          .from('salary_reports')
+          .update({ amount: Number(existingProductReport.amount) + productCommissionAmount })
+          .eq('id', existingProductReport.id)
+      } else {
+        await supabase
+          .from('salary_reports')
+          .insert({
+            staff_id: visit.barber_id,
+            branch_id: visit.branch_id,
+            type: 'product_commission',
+            amount: productCommissionAmount,
+            report_date: todayStr,
+            status: 'pending',
+          })
+      }
+    }
+  } catch (err) {
+    console.error('[SalaryReport] Error al generar reportes de comisión:', err)
   }
 
   revalidatePath('/barbero/fila')
