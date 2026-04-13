@@ -33,7 +33,7 @@ Deno.serve(async (req: Request) => {
 
     // Cache de configuración por org_id para no repetir queries
     const orgSettingsCache = new Map<string, { wa_api_url: string | null }>()
-    const orgChannelCache = new Map<string, { id: string } | null>()
+    const orgChannelCache = new Map<string, { id: string }[]>()
 
     const results: Array<{ id: string; sent: boolean; error: string | null }> = []
 
@@ -193,7 +193,7 @@ Deno.serve(async (req: Request) => {
 
       // Si se envió, crear conversación + mensaje para que aparezca en el dashboard
       if (sent) {
-        // Buscar canal WhatsApp activo para esta org (con cache)
+        // Buscar canales WhatsApp activos para esta org (con cache)
         if (!orgChannelCache.has(orgId)) {
           const { data: orgBranches } = await supabase
             .from('branches')
@@ -202,20 +202,19 @@ Deno.serve(async (req: Request) => {
           const branchIds = orgBranches?.map((b: { id: string }) => b.id) ?? []
 
           if (branchIds.length > 0) {
-            const { data: ch } = await supabase
+            const { data: channels } = await supabase
               .from('social_channels')
               .select('id')
               .eq('platform', 'whatsapp')
               .eq('is_active', true)
               .in('branch_id', branchIds)
-              .limit(1)
-              .maybeSingle()
-            orgChannelCache.set(orgId, ch)
+            orgChannelCache.set(orgId, channels ?? [])
           } else {
-            orgChannelCache.set(orgId, null)
+            orgChannelCache.set(orgId, [])
           }
         }
-        const waChannel = orgChannelCache.get(orgId)
+        const waChannels = orgChannelCache.get(orgId) as { id: string }[]
+        const waChannel = waChannels[0] ?? null
 
         if (waChannel) {
           // Normalizar al formato internacional que usa Meta (ej: 5493835411954)
@@ -231,12 +230,16 @@ Deno.serve(async (req: Request) => {
             phoneNorm = '54' + phoneNorm.slice(3)
           }
 
+          // Buscar conversación existente por sufijo para evitar duplicados
+          // por diferencia de formato (ej: 54xxx vs 549xxx)
+          const phoneSuffix = phoneNorm.slice(-10)
+          const allChannelIds = waChannels.map(c => c.id)
           let convId: string | null = null
           const { data: existingConv } = await supabase
             .from('conversations')
             .select('id')
-            .eq('channel_id', waChannel.id)
-            .eq('platform_user_id', phoneNorm)
+            .in('channel_id', allChannelIds)
+            .ilike('platform_user_id', `%${phoneSuffix}`)
             .maybeSingle()
 
           if (existingConv) {

@@ -95,7 +95,7 @@ Deno.serve(async (req: Request) => {
     let convId: string
     const { data: existingConv } = await supabase
       .from('conversations')
-      .select('id, unread_count')
+      .select('id, unread_count, platform_user_id')
       .eq('channel_id', waChannel.id)
       .ilike('platform_user_id', `%${phoneSuffix}`)
       .maybeSingle()
@@ -109,6 +109,8 @@ Deno.serve(async (req: Request) => {
           last_message_at: new Date().toISOString(),
           client_id: (client as any)?.id ?? null,
           can_reply_until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          // Normalizar al formato que llega para evitar futuros desmatches
+          ...(existingConv.platform_user_id !== phoneClean ? { platform_user_id: phoneClean } : {}),
         })
         .eq('id', convId)
     } else {

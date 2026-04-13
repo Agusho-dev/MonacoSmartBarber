@@ -171,12 +171,13 @@ export async function sendTemplateToClient(
     phone = '54' + phone.slice(3)
   }
 
-  // Buscar o crear conversación
+  // Buscar o crear conversación (por sufijo para evitar duplicados por formato 54xxx vs 549xxx)
+  const phoneSuffix = phone.slice(-10)
   let { data: conv } = await supabase
     .from('conversations')
     .select('id')
     .eq('channel_id', waChannel.id)
-    .eq('platform_user_id', phone)
+    .ilike('platform_user_id', `%${phoneSuffix}`)
     .maybeSingle()
 
   if (!conv) {

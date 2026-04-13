@@ -257,6 +257,8 @@ export async function POST(req: NextRequest) {
               last_message_at: new Date().toISOString(),
               client_id: client?.id ?? null,
               can_reply_until: replyUntil,
+              // Normalizar al formato canónico de Meta para evitar futuros desmatches
+              ...(existingConv.platform_user_id !== from ? { platform_user_id: from } : {}),
             })
             .eq('id', convId)
         } else {
