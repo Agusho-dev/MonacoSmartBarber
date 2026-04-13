@@ -189,14 +189,27 @@ export function ChatView({
                   </div>
                   {msgs.map(msg => {
                     const isOut = msg.direction === 'outbound'
-                    const isTemplate = msg.content_type === 'template' || (msg.template_name && (!msg.content || msg.content.startsWith('[Template:')))
+                    const tp = msg.template_params as { interactive_type?: string; buttons?: Array<{ id: string; title: string }> } | null
+                    const isInteractiveButtons =
+                      msg.content_type === 'interactive' &&
+                      tp?.interactive_type === 'button' &&
+                      Array.isArray(tp.buttons) &&
+                      tp.buttons.length > 0
+                    const isTemplate =
+                      !isInteractiveButtons &&
+                      (msg.content_type === 'template' || (msg.template_name && (!msg.content || msg.content.startsWith('[Template:'))))
                     return (
                       <div key={msg.id} className={`flex mb-1.5 ${isOut ? 'justify-end' : 'justify-start'}`}>
-                        {isTemplate && msg.template_name ? (
+                        {isInteractiveButtons ? (
+                          <InteractiveButtonsBubble msg={msg} isOut={isOut} />
+                        ) : isTemplate && msg.template_name ? (
                           <TemplateBubble msg={msg} isOut={isOut} templates={waTemplates} />
                         ) : (
                           <div className={`relative max-w-[65%] px-3 py-1.5 rounded-lg text-sm ${isOut ? 'bg-green-700 text-white rounded-tr-none' : 'bg-card text-card-foreground rounded-tl-none'}`}>
                             {msg.content && <p className="whitespace-pre-wrap wrap-break-word leading-[1.45]">{msg.content}</p>}
+                            {msg.error_message && isOut && (
+                              <p className="text-[10px] text-red-300 mt-1 wrap-break-word opacity-90">{msg.error_message}</p>
+                            )}
                             <div className={`flex items-center gap-1 mt-0.5 ${isOut ? 'justify-end' : ''}`}>
                               <span className="text-[10px] text-muted-foreground">{formatTime(msg.created_at)}</span>
                               {isOut && <MessageStatusIcon status={msg.status} />}
@@ -339,6 +352,44 @@ export function ChatView({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function InteractiveButtonsBubble({ msg, isOut }: { msg: Message; isOut: boolean }) {
+  const tp = msg.template_params as { buttons: Array<{ id: string; title: string }> }
+  const buttons = tp?.buttons ?? []
+
+  return (
+    <div className={`relative max-w-[70%] w-72 rounded-lg overflow-hidden ${isOut ? 'rounded-tr-none' : 'rounded-tl-none'}`}>
+      <div className={`${isOut ? 'bg-green-700 text-white' : 'bg-card text-card-foreground'}`}>
+        {msg.content && (
+          <div className="px-3 py-2">
+            <p className="whitespace-pre-wrap text-[13px] leading-[1.45]">{msg.content}</p>
+          </div>
+        )}
+        <div className={`flex items-center gap-1 px-3 pb-1.5 ${isOut ? 'justify-end' : ''}`}>
+          <span className={`text-[10px] ${isOut ? 'text-white/50' : 'text-muted-foreground'}`}>{formatTime(msg.created_at)}</span>
+          {isOut && <MessageStatusIcon status={msg.status} />}
+        </div>
+      </div>
+      <div className={`border-t ${isOut ? 'border-green-600/50 bg-green-800/40' : 'border-border bg-muted/30'}`}>
+        {buttons.map((btn, i) => (
+          <div
+            key={btn.id || i}
+            className={`flex items-center justify-center py-2.5 text-[13px] font-medium ${
+              isOut
+                ? `text-sky-200 ${i < buttons.length - 1 ? 'border-b border-green-600/40' : ''}`
+                : `text-sky-400 ${i < buttons.length - 1 ? 'border-b border-border' : ''}`
+            }`}
+          >
+            {btn.title}
+          </div>
+        ))}
+      </div>
+      {msg.error_message && isOut && (
+        <p className="text-[10px] text-red-300 bg-green-900/50 px-2 py-1 wrap-break-word">{msg.error_message}</p>
+      )}
     </div>
   )
 }

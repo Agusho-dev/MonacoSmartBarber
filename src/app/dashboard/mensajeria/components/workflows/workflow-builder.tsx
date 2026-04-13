@@ -688,10 +688,10 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
                   {/* Output port(s) (bottom) */}
                   {isCondition && conditions.length > 0 ? (
                     <div className="flex justify-around mt-1">
-                      {conditions.map((cond) => {
+                      {conditions.map((cond, condIdx) => {
                         const active = connectingFrom?.nodeId === node.id && connectingFrom.handle === cond.id
                         return (
-                          <div key={cond.id} className="flex flex-col items-center">
+                          <div key={`${node.id}-${cond.id}-${condIdx}`} className="flex flex-col items-center">
                             <div
                               data-port="output"
                               data-port-key={`out:${node.id}:${cond.id}`}

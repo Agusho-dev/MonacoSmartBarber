@@ -534,11 +534,13 @@ function ConditionConfig({ config, onUpdateConfig }: { config: Record<string, un
           </button>
         </div>
         {conditions.map((cond, i) => (
-          <div key={i} className="flex items-center gap-2 p-2 bg-muted rounded-lg">
+          <div key={`${cond.id}-${i}`} className="flex items-center gap-2 p-2 bg-muted rounded-lg">
             <div className="flex-1 space-y-1">
-              <Input className="bg-background border text-foreground text-xs" placeholder="ID (ej: btn_5, r5)"
+              <Label className="text-[9px] text-muted-foreground">ID (igual que en el nodo &quot;Enviar botones&quot;, ej. btn_1)</Label>
+              <Input className="bg-background border text-foreground text-xs" placeholder="btn_1"
                 value={cond.id} onChange={e => updateCondition(i, 'id', e.target.value)} />
-              <Input className="bg-background border text-foreground text-xs" placeholder="Etiqueta visual"
+              <Label className="text-[9px] text-muted-foreground">Etiqueta en el diagrama</Label>
+              <Input className="bg-background border text-foreground text-xs" placeholder="Si"
                 value={cond.label} onChange={e => updateCondition(i, 'label', e.target.value)} />
             </div>
             <button onClick={() => removeCondition(i)} className="text-muted-foreground hover:text-red-400 shrink-0">
@@ -549,8 +551,8 @@ function ConditionConfig({ config, onUpdateConfig }: { config: Record<string, un
       </div>
 
       <p className="text-[10px] text-muted-foreground">
-        Cada ruta genera un puerto de salida en el nodo. El ID debe coincidir con el ID del botón/opción que activa esa ruta.
-        Las conexiones sin match van a la salida "Otro".
+        Cada ruta genera un puerto de salida. Lo ideal es que el ID sea el mismo que el del botón en WhatsApp (btn_1, btn_2…).
+        Si dejás el texto del botón (ej. Si), también puede coincidir. Las rutas sin match van a &quot;Otro&quot;. No repetir el mismo ID en dos rutas.
       </p>
     </div>
   )

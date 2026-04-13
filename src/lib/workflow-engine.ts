@@ -445,11 +445,25 @@ async function advanceFromNode(
 
   // Si el nodo actual tiene edges con condition_value, matchear
   const conditionalEdges = edges.filter(e => e.condition_value)
-  // Usar last_button_id (botón interactivo) o last_text_reply (texto libre) para matchear
-  const replyValue = context.last_button_id || context.last_text_reply?.trim()
-  if (conditionalEdges.length > 0 && replyValue) {
-    // Buscar edge que matchee la respuesta del cliente
-    const matchedEdge = conditionalEdges.find(e => e.condition_value === replyValue)
+  // Meta envía button_reply.id (ej. btn_1) y title (ej. "Si"). Las aristas guardan cond.id:
+  // debe coincidir con el id de Meta O con el texto del botón / mensaje libre.
+  const replyId = (context.last_button_id ?? '').trim()
+  const replyTitle = (context.last_button_title ?? '').trim()
+  const replyText = (context.last_text_reply ?? '').trim()
+  const replyForMatch = replyId || replyTitle || replyText
+
+  const matchesConditionValue = (cv: string | null | undefined): boolean => {
+    if (cv == null) return false
+    const c = String(cv).trim()
+    if (!c) return false
+    if (replyId && replyId === c) return true
+    if (replyTitle && replyTitle.toLowerCase() === c.toLowerCase()) return true
+    if (!replyId && replyText && replyText.toLowerCase() === c.toLowerCase()) return true
+    return false
+  }
+
+  if (conditionalEdges.length > 0 && replyForMatch) {
+    const matchedEdge = conditionalEdges.find(e => matchesConditionValue(e.condition_value as string))
     if (matchedEdge) {
       targetNodeId = matchedEdge.target_node_id
     } else {
@@ -528,10 +542,26 @@ async function executeNode(
       }
 
       case 'send_buttons': {
-        const body = resolveVariables(config.body as string || '', context, params)
-        const buttons = config.buttons as Array<{ id: string; title: string }>
-        await sendWhatsAppButtons(supabase, params, body, buttons)
-        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { body, buttons })
+        const body = resolveVariables(
+          (config.body as string) || (config.text as string) || '',
+          context,
+          params
+        )
+        const raw = (config.buttons as Array<{ id: string; title: string }>) ?? []
+        const buttons = raw.filter(b => b && String(b.id).trim() && String(b.title).trim())
+        if (buttons.length === 0) {
+          const fallback = body.trim() || 'Mensaje sin botones configurados.'
+          await sendPlatformMessage(supabase, params, fallback)
+          await logExecution(supabase, executionId, node.id, node.node_type, 'success', { warning: 'sin_botones', fallback })
+        } else if (params.platform === 'whatsapp' && params.waConfig) {
+          await sendWhatsAppButtons(supabase, params, body, buttons)
+          await logExecution(supabase, executionId, node.id, node.node_type, 'success', { body, buttons })
+        } else {
+          const lines = buttons.map(b => `▸ ${b.title}`).join('\n')
+          const combined = [body.trim(), lines].filter(Boolean).join('\n\n')
+          await sendPlatformMessage(supabase, params, combined || lines)
+          await logExecution(supabase, executionId, node.id, node.node_type, 'success', { warning: 'botones_no_interactivos', body, buttons })
+        }
         // Después de enviar botones, poner en espera
         await supabase
           .from('workflow_executions')
@@ -919,10 +949,11 @@ async function sendWhatsAppButtons(
 ): Promise<void> {
   if (!params.waConfig) return
 
-  // WhatsApp soporta máximo 3 botones por mensaje interactivo
+  // WhatsApp: cuerpo obligatorio (máx. 1024), hasta 3 botones, título máx. 20
+  const bodyText = (body.trim() || 'Elegí una opción:').slice(0, 1024)
   const waButtons = buttons.slice(0, 3).map(btn => ({
-    type: 'reply',
-    reply: { id: btn.id, title: btn.title.slice(0, 20) },
+    type: 'reply' as const,
+    reply: { id: String(btn.id).trim(), title: String(btn.title).trim().slice(0, 20) },
   }))
 
   const res = await fetch(
@@ -935,11 +966,12 @@ async function sendWhatsAppButtons(
       },
       body: JSON.stringify({
         messaging_product: 'whatsapp',
+        recipient_type: 'individual',
         to: params.platformUserId,
         type: 'interactive',
         interactive: {
           type: 'button',
-          body: { text: body },
+          body: { text: bodyText },
           action: { buttons: waButtons },
         },
       }),
@@ -947,15 +979,30 @@ async function sendWhatsAppButtons(
   )
   const data = await res.json()
   const platformMsgId = data.messages?.[0]?.id ?? null
+  const errSnippet = platformMsgId
+    ? null
+    : (data.error?.message || JSON.stringify(data)).slice(0, 500)
+
+  const uiButtons = waButtons.map(b => ({
+    id: b.reply.id,
+    title: b.reply.title,
+  }))
 
   await supabase.from('messages').insert({
     conversation_id: params.conversationId,
     direction: 'outbound',
-    content_type: 'template',
-    content: body,
+    content_type: 'interactive',
+    content: bodyText,
+    template_params: { interactive_type: 'button', buttons: uiButtons },
     platform_message_id: platformMsgId,
     status: platformMsgId ? 'sent' : 'failed',
+    error_message: errSnippet,
   })
+
+  await supabase
+    .from('conversations')
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', params.conversationId)
 }
 
 async function sendWhatsAppList(
