@@ -177,23 +177,6 @@ export function assignDynamicBarbers(
     if (!barberLoad.has(b.id)) {
       barberLoad.set(b.id, 0)
     }
-    const lastCompleted = lastCompletedAt[b.id]
-    if (lastCompleted) {
-      const elapsedMs = currentTime - new Date(lastCompleted).getTime()
-      // Cooldown progresivo: penalización mayor cuanto más reciente fue el último corte
-      // Evita que barberos rápidos encadenen cortes sin pausa
-      if (elapsedMs > 0 && elapsedMs < cooldownMs) {
-        let cooldownLoad: number
-        if (elapsedMs < 30_000) {
-          cooldownLoad = 3  // <30s: cliente probablemente aún en camino
-        } else if (elapsedMs < 60_000) {
-          cooldownLoad = 2  // 30-60s: probable
-        } else {
-          cooldownLoad = 1  // 60-120s: bajo
-        }
-        barberLoad.set(b.id, barberLoad.get(b.id)! + cooldownLoad)
-      }
-    }
   }
 
   unassigned.sort((a, b) => a.position - b.position)
@@ -215,14 +198,16 @@ export function assignDynamicBarbers(
       const loadB = barberLoad.get(b.id) || 0
       if (loadA !== loadB) return loadA - loadB
 
-      const countA = dailyServiceCounts[a.id] || 0
-      const countB = dailyServiceCounts[b.id] || 0
-      if (countA !== countB) return countA - countB
-
-      // Prefer the barber who has been idle the longest (earliest completed_at)
+      // Prefer the barber who has been idle the longest (earliest completed_at).
+      // This replaces the cooldown system: a barber who just finished a cut
+      // is naturally deprioritized without depending on device clock.
       const lastA = lastCompletedAt[a.id] || ''
       const lastB = lastCompletedAt[b.id] || ''
       if (lastA !== lastB) return lastA.localeCompare(lastB)
+
+      const countA = dailyServiceCounts[a.id] || 0
+      const countB = dailyServiceCounts[b.id] || 0
+      if (countA !== countB) return countA - countB
 
       return a.id.localeCompare(b.id)
     })
