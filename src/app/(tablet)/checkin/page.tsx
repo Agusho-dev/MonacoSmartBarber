@@ -600,9 +600,12 @@ export default function CheckinPage() {
     setPhone((p) => p.slice(0, -1))
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const assignmentTime = useMemo(() => Date.now(), [queueEntries, barbers, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
+
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(queueEntries, barbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs)
-  }, [queueEntries, barbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs])
+    return assignDynamicBarbers(queueEntries, barbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs)
+  }, [queueEntries, barbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs])
 
 
 

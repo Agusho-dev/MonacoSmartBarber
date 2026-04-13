@@ -424,9 +424,16 @@ export function QueuePanel({
     return () => clearInterval(interval)
   }, [])
 
+  // Timestamp estable para la asignación dinámica: solo cambia cuando los datos subyacentes
+  // cambian (entries, barbers, etc.), NO cada segundo. Esto garantiza que todos los
+  // dispositivos que reciben el mismo evento Realtime calculen la misma asignación,
+  // evitando que clientes aparezcan en la fila de barberos distintos por diferencias de reloj.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const assignmentTime = useMemo(() => Date.now(), [entries, allBarbers, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
+
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(entries, allBarbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs)
-  }, [entries, allBarbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs])
+    return assignDynamicBarbers(entries, allBarbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs)
+  }, [entries, allBarbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs])
 
   // My active break (ghost entry that is in_progress)
   const myActiveBreak = dynamicEntries.find(

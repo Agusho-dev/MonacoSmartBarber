@@ -327,11 +327,14 @@ export function TvClient({
     return notClocked
   }, [liveBarbers, latestAttendance])
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const assignmentTime = useMemo(() => Date.now(), [entries, liveBarbers, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
+
   const dynamicEntries = useMemo(() => {
     const branchEntries = selectedBranchId ? entries.filter(e => e.branch_id === selectedBranchId) : entries
     const branchBarbers = selectedBranchId ? liveBarbers.filter(b => b.branch_id === selectedBranchId) : liveBarbers
-    return assignDynamicBarbers(branchEntries, branchBarbers as unknown as Staff[], schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs)
-  }, [entries, liveBarbers, schedules, now, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, selectedBranchId, dynamicCooldownMs])
+    return assignDynamicBarbers(branchEntries, branchBarbers as unknown as Staff[], schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs)
+  }, [entries, liveBarbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, selectedBranchId, dynamicCooldownMs])
 
   const waitingEntries = useMemo(
     () => dynamicEntries.filter((e) => e.status === 'waiting'),
