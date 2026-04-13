@@ -382,9 +382,11 @@ async function advanceFromNode(
 
   // Si el nodo actual tiene edges con condition_value, matchear
   const conditionalEdges = edges.filter(e => e.condition_value)
-  if (conditionalEdges.length > 0 && context.last_button_id) {
-    // Buscar edge que matchee el botón presionado
-    const matchedEdge = conditionalEdges.find(e => e.condition_value === context.last_button_id)
+  // Usar last_button_id (botón interactivo) o last_text_reply (texto libre) para matchear
+  const replyValue = context.last_button_id || context.last_text_reply?.trim()
+  if (conditionalEdges.length > 0 && replyValue) {
+    // Buscar edge que matchee la respuesta del cliente
+    const matchedEdge = conditionalEdges.find(e => e.condition_value === replyValue)
     if (matchedEdge) {
       targetNodeId = matchedEdge.target_node_id
     } else {
@@ -922,6 +924,113 @@ async function logExecution(
     output_data: outputData,
     error_message: errorMessage ?? null,
   })
+}
+
+// ─── Cron: procesar delays expirados ────────────────────────────
+
+/**
+ * Busca ejecuciones de workflow que están en waiting_reply en un nodo delay
+ * cuyo delay_until ya pasó, y las avanza al siguiente nodo.
+ * Debe llamarse desde un cron cada ~1 minuto.
+ */
+export async function processExpiredDelays(): Promise<{ processed: number; errors: string[] }> {
+  const supabase = getSupabase()
+  const errors: string[] = []
+  let processed = 0
+
+  // Buscar ejecuciones en waiting_reply en nodos delay con delay_until vencido
+  const { data: executions } = await supabase
+    .from('workflow_executions')
+    .select('*, current_node:workflow_nodes(*), workflow:automation_workflows(organization_id)')
+    .eq('status', 'waiting_reply')
+    .limit(20)
+
+  if (!executions || executions.length === 0) return { processed: 0, errors: [] }
+
+  const now = new Date()
+
+  for (const exec of executions) {
+    const node = exec.current_node as WorkflowNode | null
+    if (!node || node.node_type !== 'delay') continue
+
+    const ctx = (exec.context as ExecutionContext) ?? {}
+    const delayUntil = ctx.delay_until as string | undefined
+    if (!delayUntil) continue
+    if (new Date(delayUntil) > now) continue // aún no expiró
+
+    try {
+      // Resolver datos de la conversación para poder enviar mensajes
+      const { data: conv } = await supabase
+        .from('conversations')
+        .select('platform_user_id, channel:social_channels(platform, branch_id)')
+        .eq('id', exec.conversation_id)
+        .maybeSingle()
+
+      if (!conv) {
+        errors.push(`Conversación no encontrada: ${exec.conversation_id}`)
+        continue
+      }
+
+      const channel = conv.channel as { platform?: string; branch_id?: string } | { platform?: string; branch_id?: string }[] | null
+      const channelData = Array.isArray(channel) ? channel[0] : channel
+      const platform = (channelData?.platform as 'whatsapp' | 'instagram') ?? 'whatsapp'
+      const orgId = (exec.workflow as { organization_id?: string } | null)?.organization_id ?? ''
+
+      // Obtener config de WhatsApp para enviar mensajes
+      let waConfig: WaConfig | null = null
+      let igConfig: IgConfig | null = null
+
+      if (platform === 'whatsapp' && orgId) {
+        const { data: waCfg } = await supabase
+          .from('organization_whatsapp_config')
+          .select('whatsapp_access_token, whatsapp_phone_id')
+          .eq('organization_id', orgId)
+          .eq('is_active', true)
+          .maybeSingle()
+        if (waCfg?.whatsapp_access_token && waCfg?.whatsapp_phone_id) {
+          waConfig = { whatsapp_access_token: waCfg.whatsapp_access_token, whatsapp_phone_id: waCfg.whatsapp_phone_id }
+        }
+      } else if (platform === 'instagram' && orgId) {
+        const { data: igCfg } = await supabase
+          .from('organization_instagram_config')
+          .select('instagram_page_access_token')
+          .eq('organization_id', orgId)
+          .eq('is_active', true)
+          .maybeSingle()
+        if (igCfg?.instagram_page_access_token) {
+          igConfig = { instagram_page_access_token: igCfg.instagram_page_access_token }
+        }
+      }
+
+      // Marcar como activo
+      await supabase
+        .from('workflow_executions')
+        .update({ status: 'active', updated_at: new Date().toISOString() })
+        .eq('id', exec.id)
+
+      await logExecution(supabase, exec.id, node.id, 'delay', 'success', { resumed_by: 'cron', delay_until: delayUntil })
+
+      // Construir params y avanzar
+      const params: Parameters<typeof evaluateIncomingMessage>[0] = {
+        orgId,
+        conversationId: exec.conversation_id,
+        text: '',
+        platform,
+        messageType: 'text',
+        waConfig,
+        igConfig,
+        platformUserId: conv.platform_user_id ?? '',
+      }
+
+      await advanceFromNode(supabase, exec.id, exec.workflow_id, node.id, ctx, params)
+      processed++
+    } catch (err) {
+      errors.push(`Error procesando ${exec.id}: ${(err as Error).message}`)
+      console.error('[WorkflowEngine] Error procesando delay expirado:', exec.id, err)
+    }
+  }
+
+  return { processed, errors }
 }
 
 // ─── Legacy auto-reply fallback ──────────────────────────────────

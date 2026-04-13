@@ -90,6 +90,10 @@ export async function loginWithPin(formData: FormData) {
     }
   }
 
+  // Limpiar cualquier sesión de Supabase Auth residual para evitar
+  // que getCurrentOrgId() use cookies de Auth en vez de barber_session
+  await supabase.auth.signOut()
+
   const cookieStore = await cookies()
   const session = JSON.stringify({
     staff_id: staff.id,
