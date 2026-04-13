@@ -134,7 +134,7 @@ export async function evaluateIncomingMessage(params: {
 
   try {
     // 1. Chequear si hay un workflow en estado waiting_reply para esta conversación
-    const { data: activeExec } = await supabase
+    let { data: activeExec } = await supabase
       .from('workflow_executions')
       .select('*, current_node:workflow_nodes(*)')
       .eq('conversation_id', conversationId)
@@ -142,6 +142,38 @@ export async function evaluateIncomingMessage(params: {
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle()
+
+    // 1b. Si no hay ejecución activa en esta conversación, buscar en conversaciones
+    // duplicadas del mismo teléfono (safety net para datos legacy con dedup roto)
+    if (!activeExec && params.platformUserId) {
+      const phoneSuffix = params.platformUserId.slice(-10)
+      if (phoneSuffix.length === 10) {
+        const { data: siblingConvs } = await supabase
+          .from('conversations')
+          .select('id')
+          .neq('id', conversationId)
+          .ilike('platform_user_id', `%${phoneSuffix}`)
+        const siblingIds = siblingConvs?.map(c => c.id) ?? []
+        if (siblingIds.length > 0) {
+          const { data: siblingExec } = await supabase
+            .from('workflow_executions')
+            .select('*, current_node:workflow_nodes(*)')
+            .in('conversation_id', siblingIds)
+            .in('status', ['waiting_reply'])
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          if (siblingExec) {
+            // Migrar la ejecución a la conversación canónica (la actual del webhook)
+            await supabase
+              .from('workflow_executions')
+              .update({ conversation_id: conversationId })
+              .eq('id', siblingExec.id)
+            activeExec = siblingExec
+          }
+        }
+      }
+    }
 
     if (activeExec) {
       // Hay un workflow esperando respuesta — procesar
@@ -151,6 +183,11 @@ export async function evaluateIncomingMessage(params: {
         // Refrescar identidad del cliente en el contexto si cambió o falta
         if (clientInfo.fullName) ctx.client_name = clientInfo.fullName
         if (clientInfo.firstName) ctx.client_first_name = clientInfo.firstName
+
+        // Limpiar valores de la iteración anterior antes de procesar la nueva respuesta
+        ctx.last_button_id = undefined
+        ctx.last_button_title = undefined
+        ctx.last_text_reply = undefined
 
         if (messageType === 'interactive' || messageType === 'button') {
           // Respuesta interactiva (botón o lista)
@@ -170,6 +207,7 @@ export async function evaluateIncomingMessage(params: {
           .update({
             status: 'active',
             context: ctx,
+            conversation_id: conversationId,
             updated_at: new Date().toISOString(),
           })
           .eq('id', activeExec.id)
@@ -178,7 +216,6 @@ export async function evaluateIncomingMessage(params: {
         await logExecution(supabase, activeExec.id, node.id, node.node_type, 'success', { reply: text || interactivePayload })
 
         // El nodo wait_reply terminó. Buscar el siguiente edge.
-        // Si el nodo actual es wait_reply, el siguiente nodo debería ser un condition o un send_message
         await advanceFromNode(supabase, activeExec.id, activeExec.workflow_id, node.id, ctx, params)
         return
       }

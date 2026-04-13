@@ -237,12 +237,16 @@ export async function POST(req: NextRequest) {
         // Buscar o crear conversación
         // Usamos sufijo de teléfono para evitar duplicados por diferencia de formato
         // (ej: startConversation guarda 54xxx, Meta envía 549xxx)
+        // IMPORTANTE: limit(1) antes de maybeSingle() para evitar error 406 si hay
+        // múltiples conversaciones con el mismo sufijo (legacy duplicates)
         const fromSuffix = from.slice(-10)
         const { data: existingConv } = await supabase
           .from('conversations')
           .select('id, unread_count, platform_user_id')
           .eq('channel_id', waChannel.id)
           .ilike('platform_user_id', `%${fromSuffix}`)
+          .order('last_message_at', { ascending: false, nullsFirst: false })
+          .limit(1)
           .maybeSingle()
 
         let convId: string
