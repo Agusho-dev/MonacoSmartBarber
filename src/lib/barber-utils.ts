@@ -158,6 +158,7 @@ export function assignDynamicBarbers(
   const result: DynamicQueueEntry[] = []
 
   const barberLoad = new Map<string, number>()
+  const barberAttending = new Set<string>()
   const unassigned: QueueEntry[] = []
 
   for (const entry of entries) {
@@ -165,10 +166,13 @@ export function assignDynamicBarbers(
       unassigned.push(entry)
     } else {
       result.push(entry)
-      // Exclude break ghost entries from load so they don't cause dynamic clients to be
-      // redirected to other barbers when a break is scheduled for this barber.
-      if (entry.barber_id && (entry.status === 'waiting' || entry.status === 'in_progress') && !entry.is_break) {
-        barberLoad.set(entry.barber_id, (barberLoad.get(entry.barber_id) || 0) + 1)
+      if (entry.barber_id && !entry.is_break) {
+        if (entry.status === 'waiting' || entry.status === 'in_progress') {
+          barberLoad.set(entry.barber_id, (barberLoad.get(entry.barber_id) || 0) + 1)
+        }
+        if (entry.status === 'in_progress') {
+          barberAttending.add(entry.barber_id)
+        }
       }
     }
   }
@@ -193,6 +197,13 @@ export function assignDynamicBarbers(
         const loadA = barberLoad.get(a.id) || 0
         const loadB = barberLoad.get(b.id) || 0
         if (loadA !== loadB) return loadA - loadB
+
+        // At same load, prefer free barbers (can serve immediately) over busy ones.
+        // This ensures the first FIFO client goes to the barber who just became available
+        // rather than being queued behind a busy barber's current client.
+        const busyA = barberAttending.has(a.id) ? 1 : 0
+        const busyB = barberAttending.has(b.id) ? 1 : 0
+        if (busyA !== busyB) return busyA - busyB
 
         const lastA = lastCompletedAt[a.id] || ''
         const lastB = lastCompletedAt[b.id] || ''
