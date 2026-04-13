@@ -91,6 +91,8 @@ Deno.serve(async (req: Request) => {
 
     // Buscar o crear conversación
     // Usamos sufijo de teléfono para evitar duplicados por diferencia de formato
+    // IMPORTANTE: limit(1) antes de maybeSingle() para evitar error 406
+    // cuando hay múltiples conversaciones con el mismo sufijo de teléfono
     const phoneSuffix = phoneClean.slice(-10)
     let convId: string
     const { data: existingConv } = await supabase
@@ -98,6 +100,8 @@ Deno.serve(async (req: Request) => {
       .select('id, unread_count, platform_user_id')
       .eq('channel_id', waChannel.id)
       .ilike('platform_user_id', `%${phoneSuffix}`)
+      .order('last_message_at', { ascending: false, nullsFirst: false })
+      .limit(1)
       .maybeSingle()
 
     if (existingConv) {
