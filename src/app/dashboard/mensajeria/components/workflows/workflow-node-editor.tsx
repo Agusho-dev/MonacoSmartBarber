@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { X, Plus, Trash2, MessageSquare, Tag, Bell, Image, LayoutGrid, GitBranch, Clock, Send, List as ListIcon, User, MessageCircleReply, Hash, Bot, UserCheck, Globe, Inbox, CalendarDays } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -133,7 +133,7 @@ export function WorkflowNodeEditor({ node, workflow, onUpdateConfig, onUpdateLab
 
         {/* Node-specific config */}
         {node.node_type === 'trigger' && (
-          <TriggerConfig config={config} onUpdateConfig={onUpdateConfig} />
+          <TriggerConfig nodeId={node.id} config={config} onUpdateConfig={onUpdateConfig} />
         )}
 
         {node.node_type === 'send_message' && (
@@ -660,9 +660,38 @@ const TRIGGER_TYPE_OPTIONS = [
   { value: 'days_after_visit', label: 'Seguimiento', icon: CalendarDays, description: 'Envía mensaje X días después de la última visita' },
 ]
 
-function TriggerConfig({ config, onUpdateConfig }: { config: Record<string, unknown>; onUpdateConfig: (config: Record<string, unknown>) => void }) {
+function TriggerConfig({
+  nodeId,
+  config,
+  onUpdateConfig,
+}: {
+  nodeId: string
+  config: Record<string, unknown>
+  onUpdateConfig: (config: Record<string, unknown>) => void
+}) {
   const { waTemplates, handleSyncTemplates, syncingTemplates } = useMensajeria()
   const triggerType = (config.trigger_type as string) || 'message_received'
+  const configRef = useRef(config)
+  configRef.current = config
+
+  const keywordsJoined = ((config.keywords as string[]) ?? []).join(', ')
+  const [keywordDraft, setKeywordDraft] = useState(keywordsJoined)
+  const keywordDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    setKeywordDraft(((config.keywords as string[]) ?? []).join(', '))
+  }, [nodeId])
+
+  useEffect(() => () => {
+    if (keywordDebounceRef.current) clearTimeout(keywordDebounceRef.current)
+  }, [])
+
+  const flushKeywordsToConfig = (raw: string) => {
+    const c = configRef.current
+    const tt = (c.trigger_type as string) || 'message_received'
+    const keywords = raw.split(',').map(k => k.trim().toLowerCase()).filter(Boolean)
+    onUpdateConfig({ ...c, keywords, trigger_type: tt })
+  }
 
   const setTriggerType = (type: string) => {
     onUpdateConfig({ ...config, trigger_type: type })
@@ -696,9 +725,24 @@ function TriggerConfig({ config, onUpdateConfig }: { config: Record<string, unkn
         <>
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Palabras clave (separadas por coma)</Label>
-            <Input className="bg-muted border text-foreground text-sm" placeholder="horarios, precios, abierto"
-              value={((config.keywords as string[]) ?? []).join(', ')}
-              onChange={e => onUpdateConfig({ ...config, keywords: e.target.value.split(',').map(k => k.trim().toLowerCase()).filter(Boolean), trigger_type: triggerType })} />
+            <Input
+              className="bg-muted border text-foreground text-sm"
+              placeholder="horarios, precios, abierto"
+              value={keywordDraft}
+              onChange={e => {
+                const v = e.target.value
+                setKeywordDraft(v)
+                if (keywordDebounceRef.current) clearTimeout(keywordDebounceRef.current)
+                keywordDebounceRef.current = setTimeout(() => flushKeywordsToConfig(v), 350)
+              }}
+              onBlur={() => {
+                if (keywordDebounceRef.current) {
+                  clearTimeout(keywordDebounceRef.current)
+                  keywordDebounceRef.current = null
+                }
+                flushKeywordsToConfig(keywordDraft)
+              }}
+            />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Modo de coincidencia</Label>

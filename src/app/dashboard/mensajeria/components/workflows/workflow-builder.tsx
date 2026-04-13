@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useTransition } from 'react'
+import { flushSync } from 'react-dom'
 import {
   ArrowLeft, Save, Plus, ZoomIn, ZoomOut, Maximize2,
   MessageSquare, Image, LayoutGrid, List, Tag,
@@ -99,8 +100,12 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
   // Refs que reflejan el estado para handlers nativos (wheel) y capture flows
   const zoomRef = useRef(zoom)
   const panRef = useRef(pan)
+  const nodesRef = useRef(nodes)
+  const edgesRef = useRef(edges)
   useEffect(() => { zoomRef.current = zoom }, [zoom])
   useEffect(() => { panRef.current = pan }, [pan])
+  useLayoutEffect(() => { nodesRef.current = nodes }, [nodes])
+  useLayoutEffect(() => { edgesRef.current = edges }, [edges])
 
   type Interaction =
     | { mode: 'none' }
@@ -334,9 +339,16 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
   // ─── Save ────────────────────────────────────────────────────
 
   const handleSave = () => {
+    flushSync(() => {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur()
+      }
+    })
     startSaving(async () => {
+      const currentNodes = nodesRef.current
+      const currentEdges = edgesRef.current
       // Sincronizar trigger node config al registro del workflow
-      const triggerNode = nodes.find(n => n.is_entry_point)
+      const triggerNode = currentNodes.find(n => n.is_entry_point)
       if (triggerNode) {
         const triggerType = (triggerNode.config.trigger_type as string) ?? workflow?.trigger_type ?? 'message_received'
         const triggerConfig = { ...triggerNode.config }
@@ -344,7 +356,7 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
         await syncTriggerToWorkflow(workflowId, triggerType, triggerConfig)
         setWorkflow(prev => prev ? { ...prev, trigger_type: triggerType as typeof prev.trigger_type, trigger_config: triggerConfig } : prev)
       }
-      const result = await saveWorkflowGraph(workflowId, nodes, edges)
+      const result = await saveWorkflowGraph(workflowId, currentNodes, currentEdges)
       if (result.error) { toast.error(result.error); return }
       toast.success('Workflow guardado')
     })
