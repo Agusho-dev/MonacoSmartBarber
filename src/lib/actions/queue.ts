@@ -618,6 +618,47 @@ export async function completeService(
     }
   }
 
+  // 8. Generar/actualizar salary_report de comisión diario al hacer checkout
+  if (commissionAmount > 0) {
+    try {
+      const todayStr = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Argentina/Buenos_Aires',
+      }).format(new Date())
+
+      const { data: existingReport } = await supabase
+        .from('salary_reports')
+        .select('id, amount')
+        .eq('staff_id', visit.barber_id)
+        .eq('branch_id', visit.branch_id)
+        .eq('type', 'commission')
+        .eq('report_date', todayStr)
+        .eq('status', 'pending')
+        .maybeSingle()
+
+      if (existingReport) {
+        // Sumar la comisión de este servicio al reporte existente del día
+        await supabase
+          .from('salary_reports')
+          .update({ amount: Number(existingReport.amount) + commissionAmount })
+          .eq('id', existingReport.id)
+      } else {
+        // Crear reporte nuevo para el día
+        await supabase
+          .from('salary_reports')
+          .insert({
+            staff_id: visit.barber_id,
+            branch_id: visit.branch_id,
+            type: 'commission',
+            amount: commissionAmount,
+            report_date: todayStr,
+            status: 'pending',
+          })
+      }
+    } catch (err) {
+      console.error('[SalaryReport] Error al generar reporte de comisión:', err)
+    }
+  }
+
   revalidatePath('/barbero/fila')
   revalidatePath('/barbero/facturacion')
   revalidatePath('/barbero/rendimiento')

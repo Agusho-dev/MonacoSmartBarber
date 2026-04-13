@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { SalaryScheme } from '@/lib/types/database'
 import { validateBranchAccess, getCurrentOrgId } from './org'
@@ -41,7 +41,7 @@ export async function getSalaryConfig(staffId: string) {
   const orgId = await getCurrentOrgId()
   if (!orgId) return null
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Verificar que el barbero pertenece a la organización
   const { data: staffRow } = await supabase
@@ -64,7 +64,8 @@ export async function upsertSalaryConfig(staffId: string, scheme: SalaryScheme, 
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'No autorizado' }
 
-  const supabase = await createClient()
+  // Usar admin client para evitar bloqueo por RLS en salary_configs
+  const supabase = createAdminClient()
 
   // Verificar que el barbero pertenece a la organización
   const { data: staffRow } = await supabase
@@ -99,7 +100,7 @@ export async function calculateAndSaveSalary(staffId: string, periodStart: strin
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Verificar que el barbero pertenece a la organización
   const { data: staffRow } = await supabase
@@ -136,7 +137,7 @@ export async function markSalaryAsPaid(paymentId: string, notes?: string) {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Verificar que el pago pertenece a la organización a través del staff
   const { data: payment } = await supabase
@@ -162,7 +163,7 @@ export async function getSalaryHistory(branchId: string) {
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { data: [], error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('salary_payments')
     .select('*, staff:staff(id, full_name, branch_id)')
@@ -178,7 +179,7 @@ export async function getAllBarbersWithSalaryConfig(branchId: string) {
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { data: [], error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('staff')
     .select('id, full_name, commission_pct, salary_configs(*)')
@@ -193,7 +194,7 @@ export async function previewSalary(staffId: string, periodStart: string, period
   const orgId = await getCurrentOrgId()
   if (!orgId) return { amount: 0 }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Verificar que el barbero pertenece a la organización
   const { data: staffRow } = await supabase
@@ -222,7 +223,7 @@ export async function getSalaryReports(staffId: string, branchId: string) {
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { data, error } = await supabase
     .from('salary_reports')
@@ -268,7 +269,7 @@ export async function createManualSalaryReport(
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Los adelantos se registran como monto negativo
   const finalAmount = type === 'advance' ? -Math.abs(amount) : Math.abs(amount)
@@ -310,7 +311,7 @@ export async function generateCommissionReport(
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Verificar que no exista ya un reporte de comisión para este día
   const { count: existingCount } = await supabase
@@ -384,7 +385,7 @@ export async function generateBaseSalaryReport(
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { data: salaryConfig, error: configError } = await supabase
     .from('salary_configs')
@@ -447,7 +448,7 @@ export async function paySelectedReports(
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Buscar los reportes seleccionados para calcular el total
   const { data: reports, error: reportsError } = await supabase
@@ -519,7 +520,7 @@ export async function getPaymentBatches(staffId: string, branchId: string) {
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { data: batches, error: batchesError } = await supabase
     .from('salary_payment_batches')
@@ -577,7 +578,7 @@ export async function deleteSalaryReport(reportId: string) {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Verificar que el reporte existe, está pendiente y pertenece a la organización
   const { data: report, error: fetchError } = await supabase
@@ -625,7 +626,7 @@ export async function generateCheckoutCommissionReport(
   staffId: string,
   branchId: string
 ) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Fecha local de hoy en Argentina
   const now = new Date()
@@ -752,7 +753,7 @@ export async function settleHybridPeriod(
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Obtener configuración salarial
   const { data: salaryConfig, error: configError } = await supabase
@@ -925,7 +926,7 @@ export async function getPaymentBatchesGrouped(staffId: string, branchId: string
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { data: batches, error: batchesError } = await supabase
     .from('salary_payment_batches')
@@ -1016,7 +1017,7 @@ export async function getCommissionSummary(branchId?: string | null) {
     }
   }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   let pendingQuery = supabase
     .from('salary_reports')
