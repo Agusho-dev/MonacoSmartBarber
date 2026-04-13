@@ -3,12 +3,22 @@
 import { createContext, useContext, useState, useMemo, useRef, useCallback, useTransition, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { sendMessage as sendMessageAction, markAsRead, cancelScheduledMessage, sendTemplateToConversation, sendTemplateToClient } from '@/lib/actions/messaging'
+import { getQuickReplies } from '@/lib/actions/quick-replies'
 import { syncWhatsAppTemplates } from '@/lib/actions/whatsapp-meta'
 import { startConversation, updateConversationStatus, getClientVisits, scheduleMessageAuto } from '@/lib/actions/conversations'
 import { createConversationTag, deleteConversationTag, assignConversationTag, removeConversationTag } from '@/lib/actions/tags'
 import { toast } from 'sonner'
 import type { Message, ConversationTag, OrgWhatsAppConfig, OrgInstagramConfig, Client } from '@/lib/types/database'
 import type { ConversationWithRelations, ScheduledWithRelations, ClientVisit, WaTemplate, ReviewAutoSettings, PlatformFilter } from './types'
+
+export interface QuickReply {
+  id: string
+  title: string
+  content: string
+  shortcut: string | null
+  sort_order: number
+  created_at: string
+}
 
 interface MensajeriaContextValue {
   // Supabase
@@ -92,6 +102,9 @@ interface MensajeriaContextValue {
   handleCreateTag: (name: string, color: string) => void
   handleDeleteTag: (tagId: string) => void
   handleToggleTag: (conversationId: string, tagId: string) => void
+
+  // Quick replies
+  quickReplies: QuickReply[]
 
   // Transition states
   isSending: boolean
@@ -179,6 +192,14 @@ export function MensajeriaProvider({
   const [sendingTemplate, startSendingTemplate] = useTransition()
   const [templateTarget, setTemplateTarget] = useState<{ type: 'conversation'; conversationId: string } | { type: 'client'; clientId: string } | null>(null)
 
+  // Quick replies
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([])
+  useEffect(() => {
+    getQuickReplies().then(r => {
+      if (r.data) setQuickReplies(r.data as QuickReply[])
+    })
+  }, [])
+
   useEffect(() => {
     const channelIds = initialConversations
       .map(c => c.channel_id)
@@ -246,10 +267,16 @@ export function MensajeriaProvider({
         if (activeConv && newMsg.conversation_id === activeConv.id) {
           setMessages(prev => prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg])
         }
+        const isOutbound = newMsg.direction === 'outbound'
         setConversations(prev =>
           prev.map(c => {
             if (c.id !== newMsg.conversation_id) return c
-            return { ...c, last_message_at: newMsg.created_at, unread_count: activeConv?.id === c.id ? 0 : c.unread_count + 1 }
+            return {
+              ...c,
+              last_message_at: newMsg.created_at,
+              // Solo incrementar unread para mensajes inbound, no para outbound (echo)
+              unread_count: isOutbound ? 0 : (activeConv?.id === c.id ? 0 : c.unread_count + 1),
+            }
           }).sort((a, b) => {
             const da = a.last_message_at ? new Date(a.last_message_at).getTime() : 0
             const db = b.last_message_at ? new Date(b.last_message_at).getTime() : 0
@@ -260,6 +287,15 @@ export function MensajeriaProvider({
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (payload) => {
         const updated = payload.new as Message
         setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, status: updated.status } : m))
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations' }, (payload) => {
+        const updated = payload.new as ConversationWithRelations
+        setConversations(prev => prev.map(c =>
+          c.id === updated.id ? { ...c, unread_count: updated.unread_count, last_message_at: updated.last_message_at } : c
+        ))
+        if (activeConv?.id === updated.id) {
+          setActiveConv(prev => prev ? { ...prev, unread_count: updated.unread_count, last_message_at: updated.last_message_at } : prev)
+        }
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversation_tag_assignments' }, async (payload) => {
         const assignment = payload.new as { conversation_id: string; tag_id: string }
@@ -530,6 +566,7 @@ export function MensajeriaProvider({
     handleSchedule, handleCancelScheduled,
     handleSyncTemplates, handleOpenTemplateDialog, handleSendTemplate,
     handleCreateTag, handleDeleteTag, handleToggleTag,
+    quickReplies,
     isSending, isActing, isStarting,
     syncingTemplates, sendingTemplate, creatingTag, taggingConv,
   }

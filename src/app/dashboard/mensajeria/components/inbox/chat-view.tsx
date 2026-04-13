@@ -1,9 +1,10 @@
 'use client'
 
+import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   Send, Clock, ArrowLeft, Plus, Settings,
   CheckCircle2, Archive, RotateCcw, User, MessageSquare, FileText,
-  ExternalLink,
+  ExternalLink, MessageCircle, Search, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -11,6 +12,7 @@ import { Avatar } from '../shared/avatar'
 import { MessageStatusIcon } from '../shared/icons'
 import { displayName, formatTime, formatDateSeparator } from '../shared/helpers'
 import { useMensajeria } from '../shared/mensajeria-context'
+import type { QuickReply } from '../shared/mensajeria-context'
 import type { Message } from '@/lib/types/database'
 import type { WaTemplate } from '../shared/types'
 
@@ -33,7 +35,33 @@ export function ChatView({
     handleOpenTemplateDialog,
     isSending, isActing,
     waTemplates,
+    quickReplies,
   } = useMensajeria()
+
+  const [showQuickReplies, setShowQuickReplies] = useState(false)
+  const [quickReplySearch, setQuickReplySearch] = useState('')
+  const quickReplySearchRef = useRef<HTMLInputElement>(null)
+
+  const filteredQuickReplies = useMemo(() => {
+    if (!quickReplySearch) return quickReplies
+    const s = quickReplySearch.toLowerCase()
+    return quickReplies.filter(r =>
+      r.title.toLowerCase().includes(s) ||
+      r.content.toLowerCase().includes(s) ||
+      (r.shortcut && r.shortcut.toLowerCase().includes(s))
+    )
+  }, [quickReplies, quickReplySearch])
+
+  const insertQuickReply = (reply: QuickReply) => {
+    setMessageInput(reply.content)
+    setShowQuickReplies(false)
+    setQuickReplySearch('')
+  }
+
+  // Focus search input when quick replies panel opens
+  useEffect(() => {
+    if (showQuickReplies) quickReplySearchRef.current?.focus()
+  }, [showQuickReplies])
 
   const activeConvName = activeConv ? displayName(activeConv.client?.name || activeConv.platform_user_name || activeConv.platform_user_id, activeConv.channel?.platform) : ''
 
@@ -206,28 +234,107 @@ export function ChatView({
               )}
             </div>
           ) : (
-            <div className="flex items-end gap-2">
-              {activeConv.channel?.platform === 'whatsapp' && (
-                <button
-                  onClick={() => handleOpenTemplateDialog({ type: 'conversation', conversationId: activeConv.id })}
-                  className="size-10 shrink-0 rounded-full bg-accent hover:bg-accent flex items-center justify-center transition-colors"
-                  title="Enviar template"
-                >
-                  <FileText className="size-4 text-muted-foreground" />
-                </button>
+            <div className="space-y-0">
+              {/* Quick replies carousel */}
+              {showQuickReplies && quickReplies.length > 0 && (
+                <div className="border-b border px-2 py-2 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+                      <input
+                        ref={quickReplySearchRef}
+                        className="w-full h-7 rounded-md bg-accent pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
+                        placeholder="Buscar mensaje rápido..."
+                        value={quickReplySearch}
+                        onChange={e => setQuickReplySearch(e.target.value)}
+                      />
+                    </div>
+                    <button onClick={() => { setShowQuickReplies(false); setQuickReplySearch('') }}
+                      className="size-6 shrink-0 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground">
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-muted-foreground/20 scrollbar-track-transparent">
+                    {filteredQuickReplies.length === 0 ? (
+                      <p className="text-xs text-muted-foreground py-2 px-1">Sin resultados</p>
+                    ) : (
+                      filteredQuickReplies.map(reply => (
+                        <button
+                          key={reply.id}
+                          onClick={() => insertQuickReply(reply)}
+                          className="shrink-0 w-48 text-left rounded-lg border bg-accent hover:bg-muted p-2.5 transition-colors group"
+                        >
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="text-xs font-medium text-foreground truncate">{reply.title}</span>
+                            {reply.shortcut && (
+                              <span className="text-[9px] px-1 py-0.5 rounded bg-muted-foreground/10 text-muted-foreground font-mono shrink-0">/{reply.shortcut}</span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">{reply.content}</p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
               )}
-              <textarea rows={1}
-                className="flex-1 rounded-lg bg-accent px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:ring-1 focus:ring-ring min-h-10 max-h-30 overflow-y-auto"
-                placeholder="Escribí un mensaje..."
-                value={messageInput}
-                onChange={(e) => setMessageInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-                disabled={isSending}
-              />
-              <button onClick={handleSend} disabled={!messageInput.trim() || isSending}
-                className="size-10 shrink-0 rounded-full bg-green-600 hover:bg-green-500 disabled:opacity-40 flex items-center justify-center transition-colors">
-                <Send className="size-4 text-white" />
-              </button>
+
+              <div className="flex items-end gap-2">
+                {activeConv.channel?.platform === 'whatsapp' && (
+                  <button
+                    onClick={() => handleOpenTemplateDialog({ type: 'conversation', conversationId: activeConv.id })}
+                    className="size-10 shrink-0 rounded-full bg-accent hover:bg-accent flex items-center justify-center transition-colors"
+                    title="Enviar template"
+                  >
+                    <FileText className="size-4 text-muted-foreground" />
+                  </button>
+                )}
+                {quickReplies.length > 0 && (
+                  <button
+                    onClick={() => setShowQuickReplies(v => !v)}
+                    className={`size-10 shrink-0 rounded-full flex items-center justify-center transition-colors ${
+                      showQuickReplies ? 'bg-blue-500/15 text-blue-400' : 'bg-accent text-muted-foreground hover:text-foreground'
+                    }`}
+                    title="Mensajes rápidos"
+                  >
+                    <MessageCircle className="size-4" />
+                  </button>
+                )}
+                <textarea rows={1}
+                  className="flex-1 rounded-lg bg-accent px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:ring-1 focus:ring-ring min-h-10 max-h-30 overflow-y-auto"
+                  placeholder="Escribí un mensaje... (/ para rápidos)"
+                  value={messageInput}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    setMessageInput(val)
+                    // Detect /shortcut pattern
+                    if (val.startsWith('/') && quickReplies.length > 0) {
+                      const query = val.slice(1)
+                      // Check for exact shortcut match
+                      const exact = quickReplies.find(r => r.shortcut && r.shortcut.toLowerCase() === query.toLowerCase())
+                      if (exact) {
+                        setMessageInput(exact.content)
+                        setShowQuickReplies(false)
+                        setQuickReplySearch('')
+                      } else {
+                        setShowQuickReplies(true)
+                        setQuickReplySearch(query)
+                      }
+                    } else if (!val && showQuickReplies) {
+                      setShowQuickReplies(false)
+                      setQuickReplySearch('')
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
+                    if (e.key === 'Escape' && showQuickReplies) { setShowQuickReplies(false); setQuickReplySearch('') }
+                  }}
+                  disabled={isSending}
+                />
+                <button onClick={handleSend} disabled={!messageInput.trim() || isSending}
+                  className="size-10 shrink-0 rounded-full bg-green-600 hover:bg-green-500 disabled:opacity-40 flex items-center justify-center transition-colors">
+                  <Send className="size-4 text-white" />
+                </button>
+              </div>
             </div>
           )}
         </div>

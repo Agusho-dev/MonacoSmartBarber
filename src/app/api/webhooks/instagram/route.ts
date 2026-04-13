@@ -211,14 +211,32 @@ export async function POST(req: NextRequest) {
     }
 
     for (const messaging of messagingEvents) {
-      // Ignorar echo (mensajes enviados por la página misma)
-      if (messaging.message?.is_echo) continue
+      // ── Leer receipts: marcar conversación como leída ──
+      if (messaging.read) {
+        const readSenderId: string = messaging.sender?.id
+        // Si quien leyó es la página (business), resetear unread
+        if (readSenderId === entryId) {
+          const readRecipient: string = messaging.recipient?.id
+          if (readRecipient) {
+            await supabase
+              .from('conversations')
+              .update({ unread_count: 0 })
+              .eq('channel_id', igChannel.id)
+              .eq('platform_user_id', readRecipient)
+          }
+        }
+        continue
+      }
+
+      // Ignorar delivery receipts
+      if (messaging.delivery) continue
 
       const senderId: string = messaging.sender?.id
       const recipientId: string = messaging.recipient?.id
       const platformMsgId: string = messaging.message?.mid
       const rawTimestamp = messaging.timestamp
       const text: string = messaging.message?.text ?? ''
+      const isEcho = !!messaging.message?.is_echo
 
       if (!senderId || !platformMsgId) {
         console.warn('[IG Webhook] Evento sin sender o mid, keys:', Object.keys(messaging))
@@ -236,8 +254,9 @@ export async function POST(req: NextRequest) {
       }
       const createdAt = isNaN(msgDate.getTime()) ? new Date().toISOString() : msgDate.toISOString()
 
-      // El remitente es el usuario de Instagram (no la cuenta business)
-      const from = senderId === entryId ? recipientId : senderId
+      // Para echo: el "from" es el recipient (la persona a quien le respondimos)
+      // Para inbound: el "from" es el sender (el usuario que nos escribió)
+      const from = isEcho ? recipientId : (senderId === entryId ? recipientId : senderId)
 
       // Deduplicación ANTES de crear/actualizar conversación
       const { data: existingMsg } = await supabase
@@ -257,7 +276,7 @@ export async function POST(req: NextRequest) {
 
       // Intentar obtener el nombre del perfil de Instagram si no hay cliente vinculado
       let displayName: string = client?.name ?? from
-      if (!client?.name && igConfig.instagram_page_access_token) {
+      if (!client?.name && !isEcho && igConfig.instagram_page_access_token) {
         const profile = await fetchIgUserProfile(from, igConfig.instagram_page_access_token)
         if (profile.name) {
           displayName = profile.name
@@ -269,7 +288,7 @@ export async function POST(req: NextRequest) {
       // Buscar o crear conversación
       const { data: existingConv } = await supabase
         .from('conversations')
-        .select('id, unread_count, platform_user_name')
+        .select('id, unread_count, platform_user_name, client_id')
         .eq('channel_id', igChannel.id)
         .eq('platform_user_id', from)
         .maybeSingle()
@@ -279,18 +298,30 @@ export async function POST(req: NextRequest) {
 
       if (existingConv) {
         convId = existingConv.id
-        // Actualizar nombre si antes era el ID numérico y ahora tenemos uno mejor
-        const shouldUpdateName = existingConv.platform_user_name === from && displayName !== from
-        await supabase
-          .from('conversations')
-          .update({
-            unread_count: (existingConv.unread_count || 0) + 1,
-            last_message_at: new Date().toISOString(),
-            client_id: client?.id ?? null,
-            can_reply_until: replyUntil,
-            ...(shouldUpdateName ? { platform_user_name: displayName } : {}),
-          })
-          .eq('id', convId)
+        if (isEcho) {
+          // Echo = la página respondió → resetear unread y actualizar timestamp
+          await supabase
+            .from('conversations')
+            .update({
+              unread_count: 0,
+              last_message_at: new Date().toISOString(),
+              client_id: client?.id ?? existingConv.client_id,
+            })
+            .eq('id', convId)
+        } else {
+          // Inbound = usuario escribió → incrementar unread
+          const shouldUpdateName = existingConv.platform_user_name === from && displayName !== from
+          await supabase
+            .from('conversations')
+            .update({
+              unread_count: (existingConv.unread_count || 0) + 1,
+              last_message_at: new Date().toISOString(),
+              client_id: client?.id ?? null,
+              can_reply_until: replyUntil,
+              ...(shouldUpdateName ? { platform_user_name: displayName } : {}),
+            })
+            .eq('id', convId)
+        }
       } else {
         const { data: newConv, error: convErr } = await supabase
           .from('conversations')
@@ -300,7 +331,7 @@ export async function POST(req: NextRequest) {
             platform_user_id: from,
             platform_user_name: displayName,
             status: 'open',
-            unread_count: 1,
+            unread_count: isEcho ? 0 : 1,
             last_message_at: new Date().toISOString(),
             can_reply_until: replyUntil,
           })
@@ -316,19 +347,19 @@ export async function POST(req: NextRequest) {
 
       const { error: msgErr } = await supabase.from('messages').insert({
         conversation_id: convId,
-        direction: 'inbound',
+        direction: isEcho ? 'outbound' : 'inbound',
         content_type: 'text',
         content: text || null,
         platform_message_id: platformMsgId,
-        status: 'delivered',
+        status: isEcho ? 'sent' : 'delivered',
         created_at: createdAt,
       })
       if (msgErr) {
         console.error('[IG Webhook] Error insertando mensaje:', msgErr.message)
       }
 
-      // ── Workflow Engine: evaluar reglas y workflows ──
-      if (igConfig.instagram_page_access_token) {
+      // ── Workflow Engine: solo para mensajes inbound ──
+      if (!isEcho && igConfig.instagram_page_access_token) {
         try {
           // Detectar quick_reply (respuestas a botones en IG)
           const quickReply = messaging.message?.quick_reply
