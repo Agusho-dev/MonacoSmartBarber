@@ -232,6 +232,8 @@ Deno.serve(async (req: Request) => {
 
           // Buscar conversación existente por sufijo para evitar duplicados
           // por diferencia de formato (ej: 54xxx vs 549xxx)
+          // IMPORTANTE: limit(1) antes de maybeSingle() para evitar error 406
+          // cuando hay múltiples conversaciones con el mismo sufijo de teléfono
           const phoneSuffix = phoneNorm.slice(-10)
           const allChannelIds = waChannels.map(c => c.id)
           let convId: string | null = null
@@ -240,6 +242,8 @@ Deno.serve(async (req: Request) => {
             .select('id')
             .in('channel_id', allChannelIds)
             .ilike('platform_user_id', `%${phoneSuffix}`)
+            .order('last_message_at', { ascending: false, nullsFirst: false })
+            .limit(1)
             .maybeSingle()
 
           if (existingConv) {

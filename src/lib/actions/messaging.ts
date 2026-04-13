@@ -178,6 +178,8 @@ export async function sendTemplateToClient(
     .select('id')
     .eq('channel_id', waChannel.id)
     .ilike('platform_user_id', `%${phoneSuffix}`)
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .limit(1)
     .maybeSingle()
 
   if (!conv) {
