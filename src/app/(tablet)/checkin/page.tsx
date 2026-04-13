@@ -46,6 +46,7 @@ import {
   statusConfig,
   assignDynamicBarbers,
   isBarberBlockedByShiftEnd,
+  calculateEffectiveAhead,
   type BarberStats,
 } from '@/lib/barber-utils'
 import { FaceCamera } from '@/components/checkin/face-camera'
@@ -639,6 +640,17 @@ export default function CheckinPage() {
     }
     return best
   }, [barbers, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers, dailyServiceCounts, lastCompletedAt])
+
+  // Barberos activos para cálculo de posición optimista
+  const activeBarberCount = useMemo(() => {
+    return barbers.filter(b => b.is_active && !b.hidden_from_checkin && !notClockedInBarbers.has(b.id)).length
+  }, [barbers, notClockedInBarbers])
+
+  // Posición optimista del cliente en la fila (considerando paralelismo)
+  const effectiveAhead = useMemo(() => {
+    if (!queueEntryId) return null
+    return calculateEffectiveAhead(dynamicEntries, queueEntryId, activeBarberCount)
+  }, [dynamicEntries, queueEntryId, activeBarberCount])
 
   // ── Availability level: 1 (sin espera), 2 (baja), 3 (media), 4 (alta) ──
   const getAvailabilityLevel = useCallback((stats: BarberStats): 1 | 2 | 3 | 4 => {
@@ -1739,6 +1751,11 @@ export default function CheckinPage() {
                   <p className="text-4xl md:text-6xl font-bold leading-tight mt-2">
                     ¡Tomá asiento!
                   </p>
+                  {effectiveAhead && effectiveAhead.label && (
+                    <p className="text-lg md:text-xl font-medium text-emerald-400 mt-3">
+                      {effectiveAhead.label}
+                    </p>
+                  )}
                   <p className="text-base md:text-lg text-muted-foreground mt-2">
                     Te llamaremos cuando sea tu turno
                   </p>

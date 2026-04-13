@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
 import type { QueueEntry, StaffStatus, StaffSchedule, Staff } from '@/lib/types/database'
-import { assignDynamicBarbers } from '@/lib/barber-utils'
+import { assignDynamicBarbers, calculateEffectiveAhead } from '@/lib/barber-utils'
 import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
 import {
   Select,
@@ -342,6 +342,12 @@ export function TvClient({
     [dynamicEntries]
   )
 
+  // Barberos activos (clocked in + is_active)
+  const activeBarberCount = useMemo(() => {
+    const branchBarbers = selectedBranchId ? liveBarbers.filter(b => b.branch_id === selectedBranchId) : liveBarbers
+    return branchBarbers.filter(b => b.is_active && !notClockedInBarbers.has(b.id)).length
+  }, [liveBarbers, selectedBranchId, notClockedInBarbers])
+
   // --- Sizing dinámico por columna ---
   const ipMode = getSizeMode(inProgressEntries.length)
   const wMode = getSizeMode(waitingEntries.length)
@@ -386,44 +392,53 @@ export function TvClient({
     </div>
   )
 
-  const renderWaitingCard = (entry: QueueEntry, index: number, key: string) => (
-    <div
-      key={key}
-      className={`flex items-center ${ws.card} border border-white/5 transition-all duration-300 ${
-        index === 0 ? 'bg-white/10 shadow-xl lg:shadow-2xl scale-[1.01] origin-left' : 'bg-white/[0.03]'
-      }`}
-    >
-      <div className={`flex items-center justify-center ${ws.positionBox} shrink-0 font-bold ${
-        index === 0 ? 'bg-white text-black' : 'bg-zinc-800 text-zinc-400'
-      }`}>
-        {entry.position}
-      </div>
+  const renderWaitingCard = (entry: QueueEntry, index: number, key: string) => {
+    const { label: aheadLabel } = calculateEffectiveAhead(dynamicEntries, entry.id, activeBarberCount)
 
-      <div className="flex-1 min-w-0">
-        <p className={`${ws.clientName} font-medium truncate ${index === 0 ? 'text-white' : 'text-zinc-300'}`}>
-          {entry.client?.name ?? 'Cliente'}
-        </p>
-        {(entry as any)._is_dynamically_assigned ? (
-          <p className={`text-emerald-400 ${ws.barberInfo} flex items-center`}>
-            <Zap className={ws.chevronSize} />
-            <span className="font-medium">Menor espera</span>
-            <ChevronRight className={ws.chevronSize} />
-            <span className="font-medium text-zinc-300">{entry.barber?.full_name}</span>
+    return (
+      <div
+        key={key}
+        className={`flex items-center ${ws.card} border border-white/5 transition-all duration-300 ${
+          index === 0 ? 'bg-white/10 shadow-xl lg:shadow-2xl scale-[1.01] origin-left' : 'bg-white/[0.03]'
+        }`}
+      >
+        <div className={`flex items-center justify-center ${ws.positionBox} shrink-0 font-bold ${
+          index === 0 ? 'bg-white text-black' : 'bg-zinc-800 text-zinc-400'
+        }`}>
+          {entry.position}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <p className={`${ws.clientName} font-medium truncate ${index === 0 ? 'text-white' : 'text-zinc-300'}`}>
+            {entry.client?.name ?? 'Cliente'}
           </p>
-        ) : entry.is_dynamic && !entry.barber_id ? (
-          <p className={`text-emerald-400/70 ${ws.barberInfo} flex items-center`}>
-            <Zap className={ws.chevronSize} />
-            <span className="font-medium">Menor espera</span>
-          </p>
-        ) : entry.barber_id && entry.barber ? (
-          <p className={`text-zinc-500 ${ws.barberInfo} flex items-center`}>
-            <ChevronRight className={ws.chevronSize} />
-            <span>Se corta con <span className="font-medium text-zinc-300">{entry.barber.full_name}</span></span>
-          </p>
-        ) : null}
+          <div className="flex items-center gap-2">
+            {(entry as any)._is_dynamically_assigned ? (
+              <p className={`text-emerald-400 ${ws.barberInfo} flex items-center`}>
+                <Zap className={ws.chevronSize} />
+                <span className="font-medium">Menor espera</span>
+                <ChevronRight className={ws.chevronSize} />
+                <span className="font-medium text-zinc-300">{entry.barber?.full_name}</span>
+              </p>
+            ) : entry.is_dynamic && !entry.barber_id ? (
+              <p className={`text-emerald-400/70 ${ws.barberInfo} flex items-center`}>
+                <Zap className={ws.chevronSize} />
+                <span className="font-medium">Menor espera</span>
+              </p>
+            ) : entry.barber_id && entry.barber ? (
+              <p className={`text-zinc-500 ${ws.barberInfo} flex items-center`}>
+                <ChevronRight className={ws.chevronSize} />
+                <span>Se corta con <span className="font-medium text-zinc-300">{entry.barber.full_name}</span></span>
+              </p>
+            ) : null}
+            {aheadLabel && (
+              <span className="text-zinc-500 text-xs lg:text-sm 2xl:text-base">· {aheadLabel}</span>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
 
   return (
     <div className="h-screen max-h-screen w-screen bg-black text-white font-sans selection:bg-primary/30 flex flex-col overflow-hidden">

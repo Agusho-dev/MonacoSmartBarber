@@ -243,3 +243,47 @@ export function assignDynamicBarbers(
   // appears before a later-arriving assigned client, regardless of assignment order.
   return result.sort((a, b) => a.position - b.position)
 }
+
+/**
+ * Calcula la cantidad optimista de personas "efectivamente" antes de un cliente,
+ * considerando el paralelismo de barberos activos.
+ *
+ * - Dinámico (barber_id=null): ceil(todos_adelante / barberos_activos)
+ * - Específico (barber_id=X): específicos_X_adelante + ceil(dinámicos_adelante / barberos_activos)
+ *
+ * Retorna el número y un label descriptivo.
+ */
+export function calculateEffectiveAhead(
+  entries: QueueEntry[],
+  entryId: string,
+  activeBarbers: number
+): { ahead: number; label: string } {
+  const myEntry = entries.find(e => e.id === entryId)
+  if (!myEntry) return { ahead: 0, label: '' }
+
+  const waiting = entries.filter(
+    e => e.status === 'waiting' && !e.is_break && e.id !== entryId
+  )
+
+  const ahead = waiting.filter(
+    e => new Date(e.priority_order).getTime() < new Date(myEntry.priority_order).getTime()
+  )
+
+  const barbers = Math.max(activeBarbers, 1)
+
+  let effectiveAhead: number
+
+  if (!myEntry.barber_id) {
+    // Dinámico: todos los que están adelante se distribuyen entre todos los barberos
+    effectiveAhead = Math.ceil(ahead.length / barbers)
+  } else {
+    // Específico: los dinámicos adelante se reparten, los específicos de mi barbero no
+    const specificsAhead = ahead.filter(e => e.barber_id === myEntry.barber_id).length
+    const dynamicsAhead = ahead.filter(e => !e.barber_id).length
+    effectiveAhead = specificsAhead + Math.ceil(dynamicsAhead / barbers)
+  }
+
+  if (effectiveAhead === 0) return { ahead: 0, label: 'Sos el siguiente' }
+  if (effectiveAhead === 1) return { ahead: 1, label: 'Aprox. 1 persona antes' }
+  return { ahead: effectiveAhead, label: `Aprox. ${effectiveAhead} personas antes` }
+}
