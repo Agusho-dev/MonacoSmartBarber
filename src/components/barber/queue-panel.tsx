@@ -602,12 +602,13 @@ export function QueuePanel({
 
   async function handleStartService(entryId: string) {
     setActionLoading(entryId)
-    // Asignación atómica en el servidor: el backend decide quién es el siguiente (FIFO global)
-    const result = await attendNextClient(session.staff_id, session.branch_id)
+    const result = await attendNextClient(session.staff_id, session.branch_id, entryId)
     if ('error' in result) {
       toast.error(result.error)
     } else if (!result.entryId) {
       toast.info('No hay clientes en espera')
+    } else if (result.entryId !== entryId) {
+      toast.info('El cliente fue tomado por otro barbero. Se asignó el siguiente.')
     }
     await fetchQueue()
     setActionLoading(null)

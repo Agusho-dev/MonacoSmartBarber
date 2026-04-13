@@ -152,16 +152,17 @@ export async function startService(queueEntryId: string, barberId: string) {
  * asignado a este barbero o sea dinámico (barber_id IS NULL).
  * SELECT ... FOR UPDATE SKIP LOCKED previene race conditions entre barberos.
  */
-export async function attendNextClient(barberId: string, branchId: string) {
+export async function attendNextClient(barberId: string, branchId: string, preferredEntryId?: string) {
   const supabase = createAdminClient()
 
   const orgAccess = await validateBranchAccess(branchId)
   if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
 
-  // 1. Asignar atómicamente el próximo cliente (FIFO global con lock)
+  // 1. Asignar atómicamente el próximo cliente (prefiere el entry visible en la UI del barbero)
   const { data: entryId, error: assignError } = await supabase.rpc('assign_next_client', {
     p_barber_id: barberId,
     p_branch_id: branchId,
+    p_preferred_entry_id: preferredEntryId ?? null,
   })
 
   if (assignError) {
