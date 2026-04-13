@@ -434,6 +434,203 @@ payment_account_id   -- cuenta de pago (transferencias)
 
 ---
 
+## Reglas de Negocio del Proceso (Detalle Fino)
+
+### R1. El barbero SOLO puede atender al primer cliente de su cola
+
+En `queue-panel.tsx` línea 836, el botón "Atender" solo se renderiza si se cumplen **tres condiciones simultáneas**:
+
+```
+(!myActiveEntry && !myActiveBreak && entry.id === myWaitingEntries[0]?.id)
+```
+
+Esto significa:
+1. **No tiene un cliente activo** (`!myActiveEntry`) — no puede tener dos cortes simultáneos
+2. **No está en descanso** (`!myActiveBreak`) — si está en break, no puede atender
+3. **Es el primer entry de SU cola** (`entry.id === myWaitingEntries[0]?.id`) — no puede saltear clientes
+
+**Consecuencia:** El barbero no puede elegir a qué cliente atender. Siempre es FIFO estricto dentro de su cola personal. Si quiere cambiar el orden, debe usar drag-and-drop para reordenar primero, o reasignar el cliente a otro barbero.
+
+### R2. Un barbero solo puede tener UN cliente en atención a la vez
+
+`myActiveEntry` es un `find()` (no `filter()`), lo que retorna solo el primer match de `status === 'in_progress'` para ese barbero. El botón "Atender" se oculta completamente mientras `myActiveEntry` existe. No hay forma en la UI de iniciar un segundo corte.
+
+### R3. Un barbero no puede atender mientras está en descanso
+
+Si `myActiveBreak` existe (ghost entry con `is_break=true` y `status='in_progress'`), el botón "Atender" desaparece. El footer muestra el timer de descanso con botón "Finalizar descanso". Debe finalizar el break antes de atender al siguiente cliente.
+
+### R4. Ordenamiento de "Mi cola" — por tiempo de espera, no por posición
+
+`myWaitingEntries` se ordena así (líneas 450-454):
+```typescript
+.sort((a, b) => {
+  if (a.is_break !== b.is_break) return a.is_break ? 1 : -1  // breaks al final
+  if (a.is_break && b.is_break) return a.position - b.position  // breaks por position
+  return new Date(a.checked_in_at).getTime() - new Date(b.checked_in_at).getTime()  // clientes por tiempo
+})
+```
+
+- Los **clientes reales** se ordenan por `checked_in_at` (quien lleva más tiempo esperando primero)
+- Los **breaks** van siempre al final de la lista
+- Entre breaks, se ordena por `position`
+
+**Razón:** Tras reasignaciones dinámicas, `position` puede no reflejar el orden real de llegada. `checked_in_at` es inmutable y siempre correcto.
+
+### R5. "Mi fila" incluye entries sin barbero asignado
+
+La definición de "Mi cola" (línea 444-449):
+```typescript
+e.status === 'waiting' && (!e.barber_id || e.barber_id === session.staff_id)
+```
+
+Incluye:
+- Entries **explícitamente asignadas** a este barbero (`barber_id === session.staff_id`)
+- Entries **sin barbero asignado** (`!e.barber_id`) — los de "menor espera" cuyo `barber_id` es NULL en DB
+
+Pero gracias a `assignDynamicBarbers()`, las entries sin barbero se reasignan visualmente, por lo que en la práctica el barbero solo ve las que el algoritmo le asigna a él.
+
+### R6. La cola general muestra TODOS los clientes esperando de la sucursal
+
+`allWaitingEntries` (línea 457):
+```typescript
+dynamicEntries.filter((e) => e.status === 'waiting')
+```
+
+Incluye clientes de todos los barberos. Se usa como vista secundaria (tab "General" en mobile, columna lateral en desktop). Los entries en la cola general también muestran el botón "Atender" **solo si** pertenecen a la cola del barbero actual y es el primero.
+
+### R7. El barbero puede ver qué hacen los otros barberos
+
+`otherInProgress` (línea 599-601):
+```typescript
+dynamicEntries.filter(
+  (e) => e.status === 'in_progress' && e.barber_id !== session.staff_id && !e.is_break
+)
+```
+
+Se muestra como sección "En atención por otros barberos" debajo de las colas, con opacity reducida (0.6) y borde punteado. Muestra nombre del cliente, barbero asignado, y timer.
+
+### R8. El cliente puede cambiar de barbero desde el kiosk (post check-in)
+
+Cuando un cliente que ya está en la fila vuelve a escanear su cara o ingresar su teléfono, el kiosk detecta que tiene un `activeEntry` y va al paso `manage_turn`:
+- Si su status es `'waiting'`: muestra "¡Estás en la fila! ¡Tomá asiento!" + botón "Cambiar barbero"
+- Si su status es `'in_progress'`: muestra "¡Ya es tu turno! ¡Acercate!" (sin opción de cambiar)
+
+El botón "Cambiar barbero" solo aparece si `status === 'waiting'`. Llama a `reassignMyBarber()` que es una versión pública de `reassignBarber()` con validaciones mínimas (solo verifica que la sucursal esté activa y que el barbero pertenezca a la misma sucursal).
+
+**Auto-reset:** La pantalla `manage_turn` tiene un countdown visual (`RESET_DELAY_MS`) que vuelve automáticamente a la pantalla de inicio después de unos segundos.
+
+### R9. Cancelar turno = "No se presentó" (no-show)
+
+El botón de cancelar (X) en cada entry tiene un `AlertDialog` de confirmación:
+- Título: "¿El cliente no se presentó?"
+- Descripción: "Esto marcará a [nombre] como Ausente y lo quitará de la fila de espera de forma permanente."
+- Acción: "Sí, cancelar turno" → `cancelQueueEntry()`
+
+La cancelación **no distingue entre waiting e in_progress** en la UI — el server action acepta ambos estados. No hay soft-delete ni undo. El status `cancelled` es terminal.
+
+### R10. Desactivar barbero reasigna automáticamente su cola
+
+Cuando un admin/manager desactiva un barbero (via `deactivateBarber()` en `actions/barber.ts`):
+1. Se marca `staff.is_active = false`
+2. Se buscan todos sus `queue_entries` con `status='waiting'` y `is_break=false`
+3. Se reasignan a `barber_id = null`, `is_dynamic = true` (vuelven a la pool dinámica)
+4. El toast muestra: "Barbero desactivado. X cliente(s) reasignados."
+
+**Importante:** Solo reasigna entries en `waiting`. Si el barbero tiene un cliente `in_progress`, esa entry NO se toca — queda huérfana con un barbero inactivo.
+
+### R11. Badges informativos en cada entry de la cola
+
+Cada entry en la cola muestra badges contextuales:
+- **"Especial"** (amber): Si el teléfono empieza con `00` y tiene 10 dígitos (perfil de niño virtual)
+- **"Primer Corte"** (emerald): Si el cliente tiene 0 visitas (tanto en `visits` como en `client_points`)
+- **"⚡️ Menor Espera"** (blue): Si `is_dynamic === true` (asignado por algoritmo, no por elección)
+- **"Premio reclamado"** (purple): Si `reward_claimed === true` (cliente va a canjear puntos)
+- **Tiempo esperando**: Muestra `formatElapsed(checked_in_at)` — ej: "12m esperando"
+- **Servicio**: Muestra el nombre del servicio seleccionado si existe
+
+### R12. Sistema de alerta de idle (barbero sin atender)
+
+Cuando un barbero está libre (`!myActiveEntry && !myActiveBreak`) pero tiene clientes esperando (`myRealWaitingEntries.length > 0`):
+1. Se inicia un timer interno (`idleSince`)
+2. Después de `nextClientAlertMinutes` minutos (default 5), se activa `showWaitWarning`
+3. Se dispara vibración del dispositivo (`navigator.vibrate([200, 100, 200, 100, 200])`)
+4. Se reproduce un beep (tono G5 a 784 Hz) cada 3 segundos
+5. Se muestra un warning visual con botón "Atender ahora" que llama `handleWarningStartService()`
+6. `handleWarningStartService()` automáticamente toma al primer cliente real de la cola
+
+El timer se resetea cuando el barbero toma un cliente o cuando no hay más clientes esperando.
+
+---
+
+## Dashboard de Fila (Vista Admin)
+
+### Interfaz Kanban con Drag-and-Drop
+
+**Ruta:** `/dashboard/fila`
+**Componente:** `fila-client.tsx`
+**Librería:** `@dnd-kit/core` + `@dnd-kit/sortable`
+
+El dashboard muestra la fila como un **tablero Kanban horizontal**:
+
+```
+┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+│  Sin asignar │  │  Barbero A  │  │  Barbero B  │  │  Barbero C  │
+│ (__dynamic__)│  │             │  │             │  │             │
+├─────────────┤  ├─────────────┤  ├─────────────┤  ├─────────────┤
+│ [in_progress]│  │ [in_progress]│  │ [in_progress]│  │             │
+│  (si tiene)  │  │  (si tiene)  │  │  (si tiene)  │  │  (vacío)    │
+├─────────────┤  ├─────────────┤  ├─────────────┤  ├─────────────┤
+│ Cliente 1   │  │ Cliente 3   │  │ Cliente 5   │  │ Cliente 7   │
+│ Cliente 2   │  │ Cliente 4   │  │ Cliente 6   │  │             │
+│ [break]     │  │             │  │             │  │             │
+└─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘
+```
+
+**Columna `__dynamic__`:** Entries con `barber_id = NULL` (sin asignar / menor espera en DB)
+**Columnas de barbero:** Entries con `barber_id = UUID` de ese barbero
+
+### Acciones del Admin en la Fila
+
+| Acción | Mecanismo | Efecto |
+|--------|-----------|--------|
+| **Arrastrar cliente entre columnas** | Drag & drop → `updateQueueOrder()` | Cambia `barber_id` + `is_dynamic` + `position` |
+| **Reordenar dentro de columna** | Drag & drop → `updateQueueOrder()` | Cambia `position` |
+| **Arrastrar break a barbero** | Drag template → `createBreakEntry()` | Crea ghost entry en la cola del barbero |
+| **Iniciar servicio** | Botón Play → `startService()` | Requiere que el entry tenga `barber_id` asignado |
+| **Cancelar turno** | Botón X → `cancelQueueEntry()` | status → cancelled |
+| **Completar servicio** | Botón Check → `CompleteServiceDialog` | Mismo flow que panel barbero |
+| **Registrar cliente manual** | Dialog → `checkinClient()` | Permite registrar sin kiosk |
+| **Buscar cliente existente** | Dialog de búsqueda → `checkinClient()` | Busca por nombre/teléfono |
+
+### Diferencias clave Dashboard vs Panel Barbero
+
+| Aspecto | Dashboard | Panel Barbero |
+|---------|-----------|---------------|
+| **Vista** | Kanban (todas las columnas) | Lista personal (mi cola + general) |
+| **Drag & drop** | Entre columnas y dentro | No disponible |
+| **Iniciar servicio** | Requiere barber_id asignado | Siempre asigna al barbero logueado |
+| **Scope** | Todas las sucursales (filtrable) | Solo la sucursal del barbero |
+| **Auth** | Supabase Auth (email+password) | PIN → cookie |
+| **Registrar clientes** | Sí (manual + búsqueda) | No |
+| **Desactivar barberos** | No (desde staff mgmt) | Sí (si tiene permiso) |
+
+### Regla del Dashboard: startService requiere barber_id
+
+En el dashboard (línea 1299-1303):
+```typescript
+async function handleStartService(entry: QueueEntry) {
+  if (!entry.barber_id) {
+    toast.error('El cliente no tiene barbero asignado')
+    return
+  }
+  ...
+}
+```
+
+A diferencia del panel del barbero (que siempre usa `session.staff_id`), el dashboard necesita que el entry ya tenga un barbero asignado antes de poder iniciar el servicio. Si el entry está en la columna `__dynamic__`, primero hay que arrastrarlo a una columna de barbero.
+
+---
+
 ## Hallazgos Clave para Process Engineering
 
 ### Arquitectura
