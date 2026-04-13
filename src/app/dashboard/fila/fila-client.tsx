@@ -1609,7 +1609,9 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
             <div className="min-w-0">
               <p className="text-[11px] text-muted-foreground leading-none">Servicios del día</p>
               <p className="text-lg font-bold leading-tight text-zinc-100">
-                {Object.values(dailyServiceCounts).reduce((a, b) => a + b, 0)}
+                {selectedBranchId
+                  ? filteredBarbers.reduce((sum, b) => sum + (dailyServiceCounts[b.id] || 0), 0)
+                  : Object.values(dailyServiceCounts).reduce((a, b) => a + b, 0)}
               </p>
             </div>
           </div>
