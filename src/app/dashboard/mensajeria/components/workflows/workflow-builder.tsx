@@ -4,12 +4,16 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback, useTransitio
 import {
   ArrowLeft, Save, Plus, ZoomIn, ZoomOut, Maximize2,
   MessageSquare, Image, LayoutGrid, List, Tag,
-  GitBranch, Bell, Clock, Send, Trash2, Pencil, MapPin,
+  GitBranch, Bell, Clock, Send, Trash2, Pencil, MapPin, Settings2, CalendarDays,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { getWorkflow, saveWorkflowGraph, updateWorkflow } from '@/lib/actions/workflows'
-import type { WorkflowNode, WorkflowEdge, WorkflowWithGraph, WorkflowNodeType } from '@/lib/types/database'
+import type { WorkflowNode, WorkflowEdge, WorkflowWithGraph, WorkflowNodeType, WorkflowTriggerType } from '@/lib/types/database'
 import { WorkflowNodeEditor } from './workflow-node-editor'
 import { useMensajeria } from '../shared/mensajeria-context'
 
@@ -33,6 +37,19 @@ function getNodeMeta(type: string) {
   return NODE_TYPES.find(n => n.type === type) ?? { type, label: type, icon: MessageSquare, color: '#6b7280', category: 'Otro' }
 }
 
+const TRIGGER_TYPES = [
+  { value: 'keyword', label: 'Palabra clave', icon: MessageSquare, description: 'Responde cuando un mensaje contiene palabras clave' },
+  { value: 'template_reply', label: 'Respuesta a template', icon: GitBranch, description: 'Se activa cuando un cliente responde a un template' },
+  { value: 'post_service', label: 'Post-servicio', icon: Clock, description: 'Envía un mensaje después de completar un servicio' },
+  { value: 'days_after_visit', label: 'Seguimiento', icon: CalendarDays, description: 'Envía un mensaje X días después de la última visita' },
+]
+
+const CHANNEL_OPTIONS = [
+  { value: 'all', label: 'Todos los canales' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'instagram', label: 'Instagram' },
+]
+
 const GRID_SIZE = 20
 
 function snapToGrid(val: number) {
@@ -47,8 +64,9 @@ interface Props {
 }
 
 export function WorkflowBuilder({ workflowId, onBack }: Props) {
-  const { branches } = useMensajeria()
+  const { branches, waTemplates, handleSyncTemplates, syncingTemplates } = useMensajeria()
   const [workflow, setWorkflow] = useState<WorkflowWithGraph | null>(null)
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false)
   const [nodes, setNodes] = useState<WorkflowNode[]>([])
   const [edges, setEdges] = useState<WorkflowEdge[]>([])
   const [loading, setLoading] = useState(true)
@@ -445,24 +463,15 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
                 <p className="text-[10px] text-muted-foreground truncate">{workflow.description}</p>
               )}
             </div>
-            {branches.length > 1 && (
-              <select
-                value={workflow.branch_id ?? ''}
-                onChange={async (e) => {
-                  const newBranchId = e.target.value || null
-                  const res = await updateWorkflow(workflow.id, { branch_id: newBranchId })
-                  if (res.error) { toast.error(res.error); return }
-                  setWorkflow(prev => prev ? { ...prev, branch_id: newBranchId } : prev)
-                  toast.success(newBranchId ? `Sucursal: ${branches.find(b => b.id === newBranchId)?.name}` : 'Aplica a todas las sucursales')
-                }}
-                className="h-7 rounded-md bg-muted border px-2 text-xs text-foreground outline-none shrink-0"
-              >
-                <option value="">Todas las sucursales</option>
-                {branches.map(b => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowSettingsDialog(true)}
+              className="h-7 px-2 text-muted-foreground hover:text-foreground shrink-0"
+              title="Configuración del workflow"
+            >
+              <Settings2 className="size-4" />
+            </Button>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {/* Zoom controls */}
@@ -742,7 +751,285 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
           onDelete={() => deleteNode(selectedNode.id)}
         />
       )}
+
+      {/* ═══ Settings dialog ═══ */}
+      <WorkflowSettingsDialog
+        workflow={workflow}
+        open={showSettingsDialog}
+        onOpenChange={setShowSettingsDialog}
+        branches={branches}
+        waTemplates={waTemplates}
+        syncingTemplates={syncingTemplates}
+        handleSyncTemplates={handleSyncTemplates}
+        onUpdate={(updates) => setWorkflow(prev => prev ? { ...prev, ...updates } : prev)}
+      />
     </div>
+  )
+}
+
+// ─── Settings Dialog ────────────────────────────────────────────
+
+function WorkflowSettingsDialog({
+  workflow,
+  open,
+  onOpenChange,
+  branches,
+  waTemplates,
+  syncingTemplates,
+  handleSyncTemplates,
+  onUpdate,
+}: {
+  workflow: WorkflowWithGraph
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  branches: { id: string; name: string }[]
+  waTemplates: { name: string; status: string; language: string; category: string }[]
+  syncingTemplates: boolean
+  handleSyncTemplates: () => void
+  onUpdate: (updates: Partial<WorkflowWithGraph>) => void
+}) {
+  const [name, setName] = useState(workflow.name)
+  const [description, setDescription] = useState(workflow.description ?? '')
+  const [channel, setChannel] = useState(workflow.channels?.[0] ?? 'all')
+  const [branchId, setBranchId] = useState(workflow.branch_id ?? '')
+  const [triggerType, setTriggerType] = useState<WorkflowTriggerType>(workflow.trigger_type)
+  const [keywords, setKeywords] = useState(
+    ((workflow.trigger_config?.keywords as string[]) ?? []).join(', ')
+  )
+  const [matchMode, setMatchMode] = useState(
+    (workflow.trigger_config?.match_mode as string) ?? 'contains'
+  )
+  const [templateName, setTemplateName] = useState(
+    (workflow.trigger_config?.template_name as string) ?? ''
+  )
+  const [delayMinutes, setDelayMinutes] = useState(
+    (workflow.trigger_config?.delay_minutes as number) ?? 15
+  )
+  const [delayDays, setDelayDays] = useState(
+    (workflow.trigger_config?.delay_days as number) ?? 7
+  )
+  const [isSaving, startSaving] = useTransition()
+
+  // Sincronizar estado cuando se abre con un workflow diferente
+  useEffect(() => {
+    setName(workflow.name)
+    setDescription(workflow.description ?? '')
+    setChannel(workflow.channels?.[0] ?? 'all')
+    setBranchId(workflow.branch_id ?? '')
+    setTriggerType(workflow.trigger_type)
+    setKeywords(((workflow.trigger_config?.keywords as string[]) ?? []).join(', '))
+    setMatchMode((workflow.trigger_config?.match_mode as string) ?? 'contains')
+    setTemplateName((workflow.trigger_config?.template_name as string) ?? '')
+    setDelayMinutes((workflow.trigger_config?.delay_minutes as number) ?? 15)
+    setDelayDays((workflow.trigger_config?.delay_days as number) ?? 7)
+  }, [workflow])
+
+  const buildTriggerConfig = () => {
+    if (triggerType === 'keyword') {
+      return {
+        keywords: keywords.split(',').map(k => k.trim().toLowerCase()).filter(Boolean),
+        match_mode: matchMode,
+      }
+    }
+    if (triggerType === 'template_reply') return { template_name: templateName }
+    if (triggerType === 'post_service') return { delay_minutes: delayMinutes }
+    if (triggerType === 'days_after_visit') return { delay_days: delayDays }
+    return {}
+  }
+
+  const handleSave = () => {
+    if (!name.trim()) { toast.error('El nombre es requerido'); return }
+    if (triggerType === 'keyword') {
+      const kws = keywords.split(',').filter(k => k.trim())
+      if (kws.length === 0) { toast.error('Las palabras clave son requeridas'); return }
+    }
+    if (triggerType === 'template_reply' && !templateName.trim()) {
+      toast.error('El nombre del template es requerido'); return
+    }
+
+    const triggerConfig = buildTriggerConfig()
+
+    startSaving(async () => {
+      const res = await updateWorkflow(workflow.id, {
+        name: name.trim(),
+        description: description.trim() || undefined,
+        channels: [channel],
+        branch_id: branchId || null,
+        trigger_type: triggerType,
+        trigger_config: triggerConfig,
+      })
+      if (res.error) { toast.error(res.error); return }
+      onUpdate({
+        name: name.trim(),
+        description: description.trim() || null,
+        channels: [channel],
+        branch_id: branchId || null,
+        trigger_type: triggerType as WorkflowWithGraph['trigger_type'],
+        trigger_config: triggerConfig,
+      })
+      toast.success('Configuración guardada')
+      onOpenChange(false)
+    })
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Settings2 className="size-4 text-amber-400" />
+            Configuración del workflow
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Nombre</Label>
+            <Input className="bg-muted border text-foreground" placeholder="Ej: Encuesta de satisfacción"
+              value={name} onChange={e => setName(e.target.value)} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Descripción (opcional)</Label>
+            <Textarea className="bg-muted border text-foreground resize-none" rows={2}
+              placeholder="¿Qué hace este workflow?"
+              value={description} onChange={e => setDescription(e.target.value)} />
+          </div>
+
+          {/* Canal */}
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Canal</Label>
+            <select value={channel} onChange={e => setChannel(e.target.value)}
+              className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border">
+              {CHANNEL_OPTIONS.map(c => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Sucursal */}
+          {branches.length > 1 && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Sucursal</Label>
+              <select value={branchId} onChange={e => setBranchId(e.target.value)}
+                className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border">
+                <option value="">Todas las sucursales (general)</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Trigger type */}
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Tipo de activación</Label>
+            <div className="grid gap-2">
+              {TRIGGER_TYPES.map(t => {
+                const Icon = t.icon
+                return (
+                  <button key={t.value} onClick={() => {
+                      setTriggerType(t.value as WorkflowTriggerType)
+                      if (t.value === 'template_reply' && waTemplates.length === 0) handleSyncTemplates()
+                    }}
+                    className={`flex items-start gap-3 p-3 rounded-lg border transition-colors text-left ${
+                      triggerType === t.value ? 'border-amber-500/50 bg-amber-500/5' : 'border bg-muted hover:border-foreground/20'
+                    }`}>
+                    <Icon className={`size-4 mt-0.5 shrink-0 ${triggerType === t.value ? 'text-amber-400' : 'text-muted-foreground'}`} />
+                    <div>
+                      <p className={`text-sm font-medium ${triggerType === t.value ? 'text-foreground' : 'text-muted-foreground'}`}>{t.label}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">{t.description}</p>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Config según trigger */}
+          {triggerType === 'keyword' && (
+            <>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Palabras clave (separadas por coma)</Label>
+                <Input className="bg-muted border text-foreground" placeholder="horarios, precios, abierto"
+                  value={keywords} onChange={e => setKeywords(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Modo de coincidencia</Label>
+                <select value={matchMode} onChange={e => setMatchMode(e.target.value)}
+                  className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border">
+                  <option value="contains">Contiene la palabra</option>
+                  <option value="exact">Coincidencia exacta</option>
+                </select>
+              </div>
+            </>
+          )}
+
+          {triggerType === 'template_reply' && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Template de Meta</Label>
+              {syncingTemplates ? (
+                <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-lg">
+                  <div className="size-4 animate-spin rounded-full border-2 border-muted-foreground border-t-green-400" />
+                  <span className="text-xs text-muted-foreground">Cargando templates...</span>
+                </div>
+              ) : waTemplates.length === 0 ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">No se encontraron templates.</p>
+                  <Button size="sm" variant="outline" onClick={handleSyncTemplates} className="h-7 text-xs">
+                    Sincronizar templates
+                  </Button>
+                </div>
+              ) : (
+                <select
+                  value={templateName}
+                  onChange={e => setTemplateName(e.target.value)}
+                  className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border"
+                >
+                  <option value="">Seleccionar template...</option>
+                  {waTemplates.filter(t => t.status === 'APPROVED').map(tpl => (
+                    <option key={tpl.name} value={tpl.name}>
+                      {tpl.name} ({tpl.language}) — {tpl.category}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <p className="text-[10px] text-muted-foreground">
+                El workflow se activa cuando un cliente responde a este template.
+              </p>
+            </div>
+          )}
+
+          {triggerType === 'post_service' && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Demora después del servicio</Label>
+              <div className="flex items-center gap-2">
+                <Input type="number" min={0} max={1440} className="bg-muted border text-foreground w-24"
+                  value={delayMinutes} onChange={e => setDelayMinutes(parseInt(e.target.value) || 0)} />
+                <span className="text-xs text-muted-foreground">minutos</span>
+              </div>
+            </div>
+          )}
+
+          {triggerType === 'days_after_visit' && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Días después de la última visita</Label>
+              <div className="flex items-center gap-2">
+                <Input type="number" min={1} max={365} className="bg-muted border text-foreground w-24"
+                  value={delayDays} onChange={e => setDelayDays(parseInt(e.target.value) || 1)} />
+                <span className="text-xs text-muted-foreground">días</span>
+              </div>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}
+            className="text-muted-foreground hover:text-foreground">Cancelar</Button>
+          <Button className="bg-green-600 hover:bg-green-500 text-white" onClick={handleSave} disabled={isSaving}>
+            {isSaving ? 'Guardando...' : 'Guardar cambios'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

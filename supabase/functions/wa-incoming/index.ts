@@ -90,12 +90,14 @@ Deno.serve(async (req: Request) => {
       .maybeSingle()
 
     // Buscar o crear conversación
+    // Usamos sufijo de teléfono para evitar duplicados por diferencia de formato
+    const phoneSuffix = phoneClean.slice(-10)
     let convId: string
     const { data: existingConv } = await supabase
       .from('conversations')
       .select('id, unread_count')
       .eq('channel_id', waChannel.id)
-      .eq('platform_user_id', phoneClean)
+      .ilike('platform_user_id', `%${phoneSuffix}`)
       .maybeSingle()
 
     if (existingConv) {

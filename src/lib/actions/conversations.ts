@@ -43,15 +43,39 @@ export async function startConversation(clientId: string) {
   let phoneClean = client.phone.replace(/\D/g, '')
   if (!phoneClean.startsWith('54')) phoneClean = '54' + phoneClean
 
-  // Buscar conversación existente
+  // Obtener todos los canales WA de la org para buscar conversaciones existentes
+  const { data: allWaChannels } = await supabase
+    .from('social_channels')
+    .select('id')
+    .in('branch_id', branchIds)
+    .eq('platform', 'whatsapp')
+    .eq('is_active', true)
+
+  const allChannelIds = allWaChannels?.map((c: any) => c.id) ?? [channel.id]
+
+  // Buscar conversación existente por sufijo de teléfono para evitar duplicados
+  // por diferencia de formato (ej: 549xxx vs 54xxx)
+  const phoneSuffix = phoneClean.slice(-10)
   const { data: existing } = await supabase
     .from('conversations')
     .select('*')
-    .eq('channel_id', channel.id)
-    .eq('platform_user_id', phoneClean)
+    .in('channel_id', allChannelIds)
+    .ilike('platform_user_id', `%${phoneSuffix}`)
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .limit(1)
     .maybeSingle()
 
-  if (existing) return { data: existing, error: null }
+  if (existing) {
+    // Vincular el cliente si no está vinculado
+    if (!existing.client_id) {
+      await supabase
+        .from('conversations')
+        .update({ client_id: clientId })
+        .eq('id', existing.id)
+      existing.client_id = clientId
+    }
+    return { data: existing, error: null }
+  }
 
   // Crear nueva conversación
   const { data: newConv, error } = await supabase
