@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
 import { startService, attendNextClient, cancelQueueEntry, reassignBarber } from '@/lib/actions/queue'
-import { fetchBarberDayStats } from '@/lib/actions/barber'
+import { fetchBarberDayStats, fetchBranchAssignmentData } from '@/lib/actions/barber'
 import { logoutBarber } from '@/lib/actions/auth'
 import {
   requestBreak,
@@ -197,10 +197,7 @@ export function QueuePanel({
   }, [session.staff_id, session.branch_id])
 
   const fetchBarbersAndSchedules = useCallback(async () => {
-    const dayStart = new Date()
-    dayStart.setHours(0, 0, 0, 0)
-
-    const [barbersRes, schedRes, settingsRes, monthlyVisitsRes, lastVisitsRes, attendanceRes] = await Promise.all([
+    const [barbersRes, schedRes, settingsRes, attendanceRes, assignmentData] = await Promise.all([
       supabase
         .from('staff')
         .select('*')
@@ -218,24 +215,12 @@ export function QueuePanel({
         .select('shift_end_margin_minutes, next_client_alert_minutes, dynamic_cooldown_seconds')
         .maybeSingle(),
       supabase
-        .from('visits')
-        .select('barber_id')
-        .eq('branch_id', session.branch_id)
-        .gte('completed_at', dayStart.toISOString())
-        .not('barber_id', 'is', null),
-      supabase
-        .from('visits')
-        .select('barber_id, completed_at')
-        .eq('branch_id', session.branch_id)
-        .not('barber_id', 'is', null)
-        .order('completed_at', { ascending: false })
-        .limit(200),
-      supabase
         .from('attendance_logs')
         .select('staff_id, action_type')
         .eq('branch_id', session.branch_id)
         .gte('recorded_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
         .order('recorded_at', { ascending: false }),
+      fetchBranchAssignmentData(session.branch_id),
     ])
 
     if (barbersRes.data) {
@@ -279,23 +264,8 @@ export function QueuePanel({
       }
     }
 
-    if (monthlyVisitsRes?.data) {
-      const counts: Record<string, number> = {}
-      for (const v of monthlyVisitsRes.data as { barber_id: string }[]) {
-        counts[v.barber_id] = (counts[v.barber_id] || 0) + 1
-      }
-      setDailyServiceCounts(counts)
-    }
-
-    if (lastVisitsRes?.data) {
-      const lastMap: Record<string, string> = {}
-      for (const v of lastVisitsRes.data as { barber_id: string; completed_at: string }[]) {
-        if (!lastMap[v.barber_id]) {
-          lastMap[v.barber_id] = v.completed_at
-        }
-      }
-      setLastCompletedAt(lastMap)
-    }
+    setDailyServiceCounts(assignmentData.dailyServiceCounts)
+    setLastCompletedAt(assignmentData.lastCompletedAt)
   }, [supabase, session.branch_id, session.staff_id])
 
   const fetchBreakRequestStatus = useCallback(async () => {
@@ -444,15 +414,15 @@ export function QueuePanel({
     (e) => e.barber_id === session.staff_id && e.status === 'in_progress' && !e.is_break
   )
 
-  // "Mi fila": clients that have no barber assigned or are assigned to me (including ghost breaks)
-  // Ordenado por priority_order (fuente única de verdad para el FIFO global).
-  // Los breaks mantienen su orden por position para respetar la ubicación configurada.
-  // Nota: la asignación real ocurre en el servidor via attendNextClient(), esto es solo visualización.
+  // "Mi fila": only entries assigned to this barber (by DB or by assignDynamicBarbers).
+  // Nunca mostramos entries con barber_id=null aquí para evitar que el mismo cliente
+  // aparezca en la fila de múltiples barberos simultáneamente.
+  // La asignación real ocurre en el servidor via attendNextClient(), esto es solo visualización.
   const myWaitingEntries = dynamicEntries
     .filter(
       (e) =>
         e.status === 'waiting' &&
-        (!e.barber_id || e.barber_id === session.staff_id)
+        e.barber_id === session.staff_id
     )
     .sort((a, b) => {
       if (a.is_break !== b.is_break) return a.is_break ? 1 : -1
@@ -744,7 +714,7 @@ export function QueuePanel({
   function renderGhostBreakEntry(entry: QueueEntry) {
     // Count real waiting clients before this ghost for this barber
     const myRealWaiting = entries.filter(
-      e => e.status === 'waiting' && !e.is_break && (!e.barber_id || e.barber_id === session.staff_id) && e.position < entry.position
+      e => e.status === 'waiting' && !e.is_break && e.barber_id === session.staff_id && e.position < entry.position
     ).length
 
     return (

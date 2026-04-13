@@ -188,31 +188,37 @@ export function assignDynamicBarbers(
       !notClockedInIds.has(b.id)
     )
 
-    if (eligibleBarbers.length === 0) {
-      result.push(u)
-      continue
+    const sortByLoad = (list: Staff[]) => {
+      list.sort((a, b) => {
+        const loadA = barberLoad.get(a.id) || 0
+        const loadB = barberLoad.get(b.id) || 0
+        if (loadA !== loadB) return loadA - loadB
+
+        const lastA = lastCompletedAt[a.id] || ''
+        const lastB = lastCompletedAt[b.id] || ''
+        if (lastA !== lastB) return lastA.localeCompare(lastB)
+
+        const countA = dailyServiceCounts[a.id] || 0
+        const countB = dailyServiceCounts[b.id] || 0
+        if (countA !== countB) return countA - countB
+
+        return a.id.localeCompare(b.id)
+      })
+      return list
     }
 
-    eligibleBarbers.sort((a, b) => {
-      const loadA = barberLoad.get(a.id) || 0
-      const loadB = barberLoad.get(b.id) || 0
-      if (loadA !== loadB) return loadA - loadB
+    let candidates = eligibleBarbers
+    if (candidates.length === 0) {
+      candidates = sortByLoad([...barbers])
+      if (candidates.length === 0) {
+        result.push(u)
+        continue
+      }
+    } else {
+      sortByLoad(candidates)
+    }
 
-      // Prefer the barber who has been idle the longest (earliest completed_at).
-      // This replaces the cooldown system: a barber who just finished a cut
-      // is naturally deprioritized without depending on device clock.
-      const lastA = lastCompletedAt[a.id] || ''
-      const lastB = lastCompletedAt[b.id] || ''
-      if (lastA !== lastB) return lastA.localeCompare(lastB)
-
-      const countA = dailyServiceCounts[a.id] || 0
-      const countB = dailyServiceCounts[b.id] || 0
-      if (countA !== countB) return countA - countB
-
-      return a.id.localeCompare(b.id)
-    })
-
-    const selectedBarber = eligibleBarbers[0]
+    const selectedBarber = candidates[0]
 
     result.push({
       ...u,

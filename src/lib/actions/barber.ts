@@ -239,6 +239,42 @@ export async function fetchBarberDayStats(staffId: string, branchId: string) {
   return { servicesCount, revenue }
 }
 
+export async function fetchBranchAssignmentData(branchId: string) {
+  const supabase = createAdminClient()
+  const dayStart = new Date()
+  dayStart.setHours(0, 0, 0, 0)
+
+  const [dailyRes, lastRes] = await Promise.all([
+    supabase
+      .from('visits')
+      .select('barber_id')
+      .eq('branch_id', branchId)
+      .gte('completed_at', dayStart.toISOString())
+      .not('barber_id', 'is', null),
+    supabase
+      .from('visits')
+      .select('barber_id, completed_at')
+      .eq('branch_id', branchId)
+      .not('barber_id', 'is', null)
+      .order('completed_at', { ascending: false })
+      .limit(200),
+  ])
+
+  const dailyServiceCounts: Record<string, number> = {}
+  for (const v of (dailyRes.data ?? []) as { barber_id: string }[]) {
+    dailyServiceCounts[v.barber_id] = (dailyServiceCounts[v.barber_id] || 0) + 1
+  }
+
+  const lastCompletedAt: Record<string, string> = {}
+  for (const v of (lastRes.data ?? []) as { barber_id: string; completed_at: string }[]) {
+    if (!lastCompletedAt[v.barber_id]) {
+      lastCompletedAt[v.barber_id] = v.completed_at
+    }
+  }
+
+  return { dailyServiceCounts, lastCompletedAt }
+}
+
 export async function manageStaffAccess(
   staffId: string,
   email: string,
