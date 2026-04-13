@@ -44,7 +44,8 @@
       "Bash(xargs -I{} basename {})",
       "mcp__supabase__list_migrations",
       "Bash(wc:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(xargs -I {} basename {})"
     ]
   },
   "enabledMcpjsonServers": [
