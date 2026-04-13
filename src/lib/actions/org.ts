@@ -213,22 +213,16 @@ export async function switchOrganization(newOrgId: string) {
  * Obtiene el organization_id del usuario autenticado actual.
  * Soporta tanto Supabase Auth (dashboard) como barber PIN session (panel barbero).
  * Cacheado con React cache() para deduplicar llamadas dentro del mismo request.
+ *
+ * Prioridad: barber_session > Supabase Auth.
+ * El panel barbero usa autenticación por PIN (sin Supabase Auth), pero las tablets
+ * pueden tener cookies de Auth residuales de sesiones previas del dashboard.
+ * Verificar barber_session primero evita que esas cookies interfieran.
  */
 export const getCurrentOrgId = cache(async function getCurrentOrgId(): Promise<string | null> {
   const cookieStore = await cookies()
 
-  // 1. Intentar con Supabase Auth (usuarios del dashboard)
-  const { createClient } = await import('@/lib/supabase/server')
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-
-  if (user) {
-    const activeOrg = cookieStore.get('active_organization')?.value
-    if (activeOrg) return activeOrg
-    return getOrganizationId(user.id)
-  }
-
-  // 2. Fallback: barber PIN session (cookie barber_session)
+  // 1. Barber PIN session (panel barbero) — no requiere llamada a Supabase Auth
   const barberSession = cookieStore.get('barber_session')
   if (barberSession) {
     try {
@@ -241,9 +235,24 @@ export const getCurrentOrgId = cache(async function getCurrentOrgId(): Promise<s
           .eq('id', parsed.staff_id)
           .eq('is_active', true)
           .maybeSingle()
-        return staff?.organization_id ?? null
+        if (staff?.organization_id) return staff.organization_id
       }
     } catch { /* cookie invalida */ }
+  }
+
+  // 2. Supabase Auth (usuarios del dashboard)
+  try {
+    const { createClient } = await import('@/lib/supabase/server')
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (user) {
+      const activeOrg = cookieStore.get('active_organization')?.value
+      if (activeOrg) return activeOrg
+      return getOrganizationId(user.id)
+    }
+  } catch {
+    console.error('[getCurrentOrgId] Error al verificar Supabase Auth')
   }
 
   return null
