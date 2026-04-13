@@ -1578,6 +1578,43 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
           </div>
         </div>
 
+        {/* Cards resumen rápido */}
+        <div className="grid grid-cols-3 gap-2 lg:gap-3 shrink-0 px-2">
+          <div className="flex items-center gap-2.5 rounded-xl border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-blue-500/15">
+              <Scissors className="size-4 text-blue-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] text-muted-foreground leading-none">En atención</p>
+              <p className="text-lg font-bold leading-tight text-zinc-100">
+                {branchEntries.filter(e => e.status === 'in_progress' && !e.is_break).length}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5 rounded-xl border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-amber-500/15">
+              <Clock className="size-4 text-amber-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] text-muted-foreground leading-none">En cola</p>
+              <p className="text-lg font-bold leading-tight text-zinc-100">
+                {branchEntries.filter(e => e.status === 'waiting' && !e.is_break).length}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5 rounded-xl border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-500/15">
+              <Check className="size-4 text-emerald-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] text-muted-foreground leading-none">Servicios del día</p>
+              <p className="text-lg font-bold leading-tight text-zinc-100">
+                {Object.values(dailyServiceCounts).reduce((a, b) => a + b, 0)}
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Tablero Kanban (Grid Layout) */}
         <div className="flex flex-1 overflow-auto bg-zinc-950/40 border-t border-zinc-800/80 mt-1 lg:mt-2 relative md:overflow-x-auto overflow-y-auto">
           <div className="flex flex-col md:flex-row md:min-w-max w-full md:h-full">
