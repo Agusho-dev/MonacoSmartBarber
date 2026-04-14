@@ -649,6 +649,7 @@ export interface Conversation {
   updated_at: string
   channel?: SocialChannel
   client?: Client
+  last_message?: Array<{ content: string | null; direction: MessageDirection; content_type: MessageContentType; created_at: string }> | null
 }
 
 export interface Message {

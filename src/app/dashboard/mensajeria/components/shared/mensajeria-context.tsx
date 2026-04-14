@@ -280,6 +280,7 @@ export function MensajeriaProvider({
             return {
               ...c,
               last_message_at: newMsg.created_at,
+              last_message: [{ content: newMsg.content, direction: newMsg.direction, content_type: newMsg.content_type, created_at: newMsg.created_at }],
               // Solo incrementar unread para mensajes inbound, no para outbound (echo)
               unread_count: isOutbound ? 0 : (activeConv?.id === c.id ? 0 : c.unread_count + 1),
             }

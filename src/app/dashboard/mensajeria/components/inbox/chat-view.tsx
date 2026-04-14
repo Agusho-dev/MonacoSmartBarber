@@ -156,11 +156,22 @@ export function ChatView({
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto min-h-0 px-[5%]">
+        <div className="flex-1 overflow-y-auto min-h-0 px-[5%] scroll-smooth">
           <div className="py-4 space-y-0.5">
             {loadingMessages ? (
-              <div className="flex justify-center py-12">
-                <div className="size-6 animate-spin rounded-full border-2 border-muted border-t-green-400" />
+              <div className="space-y-3 py-4">
+                {/* Skeleton: fecha */}
+                <div className="flex justify-center">
+                  <div className="h-5 w-24 rounded-full bg-muted animate-pulse" />
+                </div>
+                {/* Skeleton: burbujas alternadas */}
+                {[false, false, true, false, true, true, false].map((isOut, i) => (
+                  <div key={i} className={`flex ${isOut ? 'justify-end' : 'justify-start'} animate-pulse`} style={{ animationDelay: `${i * 60}ms` }}>
+                    <div className={`rounded-lg ${isOut ? 'rounded-tr-none bg-green-700/30' : 'rounded-tl-none bg-muted'}`}
+                      style={{ width: `${30 + Math.random() * 30}%`, height: isOut && i === 4 ? 52 : 36 }}>
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
@@ -199,7 +210,7 @@ export function ChatView({
                       !isInteractiveButtons &&
                       (msg.content_type === 'template' || (msg.template_name && (!msg.content || msg.content.startsWith('[Template:'))))
                     return (
-                      <div key={msg.id} className={`flex mb-1.5 ${isOut ? 'justify-end' : 'justify-start'}`}>
+                      <div key={msg.id} className={`flex mb-1.5 ${isOut ? 'justify-end' : 'justify-start'} animate-[msgIn_0.25s_ease-out_both]`}>
                         {isInteractiveButtons ? (
                           <InteractiveButtonsBubble msg={msg} isOut={isOut} />
                         ) : isTemplate && msg.template_name ? (

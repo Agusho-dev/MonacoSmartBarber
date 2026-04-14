@@ -40,7 +40,26 @@ export async function getConversations(channelFilter?: string) {
   const { data, error } = await query
 
   if (error) return { data: [], error: error.message }
-  return { data: data ?? [], error: null }
+
+  // Traer el último mensaje de cada conversación en una sola query
+  const convIds = (data ?? []).map(c => c.id)
+  let lastMessages: Record<string, { content: string | null; direction: string; content_type: string; created_at: string }> = {}
+
+  if (convIds.length > 0) {
+    const { data: msgs } = await supabase.rpc('get_last_messages_for_conversations', { conv_ids: convIds })
+    if (msgs) {
+      for (const m of msgs as Array<{ conversation_id: string; content: string | null; direction: string; content_type: string; created_at: string }>) {
+        lastMessages[m.conversation_id] = m
+      }
+    }
+  }
+
+  const enriched = (data ?? []).map(c => {
+    const lm = lastMessages[c.id]
+    return { ...c, last_message: lm ? [lm] : [] }
+  })
+
+  return { data: enriched, error: null }
 }
 
 export async function getMessages(conversationId: string) {

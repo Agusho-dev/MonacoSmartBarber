@@ -254,8 +254,28 @@ export function WorkflowList() {
 
         <div className="flex-1 overflow-y-auto min-h-0">
           {loading ? (
-            <div className="flex justify-center py-12">
-              <div className="size-6 animate-spin rounded-full border-2 border-muted border-t-green-400" />
+            <div className="space-y-0">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="px-4 py-3 border-b border space-y-2.5 animate-pulse" style={{ animationDelay: `${i * 80}ms` }}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="size-3.5 rounded bg-muted" />
+                      <div className="h-3.5 w-32 rounded bg-muted" />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-9 h-5 rounded-full bg-muted" />
+                      <div className="size-3.5 rounded bg-muted" />
+                      <div className="size-3.5 rounded bg-muted" />
+                    </div>
+                  </div>
+                  <div className="h-3 w-48 rounded bg-muted/70" />
+                  <div className="flex gap-1.5">
+                    <div className="h-4 w-20 rounded bg-muted/60" />
+                    <div className="h-4 w-14 rounded bg-muted/60" />
+                    <div className="h-4 w-16 rounded bg-muted/60" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : filteredWorkflows.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
@@ -268,7 +288,7 @@ export function WorkflowList() {
               {filteredWorkflows.map(wf => (
                 <div
                   key={wf.id}
-                  className="px-4 py-3 border-b border space-y-2 hover:bg-muted/50 transition-colors cursor-pointer"
+                  className="px-4 py-3 border-b border space-y-2 hover:bg-muted/50 transition-all duration-200 cursor-pointer hover:pl-5"
                   onClick={() => setEditingWorkflowId(wf.id)}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -283,9 +303,9 @@ export function WorkflowList() {
                       <button
                         onClick={() => handleToggle(wf.id, !wf.is_active)}
                         disabled={isToggling}
-                        className={`relative w-9 h-5 rounded-full transition-colors ${wf.is_active ? 'bg-green-500' : 'bg-muted'}`}
+                        className={`relative w-9 h-5 rounded-full transition-all duration-200 ${wf.is_active ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.3)]' : 'bg-muted'}`}
                       >
-                        <span className={`absolute top-0.5 left-0.5 size-4 rounded-full bg-white transition-transform ${wf.is_active ? 'translate-x-4' : ''}`} />
+                        <span className={`absolute top-0.5 left-0.5 size-4 rounded-full bg-white transition-all duration-200 ${wf.is_active ? 'translate-x-4' : ''}`} />
                       </button>
                       <button onClick={() => handleDuplicate(wf.id)} className="text-muted-foreground hover:text-blue-400" title="Duplicar" disabled={isCreating}>
                         <Copy className="size-3.5" />

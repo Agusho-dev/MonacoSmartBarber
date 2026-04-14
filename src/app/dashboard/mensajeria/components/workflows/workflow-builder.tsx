@@ -451,8 +451,31 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-background">
-        <div className="size-8 animate-spin rounded-full border-2 border-muted border-t-green-400" />
+      <div className="flex flex-1 flex-col bg-background">
+        {/* Skeleton toolbar */}
+        <div className="flex items-center gap-3 px-4 py-2.5 border-b border animate-pulse">
+          <div className="size-8 rounded bg-muted" />
+          <div className="h-4 w-40 rounded bg-muted" />
+          <div className="flex-1" />
+          <div className="h-8 w-20 rounded bg-muted" />
+        </div>
+        {/* Skeleton canvas con nodos fantasma */}
+        <div className="flex-1 relative overflow-hidden">
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-16">
+              {/* Trigger node skeleton */}
+              <div className="w-52 h-16 rounded-xl bg-muted/60 animate-pulse" />
+              {/* Line */}
+              <div className="w-px h-8 bg-muted/40 -my-12" />
+              {/* Second node skeleton */}
+              <div className="w-52 h-16 rounded-xl bg-muted/40 animate-pulse" style={{ animationDelay: '150ms' }} />
+              {/* Line */}
+              <div className="w-px h-8 bg-muted/30 -my-12" />
+              {/* Third node skeleton */}
+              <div className="w-52 h-16 rounded-xl bg-muted/30 animate-pulse" style={{ animationDelay: '300ms' }} />
+            </div>
+          </div>
+        </div>
       </div>
     )
   }

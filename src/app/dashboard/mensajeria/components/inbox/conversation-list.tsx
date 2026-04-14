@@ -143,7 +143,9 @@ export function ConversationList({
                         </div>
                         <div className="flex items-center justify-between gap-2 mt-0.5">
                           <p className="truncate text-xs text-muted-foreground">
-                            {conv.client?.phone || (conv.channel?.platform === 'instagram' ? (conv.client?.instagram || 'Instagram DM') : conv.platform_user_id)}
+                            {conv.last_message?.[0]?.content
+                              ? `${conv.last_message[0].direction === 'outbound' ? 'Vos: ' : ''}${conv.last_message[0].content_type === 'template' ? '📋 Template' : conv.last_message[0].content_type === 'image' ? '📷 Imagen' : conv.last_message[0].content_type === 'video' ? '🎬 Video' : conv.last_message[0].content_type === 'audio' ? '🎤 Audio' : conv.last_message[0].content_type === 'document' ? '📎 Documento' : conv.last_message[0].content}`
+                              : conv.client?.phone || (conv.channel?.platform === 'instagram' ? (conv.client?.instagram || 'Instagram DM') : conv.platform_user_id)}
                           </p>
                           {conv.unread_count > 0 && (
                             <span className="shrink-0 min-w-4.5 h-4.5 flex items-center justify-center rounded-full bg-green-500 text-[10px] font-semibold text-white px-1">
