@@ -358,11 +358,14 @@ export async function evaluateIncomingMessage(params: {
   } catch (err) {
     console.error('[WorkflowEngine] Error evaluando mensaje:', err)
   } finally {
-    // Auto-tag global con IA: debe ejecutarse también cuando hay return temprano
-    // (workflow activo, keyword, message_received, etc.) — antes solo corría en el “happy path”.
-    runGlobalAutoTag(supabase, orgId, conversationId).catch(err =>
-      console.error('[WorkflowEngine] Auto-tag error:', err)
-    )
+    // Auto-tag global con IA: mismo alcance que antes (todos los caminos + errores en try).
+    // Importante: hay que AWAIT — en Vercel/serverless, promesas “fire and forget” suelen
+    // cancelarse al devolver 200 del webhook y el auto-tag nunca llega a ejecutarse.
+    try {
+      await runGlobalAutoTag(supabase, orgId, conversationId)
+    } catch (autoTagErr) {
+      console.error('[WorkflowEngine] Auto-tag error:', autoTagErr)
+    }
   }
 }
 
@@ -1587,7 +1590,7 @@ async function executeLegacyAutoReply(
 
 /**
  * Si la org tiene auto_tag_enabled, ejecuta la clasificación de la conversación con IA.
- * Se llama en background desde evaluateIncomingMessage (no bloquea el webhook).
+ * Se llama desde el `finally` de evaluateIncomingMessage con await (serverless no debe dejarlo “sueltó”).
  */
 async function runGlobalAutoTag(
   supabase: SupabaseClient,
