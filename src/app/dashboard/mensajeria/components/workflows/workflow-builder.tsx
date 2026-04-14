@@ -1025,7 +1025,7 @@ function WorkflowSettingsDialog({
         wait_reply_timeout_minutes: waitReplyTimeout,
         fallback_template_name: fallbackTemplate.trim() || null,
         requires_meta_window: requiresMetaWindow,
-      } as Partial<WorkflowWithGraph>)
+      })
       if (res.error) { toast.error(res.error); return }
       onUpdate({
         name: name.trim(),
