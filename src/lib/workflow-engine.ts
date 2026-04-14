@@ -537,8 +537,13 @@ async function advanceFromNode(
         const defaultEdge = edges.find(e => !e.condition_value || e.source_handle === 'default')
         if (defaultEdge) targetNodeId = defaultEdge.target_node_id
       }
+    } else if (conditionalEdges.length > 0 && !replyForMatch) {
+      // Hay ramas condicionales (ej. nota 1–5) pero no hay respuesta del cliente en el
+      // contexto: antes caíamos en "primer edge" y se enviaba una rama al azar (típico
+      // mensaje de <5 estrellas) al reanudar por delay/cron o avanzar sin interacción.
+      targetNodeId = null
     } else {
-      // Sin condiciones — tomar el primer edge (default)
+      // Sin aristas condicionales — tomar el primer edge
       targetNodeId = edges[0].target_node_id
     }
   }
