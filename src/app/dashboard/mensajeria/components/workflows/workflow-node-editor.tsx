@@ -712,7 +712,15 @@ function TriggerConfig({
   }
 
   const setTriggerType = (type: string) => {
-    onUpdateConfig({ ...config, trigger_type: type })
+    // Inyectar defaults al cambiar de trigger type para que se persistan
+    const defaults: Record<string, Record<string, unknown>> = {
+      conversation_reopened: {
+        reopen_mode: 'inactivity',
+        min_hours_since_client_msg: 12,
+        exclude_first_ever_contact: false,
+      },
+    }
+    onUpdateConfig({ ...config, trigger_type: type, ...defaults[type] })
   }
 
   return (

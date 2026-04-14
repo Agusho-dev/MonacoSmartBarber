@@ -1,14 +1,13 @@
--- Migración 083: Fix race condition en match_conversation_reopened_workflows
+-- Migración 083: Fix race condition + defaults en match_conversation_reopened_workflows
 --
--- Problema: el trigger trg_conversation_on_message_insert actualiza
--- conversations.last_inbound_at = now() ANTES de que el workflow engine
--- llame a esta RPC. Entonces la condición
---   last_inbound_at < now() - X hours
--- nunca se cumple porque last_inbound_at ya fue actualizado al momento actual.
+-- Problema 1 (race condition): el trigger trg_conversation_on_message_insert actualiza
+-- conversations.last_inbound_at = now() ANTES de que el workflow engine llame a esta RPC.
+-- La condición last_inbound_at < now() - X hours nunca se cumple.
+-- Solución: usar el penúltimo mensaje inbound en vez de last_inbound_at.
 --
--- Solución: en vez de leer last_inbound_at de la tabla conversations (que ya
--- fue actualizado por el trigger), buscamos el penúltimo mensaje inbound
--- para determinar la inactividad real del cliente.
+-- Problema 2 (config incompleta): al cambiar trigger_type a conversation_reopened en el UI,
+-- no se inyectaban los defaults (reopen_mode, min_hours_since_client_msg).
+-- Solución: COALESCE con default 12 horas, y fix en el componente TriggerConfig.
 
 CREATE OR REPLACE FUNCTION match_conversation_reopened_workflows(
   p_org_id          UUID,
@@ -27,12 +26,9 @@ BEGIN
   SELECT * INTO v_conv FROM conversations WHERE id = p_conversation_id;
   IF NOT FOUND THEN RETURN; END IF;
 
-  -- Cantidad de mensajes previos (para exclude_first_ever_contact)
   SELECT count(*)::int INTO v_msg_count FROM messages WHERE conversation_id = p_conversation_id;
 
-  -- Obtener el timestamp del penúltimo mensaje inbound.
-  -- El último inbound es el que acaba de llegar (y ya actualizó last_inbound_at via trigger),
-  -- así que necesitamos el anterior para calcular la inactividad real.
+  -- Penúltimo mensaje inbound (el último es el que acaba de llegar)
   SELECT created_at INTO v_prev_inbound_at
     FROM messages
    WHERE conversation_id = p_conversation_id
@@ -49,26 +45,23 @@ BEGIN
      AND w.trigger_type = 'conversation_reopened'
      AND (w.channels @> ARRAY['all']::text[] OR w.channels @> ARRAY[p_platform]::text[])
      AND (
-       -- Modo: status closed/inactive
-       -- Nota: el trigger de DB ya cambió el status a 'open', así que chequeamos
-       -- reopened_at (que se setea cuando el status ERA inactive/closed)
+       -- Modo: status closed/inactive (usa reopened_at porque el trigger de DB ya cambió status a open)
        (
          COALESCE(w.trigger_config->>'reopen_mode','inactivity') IN ('status_closed','either')
          AND v_conv.reopened_at IS NOT NULL
          AND v_conv.reopened_at >= now() - interval '5 seconds'
        )
        OR
-       -- Modo: inactividad del cliente (usa penúltimo inbound, NO last_inbound_at)
+       -- Modo: inactividad del cliente — default 12 horas si falta min_hours_since_client_msg
        (
          COALESCE(w.trigger_config->>'reopen_mode','inactivity') IN ('inactivity','either')
-         AND (w.trigger_config->>'min_hours_since_client_msg') IS NOT NULL
          AND (
            v_prev_inbound_at IS NULL
-           OR v_prev_inbound_at < now() - ((w.trigger_config->>'min_hours_since_client_msg')::int || ' hours')::interval
+           OR v_prev_inbound_at < now() - (COALESCE((w.trigger_config->>'min_hours_since_client_msg')::int, 12) || ' hours')::interval
          )
        )
        OR
-       -- Modo: inactividad de la barbería (last_outbound_at no se ve afectado por mensajes inbound)
+       -- Modo: inactividad de la barbería
        (
          COALESCE(w.trigger_config->>'reopen_mode','inactivity') IN ('inactivity','either')
          AND (w.trigger_config->>'min_hours_since_shop_msg') IS NOT NULL
@@ -78,7 +71,7 @@ BEGIN
          )
        )
      )
-     -- Excluir primer contacto si está configurado (más de 1 mensaje previo)
+     -- Excluir primer contacto si está configurado
      AND (
        COALESCE((w.trigger_config->>'exclude_first_ever_contact')::boolean, true) = false
        OR v_msg_count > 1
@@ -89,4 +82,4 @@ END;
 $$;
 
 COMMENT ON FUNCTION match_conversation_reopened_workflows IS
-  'Devuelve el workflow de mayor prioridad que matchea una conversación reabierta por inbound. Usa el penúltimo mensaje inbound para evitar race condition con el trigger de lifecycle.';
+  'Devuelve el workflow de mayor prioridad que matchea conversación reabierta. Usa penúltimo inbound para evitar race condition con trigger de lifecycle. Default 12h si falta config.';
