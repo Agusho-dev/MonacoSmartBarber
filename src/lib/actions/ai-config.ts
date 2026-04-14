@@ -15,6 +15,8 @@ export interface OrgAiConfig {
   default_temperature: number
   default_max_tokens: number
   is_active: boolean
+  auto_tag_enabled: boolean
+  auto_tag_model: string
   created_at: string
   updated_at: string
 }
@@ -42,6 +44,8 @@ export async function saveOrgAiConfig(config: {
   default_system_prompt?: string
   default_temperature?: number
   default_max_tokens?: number
+  auto_tag_enabled?: boolean
+  auto_tag_model?: string
 }) {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: null, error: 'No autorizado' }
@@ -59,6 +63,8 @@ export async function saveOrgAiConfig(config: {
         default_system_prompt: config.default_system_prompt || '',
         default_temperature: config.default_temperature ?? 0.7,
         default_max_tokens: config.default_max_tokens ?? 500,
+        auto_tag_enabled: config.auto_tag_enabled ?? false,
+        auto_tag_model: config.auto_tag_model || 'gpt-4o-mini',
         is_active: true,
         updated_at: new Date().toISOString(),
       },

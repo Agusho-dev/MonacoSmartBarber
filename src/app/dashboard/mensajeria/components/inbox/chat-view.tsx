@@ -4,7 +4,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   Send, Clock, ArrowLeft, Plus, Settings,
   CheckCircle2, Archive, RotateCcw, User, MessageSquare, FileText,
-  ExternalLink, MessageCircle, Search, X,
+  ExternalLink, MessageCircle, Search, X, Sparkles,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -33,6 +33,7 @@ export function ChatView({
     canReply, replyWindowLeft,
     handleSend, handleStatusChange,
     handleOpenTemplateDialog,
+    handleAutoTag, autoTagging,
     isSending, isActing,
     waTemplates,
     quickReplies,
@@ -131,6 +132,16 @@ export function ChatView({
                 <Clock className="size-2.5" />{replyWindowLeft}
               </Badge>
             )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`size-8 transition-colors ${autoTagging ? 'text-purple-400 animate-pulse' : 'text-muted-foreground hover:text-purple-400'}`}
+              title="Auto-etiquetar con IA"
+              onClick={() => handleAutoTag(activeConv.id)}
+              disabled={autoTagging}
+            >
+              <Sparkles className="size-4" />
+            </Button>
             {activeConv.status === 'open' ? (
               <>
                 <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-blue-400" title="Cerrar conversación"

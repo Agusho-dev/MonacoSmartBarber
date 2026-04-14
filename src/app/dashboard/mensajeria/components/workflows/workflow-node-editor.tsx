@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Plus, Trash2, MessageSquare, Tag, Bell, Image, LayoutGrid, GitBranch, Clock, Send, List as ListIcon, User, MessageCircleReply, Hash, Bot, UserCheck, Globe, Inbox, CalendarDays, RefreshCw, ChevronDown, Sliders, Brain, AlertTriangle } from 'lucide-react'
+import { X, Plus, Trash2, MessageSquare, Tag, Bell, Image, LayoutGrid, GitBranch, Clock, Send, List as ListIcon, User, MessageCircleReply, Hash, Bot, UserCheck, Globe, Inbox, CalendarDays, RefreshCw, ChevronDown, Sliders, Brain, AlertTriangle, Sparkles } from 'lucide-react'
 import { ModelPicker } from '../shared/model-picker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -193,6 +193,10 @@ export function WorkflowNodeEditor({ node, workflow, onUpdateConfig, onUpdateLab
 
         {node.node_type === 'http_request' && (
           <HttpRequestConfig config={config} onUpdateConfig={onUpdateConfig} />
+        )}
+
+        {node.node_type === 'ai_auto_tag' && (
+          <AiAutoTagConfig />
         )}
 
         {/* Delete button */}
@@ -1141,6 +1145,32 @@ function HttpRequestConfig({ config, onUpdateConfig }: { config: Record<string, 
   )
 }
 
+// ─── AI Auto-tag config ─────────────────────────────────────────
+
+function AiAutoTagConfig() {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-3 space-y-2">
+        <div className="flex items-center gap-2">
+          <Sparkles className="size-4 text-purple-400" />
+          <span className="text-xs font-medium text-foreground">Auto-etiquetado con IA</span>
+        </div>
+        <p className="text-[10px] text-muted-foreground leading-relaxed">
+          Este nodo analiza la conversación y asigna automáticamente las etiquetas que tengan <strong className="text-purple-300">auto-asignar con IA</strong> activado.
+        </p>
+      </div>
+      <p className="text-[10px] text-muted-foreground leading-relaxed">
+        Configurá las etiquetas y sus descripciones en <strong>Config → Tags</strong>. La IA lee la descripción de cada etiqueta para decidir si aplica a la conversación.
+      </p>
+      <div className="rounded-md border border-dashed border-muted-foreground/20 p-2.5">
+        <p className="text-[10px] text-muted-foreground">
+          💡 <strong>Ejemplo:</strong> Si tenés una etiqueta <em>&quot;Consulta precio&quot;</em> con descripción <em>&quot;Cliente pregunta por precios o promociones&quot;</em>, la IA la asignará cuando detecte mensajes sobre costos.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 // ─── Node icon helper ────────────────────────────────────────────
 
 function NodeIcon({ type }: { type: string }) {
@@ -1158,6 +1188,7 @@ function NodeIcon({ type }: { type: string }) {
     remove_tag: Tag,
     crm_alert: Bell,
     ai_response: Bot,
+    ai_auto_tag: Sparkles,
     handoff_human: UserCheck,
     http_request: Globe,
     loop: RefreshCw,

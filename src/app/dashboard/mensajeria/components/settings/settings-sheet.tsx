@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { ModelPicker } from '../shared/model-picker'
 import { AiLogsPanel } from './ai-logs-panel'
+import { TagsSection } from './tags-section'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
@@ -25,7 +26,7 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
   const {
     waConfig, setWaConfig, igConfig, setIgConfig,
     aiConfig, setAiConfig,
-    tags, handleCreateTag, handleDeleteTag,
+    tags, handleCreateTag, handleDeleteTag, handleUpdateTag,
     isConfigured, isInstagramConfigured,
     creatingTag,
   } = useMensajeria()
@@ -531,68 +532,19 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
 
           {/* Tags tab */}
           {settingsTab === 'tags' && (
-            <div className="space-y-5">
-              <div>
-                <p className="text-xs font-semibold text-foreground mb-1">Gestión de etiquetas</p>
-                <p className="text-[11px] text-muted-foreground">Las etiquetas se aplican a conversaciones de cualquier plataforma para organizar tu inbox.</p>
-              </div>
-
-              <div className="space-y-3">
-                <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Nueva etiqueta</Label>
-                <div className="flex gap-2">
-                  <input
-                    className="flex-1 rounded-lg bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
-                    placeholder="Ej: VIP, Seguimiento, Nuevo cliente..."
-                    value={newTagName}
-                    onChange={e => setNewTagName(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') { handleCreateTag(newTagName, newTagColor); setNewTagName('') } }}
-                  />
-                  <Button size="sm" onClick={() => { handleCreateTag(newTagName, newTagColor); setNewTagName('') }} disabled={creatingTag || !newTagName.trim()}
-                    className="shrink-0 bg-muted hover:bg-muted/80 text-white border-0">
-                    <Plus className="size-3.5" />
-                  </Button>
-                </div>
-                <div className="flex gap-2 flex-wrap">
-                  {TAG_COLORS.map(color => (
-                    <button key={color} onClick={() => setNewTagColor(color)}
-                      className={`size-6 rounded-full transition-transform hover:scale-110 ${newTagColor === color ? 'ring-2 ring-white ring-offset-1 ring-offset-background' : ''}`}
-                      style={{ backgroundColor: color }} />
-                  ))}
-                </div>
-                {newTagName.trim() && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-muted-foreground">Vista previa:</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-medium text-white" style={{ backgroundColor: newTagColor }}>
-                      {newTagName.trim()}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              <Separator className="bg-white/5" />
-
-              <div className="space-y-2">
-                <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Etiquetas creadas ({tags.length})</Label>
-                {tags.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic py-2">Todavía no creaste ninguna etiqueta</p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {tags.map(tag => (
-                      <div key={tag.id} className="flex items-center justify-between gap-2 rounded-lg bg-card px-3 py-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="size-3 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
-                          <span className="text-sm text-foreground truncate">{tag.name}</span>
-                        </div>
-                        <button onClick={() => handleDeleteTag(tag.id)} disabled={creatingTag}
-                          className="shrink-0 text-muted-foreground hover:text-red-400 transition-colors">
-                          <X className="size-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+            <TagsSection
+              tags={tags}
+              newTagName={newTagName}
+              setNewTagName={setNewTagName}
+              newTagColor={newTagColor}
+              setNewTagColor={setNewTagColor}
+              handleCreateTag={handleCreateTag}
+              handleDeleteTag={handleDeleteTag}
+              handleUpdateTag={handleUpdateTag}
+              creatingTag={creatingTag}
+              aiConfig={aiConfig}
+              setAiConfig={setAiConfig}
+            />
           )}
         </div>
       </SheetContent>

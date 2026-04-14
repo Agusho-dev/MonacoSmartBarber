@@ -6,7 +6,7 @@ import {
   ArrowLeft, Save, Plus, ZoomIn, ZoomOut, Maximize2,
   MessageSquare, Image, LayoutGrid, List, Tag,
   GitBranch, Bell, Clock, Send, Trash2, Pencil, MapPin, Settings2, CalendarDays,
-  Bot, UserCheck, Globe, Inbox, RefreshCw,
+  Bot, UserCheck, Globe, Inbox, RefreshCw, Sparkles,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -34,6 +34,7 @@ const NODE_TYPES = [
   { type: 'remove_tag', label: 'Quitar etiqueta', icon: Tag, color: '#f43f5e', category: 'Acciones' },
   { type: 'crm_alert', label: 'Alerta CRM', icon: Bell, color: '#ef4444', category: 'Acciones' },
   { type: 'ai_response', label: 'Respuesta IA', icon: Bot, color: '#a855f7', category: 'IA' },
+  { type: 'ai_auto_tag', label: 'Auto-tag IA', icon: Sparkles, color: '#c084fc', category: 'IA' },
   { type: 'handoff_human', label: 'Derivar a humano', icon: UserCheck, color: '#f97316', category: 'IA' },
   { type: 'http_request', label: 'HTTP Request', icon: Globe, color: '#0ea5e9', category: 'Acciones' },
   { type: 'loop', label: 'Bucle / Loop', icon: RefreshCw, color: '#f97316', category: 'Lógica' },
@@ -710,6 +711,9 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
                       {node.node_type === 'loop' && (
                         <span>Repetir hasta {(node.config.max_iterations as number) ?? 3} veces</span>
                       )}
+                      {node.node_type === 'ai_auto_tag' && (
+                        <span>Clasificar conversación con IA</span>
+                      )}
                     </div>
                   </div>
 
@@ -1156,6 +1160,8 @@ function getDefaultConfig(type: string): Record<string, unknown> {
       return { url: '', method: 'POST', headers: {}, body_template: '', response_variable: 'http_response' }
     case 'loop':
       return { max_iterations: 3 }
+    case 'ai_auto_tag':
+      return {}
     default:
       return {}
   }

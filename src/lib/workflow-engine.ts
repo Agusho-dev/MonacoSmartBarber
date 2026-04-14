@@ -351,7 +351,12 @@ export async function evaluateIncomingMessage(params: {
       await executeLegacyAutoReply(supabase, orgId, conversationId, text, platform, params)
     }
 
-    // 6. Polling oportunista: avanzar delays largos vencidos.
+    // 6. Auto-tag global con IA: si está habilitado, clasificar la conversación en background
+    runGlobalAutoTag(supabase, orgId, conversationId).catch(err =>
+      console.error('[WorkflowEngine] Auto-tag error:', err)
+    )
+
+    // 7. Polling oportunista: avanzar delays largos vencidos.
     // Funciona como red de seguridad si el cron no está configurado.
     // No bloquea el flujo si falla.
     processExpiredDelays().catch(err => console.error('[WorkflowEngine] processExpiredDelays fallback:', err))
@@ -965,6 +970,25 @@ async function executeNode(
         break
       }
 
+      case 'ai_auto_tag': {
+        // Nodo de workflow que ejecuta auto-etiquetado con IA
+        const { data: wfForTag } = await supabase
+          .from('automation_workflows')
+          .select('organization_id')
+          .eq('id', workflowId)
+          .single()
+
+        if (!wfForTag) {
+          throw new Error('No se pudo obtener la org del workflow')
+        }
+
+        const tagResult = await runAutoTagForOrg(supabase, wfForTag.organization_id, params.conversationId)
+        await logExecution(supabase, executionId, node.id, node.node_type, tagResult.error ? 'error' : 'success',
+          { applied: tagResult.applied }, tagResult.error || undefined)
+        await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+        break
+      }
+
       default:
         console.warn('[WorkflowEngine] Tipo de nodo no soportado:', node.node_type)
         await logExecution(supabase, executionId, node.id, node.node_type, 'skipped', {})
@@ -1555,5 +1579,161 @@ async function executeLegacyAutoReply(
       }
       break
     }
+  }
+}
+
+// ─── Auto-tag global con IA ──────────────────────────────────────
+
+/**
+ * Si la org tiene auto_tag_enabled, ejecuta la clasificación de la conversación con IA.
+ * Se llama en background desde evaluateIncomingMessage (no bloquea el webhook).
+ */
+async function runGlobalAutoTag(
+  supabase: SupabaseClient,
+  orgId: string,
+  conversationId: string
+): Promise<void> {
+  // Chequear si auto-tag está habilitado
+  const { data: aiConfig } = await supabase
+    .from('organization_ai_config')
+    .select('auto_tag_enabled, auto_tag_model, default_model, openai_api_key, anthropic_api_key, openrouter_api_key')
+    .eq('organization_id', orgId)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!aiConfig?.auto_tag_enabled) return
+
+  await runAutoTagForOrg(supabase, orgId, conversationId, aiConfig)
+}
+
+/**
+ * Core del auto-etiquetado: lee mensajes + etiquetas IA → clasifica → asigna.
+ * Usado tanto por runGlobalAutoTag como por el nodo ai_auto_tag del workflow.
+ */
+async function runAutoTagForOrg(
+  supabase: SupabaseClient,
+  orgId: string,
+  conversationId: string,
+  aiConfigOverride?: Record<string, unknown> | null
+): Promise<{ applied: string[]; error?: string }> {
+  // 1. Obtener etiquetas con auto-assign activado
+  const { data: aiTags } = await supabase
+    .from('conversation_tags')
+    .select('id, name, description')
+    .eq('organization_id', orgId)
+    .eq('ai_auto_assign', true)
+
+  if (!aiTags || aiTags.length === 0) {
+    return { applied: [], error: 'No hay etiquetas con IA activada' }
+  }
+
+  // 2. Config IA
+  let aiConfig = aiConfigOverride
+  if (!aiConfig) {
+    const { data } = await supabase
+      .from('organization_ai_config')
+      .select('*')
+      .eq('organization_id', orgId)
+      .eq('is_active', true)
+      .maybeSingle()
+    aiConfig = data
+  }
+  if (!aiConfig) return { applied: [], error: 'Sin config IA' }
+
+  // 3. Últimos mensajes
+  const { data: messages } = await supabase
+    .from('messages')
+    .select('direction, content, content_type')
+    .eq('conversation_id', conversationId)
+    .in('content_type', ['text', 'interactive'])
+    .not('content', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(15)
+
+  if (!messages || messages.length === 0) return { applied: [] }
+
+  const conversation = messages
+    .reverse()
+    .filter(m => (m.content as string)?.trim())
+    .map(m => `[${m.direction === 'inbound' ? 'Cliente' : 'Negocio'}]: ${m.content}`)
+    .join('\n')
+
+  // 4. Tags actuales
+  const { data: currentAssignments } = await supabase
+    .from('conversation_tag_assignments')
+    .select('tag_id')
+    .eq('conversation_id', conversationId)
+  const currentTagIds = new Set((currentAssignments ?? []).map(t => t.tag_id))
+
+  // 5. Prompt
+  const tagList = aiTags
+    .map(t => `- ID: "${t.id}" | Nombre: "${t.name}" | Descripción: ${t.description || 'Sin descripción'}`)
+    .join('\n')
+
+  const systemPrompt = `Sos un asistente de clasificación de conversaciones de un negocio.
+Analizá la conversación y determiná qué etiquetas aplican.
+
+ETIQUETAS DISPONIBLES:
+${tagList}
+
+REGLAS:
+- Analizá el contenido y la intención de los mensajes del cliente
+- Devolvé ÚNICAMENTE un JSON array con los IDs de las etiquetas que aplican
+- Si ninguna aplica, devolvé: []
+- No inventes IDs
+- Sé conservador: solo asigná si hay evidencia clara
+
+Respondé SOLO con el JSON array.`
+
+  // 6. Llamar IA
+  const model = (aiConfig.auto_tag_model as string) || (aiConfig.default_model as string) || 'gpt-4o-mini'
+  const provider = getAiProvider(model)
+  const apiKey = provider === 'anthropic'
+    ? (aiConfig.anthropic_api_key as string)
+    : provider === 'openrouter'
+      ? (aiConfig.openrouter_api_key as string)
+      : (aiConfig.openai_api_key as string)
+
+  if (!apiKey) return { applied: [], error: 'Sin API key' }
+
+  try {
+    const response = await callAiModel({
+      model,
+      systemPrompt,
+      userMessage: `CONVERSACIÓN:\n${conversation}`,
+      temperature: 0.1,
+      maxTokens: 300,
+      apiKey,
+    })
+
+    let tagIds: string[] = []
+    try {
+      const cleaned = response.trim().replace(/^```json?\s*/i, '').replace(/```\s*$/i, '').trim()
+      tagIds = JSON.parse(cleaned)
+      if (!Array.isArray(tagIds)) tagIds = []
+    } catch {
+      return { applied: [], error: 'Respuesta IA inválida' }
+    }
+
+    const validIds = new Set(aiTags.map(t => t.id))
+    tagIds = tagIds.filter(id => typeof id === 'string' && validIds.has(id))
+
+    const applied: string[] = []
+    for (const tagId of tagIds) {
+      if (currentTagIds.has(tagId)) continue
+      const { error } = await supabase
+        .from('conversation_tag_assignments')
+        .upsert({ conversation_id: conversationId, tag_id: tagId }, { onConflict: 'conversation_id,tag_id' })
+      if (!error) applied.push(tagId)
+    }
+
+    if (applied.length > 0) {
+      console.log(`[AutoTag] Conv ${conversationId}: asignadas ${applied.length} etiqueta(s)`)
+    }
+
+    return { applied }
+  } catch (err) {
+    console.error('[AutoTag] Error:', err)
+    return { applied: [], error: (err as Error).message }
   }
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { Search, Calendar, Plus, Pencil, MessageSquare, Instagram, Facebook, Clock, X, Settings } from 'lucide-react'
+import { Search, Calendar, Plus, Pencil, MessageSquare, Instagram, Facebook, Clock, X, Settings, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar } from '../shared/avatar'
@@ -157,8 +157,9 @@ export function ConversationList({
                         {conv.tags && conv.tags.length > 0 && (
                           <div className="flex gap-1 mt-1 flex-wrap">
                             {conv.tags.map(({ tag_id, tag }) => (
-                              <span key={tag_id} className="px-1.5 py-0.5 rounded-full text-[9px] font-medium text-white"
+                              <span key={tag_id} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium text-white"
                                 style={{ backgroundColor: tag?.color ?? '#6B7280' }}>
+                                {tag?.ai_auto_assign && <Sparkles className="size-2" />}
                                 {tag?.name}
                               </span>
                             ))}

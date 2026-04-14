@@ -6,7 +6,7 @@ import { sendMessage as sendMessageAction, markAsRead, cancelScheduledMessage, s
 import { getQuickReplies } from '@/lib/actions/quick-replies'
 import { syncWhatsAppTemplates } from '@/lib/actions/whatsapp-meta'
 import { startConversation, updateConversationStatus, getClientVisits, scheduleMessageAuto } from '@/lib/actions/conversations'
-import { createConversationTag, deleteConversationTag, assignConversationTag, removeConversationTag } from '@/lib/actions/tags'
+import { createConversationTag, deleteConversationTag, assignConversationTag, removeConversationTag, updateConversationTag, autoTagConversation } from '@/lib/actions/tags'
 import { toast } from 'sonner'
 import type { Message, ConversationTag, OrgWhatsAppConfig, OrgInstagramConfig, Client } from '@/lib/types/database'
 import type { OrgAiConfig } from '@/lib/actions/ai-config'
@@ -102,9 +102,12 @@ interface MensajeriaContextValue {
   handleSyncTemplates: () => void
   handleOpenTemplateDialog: (target: { type: 'conversation'; conversationId: string } | { type: 'client'; clientId: string }) => void
   handleSendTemplate: (tpl: WaTemplate) => void
-  handleCreateTag: (name: string, color: string) => void
+  handleCreateTag: (name: string, color: string, description?: string, aiAutoAssign?: boolean) => void
   handleDeleteTag: (tagId: string) => void
   handleToggleTag: (conversationId: string, tagId: string) => void
+  handleUpdateTag: (tagId: string, updates: { name?: string; color?: string; description?: string | null; ai_auto_assign?: boolean }) => void
+  handleAutoTag: (conversationId: string) => void
+  autoTagging: boolean
 
   // Quick replies
   quickReplies: QuickReply[]
@@ -488,14 +491,39 @@ export function MensajeriaProvider({
     })
   }
 
-  const handleCreateTag = (name: string, color: string) => {
+  const handleCreateTag = (name: string, color: string, description?: string, aiAutoAssign?: boolean) => {
     if (!name.trim()) { toast.error('Escribí un nombre para la etiqueta'); return }
     startCreatingTag(async () => {
-      const result = await createConversationTag(name.trim(), color)
+      const result = await createConversationTag(name.trim(), color, description, aiAutoAssign)
       if (result.error) { toast.error(result.error) }
       else {
         toast.success('Etiqueta creada')
         if (result.data) setTags(prev => [...prev, result.data as ConversationTag].sort((a, b) => a.name.localeCompare(b.name)))
+      }
+    })
+  }
+
+  const handleUpdateTag = (tagId: string, updates: { name?: string; color?: string; description?: string | null; ai_auto_assign?: boolean }) => {
+    startCreatingTag(async () => {
+      const result = await updateConversationTag(tagId, updates)
+      if (result.error) { toast.error(result.error) }
+      else {
+        setTags(prev => prev.map(t => t.id === tagId ? { ...t, ...updates } as ConversationTag : t))
+        toast.success('Etiqueta actualizada')
+      }
+    })
+  }
+
+  const [autoTagging, startAutoTagging] = useTransition()
+  const handleAutoTag = (conversationId: string) => {
+    startAutoTagging(async () => {
+      const result = await autoTagConversation(conversationId)
+      if (result.error) { toast.error(result.error) }
+      else if (result.applied.length > 0) {
+        const names = result.applied.map(id => tags.find(t => t.id === id)?.name).filter(Boolean)
+        toast.success(`IA asignó: ${names.join(', ')}`)
+      } else {
+        toast.info('La IA no encontró etiquetas aplicables')
       }
     })
   }
@@ -573,7 +601,7 @@ export function MensajeriaProvider({
     handleSend, handleStatusChange, handleStartConversation,
     handleSchedule, handleCancelScheduled,
     handleSyncTemplates, handleOpenTemplateDialog, handleSendTemplate,
-    handleCreateTag, handleDeleteTag, handleToggleTag,
+    handleCreateTag, handleDeleteTag, handleToggleTag, handleUpdateTag, handleAutoTag, autoTagging,
     quickReplies,
     isSending, isActing, isStarting,
     syncingTemplates, sendingTemplate, creatingTag, taggingConv,
