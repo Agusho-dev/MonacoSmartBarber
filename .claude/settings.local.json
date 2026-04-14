@@ -49,7 +49,8 @@
       "Bash(npx shadcn@latest add checkbox --yes)",
       "Bash(echo \"exit=$?\")",
       "Bash(cat /Users/ignaciobaldovino/MSB_FULL/MonacoSmartBarber/supabase/functions/process-scheduled-messages/index.ts)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(npx vercel *)"
     ]
   },
   "enabledMcpjsonServers": [
