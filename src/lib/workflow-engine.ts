@@ -52,6 +52,32 @@ interface ExecutionContext {
   [key: string]: unknown
 }
 
+// Trae los últimos N mensajes de la conversación como historial para la IA.
+async function fetchConversationHistory(
+  supabase: SupabaseClient,
+  conversationId: string,
+  limit: number = 10
+): Promise<Array<{ role: 'user' | 'assistant'; content: string }>> {
+  const { data: messages } = await supabase
+    .from('messages')
+    .select('direction, content, content_type, created_at')
+    .eq('conversation_id', conversationId)
+    .in('content_type', ['text', 'interactive'])
+    .not('content', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (!messages || messages.length === 0) return []
+
+  return messages
+    .reverse()
+    .filter(m => m.content?.trim())
+    .map(m => ({
+      role: m.direction === 'inbound' ? 'user' as const : 'assistant' as const,
+      content: m.content!,
+    }))
+}
+
 // Devuelve el nombre completo y el primer nombre del contacto de una conversación.
 // Prioriza clients.name (si la conversación está linkeada a un cliente), y si no
 // cae en platform_user_name (display name del provider).
@@ -423,6 +449,19 @@ async function advanceFromNode(
   context: ExecutionContext,
   params: Parameters<typeof evaluateIncomingMessage>[0]
 ): Promise<void> {
+  // Protección anti-infinite: máximo 100 nodos por ejecución
+  context.variables = context.variables ?? {}
+  const stepCount = parseInt(context.variables._step_count ?? '0') + 1
+  context.variables._step_count = String(stepCount)
+  if (stepCount > 100) {
+    await supabase
+      .from('workflow_executions')
+      .update({ status: 'error', context, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', executionId)
+    await logExecution(supabase, executionId, currentNodeId, 'system', 'error', {}, 'Límite de 100 nodos alcanzado — posible loop infinito')
+    return
+  }
+
   // Buscar edges que salen del nodo actual
   const { data: edges } = await supabase
     .from('workflow_edges')
@@ -445,35 +484,49 @@ async function advanceFromNode(
 
   // Si el nodo actual tiene edges con condition_value, matchear
   const conditionalEdges = edges.filter(e => e.condition_value)
-  // Meta envía button_reply.id (ej. btn_1) y title (ej. "Si"). Las aristas guardan cond.id:
-  // debe coincidir con el id de Meta O con el texto del botón / mensaje libre.
-  const replyId = (context.last_button_id ?? '').trim()
-  const replyTitle = (context.last_button_title ?? '').trim()
-  const replyText = (context.last_text_reply ?? '').trim()
-  const replyForMatch = replyId || replyTitle || replyText
 
-  const matchesConditionValue = (cv: string | null | undefined): boolean => {
-    if (cv == null) return false
-    const c = String(cv).trim()
-    if (!c) return false
-    if (replyId && replyId === c) return true
-    if (replyTitle && replyTitle.toLowerCase() === c.toLowerCase()) return true
-    if (!replyId && replyText && replyText.toLowerCase() === c.toLowerCase()) return true
-    return false
+  // Routing especial para loop nodes: usar la dirección interna
+  const loopDirection = context.variables?.[`_loop_${currentNodeId}_direction`]
+  if (loopDirection && conditionalEdges.length > 0) {
+    const matchedEdge = conditionalEdges.find(e =>
+      (e.condition_value as string)?.toLowerCase() === loopDirection
+    ) ?? edges.find(e => e.source_handle === loopDirection)
+    if (matchedEdge) targetNodeId = matchedEdge.target_node_id
+    // Limpiar la dirección temporal
+    delete context.variables[`_loop_${currentNodeId}_direction`]
   }
 
-  if (conditionalEdges.length > 0 && replyForMatch) {
-    const matchedEdge = conditionalEdges.find(e => matchesConditionValue(e.condition_value as string))
-    if (matchedEdge) {
-      targetNodeId = matchedEdge.target_node_id
-    } else {
-      // Buscar edge "default" (sin condition_value)
-      const defaultEdge = edges.find(e => !e.condition_value || e.source_handle === 'default')
-      if (defaultEdge) targetNodeId = defaultEdge.target_node_id
+  if (!targetNodeId) {
+    // Meta envía button_reply.id (ej. btn_1) y title (ej. "Si"). Las aristas guardan cond.id:
+    // debe coincidir con el id de Meta O con el texto del botón / mensaje libre.
+    const replyId = (context.last_button_id ?? '').trim()
+    const replyTitle = (context.last_button_title ?? '').trim()
+    const replyText = (context.last_text_reply ?? '').trim()
+    const replyForMatch = replyId || replyTitle || replyText
+
+    const matchesConditionValue = (cv: string | null | undefined): boolean => {
+      if (cv == null) return false
+      const c = String(cv).trim()
+      if (!c) return false
+      if (replyId && replyId === c) return true
+      if (replyTitle && replyTitle.toLowerCase() === c.toLowerCase()) return true
+      if (!replyId && replyText && replyText.toLowerCase() === c.toLowerCase()) return true
+      return false
     }
-  } else {
-    // Sin condiciones — tomar el primer edge (default)
-    targetNodeId = edges[0].target_node_id
+
+    if (conditionalEdges.length > 0 && replyForMatch) {
+      const matchedEdge = conditionalEdges.find(e => matchesConditionValue(e.condition_value as string))
+      if (matchedEdge) {
+        targetNodeId = matchedEdge.target_node_id
+      } else {
+        // Buscar edge "default" (sin condition_value)
+        const defaultEdge = edges.find(e => !e.condition_value || e.source_handle === 'default')
+        if (defaultEdge) targetNodeId = defaultEdge.target_node_id
+      }
+    } else {
+      // Sin condiciones — tomar el primer edge (default)
+      targetNodeId = edges[0].target_node_id
+    }
   }
 
   if (!targetNodeId) {
@@ -685,24 +738,19 @@ async function executeNode(
 
       case 'delay': {
         const seconds = (config.seconds as number) ?? 5
-        // Esperar con setTimeout (funciona en el contexto del webhook, máx ~10s recomendado)
-        if (seconds <= 10) {
-          await new Promise(resolve => setTimeout(resolve, seconds * 1000))
-          await logExecution(supabase, executionId, node.id, node.node_type, 'success', { seconds })
-          await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
-        } else {
-          // Para delays largos, dejar en waiting y procesarlo con un cron
-          await supabase
-            .from('workflow_executions')
-            .update({
-              status: 'waiting_reply',
-              current_node_id: node.id,
-              context: { ...context, delay_until: new Date(Date.now() + seconds * 1000).toISOString() },
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', executionId)
-          await logExecution(supabase, executionId, node.id, node.node_type, 'success', { seconds, deferred: true })
-        }
+        // SIEMPRE usar el cron para delays — el setTimeout inline es frágil
+        // (si la función de Vercel muere, la ejecución queda stuck para siempre)
+        const delayUntilDate = new Date(Date.now() + seconds * 1000).toISOString()
+        await supabase
+          .from('workflow_executions')
+          .update({
+            status: 'waiting_reply',
+            current_node_id: node.id,
+            context: { ...context, delay_until: delayUntilDate },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', executionId)
+        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { seconds, delay_until: delayUntilDate })
         break
       }
 
@@ -746,7 +794,39 @@ async function executeNode(
           throw new Error(`No hay API key de ${providerName} configurada para el modelo "${model}". Configurala en Mensajería → Config → IA.`)
         }
 
-        const aiResponse = await callAiModel({ model, systemPrompt, userMessage, temperature, maxTokens, apiKey })
+        // Memoria de conversación: traer mensajes previos como contexto
+        const memoryLimit = (config.memory_messages as number) ?? 10
+        let conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = []
+        if (memoryLimit > 0) {
+          conversationHistory = await fetchConversationHistory(supabase, params.conversationId, memoryLimit)
+        }
+
+        // Retry con backoff para errores transitorios (429, 5xx)
+        let aiResponse = ''
+        let lastAiError: Error | null = null
+        const maxRetries = 2
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          try {
+            if (attempt > 0) await new Promise(r => setTimeout(r, 2000 * attempt))
+            aiResponse = await callAiModel({ model, systemPrompt, userMessage, temperature, maxTokens, apiKey, conversationHistory })
+            lastAiError = null
+            break
+          } catch (err) {
+            lastAiError = err as Error
+            const msg = lastAiError.message
+            const isRetryable = msg.includes('429') || msg.includes('500') || msg.includes('502') || msg.includes('503')
+            if (!isRetryable) break // No reintentar errores de auth, modelo inválido, etc.
+          }
+        }
+
+        if (lastAiError) {
+          // Fallback: usar mensaje configurable en vez de matar el workflow
+          aiResponse = (config.fallback_message as string)
+            || 'Disculpá, no pude procesar tu consulta en este momento. Un agente te va a responder pronto.'
+          await logExecution(supabase, executionId, node.id, node.node_type, 'error',
+            { model, error: lastAiError.message, used_fallback: true }, lastAiError.message)
+        }
 
         await sendPlatformMessage(supabase, params, aiResponse)
 
@@ -758,7 +838,9 @@ async function executeNode(
           .update({ context, updated_at: new Date().toISOString() })
           .eq('id', executionId)
 
-        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { model, response_preview: aiResponse.slice(0, 200) })
+        if (!lastAiError) {
+          await logExecution(supabase, executionId, node.id, node.node_type, 'success', { model, response_preview: aiResponse.slice(0, 200) })
+        }
         await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
         break
       }
@@ -835,6 +917,34 @@ async function executeNode(
         } catch (err) {
           await logExecution(supabase, executionId, node.id, node.node_type, 'error', { url }, (err as Error).message)
         }
+        await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+        break
+      }
+
+      case 'loop': {
+        const maxIterations = (config.max_iterations as number) ?? 3
+        const loopKey = `_loop_${node.id}_count`
+        context.variables = context.variables ?? {}
+        const currentCount = parseInt(context.variables[loopKey] ?? '0')
+
+        if (currentCount < maxIterations) {
+          context.variables[loopKey] = String(currentCount + 1)
+          context.variables[`_loop_${node.id}_direction`] = 'continue'
+          await logExecution(supabase, executionId, node.id, 'loop', 'success', {
+            iteration: currentCount + 1, max: maxIterations,
+          })
+        } else {
+          context.variables[loopKey] = '0'
+          context.variables[`_loop_${node.id}_direction`] = 'done'
+          await logExecution(supabase, executionId, node.id, 'loop', 'success', {
+            iteration: 'done', max: maxIterations,
+          })
+        }
+
+        await supabase
+          .from('workflow_executions')
+          .update({ context, updated_at: new Date().toISOString() })
+          .eq('id', executionId)
         await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
         break
       }
@@ -1141,11 +1251,20 @@ async function callAiModel(opts: {
   temperature: number
   maxTokens: number
   apiKey: string
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
 }): Promise<string> {
-  const { model, systemPrompt, userMessage, temperature, maxTokens, apiKey } = opts
+  const { model, systemPrompt, userMessage, temperature, maxTokens, apiKey, conversationHistory } = opts
   const provider = getAiProvider(model)
 
+  // Construir historial: mensajes previos + mensaje actual
+  const history = conversationHistory ?? []
+
   if (provider === 'anthropic') {
+    const anthropicMessages = [
+      ...history.map(m => ({ role: m.role, content: m.content })),
+      { role: 'user' as const, content: userMessage },
+    ]
+
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -1158,7 +1277,7 @@ async function callAiModel(opts: {
         max_tokens: maxTokens,
         temperature,
         system: systemPrompt || undefined,
-        messages: [{ role: 'user', content: userMessage }],
+        messages: anthropicMessages,
       }),
     })
 
@@ -1177,6 +1296,7 @@ async function callAiModel(opts: {
 
     const messages: Array<{ role: string; content: string }> = []
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt })
+    messages.push(...history.map(m => ({ role: m.role, content: m.content })))
     messages.push({ role: 'user', content: userMessage })
 
     const headers: Record<string, string> = {
@@ -1290,8 +1410,18 @@ export async function processExpiredDelays(): Promise<{ processed: number; error
 
     const ctx = (exec.context as ExecutionContext) ?? {}
     const delayUntil = ctx.delay_until as string | undefined
-    if (!delayUntil) continue
-    if (new Date(delayUntil) > now) continue // aún no expiró
+
+    if (delayUntil) {
+      // Ruta normal: delay_until explícito
+      if (new Date(delayUntil) > now) continue // aún no expiró
+    } else {
+      // Fallback para ejecuciones stuck sin delay_until:
+      // calcular expiración desde updated_at + config.seconds
+      const configSeconds = ((node.config as Record<string, unknown>)?.seconds as number) ?? 5
+      const updatedAt = new Date(exec.updated_at)
+      const fallbackExpiry = new Date(updatedAt.getTime() + configSeconds * 1000 + 60000) // +60s gracia
+      if (fallbackExpiry > now) continue // aún no expiró con el fallback
+    }
 
     try {
       // Resolver datos de la conversación para poder enviar mensajes

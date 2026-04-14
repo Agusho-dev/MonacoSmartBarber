@@ -6,7 +6,7 @@ import {
   ArrowLeft, Save, Plus, ZoomIn, ZoomOut, Maximize2,
   MessageSquare, Image, LayoutGrid, List, Tag,
   GitBranch, Bell, Clock, Send, Trash2, Pencil, MapPin, Settings2, CalendarDays,
-  Bot, UserCheck, Globe, Inbox,
+  Bot, UserCheck, Globe, Inbox, RefreshCw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -36,6 +36,7 @@ const NODE_TYPES = [
   { type: 'ai_response', label: 'Respuesta IA', icon: Bot, color: '#a855f7', category: 'IA' },
   { type: 'handoff_human', label: 'Derivar a humano', icon: UserCheck, color: '#f97316', category: 'IA' },
   { type: 'http_request', label: 'HTTP Request', icon: Globe, color: '#0ea5e9', category: 'Acciones' },
+  { type: 'loop', label: 'Bucle / Loop', icon: RefreshCw, color: '#f97316', category: 'Lógica' },
 ] as const
 
 function getNodeMeta(type: string) {
@@ -588,6 +589,7 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
               const isSelected = node.id === selectedNodeId
               const isDragging = node.id === draggingNodeId
               const isCondition = node.node_type === 'condition'
+              const isLoop = node.node_type === 'loop'
               const conditions = isCondition ? (node.config.conditions as Array<{ id: string; label: string }>) ?? [] : []
 
               return (
@@ -682,11 +684,33 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
                       {node.node_type === 'http_request' && (
                         <span>{(node.config.method as string) || 'POST'} {(node.config.url as string)?.slice(0, 25) || 'sin URL'}</span>
                       )}
+                      {node.node_type === 'loop' && (
+                        <span>Repetir hasta {(node.config.max_iterations as number) ?? 3} veces</span>
+                      )}
                     </div>
                   </div>
 
                   {/* Output port(s) (bottom) */}
-                  {isCondition && conditions.length > 0 ? (
+                  {isLoop ? (
+                    <div className="flex justify-around mt-1">
+                      {[{ id: 'continue', label: 'Continuar', color: 'bg-orange-400 ring-orange-400/30' }, { id: 'done', label: 'Listo', color: 'bg-green-400 ring-green-400/30' }].map(h => {
+                        const active = connectingFrom?.nodeId === node.id && connectingFrom.handle === h.id
+                        return (
+                          <div key={`${node.id}-${h.id}`} className="flex flex-col items-center">
+                            <div
+                              data-port="output"
+                              data-port-key={`out:${node.id}:${h.id}`}
+                              className="p-1.5 cursor-crosshair"
+                              onPointerDown={e => handleOutputPortDown(e, node.id, h.id)}
+                            >
+                              <div className={`size-4 rounded-full border-2 border-background transition-all ${active ? `${h.color} scale-125 ring-2` : `bg-muted-foreground/50 hover:${h.color} hover:scale-110`}`} />
+                            </div>
+                            <span className="text-[9px] text-muted-foreground">{h.label}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : isCondition && conditions.length > 0 ? (
                     <div className="flex justify-around mt-1">
                       {conditions.map((cond, condIdx) => {
                         const active = connectingFrom?.nodeId === node.id && connectingFrom.handle === cond.id
@@ -1107,6 +1131,8 @@ function getDefaultConfig(type: string): Record<string, unknown> {
       return { assign_to: 'auto', client_message: 'Te estamos transfiriendo con un agente...', create_alert: true, alert_type: 'urgent' }
     case 'http_request':
       return { url: '', method: 'POST', headers: {}, body_template: '', response_variable: 'http_response' }
+    case 'loop':
+      return { max_iterations: 3 }
     default:
       return {}
   }

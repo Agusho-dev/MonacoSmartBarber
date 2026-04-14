@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Plus, Trash2, MessageSquare, Tag, Bell, Image, LayoutGrid, GitBranch, Clock, Send, List as ListIcon, User, MessageCircleReply, Hash, Bot, UserCheck, Globe, Inbox, CalendarDays } from 'lucide-react'
+import { X, Plus, Trash2, MessageSquare, Tag, Bell, Image, LayoutGrid, GitBranch, Clock, Send, List as ListIcon, User, MessageCircleReply, Hash, Bot, UserCheck, Globe, Inbox, CalendarDays, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -184,6 +184,10 @@ export function WorkflowNodeEditor({ node, workflow, onUpdateConfig, onUpdateLab
 
         {node.node_type === 'handoff_human' && (
           <HandoffHumanConfig config={config} onChange={updateField} />
+        )}
+
+        {node.node_type === 'loop' && (
+          <LoopConfig config={config} onChange={updateField} />
         )}
 
         {node.node_type === 'http_request' && (
@@ -919,8 +923,59 @@ function AiResponseConfig({ config, onChange }: { config: Record<string, unknown
         </div>
       </div>
 
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Mensajes de contexto (memoria)</Label>
+        <Input
+          type="number"
+          min={0}
+          max={30}
+          step={1}
+          className="bg-muted border text-foreground text-sm"
+          value={(config.memory_messages as number) ?? 10}
+          onChange={e => onChange('memory_messages', parseInt(e.target.value) || 0)}
+        />
+        <p className="text-[10px] text-muted-foreground">
+          Cantidad de mensajes previos que la IA recibe como contexto de la conversación. 0 = sin memoria.
+        </p>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Mensaje de fallback (si la IA falla)</Label>
+        <Textarea
+          className="bg-muted border text-foreground resize-none text-sm"
+          rows={2}
+          placeholder="Disculpá, no pude procesar tu consulta. Un agente te va a responder pronto."
+          value={(config.fallback_message as string) || ''}
+          onChange={e => onChange('fallback_message', e.target.value)}
+        />
+      </div>
+
       <p className="text-[10px] text-muted-foreground">
         La IA recibirá el mensaje del cliente y responderá según el prompt. La respuesta se envía automáticamente y queda disponible como {'{ai_response}'}.
+      </p>
+    </div>
+  )
+}
+
+// ─── Loop config ────────────────────────────────────────────────
+
+function LoopConfig({ config, onChange }: { config: Record<string, unknown>; onChange: (key: string, value: unknown) => void }) {
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Repeticiones máximas</Label>
+        <Input
+          type="number"
+          min={1}
+          max={50}
+          step={1}
+          className="bg-muted border text-foreground text-sm"
+          value={(config.max_iterations as number) ?? 3}
+          onChange={e => onChange('max_iterations', parseInt(e.target.value) || 3)}
+        />
+      </div>
+      <p className="text-[10px] text-muted-foreground">
+        El nodo tiene dos salidas: &quot;continuar&quot; (repite el cuerpo del bucle) y &quot;listo&quot; (sale del bucle al siguiente paso). Conectá cada salida al nodo correspondiente.
       </p>
     </div>
   )
@@ -1074,6 +1129,7 @@ function NodeIcon({ type }: { type: string }) {
     ai_response: Bot,
     handoff_human: UserCheck,
     http_request: Globe,
+    loop: RefreshCw,
   }
   const Icon = iconMap[type] ?? MessageSquare
   return <Icon className="size-4 text-muted-foreground" />
