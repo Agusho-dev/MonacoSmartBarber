@@ -835,6 +835,35 @@ function TriggerConfig({
           El workflow se activará con cualquier mensaje entrante. Los workflows con triggers más específicos (palabra clave, template) tienen prioridad.
         </p>
       )}
+
+      {triggerType === 'conversation_reopened' && (
+        <div className="space-y-3 border rounded-lg p-3 bg-muted/30">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Modo de reapertura</Label>
+            <select value={(config.reopen_mode as string) || 'inactivity'}
+              onChange={e => onUpdateConfig({ ...config, reopen_mode: e.target.value, trigger_type: triggerType })}
+              className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border">
+              <option value="inactivity">Por inactividad (horas sin contacto)</option>
+              <option value="status_closed">Solo si estaba inactiva/cerrada</option>
+              <option value="either">Cualquiera de las dos</option>
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Horas mínimas desde el último mensaje del cliente</Label>
+            <div className="flex items-center gap-2">
+              <Input type="number" min={1} max={720} className="bg-muted border text-foreground text-sm w-24"
+                value={(config.min_hours_since_client_msg as number) ?? 12}
+                onChange={e => onUpdateConfig({ ...config, min_hours_since_client_msg: parseInt(e.target.value) || 12, trigger_type: triggerType })} />
+              <span className="text-xs text-muted-foreground">horas</span>
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-foreground">
+            <input type="checkbox" checked={(config.exclude_first_ever_contact as boolean) ?? false}
+              onChange={e => onUpdateConfig({ ...config, exclude_first_ever_contact: e.target.checked, trigger_type: triggerType })} />
+            No disparar en el primer contacto del cliente
+          </label>
+        </div>
+      )}
     </div>
   )
 }
