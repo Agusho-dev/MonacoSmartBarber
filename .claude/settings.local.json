@@ -45,7 +45,8 @@
       "mcp__supabase__list_migrations",
       "Bash(wc:*)",
       "Bash(ls:*)",
-      "Bash(xargs -I {} basename {})"
+      "Bash(xargs -I {} basename {})",
+      "Bash(npx shadcn@latest add checkbox --yes)"
     ]
   },
   "enabledMcpjsonServers": [

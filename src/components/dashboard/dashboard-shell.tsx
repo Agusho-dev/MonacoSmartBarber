@@ -19,6 +19,7 @@ import {
   GripVertical,
   Check,
   ChevronDown,
+  Receipt,
 } from 'lucide-react'
 import {
   DndContext,
@@ -72,6 +73,7 @@ const navItems = [
   { href: '/dashboard/mensajeria', label: 'Mensajería', icon: MessageSquare, requiredPermissions: ['clients.view'] },
   { href: '/dashboard/app-movil', label: 'APP Móvil', icon: Smartphone, requiredPermissions: ['rewards.view'] },
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3, requiredPermissions: ['stats.view'] },
+  { href: '/dashboard/caja', label: 'Caja', icon: Receipt, requiredPermissions: ['finances.view_summary'] },
   { href: '/dashboard/finanzas', label: 'Finanzas', icon: DollarSign, requiredPermissions: ['finances.view', 'salary.view'] },
   { href: '/dashboard/configuracion', label: 'Configuración', icon: Settings, requiredPermissions: ['settings.view'] },
 ]
