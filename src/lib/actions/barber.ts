@@ -185,7 +185,18 @@ export async function createStaffMember(data: {
     return { error: 'Error al crear staff: ' + error.message }
   }
 
+  // Espejar en clients + etiquetar "Staff" (best-effort, no bloquea la creacion)
+  if (inserted?.id && data.phone) {
+    try {
+      const { prepareStaffContact } = await import('./staff-contact')
+      await prepareStaffContact(inserted.id)
+    } catch (e) {
+      console.warn('[createStaffMember] prepareStaffContact fallo:', e)
+    }
+  }
+
   revalidatePath('/dashboard/barberos')
+  revalidatePath('/dashboard/mensajeria')
   return { success: true, data: inserted }
 }
 
@@ -212,7 +223,18 @@ export async function updateStaffMember(staffId: string, data: {
     return { error: 'Error al actualizar staff: ' + error.message }
   }
 
+  // Resincronizar mirror client + etiqueta "Staff" si hay telefono (idempotente).
+  if (data.phone) {
+    try {
+      const { prepareStaffContact } = await import('./staff-contact')
+      await prepareStaffContact(staffId)
+    } catch (e) {
+      console.warn('[updateStaffMember] prepareStaffContact fallo:', e)
+    }
+  }
+
   revalidatePath('/dashboard/barberos')
+  revalidatePath('/dashboard/mensajeria')
   return { success: true }
 }
 

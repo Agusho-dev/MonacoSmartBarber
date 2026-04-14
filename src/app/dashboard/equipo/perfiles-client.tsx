@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useTransition, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Scissors,
   Banknote,
@@ -21,6 +22,8 @@ import {
   User,
   FileDown,
   Receipt,
+  MessageSquare,
+  Loader2,
 } from 'lucide-react'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -69,6 +72,7 @@ import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { getPaymentBatchesGrouped, type GroupedBatchMonth, type SalaryReport, type SalaryPaymentBatch } from '@/lib/actions/salary'
+import { prepareStaffContact } from '@/lib/actions/staff-contact'
 import { exportPaymentReceiptPDF } from '@/lib/export'
 import type {
   Staff,
@@ -451,6 +455,32 @@ function BarberDetailPanel({
   setPeriod: (p: PeriodFilter) => void
 }) {
   const [exporting, setExporting] = useState(false)
+  const [contactingStaff, setContactingStaff] = useState(false)
+  const router = useRouter()
+
+  const handleContactBarber = async () => {
+    if (!barber.phone) {
+      toast.error('Este miembro no tiene telefono cargado')
+      return
+    }
+    setContactingStaff(true)
+    try {
+      const res = await prepareStaffContact(barber.id)
+      if (res.error || !res.clientId) {
+        toast.error(res.error ?? 'No se pudo preparar el contacto')
+        return
+      }
+      const qs = new URLSearchParams({ clientId: res.clientId })
+      if (res.tagId) qs.set('tag', res.tagId)
+      router.push(`/dashboard/mensajeria?${qs.toString()}`)
+    } catch (e) {
+      console.error(e)
+      toast.error('Error al abrir conversacion')
+    } finally {
+      setContactingStaff(false)
+    }
+  }
+
   const [boletinFrom, setBoletinFrom] = useState(() => {
     const d = new Date()
     d.setDate(1)
@@ -989,6 +1019,22 @@ function BarberDetailPanel({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {barber.phone && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-xs h-8 gap-1.5 border-green-500/40 bg-green-500/10 text-green-500 hover:bg-green-500/20 hover:text-green-400"
+                onClick={handleContactBarber}
+                disabled={contactingStaff}
+              >
+                {contactingStaff ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <MessageSquare className="size-3.5" />
+                )}
+                Contactar
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
