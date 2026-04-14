@@ -848,7 +848,32 @@ function AiResponseConfig({ config, onChange }: { config: Record<string, unknown
             <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
             <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
           </optgroup>
+          <optgroup label="OpenRouter">
+            <option value="openrouter/auto">OpenRouter Auto (mejor modelo)</option>
+            <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B Instruct (gratis)</option>
+            <option value="meta-llama/llama-4-maverick:free">Llama 4 Maverick (gratis)</option>
+            <option value="deepseek/deepseek-chat-v3-0324:free">DeepSeek V3 (gratis)</option>
+            <option value="google/gemini-2.5-pro-exp-03-25:free">Gemini 2.5 Pro (gratis)</option>
+            <option value="mistralai/mistral-small-3.1-24b-instruct:free">Mistral Small 3.1 (gratis)</option>
+            <option value="__custom_openrouter__">Otro modelo de OpenRouter...</option>
+          </optgroup>
         </select>
+        {(config.model as string) === '__custom_openrouter__' || (
+          typeof config.model === 'string' && config.model.includes('/') &&
+          !['openrouter/auto', 'meta-llama/llama-3.3-70b-instruct:free', 'meta-llama/llama-4-maverick:free', 'deepseek/deepseek-chat-v3-0324:free', 'google/gemini-2.5-pro-exp-03-25:free', 'mistralai/mistral-small-3.1-24b-instruct:free'].includes(config.model)
+        ) ? (
+          <div className="mt-1.5">
+            <Input
+              className="bg-muted border text-foreground text-xs font-mono"
+              placeholder="org/model-name (ej: meta-llama/llama-3.3-70b-instruct:free)"
+              value={(config.model as string) === '__custom_openrouter__' ? '' : (config.model as string) || ''}
+              onChange={e => onChange('model', e.target.value)}
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Ingresá el ID del modelo de openrouter.ai (ej: meta-llama/llama-3.3-70b-instruct:free)
+            </p>
+          </div>
+        ) : null}
       </div>
 
       <div className="space-y-1.5">

@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS organization_ai_config (
   openai_api_key TEXT,
   -- Anthropic
   anthropic_api_key TEXT,
+  -- OpenRouter
+  openrouter_api_key TEXT,
   -- Defaults
   default_model TEXT DEFAULT 'gpt-4o-mini',
   default_system_prompt TEXT DEFAULT '',

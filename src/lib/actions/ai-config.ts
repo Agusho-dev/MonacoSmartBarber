@@ -9,6 +9,7 @@ export interface OrgAiConfig {
   organization_id: string
   openai_api_key: string | null
   anthropic_api_key: string | null
+  openrouter_api_key: string | null
   default_model: string
   default_system_prompt: string
   default_temperature: number
@@ -36,6 +37,7 @@ export async function getOrgAiConfig() {
 export async function saveOrgAiConfig(config: {
   openai_api_key?: string
   anthropic_api_key?: string
+  openrouter_api_key?: string
   default_model?: string
   default_system_prompt?: string
   default_temperature?: number
@@ -52,6 +54,7 @@ export async function saveOrgAiConfig(config: {
         organization_id: orgId,
         openai_api_key: config.openai_api_key || null,
         anthropic_api_key: config.anthropic_api_key || null,
+        openrouter_api_key: config.openrouter_api_key || null,
         default_model: config.default_model || 'gpt-4o-mini',
         default_system_prompt: config.default_system_prompt || '',
         default_temperature: config.default_temperature ?? 0.7,

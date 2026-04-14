@@ -707,13 +707,46 @@ async function executeNode(
       }
 
       case 'ai_response': {
-        const model = (config.model as string) || 'gpt-4o-mini'
-        const systemPrompt = resolveVariables(config.system_prompt as string || '', context, params)
-        const temperature = (config.temperature as number) ?? 0.7
-        const maxTokens = (config.max_tokens as number) ?? 500
+        // Obtener config de IA de la organización
+        const { data: wfForAi } = await supabase
+          .from('automation_workflows')
+          .select('organization_id')
+          .eq('id', workflowId)
+          .single()
+
+        const { data: orgAiConfig } = await supabase
+          .from('organization_ai_config')
+          .select('*')
+          .eq('organization_id', wfForAi?.organization_id ?? '')
+          .eq('is_active', true)
+          .maybeSingle()
+
+        if (!orgAiConfig) {
+          throw new Error('No hay configuración de IA para esta organización. Configurala en Mensajería → Config → IA.')
+        }
+
+        const model = (config.model as string) || orgAiConfig.default_model || 'gpt-4o-mini'
+        const systemPrompt = resolveVariables(
+          (config.system_prompt as string) || orgAiConfig.default_system_prompt || '',
+          context, params
+        )
+        const temperature = (config.temperature as number) ?? orgAiConfig.default_temperature ?? 0.7
+        const maxTokens = (config.max_tokens as number) ?? orgAiConfig.default_max_tokens ?? 500
         const userMessage = context.last_text_reply || context.last_button_title || ''
 
-        const aiResponse = await callAiModel({ model, systemPrompt, userMessage, temperature, maxTokens })
+        const provider = getAiProvider(model)
+        const apiKey = provider === 'anthropic'
+          ? orgAiConfig.anthropic_api_key
+          : provider === 'openrouter'
+            ? orgAiConfig.openrouter_api_key
+            : orgAiConfig.openai_api_key
+
+        if (!apiKey) {
+          const providerName = provider === 'anthropic' ? 'Anthropic' : provider === 'openrouter' ? 'OpenRouter' : 'OpenAI'
+          throw new Error(`No hay API key de ${providerName} configurada para el modelo "${model}". Configurala en Mensajería → Config → IA.`)
+        }
+
+        const aiResponse = await callAiModel({ model, systemPrompt, userMessage, temperature, maxTokens, apiKey })
 
         await sendPlatformMessage(supabase, params, aiResponse)
 
@@ -1095,20 +1128,24 @@ async function sendWhatsAppTemplate(
 
 // ─── AI Model caller ────────────────────────────────────────────
 
+function getAiProvider(model: string): 'anthropic' | 'openrouter' | 'openai' {
+  if (model.startsWith('claude')) return 'anthropic'
+  if (model.includes('/')) return 'openrouter' // e.g. meta-llama/llama-3.3-70b-instruct:free, openrouter/auto
+  return 'openai'
+}
+
 async function callAiModel(opts: {
   model: string
   systemPrompt: string
   userMessage: string
   temperature: number
   maxTokens: number
+  apiKey: string
 }): Promise<string> {
-  const { model, systemPrompt, userMessage, temperature, maxTokens } = opts
+  const { model, systemPrompt, userMessage, temperature, maxTokens, apiKey } = opts
+  const provider = getAiProvider(model)
 
-  if (model.startsWith('claude')) {
-    // Anthropic API
-    const apiKey = process.env.ANTHROPIC_API_KEY
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY no configurada')
-
+  if (provider === 'anthropic') {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -1133,20 +1170,27 @@ async function callAiModel(opts: {
     const data = await resp.json() as { content: Array<{ type: string; text: string }> }
     return data.content?.[0]?.text ?? ''
   } else {
-    // OpenAI API
-    const apiKey = process.env.OPENAI_API_KEY
-    if (!apiKey) throw new Error('OPENAI_API_KEY no configurada')
+    // OpenAI y OpenRouter usan el mismo formato (OpenAI-compatible)
+    const baseUrl = provider === 'openrouter'
+      ? 'https://openrouter.ai/api/v1/chat/completions'
+      : 'https://api.openai.com/v1/chat/completions'
 
     const messages: Array<{ role: string; content: string }> = []
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt })
     messages.push({ role: 'user', content: userMessage })
 
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    }
+    if (provider === 'openrouter') {
+      headers['HTTP-Referer'] = 'https://monacosmartbarber.com'
+      headers['X-Title'] = 'Monaco Smart Barber'
+    }
+
+    const resp = await fetch(baseUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
+      headers,
       body: JSON.stringify({
         model,
         messages,
@@ -1157,7 +1201,7 @@ async function callAiModel(opts: {
 
     if (!resp.ok) {
       const errText = await resp.text()
-      throw new Error(`OpenAI API error ${resp.status}: ${errText.slice(0, 200)}`)
+      throw new Error(`${provider === 'openrouter' ? 'OpenRouter' : 'OpenAI'} API error ${resp.status}: ${errText.slice(0, 200)}`)
     }
 
     const data = await resp.json() as { choices: Array<{ message: { content: string } }> }

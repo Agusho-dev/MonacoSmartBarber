@@ -17,11 +17,12 @@ import { WhatsAppIcon } from '../shared/icons'
 import { TAG_COLORS } from '../shared/helpers'
 import { useMensajeria } from '../shared/mensajeria-context'
 
-type SettingsTab = 'whatsapp' | 'instagram' | 'facebook' | 'tags'
+type SettingsTab = 'whatsapp' | 'instagram' | 'facebook' | 'ai' | 'tags'
 
 export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const {
     waConfig, setWaConfig, igConfig, setIgConfig,
+    aiConfig, setAiConfig,
     tags, handleCreateTag, handleDeleteTag,
     isConfigured, isInstagramConfigured,
     creatingTag,
@@ -48,6 +49,21 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
   })
   const [showIgToken, setShowIgToken] = useState(false)
   const [savingIgConfig, startSavingIgConfig] = useTransition()
+
+  // AI config
+  const [aiConfigForm, setAiConfigForm] = useState({
+    openai_api_key: aiConfig?.openai_api_key ?? '',
+    anthropic_api_key: aiConfig?.anthropic_api_key ?? '',
+    openrouter_api_key: aiConfig?.openrouter_api_key ?? '',
+    default_model: aiConfig?.default_model ?? 'gpt-4o-mini',
+    default_system_prompt: aiConfig?.default_system_prompt ?? '',
+    default_temperature: aiConfig?.default_temperature ?? 0.7,
+    default_max_tokens: aiConfig?.default_max_tokens ?? 500,
+  })
+  const [showOpenAiKey, setShowOpenAiKey] = useState(false)
+  const [showAnthropicKey, setShowAnthropicKey] = useState(false)
+  const [showOpenRouterKey, setShowOpenRouterKey] = useState(false)
+  const [savingAiConfig, startSavingAiConfig] = useTransition()
 
   // Tags
   const [newTagName, setNewTagName] = useState('')
@@ -81,6 +97,22 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
     })
   }
 
+  const handleSaveAiConfig = () => {
+    if (!aiConfigForm.openai_api_key && !aiConfigForm.anthropic_api_key && !aiConfigForm.openrouter_api_key) {
+      toast.error('Configurá al menos una API key (OpenAI o Anthropic)'); return
+    }
+    startSavingAiConfig(async () => {
+      const result = await saveOrgAiConfig(aiConfigForm)
+      if (result.error) { toast.error(result.error) }
+      else {
+        toast.success('Configuración de IA guardada')
+        if (result.data) setAiConfig(result.data)
+      }
+    })
+  }
+
+  const isAiConfigured = !!(aiConfig?.openai_api_key || aiConfig?.anthropic_api_key || aiConfig?.openrouter_api_key)
+
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text).then(() => toast.success(`${label} copiado`))
   }
@@ -92,16 +124,17 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full max-w-md flex flex-col p-0">
         <div className="px-6 py-4 border-b border shrink-0">
-          <p className="font-semibold text-foreground mb-3">Canales conectados</p>
-          <div className="grid grid-cols-4 gap-1 bg-card p-1 rounded-lg">
-            {(['whatsapp', 'instagram', 'facebook', 'tags'] as SettingsTab[]).map(tab => (
+          <p className="font-semibold text-foreground mb-3">Configuración</p>
+          <div className="grid grid-cols-5 gap-1 bg-card p-1 rounded-lg">
+            {(['whatsapp', 'instagram', 'facebook', 'ai', 'tags'] as SettingsTab[]).map(tab => (
               <button key={tab} onClick={() => setSettingsTab(tab)}
                 className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-md text-[10px] font-medium transition-colors ${settingsTab === tab ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
                 {tab === 'whatsapp' && <WhatsAppIcon className="size-3.5 text-green-400" />}
                 {tab === 'instagram' && <Instagram className="size-3.5 text-pink-400" />}
                 {tab === 'facebook' && <Facebook className="size-3.5 text-blue-400" />}
+                {tab === 'ai' && <Bot className="size-3.5 text-purple-400" />}
                 {tab === 'tags' && <span className="text-base leading-none">🏷️</span>}
-                <span>{tab === 'whatsapp' ? 'WA' : tab === 'instagram' ? 'IG' : tab === 'facebook' ? 'FB' : 'Tags'}</span>
+                <span>{tab === 'whatsapp' ? 'WA' : tab === 'instagram' ? 'IG' : tab === 'facebook' ? 'FB' : tab === 'ai' ? 'IA' : 'Tags'}</span>
               </button>
             ))}
           </div>
@@ -336,6 +369,174 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
                 </p>
               </div>
               <Badge variant="outline" className="border-blue-500/30 text-blue-400 bg-blue-500/5">Próximamente</Badge>
+            </div>
+          )}
+
+          {/* AI tab */}
+          {settingsTab === 'ai' && (
+            <div className="space-y-6">
+              <div className="flex items-center gap-2">
+                <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${isAiConfigured ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-orange-500/10 text-orange-400 border border-orange-500/20'}`}>
+                  {isAiConfigured ? <Wifi className="size-3" /> : <WifiOff className="size-3" />}
+                  {isAiConfigured ? 'Configurado' : 'Sin configurar'}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-semibold text-foreground mb-1">Proveedores de IA</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Configurá las API keys para usar nodos de IA en los workflows. Podés usar OpenAI, Anthropic, OpenRouter, o combinarlos.
+                </p>
+              </div>
+
+              <Separator />
+
+              {/* OpenAI */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="size-5 rounded-full bg-green-500/10 flex items-center justify-center text-green-400 font-bold text-[10px]">1</div>
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">OpenAI</h3>
+                </div>
+                <div className="pl-7 space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] text-muted-foreground">API Key</Label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type={showOpenAiKey ? 'text' : 'password'}
+                        className="flex-1 rounded-lg bg-card px-3 py-2 text-xs text-foreground outline-none font-mono border"
+                        placeholder="sk-..."
+                        value={aiConfigForm.openai_api_key}
+                        onChange={e => setAiConfigForm(p => ({ ...p, openai_api_key: e.target.value }))}
+                      />
+                      <button className="shrink-0 p-2 rounded-lg bg-card hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                        onClick={() => setShowOpenAiKey(!showOpenAiKey)}>
+                        {showOpenAiKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Modelos disponibles: GPT-4o Mini, GPT-4o, GPT-4.1 Mini, GPT-4.1
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Anthropic */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="size-5 rounded-full bg-purple-500/10 flex items-center justify-center text-purple-400 font-bold text-[10px]">2</div>
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Anthropic</h3>
+                </div>
+                <div className="pl-7 space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] text-muted-foreground">API Key</Label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type={showAnthropicKey ? 'text' : 'password'}
+                        className="flex-1 rounded-lg bg-card px-3 py-2 text-xs text-foreground outline-none font-mono border"
+                        placeholder="sk-ant-..."
+                        value={aiConfigForm.anthropic_api_key}
+                        onChange={e => setAiConfigForm(p => ({ ...p, anthropic_api_key: e.target.value }))}
+                      />
+                      <button className="shrink-0 p-2 rounded-lg bg-card hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                        onClick={() => setShowAnthropicKey(!showAnthropicKey)}>
+                        {showAnthropicKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Modelos disponibles: Claude Haiku 4.5, Claude Sonnet 4.6
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* OpenRouter */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="size-5 rounded-full bg-cyan-500/10 flex items-center justify-center text-cyan-400 font-bold text-[10px]">3</div>
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">OpenRouter</h3>
+                </div>
+                <div className="pl-7 space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] text-muted-foreground">API Key</Label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type={showOpenRouterKey ? 'text' : 'password'}
+                        className="flex-1 rounded-lg bg-card px-3 py-2 text-xs text-foreground outline-none font-mono border"
+                        placeholder="sk-or-..."
+                        value={aiConfigForm.openrouter_api_key}
+                        onChange={e => setAiConfigForm(p => ({ ...p, openrouter_api_key: e.target.value }))}
+                      />
+                      <button className="shrink-0 p-2 rounded-lg bg-card hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                        onClick={() => setShowOpenRouterKey(!showOpenRouterKey)}>
+                        {showOpenRouterKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Acceso a cientos de modelos (Llama, Mistral, Gemini, etc.) a través de openrouter.ai. Incluye modelos gratuitos.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Defaults */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="size-5 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-400 font-bold text-[10px]">4</div>
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Valores por defecto</h3>
+                </div>
+                <div className="pl-7 space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] text-muted-foreground">Modelo por defecto</Label>
+                    <select
+                      value={aiConfigForm.default_model}
+                      onChange={e => setAiConfigForm(p => ({ ...p, default_model: e.target.value }))}
+                      className="w-full rounded-lg bg-card px-3 py-2 text-xs text-foreground outline-none border"
+                    >
+                      <optgroup label="OpenAI">
+                        <option value="gpt-4o-mini">GPT-4o Mini</option>
+                        <option value="gpt-4o">GPT-4o</option>
+                        <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
+                        <option value="gpt-4.1">GPT-4.1</option>
+                      </optgroup>
+                      <optgroup label="Anthropic">
+                        <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
+                        <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+                      </optgroup>
+                      <optgroup label="OpenRouter">
+                        <option value="openrouter/auto">OpenRouter Auto (mejor modelo)</option>
+                        <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B Instruct (gratis)</option>
+                        <option value="meta-llama/llama-4-maverick:free">Llama 4 Maverick (gratis)</option>
+                        <option value="deepseek/deepseek-chat-v3-0324:free">DeepSeek V3 (gratis)</option>
+                        <option value="google/gemini-2.5-pro-exp-03-25:free">Gemini 2.5 Pro (gratis)</option>
+                        <option value="mistralai/mistral-small-3.1-24b-instruct:free">Mistral Small 3.1 (gratis)</option>
+                      </optgroup>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] text-muted-foreground">System prompt por defecto</Label>
+                    <textarea
+                      className="w-full rounded-lg bg-card px-3 py-2 text-xs text-foreground outline-none border resize-none"
+                      rows={4}
+                      placeholder="Sos un asistente de la barbería. Respondé consultas sobre horarios, servicios y precios..."
+                      value={aiConfigForm.default_system_prompt}
+                      onChange={e => setAiConfigForm(p => ({ ...p, default_system_prompt: e.target.value }))}
+                    />
+                    <p className="text-[10px] text-muted-foreground">
+                      Este prompt se usará como base cuando un nodo de IA no tenga prompt propio configurado.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <Button onClick={handleSaveAiConfig} disabled={savingAiConfig} className="w-full bg-purple-600 hover:bg-purple-500 text-white">
+                {savingAiConfig ? 'Guardando...' : 'Guardar configuración de IA'}
+              </Button>
             </div>
           )}
 
