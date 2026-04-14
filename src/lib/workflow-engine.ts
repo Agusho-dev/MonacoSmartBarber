@@ -351,17 +351,18 @@ export async function evaluateIncomingMessage(params: {
       await executeLegacyAutoReply(supabase, orgId, conversationId, text, platform, params)
     }
 
-    // 6. Auto-tag global con IA: si está habilitado, clasificar la conversación en background
-    runGlobalAutoTag(supabase, orgId, conversationId).catch(err =>
-      console.error('[WorkflowEngine] Auto-tag error:', err)
-    )
-
-    // 7. Polling oportunista: avanzar delays largos vencidos.
+    // 6. Polling oportunista: avanzar delays largos vencidos.
     // Funciona como red de seguridad si el cron no está configurado.
     // No bloquea el flujo si falla.
     processExpiredDelays().catch(err => console.error('[WorkflowEngine] processExpiredDelays fallback:', err))
   } catch (err) {
     console.error('[WorkflowEngine] Error evaluando mensaje:', err)
+  } finally {
+    // Auto-tag global con IA: debe ejecutarse también cuando hay return temprano
+    // (workflow activo, keyword, message_received, etc.) — antes solo corría en el “happy path”.
+    runGlobalAutoTag(supabase, orgId, conversationId).catch(err =>
+      console.error('[WorkflowEngine] Auto-tag error:', err)
+    )
   }
 }
 
