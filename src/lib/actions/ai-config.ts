@@ -51,20 +51,57 @@ export async function saveOrgAiConfig(config: {
   if (!orgId) return { data: null, error: 'No autorizado' }
 
   const supabase = createAdminClient()
+
+  const { data: existingRaw } = await supabase
+    .from('organization_ai_config')
+    .select('*')
+    .eq('organization_id', orgId)
+    .maybeSingle()
+
+  const existing = existingRaw as OrgAiConfig | null
+
+  // Base: fila actual o valores por defecto (insert). No pisar campos que no vienen en `config`
+  // (p. ej. Tags llama solo con auto_tag_enabled — antes esto borraba las API keys).
+  const base = existing
+    ? {
+        openai_api_key: existing.openai_api_key,
+        anthropic_api_key: existing.anthropic_api_key,
+        openrouter_api_key: existing.openrouter_api_key,
+        default_model: existing.default_model,
+        default_system_prompt: existing.default_system_prompt,
+        default_temperature: existing.default_temperature,
+        default_max_tokens: existing.default_max_tokens,
+        auto_tag_enabled: existing.auto_tag_enabled ?? false,
+        auto_tag_model: existing.auto_tag_model ?? 'gpt-4o-mini',
+      }
+    : {
+        openai_api_key: null as string | null,
+        anthropic_api_key: null as string | null,
+        openrouter_api_key: null as string | null,
+        default_model: 'gpt-4o-mini',
+        default_system_prompt: '',
+        default_temperature: 0.7,
+        default_max_tokens: 500,
+        auto_tag_enabled: false,
+        auto_tag_model: 'gpt-4o-mini',
+      }
+
+  if (config.openai_api_key !== undefined) base.openai_api_key = config.openai_api_key || null
+  if (config.anthropic_api_key !== undefined) base.anthropic_api_key = config.anthropic_api_key || null
+  if (config.openrouter_api_key !== undefined) base.openrouter_api_key = config.openrouter_api_key || null
+  if (config.default_model !== undefined) base.default_model = config.default_model || 'gpt-4o-mini'
+  if (config.default_system_prompt !== undefined) base.default_system_prompt = config.default_system_prompt ?? ''
+  if (config.default_temperature !== undefined) base.default_temperature = config.default_temperature ?? 0.7
+  if (config.default_max_tokens !== undefined) base.default_max_tokens = config.default_max_tokens ?? 500
+  if (config.auto_tag_enabled !== undefined) base.auto_tag_enabled = config.auto_tag_enabled
+  if (config.auto_tag_model !== undefined) base.auto_tag_model = config.auto_tag_model || 'gpt-4o-mini'
+
   const { data, error } = await supabase
     .from('organization_ai_config')
     .upsert(
       {
         organization_id: orgId,
-        openai_api_key: config.openai_api_key || null,
-        anthropic_api_key: config.anthropic_api_key || null,
-        openrouter_api_key: config.openrouter_api_key || null,
-        default_model: config.default_model || 'gpt-4o-mini',
-        default_system_prompt: config.default_system_prompt || '',
-        default_temperature: config.default_temperature ?? 0.7,
-        default_max_tokens: config.default_max_tokens ?? 500,
-        auto_tag_enabled: config.auto_tag_enabled ?? false,
-        auto_tag_model: config.auto_tag_model || 'gpt-4o-mini',
+        ...base,
         is_active: true,
         updated_at: new Date().toISOString(),
       },
