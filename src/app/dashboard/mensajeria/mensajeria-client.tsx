@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { MessageSquare, Megaphone, Zap, MessageCircle, Settings, Bell } from 'lucide-react'
-import { MensajeriaProvider } from './components/shared/mensajeria-context'
+import { MensajeriaProvider, useMensajeria } from './components/shared/mensajeria-context'
 import { ConversationList } from './components/inbox/conversation-list'
 import { ChatView } from './components/inbox/chat-view'
 import { ClientProfile } from './components/inbox/client-profile'
@@ -128,6 +129,8 @@ export function MensajeriaClient(props: MensajeriaProps) {
           })}
         </div>
 
+        <DeepLinkHandler onSection={setSection} />
+
         {/* ═══ CONTENT ═══ */}
         {section === 'inbox' && (
           <>
@@ -156,4 +159,48 @@ export function MensajeriaClient(props: MensajeriaProps) {
       </div>
     </MensajeriaProvider>
   )
+}
+
+function DeepLinkHandler({ onSection }: { onSection: (s: CrmSection) => void }) {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const { handleStartConversation, activeConv, setConversations, tags } = useMensajeria()
+  const [pendingTag, setPendingTag] = useState<{ clientId: string; tagId: string } | null>(null)
+
+  useEffect(() => {
+    const clientId = searchParams.get('clientId')
+    if (!clientId) return
+    const tag = searchParams.get('tag')
+    onSection('inbox')
+    handleStartConversation(clientId)
+    if (tag) setPendingTag({ clientId, tagId: tag })
+    router.replace('/dashboard/mensajeria')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  // Cuando la conversacion objetivo queda activa, aplicamos la etiqueta pendiente.
+  useEffect(() => {
+    if (!pendingTag || !activeConv) return
+    if (activeConv.client_id !== pendingTag.clientId) return
+    const { tagId } = pendingTag
+    setPendingTag(null)
+    ;(async () => {
+      const { assignConversationTag } = await import('@/lib/actions/tags')
+      const res = await assignConversationTag(activeConv.id, tagId)
+      if (res.error) return
+      const tagObj = tags.find(t => t.id === tagId)
+      if (!tagObj) return
+      setConversations(prev => prev.map(c => {
+        if (c.id !== activeConv.id) return c
+        const already = c.tags?.some(t => t.tag_id === tagId)
+        if (already) return c
+        return {
+          ...c,
+          tags: [...(c.tags ?? []), { tag_id: tagId, tag: tagObj }],
+        }
+      }))
+    })()
+  }, [activeConv, pendingTag, setConversations])
+
+  return null
 }
