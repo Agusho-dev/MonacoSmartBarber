@@ -675,6 +675,7 @@ const TRIGGER_TYPE_OPTIONS = [
   { value: 'template_reply', label: 'Respuesta a template', icon: GitBranch, description: 'Se activa cuando un cliente responde a un template' },
   { value: 'post_service', label: 'Post-servicio', icon: Clock, description: 'Envía mensaje después de completar un servicio' },
   { value: 'days_after_visit', label: 'Seguimiento', icon: CalendarDays, description: 'Envía mensaje X días después de la última visita' },
+  { value: 'conversation_reopened', label: 'Conversación reabierta', icon: Inbox, description: 'Se activa cuando el cliente escribe tras X horas de inactividad' },
 ]
 
 function TriggerConfig({

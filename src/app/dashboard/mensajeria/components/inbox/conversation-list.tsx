@@ -77,18 +77,6 @@ export function ConversationList({
               <input className="w-full h-8 rounded-lg bg-card pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
                 placeholder="Buscar o iniciar chat" value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
-            {tags.length > 0 && (
-              <div className="flex gap-1 flex-wrap">
-                {tags.map(tag => (
-                  <button key={tag.id} onClick={() => setTagFilter(tagFilter === tag.id ? null : tag.id)}
-                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border ${tagFilter === tag.id ? 'text-white border-transparent' : 'text-muted-foreground border hover:border'}`}
-                    style={tagFilter === tag.id ? { backgroundColor: tag.color, borderColor: tag.color } : {}}>
-                    <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
-                    {tag.name}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
           <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-muted-foreground/20 scrollbar-track-transparent">

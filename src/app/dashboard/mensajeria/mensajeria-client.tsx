@@ -76,7 +76,11 @@ export function MensajeriaClient(props: MensajeriaProps) {
       appSettings={props.appSettings}
       branches={props.branches}
     >
-      <div className="flex h-full min-h-0 overflow-hidden bg-background">
+      <div className="flex flex-col h-full min-h-0 overflow-hidden bg-background">
+
+        <TopTagsBar />
+
+        <div className="flex flex-1 min-h-0 overflow-hidden">
 
         {/* ═══ NAV BAR — Iconos de sección ═══ */}
         <div className="hidden lg:flex flex-col items-center w-14 shrink-0 bg-background border-r border py-3 gap-1">
@@ -151,6 +155,8 @@ export function MensajeriaClient(props: MensajeriaProps) {
         {section === 'alerts' && <CrmAlertsPanel />}
         {section === 'quick-replies' && <QuickReplySection />}
 
+        </div>
+
         {/* ═══ Dialogs & Sheets ═══ */}
         <SettingsSheet open={showSettings} onOpenChange={setShowSettings} />
         <NewChatDialog open={showNewChat} onOpenChange={setShowNewChat} />
@@ -158,6 +164,34 @@ export function MensajeriaClient(props: MensajeriaProps) {
         <TemplatePicker />
       </div>
     </MensajeriaProvider>
+  )
+}
+
+function TopTagsBar() {
+  const { tags, tagFilter, setTagFilter } = useMensajeria()
+  if (tags.length === 0) return null
+  return (
+    <div className="border-b border bg-card px-3 py-2 overflow-x-auto scrollbar-thin scrollbar-thumb-muted-foreground/20 scrollbar-track-transparent">
+      <div className="flex items-center gap-1 whitespace-nowrap w-max">
+        <button
+          onClick={() => setTagFilter(null)}
+          className={`px-2.5 py-1 rounded-full text-[11px] font-medium shrink-0 transition-colors ${tagFilter === null ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+        >
+          Todas
+        </button>
+        {tags.map(tag => (
+          <button
+            key={tag.id}
+            onClick={() => setTagFilter(tagFilter === tag.id ? null : tag.id)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all border shrink-0 ${tagFilter === tag.id ? 'text-white border-transparent' : 'text-muted-foreground border hover:border-foreground/30'}`}
+            style={tagFilter === tag.id ? { backgroundColor: tag.color, borderColor: tag.color } : {}}
+          >
+            <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+            {tag.name}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 

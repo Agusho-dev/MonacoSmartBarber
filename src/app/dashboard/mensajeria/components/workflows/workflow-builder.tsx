@@ -60,6 +60,8 @@ const CHANNEL_OPTIONS = [
 ]
 
 const GRID_SIZE = 20
+const ZOOM_MIN = 0.15
+const ZOOM_MAX = 3
 
 function snapToGrid(val: number) {
   return Math.round(val / GRID_SIZE) * GRID_SIZE
@@ -98,6 +100,8 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
   const [showToolbar, setShowToolbar] = useState(false)
 
   const canvasRef = useRef<HTMLDivElement>(null)
+  /** Área toolbar + lienzo: zoom con rueda/pellizco aunque el cursor esté sobre la barra superior */
+  const zoomAreaRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
   // Refs que reflejan el estado para handlers nativos (wheel) y capture flows
@@ -195,24 +199,45 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
     setDraggingNodeId(null)
   }
 
-  // Zoom con scroll — zoom hacia el cursor. Listener nativo no-passive porque
-  // React adjunta onWheel como passive y preventDefault sería ignorado.
+  // Zoom: rueda del mouse o desplazamiento vertical del trackpad.
+  // Pellizcar en trackpad (macOS/Chrome) suele llegar como wheel + ctrlKey — mismo handler.
+  // Listener no-passive porque preventDefault evita scroll del navegador vistas/layout.
   useEffect(() => {
-    const el = canvasRef.current
-    if (!el) return
-    const handler = (e: WheelEvent) => {
+    const zoomHost = zoomAreaRef.current
+    const canvasEl = canvasRef.current
+    if (!zoomHost || !canvasEl) return
+
+    const wheelHandler = (e: WheelEvent) => {
+      // Pellizco horizontal puro → panear; el zoom lo hacemos con deltaY o ctrl+meta+wheel
+      const primaryZoomDelta =
+        e.ctrlKey || e.metaKey
+          ? (e.deltaY !== 0 ? e.deltaY : e.deltaX)
+          : e.deltaY
+      if (!e.ctrlKey && !e.metaKey && Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        e.preventDefault()
+        setPan(p => ({
+          x: p.x - (e.deltaMode === 1 ? e.deltaX * 16 : e.deltaMode === 2 ? e.deltaX * 100 : e.deltaX),
+          y: p.y,
+        }))
+        return
+      }
+
       e.preventDefault()
-      const rect = el.getBoundingClientRect()
-      const mx = e.clientX - rect.left
-      const my = e.clientY - rect.top
+      const rect = canvasEl.getBoundingClientRect()
+      const mx = Math.min(Math.max(0, e.clientX - rect.left), rect.width)
+      const my = Math.min(Math.max(0, e.clientY - rect.top), rect.height)
       const oldZoom = zoomRef.current
-      // Escala exponencial proporcional al deltaY → zoom continuo y suave.
-      // Factor 0.0012 da ~1% por tick típico de trackpad y es visualmente ameno.
-      // Normalizamos deltaMode (píxeles vs líneas vs páginas) para trackpads y ruedas.
-      const pixelDelta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 100 : e.deltaY
-      const clamped = Math.max(-50, Math.min(50, pixelDelta))
-      const newZoom = Math.max(0.25, Math.min(2, oldZoom * Math.exp(-clamped * 0.0018)))
-      if (newZoom === oldZoom) return
+      let pixelDelta =
+        e.deltaMode === 1
+          ? primaryZoomDelta * 16
+          : e.deltaMode === 2
+            ? primaryZoomDelta * 100
+            : primaryZoomDelta
+      // Pinch vía ctrl se nota más fuerte: un poco más de sensibilidad
+      if (e.ctrlKey || e.metaKey) pixelDelta *= 1.35
+      const clamped = Math.max(-55, Math.min(55, pixelDelta))
+      const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, oldZoom * Math.exp(-clamped * 0.0018)))
+      if (Math.abs(newZoom - oldZoom) < 0.0005) return
       const ratio = newZoom / oldZoom
       const p = panRef.current
       setZoom(newZoom)
@@ -221,9 +246,21 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
         y: my - (my - p.y) * ratio,
       })
     }
-    el.addEventListener('wheel', handler, { passive: false })
-    return () => el.removeEventListener('wheel', handler)
-  }, [])
+
+    zoomHost.addEventListener('wheel', wheelHandler, { passive: false })
+
+    // Safari/macOS: solo en el lienzo — preventDefault en la barra (zoomHost) bloqueaba
+    // clics en el ícono de configuración y otros controles.
+    const blockGesture = (ev: Event) => ev.preventDefault()
+    canvasEl.addEventListener('gesturestart', blockGesture)
+    canvasEl.addEventListener('gesturechange', blockGesture)
+
+    return () => {
+      zoomHost.removeEventListener('wheel', wheelHandler)
+      canvasEl.removeEventListener('gesturestart', blockGesture)
+      canvasEl.removeEventListener('gesturechange', blockGesture)
+    }
+  }, [loading, workflow?.id])
 
   // ─── Node drag ───────────────────────────────────────────────
 
@@ -493,13 +530,13 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
   const selectedNode = nodes.find(n => n.id === selectedNodeId)
 
   return (
-    <div className="flex flex-1 min-w-0 min-h-0 h-full overflow-hidden">
-      {/* ═══ Canvas area ═══ */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0">
-        {/* Top bar */}
-        <div className="flex items-center justify-between px-4 py-2 bg-card border-b border shrink-0 gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Button variant="ghost" size="sm" onClick={onBack} className="h-7 px-2">
+    <div className="flex flex-1 min-w-0 min-h-0 h-full w-full overflow-hidden">
+      {/* ═══ Canvas area (toolbar + lienzo) — ref para zoom con rueda / trackpad ═══ */}
+      <div ref={zoomAreaRef} className="flex flex-1 flex-col min-w-0 min-h-0">
+        {/* Top bar — z-index por encima del lienzo (transform/stacking) */}
+        <div className="relative z-20 flex shrink-0 items-center justify-between gap-2 border-b border bg-card px-4 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={onBack} className="h-7 shrink-0 px-2">
               <ArrowLeft className="size-4" />
             </Button>
             <div className="min-w-0">
@@ -512,14 +549,15 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
                 }}
               />
               {workflow.description && (
-                <p className="text-[10px] text-muted-foreground truncate">{workflow.description}</p>
+                <p className="truncate text-[10px] text-muted-foreground">{workflow.description}</p>
               )}
             </div>
             <Button
+              type="button"
               variant="ghost"
               size="sm"
               onClick={() => setShowSettingsDialog(true)}
-              className="h-7 px-2 text-muted-foreground hover:text-foreground shrink-0"
+              className="relative z-30 h-7 shrink-0 px-2 text-muted-foreground hover:text-foreground"
               title="Configuración del workflow"
             >
               <Settings2 className="size-4" />
@@ -528,11 +566,11 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
           <div className="flex items-center gap-2 shrink-0">
             {/* Zoom controls */}
             <div className="flex items-center gap-1 bg-muted rounded-lg px-1">
-              <button onClick={() => setZoom(z => Math.max(0.25, z - 0.15))} className="p-1 hover:text-foreground text-muted-foreground">
+              <button onClick={() => setZoom(z => Math.max(ZOOM_MIN, z - 0.15))} className="p-1 hover:text-foreground text-muted-foreground">
                 <ZoomOut className="size-3.5" />
               </button>
               <span className="text-[10px] text-muted-foreground w-10 text-center">{Math.round(zoom * 100)}%</span>
-              <button onClick={() => setZoom(z => Math.min(2, z + 0.15))} className="p-1 hover:text-foreground text-muted-foreground">
+              <button onClick={() => setZoom(z => Math.min(ZOOM_MAX, z + 0.15))} className="p-1 hover:text-foreground text-muted-foreground">
                 <ZoomIn className="size-3.5" />
               </button>
               <button onClick={fitView} className="p-1 hover:text-foreground text-muted-foreground">
@@ -549,7 +587,7 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
         {/* Canvas */}
         <div
           ref={canvasRef}
-          className={`flex-1 min-h-0 overflow-hidden relative ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+          className={`relative z-0 flex-1 min-h-0 overflow-hidden ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
           style={{
             backgroundColor: '#0a0a12',
             backgroundImage: 'radial-gradient(circle, rgba(148, 163, 184, 0.22) 1px, transparent 1px)',
@@ -1300,9 +1338,13 @@ function EditableName({ value, onSave }: { value: string; onSave: (v: string) =>
 
   if (!editing) {
     return (
-      <button onClick={() => setEditing(true)} className="group flex items-center gap-1.5 min-w-0">
-        <h2 className="text-sm font-semibold text-foreground truncate">{value}</h2>
-        <Pencil className="size-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="group flex max-w-full items-center gap-1.5 text-left min-w-0 w-max"
+      >
+        <h2 className="truncate text-sm font-semibold text-foreground">{value}</h2>
+        <Pencil className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
       </button>
     )
   }

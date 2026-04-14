@@ -192,17 +192,19 @@ export function WorkflowList() {
     ? workflows.filter(wf => !wf.branch_id || wf.branch_id === branchFilter)
     : workflows
 
-  // Si hay un workflow abierto en el builder, mostrar el builder
+  // Editor a pantalla completa: el lienzo toma prioridad (encima de la barra de tags,
+  // rail CRM y lista lateral de mensajería).
   if (editingWorkflowId) {
     return (
-      <WorkflowBuilder
-        workflowId={editingWorkflowId}
-        onBack={() => {
-          setEditingWorkflowId(null)
-          // Refresh workflows
-          getWorkflows().then(r => { if (r.data) setWorkflows(r.data) })
-        }}
-      />
+      <div className="fixed inset-0 z-[100] flex flex-col bg-background max-lg:pb-14">
+        <WorkflowBuilder
+          workflowId={editingWorkflowId}
+          onBack={() => {
+            setEditingWorkflowId(null)
+            getWorkflows().then(r => { if (r.data) setWorkflows(r.data) })
+          }}
+        />
+      </div>
     )
   }
 
