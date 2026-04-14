@@ -18,6 +18,17 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    // Housekeeping previo: cerrar conversaciones inactivas y expirar workflows colgados
+    try {
+      const [{ data: closed }, { data: expired }] = await Promise.all([
+        supabase.rpc('auto_close_inactive_conversations'),
+        supabase.rpc('expire_stale_workflow_executions'),
+      ])
+      console.log('[housekeeping]', { closed, expired })
+    } catch (hkErr) {
+      console.error('[housekeeping] error:', hkErr)
+    }
+
     const waApiKey = Deno.env.get('WA_API_KEY')
 
     const { data: pendingMessages, error } = await supabase

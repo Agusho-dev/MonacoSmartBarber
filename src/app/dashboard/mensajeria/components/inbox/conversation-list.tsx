@@ -134,6 +134,16 @@ export function ConversationList({
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <p className="truncate text-sm font-medium text-foreground">{name}</p>
+                            {conv.status === 'inactive' && (
+                              <span className="shrink-0 text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                Inactiva
+                              </span>
+                            )}
+                            {conv.status === 'closed' && (
+                              <span className="shrink-0 text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground line-through">
+                                Cerrada
+                              </span>
+                            )}
                           </div>
                           {conv.last_message_at && (
                             <span className={`shrink-0 text-[11px] ${conv.unread_count > 0 ? 'text-green-400' : 'text-muted-foreground'}`}>

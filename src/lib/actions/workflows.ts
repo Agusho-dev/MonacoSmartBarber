@@ -150,6 +150,12 @@ export async function updateWorkflow(id: string, input: {
   priority?: number
   is_active?: boolean
   branch_id?: string | null
+  category?: string | null
+  overlap_policy?: string
+  interrupts_categories?: string[]
+  wait_reply_timeout_minutes?: number
+  fallback_template_name?: string | null
+  requires_meta_window?: boolean
 }) {
   const result = await requireOrgId()
   if ('error' in result) return { error: result.error }
@@ -165,6 +171,12 @@ export async function updateWorkflow(id: string, input: {
   if (input.priority !== undefined) update.priority = input.priority
   if (input.is_active !== undefined) update.is_active = input.is_active
   if (input.branch_id !== undefined) update.branch_id = input.branch_id
+  if (input.category !== undefined) update.category = input.category
+  if (input.overlap_policy !== undefined) update.overlap_policy = input.overlap_policy
+  if (input.interrupts_categories !== undefined) update.interrupts_categories = input.interrupts_categories
+  if (input.wait_reply_timeout_minutes !== undefined) update.wait_reply_timeout_minutes = input.wait_reply_timeout_minutes
+  if (input.fallback_template_name !== undefined) update.fallback_template_name = input.fallback_template_name
+  if (input.requires_meta_window !== undefined) update.requires_meta_window = input.requires_meta_window
 
   const { error } = await supabase
     .from('automation_workflows')

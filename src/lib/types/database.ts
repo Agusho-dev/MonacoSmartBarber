@@ -17,13 +17,13 @@ export type MessagePlatform = 'whatsapp' | 'facebook' | 'instagram'
 export type MessageDirection = 'inbound' | 'outbound'
 export type MessageContentType = 'text' | 'image' | 'video' | 'audio' | 'document' | 'template' | 'location' | 'interactive'
 export type MessageStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'failed'
-export type ConversationStatus = 'open' | 'closed' | 'archived'
+export type ConversationStatus = 'open' | 'inactive' | 'closed' | 'archived'
 export type TemplateCategory = 'marketing' | 'utility' | 'authentication'
 export type TemplateStatus = 'pending' | 'approved' | 'rejected'
 export type ScheduledMessageStatus = 'pending' | 'sent' | 'failed' | 'cancelled'
 
 // Workflow automation types
-export type WorkflowTriggerType = 'keyword' | 'template_reply' | 'button_response' | 'post_service' | 'days_after_visit' | 'message_received'
+export type WorkflowTriggerType = 'keyword' | 'template_reply' | 'button_response' | 'post_service' | 'days_after_visit' | 'message_received' | 'conversation_reopened'
 export type WorkflowNodeType = 'trigger' | 'send_message' | 'send_media' | 'send_buttons' | 'send_list' | 'send_template' | 'add_tag' | 'remove_tag' | 'condition' | 'wait_reply' | 'crm_alert' | 'delay' | 'ai_response' | 'handoff_human' | 'http_request' | 'loop' | 'ai_auto_tag'
 export type WorkflowExecutionStatus = 'active' | 'waiting_reply' | 'completed' | 'cancelled' | 'error'
 export type CrmAlertType = 'info' | 'warning' | 'urgent'
@@ -645,6 +645,11 @@ export interface Conversation {
   platform_user_name: string | null
   status: ConversationStatus
   last_message_at: string | null
+  last_inbound_at: string | null
+  last_outbound_at: string | null
+  closed_at: string | null
+  reopened_at: string | null
+  auto_close_after_hours: number
   unread_count: number
   can_reply_until: string | null
   created_at: string
@@ -716,6 +721,12 @@ export interface AutomationWorkflow {
   trigger_type: WorkflowTriggerType
   trigger_config: Record<string, unknown>
   priority: number
+  category: string | null
+  overlap_policy: 'skip_if_active' | 'queue' | 'replace' | 'parallel'
+  interrupts_categories: string[]
+  wait_reply_timeout_minutes: number
+  fallback_template_name: string | null
+  requires_meta_window: boolean
   created_by: string | null
   created_at: string
   updated_at: string

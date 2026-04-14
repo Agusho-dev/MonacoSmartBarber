@@ -121,6 +121,21 @@ async function getConversationBranchId(
   return branchId ?? null
 }
 
+// Devuelve true si la conversación está fuera de la ventana Meta de 24h
+// (can_reply_until ya venció). En ese caso sólo se pueden enviar templates HSM.
+async function isConversationOutOfMetaWindow(
+  supabase: SupabaseClient,
+  conversationId: string
+): Promise<boolean> {
+  const { data } = await supabase
+    .from('conversations')
+    .select('can_reply_until')
+    .eq('id', conversationId)
+    .maybeSingle()
+  if (!data?.can_reply_until) return false // sin datos: no bloqueamos
+  return new Date(data.can_reply_until).getTime() < Date.now()
+}
+
 // Filtra workflows por branch: incluye los de esa branch + los generales (sin branch).
 function matchesBranch(wf: { branch_id?: string | null }, branchId: string | null): boolean {
   if (!wf.branch_id) return true // workflow general → aplica a todas
@@ -319,6 +334,25 @@ export async function evaluateIncomingMessage(params: {
       }
     }
 
+    // 3b. Trigger conversation_reopened: cliente vuelve a escribir tras inactividad
+    {
+      const { data: reopened } = await supabase
+        .rpc('match_conversation_reopened_workflows', {
+          p_org_id: orgId,
+          p_conversation_id: conversationId,
+          p_platform: platform,
+        })
+      const reopenedWf = Array.isArray(reopened) ? reopened[0] : reopened
+      if (reopenedWf && matchesBranch(reopenedWf, branchId)) {
+        await startWorkflowExecution(supabase, reopenedWf.id, conversationId, 'conversation_reopened', params, {
+          client_name: clientInfo.fullName,
+          client_first_name: clientInfo.firstName,
+          last_text_reply: text,
+        })
+        return
+      }
+    }
+
     // 4. Trigger genérico: message_received (cualquier mensaje, menor prioridad)
     {
       const { data: anyMsgWorkflows } = await supabase
@@ -411,12 +445,47 @@ async function startWorkflowExecution(
   params: Parameters<typeof evaluateIncomingMessage>[0],
   initialContext?: ExecutionContext
 ): Promise<void> {
-  // Cancelar ejecuciones activas previas de esta conversación
-  await supabase
-    .from('workflow_executions')
-    .update({ status: 'cancelled', completed_at: new Date().toISOString() })
-    .eq('conversation_id', conversationId)
-    .in('status', ['active', 'waiting_reply'])
+  // Respetar overlap_policy del workflow entrante
+  const { data: wfMeta } = await supabase
+    .from('automation_workflows')
+    .select('overlap_policy, interrupts_categories')
+    .eq('id', workflowId)
+    .maybeSingle()
+  const policy = (wfMeta?.overlap_policy as string) ?? 'skip_if_active'
+  const interrupts = (wfMeta?.interrupts_categories as string[] | null) ?? []
+
+  if (policy !== 'parallel') {
+    const { data: actives } = await supabase
+      .from('workflow_executions')
+      .select('id, workflow:automation_workflows(category)')
+      .eq('conversation_id', conversationId)
+      .in('status', ['active', 'waiting_reply'])
+
+    const activeList = actives ?? []
+    if (activeList.length > 0) {
+      if (policy === 'skip_if_active' || policy === 'queue') {
+        // skip y queue: no arrancar si hay activa (queue se implementará con cron aparte)
+        return
+      }
+      if (policy === 'replace') {
+        // Cancelar sólo las que pertenezcan a interrupts_categories
+        const toCancel = activeList
+          .filter((e) => {
+            const raw = e.workflow as { category?: string } | { category?: string }[] | null
+            const cat = Array.isArray(raw) ? raw[0]?.category : raw?.category
+            return cat && interrupts.includes(cat)
+          })
+          .map((e) => e.id)
+        if (toCancel.length !== activeList.length) return // hay activas no interrumpibles
+        if (toCancel.length > 0) {
+          await supabase
+            .from('workflow_executions')
+            .update({ status: 'cancelled', completed_at: new Date().toISOString() })
+            .in('id', toCancel)
+        }
+      }
+    }
+  }
 
   // Buscar nodo de entrada
   const { data: entryNode } = await supabase
@@ -594,6 +663,37 @@ async function executeNode(
   const config = node.config
 
   try {
+    // Validar ventana Meta de 24h para nodos que envían contenido libre.
+    // Si está fuera de ventana y el workflow tiene fallback_template_name, se degrada.
+    const freeFormNodeTypes = new Set(['send_message', 'send_media', 'send_buttons', 'send_list'])
+    if (freeFormNodeTypes.has(node.node_type) && params.platform === 'whatsapp') {
+      const outOfWindow = await isConversationOutOfMetaWindow(supabase, params.conversationId)
+      if (outOfWindow) {
+        const { data: wf } = await supabase
+          .from('automation_workflows')
+          .select('fallback_template_name, requires_meta_window')
+          .eq('id', workflowId)
+          .maybeSingle()
+        if (wf?.requires_meta_window !== false) {
+          if (wf?.fallback_template_name) {
+            await sendWhatsAppTemplate(supabase, params, wf.fallback_template_name, 'es_AR')
+            await logExecution(supabase, executionId, node.id, node.node_type, 'success', {
+              warning: 'out_of_meta_window_fallback_template',
+              template: wf.fallback_template_name,
+            })
+            await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+            return
+          }
+          await logExecution(supabase, executionId, node.id, node.node_type, 'skipped', {}, 'Fuera de ventana Meta 24h — no se envía texto libre')
+          await supabase
+            .from('workflow_executions')
+            .update({ status: 'error', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+            .eq('id', executionId)
+          return
+        }
+      }
+    }
+
     switch (node.node_type) {
       case 'send_message': {
         const text = resolveVariables(config.text as string || '', context, params)
@@ -637,7 +737,7 @@ async function executeNode(
         // Después de enviar botones, poner en espera
         await supabase
           .from('workflow_executions')
-          .update({ status: 'waiting_reply', current_node_id: node.id, updated_at: new Date().toISOString() })
+          .update({ status: 'waiting_reply', current_node_id: node.id, waiting_since: new Date().toISOString(), updated_at: new Date().toISOString() })
           .eq('id', executionId)
         break
       }
@@ -651,7 +751,7 @@ async function executeNode(
         // Después de enviar lista, poner en espera
         await supabase
           .from('workflow_executions')
-          .update({ status: 'waiting_reply', current_node_id: node.id, updated_at: new Date().toISOString() })
+          .update({ status: 'waiting_reply', current_node_id: node.id, waiting_since: new Date().toISOString(), updated_at: new Date().toISOString() })
           .eq('id', executionId)
         break
       }
@@ -669,7 +769,7 @@ async function executeNode(
         if (shouldWait) {
           await supabase
             .from('workflow_executions')
-            .update({ status: 'waiting_reply', current_node_id: node.id, updated_at: new Date().toISOString() })
+            .update({ status: 'waiting_reply', current_node_id: node.id, waiting_since: new Date().toISOString(), updated_at: new Date().toISOString() })
             .eq('id', executionId)
         } else {
           await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
@@ -717,7 +817,7 @@ async function executeNode(
         // Poner en espera
         await supabase
           .from('workflow_executions')
-          .update({ status: 'waiting_reply', current_node_id: node.id, updated_at: new Date().toISOString() })
+          .update({ status: 'waiting_reply', current_node_id: node.id, waiting_since: new Date().toISOString(), updated_at: new Date().toISOString() })
           .eq('id', executionId)
         await logExecution(supabase, executionId, node.id, node.node_type, 'success', {})
         break

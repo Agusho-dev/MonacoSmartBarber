@@ -50,6 +50,7 @@ const TRIGGER_TYPES = [
   { value: 'template_reply', label: 'Respuesta a template', icon: GitBranch, description: 'Se activa cuando un cliente responde a un template' },
   { value: 'post_service', label: 'Post-servicio', icon: Clock, description: 'Envía un mensaje después de completar un servicio' },
   { value: 'days_after_visit', label: 'Seguimiento', icon: CalendarDays, description: 'Envía un mensaje X días después de la última visita' },
+  { value: 'conversation_reopened', label: 'Conversación reabierta', icon: Inbox, description: 'Se activa cuando el cliente escribe después de X horas de inactividad' },
 ]
 
 const CHANNEL_OPTIONS = [
@@ -901,6 +902,30 @@ function WorkflowSettingsDialog({
   const [delayDays, setDelayDays] = useState(
     (workflow.trigger_config?.delay_days as number) ?? 7
   )
+  const [reopenMode, setReopenMode] = useState(
+    (workflow.trigger_config?.reopen_mode as string) ?? 'inactivity'
+  )
+  const [minHoursClient, setMinHoursClient] = useState(
+    (workflow.trigger_config?.min_hours_since_client_msg as number) ?? 12
+  )
+  const [excludeFirstContact, setExcludeFirstContact] = useState<boolean>(
+    (workflow.trigger_config?.exclude_first_ever_contact as boolean) ?? true
+  )
+  const [category, setCategory] = useState<string>(
+    (workflow as { category?: string | null }).category ?? ''
+  )
+  const [overlapPolicy, setOverlapPolicy] = useState<string>(
+    (workflow as { overlap_policy?: string }).overlap_policy ?? 'skip_if_active'
+  )
+  const [waitReplyTimeout, setWaitReplyTimeout] = useState<number>(
+    (workflow as { wait_reply_timeout_minutes?: number }).wait_reply_timeout_minutes ?? 1440
+  )
+  const [fallbackTemplate, setFallbackTemplate] = useState<string>(
+    (workflow as { fallback_template_name?: string | null }).fallback_template_name ?? ''
+  )
+  const [requiresMetaWindow, setRequiresMetaWindow] = useState<boolean>(
+    (workflow as { requires_meta_window?: boolean }).requires_meta_window ?? true
+  )
   const [isSaving, startSaving] = useTransition()
 
   // Sincronizar estado cuando se abre con un workflow diferente
@@ -927,6 +952,13 @@ function WorkflowSettingsDialog({
     if (triggerType === 'template_reply') return { template_name: templateName }
     if (triggerType === 'post_service') return { delay_minutes: delayMinutes }
     if (triggerType === 'days_after_visit') return { delay_days: delayDays }
+    if (triggerType === 'conversation_reopened') {
+      return {
+        reopen_mode: reopenMode,
+        min_hours_since_client_msg: minHoursClient,
+        exclude_first_ever_contact: excludeFirstContact,
+      }
+    }
     return {}
   }
 
@@ -950,7 +982,12 @@ function WorkflowSettingsDialog({
         branch_id: branchId || null,
         trigger_type: triggerType,
         trigger_config: triggerConfig,
-      })
+        category: category.trim() || null,
+        overlap_policy: overlapPolicy,
+        wait_reply_timeout_minutes: waitReplyTimeout,
+        fallback_template_name: fallbackTemplate.trim() || null,
+        requires_meta_window: requiresMetaWindow,
+      } as Partial<WorkflowWithGraph>)
       if (res.error) { toast.error(res.error); return }
       onUpdate({
         name: name.trim(),
@@ -1113,6 +1150,85 @@ function WorkflowSettingsDialog({
               </div>
             </div>
           )}
+
+          {triggerType === 'conversation_reopened' && (
+            <div className="space-y-3 border rounded-lg p-3 bg-muted/30">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Modo de reapertura</Label>
+                <select value={reopenMode} onChange={e => setReopenMode(e.target.value)}
+                  className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border">
+                  <option value="inactivity">Por inactividad (horas sin contacto)</option>
+                  <option value="status_closed">Solo si estaba inactiva/cerrada</option>
+                  <option value="either">Cualquiera de las dos</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Horas mínimas desde el último mensaje del cliente</Label>
+                <div className="flex items-center gap-2">
+                  <Input type="number" min={1} max={720} className="bg-muted border text-foreground w-24"
+                    value={minHoursClient} onChange={e => setMinHoursClient(parseInt(e.target.value) || 12)} />
+                  <span className="text-xs text-muted-foreground">horas</span>
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-foreground">
+                <input type="checkbox" checked={excludeFirstContact}
+                  onChange={e => setExcludeFirstContact(e.target.checked)} />
+                No disparar en el primer contacto del cliente
+              </label>
+            </div>
+          )}
+
+          {/* Avanzado: categoría, overlap, ventana Meta */}
+          <div className="space-y-3 border rounded-lg p-3 bg-muted/30">
+            <p className="text-xs font-medium text-foreground">Convivencia y ventana Meta</p>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Categoría (opcional)</Label>
+              <Input className="bg-muted border text-foreground" placeholder="review, reengagement, support..."
+                value={category} onChange={e => setCategory(e.target.value)} />
+              <p className="text-[10px] text-muted-foreground">Se usa para reglas de solapamiento entre workflows.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Política si hay otro workflow activo</Label>
+              <select value={overlapPolicy} onChange={e => setOverlapPolicy(e.target.value)}
+                className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border">
+                <option value="skip_if_active">No disparar si hay activo (recomendado)</option>
+                <option value="queue">Encolar para después</option>
+                <option value="replace">Reemplazar el activo</option>
+                <option value="parallel">Correr en paralelo</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Timeout de espera de respuesta</Label>
+              <div className="flex items-center gap-2">
+                <Input type="number" min={5} max={10080} className="bg-muted border text-foreground w-24"
+                  value={waitReplyTimeout} onChange={e => setWaitReplyTimeout(parseInt(e.target.value) || 1440)} />
+                <span className="text-xs text-muted-foreground">minutos (default 1440 = 24h Meta)</span>
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-foreground">
+              <input type="checkbox" checked={requiresMetaWindow}
+                onChange={e => setRequiresMetaWindow(e.target.checked)} />
+              Respetar ventana Meta de 24h (no enviar texto libre fuera de ella)
+            </label>
+            {requiresMetaWindow && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Template HSM de fallback (fuera de ventana)</Label>
+                {waTemplates.length > 0 ? (
+                  <select value={fallbackTemplate} onChange={e => setFallbackTemplate(e.target.value)}
+                    className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border">
+                    <option value="">Sin fallback (omitir envío)</option>
+                    {waTemplates.filter(t => t.status === 'APPROVED').map(tpl => (
+                      <option key={tpl.name} value={tpl.name}>{tpl.name} ({tpl.language})</option>
+                    ))}
+                  </select>
+                ) : (
+                  <Input className="bg-muted border text-foreground"
+                    placeholder="Nombre del template aprobado"
+                    value={fallbackTemplate} onChange={e => setFallbackTemplate(e.target.value)} />
+                )}
+              </div>
+            )}
+          </div>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}
