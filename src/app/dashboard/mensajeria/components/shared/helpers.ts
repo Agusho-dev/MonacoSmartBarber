@@ -25,6 +25,31 @@ export const TAG_COLORS = [
   '#06B6D4', '#3B82F6', '#8B5CF6', '#EC4899', '#6B7280',
 ]
 
+/**
+ * Devuelve siempre un preview del último mensaje, incluso cuando el content es null
+ * (ej: imágenes sin caption, audios, templates). Nunca devuelve string vacío.
+ */
+export function formatLastMessagePreview(
+  msg: { content: string | null; direction: string; content_type: string } | undefined | null,
+  fallback?: string | null,
+): string {
+  if (!msg) return fallback?.trim() || 'Sin mensajes aún'
+
+  const prefix = msg.direction === 'outbound' ? 'Vos: ' : ''
+  const content = (msg.content ?? '').trim()
+
+  switch (msg.content_type) {
+    case 'image':    return `${prefix}📷 Imagen${content ? ` · ${content}` : ''}`
+    case 'video':    return `${prefix}🎬 Video${content ? ` · ${content}` : ''}`
+    case 'audio':    return `${prefix}🎤 Audio`
+    case 'document': return `${prefix}📎 Documento${content ? ` · ${content}` : ''}`
+    case 'template': return `${prefix}📋 Template${content ? ` · ${content}` : ''}`
+    case 'sticker':  return `${prefix}💠 Sticker`
+    case 'location': return `${prefix}📍 Ubicación`
+    default:         return content ? `${prefix}${content}` : `${prefix}(mensaje sin contenido)`
+  }
+}
+
 export function formatTime(date: string) {
   return new Date(date).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
 }

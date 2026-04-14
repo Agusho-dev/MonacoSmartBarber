@@ -2,8 +2,10 @@
 
 import { useState, useTransition } from 'react'
 import {
-  Copy, Eye, EyeOff, Wifi, WifiOff, ExternalLink, Instagram, Facebook, Plus, X, Bot,
+  Copy, Eye, EyeOff, Wifi, WifiOff, ExternalLink, Instagram, Facebook, Plus, X, Bot, ScrollText,
 } from 'lucide-react'
+import { ModelPicker } from '../shared/model-picker'
+import { AiLogsPanel } from './ai-logs-panel'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
@@ -17,7 +19,7 @@ import { WhatsAppIcon } from '../shared/icons'
 import { TAG_COLORS } from '../shared/helpers'
 import { useMensajeria } from '../shared/mensajeria-context'
 
-type SettingsTab = 'whatsapp' | 'instagram' | 'facebook' | 'ai' | 'tags'
+type SettingsTab = 'whatsapp' | 'instagram' | 'facebook' | 'ai' | 'logs' | 'tags'
 
 export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const {
@@ -125,16 +127,17 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
       <SheetContent side="right" className="w-full max-w-md flex flex-col p-0">
         <div className="px-6 py-4 border-b border shrink-0">
           <p className="font-semibold text-foreground mb-3">Configuración</p>
-          <div className="grid grid-cols-5 gap-1 bg-card p-1 rounded-lg">
-            {(['whatsapp', 'instagram', 'facebook', 'ai', 'tags'] as SettingsTab[]).map(tab => (
+          <div className="grid grid-cols-6 gap-1 bg-card p-1 rounded-lg">
+            {(['whatsapp', 'instagram', 'facebook', 'ai', 'logs', 'tags'] as SettingsTab[]).map(tab => (
               <button key={tab} onClick={() => setSettingsTab(tab)}
                 className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-md text-[10px] font-medium transition-colors ${settingsTab === tab ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
                 {tab === 'whatsapp' && <WhatsAppIcon className="size-3.5 text-green-400" />}
                 {tab === 'instagram' && <Instagram className="size-3.5 text-pink-400" />}
                 {tab === 'facebook' && <Facebook className="size-3.5 text-blue-400" />}
                 {tab === 'ai' && <Bot className="size-3.5 text-purple-400" />}
+                {tab === 'logs' && <ScrollText className="size-3.5 text-amber-400" />}
                 {tab === 'tags' && <span className="text-base leading-none">🏷️</span>}
-                <span>{tab === 'whatsapp' ? 'WA' : tab === 'instagram' ? 'IG' : tab === 'facebook' ? 'FB' : tab === 'ai' ? 'IA' : 'Tags'}</span>
+                <span>{tab === 'whatsapp' ? 'WA' : tab === 'instagram' ? 'IG' : tab === 'facebook' ? 'FB' : tab === 'ai' ? 'IA' : tab === 'logs' ? 'Logs' : 'Tags'}</span>
               </button>
             ))}
           </div>
@@ -493,30 +496,13 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
                 <div className="pl-7 space-y-3">
                   <div className="space-y-1.5">
                     <Label className="text-[11px] text-muted-foreground">Modelo por defecto</Label>
-                    <select
+                    <ModelPicker
                       value={aiConfigForm.default_model}
-                      onChange={e => setAiConfigForm(p => ({ ...p, default_model: e.target.value }))}
-                      className="w-full rounded-lg bg-card px-3 py-2 text-xs text-foreground outline-none border"
-                    >
-                      <optgroup label="OpenAI">
-                        <option value="gpt-4o-mini">GPT-4o Mini</option>
-                        <option value="gpt-4o">GPT-4o</option>
-                        <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
-                        <option value="gpt-4.1">GPT-4.1</option>
-                      </optgroup>
-                      <optgroup label="Anthropic">
-                        <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
-                        <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-                      </optgroup>
-                      <optgroup label="OpenRouter">
-                        <option value="openrouter/auto">OpenRouter Auto (mejor modelo)</option>
-                        <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B Instruct (gratis)</option>
-                        <option value="meta-llama/llama-4-maverick:free">Llama 4 Maverick (gratis)</option>
-                        <option value="deepseek/deepseek-chat-v3-0324:free">DeepSeek V3 (gratis)</option>
-                        <option value="google/gemini-2.5-pro-exp-03-25:free">Gemini 2.5 Pro (gratis)</option>
-                        <option value="mistralai/mistral-small-3.1-24b-instruct:free">Mistral Small 3.1 (gratis)</option>
-                      </optgroup>
-                    </select>
+                      onChange={id => setAiConfigForm(p => ({ ...p, default_model: id }))}
+                    />
+                    <p className="text-[10px] text-muted-foreground">
+                      Buscá por nombre o pegá un model ID de OpenRouter (ej: <code className="text-cyan-400">google/gemma-2-9b-it:free</code>).
+                    </p>
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-[11px] text-muted-foreground">System prompt por defecto</Label>
@@ -539,6 +525,9 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
               </Button>
             </div>
           )}
+
+          {/* Logs tab */}
+          {settingsTab === 'logs' && <AiLogsPanel />}
 
           {/* Tags tab */}
           {settingsTab === 'tags' && (

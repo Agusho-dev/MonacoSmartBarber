@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Plus, Trash2, MessageSquare, Tag, Bell, Image, LayoutGrid, GitBranch, Clock, Send, List as ListIcon, User, MessageCircleReply, Hash, Bot, UserCheck, Globe, Inbox, CalendarDays, RefreshCw } from 'lucide-react'
+import { X, Plus, Trash2, MessageSquare, Tag, Bell, Image, LayoutGrid, GitBranch, Clock, Send, List as ListIcon, User, MessageCircleReply, Hash, Bot, UserCheck, Globe, Inbox, CalendarDays, RefreshCw, ChevronDown, Sliders, Brain, AlertTriangle } from 'lucide-react'
+import { ModelPicker } from '../shared/model-picker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -832,59 +833,38 @@ function TriggerConfig({
 function AiResponseConfig({ config, onChange }: { config: Record<string, unknown>; onChange: (key: string, value: unknown) => void }) {
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const promptValue = (config.system_prompt as string) || ''
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showFallback, setShowFallback] = useState(!!(config.fallback_message as string))
+
+  const temperature = (config.temperature as number) ?? 0.7
+  const maxTokens = (config.max_tokens as number) ?? 500
+  const memory = (config.memory_messages as number) ?? 10
+  const modelValue = (config.model as string) || 'gpt-4o-mini'
+
+  // Heat label según temperatura — feedback visual
+  const tempLabel = temperature < 0.4 ? 'Preciso' : temperature < 0.9 ? 'Balanceado' : temperature < 1.4 ? 'Creativo' : 'Muy creativo'
+  const tempColor = temperature < 0.4 ? 'text-blue-400' : temperature < 0.9 ? 'text-emerald-400' : temperature < 1.4 ? 'text-amber-400' : 'text-red-400'
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {/* Modelo — lo más importante, arriba y grande */}
       <div className="space-y-1.5">
-        <Label className="text-xs text-muted-foreground">Modelo de IA</Label>
-        <select
-          value={(config.model as string) || 'gpt-4o-mini'}
-          onChange={e => onChange('model', e.target.value)}
-          className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border"
-        >
-          <optgroup label="OpenAI">
-            <option value="gpt-4o-mini">GPT-4o Mini</option>
-            <option value="gpt-4o">GPT-4o</option>
-            <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
-            <option value="gpt-4.1">GPT-4.1</option>
-          </optgroup>
-          <optgroup label="Anthropic">
-            <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
-            <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-          </optgroup>
-          <optgroup label="OpenRouter">
-            <option value="openrouter/auto">OpenRouter Auto (mejor modelo)</option>
-            <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B Instruct (gratis)</option>
-            <option value="meta-llama/llama-4-maverick:free">Llama 4 Maverick (gratis)</option>
-            <option value="deepseek/deepseek-chat-v3-0324:free">DeepSeek V3 (gratis)</option>
-            <option value="google/gemini-2.5-pro-exp-03-25:free">Gemini 2.5 Pro (gratis)</option>
-            <option value="mistralai/mistral-small-3.1-24b-instruct:free">Mistral Small 3.1 (gratis)</option>
-            <option value="__custom_openrouter__">Otro modelo de OpenRouter...</option>
-          </optgroup>
-        </select>
-        {(config.model as string) === '__custom_openrouter__' || (
-          typeof config.model === 'string' && config.model.includes('/') &&
-          !['openrouter/auto', 'meta-llama/llama-3.3-70b-instruct:free', 'meta-llama/llama-4-maverick:free', 'deepseek/deepseek-chat-v3-0324:free', 'google/gemini-2.5-pro-exp-03-25:free', 'mistralai/mistral-small-3.1-24b-instruct:free'].includes(config.model)
-        ) ? (
-          <div className="mt-1.5">
-            <Input
-              className="bg-muted border text-foreground text-xs font-mono"
-              placeholder="org/model-name (ej: meta-llama/llama-3.3-70b-instruct:free)"
-              value={(config.model as string) === '__custom_openrouter__' ? '' : (config.model as string) || ''}
-              onChange={e => onChange('model', e.target.value)}
-            />
-            <p className="text-[10px] text-muted-foreground mt-1">
-              Ingresá el ID del modelo de openrouter.ai (ej: meta-llama/llama-3.3-70b-instruct:free)
-            </p>
-          </div>
-        ) : null}
+        <div className="flex items-center gap-1.5">
+          <Brain className="size-3.5 text-purple-400" />
+          <Label className="text-xs font-medium text-foreground">Modelo de IA</Label>
+        </div>
+        <ModelPicker value={modelValue} onChange={id => onChange('model', id)} />
       </div>
 
+      {/* Prompt */}
       <div className="space-y-1.5">
-        <Label className="text-xs text-muted-foreground">Prompt del sistema</Label>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs text-muted-foreground">Prompt del sistema</Label>
+          <span className="text-[10px] text-muted-foreground tabular-nums">{promptValue.length} chars</span>
+        </div>
         <Textarea
           ref={promptRef}
-          className="bg-muted border text-foreground resize-none text-sm"
+          className="bg-muted border text-foreground resize-none text-sm transition-colors focus:border-purple-500/50"
           rows={5}
           placeholder="Sos un asistente de la barbería Monaco. Respondé consultas sobre horarios, servicios y precios..."
           value={promptValue}
@@ -896,62 +876,107 @@ function AiResponseConfig({ config, onChange }: { config: Record<string, unknown
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Temperatura</Label>
-          <Input
-            type="number"
-            min={0}
-            max={2}
-            step={0.1}
-            className="bg-muted border text-foreground text-sm"
-            value={(config.temperature as number) ?? 0.7}
-            onChange={e => onChange('temperature', parseFloat(e.target.value) || 0.7)}
-          />
+      {/* Advanced — collapsible con animación */}
+      <div className="rounded-lg border border overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setShowAdvanced(s => !s)}
+          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/40 transition-colors">
+          <Sliders className="size-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium text-foreground">Ajustes avanzados</span>
+          <div className="ml-auto flex items-center gap-2 text-[10px] text-muted-foreground">
+            <span className={tempColor}>{tempLabel}</span>
+            <span>· {maxTokens} tok</span>
+            <span>· mem {memory}</span>
+            <ChevronDown className={`size-3.5 transition-transform duration-200 ${showAdvanced ? 'rotate-180' : ''}`} />
+          </div>
+        </button>
+
+        <div className={`grid transition-all duration-200 ease-out ${showAdvanced ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+          <div className="overflow-hidden">
+            <div className="px-3 pb-3 pt-2 space-y-3 border-t border/60">
+              {/* Temperatura como slider */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">Temperatura</Label>
+                  <span className={`text-xs font-mono ${tempColor}`}>{temperature.toFixed(1)} · {tempLabel}</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={temperature}
+                  onChange={e => onChange('temperature', parseFloat(e.target.value))}
+                  className="w-full accent-purple-500"
+                />
+                <div className="flex justify-between text-[9px] text-muted-foreground">
+                  <span>preciso</span><span>balanceado</span><span>creativo</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Max tokens</Label>
+                  <Input
+                    type="number" min={50} max={4000} step={50}
+                    className="bg-muted border text-foreground text-sm"
+                    value={maxTokens}
+                    onChange={e => onChange('max_tokens', parseInt(e.target.value) || 500)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Memoria (msgs)</Label>
+                  <Input
+                    type="number" min={0} max={30} step={1}
+                    className="bg-muted border text-foreground text-sm"
+                    value={memory}
+                    onChange={e => onChange('memory_messages', parseInt(e.target.value) || 0)}
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                La memoria define cuántos mensajes previos de la conversación recibe la IA como contexto. 0 = sin memoria.
+              </p>
+            </div>
+          </div>
         </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Max tokens</Label>
-          <Input
-            type="number"
-            min={50}
-            max={4000}
-            step={50}
-            className="bg-muted border text-foreground text-sm"
-            value={(config.max_tokens as number) ?? 500}
-            onChange={e => onChange('max_tokens', parseInt(e.target.value) || 500)}
-          />
+      </div>
+
+      {/* Fallback — collapsible separado */}
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setShowFallback(s => !s)}
+          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-amber-500/10 transition-colors">
+          <AlertTriangle className="size-3.5 text-amber-400" />
+          <span className="text-xs font-medium text-foreground">Fallback si la IA falla</span>
+          <span className="ml-auto text-[10px] text-amber-300/80">
+            {(config.fallback_message as string)?.trim() ? 'Configurado' : 'Sin configurar'}
+          </span>
+          <ChevronDown className={`size-3.5 text-muted-foreground transition-transform duration-200 ${showFallback ? 'rotate-180' : ''}`} />
+        </button>
+        <div className={`grid transition-all duration-200 ease-out ${showFallback ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+          <div className="overflow-hidden">
+            <div className="px-3 pb-3 pt-2 border-t border-amber-500/20">
+              <Textarea
+                className="bg-muted border text-foreground resize-none text-sm"
+                rows={2}
+                placeholder="Disculpá, no pude procesar tu consulta. Un agente te va a responder pronto."
+                value={(config.fallback_message as string) || ''}
+                onChange={e => onChange('fallback_message', e.target.value)}
+              />
+              <p className="text-[10px] text-amber-300/80 mt-1.5 leading-relaxed">
+                Si el modelo falla (API caída, rate limit, modelo inválido) se envía este mensaje.
+                Revisá el error exacto en <strong>Config → Logs</strong>.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="space-y-1.5">
-        <Label className="text-xs text-muted-foreground">Mensajes de contexto (memoria)</Label>
-        <Input
-          type="number"
-          min={0}
-          max={30}
-          step={1}
-          className="bg-muted border text-foreground text-sm"
-          value={(config.memory_messages as number) ?? 10}
-          onChange={e => onChange('memory_messages', parseInt(e.target.value) || 0)}
-        />
-        <p className="text-[10px] text-muted-foreground">
-          Cantidad de mensajes previos que la IA recibe como contexto de la conversación. 0 = sin memoria.
-        </p>
-      </div>
-
-      <div className="space-y-1.5">
-        <Label className="text-xs text-muted-foreground">Mensaje de fallback (si la IA falla)</Label>
-        <Textarea
-          className="bg-muted border text-foreground resize-none text-sm"
-          rows={2}
-          placeholder="Disculpá, no pude procesar tu consulta. Un agente te va a responder pronto."
-          value={(config.fallback_message as string) || ''}
-          onChange={e => onChange('fallback_message', e.target.value)}
-        />
-      </div>
-
-      <p className="text-[10px] text-muted-foreground">
-        La IA recibirá el mensaje del cliente y responderá según el prompt. La respuesta se envía automáticamente y queda disponible como {'{ai_response}'}.
+      <p className="text-[10px] text-muted-foreground leading-relaxed">
+        La respuesta de la IA se envía automáticamente al cliente y queda disponible como {'{ai_response}'} en nodos siguientes.
       </p>
     </div>
   )

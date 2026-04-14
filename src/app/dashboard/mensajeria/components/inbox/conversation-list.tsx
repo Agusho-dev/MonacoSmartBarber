@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar } from '../shared/avatar'
 import { WhatsAppIcon } from '../shared/icons'
-import { displayName, formatRelativeDate } from '../shared/helpers'
+import { displayName, formatRelativeDate, formatLastMessagePreview } from '../shared/helpers'
 import { useMensajeria } from '../shared/mensajeria-context'
 import type { PlatformFilter } from '../shared/types'
 
@@ -142,10 +142,11 @@ export function ConversationList({
                           )}
                         </div>
                         <div className="flex items-center justify-between gap-2 mt-0.5">
-                          <p className="truncate text-xs text-muted-foreground">
-                            {conv.last_message?.[0]?.content
-                              ? `${conv.last_message[0].direction === 'outbound' ? 'Vos: ' : ''}${conv.last_message[0].content_type === 'template' ? '📋 Template' : conv.last_message[0].content_type === 'image' ? '📷 Imagen' : conv.last_message[0].content_type === 'video' ? '🎬 Video' : conv.last_message[0].content_type === 'audio' ? '🎤 Audio' : conv.last_message[0].content_type === 'document' ? '📎 Documento' : conv.last_message[0].content}`
-                              : conv.client?.phone || (conv.channel?.platform === 'instagram' ? (conv.client?.instagram || 'Instagram DM') : conv.platform_user_id)}
+                          <p className={`truncate text-xs ${conv.unread_count > 0 && conv.last_message?.[0]?.direction === 'inbound' ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+                            {formatLastMessagePreview(
+                              conv.last_message?.[0],
+                              conv.client?.phone || (conv.channel?.platform === 'instagram' ? (conv.client?.instagram || 'Instagram DM') : conv.platform_user_id),
+                            )}
                           </p>
                           {conv.unread_count > 0 && (
                             <span className="shrink-0 min-w-4.5 h-4.5 flex items-center justify-center rounded-full bg-green-500 text-[10px] font-semibold text-white px-1">

@@ -88,3 +88,67 @@ export async function getAiConfigForOrg(orgId: string): Promise<OrgAiConfig | nu
 
   return data as OrgAiConfig | null
 }
+
+export interface AiExecutionLog {
+  id: string
+  executed_at: string
+  status: 'success' | 'error' | 'skipped'
+  model: string | null
+  error_message: string | null
+  used_fallback: boolean
+  response_preview: string | null
+  conversation_id: string | null
+  client_name: string | null
+  client_phone: string | null
+}
+
+/**
+ * Lee los últimos logs de nodos AI (éxito + error) para el panel de diagnóstico.
+ * Incluye preview de respuesta, modelo usado y si se activó el fallback.
+ */
+export async function getAiExecutionLogs(limit = 50): Promise<{ data: AiExecutionLog[]; error: string | null }> {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { data: [], error: 'No autorizado' }
+
+  const supabase = createAdminClient()
+
+  // Join con workflow_executions → conversations → clients para dar contexto humano
+  const { data, error } = await supabase
+    .from('workflow_execution_log')
+    .select(`
+      id, executed_at, status, node_type, output_data, error_message,
+      execution:workflow_executions!inner (
+        id,
+        conversation:conversations!inner (
+          id,
+          organization_id,
+          client:clients ( name, phone )
+        )
+      )
+    `)
+    .eq('node_type', 'ai_response')
+    .eq('execution.conversation.organization_id', orgId)
+    .order('executed_at', { ascending: false })
+    .limit(limit)
+
+  if (error) return { data: [], error: error.message }
+
+  const rows: AiExecutionLog[] = (data ?? []).map((row: any) => {
+    const out = (row.output_data ?? {}) as Record<string, unknown>
+    const conv = row.execution?.conversation
+    return {
+      id: row.id,
+      executed_at: row.executed_at,
+      status: row.status,
+      model: (out.model as string) ?? null,
+      error_message: row.error_message ?? null,
+      used_fallback: out.used_fallback === true,
+      response_preview: (out.response_preview as string) ?? null,
+      conversation_id: conv?.id ?? null,
+      client_name: conv?.client?.name ?? null,
+      client_phone: conv?.client?.phone ?? null,
+    }
+  })
+
+  return { data: rows, error: null }
+}
