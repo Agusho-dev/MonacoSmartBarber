@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { MessageSquare, Megaphone, Zap, MessageCircle, Settings, Bell } from 'lucide-react'
-import { MensajeriaProvider } from './components/shared/mensajeria-context'
+import { MensajeriaProvider, useMensajeria } from './components/shared/mensajeria-context'
 import { ConversationList } from './components/inbox/conversation-list'
 import { ChatView } from './components/inbox/chat-view'
 import { ClientProfile } from './components/inbox/client-profile'
@@ -128,6 +129,8 @@ export function MensajeriaClient(props: MensajeriaProps) {
           })}
         </div>
 
+        <DeepLinkHandler onSection={setSection} />
+
         {/* ═══ CONTENT ═══ */}
         {section === 'inbox' && (
           <>
@@ -156,4 +159,21 @@ export function MensajeriaClient(props: MensajeriaProps) {
       </div>
     </MensajeriaProvider>
   )
+}
+
+function DeepLinkHandler({ onSection }: { onSection: (s: CrmSection) => void }) {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const { handleStartConversation } = useMensajeria()
+
+  useEffect(() => {
+    const clientId = searchParams.get('clientId')
+    if (!clientId) return
+    onSection('inbox')
+    handleStartConversation(clientId)
+    router.replace('/dashboard/mensajeria')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  return null
 }

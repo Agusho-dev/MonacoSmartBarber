@@ -19,11 +19,13 @@ export interface CajaTicketProduct {
 export interface CajaTicket {
   visitId: string
   completedAt: string
+  clientId: string
   clientName: string
   clientPhone: string
   barberName: string
   barberId: string
   paymentMethod: 'cash' | 'card' | 'transfer'
+  paymentAccountId: string | null
   paymentAccountName: string | null
   amount: number
   services: CajaTicketService[]
@@ -52,6 +54,7 @@ export interface CajaCSVRow {
   cliente: string
   telefono: string
   barbero: string
+  barberoId: string
   monto: number
   metodoPago: string
   cuenta: string
@@ -98,8 +101,8 @@ export async function fetchCajaTickets(params: {
     .from('visits')
     .select(`
       id, completed_at, amount, payment_method, payment_account_id,
-      barber_id, service_id, extra_services,
-      client:clients!inner(name, phone),
+      barber_id, client_id, service_id, extra_services,
+      client:clients!inner(id, name, phone),
       barber:staff!inner(full_name),
       service:services(name, price),
       payment_account:payment_accounts(name)
@@ -181,18 +184,20 @@ export async function fetchCajaTickets(params: {
       }
     }
 
-    const client = v.client as unknown as { name: string; phone: string }
+    const client = v.client as unknown as { id: string; name: string; phone: string }
     const barber = v.barber as unknown as { full_name: string }
     const account = v.payment_account as unknown as { name: string } | null
 
     return {
       visitId: v.id,
       completedAt: v.completed_at,
+      clientId: client.id,
       clientName: client.name,
       clientPhone: client.phone,
       barberName: barber.full_name,
       barberId: v.barber_id,
       paymentMethod: v.payment_method as 'cash' | 'card' | 'transfer',
+      paymentAccountId: v.payment_account_id ?? null,
       paymentAccountName: account?.name ?? null,
       amount: v.amount,
       services,
@@ -320,6 +325,8 @@ export async function fetchCajaCSVData(params: {
   startDate: string // YYYY-MM-DD
   endDate: string   // YYYY-MM-DD
   barberIds: string[]
+  paymentMethod?: 'cash' | 'card' | 'transfer' | null
+  paymentAccountId?: string | null
 }): Promise<{ data: CajaCSVRow[]; error: string | null }> {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: [], error: 'No autorizado' }
@@ -334,7 +341,7 @@ export async function fetchCajaCSVData(params: {
   let query = supabase
     .from('visits')
     .select(`
-      id, completed_at, amount, payment_method,
+      id, completed_at, amount, payment_method, payment_account_id,
       barber_id,
       client:clients!inner(name, phone),
       barber:staff!inner(full_name),
@@ -347,6 +354,12 @@ export async function fetchCajaCSVData(params: {
 
   if (params.barberIds.length > 0) {
     query = query.in('barber_id', params.barberIds)
+  }
+  if (params.paymentMethod) {
+    query = query.eq('payment_method', params.paymentMethod)
+  }
+  if (params.paymentAccountId) {
+    query = query.eq('payment_account_id', params.paymentAccountId)
   }
 
   const { data: visits, error } = await query
@@ -364,6 +377,7 @@ export async function fetchCajaCSVData(params: {
       cliente: client.name,
       telefono: client.phone,
       barbero: barber.full_name,
+      barberoId: v.barber_id,
       monto: v.amount,
       metodoPago: paymentLabel(v.payment_method),
       cuenta: account?.name ?? (v.payment_method === 'cash' ? 'Efectivo' : '-'),
