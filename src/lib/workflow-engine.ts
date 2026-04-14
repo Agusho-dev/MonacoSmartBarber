@@ -350,6 +350,11 @@ export async function evaluateIncomingMessage(params: {
     if (text && messageType === 'text') {
       await executeLegacyAutoReply(supabase, orgId, conversationId, text, platform, params)
     }
+
+    // 6. Polling oportunista: avanzar delays largos vencidos.
+    // Funciona como red de seguridad si el cron no está configurado.
+    // No bloquea el flujo si falla.
+    processExpiredDelays().catch(err => console.error('[WorkflowEngine] processExpiredDelays fallback:', err))
   } catch (err) {
     console.error('[WorkflowEngine] Error evaluando mensaje:', err)
   }
@@ -737,9 +742,20 @@ async function executeNode(
       }
 
       case 'delay': {
-        const seconds = (config.seconds as number) ?? 5
-        // SIEMPRE usar el cron para delays — el setTimeout inline es frágil
-        // (si la función de Vercel muere, la ejecución queda stuck para siempre)
+        const seconds = Math.max(0, (config.seconds as number) ?? 5)
+
+        if (seconds <= 10) {
+          // Delays cortos: ejecutar inline dentro del mismo request.
+          // Funciona sin cron y es la UX esperada para pausas pequeñas entre mensajes.
+          await new Promise(r => setTimeout(r, seconds * 1000))
+          await logExecution(supabase, executionId, node.id, node.node_type, 'success', { seconds, mode: 'inline' })
+          await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+          break
+        }
+
+        // Delays largos: quedan en waiting_reply con delay_until. Se resuelven por
+        // processExpiredDelays() — que se llama desde el cron si está configurado,
+        // y oportunísticamente desde el webhook cuando llegan mensajes nuevos.
         const delayUntilDate = new Date(Date.now() + seconds * 1000).toISOString()
         await supabase
           .from('workflow_executions')
@@ -750,7 +766,7 @@ async function executeNode(
             updated_at: new Date().toISOString(),
           })
           .eq('id', executionId)
-        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { seconds, delay_until: delayUntilDate })
+        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { seconds, mode: 'deferred', delay_until: delayUntilDate })
         break
       }
 

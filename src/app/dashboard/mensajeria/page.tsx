@@ -116,9 +116,28 @@ export default async function MensajeriaPage() {
       : Promise.resolve({ data: null }),
   ])
 
+  // Hidratar último mensaje de cada conversación para el preview en el inbox.
+  // Sin esto, al recargar la página el preview muestra el teléfono hasta que
+  // llega el realtime update (o sea, nunca si no hay tráfico).
+  const convIds = (conversations ?? []).map((c: any) => c.id)
+  let conversationsWithPreview = conversations ?? []
+  if (convIds.length > 0) {
+    const { data: lastMsgs } = await supabase.rpc('get_last_messages_for_conversations', { conv_ids: convIds })
+    if (lastMsgs) {
+      const lmMap: Record<string, unknown> = {}
+      for (const m of lastMsgs as Array<{ conversation_id: string; content: string | null; direction: string; content_type: string; created_at: string }>) {
+        lmMap[m.conversation_id] = m
+      }
+      conversationsWithPreview = (conversations ?? []).map((c: any) => ({
+        ...c,
+        last_message: lmMap[c.id] ? [lmMap[c.id]] : [],
+      }))
+    }
+  }
+
   return (
     <MensajeriaClient
-      initialConversations={conversations ?? []}
+      initialConversations={conversationsWithPreview}
       channels={channels ?? []}
       scheduledMessages={scheduled ?? []}
       clients={clients}

@@ -564,6 +564,8 @@ function ConditionConfig({ config, onUpdateConfig }: { config: Record<string, un
 }
 
 function DelayConfig({ config, onChange }: { config: Record<string, unknown>; onChange: (key: string, value: unknown) => void }) {
+  const seconds = (config.seconds as number) || 5
+  const isInline = seconds <= 10
   return (
     <div className="space-y-3">
       <div className="space-y-1.5">
@@ -573,12 +575,16 @@ function DelayConfig({ config, onChange }: { config: Record<string, unknown>; on
           min={1}
           max={3600}
           className="bg-muted border text-foreground text-sm"
-          value={(config.seconds as number) || 5}
+          value={seconds}
           onChange={e => onChange('seconds', parseInt(e.target.value) || 5)}
         />
-        <p className="text-[10px] text-muted-foreground">
-          Hasta 10 segundos se ejecuta en el mismo request. Más de 10 se procesa en background.
-        </p>
+        <div className={`rounded-md border px-2.5 py-2 text-[10px] leading-relaxed ${isInline ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200' : 'border-amber-500/30 bg-amber-500/5 text-amber-200'}`}>
+          {isInline ? (
+            <>⚡ <strong>Inline:</strong> hasta 10s se ejecuta dentro del mismo request — funciona siempre.</>
+          ) : (
+            <>⏱ <strong>Diferido:</strong> se reanuda cuando llega el próximo mensaje del cliente o cuando corre el cron <code className="text-foreground">/api/cron/process-workflow-delays</code>. Sin cron configurado, usá valores ≤ 10s.</>
+          )}
+        </div>
       </div>
     </div>
   )
