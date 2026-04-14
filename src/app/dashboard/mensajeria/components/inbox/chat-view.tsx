@@ -42,6 +42,17 @@ export function ChatView({
   const [showQuickReplies, setShowQuickReplies] = useState(false)
   const [quickReplySearch, setQuickReplySearch] = useState('')
   const quickReplySearchRef = useRef<HTMLInputElement>(null)
+  const messageTextareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const MAX_MESSAGE_INPUT_PX = 280
+
+  useEffect(() => {
+    const el = messageTextareaRef.current
+    if (!el) return
+    el.style.height = '0px'
+    const next = Math.min(el.scrollHeight, MAX_MESSAGE_INPUT_PX)
+    el.style.height = `${next}px`
+  }, [messageInput])
 
   const filteredQuickReplies = useMemo(() => {
     if (!quickReplySearch) return quickReplies
@@ -334,8 +345,11 @@ export function ChatView({
                     <MessageCircle className="size-4" />
                   </button>
                 )}
-                <textarea rows={1}
-                  className="flex-1 rounded-lg bg-accent px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:ring-1 focus:ring-ring min-h-10 max-h-30 overflow-y-auto"
+                <textarea
+                  ref={messageTextareaRef}
+                  rows={1}
+                  className="flex-1 rounded-lg bg-accent px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:ring-1 focus:ring-ring min-h-10 max-h-[min(40vh,17.5rem)] overflow-y-auto leading-[1.45]"
+                  style={{ height: '2.5rem' }}
                   placeholder="Escribí un mensaje... (/ para rápidos)"
                   value={messageInput}
                   onChange={(e) => {

@@ -21,14 +21,14 @@ export function ClientProfile() {
   const activeConvName = displayName(activeConv.client?.name || activeConv.platform_user_name || activeConv.platform_user_id, activeConv.channel?.platform)
 
   return (
-    <div className="hidden lg:flex flex-col w-72 shrink-0 bg-background border-l border">
-      <div className="flex items-center justify-between px-4 py-3 bg-card border-b border">
+    <div className="hidden lg:flex h-full min-h-0 flex-col w-72 shrink-0 bg-background border-l border">
+      <div className="flex shrink-0 items-center justify-between px-4 py-3 bg-card border-b border">
         <span className="text-sm font-semibold text-foreground">Perfil del cliente</span>
         <button onClick={() => setShowProfile(false)} className="text-muted-foreground hover:text-foreground">
           <X className="size-4" />
         </button>
       </div>
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1 overflow-hidden">
         <div className="p-4 space-y-5">
           {/* Avatar + nombre */}
           <div className="flex flex-col items-center gap-2 pt-2">
