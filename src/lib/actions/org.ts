@@ -98,6 +98,15 @@ export async function getPublicBranches(orgId?: string) {
   return data ?? []
 }
 
+/** Color global del kiosk (app_settings). Público vía service role. */
+export async function getPublicAppCheckinBgColor(): Promise<string> {
+  const supabase = createAdminClient()
+  const { data } = await supabase.from('app_settings').select('checkin_bg_color').limit(1).maybeSingle()
+  const c = data?.checkin_bg_color
+  if (typeof c === 'string' && c.trim()) return c.trim()
+  return '#3f3f46'
+}
+
 /**
  * Setea la cookie active_organization a partir de un branch_id.
  * Útil cuando el kiosk/TV/barbero selecciona una sucursal.

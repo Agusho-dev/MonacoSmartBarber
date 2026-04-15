@@ -22,6 +22,8 @@ interface FaceCameraProps {
   orgId?: string | null
   /** Estilo kiosk neón (terminal de check-in). */
   variant?: 'default' | 'terminal'
+  /** Fondo claro activo — adapta textos y bordes al tema claro. */
+  isLightBg?: boolean
 }
 
 type CameraState =
@@ -47,6 +49,7 @@ export function FaceCamera({
   targetRole = 'client',
   orgId,
   variant = 'default',
+  isLightBg = false,
 }: FaceCameraProps) {
   const isTerminal = variant === 'terminal'
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -268,7 +271,9 @@ export function FaceCamera({
         <h2
           className={
             isTerminal
-              ? 'text-2xl md:text-3xl font-bold tracking-tight bg-gradient-to-r from-cyan-200 via-white to-violet-200 bg-clip-text text-transparent'
+              ? isLightBg
+                ? 'text-2xl md:text-3xl font-bold tracking-tight text-zinc-900'
+                : 'text-2xl md:text-3xl font-bold tracking-tight bg-gradient-to-r from-cyan-200 via-white to-violet-200 bg-clip-text text-transparent'
               : 'text-2xl md:text-3xl font-bold'
           }
         >
@@ -278,7 +283,9 @@ export function FaceCamera({
           <p
             className={
               isTerminal
-                ? 'mt-1 md:mt-2 text-base md:text-lg text-cyan-100/55'
+                ? isLightBg
+                  ? 'mt-1 md:mt-2 text-base md:text-lg text-zinc-600'
+                  : 'mt-1 md:mt-2 text-base md:text-lg text-cyan-100/55'
                 : 'text-muted-foreground mt-1 md:mt-2 text-base md:text-lg'
             }
           >
@@ -291,7 +298,9 @@ export function FaceCamera({
       <div
         className={
           isTerminal
-            ? 'relative w-full aspect-[3/4] max-h-[55dvh] rounded-2xl overflow-hidden bg-zinc-950/80 border border-cyan-400/25 shadow-[0_0_40px_rgba(34,211,238,0.15)] shrink'
+            ? isLightBg
+              ? 'relative w-full aspect-[3/4] max-h-[55dvh] rounded-2xl overflow-hidden bg-zinc-950/80 border border-zinc-300 shadow-lg shrink'
+              : 'relative w-full aspect-[3/4] max-h-[55dvh] rounded-2xl overflow-hidden bg-zinc-950/80 border border-cyan-400/25 shadow-[0_0_40px_rgba(34,211,238,0.15)] shrink'
             : 'relative w-full aspect-[3/4] max-h-[55dvh] rounded-2xl overflow-hidden bg-black/50 border border-white/10 shrink'
         }
       >
@@ -387,7 +396,9 @@ export function FaceCamera({
         variant="outline"
         className={
           isTerminal
-            ? 'w-full h-11 md:h-12 text-sm md:text-base rounded-xl gap-2 md:gap-3 shrink-0 border-cyan-500/25 bg-zinc-950/50 text-cyan-100 hover:bg-cyan-950/40 hover:text-white hover:border-cyan-400/40'
+            ? isLightBg
+              ? 'w-full h-11 md:h-12 text-sm md:text-base rounded-xl gap-2 md:gap-3 shrink-0 border-zinc-300 bg-white text-zinc-700 shadow-sm hover:bg-zinc-50 hover:text-zinc-900 hover:border-zinc-400'
+              : 'w-full h-11 md:h-12 text-sm md:text-base rounded-xl gap-2 md:gap-3 shrink-0 border-cyan-500/25 bg-zinc-950/50 text-cyan-100 hover:bg-cyan-950/40 hover:text-white hover:border-cyan-400/40'
             : 'w-full h-11 md:h-12 text-sm md:text-base rounded-xl gap-2 md:gap-3 shrink-0'
         }
       >

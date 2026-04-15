@@ -4,10 +4,10 @@ import { cn } from '@/lib/utils'
 import type { ReactNode } from 'react'
 
 /** Fondo fijo con viñetas cian/violeta (toda la terminal). */
-export function TerminalAmbient() {
+export function TerminalAmbient({ className }: { className?: string }) {
   return (
     <div
-      className="pointer-events-none fixed inset-0 z-0 overflow-hidden"
+      className={cn('pointer-events-none fixed inset-0 z-0 overflow-hidden', className)}
       aria-hidden
     >
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_90%_55%_at_50%_-10%,rgba(34,211,238,0.14),transparent_50%)]" />

@@ -74,6 +74,7 @@ import {
 import type { FaceMatchResult } from '@/lib/face-recognition'
 import { saveFacePhoto, enrollFaceDescriptor, enrollStaffFaceDescriptor, saveStaffFacePhoto } from '@/lib/face-recognition'
 import { cn } from '@/lib/utils'
+import { resolveCheckinBackground } from '@/lib/checkin-bg'
 
 type Step =
   | 'branch'
@@ -176,6 +177,7 @@ export default function CheckinPage() {
   const [services, setServices] = useState<Service[]>([])
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null)
   const [showBarberPreference, setShowBarberPreference] = useState(false)
+  const [globalCheckinBg, setGlobalCheckinBg] = useState('#3f3f46')
 
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -183,8 +185,9 @@ export default function CheckinPage() {
   useEffect(() => {
     // Cargar branches filtradas por org via server action
     const loadBranches = async () => {
-      const { getPublicBranches } = await import('@/lib/actions/org')
-      const data = await getPublicBranches()
+      const { getPublicBranches, getPublicAppCheckinBgColor } = await import('@/lib/actions/org')
+      const [data, globalBg] = await Promise.all([getPublicBranches(), getPublicAppCheckinBgColor()])
+      setGlobalCheckinBg(globalBg)
       if (data) {
           setBranches(data as Branch[])
 
@@ -1007,10 +1010,21 @@ export default function CheckinPage() {
 
   const handleBack = getBackAction()
 
+  const effectiveCheckinBgRaw =
+    (selectedBranch?.checkin_bg_color && selectedBranch.checkin_bg_color.trim()) || globalCheckinBg
+  const bgInfo = resolveCheckinBackground(effectiveCheckinBgRaw)
+  const branchBg = { background: bgInfo.css, color: bgInfo.isLight ? '#18181b' : '#f4f4f5' }
+  const isLightBg = bgInfo.isLight
+
   const backButton = handleBack ? (
     <button
       onClick={handleBack}
-      className="fixed top-3 left-3 md:top-6 md:left-6 z-50 flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 backdrop-blur-sm"
+      className={cn(
+        'fixed top-3 left-3 md:top-6 md:left-6 z-50 flex items-center gap-2 transition-colors py-2 px-3 rounded-xl backdrop-blur-sm',
+        isLightBg
+          ? 'text-zinc-600 hover:text-zinc-900 bg-zinc-900/[0.04] hover:bg-zinc-900/[0.08]'
+          : 'text-muted-foreground hover:text-foreground bg-white/5 hover:bg-white/10'
+      )}
     >
       <ArrowLeft className="size-5" />
       <span className="text-sm md:text-base">Atrás</span>
@@ -1027,7 +1041,7 @@ export default function CheckinPage() {
     // Color de las sillas encendidas según el nivel general
     const activeColors = ['text-emerald-400', 'text-emerald-400', 'text-amber-400', 'text-red-400']
     const activeColor = activeColors[level - 1]
-    const inactiveColor = 'text-white/15'
+    const inactiveColor = isLightBg ? 'text-zinc-300' : 'text-white/15'
     const badgeColors = [
       'bg-emerald-400/10 border-emerald-400/30 text-emerald-400', // sin espera
       'bg-emerald-400/10 border-emerald-400/30 text-emerald-400', // baja
@@ -1084,7 +1098,12 @@ export default function CheckinPage() {
         <button
           onClick={() => onSelect(barber.id)}
           disabled={submitting}
-          className="group relative w-full overflow-hidden rounded-2xl border border-white/15 checkin-glass-surface p-4 md:p-5 text-left transition-all duration-300 hover:border-white/28 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+          className={cn(
+            'group relative w-full overflow-hidden rounded-2xl border p-4 md:p-5 text-left transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2',
+            isLightBg
+              ? 'border-zinc-300 bg-white shadow-sm hover:border-zinc-400 hover:shadow-md focus-visible:ring-cyan-600/35'
+              : 'border-white/15 checkin-glass-surface hover:border-white/28 focus-visible:ring-white/50'
+          )}
         >
           <div className="relative flex flex-col items-center gap-3">
             <div className={`shrink-0 rounded-full ring-2 ring-offset-2 ring-offset-transparent ${ringColor}`}>
@@ -1095,14 +1114,14 @@ export default function CheckinPage() {
                   className="size-20 md:size-24 rounded-full object-cover"
                 />
               ) : (
-                <div className="flex size-20 md:size-24 items-center justify-center rounded-full bg-white/10 text-3xl font-bold text-white">
+                <div className={cn('flex size-20 md:size-24 items-center justify-center rounded-full text-3xl font-bold', isLightBg ? 'bg-zinc-200 text-zinc-700' : 'bg-white/10 text-white')}>
                   {barber.full_name.charAt(0).toUpperCase()}
                 </div>
               )}
             </div>
 
             <div className="w-full text-center space-y-1.5">
-              <p className="text-xl md:text-2xl font-bold text-white truncate">{barber.full_name}</p>
+              <p className={cn('text-xl md:text-2xl font-bold truncate', isLightBg ? 'text-zinc-900' : 'text-white')}>{barber.full_name}</p>
               {isNotClockedIn ? (
                 <>
                   <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs md:text-sm font-medium bg-orange-500/15 text-orange-300 border-orange-400/40">
@@ -1121,7 +1140,7 @@ export default function CheckinPage() {
                   >
                     {cfg.label}
                   </span>
-                  <p className="text-sm md:text-base text-white/65">
+                  <p className={cn('text-sm md:text-base', isLightBg ? 'text-zinc-500' : 'text-white/65')}>
                     {stats.attending && 'Atendiendo 1'}
                     {stats.attending && stats.waiting > 0 && ' · '}
                     {stats.waiting > 0 &&
@@ -1156,8 +1175,8 @@ export default function CheckinPage() {
 
         {/* ── Title ── */}
         <div className="text-center">
-          <h2 className="text-2xl md:text-4xl font-bold tracking-tight text-white">¿Cómo querés atenderte?</h2>
-          <p className="mt-1.5 text-base md:text-xl text-white/60">Elegí una opción para continuar</p>
+          <h2 className={cn('text-2xl md:text-4xl font-bold tracking-tight', isLightBg ? 'text-zinc-900' : 'text-white')}>¿Cómo querés atenderte?</h2>
+          <p className={cn('mt-1.5 text-base md:text-xl', isLightBg ? 'text-zinc-600' : 'text-white/60')}>Elegí una opción para continuar</p>
         </div>
 
         {/* ── TWO MAIN CTAs ── */}
@@ -1165,32 +1184,42 @@ export default function CheckinPage() {
 
           {/* ── CTA 1: Menor Espera (recommended) ── */}
           {minWaitBarber && (
-            <GlassRing>
+            <GlassRing halo={!isLightBg}>
               <button
                 onClick={() => onSelect(null as unknown as string)}
                 disabled={submitting}
-                className="group relative w-full flex items-center gap-4 md:gap-6 rounded-2xl md:rounded-[1.25rem] border border-white/18 checkin-glass-surface p-4 md:p-6 text-left overflow-hidden transition-all duration-300 hover:-translate-y-0.5 hover:border-white/30 active:translate-y-0 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                className={cn(
+                  'group relative w-full flex items-center gap-4 md:gap-6 rounded-2xl md:rounded-[1.25rem] border p-4 md:p-6 text-left overflow-hidden transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2',
+                  isLightBg
+                    ? 'border-zinc-300 bg-white shadow-sm hover:border-zinc-400 hover:shadow-md focus-visible:ring-cyan-600/35'
+                    : 'border-white/18 checkin-glass-surface hover:border-white/30 focus-visible:ring-white/60'
+                )}
               >
                 <div className="relative shrink-0">
-                  <div className="size-14 md:size-20 rounded-xl bg-gradient-to-br from-emerald-400/25 to-cyan-400/20 border border-emerald-400/40 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.2),inset_0_0_18px_rgba(16,185,129,0.25)] group-hover:scale-105 transition-transform duration-300">
-                    <Zap className="size-7 md:size-10 text-emerald-200 drop-shadow-[0_0_10px_rgba(16,185,129,0.7)]" fill="currentColor" />
+                  <div className={cn(
+                    'size-14 md:size-20 rounded-xl border flex items-center justify-center group-hover:scale-105 transition-transform duration-300',
+                    isLightBg
+                      ? 'bg-emerald-50 border-emerald-300'
+                      : 'bg-gradient-to-br from-emerald-400/25 to-cyan-400/20 border-emerald-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.2),inset_0_0_18px_rgba(16,185,129,0.25)]'
+                  )}>
+                    <Zap className={cn('size-7 md:size-10', isLightBg ? 'text-emerald-600' : 'text-emerald-200 drop-shadow-[0_0_10px_rgba(16,185,129,0.7)]')} fill="currentColor" />
                   </div>
                 </div>
 
                 <div className="relative flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <h3 className="text-xl md:text-3xl font-extrabold text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.25)]">
+                    <h3 className={cn('text-xl md:text-3xl font-extrabold', isLightBg ? 'text-zinc-900' : 'text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.25)]')}>
                       Menor espera
                     </h3>
-                    <div className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] md:text-xs font-bold uppercase tracking-wider bg-emerald-400/15 border border-emerald-400/40">
-                      <Sparkles className="size-2.5 md:size-3 text-cyan-200" />
-                      <span className="text-emerald-200">IA</span>
+                    <div className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] md:text-xs font-bold uppercase tracking-wider', isLightBg ? 'bg-emerald-100 border border-emerald-300' : 'bg-emerald-400/15 border border-emerald-400/40')}>
+                      <Sparkles className={cn('size-2.5 md:size-3', isLightBg ? 'text-cyan-600' : 'text-cyan-200')} />
+                      <span className={isLightBg ? 'text-emerald-700' : 'text-emerald-200'}>IA</span>
                     </div>
                   </div>
-                  <p className="text-sm md:text-lg text-white/70">
+                  <p className={cn('text-sm md:text-lg', isLightBg ? 'text-zinc-600' : 'text-white/70')}>
                     Te asignamos al barbero con menos fila
                   </p>
-                  <p className="text-[11px] md:text-sm text-emerald-200/80 mt-1 md:mt-1.5 font-semibold tracking-wide uppercase">
+                  <p className={cn('text-[11px] md:text-sm mt-1 md:mt-1.5 font-semibold tracking-wide uppercase', isLightBg ? 'text-emerald-600' : 'text-emerald-200/80')}>
                     Tocá para continuar →
                   </p>
                 </div>
@@ -1207,25 +1236,35 @@ export default function CheckinPage() {
             <button
               onClick={() => setShowBarberPreference(true)}
               disabled={submitting}
-              className="group relative w-full flex items-center gap-3 md:gap-5 rounded-2xl border border-white/15 checkin-glass-surface p-4 md:p-5 text-left overflow-hidden transition-all duration-300 hover:border-white/28 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+              className={cn(
+                'group relative w-full flex items-center gap-3 md:gap-5 rounded-2xl border p-4 md:p-5 text-left overflow-hidden transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2',
+                isLightBg
+                  ? 'border-zinc-300 bg-white shadow-sm hover:border-zinc-400 hover:shadow-md focus-visible:ring-cyan-600/35'
+                  : 'border-white/15 checkin-glass-surface hover:border-white/28 focus-visible:ring-white/50'
+              )}
             >
               <div className="relative shrink-0">
-                <div className="size-12 md:size-16 rounded-xl bg-gradient-to-br from-violet-400/25 to-indigo-400/15 border border-violet-400/35 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_0_16px_rgba(139,92,246,0.2)] group-hover:scale-105 transition-transform duration-300">
-                  <User className="size-6 md:size-8 text-violet-200 drop-shadow-[0_0_8px_rgba(139,92,246,0.5)]" />
+                <div className={cn(
+                  'size-12 md:size-16 rounded-xl border flex items-center justify-center group-hover:scale-105 transition-transform duration-300',
+                  isLightBg
+                    ? 'bg-violet-50 border-violet-300'
+                    : 'bg-gradient-to-br from-violet-400/25 to-indigo-400/15 border-violet-400/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_0_16px_rgba(139,92,246,0.2)]'
+                )}>
+                  <User className={cn('size-6 md:size-8', isLightBg ? 'text-violet-600' : 'text-violet-200 drop-shadow-[0_0_8px_rgba(139,92,246,0.5)]')} />
                 </div>
               </div>
 
               <div className="relative flex-1 min-w-0">
-                <h3 className="text-lg md:text-2xl font-bold text-white">
+                <h3 className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-900' : 'text-white')}>
                   Elegir barbero
                 </h3>
-                <p className="text-sm md:text-base text-white/60 mt-0.5">
+                <p className={cn('text-sm md:text-base mt-0.5', isLightBg ? 'text-zinc-600' : 'text-white/60')}>
                   ¿Tenés preferencia? Elegí con quién atenderte
                 </p>
               </div>
 
               <div className="relative shrink-0">
-                <ChevronDown className={`size-6 md:size-7 text-white/60 transition-transform duration-300 ${showBarberPreference ? 'rotate-180' : ''}`} />
+                <ChevronDown className={cn(`size-6 md:size-7 transition-transform duration-300 ${showBarberPreference ? 'rotate-180' : ''}`, isLightBg ? 'text-zinc-400' : 'text-white/60')} />
               </div>
             </button>
           </GlassRing>
@@ -1233,17 +1272,29 @@ export default function CheckinPage() {
 
         {/* ── Barber Selection Dialog Modal ── */}
         <Dialog open={showBarberPreference} onOpenChange={setShowBarberPreference}>
-          <DialogContent className={terminalDialogSurface}>
+          <DialogContent className={cn(
+            isLightBg
+              ? 'max-w-[95vw] md:max-w-2xl max-h-[85dvh] border border-zinc-200 bg-white p-4 md:p-8 rounded-2xl md:rounded-[2rem] shadow-xl'
+              : terminalDialogSurface
+          )}>
             <DialogHeader className="text-left mb-3 md:mb-6">
-              <DialogTitle className="text-xl md:text-3xl font-extrabold bg-gradient-to-r from-violet-200 to-indigo-200 bg-clip-text text-transparent">
+              <DialogTitle className={cn(
+                'text-xl md:text-3xl font-extrabold',
+                isLightBg ? 'text-zinc-900' : 'bg-gradient-to-r from-violet-200 to-indigo-200 bg-clip-text text-transparent'
+              )}>
                 Elegí tu barbero
               </DialogTitle>
-              <DialogDescription className="text-sm md:text-base text-violet-300/70">
+              <DialogDescription className={cn('text-sm md:text-base', isLightBg ? 'text-zinc-500' : 'text-violet-300/70')}>
                 Seleccioná con quién te querés atender
               </DialogDescription>
             </DialogHeader>
 
-            <div className="overflow-y-auto max-h-[65dvh] pr-2 -mr-2 space-y-3 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/20">
+            <div className={cn(
+              'overflow-y-auto max-h-[60dvh] pr-2 -mr-2 space-y-3 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full',
+              isLightBg
+                ? '[&::-webkit-scrollbar-thumb]:bg-zinc-300 hover:[&::-webkit-scrollbar-thumb]:bg-zinc-400'
+                : '[&::-webkit-scrollbar-thumb]:bg-white/10 hover:[&::-webkit-scrollbar-thumb]:bg-white/20'
+            )}>
               <div className="grid grid-cols-2 gap-3 md:gap-4 pb-2">
                 {availableBarbers.map((barber) => renderBarberCard(barber, (id) => {
                   setShowBarberPreference(false);
@@ -1253,11 +1304,11 @@ export default function CheckinPage() {
 
               {notArrivedBarbers.length > 0 && (
                 <>
-                  <div className="w-full h-px bg-white/8 my-6" />
+                  <div className={cn('w-full h-px my-6', isLightBg ? 'bg-zinc-200' : 'bg-white/8')} />
                   <div className="flex items-center gap-3 mb-4">
-                    <div className="h-px bg-white/10 flex-1" />
-                    <h4 className="text-xs font-bold text-white/40 uppercase tracking-widest shrink-0">Aún no llegaron</h4>
-                    <div className="h-px bg-white/10 flex-1" />
+                    <div className={cn('h-px flex-1', isLightBg ? 'bg-zinc-200' : 'bg-white/10')} />
+                    <h4 className={cn('text-xs font-bold uppercase tracking-widest shrink-0', isLightBg ? 'text-zinc-400' : 'text-white/40')}>Aún no llegaron</h4>
+                    <div className={cn('h-px flex-1', isLightBg ? 'bg-zinc-200' : 'bg-white/10')} />
                   </div>
                   <div className="grid grid-cols-2 gap-3 md:gap-4 pb-4">
                     {notArrivedBarbers.map((barber) => renderBarberCard(barber, (id) => {
@@ -1279,12 +1330,12 @@ export default function CheckinPage() {
     isLooking: boolean
   ) => (
     <>
-      <div className={terminalKeypadShell}>
-        <p className="text-2xl md:text-3xl font-mono font-bold tracking-[0.15em] min-h-8 md:min-h-10 flex items-center justify-center">
+      <div className={isLightBg ? 'w-full rounded-2xl border border-zinc-300 bg-white p-3 md:p-4 text-center relative overflow-hidden shadow-sm' : terminalKeypadShell}>
+        <p className={cn('text-2xl md:text-3xl font-mono font-bold tracking-[0.15em] min-h-8 md:min-h-10 flex items-center justify-center', isLightBg && 'text-zinc-900')}>
           {currentPhone ? (
             formatPhone(currentPhone)
           ) : (
-            <span className="text-white/20">__ ____ ____</span>
+            <span className={isLightBg ? 'text-zinc-300' : 'text-white/20'}>__ ____ ____</span>
           )}
         </p>
         <p className="text-xs md:text-sm text-muted-foreground mt-1 md:mt-2">
@@ -1305,7 +1356,7 @@ export default function CheckinPage() {
             key={d}
             onClick={() => pressDigit(d)}
             disabled={isLooking}
-            className={cn('h-11 md:h-[56px] text-xl md:text-2xl', terminalKeypadKey)}
+            className={cn('h-11 md:h-[56px] text-xl md:text-2xl', isLightBg ? 'relative rounded-xl md:rounded-2xl border border-zinc-300 bg-white text-zinc-900 font-semibold transition-all duration-200 hover:border-zinc-400 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600/35 shadow-sm' : terminalKeypadKey)}
           >
             {d}
           </button>
@@ -1314,14 +1365,14 @@ export default function CheckinPage() {
         <button
           onClick={() => pressDelete()}
           disabled={isLooking || currentPhone.length === 0}
-          className={cn('h-11 md:h-[56px] flex items-center justify-center', terminalKeypadKey)}
+          className={cn('h-11 md:h-[56px] flex items-center justify-center', isLightBg ? 'relative rounded-xl md:rounded-2xl border border-zinc-300 bg-white text-zinc-900 font-semibold transition-all duration-200 hover:border-zinc-400 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600/35 shadow-sm' : terminalKeypadKey)}
         >
           <Delete className="size-5 md:size-6" />
         </button>
         <button
           onClick={() => pressDigit('0')}
           disabled={isLooking}
-          className={cn('h-11 md:h-[56px] text-xl md:text-2xl', terminalKeypadKey)}
+          className={cn('h-11 md:h-[56px] text-xl md:text-2xl', isLightBg ? 'relative rounded-xl md:rounded-2xl border border-zinc-300 bg-white text-zinc-900 font-semibold transition-all duration-200 hover:border-zinc-400 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600/35 shadow-sm' : terminalKeypadKey)}
         >
           0
         </button>
@@ -1332,26 +1383,16 @@ export default function CheckinPage() {
 
   // ── Render ──
 
-  const bgInfo = selectedBranch?.checkin_bg_color ? (() => {
-    const hex = selectedBranch.checkin_bg_color!
-    const r = parseInt(hex.slice(1, 3), 16)
-    const g = parseInt(hex.slice(3, 5), 16)
-    const b = parseInt(hex.slice(5, 7), 16)
-    const isLight = (r * 299 + g * 587 + b * 114) / 1000 > 180
-    return { hex, isLight }
-  })() : null
-  const branchBg = bgInfo
-    ? { background: bgInfo.hex, color: bgInfo.isLight ? '#18181b' : '#f4f4f5' }
-    : undefined
-  const isLightBg = bgInfo?.isLight ?? false
-
   return (
     <div
-      className="relative h-dvh flex flex-col items-center select-none overflow-y-auto overflow-x-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)] py-2 md:py-4"
+      className={cn(
+        'relative h-dvh flex flex-col items-center select-none overflow-y-auto overflow-x-hidden py-2 md:py-4',
+        !isLightBg && 'bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)]'
+      )}
       style={branchBg}
     >
       <TerminalGlobalStyles />
-      <TerminalAmbient />
+      <TerminalAmbient className={isLightBg ? 'hidden' : undefined} />
       {backButton}
       {/* ═══════════════ BRANCH SELECTION ═══════════════ */}
       {step === 'branch' && (
@@ -1359,27 +1400,44 @@ export default function CheckinPage() {
           key={`branch-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-4 md:gap-8 px-4 md:px-8 my-auto animate-in fade-in zoom-in-95 duration-500"
         >
-          <TerminalSectionGlow />
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
           <div className="relative flex flex-col items-center gap-3 md:gap-5">
-            <div className="size-16 md:size-24 rounded-[1.25rem] md:rounded-3xl bg-zinc-950/50 border border-cyan-500/25 shadow-[0_0_32px_rgba(34,211,238,0.12)] flex items-center justify-center ring-1 ring-cyan-400/15">
-              <Scissors className="size-8 md:size-12 text-cyan-200" strokeWidth={1.5} />
+            <div
+              className={cn(
+                'size-16 md:size-24 rounded-[1.25rem] md:rounded-3xl flex items-center justify-center ring-1',
+                isLightBg
+                  ? 'bg-white border border-zinc-200 shadow-md ring-zinc-200/80'
+                  : 'bg-zinc-950/50 border border-cyan-500/25 shadow-[0_0_32px_rgba(34,211,238,0.12)] ring-cyan-400/15'
+              )}
+            >
+              <Scissors
+                className={cn('size-8 md:size-12', isLightBg ? 'text-cyan-700' : 'text-cyan-200')}
+                strokeWidth={1.5}
+              />
             </div>
             <div className="text-center">
-              <h1 className={cn(terminalH1, terminalH1Gradient)}>Monaco Smart Barber</h1>
-              <p className={cn('text-base md:text-xl mt-1 md:mt-3', terminalBodyMuted)}>Bienvenido</p>
+              <h1 className={cn(terminalH1, isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>Monaco Smart Barber</h1>
+              <p className={cn('text-base md:text-xl mt-1 md:mt-3', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
+                Bienvenido
+              </p>
             </div>
           </div>
 
-          <div className="relative h-px w-32 bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent" />
+          <div
+            className={cn(
+              'relative h-px w-32 bg-gradient-to-r from-transparent to-transparent',
+              isLightBg ? 'via-cyan-600/35' : 'via-cyan-400/40'
+            )}
+          />
 
           <div className="relative w-full space-y-4">
-            <p className={cn('text-center text-base md:text-lg', terminalBodyMuted)}>
+            <p className={cn('text-center text-base md:text-lg', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
               Seleccioná tu sucursal
             </p>
 
             {branches.length === 0 ? (
               <div className="flex items-center justify-center py-10 md:py-16">
-                <Loader2 className="size-8 animate-spin text-cyan-400/50" />
+                <Loader2 className={cn('size-8 animate-spin', isLightBg ? 'text-cyan-600/60' : 'text-cyan-400/50')} />
               </div>
             ) : (
               <div className="grid gap-3 md:gap-4 w-full">
@@ -1388,19 +1446,45 @@ export default function CheckinPage() {
                     <button
                       onClick={() => selectBranch(branch)}
                       className={cn(
-                        'group flex items-center gap-4 md:gap-5 w-full p-4 md:p-6 text-left overflow-hidden',
-                        terminalListItem
+                        'group flex items-center gap-4 md:gap-5 w-full p-4 md:p-6 text-left overflow-hidden rounded-2xl border transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]',
+                        isLightBg
+                          ? 'border-zinc-300 bg-white text-zinc-900 shadow-sm hover:border-zinc-400 hover:shadow-md'
+                          : terminalListItem
                       )}
                     >
-                      <div className="shrink-0 size-12 md:size-16 rounded-xl border border-white/15 bg-white/[0.06] flex items-center justify-center group-hover:border-white/28 transition-colors duration-200">
-                        <MapPin className="size-6 md:size-7 text-white drop-shadow-[0_0_8px_rgba(34,211,238,0.45)]" />
+                      <div
+                        className={cn(
+                          'shrink-0 size-12 md:size-16 rounded-xl flex items-center justify-center transition-colors duration-200 border',
+                          isLightBg
+                            ? 'border-zinc-200 bg-zinc-100 group-hover:border-zinc-300'
+                            : 'border-white/15 bg-white/[0.06] group-hover:border-white/28'
+                        )}
+                      >
+                        <MapPin
+                          className={cn(
+                            'size-6 md:size-7',
+                            isLightBg
+                              ? 'text-cyan-700'
+                              : 'text-white drop-shadow-[0_0_8px_rgba(34,211,238,0.45)]'
+                          )}
+                        />
                       </div>
                       <div className="min-w-0">
-                        <span className="text-lg md:text-2xl font-semibold block truncate text-white">
+                        <span
+                          className={cn(
+                            'text-lg md:text-2xl font-semibold block truncate',
+                            isLightBg ? 'text-zinc-900' : 'text-white'
+                          )}
+                        >
                           {branch.name}
                         </span>
                         {branch.address && (
-                          <span className="text-base text-white/60 block mt-1 truncate">
+                          <span
+                            className={cn(
+                              'text-base block mt-1 truncate',
+                              isLightBg ? 'text-zinc-600' : 'text-white/60'
+                            )}
+                          >
                             {branch.address}
                           </span>
                         )}
@@ -1474,46 +1558,86 @@ export default function CheckinPage() {
               ¿Estás registrado?
             </h2>
             <div className="grid grid-cols-2 gap-3 md:gap-4 w-full items-stretch">
-              <GlassRing>
+              <GlassRing halo={!isLightBg}>
                 <button
                   type="button"
                   onClick={() => goTo('face_scan')}
-                  className="group relative w-full min-h-[4.75rem] md:min-h-[5.75rem] rounded-2xl md:rounded-[1.25rem] overflow-hidden border border-white/15 checkin-glass-surface transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                  className={cn(
+                    'group relative w-full min-h-[4.75rem] md:min-h-[5.75rem] rounded-2xl md:rounded-[1.25rem] overflow-hidden transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 border',
+                    isLightBg
+                      ? 'border-zinc-300 bg-white text-zinc-900 shadow-sm hover:border-zinc-400 hover:shadow-md focus-visible:ring-cyan-600/35'
+                      : 'border-white/15 checkin-glass-surface focus-visible:ring-white/60'
+                  )}
                 >
                   <span className="relative flex h-full w-full items-center justify-center gap-2.5 md:gap-3 px-3 py-3 md:px-5 md:py-4">
                     <span
-                      className="relative flex size-10 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-gradient-to-br from-white/20 via-white/8 to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.3),inset_0_0_16px_rgba(34,211,238,0.18)] backdrop-blur-sm md:size-12"
+                      className={cn(
+                        'relative flex size-10 shrink-0 items-center justify-center rounded-xl backdrop-blur-sm md:size-12 border',
+                        isLightBg
+                          ? 'border-zinc-200 bg-gradient-to-br from-zinc-50 to-zinc-100 shadow-sm'
+                          : 'border-white/25 bg-gradient-to-br from-white/20 via-white/8 to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.3),inset_0_0_16px_rgba(34,211,238,0.18)]'
+                      )}
                       aria-hidden
                     >
                       <ScanFace
-                        className="size-6 text-white drop-shadow-[0_0_10px_rgba(34,211,238,0.7)] transition-transform duration-300 group-hover:scale-110 md:size-7"
+                        className={cn(
+                          'size-6 transition-transform duration-300 group-hover:scale-110 md:size-7',
+                          isLightBg
+                            ? 'text-cyan-700'
+                            : 'text-white drop-shadow-[0_0_10px_rgba(34,211,238,0.7)]'
+                        )}
                         strokeWidth={1.75}
                       />
                     </span>
-                    <span className="text-lg font-bold tracking-wide text-white drop-shadow-[0_0_12px_rgba(255,255,255,0.35)] md:text-2xl">
+                    <span
+                      className={cn(
+                        'text-lg font-bold tracking-wide md:text-2xl',
+                        isLightBg ? 'text-zinc-900' : 'text-white drop-shadow-[0_0_12px_rgba(255,255,255,0.35)]'
+                      )}
+                    >
                       Sí
                     </span>
                   </span>
                 </button>
               </GlassRing>
 
-              <GlassRing>
+              <GlassRing halo={!isLightBg}>
                 <button
                   type="button"
                   onClick={() => goTo('phone')}
-                  className="group relative w-full min-h-[4.75rem] md:min-h-[5.75rem] rounded-2xl md:rounded-[1.25rem] overflow-hidden border border-white/15 checkin-glass-surface transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/55"
+                  className={cn(
+                    'group relative w-full min-h-[4.75rem] md:min-h-[5.75rem] rounded-2xl md:rounded-[1.25rem] overflow-hidden transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 border',
+                    isLightBg
+                      ? 'border-zinc-300 bg-white text-zinc-900 shadow-sm hover:border-zinc-400 hover:shadow-md focus-visible:ring-cyan-600/35'
+                      : 'border-white/15 checkin-glass-surface focus-visible:ring-white/55'
+                  )}
                 >
                   <span className="relative flex h-full w-full items-center justify-center gap-2.5 md:gap-3 px-3 py-3 md:px-5 md:py-4">
                     <span
-                      className="relative flex size-10 shrink-0 items-center justify-center rounded-xl border border-white/22 bg-gradient-to-br from-white/18 via-white/6 to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.28),inset_0_0_14px_rgba(255,255,255,0.08)] backdrop-blur-sm md:size-12"
+                      className={cn(
+                        'relative flex size-10 shrink-0 items-center justify-center rounded-xl backdrop-blur-sm md:size-12 border',
+                        isLightBg
+                          ? 'border-zinc-200 bg-gradient-to-br from-zinc-50 to-zinc-100 shadow-sm'
+                          : 'border-white/22 bg-gradient-to-br from-white/18 via-white/6 to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.28),inset_0_0_14px_rgba(255,255,255,0.08)]'
+                      )}
                       aria-hidden
                     >
                       <UserPlus
-                        className="size-6 text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.35)] transition-transform duration-300 group-hover:scale-110 md:size-7"
+                        className={cn(
+                          'size-6 transition-transform duration-300 group-hover:scale-110 md:size-7',
+                          isLightBg
+                            ? 'text-zinc-700'
+                            : 'text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.35)]'
+                        )}
                         strokeWidth={1.75}
                       />
                     </span>
-                    <span className="text-lg font-bold tracking-wide text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.3)] md:text-2xl">
+                    <span
+                      className={cn(
+                        'text-lg font-bold tracking-wide md:text-2xl',
+                        isLightBg ? 'text-zinc-900' : 'text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]'
+                      )}
+                    >
                       No
                     </span>
                   </span>
@@ -1557,9 +1681,10 @@ export default function CheckinPage() {
           key={`face-scan-${animKey}`}
           className="relative z-[1] w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          <TerminalSectionGlow />
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
           <FaceCamera
             variant="terminal"
+            isLightBg={isLightBg}
             branchName={selectedBranch?.name}
             orgId={selectedBranch?.organization_id}
             onMatch={handleFaceMatch}
@@ -1575,11 +1700,11 @@ export default function CheckinPage() {
           key={`face-confirm-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-8 md:gap-10 px-6 pt-16 md:pt-20 pb-8 flex-1 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          <TerminalSectionGlow />
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
           {/* Nombre y pregunta */}
           <div className="relative text-center">
-            <p className={cn('text-lg md:text-xl', terminalBodyMuted)}>¿Sos vos?</p>
-            <h2 className={cn('text-4xl md:text-5xl font-bold mt-2', terminalH1Gradient)}>{faceMatch.clientName}</h2>
+            <p className={cn('text-lg md:text-xl', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>¿Sos vos?</p>
+            <h2 className={cn('text-4xl md:text-5xl font-bold mt-2', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>{faceMatch.clientName}</h2>
           </div>
 
           {/* Botones de confirmación */}
@@ -1588,28 +1713,32 @@ export default function CheckinPage() {
             <div className="flex flex-col items-center gap-3">
               <button
                 onClick={handleFaceConfirmNo}
-                className="size-24 md:size-28 rounded-full bg-red-950/40 border-2 border-red-500/50 shadow-[0_0_28px_rgba(239,68,68,0.2)] flex items-center justify-center active:scale-95 transition-all duration-200 hover:bg-red-950/60 hover:border-red-400 hover:shadow-[0_0_36px_rgba(239,68,68,0.35)]"
+                className={cn(
+                  'size-24 md:size-28 rounded-full border-2 flex items-center justify-center active:scale-95 transition-all duration-200',
+                  isLightBg
+                    ? 'bg-red-100 border-red-300 hover:bg-red-200 hover:border-red-400'
+                    : 'bg-red-950/40 border-red-500/50 shadow-[0_0_28px_rgba(239,68,68,0.2)] hover:bg-red-950/60 hover:border-red-400 hover:shadow-[0_0_36px_rgba(239,68,68,0.35)]'
+                )}
               >
-                <X className="size-12 md:size-14 text-red-400 drop-shadow-[0_0_10px_rgba(248,113,113,0.5)]" strokeWidth={2.5} />
+                <X className={cn('size-12 md:size-14', isLightBg ? 'text-red-500' : 'text-red-400 drop-shadow-[0_0_10px_rgba(248,113,113,0.5)]')} strokeWidth={2.5} />
               </button>
-              <span className="text-red-300/80 text-sm md:text-base">No soy yo</span>
+              <span className={cn('text-sm md:text-base', isLightBg ? 'text-red-600' : 'text-red-300/80')}>No soy yo</span>
             </div>
 
             {/* Sí, soy yo */}
             <div className="flex flex-col items-center gap-3">
-              <div className="relative rounded-full p-[2px]">
-                <div className="absolute inset-0 rounded-full overflow-hidden pointer-events-none">
-                  <div className="absolute inset-[-120%] bg-[conic-gradient(from_0deg,transparent_0%,rgba(34,211,238,0.55)_15%,rgba(52,211,153,0.5)_28%,transparent_42%)] animate-[checkin-terminal-orbit_4s_linear_infinite] motion-reduce:animate-none" />
-                </div>
-                <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-cyan-500/35 to-emerald-500/35 blur-lg opacity-70 animate-[checkin-terminal-neon-pulse_2.8s_ease-in-out_infinite] motion-reduce:animate-none pointer-events-none" />
-                <button
-                  onClick={handleFaceConfirmYes}
-                  className="relative z-[1] size-24 md:size-28 rounded-full bg-zinc-950/90 border border-emerald-400/40 shadow-[0_0_24px_rgba(52,211,153,0.2)] flex items-center justify-center active:scale-95 transition-all duration-200 hover:border-emerald-300/60 hover:shadow-[0_0_36px_rgba(52,211,153,0.35)]"
-                >
-                  <Check className="size-12 md:size-14 text-emerald-400 drop-shadow-[0_0_12px_rgba(52,211,153,0.55)]" strokeWidth={2.5} />
-                </button>
-              </div>
-              <span className="text-emerald-300/85 text-sm md:text-base">Sí, soy yo</span>
+              <button
+                onClick={handleFaceConfirmYes}
+                className={cn(
+                  'size-24 md:size-28 rounded-full border-2 flex items-center justify-center active:scale-95 transition-all duration-200',
+                  isLightBg
+                    ? 'bg-emerald-100 border-emerald-300 hover:bg-emerald-200 hover:border-emerald-400'
+                    : 'bg-zinc-950/90 border-emerald-400/45 shadow-[0_0_28px_rgba(52,211,153,0.22)] hover:border-emerald-300/70 hover:shadow-[0_0_36px_rgba(52,211,153,0.32)]'
+                )}
+              >
+                <Check className={cn('size-12 md:size-14', isLightBg ? 'text-emerald-600' : 'text-emerald-400 drop-shadow-[0_0_12px_rgba(52,211,153,0.55)]')} strokeWidth={2.5} />
+              </button>
+              <span className={cn('text-sm md:text-base', isLightBg ? 'text-emerald-700' : 'text-emerald-300/85')}>Sí, soy yo</span>
             </div>
           </div>
         </div>
@@ -1621,23 +1750,28 @@ export default function CheckinPage() {
           key={`phone-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-2 md:gap-4 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          <TerminalSectionGlow />
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
 
           {/* Show no-match header if coming from face scan */}
           {faceDescriptor && (
             <div className="relative flex flex-col items-center gap-1.5 md:gap-2 mb-1 md:mb-2">
-              <div className="size-10 md:size-14 rounded-full border border-cyan-500/20 bg-cyan-500/10 flex items-center justify-center shadow-[0_0_20px_rgba(34,211,238,0.12)]">
-                <User className="size-5 md:size-7 text-cyan-300/80" />
+              <div className={cn(
+                'size-10 md:size-14 rounded-full border flex items-center justify-center',
+                isLightBg
+                  ? 'border-cyan-300 bg-cyan-50'
+                  : 'border-cyan-500/20 bg-cyan-500/10 shadow-[0_0_20px_rgba(34,211,238,0.12)]'
+              )}>
+                <User className={cn('size-5 md:size-7', isLightBg ? 'text-cyan-600' : 'text-cyan-300/80')} />
               </div>
-              <p className={cn('text-sm md:text-base text-center', terminalBodyMuted)}>
+              <p className={cn('text-sm md:text-base text-center', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
                 No te reconocemos · número de teléfono
               </p>
             </div>
           )}
 
           <div className="relative text-center mt-1 md:mt-2">
-            <h2 className={terminalH2}>Número de teléfono</h2>
-            <p className={cn('mt-0.5 md:mt-2 text-sm md:text-lg', terminalBodyMuted)}>{selectedBranch?.name}</p>
+            <h2 className={cn(terminalH2, isLightBg && 'text-zinc-900')}>Número de teléfono</h2>
+            <p className={cn('mt-0.5 md:mt-2 text-sm md:text-lg', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>{selectedBranch?.name}</p>
           </div>
 
           {renderPhoneKeypad(phone, lookingUp)}
@@ -1650,25 +1784,30 @@ export default function CheckinPage() {
           key={`name-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          <TerminalSectionGlow />
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
 
           {isReturning ? (
             <div className="relative flex flex-col items-center gap-4 md:gap-6 mt-4 md:mt-6">
-              <div className="size-20 md:size-24 rounded-full border border-cyan-500/25 bg-cyan-500/10 shadow-[0_0_28px_rgba(34,211,238,0.15)] flex items-center justify-center animate-in zoom-in-75 duration-500">
+              <div className={cn(
+                'size-20 md:size-24 rounded-full border flex items-center justify-center animate-in zoom-in-75 duration-500',
+                isLightBg
+                  ? 'border-cyan-300 bg-cyan-100 shadow-md'
+                  : 'border-cyan-500/25 bg-cyan-500/10 shadow-[0_0_28px_rgba(34,211,238,0.15)]'
+              )}>
                 <span className="text-4xl md:text-5xl">👋</span>
               </div>
               <div className="text-center">
-                <h2 className={terminalH2}>¡Bienvenido de vuelta!</h2>
-                <p className={cn('text-3xl md:text-4xl font-bold mt-2 md:mt-4', terminalH1Gradient)}>{name}</p>
-                <p className={cn('mt-2 md:mt-3 text-base md:text-lg', terminalBodyMuted)}>Tel: {formatPhone(phone)}</p>
+                <h2 className={cn(terminalH2, isLightBg && 'text-zinc-900')}>¡Bienvenido de vuelta!</h2>
+                <p className={cn('text-3xl md:text-4xl font-bold mt-2 md:mt-4', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>{name}</p>
+                <p className={cn('mt-2 md:mt-3 text-base md:text-lg', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>Tel: {formatPhone(phone)}</p>
               </div>
             </div>
           ) : (
             <div className="relative flex flex-col items-center gap-4 md:gap-6 mt-4 md:mt-6 w-full">
               <div className="text-center">
-                <h2 className={terminalH2}>¡Primera vez!</h2>
-                <p className={cn('text-lg md:text-xl mt-1 md:mt-2', terminalBodyMuted)}>Te damos la bienvenida</p>
-                <p className={cn('mt-1 text-sm md:text-base', terminalBodyMuted)}>
+                <h2 className={cn(terminalH2, isLightBg && 'text-zinc-900')}>¡Primera vez!</h2>
+                <p className={cn('text-lg md:text-xl mt-1 md:mt-2', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>Te damos la bienvenida</p>
+                <p className={cn('mt-1 text-sm md:text-base', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>
                   Ingresá tu nombre para continuar
                 </p>
               </div>
@@ -1680,7 +1819,12 @@ export default function CheckinPage() {
                   if (e.key === 'Enter' && name.trim()) goToBarberStep()
                 }}
                 placeholder="Nombre y apellido"
-                className="h-14 md:h-16 text-xl md:text-2xl text-center rounded-2xl border-cyan-500/20 bg-zinc-950/50 text-cyan-50 placeholder:text-cyan-200/30 shadow-[inset_0_0_24px_rgba(34,211,238,0.04)] focus-visible:border-cyan-400/40"
+                className={cn(
+                  'h-14 md:h-16 text-xl md:text-2xl text-center rounded-2xl',
+                  isLightBg
+                    ? 'border-zinc-300 bg-white text-zinc-900 placeholder:text-zinc-400 shadow-sm focus-visible:border-cyan-500'
+                    : 'border-cyan-500/20 bg-zinc-950/50 text-cyan-50 placeholder:text-cyan-200/30 shadow-[inset_0_0_24px_rgba(34,211,238,0.04)] focus-visible:border-cyan-400/40'
+                )}
                 autoComplete="off"
               />
             </div>
@@ -1690,18 +1834,20 @@ export default function CheckinPage() {
             <p className="text-destructive text-center text-lg">{error}</p>
           )}
 
-          <GlassRing radius="rounded-[0.875rem] md:rounded-[1.375rem]" className="w-full mt-2">
+          <GlassRing radius="rounded-[0.875rem] md:rounded-[1.375rem]" halo={!isLightBg} className="w-full mt-2">
             <Button
               onClick={goToBarberStep}
               disabled={!name.trim()}
               className={cn(
-                terminalPrimaryInnerBtn,
+                isLightBg
+                  ? 'relative z-[1] flex w-full flex-row items-center justify-center gap-3 md:gap-4 overflow-hidden rounded-[0.875rem] md:rounded-[1.375rem] border border-zinc-300 bg-white text-zinc-900 shadow-sm px-3 py-3 md:px-5 md:py-4 transition-all duration-300 hover:border-zinc-400 hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600/35'
+                  : terminalPrimaryInnerBtn,
                 'h-14 md:h-16 min-h-0 rounded-[0.875rem] md:rounded-[1.375rem] text-lg md:text-xl font-semibold shadow-none disabled:opacity-40 disabled:hover:scale-100'
               )}
               size="lg"
             >
-              <span className="checkin-terminal-shimmer-layer pointer-events-none absolute inset-0 rounded-[inherit] opacity-30 motion-reduce:opacity-0" />
-              <span className="relative font-bold tracking-wide text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]">
+              {!isLightBg && <span className="checkin-terminal-shimmer-layer pointer-events-none absolute inset-0 rounded-[inherit] opacity-30 motion-reduce:opacity-0" />}
+              <span className={cn('relative font-bold tracking-wide', isLightBg ? 'text-zinc-900' : 'text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]')}>
                 Continuar
               </span>
             </Button>
@@ -1715,7 +1861,7 @@ export default function CheckinPage() {
           key={`face-enroll-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          <TerminalSectionGlow />
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
 
           <FaceEnrollment
             clientId={faceClientId || undefined}
@@ -1741,11 +1887,13 @@ export default function CheckinPage() {
           key={`service-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-6 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          <TerminalSectionGlow />
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
 
           <div className="relative text-center">
-            <h2 className={terminalH2}>¿Qué te vas a hacer?</h2>
-            <p className={cn('mt-0.5 md:mt-2 text-sm md:text-lg', terminalBodyMuted)}>Elegí tu servicio</p>
+            <h2 className={cn(terminalH2, isLightBg && 'text-zinc-900')}>¿Qué te vas a hacer?</h2>
+            <p className={cn('mt-0.5 md:mt-2 text-sm md:text-lg', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
+              Elegí tu servicio
+            </p>
           </div>
 
           <div className="relative w-full grid gap-3 md:gap-4 mt-1 md:mt-2 overflow-y-auto min-h-0 flex-1">
@@ -1757,19 +1905,37 @@ export default function CheckinPage() {
                   goTo('barber')
                 }}
                 className={cn(
-                  terminalListItem,
-                  'flex items-center justify-between gap-4 w-full p-5 md:p-6 rounded-xl md:rounded-2xl text-left overflow-hidden'
+                  'flex items-center justify-between gap-4 w-full p-5 md:p-6 rounded-xl md:rounded-2xl text-left overflow-hidden transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]',
+                  isLightBg
+                    ? 'border border-zinc-300 bg-white text-zinc-900 shadow-sm hover:border-zinc-400 hover:shadow-md'
+                    : terminalListItem
                 )}
               >
                 <div className="min-w-0">
-                  <h3 className="text-xl md:text-3xl font-semibold text-white truncate">{s.name}</h3>
+                  <h3
+                    className={cn(
+                      'text-xl md:text-3xl font-semibold truncate',
+                      isLightBg ? 'text-zinc-900' : 'text-white'
+                    )}
+                  >
+                    {s.name}
+                  </h3>
                 </div>
                 <div className="shrink-0 text-right">
                   {s.duration_minutes && (
-                    <p className="text-base md:text-lg font-medium text-white/60 mb-1">{s.duration_minutes} min</p>
+                    <p
+                      className={cn(
+                        'text-base md:text-lg font-medium mb-1',
+                        isLightBg ? 'text-zinc-600' : 'text-white/60'
+                      )}
+                    >
+                      {s.duration_minutes} min
+                    </p>
                   )}
                   {s.price > 0 && (
-                    <p className="text-lg md:text-2xl font-bold text-white">${s.price}</p>
+                    <p className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-900' : 'text-white')}>
+                      ${s.price}
+                    </p>
                   )}
                 </div>
               </button>
@@ -1784,10 +1950,10 @@ export default function CheckinPage() {
           key={`barber-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-5 px-4 md:px-6 pt-4 md:pt-10 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          <TerminalSectionGlow />
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
 
           <div className="relative text-center">
-            <p className={cn('text-sm md:text-lg', terminalBodyMuted)}>
+            <p className={cn('text-sm md:text-lg', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
               {name} · {selectedBranch?.name}
             </p>
           </div>
@@ -1826,31 +1992,38 @@ export default function CheckinPage() {
           key={`success-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-2.5 md:gap-4 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
         >
-          <TerminalSectionGlow />
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
           {!changingBarberInSuccess ? (
             <>
               <div
                 className={cn(
                   'w-full max-w-xl p-5 md:p-10 flex flex-col items-center gap-3 md:gap-5 animate-in zoom-in-50 duration-700',
-                  terminalGlassCard
+                  isLightBg
+                    ? 'rounded-2xl md:rounded-3xl border border-zinc-200 bg-white shadow-lg'
+                    : terminalGlassCard
                 )}
               >
-                <div className="size-12 md:size-16 rounded-full bg-emerald-500/10 border border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.15)] flex items-center justify-center">
-                  <CheckCircle2 className="size-6 md:size-9 text-emerald-400" strokeWidth={1.5} />
+                <div className={cn(
+                  'size-12 md:size-16 rounded-full border flex items-center justify-center',
+                  isLightBg
+                    ? 'bg-emerald-50 border-emerald-300'
+                    : 'bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.15)]'
+                )}>
+                  <CheckCircle2 className={cn('size-6 md:size-9', isLightBg ? 'text-emerald-600' : 'text-emerald-400')} strokeWidth={1.5} />
                 </div>
 
-                <h2 className={cn('text-lg md:text-2xl font-bold', terminalBodyMuted)}>¡Estás en la fila!</h2>
+                <h2 className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>¡Estás en la fila!</h2>
 
                 <div className="text-center">
-                  <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', terminalH1Gradient)}>
+                  <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
                     ¡Tomá asiento!
                   </p>
                   {effectiveAhead && effectiveAhead.label && (
-                    <p className="text-lg md:text-xl font-medium text-emerald-400 mt-3">
+                    <p className={cn('text-lg md:text-xl font-medium mt-3', isLightBg ? 'text-emerald-600' : 'text-emerald-400')}>
                       {effectiveAhead.label}
                     </p>
                   )}
-                  <p className={cn('text-base md:text-lg mt-2', terminalBodyMuted)}>
+                  <p className={cn('text-base md:text-lg mt-2', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>
                     Te llamaremos cuando sea tu turno
                   </p>
                 </div>
@@ -1864,7 +2037,12 @@ export default function CheckinPage() {
                       setChangingBarberInSuccess(true)
                     }}
                     variant="outline"
-                    className="h-11 md:h-12 text-sm md:text-base rounded-xl w-full max-w-xs border-cyan-500/25 bg-zinc-950/40 text-cyan-100 hover:bg-cyan-950/30 hover:text-white hover:border-cyan-400/40"
+                    className={cn(
+                      'h-11 md:h-12 text-sm md:text-base rounded-xl w-full max-w-xs',
+                      isLightBg
+                        ? 'border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 hover:border-zinc-400'
+                        : 'border-cyan-500/25 bg-zinc-950/40 text-cyan-100 hover:bg-cyan-950/30 hover:text-white hover:border-cyan-400/40'
+                    )}
                   >
                     <RefreshCw className="size-4 mr-2" />
                     Cambiar barbero
@@ -1878,14 +2056,19 @@ export default function CheckinPage() {
                       if (resetTimer.current) clearTimeout(resetTimer.current)
                       goTo('face_enroll')
                     }}
-                    className="flex items-center gap-3 rounded-xl border border-cyan-500/25 bg-cyan-950/30 p-3 w-full max-w-xs transition-all hover:bg-cyan-950/45 hover:border-cyan-400/40 hover:shadow-[0_0_24px_rgba(34,211,238,0.12)] active:scale-[0.98]"
+                    className={cn(
+                      'flex items-center gap-3 rounded-xl border p-3 w-full max-w-xs transition-all active:scale-[0.98]',
+                      isLightBg
+                        ? 'border-zinc-300 bg-white hover:bg-zinc-50 hover:border-zinc-400 hover:shadow-sm'
+                        : 'border-cyan-500/25 bg-cyan-950/30 hover:bg-cyan-950/45 hover:border-cyan-400/40 hover:shadow-[0_0_24px_rgba(34,211,238,0.12)]'
+                    )}
                   >
-                    <div className="shrink-0 size-8 rounded-lg border border-cyan-500/20 bg-cyan-500/10 flex items-center justify-center">
-                      <User className="size-4 text-cyan-300" />
+                    <div className={cn('shrink-0 size-8 rounded-lg border flex items-center justify-center', isLightBg ? 'border-cyan-300 bg-cyan-50' : 'border-cyan-500/20 bg-cyan-500/10')}>
+                      <User className={cn('size-4', isLightBg ? 'text-cyan-600' : 'text-cyan-300')} />
                     </div>
                     <div className="text-left">
-                      <p className="text-sm font-medium text-cyan-200">Registrar tu cara</p>
-                      <p className="text-xs text-cyan-300/65 mt-0.5">
+                      <p className={cn('text-sm font-medium', isLightBg ? 'text-zinc-800' : 'text-cyan-200')}>Registrar tu cara</p>
+                      <p className={cn('text-xs mt-0.5', isLightBg ? 'text-zinc-500' : 'text-cyan-300/65')}>
                         Hacé check-in solo con mirarte
                       </p>
                     </div>
@@ -1894,22 +2077,22 @@ export default function CheckinPage() {
               </div>
 
               {/* Countdown bar */}
-              <div className={cn(terminalProgressTrack, 'mt-2')}>
+              <div className={cn(isLightBg ? 'w-full max-w-xs h-1 rounded-full bg-zinc-200 overflow-hidden border border-zinc-300' : terminalProgressTrack, 'mt-2')}>
                 <div
-                  className={terminalProgressFill}
+                  className={isLightBg ? 'h-full rounded-full origin-left bg-gradient-to-r from-cyan-500 via-zinc-700 to-violet-500' : terminalProgressFill}
                   style={{
                     animation: `checkin-countdown ${RESET_DELAY_MS}ms linear forwards`,
                   }}
                 />
               </div>
-              <p className={cn('text-xs', terminalBodyMuted)}>Volviendo al inicio...</p>
+              <p className={cn('text-xs', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>Volviendo al inicio...</p>
             </>
           ) : (
             <>
 
               <div className="relative text-center">
-                <h2 className={terminalH2}>Cambiar barbero</h2>
-                <p className={cn('mt-1 md:mt-2 text-base md:text-lg', terminalBodyMuted)}>
+                <h2 className={cn(terminalH2, isLightBg && 'text-zinc-900')}>Cambiar barbero</h2>
+                <p className={cn('mt-1 md:mt-2 text-base md:text-lg', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
                   Seleccioná otro barbero
                 </p>
               </div>
@@ -1952,15 +2135,16 @@ export default function CheckinPage() {
           key={`staff-face-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          <TerminalSectionGlow />
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
           <div className="relative text-center mt-2">
-            <h2 className={terminalH2}>Identificación barbero</h2>
-            <p className={cn('mt-1 md:mt-2 text-base md:text-lg', terminalBodyMuted)}>
+            <h2 className={cn(terminalH2, isLightBg && 'text-zinc-900')}>Identificación barbero</h2>
+            <p className={cn('mt-1 md:mt-2 text-base md:text-lg', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
               Mirá la cámara para identificarte
             </p>
           </div>
           <FaceCamera
             variant="terminal"
+            isLightBg={isLightBg}
             branchName={selectedBranch?.name ?? 'Sucursal'}
             targetRole="staff"
             orgId={selectedBranch?.organization_id}
@@ -1985,7 +2169,7 @@ export default function CheckinPage() {
           key={`staff-action-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
         >
-          <TerminalSectionGlow />
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
           {!staffActionDone ? (
             <>
               <div className="relative text-center">
@@ -1994,8 +2178,8 @@ export default function CheckinPage() {
                     {staffFaceMatch.clientName.charAt(0)}
                   </span>
                 </div>
-                <h2 className={cn('text-2xl md:text-3xl font-bold', terminalH1Gradient)}>{staffFaceMatch.clientName}</h2>
-                <p className={cn('mt-1 md:mt-2 text-base md:text-lg', terminalBodyMuted)}>¿Qué querés registrar?</p>
+                <h2 className={cn('text-2xl md:text-3xl font-bold', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>{staffFaceMatch.clientName}</h2>
+                <p className={cn('mt-1 md:mt-2 text-base md:text-lg', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>¿Qué querés registrar?</p>
               </div>
 
               <div className="relative w-full grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
@@ -2057,25 +2241,30 @@ export default function CheckinPage() {
             </>
           ) : (
             <>
-              <div className="size-24 md:size-28 rounded-full border border-cyan-400/30 bg-zinc-950/60 shadow-[0_0_36px_rgba(34,211,238,0.15)] flex items-center justify-center animate-in zoom-in-50 duration-700">
-                <CheckCircle2 className="size-12 md:size-16 text-cyan-300" strokeWidth={1.5} />
+              <div className={cn(
+                'size-24 md:size-28 rounded-full border flex items-center justify-center animate-in zoom-in-50 duration-700',
+                isLightBg
+                  ? 'border-cyan-300 bg-cyan-50 shadow-md'
+                  : 'border-cyan-400/30 bg-zinc-950/60 shadow-[0_0_36px_rgba(34,211,238,0.15)]'
+              )}>
+                <CheckCircle2 className={cn('size-12 md:size-16', isLightBg ? 'text-cyan-600' : 'text-cyan-300')} strokeWidth={1.5} />
               </div>
               <div className="text-center">
-                <h2 className={cn('text-3xl md:text-4xl font-bold', terminalH1Gradient)}>
+                <h2 className={cn('text-3xl md:text-4xl font-bold', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
                   {staffAction === 'clock_in' ? '¡Entrada registrada!' : '¡Salida registrada!'}
                 </h2>
-                <p className={cn('text-xl md:text-2xl mt-2 md:mt-3', terminalBodyMuted)}>{staffFaceMatch.clientName}</p>
-                <p className={cn('text-base md:text-lg mt-1', terminalBodyMuted)}>
+                <p className={cn('text-xl md:text-2xl mt-2 md:mt-3', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>{staffFaceMatch.clientName}</p>
+                <p className={cn('text-base md:text-lg mt-1', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>
                   {new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
-              <div className={terminalProgressTrack}>
+              <div className={isLightBg ? 'w-full max-w-xs h-1 rounded-full bg-zinc-200 overflow-hidden border border-zinc-300' : terminalProgressTrack}>
                 <div
-                  className={terminalProgressFill}
+                  className={isLightBg ? 'h-full rounded-full origin-left bg-gradient-to-r from-cyan-500 via-zinc-700 to-violet-500' : terminalProgressFill}
                   style={{ animation: `checkin-countdown ${RESET_DELAY_MS}ms linear forwards` }}
                 />
               </div>
-              <p className={cn('text-sm', terminalBodyMuted)}>Volviendo al inicio...</p>
+              <p className={cn('text-sm', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>Volviendo al inicio...</p>
             </>
           )}
         </div>
@@ -2087,7 +2276,7 @@ export default function CheckinPage() {
           key={`staff-pin-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          <TerminalSectionGlow />
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
 
           {!staffPinSelected ? (
             <>
@@ -2095,8 +2284,8 @@ export default function CheckinPage() {
                 <div className="size-14 md:size-16 rounded-full border border-amber-400/35 bg-amber-950/30 shadow-[0_0_24px_rgba(251,191,36,0.12)] flex items-center justify-center mx-auto mb-3">
                   <ScanFace className="size-7 md:size-8 text-amber-300" strokeWidth={1.5} />
                 </div>
-                <h2 className={terminalH2}>No te reconocimos</h2>
-                <p className={cn('mt-1 md:mt-2 text-base md:text-lg', terminalBodyMuted)}>
+                <h2 className={cn(terminalH2, isLightBg && 'text-zinc-900')}>No te reconocimos</h2>
+                <p className={cn('mt-1 md:mt-2 text-base md:text-lg', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
                   Ingresá tu PIN para registrar tu rostro
                 </p>
               </div>
@@ -2162,10 +2351,10 @@ export default function CheckinPage() {
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div
                     key={i}
-                    className={`size-4 rounded-full border-2 transition-colors ${i < staffPinValue.length
-                      ? 'border-white bg-white'
-                      : 'border-white/30'
-                      }`}
+                    className={cn('size-4 rounded-full border-2 transition-colors', i < staffPinValue.length
+                      ? (isLightBg ? 'border-zinc-900 bg-zinc-900' : 'border-white bg-white')
+                      : (isLightBg ? 'border-zinc-300' : 'border-white/30')
+                    )}
                   />
                 ))}
               </div>
@@ -2272,7 +2461,7 @@ export default function CheckinPage() {
           key={`staff-enroll-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          <TerminalSectionGlow />
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
 
           <FaceEnrollment
             clientName={staffEnrollName}
@@ -2319,42 +2508,44 @@ export default function CheckinPage() {
           key={`manage-turn-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-4 md:gap-5 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          <TerminalSectionGlow />
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
 
           {!changingBarberInManage ? (
             <>
               <div
                 className={cn(
                   'w-full max-w-xl p-5 md:p-10 flex flex-col items-center gap-3 md:gap-5 animate-in zoom-in-50 duration-700',
-                  terminalGlassCard
+                  isLightBg
+                    ? 'rounded-2xl md:rounded-3xl border border-zinc-200 bg-white shadow-lg'
+                    : terminalGlassCard
                 )}
               >
                 {myQueueEntry.status === 'in_progress' ? (
                   <>
-                    <div className="size-12 md:size-16 rounded-full bg-emerald-500/10 border border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.12)] flex items-center justify-center">
-                      <CheckCircle2 className="size-6 md:size-9 text-emerald-400" strokeWidth={1.5} />
+                    <div className={cn('size-12 md:size-16 rounded-full border flex items-center justify-center', isLightBg ? 'bg-emerald-50 border-emerald-300' : 'bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.12)]')}>
+                      <CheckCircle2 className={cn('size-6 md:size-9', isLightBg ? 'text-emerald-600' : 'text-emerald-400')} strokeWidth={1.5} />
                     </div>
-                    <h2 className={cn('text-lg md:text-2xl font-bold', terminalBodyMuted)}>¡Ya es tu turno!</h2>
+                    <h2 className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>¡Ya es tu turno!</h2>
                     <div className="text-center">
-                      <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', terminalH1Gradient)}>
+                      <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
                         ¡Acercate!
                       </p>
-                      <p className="text-base md:text-lg text-emerald-400 mt-2">
+                      <p className={cn('text-base md:text-lg mt-2', isLightBg ? 'text-emerald-600' : 'text-emerald-400')}>
                         Tu barbero te está esperando
                       </p>
                     </div>
                   </>
                 ) : (
                   <>
-                    <div className="size-12 md:size-16 rounded-full bg-emerald-500/10 border border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.12)] flex items-center justify-center">
-                      <CheckCircle2 className="size-6 md:size-9 text-emerald-400" strokeWidth={1.5} />
+                    <div className={cn('size-12 md:size-16 rounded-full border flex items-center justify-center', isLightBg ? 'bg-emerald-50 border-emerald-300' : 'bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.12)]')}>
+                      <CheckCircle2 className={cn('size-6 md:size-9', isLightBg ? 'text-emerald-600' : 'text-emerald-400')} strokeWidth={1.5} />
                     </div>
-                    <h2 className={cn('text-lg md:text-2xl font-bold', terminalBodyMuted)}>¡Estás en la fila!</h2>
+                    <h2 className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>¡Estás en la fila!</h2>
                     <div className="text-center">
-                      <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', terminalH1Gradient)}>
+                      <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
                         ¡Tomá asiento!
                       </p>
-                      <p className={cn('text-base md:text-lg mt-2', terminalBodyMuted)}>
+                      <p className={cn('text-base md:text-lg mt-2', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>
                         Ya te llamamos cuando sea tu turno
                       </p>
                     </div>
@@ -2362,16 +2553,16 @@ export default function CheckinPage() {
                 )}
 
                 {myQueueEntry.barber && (
-                  <div className={cn('w-full p-3 md:p-4 mt-1', terminalGlassCardInner)}>
+                  <div className={cn('w-full p-3 md:p-4 mt-1', isLightBg ? 'rounded-xl border border-zinc-200 bg-zinc-50' : terminalGlassCardInner)}>
                     <div className="flex items-center gap-3 justify-center">
-                      <div className="flex size-10 md:size-12 items-center justify-center rounded-full border border-cyan-500/20 bg-cyan-500/10 text-sm md:text-base font-bold text-cyan-100 shrink-0">
+                      <div className={cn('flex size-10 md:size-12 items-center justify-center rounded-full border text-sm md:text-base font-bold shrink-0', isLightBg ? 'border-cyan-300 bg-cyan-50 text-cyan-700' : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-100')}>
                         {(myQueueEntry.barber as Staff).full_name.charAt(0).toUpperCase()}
                       </div>
                       <div className="min-w-0">
-                        <p className="text-base md:text-lg font-semibold truncate">
+                        <p className={cn('text-base md:text-lg font-semibold truncate', isLightBg && 'text-zinc-900')}>
                           {(myQueueEntry.barber as Staff).full_name}
                         </p>
-                        <p className={cn('text-xs md:text-sm', terminalBodyMuted)}>Tu barbero asignado</p>
+                        <p className={cn('text-xs md:text-sm', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>Tu barbero asignado</p>
                       </div>
                     </div>
                   </div>
@@ -2386,7 +2577,12 @@ export default function CheckinPage() {
                       setChangingBarberInManage(true)
                     }}
                     variant="outline"
-                    className="h-11 md:h-12 text-sm md:text-base rounded-xl w-full max-w-xs border-cyan-500/25 bg-zinc-950/40 text-cyan-100 hover:bg-cyan-950/30 hover:text-white"
+                    className={cn(
+                      'h-11 md:h-12 text-sm md:text-base rounded-xl w-full max-w-xs',
+                      isLightBg
+                        ? 'border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 hover:border-zinc-400'
+                        : 'border-cyan-500/25 bg-zinc-950/40 text-cyan-100 hover:bg-cyan-950/30 hover:text-white'
+                    )}
                   >
                     <RefreshCw className="size-4 mr-2" />
                     Cambiar barbero
@@ -2395,18 +2591,18 @@ export default function CheckinPage() {
               </div>
 
               {/* Countdown bar */}
-              <div className={terminalProgressTrack}>
+              <div className={isLightBg ? 'w-full max-w-xs h-1 rounded-full bg-zinc-200 overflow-hidden border border-zinc-300' : terminalProgressTrack}>
                 <div
-                  className={terminalProgressFill}
+                  className={isLightBg ? 'h-full rounded-full origin-left bg-gradient-to-r from-cyan-500 via-zinc-700 to-violet-500' : terminalProgressFill}
                   style={{ animation: `checkin-countdown ${RESET_DELAY_MS}ms linear forwards` }}
                 />
               </div>
-              <p className={cn('text-xs md:text-sm text-center', terminalBodyMuted)}>Volviendo al inicio...</p>
+              <p className={cn('text-xs md:text-sm text-center', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>Volviendo al inicio...</p>
             </>
           ) : (
             <>
               <div className="relative text-center">
-                <h2 className={terminalH2}>Cambiar barbero</h2>
+                <h2 className={cn(terminalH2, isLightBg && 'text-zinc-900')}>Cambiar barbero</h2>
               </div>
 
               {loadingBarbers ? (
