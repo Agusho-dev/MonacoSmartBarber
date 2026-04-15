@@ -1363,7 +1363,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
         fetchQueue() // reset visual state
       }}
     >
-      <div className="flex h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-5rem)] flex-col gap-2 lg:gap-4 overflow-hidden p-1">
+      <div className="flex h-[calc(100dvh-9rem)] lg:h-[calc(100dvh-9.5rem)] flex-col gap-2 lg:gap-4 overflow-hidden p-1">
 
         {/* Encabezado y Descansos (Top Bar) */}
         <div className="flex shrink-0 flex-col gap-2 lg:gap-3 px-2">
