@@ -185,14 +185,13 @@ interface SidebarContentProps {
   children: React.ReactNode
 }
 
-function OrgLogo({ url, size = 5 }: { url: string | null; size?: number }) {
+function OrgLogo({ url }: { url: string | null }) {
   if (url) {
     return (
       <img
         src={url}
         alt=""
-        className="shrink-0 rounded-full object-cover"
-        style={{ width: `${size * 4}px`, height: `${size * 4}px` }}
+        className="size-8 shrink-0 rounded-full object-cover"
       />
     )
   }
