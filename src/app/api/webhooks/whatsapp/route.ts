@@ -8,23 +8,101 @@ function getSupabase() {
   )
 }
 
-/** Meta envía `contacts[].profile.name` (nombre en WhatsApp) junto a los mensajes. */
-type WaWebhookContact = { profile?: { name?: string }; wa_id?: string }
+/** Meta envía `value.contacts[].profile.name` (nombre en perfil WA) junto a los mensajes. */
+type WaWebhookContact = {
+  profile?: { name?: string }
+  wa_id?: string
+  /** Variantes vistas en payloads / partners */
+  id?: string
+  input?: string
+  name?: string
+}
 
-function buildWhatsappContactNames(contacts: WaWebhookContact[] | undefined): Map<string, string> {
+function normalizeWaDigits(raw: string | undefined | null): string {
+  if (!raw) return ''
+  const beforeAt = String(raw).split('@')[0] ?? ''
+  return beforeAt.replace(/\D/g, '')
+}
+
+function extractGlobalContacts(value: { contacts?: unknown }): WaWebhookContact[] {
+  const c = value?.contacts
+  if (!c) return []
+  if (Array.isArray(c)) return c as WaWebhookContact[]
+  if (typeof c === 'object') return Object.values(c as Record<string, WaWebhookContact>)
+  return []
+}
+
+function contactDisplayName(c: WaWebhookContact): string | null {
+  const n = c.profile?.name ?? c.name
+  const t = typeof n === 'string' ? n.trim() : ''
+  return t || null
+}
+
+function contactWaDigits(c: WaWebhookContact): string {
+  return normalizeWaDigits(c.wa_id ?? c.input ?? c.id)
+}
+
+/** Mapa wa_id (completo y últimos 10 dígitos) → nombre mostrado en WhatsApp. */
+function buildWhatsappContactNameMap(value: { contacts?: unknown }): Map<string, string> {
   const map = new Map<string, string>()
-  for (const c of contacts ?? []) {
-    const label = c.profile?.name?.trim()
-    const waId = c.wa_id?.replace(/\D/g, '')
-    if (!label || !waId) continue
-    map.set(waId, label)
+  const setKey = (key: string, label: string) => {
+    if (!key || !label) return
+    const prev = map.get(key)
+    if (!prev || prev === label) map.set(key, label)
+  }
+  for (const c of extractGlobalContacts(value)) {
+    const label = contactDisplayName(c)
+    const full = contactWaDigits(c)
+    if (!label || !full) continue
+    setKey(full, label)
+    if (full.length >= 10) setKey(full.slice(-10), label)
   }
   return map
 }
 
-function waProfileNameForFrom(from: string, byWaId: Map<string, string>): string | null {
-  const digits = from.replace(/\D/g, '')
-  return byWaId.get(digits) ?? null
+/**
+ * Resuelve el nombre de perfil del remitente a partir del webhook.
+ * Incluye fallback si hay un solo mensaje y un solo contacto (wa_id a veces no coincide con `from`).
+ */
+function waProfileNameFromWebhookValue(
+  value: { contacts?: unknown; messages?: unknown[] },
+  from: string,
+): string | null {
+  const map = buildWhatsappContactNameMap(value)
+  const fromDigits = normalizeWaDigits(from)
+  if (fromDigits) {
+    const byFull = map.get(fromDigits)
+    if (byFull) return byFull
+    if (fromDigits.length >= 10) {
+      const bySuffix = map.get(fromDigits.slice(-10))
+      if (bySuffix) return bySuffix
+    }
+  }
+  const msgs = Array.isArray(value.messages) ? value.messages : []
+  const contacts = extractGlobalContacts(value)
+  if (msgs.length === 1 && contacts.length === 1) {
+    const solo = contactDisplayName(contacts[0])
+    if (solo) return solo
+  }
+  // Contacto con nombre pero sin wa_id en el JSON (Meta a veces omite el id)
+  const distinctFromDigits = new Set<string>()
+  for (const m of msgs) {
+    if (m && typeof m === 'object' && typeof (m as { from?: string }).from === 'string') {
+      const d = normalizeWaDigits((m as { from: string }).from)
+      if (d) distinctFromDigits.add(d)
+    }
+  }
+  const namedSansWaId = contacts.filter((c) => contactDisplayName(c) && !contactWaDigits(c))
+  if (
+    namedSansWaId.length === 1
+    && distinctFromDigits.size === 1
+    && fromDigits
+    && distinctFromDigits.has(fromDigits)
+  ) {
+    const n = contactDisplayName(namedSansWaId[0])
+    if (n) return n
+  }
+  return null
 }
 
 function isPlainWhatsAppAddressLabel(s: string | null | undefined): boolean {
@@ -214,8 +292,6 @@ export async function POST(req: NextRequest) {
 
       if (!waChannel) continue
 
-      const waContactNames = buildWhatsappContactNames(value.contacts)
-
       // Procesar mensajes entrantes (incluye interactive para botones/listas)
       for (const message of value.messages ?? []) {
         if (!['text', 'image', 'audio', 'video', 'document', 'interactive', 'button'].includes(message.type)) continue
@@ -280,7 +356,7 @@ export async function POST(req: NextRequest) {
         // IMPORTANTE: limit(1) antes de maybeSingle() para evitar error 406 si hay
         // múltiples conversaciones con el mismo sufijo (legacy duplicates)
         const fromSuffix = from.slice(-10)
-        const profileName = waProfileNameForFrom(from, waContactNames)
+        const profileName = waProfileNameFromWebhookValue(value, from)
 
         const { data: existingConv } = await supabase
           .from('conversations')

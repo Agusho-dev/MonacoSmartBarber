@@ -301,10 +301,42 @@ export function MensajeriaProvider({
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations' }, (payload) => {
         const updated = payload.new as ConversationWithRelations
         setConversations(prev => prev.map(c =>
-          c.id === updated.id ? { ...c, unread_count: updated.unread_count, last_message_at: updated.last_message_at } : c
+          c.id === updated.id
+            ? {
+                ...c,
+                client_id: updated.client_id,
+                platform_user_id: updated.platform_user_id,
+                platform_user_name: updated.platform_user_name,
+                status: updated.status,
+                unread_count: updated.unread_count,
+                last_message_at: updated.last_message_at,
+                last_inbound_at: updated.last_inbound_at,
+                last_outbound_at: updated.last_outbound_at,
+                can_reply_until: updated.can_reply_until,
+                closed_at: updated.closed_at,
+                reopened_at: updated.reopened_at,
+                updated_at: updated.updated_at,
+              }
+            : c,
         ))
         if (activeConv?.id === updated.id) {
-          setActiveConv(prev => prev ? { ...prev, unread_count: updated.unread_count, last_message_at: updated.last_message_at } : prev)
+          setActiveConv(prev => prev
+            ? {
+                ...prev,
+                client_id: updated.client_id,
+                platform_user_id: updated.platform_user_id,
+                platform_user_name: updated.platform_user_name,
+                status: updated.status,
+                unread_count: updated.unread_count,
+                last_message_at: updated.last_message_at,
+                last_inbound_at: updated.last_inbound_at,
+                last_outbound_at: updated.last_outbound_at,
+                can_reply_until: updated.can_reply_until,
+                closed_at: updated.closed_at,
+                reopened_at: updated.reopened_at,
+                updated_at: updated.updated_at,
+              }
+            : prev)
         }
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversation_tag_assignments' }, async (payload) => {
