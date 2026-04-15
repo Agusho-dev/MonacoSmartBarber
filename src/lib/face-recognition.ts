@@ -43,10 +43,16 @@ async function loadFaceApi(): Promise<FaceApiModule> {
   return faceapi
 }
 
+export interface FaceLandmarkPoint {
+  x: number
+  y: number
+}
+
 export interface FaceDetectionResult {
   descriptor: Float32Array
   score: number
   box: { x: number; y: number; width: number; height: number }
+  landmarks: FaceLandmarkPoint[]
 }
 
 export interface FaceMatchResult {
@@ -93,10 +99,15 @@ export async function detectFace(
   const { score } = detection.detection
   const { x, y, width, height } = detection.detection.box
 
+  // Extraer los 68 puntos de landmarks faciales
+  const positions = detection.landmarks.positions
+  const landmarks: FaceLandmarkPoint[] = positions.map((p: any) => ({ x: p.x ?? p._x, y: p.y ?? p._y }))
+
   return {
     descriptor: detection.descriptor,
     score,
     box: { x, y, width, height },
+    landmarks,
   }
 }
 

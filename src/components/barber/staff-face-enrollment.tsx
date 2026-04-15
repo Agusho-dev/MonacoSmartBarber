@@ -8,7 +8,9 @@ import {
     saveStaffFacePhoto,
     captureFrameAsBlob,
     areModelsLoaded,
+    type FaceLandmarkPoint,
 } from '@/lib/face-recognition'
+import { drawFaceOverlayWithMesh } from '@/lib/face-mesh'
 import { Loader2, Camera, CheckCircle2, SkipForward } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -39,6 +41,11 @@ export function StaffFaceEnrollment({
     const [state, setState] = useState<EnrollState>('loading')
     const [capturedCount, setCapturedCount] = useState(0)
     const [faceDetected, setFaceDetected] = useState(false)
+    const canvasRef = useRef<HTMLCanvasElement>(null)
+    const landmarksRef = useRef<FaceLandmarkPoint[] | null>(null)
+    const faceBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
+    const faceValidRef = useRef(false)
+    const meshAnimRef = useRef<number | null>(null)
 
     const stopCamera = useCallback(() => {
         if (streamRef.current) {
@@ -92,13 +99,57 @@ export function StaffFaceEnrollment({
             if (cancelled || !videoRef.current || !areModelsLoaded()) return
             const detection = await detectFace(videoRef.current)
             if (cancelled) return
-            setFaceDetected(!!detection && detection.score > 0.7)
+
+            if (detection && detection.score > 0.7) {
+                faceBoxRef.current = detection.box
+                landmarksRef.current = detection.landmarks
+                faceValidRef.current = true
+                setFaceDetected(true)
+            } else {
+                faceBoxRef.current = null
+                landmarksRef.current = null
+                faceValidRef.current = false
+                setFaceDetected(false)
+            }
+
             setTimeout(checkFace, 500)
         }
 
         checkFace()
         return () => { cancelled = true }
     }, [state])
+
+    // Loop de animación — solo cuando la cara está validada
+    useEffect(() => {
+        const animate = () => {
+            const canvas = canvasRef.current
+            const video = videoRef.current
+            if (canvas && video && video.videoWidth > 0) {
+                canvas.width = video.videoWidth
+                canvas.height = video.videoHeight
+                const ctx = canvas.getContext('2d')!
+
+                if (faceValidRef.current && landmarksRef.current) {
+                    drawFaceOverlayWithMesh(
+                        ctx,
+                        canvas.width,
+                        canvas.height,
+                        landmarksRef.current,
+                        faceBoxRef.current,
+                        faceValidRef.current,
+                        { time: Date.now() }
+                    )
+                } else {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height)
+                }
+            }
+            meshAnimRef.current = requestAnimationFrame(animate)
+        }
+        meshAnimRef.current = requestAnimationFrame(animate)
+        return () => {
+            if (meshAnimRef.current) cancelAnimationFrame(meshAnimRef.current)
+        }
+    }, [])
 
     const handleCapture = useCallback(async () => {
         if (!videoRef.current || !areModelsLoaded()) return
@@ -172,6 +223,11 @@ export function StaffFaceEnrollment({
                     className="absolute inset-0 w-full h-full object-cover"
                     playsInline
                     muted
+                    style={{ transform: 'scaleX(-1)' }}
+                />
+                <canvas
+                    ref={canvasRef}
+                    className="absolute inset-0 w-full h-full object-cover pointer-events-none"
                     style={{ transform: 'scaleX(-1)' }}
                 />
 

@@ -8,7 +8,9 @@ import {
   saveFacePhoto,
   captureFrameAsBlob,
   areModelsLoaded,
+  type FaceLandmarkPoint,
 } from '@/lib/face-recognition'
+import { drawFaceOverlayWithMesh } from '@/lib/face-mesh'
 import { Loader2, Camera, CheckCircle2, SkipForward } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -45,6 +47,11 @@ export function FaceEnrollment({
   const [faceDetected, setFaceDetected] = useState(false)
   const autoCaptureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleCaptureRef = useRef<(() => void) | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const landmarksRef = useRef<FaceLandmarkPoint[] | null>(null)
+  const faceBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
+  const faceValidRef = useRef(false)
+  const meshAnimRef = useRef<number | null>(null)
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -112,6 +119,14 @@ export function FaceEnrollment({
           faceCenterY > videoH * 0.20 &&
           faceCenterY < videoH * 0.80
         )
+
+        faceBoxRef.current = detection.box
+        landmarksRef.current = detection.landmarks
+        faceValidRef.current = isFaceValid && detection.score > 0.6
+      } else {
+        faceBoxRef.current = null
+        landmarksRef.current = null
+        faceValidRef.current = false
       }
 
       setFaceDetected(!!detection && isFaceValid && detection.score > 0.6)
@@ -146,6 +161,38 @@ export function FaceEnrollment({
       }
     }
   }, [state, faceDetected])
+
+  // Loop de animación — solo dibuja cuando la cara está bien posicionada
+  useEffect(() => {
+    const animate = () => {
+      const canvas = canvasRef.current
+      const video = videoRef.current
+      if (canvas && video && video.videoWidth > 0) {
+        canvas.width = video.videoWidth
+        canvas.height = video.videoHeight
+        const ctx = canvas.getContext('2d')!
+
+        if (faceValidRef.current && landmarksRef.current) {
+          drawFaceOverlayWithMesh(
+            ctx,
+            canvas.width,
+            canvas.height,
+            landmarksRef.current,
+            faceBoxRef.current,
+            faceValidRef.current,
+            { time: Date.now() }
+          )
+        } else {
+          ctx.clearRect(0, 0, canvas.width, canvas.height)
+        }
+      }
+      meshAnimRef.current = requestAnimationFrame(animate)
+    }
+    meshAnimRef.current = requestAnimationFrame(animate)
+    return () => {
+      if (meshAnimRef.current) cancelAnimationFrame(meshAnimRef.current)
+    }
+  }, [])
 
   const handleCapture = useCallback(async () => {
     if (!videoRef.current || !areModelsLoaded()) return
@@ -269,6 +316,11 @@ export function FaceEnrollment({
           className="absolute inset-0 w-full h-full object-cover"
           playsInline
           muted
+          style={{ transform: 'scaleX(-1)' }}
+        />
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
           style={{ transform: 'scaleX(-1)' }}
         />
 

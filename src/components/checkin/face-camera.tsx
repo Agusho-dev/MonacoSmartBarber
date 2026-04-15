@@ -9,7 +9,9 @@ import {
   areModelsLoaded,
   type FaceDetectionResult,
   type FaceMatchResult,
+  type FaceLandmarkPoint,
 } from '@/lib/face-recognition'
+import { drawFaceOverlayWithMesh } from '@/lib/face-mesh'
 import { Loader2, Camera, KeyboardIcon, UserCheck, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -63,6 +65,11 @@ export function FaceCamera({
   const [lastDescriptor, setLastDescriptor] = useState<Float32Array | null>(null)
   const [faceBox, setFaceBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const consecutiveMatchRef = useRef<{ clientId: string; count: number } | null>(null)
+  const landmarksRef = useRef<FaceLandmarkPoint[] | null>(null)
+  const faceBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
+  const faceValidRef = useRef(false)
+  const meshAnimRef = useRef<number | null>(null)
+  const showMeshRef = useRef(false)
 
   const stopCamera = useCallback(() => {
     if (scanTimerRef.current) {
@@ -118,30 +125,53 @@ export function FaceCamera({
 
   const drawFaceOverlay = useCallback(
     (detection: FaceDetectionResult | null, isValid: boolean = false) => {
-      const canvas = canvasRef.current
-      const video = videoRef.current
-      if (!canvas || !video) return
-
-      canvas.width = video.videoWidth
-      canvas.height = video.videoHeight
-      const ctx = canvas.getContext('2d')!
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-
       if (detection) {
         const { x, y, width, height } = detection.box
-        ctx.strokeStyle = isValid ? '#22c55e' : '#f59e0b'
-        ctx.lineWidth = 3
-        ctx.beginPath()
-        ctx.roundRect(x, y, width, height, 12)
-        ctx.stroke()
-
+        faceBoxRef.current = { x, y, width, height }
+        landmarksRef.current = detection.landmarks
+        faceValidRef.current = isValid
         setFaceBox({ x, y, w: width, h: height })
       } else {
+        faceBoxRef.current = null
+        landmarksRef.current = null
+        faceValidRef.current = false
         setFaceBox(null)
       }
     },
     []
   )
+
+  // Loop de animación — solo dibuja la malla cuando la cara está quieta y validada
+  useEffect(() => {
+    const animate = () => {
+      const canvas = canvasRef.current
+      const video = videoRef.current
+      if (canvas && video && video.videoWidth > 0) {
+        canvas.width = video.videoWidth
+        canvas.height = video.videoHeight
+        const ctx = canvas.getContext('2d')!
+
+        if (showMeshRef.current && landmarksRef.current) {
+          drawFaceOverlayWithMesh(
+            ctx,
+            canvas.width,
+            canvas.height,
+            landmarksRef.current,
+            faceBoxRef.current,
+            faceValidRef.current,
+            { time: Date.now() }
+          )
+        } else {
+          ctx.clearRect(0, 0, canvas.width, canvas.height)
+        }
+      }
+      meshAnimRef.current = requestAnimationFrame(animate)
+    }
+    meshAnimRef.current = requestAnimationFrame(animate)
+    return () => {
+      if (meshAnimRef.current) cancelAnimationFrame(meshAnimRef.current)
+    }
+  }, [])
 
   const runScanLoop = useCallback(async () => {
     if (!mountedRef.current || !videoRef.current || !areModelsLoaded()) return
@@ -172,6 +202,8 @@ export function FaceCamera({
     drawFaceOverlay(detection, isFaceValid)
 
     if (detection && isFaceValid) {
+      // Activar malla de puntos cuando la cara está validada y quieta
+      showMeshRef.current = true
       setState('matching')
       setLastDescriptor(detection.descriptor)
 
@@ -202,6 +234,7 @@ export function FaceCamera({
         }
       } else {
         consecutiveMatchRef.current = null
+        showMeshRef.current = false
         setState('no_match')
         setTimeout(() => {
           if (mountedRef.current) {
@@ -211,6 +244,7 @@ export function FaceCamera({
       }
     } else {
       consecutiveMatchRef.current = null
+      showMeshRef.current = false
       scanTimerRef.current = setTimeout(runScanLoop, SCAN_INTERVAL_MS)
     }
   }, [state, drawFaceOverlay, onMatch, targetRole, orgId])
