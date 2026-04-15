@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition, useCallback } from 'react'
-import { Bell, AlertTriangle, Info, AlertCircle, CheckCheck, MessageSquare, ExternalLink, Flame, X } from 'lucide-react'
+import { Bell, AlertTriangle, Info, AlertCircle, CheckCheck, MessageSquare, ExternalLink, X, User, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { getCrmAlerts, markAlertRead, markAllAlertsRead } from '@/lib/actions/workflows'
 import { useMensajeria } from '../shared/mensajeria-context'
@@ -21,50 +21,50 @@ type AlertWithConversation = CrmAlert & {
 const ALERT_CONFIG: Record<CrmAlertType, {
   icon: React.ElementType
   label: string
-  gradient: string
-  iconBg: string
+  bg: string
+  border: string
+  badge: string
+  iconWrapper: string
   iconColor: string
-  accentBorder: string
-  badgeBg: string
-  badgeText: string
-  glow: string
+  hover: string
+  pulseText: string
 }> = {
   urgent: {
-    icon: Flame,
-    label: 'URGENTE',
-    gradient: 'bg-gradient-to-r from-red-500/20 via-red-500/10 to-transparent',
-    iconBg: 'bg-red-500',
-    iconColor: 'text-white',
-    accentBorder: 'border-l-red-500',
-    badgeBg: 'bg-red-500/15',
-    badgeText: 'text-red-400',
-    glow: 'shadow-red-500/20 shadow-lg',
+    icon: AlertCircle,
+    label: 'Urgente',
+    bg: 'bg-red-500/5',
+    border: 'border-red-500/20',
+    badge: 'bg-red-500/10 text-red-500',
+    iconWrapper: 'bg-red-500/10',
+    iconColor: 'text-red-500',
+    hover: 'hover:border-red-500/40 hover:bg-red-500/10',
+    pulseText: 'bg-red-500',
   },
   warning: {
     icon: AlertTriangle,
-    label: 'ADVERTENCIA',
-    gradient: 'bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent',
-    iconBg: 'bg-amber-500',
-    iconColor: 'text-white',
-    accentBorder: 'border-l-amber-500',
-    badgeBg: 'bg-amber-500/15',
-    badgeText: 'text-amber-400',
-    glow: 'shadow-amber-500/20 shadow-lg',
+    label: 'Advertencia',
+    bg: 'bg-amber-500/5',
+    border: 'border-amber-500/20',
+    badge: 'bg-amber-500/10 text-amber-500',
+    iconWrapper: 'bg-amber-500/10',
+    iconColor: 'text-amber-500',
+    hover: 'hover:border-amber-500/40 hover:bg-amber-500/10',
+    pulseText: 'bg-amber-500',
   },
   info: {
     icon: Info,
-    label: 'INFO',
-    gradient: 'bg-gradient-to-r from-blue-500/15 via-blue-500/5 to-transparent',
-    iconBg: 'bg-blue-500',
-    iconColor: 'text-white',
-    accentBorder: 'border-l-blue-500',
-    badgeBg: 'bg-blue-500/15',
-    badgeText: 'text-blue-400',
-    glow: 'shadow-blue-500/20 shadow-lg',
+    label: 'Info',
+    bg: 'bg-blue-500/5',
+    border: 'border-blue-500/20',
+    badge: 'bg-blue-500/10 text-blue-500',
+    iconWrapper: 'bg-blue-500/10',
+    iconColor: 'text-blue-500',
+    hover: 'hover:border-blue-500/40 hover:bg-blue-500/10',
+    pulseText: 'bg-blue-500',
   },
 }
 
-export function CrmAlertsPanel() {
+export function CrmAlertsPanel({ onNavigateToInbox }: { onNavigateToInbox?: () => void } = {}) {
   const { conversations, setActiveConv, setShowMobileChat } = useMensajeria()
   const [alerts, setAlerts] = useState<AlertWithConversation[]>([])
   const [loading, setLoading] = useState(true)
@@ -111,6 +111,7 @@ export function CrmAlertsPanel() {
     if (conv) {
       setActiveConv(conv)
       setShowMobileChat(true)
+      onNavigateToInbox?.()
     }
   }
 
@@ -162,7 +163,7 @@ export function CrmAlertsPanel() {
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {alerts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
             <div className="size-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
@@ -176,86 +177,113 @@ export function CrmAlertsPanel() {
             const config = ALERT_CONFIG[alert.alert_type] || ALERT_CONFIG.info
             const Icon = config.icon
             const clientName = alert.conversation?.client?.name || alert.conversation?.platform_user_name || 'Desconocido'
-            const phone = alert.conversation?.client?.phone || ''
             const timeAgo = formatDistanceToNow(new Date(alert.created_at), { addSuffix: true, locale: es })
 
             return (
               <div
                 key={alert.id}
                 className={`
-                  relative rounded-xl border border-l-4 ${config.accentBorder} overflow-hidden
-                  transition-all duration-300
+                  relative rounded-xl border transition-all duration-300 text-left w-full overflow-hidden
                   ${alert.is_read
-                    ? 'opacity-50 hover:opacity-75 bg-card/30'
-                    : `${config.gradient} ${config.glow} hover:scale-[1.01]`
+                    ? 'opacity-75 bg-card/40 border-border/50 grayscale-[0.2]'
+                    : `${config.bg} ${config.border} shadow-sm hover:shadow-md`
                   }
                 `}
               >
-                <div className="px-4 py-4">
-                  <div className="flex items-start gap-3.5">
+                <div className="p-4">
+                  <div className="flex gap-4">
                     {/* Icon */}
-                    <div className={`shrink-0 size-10 rounded-xl ${config.iconBg} flex items-center justify-center ${!alert.is_read ? 'animate-bounce' : ''}`}
-                      style={{ animationDuration: '2s', animationIterationCount: alert.is_read ? '0' : '3' }}>
-                      <Icon className={`size-5 ${config.iconColor}`} />
+                    <div className="shrink-0 mt-0.5">
+                      <div className={`size-10 rounded-2xl flex items-center justify-center shadow-sm ${alert.is_read ? 'bg-muted text-muted-foreground' : config.iconWrapper}`}>
+                        <Icon className={`size-5 ${alert.is_read ? 'text-muted-foreground' : config.iconColor}`} />
+                      </div>
                     </div>
 
                     {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      {/* Top row: badge + time */}
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold tracking-widest ${config.badgeBg} ${config.badgeText}`}>
+                    <div className="flex-1 min-w-0 flex flex-col gap-2.5">
+                      
+                      {/* Header: Name, Badge, Time */}
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 shrink min-w-0 max-w-[60%] lg:max-w-[70%]">
+                            <User className="size-3.5 shrink-0 text-muted-foreground/80" />
+                            <h4 className="text-[13px] font-bold text-foreground truncate leading-none">
+                              {clientName}
+                            </h4>
+                          </div>
+                          <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${alert.is_read ? 'bg-muted text-muted-foreground' : config.badge}`}>
                             {config.label}
                           </span>
                           {!alert.is_read && (
-                            <span className="relative flex size-2.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                              <span className="relative inline-flex rounded-full size-2.5 bg-red-500" />
+                            <span className="shrink-0 relative flex size-2">
+                              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${config.pulseText}`} />
+                              <span className={`relative inline-flex rounded-full size-2 ${config.pulseText}`} />
                             </span>
                           )}
                         </div>
-                        <span className="text-[11px] text-muted-foreground shrink-0">{timeAgo}</span>
-                      </div>
-
-                      {/* Title */}
-                      <h3 className="text-[15px] font-semibold mt-1.5 leading-tight">{alert.title}</h3>
-
-                      {/* Message */}
-                      {alert.message && (
-                        <p className="text-xs text-muted-foreground mt-1 leading-relaxed line-clamp-2">{alert.message}</p>
-                      )}
-
-                      {/* Client & metadata card */}
-                      <div className="flex flex-wrap items-center gap-2 mt-3">
-                        {alert.conversation_id && (
-                          <button
-                            onClick={() => handleGoToConversation(alert.conversation_id!)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-xs font-medium text-green-400 hover:bg-green-500/20 hover:border-green-500/30 transition-all"
-                          >
-                            <MessageSquare className="size-3.5" />
-                            <span>{clientName}</span>
-                            {phone && <span className="text-green-400/60">({phone})</span>}
-                            <ExternalLink className="size-3 ml-0.5" />
-                          </button>
-                        )}
-                        {alert.metadata?.button_pressed != null && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-muted/80 border text-[11px] font-medium text-muted-foreground">
-                            Calificacion: <strong className="text-foreground">{String(alert.metadata.button_pressed)}</strong>
+                        
+                        <div className="flex items-center gap-3 shrink-0">
+                          <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground whitespace-nowrap">
+                            <Clock className="size-3 opacity-70" />
+                            {timeAgo}
                           </span>
+                          {!alert.is_read ? (
+                            <button
+                              onClick={() => handleMarkRead(alert.id)}
+                              disabled={isMarking}
+                              className="size-6 -my-1 -mr-1.5 rounded-md flex items-center justify-center text-muted-foreground/50 hover:bg-background/80 hover:text-foreground transition-all"
+                              title="Marcar como leída"
+                            >
+                              <X className="size-4" />
+                            </button>
+                          ) : (
+                            <div className="size-6 -my-1 -mr-1.5" />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Body: Title & Message */}
+                      <div className="pr-2 space-y-1">
+                        <h3 className={`text-[14px] font-semibold leading-tight ${alert.is_read ? 'text-muted-foreground' : 'text-foreground/90'}`}>
+                          {alert.title}
+                        </h3>
+                        {alert.message && (
+                          <p className="text-[12px] text-muted-foreground leading-relaxed line-clamp-2">
+                            {alert.message}
+                          </p>
                         )}
                       </div>
 
-                      {/* Mark as read */}
-                      {!alert.is_read && (
-                        <button
-                          onClick={() => handleMarkRead(alert.id)}
-                          disabled={isMarking}
-                          className="inline-flex items-center gap-1 mt-3 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <X className="size-3" />
-                          Descartar
-                        </button>
-                      )}
+                      {/* Footer: Metadata & Action */}
+                      <div className="flex items-center justify-between mt-0.5">
+                        <div className="flex items-center gap-2">
+                          {alert.metadata?.button_pressed != null && (
+                            <div className="flex items-center gap-1.5 bg-background/60 border border-border/40 px-2.5 py-1 rounded-md shadow-sm">
+                              <span className="text-[10px] font-medium text-muted-foreground">Calificación:</span>
+                              <span className="text-[11px] font-bold text-foreground">{String(alert.metadata.button_pressed)}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {alert.conversation_id && (
+                            <button
+                              onClick={() => handleGoToConversation(alert.conversation_id!)}
+                              className={`
+                                h-8 px-4 rounded-full flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider transition-all shadow-sm
+                                ${alert.is_read 
+                                  ? 'bg-muted text-muted-foreground hover:bg-muted/80' 
+                                  : 'bg-green-500 hover:bg-green-600 text-white hover:shadow-md hover:-translate-y-0.5 active:translate-y-0'}
+                              `}
+                              title={`Responder a ${clientName}`}
+                            >
+                              <MessageSquare className="size-3.5 shrink-0" />
+                              Responder
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
                     </div>
                   </div>
                 </div>

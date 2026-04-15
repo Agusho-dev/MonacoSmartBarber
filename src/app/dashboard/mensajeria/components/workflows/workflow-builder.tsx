@@ -208,6 +208,11 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
     if (!zoomHost || !canvasEl) return
 
     const wheelHandler = (e: WheelEvent) => {
+      // Ignorar wheel si es sobre un elemento scrolleable como el dropdown
+      if ((e.target as Element)?.closest?.('[data-no-pan="true"]')) {
+        return
+      }
+
       // Pellizco horizontal puro → panear; el zoom lo hacemos con deltaY o ctrl+meta+wheel
       const primaryZoomDelta =
         e.ctrlKey || e.metaKey
@@ -836,8 +841,10 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
               {/* Toolbar dropdown — abre hacia arriba del botón */}
               {showToolbar && (
                 <div
+                  data-no-pan="true"
                   className="absolute left-1/2 bottom-full mb-3 -translate-x-1/2 w-64 max-h-[min(60vh,420px)] overflow-y-auto bg-card border rounded-xl shadow-2xl p-2 space-y-1"
                   onPointerDown={e => e.stopPropagation()}
+                  onWheel={e => e.stopPropagation()}
                 >
                   {['Mensajes', 'Lógica', 'IA', 'Acciones'].map(category => (
                     <div key={category}>

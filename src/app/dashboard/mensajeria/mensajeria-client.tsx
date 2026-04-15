@@ -152,7 +152,7 @@ export function MensajeriaClient(props: MensajeriaProps) {
 
         {section === 'broadcasts' && <BroadcastSection />}
         {section === 'automations' && <WorkflowList />}
-        {section === 'alerts' && <CrmAlertsPanel />}
+        {section === 'alerts' && <CrmAlertsPanel onNavigateToInbox={() => setSection('inbox')} />}
         {section === 'quick-replies' && <QuickReplySection />}
 
         </div>
