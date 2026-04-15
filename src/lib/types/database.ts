@@ -108,6 +108,8 @@ export interface Branch {
   checkin_bg_color: string | null
   created_at: string
   updated_at: string
+  /** Presente cuando el query incluye el embed `organizations(name)` (p. ej. getPublicBranches). */
+  organizations?: Pick<Organization, 'name'> | null
 }
 
 export interface ReviewRequest {

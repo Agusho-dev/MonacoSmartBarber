@@ -24,11 +24,9 @@ import {
   MapPin,
   CheckCircle2,
   Loader2,
-  Smartphone,
   Zap,
   User,
   RefreshCw,
-  Search,
   LogIn,
   LogOut,
   Coffee,
@@ -38,6 +36,7 @@ import {
   Sparkles,
   Check,
   X,
+  UserPlus,
 } from 'lucide-react'
 import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule, AppSettings } from '@/lib/types/database'
 import {
@@ -51,8 +50,30 @@ import {
 } from '@/lib/barber-utils'
 import { FaceCamera } from '@/components/checkin/face-camera'
 import { FaceEnrollment } from '@/components/checkin/face-enrollment'
+import {
+  TerminalAmbient,
+  TerminalGlobalStyles,
+  TerminalNeoFrame,
+  GlassRing,
+  TerminalSectionGlow,
+  terminalBodyMuted,
+  terminalDialogSurface,
+  terminalGlassCard,
+  terminalGlassCardInner,
+  terminalH1,
+  terminalH1Gradient,
+  terminalH2,
+  terminalKeypadKey,
+  terminalKeypadShell,
+  terminalListItem,
+  terminalPrimaryInnerBtn,
+  terminalProgressFill,
+  terminalProgressTrack,
+  terminalSecondaryFlat,
+} from '@/components/checkin/terminal-theme'
 import type { FaceMatchResult } from '@/lib/face-recognition'
 import { saveFacePhoto, enrollFaceDescriptor, enrollStaffFaceDescriptor, saveStaffFacePhoto } from '@/lib/face-recognition'
+import { cn } from '@/lib/utils'
 
 type Step =
   | 'branch'
@@ -1059,38 +1080,35 @@ export default function CheckinPage() {
           : 'ring-amber-500/60'
 
     return (
-      <div
-        key={barber.id}
-        className="w-full rounded-2xl border border-white/8 bg-white/2 text-left transition-all duration-200 overflow-hidden"
-      >
+      <GlassRing key={barber.id} halo={false}>
         <button
           onClick={() => onSelect(barber.id)}
           disabled={submitting}
-          className="w-full p-4 text-left hover:bg-white/6 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
+          className="group relative w-full overflow-hidden rounded-2xl border border-white/15 checkin-glass-surface p-4 md:p-5 text-left transition-all duration-300 hover:border-white/28 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
         >
-          <div className="flex flex-col items-center gap-3">
-            <div className={`shrink-0 rounded-full ring-2 ring-offset-2 ring-offset-zinc-700 ${ringColor}`}>
+          <div className="relative flex flex-col items-center gap-3">
+            <div className={`shrink-0 rounded-full ring-2 ring-offset-2 ring-offset-transparent ${ringColor}`}>
               {barber.avatar_url ? (
                 <img
                   src={barber.avatar_url}
                   alt={barber.full_name}
-                  className="size-20 rounded-full object-cover"
+                  className="size-20 md:size-24 rounded-full object-cover"
                 />
               ) : (
-                <div className="flex size-20 items-center justify-center rounded-full bg-white/8 text-2xl font-bold">
+                <div className="flex size-20 md:size-24 items-center justify-center rounded-full bg-white/10 text-3xl font-bold text-white">
                   {barber.full_name.charAt(0).toUpperCase()}
                 </div>
               )}
             </div>
 
             <div className="w-full text-center space-y-1.5">
-              <p className="text-lg font-bold truncate">{barber.full_name}</p>
+              <p className="text-xl md:text-2xl font-bold text-white truncate">{barber.full_name}</p>
               {isNotClockedIn ? (
                 <>
-                  <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium bg-orange-500/15 text-orange-400 border-orange-500/30">
+                  <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs md:text-sm font-medium bg-orange-500/15 text-orange-300 border-orange-400/40">
                     Aún no llegó
                   </span>
-                  <p className="text-sm text-orange-400/70">
+                  <p className="text-sm md:text-base text-orange-300/80">
                     {barberNextArrival[barber.id]
                       ? `Ingresa a las ${barberNextArrival[barber.id].slice(0, 5)}`
                       : 'Todavía no llegó'}
@@ -1099,11 +1117,11 @@ export default function CheckinPage() {
               ) : (
                 <>
                   <span
-                    className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${cfg.className}`}
+                    className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs md:text-sm font-medium ${cfg.className}`}
                   >
                     {cfg.label}
                   </span>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-sm md:text-base text-white/65">
                     {stats.attending && 'Atendiendo 1'}
                     {stats.attending && stats.waiting > 0 && ' · '}
                     {stats.waiting > 0 &&
@@ -1111,7 +1129,6 @@ export default function CheckinPage() {
                     {!stats.attending && stats.waiting === 0 && 'Sin espera'}
                   </p>
 
-                  {/* Availability indicator instead of wait time */}
                   <div className="pt-1">
                     <AvailabilityIndicator level={availLevel} size="sm" />
                   </div>
@@ -1120,7 +1137,7 @@ export default function CheckinPage() {
             </div>
           </div>
         </button>
-      </div>
+      </GlassRing>
     )
   }
 
@@ -1139,100 +1156,84 @@ export default function CheckinPage() {
 
         {/* ── Title ── */}
         <div className="text-center">
-          <h2 className="text-2xl md:text-3xl font-bold">¿Cómo querés atenderte?</h2>
-          <p className="text-muted-foreground mt-1 text-base md:text-lg">Elegí una opción para continuar</p>
+          <h2 className="text-2xl md:text-4xl font-bold tracking-tight text-white">¿Cómo querés atenderte?</h2>
+          <p className="mt-1.5 text-base md:text-xl text-white/60">Elegí una opción para continuar</p>
         </div>
 
         {/* ── TWO MAIN CTAs ── */}
         <div className="flex flex-col gap-4 w-full">
 
-          {/* ── CTA 1: Menor Espera (recommended, bigger, glowing border) ── */}
+          {/* ── CTA 1: Menor Espera (recommended) ── */}
           {minWaitBarber && (
-            <div className="relative rounded-[1.25rem]" style={{ padding: '2px' }}>
-              {/* Animated rotating border glow */}
-              <div className="absolute inset-0 rounded-[1.25rem] overflow-hidden pointer-events-none">
-                <div className="absolute inset-[-200%] bg-[conic-gradient(from_0deg,transparent_0%,rgba(16,185,129,0.5)_10%,rgba(20,184,166,0.5)_20%,transparent_30%)] animate-[checkin-border-rotate_3s_linear_infinite]" />
-              </div>
-              {/* Inner glow pulse */}
-              <div className="absolute -inset-2 rounded-[1.75rem] bg-gradient-to-r from-emerald-900/60 via-teal-900/60 to-emerald-900/60 blur-xl opacity-40 animate-[checkin-pulse-glow_3s_ease-in-out_infinite] pointer-events-none" />
-
+            <GlassRing>
               <button
                 onClick={() => onSelect(null as unknown as string)}
                 disabled={submitting}
-                className="group relative w-full flex items-center gap-3 md:gap-5 rounded-[1.15rem] bg-gradient-to-r from-emerald-950/90 to-cyan-950/90 p-4 md:p-8 text-left transition-all duration-300 hover:shadow-[0_0_50px_rgba(16,185,129,0.3)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
+                className="group relative w-full flex items-center gap-4 md:gap-6 rounded-2xl md:rounded-[1.25rem] border border-white/18 checkin-glass-surface p-4 md:p-6 text-left overflow-hidden transition-all duration-300 hover:-translate-y-0.5 hover:border-white/30 active:translate-y-0 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
               >
-                {/* Shimmer sweep */}
-                <div className="absolute inset-0 overflow-hidden rounded-[1.15rem] pointer-events-none">
-                  <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.06) 50%, transparent 100%)', animation: 'checkin-shimmer 2.5s ease-in-out infinite' }} />
-                </div>
-
-                {/* Icon */}
                 <div className="relative shrink-0">
-                  <div className="size-14 md:size-20 rounded-xl bg-gradient-to-br from-emerald-400/25 to-cyan-400/25 border border-emerald-400/40 flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
-                    <Zap className="size-7 md:size-10 text-emerald-300 drop-shadow-[0_0_8px_rgba(16,185,129,0.5)]" fill="currentColor" />
+                  <div className="size-14 md:size-20 rounded-xl bg-gradient-to-br from-emerald-400/25 to-cyan-400/20 border border-emerald-400/40 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.2),inset_0_0_18px_rgba(16,185,129,0.25)] group-hover:scale-105 transition-transform duration-300">
+                    <Zap className="size-7 md:size-10 text-emerald-200 drop-shadow-[0_0_10px_rgba(16,185,129,0.7)]" fill="currentColor" />
                   </div>
                 </div>
 
-                {/* Content */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 md:gap-2 mb-1">
-                    <h3 className="text-lg md:text-3xl font-extrabold bg-gradient-to-r from-emerald-200 via-white to-cyan-200 bg-clip-text text-transparent">
+                <div className="relative flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3 className="text-xl md:text-3xl font-extrabold text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.25)]">
                       Menor espera
                     </h3>
-                    <div className="inline-flex items-center gap-1 rounded-full px-1.5 md:px-2 py-0.5 text-[9px] md:text-[10px] font-bold uppercase tracking-wider bg-emerald-400/15 border border-emerald-400/30">
-                      <Sparkles className="size-2.5 text-cyan-300" />
-                      <span className="text-emerald-300">IA</span>
+                    <div className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] md:text-xs font-bold uppercase tracking-wider bg-emerald-400/15 border border-emerald-400/40">
+                      <Sparkles className="size-2.5 md:size-3 text-cyan-200" />
+                      <span className="text-emerald-200">IA</span>
                     </div>
                   </div>
-                  <p className="text-xs md:text-base text-emerald-300/70">
+                  <p className="text-sm md:text-lg text-white/70">
                     Te asignamos al barbero con menos fila
                   </p>
-                  <p className="text-[10px] md:text-xs text-emerald-400/50 mt-1 md:mt-1.5 font-medium tracking-wide uppercase">
+                  <p className="text-[11px] md:text-sm text-emerald-200/80 mt-1 md:mt-1.5 font-semibold tracking-wide uppercase">
                     Tocá para continuar →
                   </p>
                 </div>
 
-                {/* Availability indicator */}
-                <div className="shrink-0">
+                <div className="relative shrink-0">
                   <AvailabilityIndicator level={globalAvailability} size="lg" />
                 </div>
               </button>
-            </div>
+            </GlassRing>
           )}
 
-          {/* ── CTA 2: Elegir barbero (secondary, smaller) ── */}
-          <button
-            onClick={() => setShowBarberPreference(true)}
-            disabled={submitting}
-            className="group relative w-full flex items-center gap-3 md:gap-4 rounded-2xl border-2 border-violet-400/30 bg-gradient-to-r from-violet-950/40 to-indigo-950/40 p-3 md:p-5 text-left transition-all duration-300 hover:border-violet-400/60 hover:shadow-[0_0_30px_rgba(139,92,246,0.15)] active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none overflow-hidden backdrop-blur-sm"
-          >
-            {/* Icon */}
-            <div className="relative shrink-0">
-              <div className="size-10 md:size-14 rounded-xl bg-gradient-to-br from-violet-400/20 to-indigo-400/20 border border-violet-400/30 flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
-                <User className="size-5 md:size-7 text-violet-300" />
+          {/* ── CTA 2: Elegir barbero (secondary) ── */}
+          <GlassRing halo={false}>
+            <button
+              onClick={() => setShowBarberPreference(true)}
+              disabled={submitting}
+              className="group relative w-full flex items-center gap-3 md:gap-5 rounded-2xl border border-white/15 checkin-glass-surface p-4 md:p-5 text-left overflow-hidden transition-all duration-300 hover:border-white/28 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+            >
+              <div className="relative shrink-0">
+                <div className="size-12 md:size-16 rounded-xl bg-gradient-to-br from-violet-400/25 to-indigo-400/15 border border-violet-400/35 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_0_16px_rgba(139,92,246,0.2)] group-hover:scale-105 transition-transform duration-300">
+                  <User className="size-6 md:size-8 text-violet-200 drop-shadow-[0_0_8px_rgba(139,92,246,0.5)]" />
+                </div>
               </div>
-            </div>
 
-            {/* Content */}
-            <div className="flex-1 min-w-0">
-              <h3 className="text-base md:text-2xl font-bold text-white">
-                Elegir barbero
-              </h3>
-              <p className="text-[11px] md:text-sm text-violet-300/70 mt-0.5">
-                ¿Tenés preferencia? Elegí con quién atenderte
-              </p>
-            </div>
+              <div className="relative flex-1 min-w-0">
+                <h3 className="text-lg md:text-2xl font-bold text-white">
+                  Elegir barbero
+                </h3>
+                <p className="text-sm md:text-base text-white/60 mt-0.5">
+                  ¿Tenés preferencia? Elegí con quién atenderte
+                </p>
+              </div>
 
-            {/* Arrow indicator */}
-            <div className="shrink-0">
-              <ChevronDown className={`size-6 text-violet-300/60 transition-transform duration-300 ${showBarberPreference ? 'rotate-180' : ''}`} />
-            </div>
-          </button>
+              <div className="relative shrink-0">
+                <ChevronDown className={`size-6 md:size-7 text-white/60 transition-transform duration-300 ${showBarberPreference ? 'rotate-180' : ''}`} />
+              </div>
+            </button>
+          </GlassRing>
         </div>
 
         {/* ── Barber Selection Dialog Modal ── */}
         <Dialog open={showBarberPreference} onOpenChange={setShowBarberPreference}>
-          <DialogContent className="max-w-[95vw] md:max-w-2xl max-h-[90dvh] bg-zinc-700/95 backdrop-blur-2xl border-white/10 p-4 md:p-8 rounded-2xl md:rounded-[2rem] shadow-2xl">
+          <DialogContent className={terminalDialogSurface}>
             <DialogHeader className="text-left mb-3 md:mb-6">
               <DialogTitle className="text-xl md:text-3xl font-extrabold bg-gradient-to-r from-violet-200 to-indigo-200 bg-clip-text text-transparent">
                 Elegí tu barbero
@@ -1278,7 +1279,7 @@ export default function CheckinPage() {
     isLooking: boolean
   ) => (
     <>
-      <div className="w-full rounded-2xl border border-white/8 bg-white/2 p-3 md:p-4 text-center relative overflow-hidden">
+      <div className={terminalKeypadShell}>
         <p className="text-2xl md:text-3xl font-mono font-bold tracking-[0.15em] min-h-8 md:min-h-10 flex items-center justify-center">
           {currentPhone ? (
             formatPhone(currentPhone)
@@ -1304,7 +1305,7 @@ export default function CheckinPage() {
             key={d}
             onClick={() => pressDigit(d)}
             disabled={isLooking}
-            className="h-11 md:h-[56px] rounded-xl md:rounded-2xl bg-white/4 border border-white/6 text-xl md:text-2xl font-semibold transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+            className={cn('h-11 md:h-[56px] text-xl md:text-2xl', terminalKeypadKey)}
           >
             {d}
           </button>
@@ -1313,14 +1314,14 @@ export default function CheckinPage() {
         <button
           onClick={() => pressDelete()}
           disabled={isLooking || currentPhone.length === 0}
-          className="h-11 md:h-[56px] rounded-xl md:rounded-2xl bg-white/4 border border-white/6 flex items-center justify-center transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+          className={cn('h-11 md:h-[56px] flex items-center justify-center', terminalKeypadKey)}
         >
           <Delete className="size-5 md:size-6" />
         </button>
         <button
           onClick={() => pressDigit('0')}
           disabled={isLooking}
-          className="h-11 md:h-[56px] rounded-xl md:rounded-2xl bg-white/4 border border-white/6 text-xl md:text-2xl font-semibold transition-all duration-150 hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+          className={cn('h-11 md:h-[56px] text-xl md:text-2xl', terminalKeypadKey)}
         >
           0
         </button>
@@ -1331,72 +1332,81 @@ export default function CheckinPage() {
 
   // ── Render ──
 
-  const branchBg = selectedBranch?.checkin_bg_color ? (() => {
+  const bgInfo = selectedBranch?.checkin_bg_color ? (() => {
     const hex = selectedBranch.checkin_bg_color!
     const r = parseInt(hex.slice(1, 3), 16)
     const g = parseInt(hex.slice(3, 5), 16)
     const b = parseInt(hex.slice(5, 7), 16)
-    const isLight = (r * 299 + g * 587 + b * 114) / 1000 > 128
-    return { background: hex, color: isLight ? '#18181b' : '#f4f4f5' }
-  })() : undefined
+    const isLight = (r * 299 + g * 587 + b * 114) / 1000 > 180
+    return { hex, isLight }
+  })() : null
+  const branchBg = bgInfo
+    ? { background: bgInfo.hex, color: bgInfo.isLight ? '#18181b' : '#f4f4f5' }
+    : undefined
+  const isLightBg = bgInfo?.isLight ?? false
 
   return (
     <div
-      className="h-dvh flex flex-col items-center select-none overflow-y-auto overflow-x-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)] py-2 md:py-4"
+      className="relative h-dvh flex flex-col items-center select-none overflow-y-auto overflow-x-hidden bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)] py-2 md:py-4"
       style={branchBg}
     >
+      <TerminalGlobalStyles />
+      <TerminalAmbient />
       {backButton}
       {/* ═══════════════ BRANCH SELECTION ═══════════════ */}
       {step === 'branch' && (
         <div
           key={`branch-${animKey}`}
-          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-4 md:gap-8 px-4 md:px-8 my-auto animate-in fade-in zoom-in-95 duration-500"
+          className="relative z-[1] w-full max-w-sm md:max-w-2xl flex flex-col items-center gap-4 md:gap-8 px-4 md:px-8 my-auto animate-in fade-in zoom-in-95 duration-500"
         >
-          <div className="flex flex-col items-center gap-3 md:gap-5">
-            <div className="size-16 md:size-24 rounded-[1.25rem] md:rounded-3xl bg-white/4 border border-white/10 flex items-center justify-center">
-              <Scissors className="size-8 md:size-12 text-white" strokeWidth={1.5} />
+          <TerminalSectionGlow />
+          <div className="relative flex flex-col items-center gap-3 md:gap-5">
+            <div className="size-16 md:size-24 rounded-[1.25rem] md:rounded-3xl bg-zinc-950/50 border border-cyan-500/25 shadow-[0_0_32px_rgba(34,211,238,0.12)] flex items-center justify-center ring-1 ring-cyan-400/15">
+              <Scissors className="size-8 md:size-12 text-cyan-200" strokeWidth={1.5} />
             </div>
             <div className="text-center">
-              <h1 className="text-2xl md:text-5xl font-bold tracking-tight">
-                Monaco Smart Barber
-              </h1>
-              <p className="text-base md:text-xl text-muted-foreground mt-1 md:mt-3">Bienvenido</p>
+              <h1 className={cn(terminalH1, terminalH1Gradient)}>Monaco Smart Barber</h1>
+              <p className={cn('text-base md:text-xl mt-1 md:mt-3', terminalBodyMuted)}>Bienvenido</p>
             </div>
           </div>
 
-          <div className="w-24 h-px bg-white/10" />
+          <div className="relative h-px w-32 bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent" />
 
-          <div className="w-full space-y-4">
-            <p className="text-center text-muted-foreground text-base md:text-lg">
+          <div className="relative w-full space-y-4">
+            <p className={cn('text-center text-base md:text-lg', terminalBodyMuted)}>
               Seleccioná tu sucursal
             </p>
 
             {branches.length === 0 ? (
               <div className="flex items-center justify-center py-10 md:py-16">
-                <Loader2 className="size-8 animate-spin text-muted-foreground" />
+                <Loader2 className="size-8 animate-spin text-cyan-400/50" />
               </div>
             ) : (
               <div className="grid gap-3 md:gap-4 w-full">
                 {branches.map((branch) => (
-                  <button
-                    key={branch.id}
-                    onClick={() => selectBranch(branch)}
-                    className="group flex items-center gap-4 md:gap-5 w-full rounded-2xl border border-white/8 bg-white/2 p-4 md:p-6 text-left transition-all duration-200 hover:bg-white/6 hover:border-white/20 active:scale-[0.98]"
-                  >
-                    <div className="shrink-0 size-12 md:size-16 rounded-xl bg-white/4 flex items-center justify-center group-hover:bg-white/8 transition-colors duration-200">
-                      <MapPin className="size-6 md:size-7 text-white/60 group-hover:text-white/80 transition-colors" />
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-lg md:text-2xl font-semibold block truncate">
-                        {branch.name}
-                      </span>
-                      {branch.address && (
-                        <span className="text-base text-muted-foreground block mt-1 truncate">
-                          {branch.address}
-                        </span>
+                  <GlassRing key={branch.id} halo={false}>
+                    <button
+                      onClick={() => selectBranch(branch)}
+                      className={cn(
+                        'group flex items-center gap-4 md:gap-5 w-full p-4 md:p-6 text-left overflow-hidden',
+                        terminalListItem
                       )}
-                    </div>
-                  </button>
+                    >
+                      <div className="shrink-0 size-12 md:size-16 rounded-xl border border-white/15 bg-white/[0.06] flex items-center justify-center group-hover:border-white/28 transition-colors duration-200">
+                        <MapPin className="size-6 md:size-7 text-white drop-shadow-[0_0_8px_rgba(34,211,238,0.45)]" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-lg md:text-2xl font-semibold block truncate text-white">
+                          {branch.name}
+                        </span>
+                        {branch.address && (
+                          <span className="text-base text-white/60 block mt-1 truncate">
+                            {branch.address}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  </GlassRing>
                 ))}
               </div>
             )}
@@ -1408,58 +1418,135 @@ export default function CheckinPage() {
       {step === 'home' && selectedBranch && (
         <div
           key={`home-${animKey}`}
-          className="w-full max-w-sm md:max-w-2xl flex flex-col items-center justify-center gap-3 md:gap-4 px-4 md:px-8 py-2 md:py-6 my-auto animate-in fade-in zoom-in-95 duration-500"
+          className="relative z-[1] w-full max-w-sm md:max-w-2xl flex flex-col items-center justify-center gap-5 md:gap-8 px-4 md:px-8 py-4 md:py-8 my-auto animate-in fade-in zoom-in-95 duration-500"
         >
-          <div className="flex flex-col items-center gap-1.5 md:gap-2">
-            <div className="size-12 md:size-16 rounded-[1.25rem] md:rounded-2xl overflow-hidden flex items-center justify-center">
-              <img src="/logo-monaco.png" alt="Monaco Smart Barber" className="w-full h-full object-contain" />
+          <div className="relative flex flex-col items-center gap-3 md:gap-4">
+            <div className="relative size-16 md:size-24 rounded-full flex items-center justify-center">
+              <div
+                className="pointer-events-none absolute -inset-6 rounded-full bg-[radial-gradient(circle_at_center,rgba(34,211,238,0.22),rgba(167,139,250,0.12)_45%,transparent_70%)] blur-xl opacity-80 motion-reduce:opacity-60"
+                aria-hidden
+              />
+              <div className="relative size-full rounded-full overflow-hidden flex items-center justify-center ring-1 ring-white/10 bg-zinc-950/80 backdrop-blur-sm shadow-[0_8px_32px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.08)]">
+                <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/10 via-transparent to-violet-500/10" />
+                <img src="/logo-monaco.png" alt="Monaco Smart Barber" className="absolute inset-0 z-[1] size-full object-cover" />
+              </div>
             </div>
-            <div className="text-center">
-              <h1 className="text-xl md:text-4xl font-bold tracking-tight">
-                Monaco Smart Barber
+            <div className="text-center space-y-1.5 md:space-y-2.5">
+              <h1
+                className={cn(
+                  'text-xl md:text-4xl font-bold tracking-tight text-balance px-1 leading-tight',
+                  isLightBg ? 'text-zinc-900' : 'text-white'
+                )}
+              >
+                Bienvenido a{' '}
+                <span className={isLightBg ? '' : 'drop-shadow-[0_0_24px_rgba(34,211,238,0.25)]'}>
+                  {selectedBranch.organizations?.name?.trim() || 'Monaco Smart Barber'}
+                </span>
               </h1>
-              <div className="flex items-center justify-center gap-2 mt-0.5 md:mt-2">
-                <MapPin className="size-3.5 md:size-4 text-muted-foreground" />
-                <p className="text-xs md:text-lg text-muted-foreground">{selectedBranch.name}</p>
+              <div
+                className={cn(
+                  'inline-flex items-center gap-1.5 md:gap-2 px-2.5 py-1 md:px-3 md:py-1.5 rounded-full backdrop-blur-sm',
+                  isLightBg
+                    ? 'border border-zinc-300 bg-white/70'
+                    : 'border border-white/10 bg-zinc-950/50'
+                )}
+              >
+                <MapPin className={cn('size-3 md:size-3.5', isLightBg ? 'text-cyan-700' : 'text-cyan-300/70')} />
+                <p className={cn('text-xs md:text-sm font-medium tracking-wide', isLightBg ? 'text-zinc-700' : 'text-white/70')}>
+                  {selectedBranch.name}
+                </p>
               </div>
             </div>
           </div>
 
-          <Button
-            onClick={() => goTo('face_scan')}
-            className="w-full max-w-xs md:max-w-md h-11 md:h-14 text-base md:text-2xl rounded-2xl md:rounded-3xl font-bold tracking-wide gap-2 md:gap-4 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
-            size="lg"
+          <div
+            role="group"
+            aria-labelledby="checkin-registro-pregunta"
+            className="relative z-[1] w-full max-w-xs md:max-w-lg flex flex-col items-stretch gap-3 md:gap-5"
           >
-            <ScanFace className="size-5 md:size-8" strokeWidth={1.5} />
-            INGRESAR
-          </Button>
+            <h2
+              id="checkin-registro-pregunta"
+              className={cn(
+                'text-center text-base md:text-xl font-medium tracking-[0.08em] uppercase',
+                isLightBg ? 'text-zinc-600' : 'text-white/55'
+              )}
+            >
+              ¿Estás registrado?
+            </h2>
+            <div className="grid grid-cols-2 gap-3 md:gap-4 w-full items-stretch">
+              <GlassRing>
+                <button
+                  type="button"
+                  onClick={() => goTo('face_scan')}
+                  className="group relative w-full min-h-[4.75rem] md:min-h-[5.75rem] rounded-2xl md:rounded-[1.25rem] overflow-hidden border border-white/15 checkin-glass-surface transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                >
+                  <span className="relative flex h-full w-full items-center justify-center gap-2.5 md:gap-3 px-3 py-3 md:px-5 md:py-4">
+                    <span
+                      className="relative flex size-10 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-gradient-to-br from-white/20 via-white/8 to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.3),inset_0_0_16px_rgba(34,211,238,0.18)] backdrop-blur-sm md:size-12"
+                      aria-hidden
+                    >
+                      <ScanFace
+                        className="size-6 text-white drop-shadow-[0_0_10px_rgba(34,211,238,0.7)] transition-transform duration-300 group-hover:scale-110 md:size-7"
+                        strokeWidth={1.75}
+                      />
+                    </span>
+                    <span className="text-lg font-bold tracking-wide text-white drop-shadow-[0_0_12px_rgba(255,255,255,0.35)] md:text-2xl">
+                      Sí
+                    </span>
+                  </span>
+                </button>
+              </GlassRing>
 
-          <div className="flex flex-col items-center gap-1.5 md:gap-2 justify-center">
-            <div className="flex items-center gap-4 md:gap-6 justify-center">
-              <button
-                onClick={() => goTo('phone')}
-                className="flex items-center gap-1.5 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-1.5"
-              >
-                <Search className="size-4 md:size-5" />
-                <span className="text-sm md:text-lg">Soy Nuevo</span>
-              </button>
-              <span className="text-white/20">·</span>
+              <GlassRing>
+                <button
+                  type="button"
+                  onClick={() => goTo('phone')}
+                  className="group relative w-full min-h-[4.75rem] md:min-h-[5.75rem] rounded-2xl md:rounded-[1.25rem] overflow-hidden border border-white/15 checkin-glass-surface transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/55"
+                >
+                  <span className="relative flex h-full w-full items-center justify-center gap-2.5 md:gap-3 px-3 py-3 md:px-5 md:py-4">
+                    <span
+                      className="relative flex size-10 shrink-0 items-center justify-center rounded-xl border border-white/22 bg-gradient-to-br from-white/18 via-white/6 to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.28),inset_0_0_14px_rgba(255,255,255,0.08)] backdrop-blur-sm md:size-12"
+                      aria-hidden
+                    >
+                      <UserPlus
+                        className="size-6 text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.35)] transition-transform duration-300 group-hover:scale-110 md:size-7"
+                        strokeWidth={1.75}
+                      />
+                    </span>
+                    <span className="text-lg font-bold tracking-wide text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.3)] md:text-2xl">
+                      No
+                    </span>
+                  </span>
+                </button>
+              </GlassRing>
+            </div>
+          </div>
+
+          <div className="relative z-[1] flex flex-col items-center gap-2 md:gap-3">
+            <div className={cn('h-px w-24 md:w-32 bg-gradient-to-r from-transparent to-transparent', isLightBg ? 'via-zinc-400/50' : 'via-white/15')} />
+            <div className="flex items-center gap-4 md:gap-6">
               <button
                 onClick={() => goTo('staff_face_scan')}
-                className="flex items-center gap-1.5 md:gap-3 text-muted-foreground hover:text-foreground transition-colors py-1.5"
+                className={cn(
+                  'group flex items-center gap-1.5 md:gap-2 text-sm md:text-base transition-colors py-1.5 px-2 rounded-lg font-medium',
+                  isLightBg ? 'text-zinc-600 hover:text-cyan-700' : 'text-white/55 hover:text-cyan-200'
+                )}
               >
-                <LogIn className="size-4 md:size-5" />
-                <span className="text-sm md:text-lg">Soy barbero</span>
+                <LogIn className="size-4 md:size-[18px] transition-transform group-hover:-translate-x-0.5" />
+                <span>Soy barbero</span>
+              </button>
+              <div className={cn('h-4 w-px', isLightBg ? 'bg-zinc-300' : 'bg-white/10')} aria-hidden />
+              <button
+                onClick={changeBranch}
+                className={cn(
+                  'group flex items-center gap-1.5 md:gap-2 text-sm md:text-base transition-colors py-1.5 px-2 rounded-lg font-medium',
+                  isLightBg ? 'text-zinc-500 hover:text-zinc-800' : 'text-white/40 hover:text-white/70'
+                )}
+              >
+                <Settings2 className="size-3.5 md:size-4 transition-transform group-hover:rotate-45" />
+                <span>Cambiar sucursal</span>
               </button>
             </div>
-
-            <button
-              onClick={changeBranch}
-              className="flex items-center gap-2 text-xs md:text-sm text-muted-foreground/60 hover:text-muted-foreground transition-colors py-1"
-            >
-              <Settings2 className="size-3.5 md:size-4" />
-              Cambiar sucursal
-            </button>
           </div>
         </div>
       )}
@@ -1468,10 +1555,11 @@ export default function CheckinPage() {
       {step === 'face_scan' && (
         <div
           key={`face-scan-${animKey}`}
-          className="relative w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-
+          <TerminalSectionGlow />
           <FaceCamera
+            variant="terminal"
             branchName={selectedBranch?.name}
             orgId={selectedBranch?.organization_id}
             onMatch={handleFaceMatch}
@@ -1485,36 +1573,43 @@ export default function CheckinPage() {
       {step === 'face_confirm' && faceMatch && (
         <div
           key={`face-confirm-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-8 md:gap-10 px-6 pt-16 md:pt-20 pb-8 flex-1 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-8 md:gap-10 px-6 pt-16 md:pt-20 pb-8 flex-1 animate-in fade-in slide-in-from-right-4 duration-400"
         >
+          <TerminalSectionGlow />
           {/* Nombre y pregunta */}
-          <div className="text-center">
-            <p className="text-muted-foreground text-lg md:text-xl">¿Sos vos?</p>
-            <h2 className="text-4xl md:text-5xl font-bold mt-2">{faceMatch.clientName}</h2>
+          <div className="relative text-center">
+            <p className={cn('text-lg md:text-xl', terminalBodyMuted)}>¿Sos vos?</p>
+            <h2 className={cn('text-4xl md:text-5xl font-bold mt-2', terminalH1Gradient)}>{faceMatch.clientName}</h2>
           </div>
 
           {/* Botones de confirmación */}
-          <div className="flex items-center gap-10 md:gap-16">
+          <div className="relative flex items-center gap-10 md:gap-16">
             {/* No soy yo */}
             <div className="flex flex-col items-center gap-3">
               <button
                 onClick={handleFaceConfirmNo}
-                className="size-24 md:size-28 rounded-full bg-red-500/10 border-2 border-red-500/60 flex items-center justify-center active:scale-95 transition-all duration-150 hover:bg-red-500/20 hover:border-red-400"
+                className="size-24 md:size-28 rounded-full bg-red-950/40 border-2 border-red-500/50 shadow-[0_0_28px_rgba(239,68,68,0.2)] flex items-center justify-center active:scale-95 transition-all duration-200 hover:bg-red-950/60 hover:border-red-400 hover:shadow-[0_0_36px_rgba(239,68,68,0.35)]"
               >
-                <X className="size-12 md:size-14 text-red-400" strokeWidth={2.5} />
+                <X className="size-12 md:size-14 text-red-400 drop-shadow-[0_0_10px_rgba(248,113,113,0.5)]" strokeWidth={2.5} />
               </button>
-              <span className="text-red-400/70 text-sm md:text-base">No soy yo</span>
+              <span className="text-red-300/80 text-sm md:text-base">No soy yo</span>
             </div>
 
             {/* Sí, soy yo */}
             <div className="flex flex-col items-center gap-3">
-              <button
-                onClick={handleFaceConfirmYes}
-                className="size-24 md:size-28 rounded-full bg-emerald-500/10 border-2 border-emerald-500/60 flex items-center justify-center active:scale-95 transition-all duration-150 hover:bg-emerald-500/20 hover:border-emerald-400"
-              >
-                <Check className="size-12 md:size-14 text-emerald-400" strokeWidth={2.5} />
-              </button>
-              <span className="text-emerald-400/70 text-sm md:text-base">Sí, soy yo</span>
+              <div className="relative rounded-full p-[2px]">
+                <div className="absolute inset-0 rounded-full overflow-hidden pointer-events-none">
+                  <div className="absolute inset-[-120%] bg-[conic-gradient(from_0deg,transparent_0%,rgba(34,211,238,0.55)_15%,rgba(52,211,153,0.5)_28%,transparent_42%)] animate-[checkin-terminal-orbit_4s_linear_infinite] motion-reduce:animate-none" />
+                </div>
+                <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-cyan-500/35 to-emerald-500/35 blur-lg opacity-70 animate-[checkin-terminal-neon-pulse_2.8s_ease-in-out_infinite] motion-reduce:animate-none pointer-events-none" />
+                <button
+                  onClick={handleFaceConfirmYes}
+                  className="relative z-[1] size-24 md:size-28 rounded-full bg-zinc-950/90 border border-emerald-400/40 shadow-[0_0_24px_rgba(52,211,153,0.2)] flex items-center justify-center active:scale-95 transition-all duration-200 hover:border-emerald-300/60 hover:shadow-[0_0_36px_rgba(52,211,153,0.35)]"
+                >
+                  <Check className="size-12 md:size-14 text-emerald-400 drop-shadow-[0_0_12px_rgba(52,211,153,0.55)]" strokeWidth={2.5} />
+                </button>
+              </div>
+              <span className="text-emerald-300/85 text-sm md:text-base">Sí, soy yo</span>
             </div>
           </div>
         </div>
@@ -1524,24 +1619,25 @@ export default function CheckinPage() {
       {step === 'phone' && (
         <div
           key={`phone-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-2 md:gap-4 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-2 md:gap-4 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
+          <TerminalSectionGlow />
 
           {/* Show no-match header if coming from face scan */}
           {faceDescriptor && (
-            <div className="flex flex-col items-center gap-1.5 md:gap-2 mb-1 md:mb-2">
-              <div className="size-10 md:size-14 rounded-full bg-white/4 border border-white/10 flex items-center justify-center">
-                <User className="size-5 md:size-7 text-white/60" />
+            <div className="relative flex flex-col items-center gap-1.5 md:gap-2 mb-1 md:mb-2">
+              <div className="size-10 md:size-14 rounded-full border border-cyan-500/20 bg-cyan-500/10 flex items-center justify-center shadow-[0_0_20px_rgba(34,211,238,0.12)]">
+                <User className="size-5 md:size-7 text-cyan-300/80" />
               </div>
-              <p className="text-sm md:text-base text-muted-foreground">No te reconocemos · número de teléfono</p>
+              <p className={cn('text-sm md:text-base text-center', terminalBodyMuted)}>
+                No te reconocemos · número de teléfono
+              </p>
             </div>
           )}
 
-          <div className="text-center mt-1 md:mt-2">
-            <h2 className="text-xl md:text-3xl font-bold">Número de teléfono</h2>
-            <p className="text-muted-foreground mt-0.5 md:mt-2 text-sm md:text-lg">
-              {selectedBranch?.name}
-            </p>
+          <div className="relative text-center mt-1 md:mt-2">
+            <h2 className={terminalH2}>Número de teléfono</h2>
+            <p className={cn('mt-0.5 md:mt-2 text-sm md:text-lg', terminalBodyMuted)}>{selectedBranch?.name}</p>
           </div>
 
           {renderPhoneKeypad(phone, lookingUp)}
@@ -1552,30 +1648,27 @@ export default function CheckinPage() {
       {step === 'name' && (
         <div
           key={`name-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
+          <TerminalSectionGlow />
 
           {isReturning ? (
-            <div className="flex flex-col items-center gap-4 md:gap-6 mt-4 md:mt-6">
-              <div className="size-20 md:size-24 rounded-full bg-white/4 border border-white/10 flex items-center justify-center animate-in zoom-in-75 duration-500">
+            <div className="relative flex flex-col items-center gap-4 md:gap-6 mt-4 md:mt-6">
+              <div className="size-20 md:size-24 rounded-full border border-cyan-500/25 bg-cyan-500/10 shadow-[0_0_28px_rgba(34,211,238,0.15)] flex items-center justify-center animate-in zoom-in-75 duration-500">
                 <span className="text-4xl md:text-5xl">👋</span>
               </div>
               <div className="text-center">
-                <h2 className="text-2xl md:text-3xl font-bold">¡Bienvenido de vuelta!</h2>
-                <p className="text-3xl md:text-4xl font-bold mt-2 md:mt-4">{name}</p>
-                <p className="text-muted-foreground mt-2 md:mt-3 text-base md:text-lg">
-                  Tel: {formatPhone(phone)}
-                </p>
+                <h2 className={terminalH2}>¡Bienvenido de vuelta!</h2>
+                <p className={cn('text-3xl md:text-4xl font-bold mt-2 md:mt-4', terminalH1Gradient)}>{name}</p>
+                <p className={cn('mt-2 md:mt-3 text-base md:text-lg', terminalBodyMuted)}>Tel: {formatPhone(phone)}</p>
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-4 md:gap-6 mt-4 md:mt-6 w-full">
+            <div className="relative flex flex-col items-center gap-4 md:gap-6 mt-4 md:mt-6 w-full">
               <div className="text-center">
-                <h2 className="text-2xl md:text-3xl font-bold">¡Primera vez!</h2>
-                <p className="text-lg md:text-xl text-muted-foreground mt-1 md:mt-2">
-                  Te damos la bienvenida
-                </p>
-                <p className="text-muted-foreground mt-1 text-sm md:text-base">
+                <h2 className={terminalH2}>¡Primera vez!</h2>
+                <p className={cn('text-lg md:text-xl mt-1 md:mt-2', terminalBodyMuted)}>Te damos la bienvenida</p>
+                <p className={cn('mt-1 text-sm md:text-base', terminalBodyMuted)}>
                   Ingresá tu nombre para continuar
                 </p>
               </div>
@@ -1587,7 +1680,7 @@ export default function CheckinPage() {
                   if (e.key === 'Enter' && name.trim()) goToBarberStep()
                 }}
                 placeholder="Nombre y apellido"
-                className="h-14 md:h-16 text-xl md:text-2xl text-center rounded-2xl border-white/10 bg-white/3"
+                className="h-14 md:h-16 text-xl md:text-2xl text-center rounded-2xl border-cyan-500/20 bg-zinc-950/50 text-cyan-50 placeholder:text-cyan-200/30 shadow-[inset_0_0_24px_rgba(34,211,238,0.04)] focus-visible:border-cyan-400/40"
                 autoComplete="off"
               />
             </div>
@@ -1597,14 +1690,22 @@ export default function CheckinPage() {
             <p className="text-destructive text-center text-lg">{error}</p>
           )}
 
-          <Button
-            onClick={goToBarberStep}
-            disabled={!name.trim()}
-            className="w-full h-14 md:h-16 text-lg md:text-xl rounded-2xl font-semibold mt-2"
-            size="lg"
-          >
-            Continuar
-          </Button>
+          <GlassRing radius="rounded-[0.875rem] md:rounded-[1.375rem]" className="w-full mt-2">
+            <Button
+              onClick={goToBarberStep}
+              disabled={!name.trim()}
+              className={cn(
+                terminalPrimaryInnerBtn,
+                'h-14 md:h-16 min-h-0 rounded-[0.875rem] md:rounded-[1.375rem] text-lg md:text-xl font-semibold shadow-none disabled:opacity-40 disabled:hover:scale-100'
+              )}
+              size="lg"
+            >
+              <span className="checkin-terminal-shimmer-layer pointer-events-none absolute inset-0 rounded-[inherit] opacity-30 motion-reduce:opacity-0" />
+              <span className="relative font-bold tracking-wide text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]">
+                Continuar
+              </span>
+            </Button>
+          </GlassRing>
         </div>
       )}
 
@@ -1612,8 +1713,9 @@ export default function CheckinPage() {
       {step === 'face_enroll' && (
         <div
           key={`face-enroll-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
+          <TerminalSectionGlow />
 
           <FaceEnrollment
             clientId={faceClientId || undefined}
@@ -1637,17 +1739,16 @@ export default function CheckinPage() {
       {step === 'service_selection' && (
         <div
           key={`service-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-6 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-6 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
+          <TerminalSectionGlow />
 
-          <div className="text-center">
-            <h2 className="text-xl md:text-3xl font-bold">¿Qué te vas a hacer?</h2>
-            <p className="text-muted-foreground mt-0.5 md:mt-2 text-sm md:text-lg">
-              Elegí tu servicio
-            </p>
+          <div className="relative text-center">
+            <h2 className={terminalH2}>¿Qué te vas a hacer?</h2>
+            <p className={cn('mt-0.5 md:mt-2 text-sm md:text-lg', terminalBodyMuted)}>Elegí tu servicio</p>
           </div>
 
-          <div className="w-full grid gap-2.5 md:gap-4 mt-1 md:mt-2 overflow-y-auto min-h-0 flex-1">
+          <div className="relative w-full grid gap-3 md:gap-4 mt-1 md:mt-2 overflow-y-auto min-h-0 flex-1">
             {services.map(s => (
               <button
                 key={s.id}
@@ -1655,17 +1756,20 @@ export default function CheckinPage() {
                   setSelectedServiceId(s.id)
                   goTo('barber')
                 }}
-                className="flex items-center justify-between p-3.5 md:p-5 rounded-xl md:rounded-2xl border border-white/8 bg-white/2 hover:bg-white/6 hover:border-white/20 transition-all text-left"
+                className={cn(
+                  terminalListItem,
+                  'flex items-center justify-between gap-4 w-full p-5 md:p-6 rounded-xl md:rounded-2xl text-left overflow-hidden'
+                )}
               >
-                <div>
-                  <h3 className="text-base md:text-xl font-semibold">{s.name}</h3>
+                <div className="min-w-0">
+                  <h3 className="text-xl md:text-3xl font-semibold text-white truncate">{s.name}</h3>
                 </div>
                 <div className="shrink-0 text-right">
                   {s.duration_minutes && (
-                    <p className="text-sm font-medium text-muted-foreground mb-1">{s.duration_minutes} min</p>
+                    <p className="text-base md:text-lg font-medium text-white/60 mb-1">{s.duration_minutes} min</p>
                   )}
                   {s.price > 0 && (
-                    <p className="text-sm font-bold text-foreground">${s.price}</p>
+                    <p className="text-lg md:text-2xl font-bold text-white">${s.price}</p>
                   )}
                 </div>
               </button>
@@ -1678,11 +1782,12 @@ export default function CheckinPage() {
       {step === 'barber' && (
         <div
           key={`barber-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-5 px-4 md:px-6 pt-4 md:pt-10 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-5 px-4 md:px-6 pt-4 md:pt-10 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
+          <TerminalSectionGlow />
 
-          <div className="text-center">
-            <p className="text-muted-foreground text-sm md:text-lg">
+          <div className="relative text-center">
+            <p className={cn('text-sm md:text-lg', terminalBodyMuted)}>
               {name} · {selectedBranch?.name}
             </p>
           </div>
@@ -1712,26 +1817,6 @@ export default function CheckinPage() {
               <span className="text-lg">Registrando...</span>
             </div>
           )}
-
-          {/* CSS Animations for barber selection */}
-          <style>{`
-            @keyframes checkin-pulse-glow {
-              0%, 100% { opacity: 0.4; transform: scale(1); }
-              50% { opacity: 0.8; transform: scale(1.02); }
-            }
-            @keyframes checkin-shimmer {
-              0% { transform: translateX(-100%); }
-              100% { transform: translateX(200%); }
-            }
-            @keyframes checkin-float-particle {
-              0%, 100% { transform: translateY(0) scale(1); opacity: 0.4; }
-              50% { transform: translateY(-12px) scale(1.3); opacity: 0.8; }
-            }
-            @keyframes checkin-border-rotate {
-              0% { transform: rotate(0deg); }
-              100% { transform: rotate(360deg); }
-            }
-          `}</style>
         </div>
       )}
 
@@ -1739,19 +1824,25 @@ export default function CheckinPage() {
       {step === 'success' && (
         <div
           key={`success-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-2.5 md:gap-4 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
+          className="relative z-[1] w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-2.5 md:gap-4 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
         >
+          <TerminalSectionGlow />
           {!changingBarberInSuccess ? (
             <>
-              <div className="w-full max-w-xl rounded-2xl md:rounded-3xl border border-white/10 bg-white/3 p-5 md:p-10 flex flex-col items-center gap-3 md:gap-5 animate-in zoom-in-50 duration-700">
-                <div className="size-12 md:size-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+              <div
+                className={cn(
+                  'w-full max-w-xl p-5 md:p-10 flex flex-col items-center gap-3 md:gap-5 animate-in zoom-in-50 duration-700',
+                  terminalGlassCard
+                )}
+              >
+                <div className="size-12 md:size-16 rounded-full bg-emerald-500/10 border border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.15)] flex items-center justify-center">
                   <CheckCircle2 className="size-6 md:size-9 text-emerald-400" strokeWidth={1.5} />
                 </div>
 
-                <h2 className="text-lg md:text-2xl font-bold text-muted-foreground">¡Estás en la fila!</h2>
+                <h2 className={cn('text-lg md:text-2xl font-bold', terminalBodyMuted)}>¡Estás en la fila!</h2>
 
                 <div className="text-center">
-                  <p className="text-4xl md:text-6xl font-bold leading-tight mt-2">
+                  <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', terminalH1Gradient)}>
                     ¡Tomá asiento!
                   </p>
                   {effectiveAhead && effectiveAhead.label && (
@@ -1759,7 +1850,7 @@ export default function CheckinPage() {
                       {effectiveAhead.label}
                     </p>
                   )}
-                  <p className="text-base md:text-lg text-muted-foreground mt-2">
+                  <p className={cn('text-base md:text-lg mt-2', terminalBodyMuted)}>
                     Te llamaremos cuando sea tu turno
                   </p>
                 </div>
@@ -1773,7 +1864,7 @@ export default function CheckinPage() {
                       setChangingBarberInSuccess(true)
                     }}
                     variant="outline"
-                    className="h-11 md:h-12 text-sm md:text-base rounded-xl w-full max-w-xs"
+                    className="h-11 md:h-12 text-sm md:text-base rounded-xl w-full max-w-xs border-cyan-500/25 bg-zinc-950/40 text-cyan-100 hover:bg-cyan-950/30 hover:text-white hover:border-cyan-400/40"
                   >
                     <RefreshCw className="size-4 mr-2" />
                     Cambiar barbero
@@ -1787,14 +1878,14 @@ export default function CheckinPage() {
                       if (resetTimer.current) clearTimeout(resetTimer.current)
                       goTo('face_enroll')
                     }}
-                    className="flex items-center gap-3 rounded-xl border border-blue-500/20 bg-blue-500/5 p-3 w-full max-w-xs transition-all hover:bg-blue-500/10 hover:border-blue-500/30 active:scale-[0.98]"
+                    className="flex items-center gap-3 rounded-xl border border-cyan-500/25 bg-cyan-950/30 p-3 w-full max-w-xs transition-all hover:bg-cyan-950/45 hover:border-cyan-400/40 hover:shadow-[0_0_24px_rgba(34,211,238,0.12)] active:scale-[0.98]"
                   >
-                    <div className="shrink-0 size-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                      <User className="size-4 text-blue-400" />
+                    <div className="shrink-0 size-8 rounded-lg border border-cyan-500/20 bg-cyan-500/10 flex items-center justify-center">
+                      <User className="size-4 text-cyan-300" />
                     </div>
                     <div className="text-left">
-                      <p className="text-sm font-medium text-blue-300">Registrar tu cara</p>
-                      <p className="text-xs text-blue-400/70 mt-0.5">
+                      <p className="text-sm font-medium text-cyan-200">Registrar tu cara</p>
+                      <p className="text-xs text-cyan-300/65 mt-0.5">
                         Hacé check-in solo con mirarte
                       </p>
                     </div>
@@ -1803,31 +1894,22 @@ export default function CheckinPage() {
               </div>
 
               {/* Countdown bar */}
-              <div className="w-full max-w-xs h-1 rounded-full bg-white/10 overflow-hidden mt-2">
+              <div className={cn(terminalProgressTrack, 'mt-2')}>
                 <div
-                  className="h-full bg-white/40 rounded-full origin-left"
+                  className={terminalProgressFill}
                   style={{
                     animation: `checkin-countdown ${RESET_DELAY_MS}ms linear forwards`,
                   }}
                 />
               </div>
-              <p className="text-xs text-muted-foreground">
-                Volviendo al inicio...
-              </p>
-
-              <style>{`
-                @keyframes checkin-countdown {
-                  from { transform: scaleX(1); }
-                  to { transform: scaleX(0); }
-                }
-              `}</style>
+              <p className={cn('text-xs', terminalBodyMuted)}>Volviendo al inicio...</p>
             </>
           ) : (
             <>
 
-              <div className="text-center">
-                <h2 className="text-2xl md:text-3xl font-bold">Cambiar barbero</h2>
-                <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
+              <div className="relative text-center">
+                <h2 className={terminalH2}>Cambiar barbero</h2>
+                <p className={cn('mt-1 md:mt-2 text-base md:text-lg', terminalBodyMuted)}>
                   Seleccioná otro barbero
                 </p>
               </div>
@@ -1868,13 +1950,17 @@ export default function CheckinPage() {
       {step === 'staff_face_scan' && (
         <div
           key={`staff-face-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
-          <div className="text-center mt-2">
-            <h2 className="text-2xl md:text-3xl font-bold">Identificación barbero</h2>
-            <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">Mirá la cámara para identificarte</p>
+          <TerminalSectionGlow />
+          <div className="relative text-center mt-2">
+            <h2 className={terminalH2}>Identificación barbero</h2>
+            <p className={cn('mt-1 md:mt-2 text-base md:text-lg', terminalBodyMuted)}>
+              Mirá la cámara para identificarte
+            </p>
           </div>
           <FaceCamera
+            variant="terminal"
             branchName={selectedBranch?.name ?? 'Sucursal'}
             targetRole="staff"
             orgId={selectedBranch?.organization_id}
@@ -1897,19 +1983,22 @@ export default function CheckinPage() {
       {step === 'staff_action_confirm' && staffFaceMatch && (
         <div
           key={`staff-action-${animKey}`}
-          className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
+          className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
         >
+          <TerminalSectionGlow />
           {!staffActionDone ? (
             <>
-              <div className="text-center">
-                <div className="size-20 md:size-24 rounded-full bg-white/4 border border-white/10 flex items-center justify-center mx-auto mb-3 md:mb-4 animate-in zoom-in-50 duration-700">
-                  <span className="text-4xl md:text-5xl font-bold">{staffFaceMatch.clientName.charAt(0)}</span>
+              <div className="relative text-center">
+                <div className="size-20 md:size-24 rounded-full border border-cyan-500/25 bg-cyan-500/10 shadow-[0_0_28px_rgba(34,211,238,0.12)] flex items-center justify-center mx-auto mb-3 md:mb-4 animate-in zoom-in-50 duration-700">
+                  <span className="text-4xl md:text-5xl font-bold bg-gradient-to-br from-cyan-200 to-violet-200 bg-clip-text text-transparent">
+                    {staffFaceMatch.clientName.charAt(0)}
+                  </span>
                 </div>
-                <h2 className="text-2xl md:text-3xl font-bold">{staffFaceMatch.clientName}</h2>
-                <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">¿Qué querés registrar?</p>
+                <h2 className={cn('text-2xl md:text-3xl font-bold', terminalH1Gradient)}>{staffFaceMatch.clientName}</h2>
+                <p className={cn('mt-1 md:mt-2 text-base md:text-lg', terminalBodyMuted)}>¿Qué querés registrar?</p>
               </div>
 
-              <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+              <div className="relative w-full grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
                 <button
                   onClick={async () => {
                     const branchId = selectedBranch?.id
@@ -1924,10 +2013,10 @@ export default function CheckinPage() {
                     setStaffActionDone(true)
                     resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
                   }}
-                  className="flex flex-col items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6 text-left transition-all hover:bg-emerald-500/10 active:scale-95"
+                  className="flex flex-col items-center gap-3 rounded-2xl border border-emerald-400/35 bg-emerald-950/35 p-6 text-left shadow-[0_0_24px_rgba(52,211,153,0.08)] backdrop-blur-sm transition-all hover:border-emerald-300/50 hover:bg-emerald-950/50 hover:shadow-[0_0_32px_rgba(52,211,153,0.15)] active:scale-95"
                 >
-                  <LogIn className="size-10 text-emerald-400" />
-                  <span className="text-lg font-semibold text-emerald-300">Entrada</span>
+                  <LogIn className="size-10 text-emerald-400 drop-shadow-[0_0_12px_rgba(52,211,153,0.4)]" />
+                  <span className="text-lg font-semibold text-emerald-200">Entrada</span>
                 </button>
 
                 <button
@@ -1944,20 +2033,23 @@ export default function CheckinPage() {
                     setStaffActionDone(true)
                     resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
                   }}
-                  className="flex flex-col items-center gap-3 rounded-2xl border border-red-500/30 bg-red-500/5 p-6 text-left transition-all hover:bg-red-500/10 active:scale-95"
+                  className="flex flex-col items-center gap-3 rounded-2xl border border-red-400/35 bg-red-950/35 p-6 text-left shadow-[0_0_24px_rgba(248,113,113,0.08)] backdrop-blur-sm transition-all hover:border-red-300/50 hover:bg-red-950/50 hover:shadow-[0_0_32px_rgba(248,113,113,0.15)] active:scale-95"
                 >
-                  <LogOut className="size-10 text-red-400" />
-                  <span className="text-lg font-semibold text-red-300">Salida</span>
+                  <LogOut className="size-10 text-red-400 drop-shadow-[0_0_12px_rgba(248,113,113,0.4)]" />
+                  <span className="text-lg font-semibold text-red-200">Salida</span>
                 </button>
 
                 <button
                   onClick={() => {
                     goTo('branch')
                   }}
-                  className="flex flex-col items-center gap-3 rounded-2xl border border-white/10 bg-white/2 p-6 text-left transition-all hover:bg-white/6 active:scale-95"
+                  className={cn(
+                    'flex flex-col items-center gap-3 rounded-2xl p-6 text-left',
+                    terminalSecondaryFlat
+                  )}
                 >
-                  <Coffee className="size-10 text-yellow-400" />
-                  <span className="text-lg font-semibold text-yellow-300">Volver</span>
+                  <Coffee className="size-10 text-amber-300 drop-shadow-[0_0_10px_rgba(251,191,36,0.25)]" />
+                  <span className="text-lg font-semibold text-amber-100/90">Volver</span>
                 </button>
               </div>
 
@@ -1965,25 +2057,25 @@ export default function CheckinPage() {
             </>
           ) : (
             <>
-              <div className="size-24 md:size-28 rounded-full bg-white/4 border border-white/10 flex items-center justify-center animate-in zoom-in-50 duration-700">
-                <CheckCircle2 className="size-12 md:size-16 text-white" strokeWidth={1.5} />
+              <div className="size-24 md:size-28 rounded-full border border-cyan-400/30 bg-zinc-950/60 shadow-[0_0_36px_rgba(34,211,238,0.15)] flex items-center justify-center animate-in zoom-in-50 duration-700">
+                <CheckCircle2 className="size-12 md:size-16 text-cyan-300" strokeWidth={1.5} />
               </div>
               <div className="text-center">
-                <h2 className="text-3xl md:text-4xl font-bold">
+                <h2 className={cn('text-3xl md:text-4xl font-bold', terminalH1Gradient)}>
                   {staffAction === 'clock_in' ? '¡Entrada registrada!' : '¡Salida registrada!'}
                 </h2>
-                <p className="text-xl md:text-2xl text-muted-foreground mt-2 md:mt-3">{staffFaceMatch.clientName}</p>
-                <p className="text-base md:text-lg text-muted-foreground mt-1">
+                <p className={cn('text-xl md:text-2xl mt-2 md:mt-3', terminalBodyMuted)}>{staffFaceMatch.clientName}</p>
+                <p className={cn('text-base md:text-lg mt-1', terminalBodyMuted)}>
                   {new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
-              <div className="w-full max-w-xs h-1 rounded-full bg-white/10 overflow-hidden">
+              <div className={terminalProgressTrack}>
                 <div
-                  className="h-full bg-white/40 rounded-full origin-left"
+                  className={terminalProgressFill}
                   style={{ animation: `checkin-countdown ${RESET_DELAY_MS}ms linear forwards` }}
                 />
               </div>
-              <p className="text-sm text-muted-foreground">Volviendo al inicio...</p>
+              <p className={cn('text-sm', terminalBodyMuted)}>Volviendo al inicio...</p>
             </>
           )}
         </div>
@@ -1993,17 +2085,18 @@ export default function CheckinPage() {
       {step === 'staff_pin' && (
         <div
           key={`staff-pin-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
+          <TerminalSectionGlow />
 
           {!staffPinSelected ? (
             <>
-              <div className="text-center mt-2">
-                <div className="size-14 md:size-16 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-3">
-                  <ScanFace className="size-7 md:size-8 text-amber-400" strokeWidth={1.5} />
+              <div className="relative text-center mt-2">
+                <div className="size-14 md:size-16 rounded-full border border-amber-400/35 bg-amber-950/30 shadow-[0_0_24px_rgba(251,191,36,0.12)] flex items-center justify-center mx-auto mb-3">
+                  <ScanFace className="size-7 md:size-8 text-amber-300" strokeWidth={1.5} />
                 </div>
-                <h2 className="text-2xl md:text-3xl font-bold">No te reconocimos</h2>
-                <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
+                <h2 className={terminalH2}>No te reconocimos</h2>
+                <p className={cn('mt-1 md:mt-2 text-base md:text-lg', terminalBodyMuted)}>
                   Ingresá tu PIN para registrar tu rostro
                 </p>
               </div>
@@ -2026,16 +2119,16 @@ export default function CheckinPage() {
                         setStaffPinValue('')
                         setStaffPinError('')
                       }}
-                      className="flex flex-col items-center gap-3 rounded-2xl border border-white/8 bg-white/2 p-5 transition-all hover:bg-white/6 active:scale-[0.98]"
+                      className={cn('flex flex-col items-center gap-3 rounded-2xl p-5', terminalListItem)}
                     >
                       {barber.avatar_url ? (
                         <img
                           src={barber.avatar_url}
                           alt={barber.full_name}
-                          className="size-16 rounded-full object-cover"
+                          className="size-16 rounded-full object-cover ring-1 ring-cyan-500/20"
                         />
                       ) : (
-                        <div className="flex size-16 items-center justify-center rounded-full bg-white/8 text-xl font-bold">
+                        <div className="flex size-16 items-center justify-center rounded-full border border-cyan-500/15 bg-cyan-950/40 text-xl font-bold text-cyan-100">
                           {barber.full_name.charAt(0).toUpperCase()}
                         </div>
                       )}
@@ -2111,7 +2204,7 @@ export default function CheckinPage() {
                         })
                       }
                     }}
-                    className="h-14 rounded-2xl bg-white/4 border border-white/6 text-2xl font-semibold transition-all hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40"
+                    className={cn('h-14 text-2xl', terminalKeypadKey)}
                   >
                     {d}
                   </button>
@@ -2124,7 +2217,7 @@ export default function CheckinPage() {
                     }
                   }}
                   disabled={staffPinSubmitting || staffPinValue.length === 0}
-                  className="h-14 rounded-2xl bg-white/4 border border-white/6 flex items-center justify-center transition-all hover:bg-white/8 active:scale-95 disabled:opacity-40"
+                  className={cn('h-14 flex items-center justify-center', terminalKeypadKey)}
                 >
                   <Delete className="size-6" />
                 </button>
@@ -2151,7 +2244,7 @@ export default function CheckinPage() {
                       })
                     }
                   }}
-                  className="h-14 rounded-2xl bg-white/4 border border-white/6 text-2xl font-semibold transition-all hover:bg-white/8 active:bg-white/12 active:scale-95 disabled:opacity-40"
+                  className={cn('h-14 text-2xl', terminalKeypadKey)}
                 >
                   0
                 </button>
@@ -2177,8 +2270,9 @@ export default function CheckinPage() {
       {step === 'staff_face_enroll' && staffEnrollId && (
         <div
           key={`staff-enroll-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
+          <TerminalSectionGlow />
 
           <FaceEnrollment
             clientName={staffEnrollName}
@@ -2223,20 +2317,26 @@ export default function CheckinPage() {
       {step === 'manage_turn' && myQueueEntry && (
         <div
           key={`manage-turn-${animKey}`}
-          className="relative w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-4 md:gap-5 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-4 md:gap-5 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
+          <TerminalSectionGlow />
 
           {!changingBarberInManage ? (
             <>
-              <div className="w-full max-w-xl rounded-2xl md:rounded-3xl border border-white/10 bg-white/3 p-5 md:p-10 flex flex-col items-center gap-3 md:gap-5 animate-in zoom-in-50 duration-700">
+              <div
+                className={cn(
+                  'w-full max-w-xl p-5 md:p-10 flex flex-col items-center gap-3 md:gap-5 animate-in zoom-in-50 duration-700',
+                  terminalGlassCard
+                )}
+              >
                 {myQueueEntry.status === 'in_progress' ? (
                   <>
-                    <div className="size-12 md:size-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                    <div className="size-12 md:size-16 rounded-full bg-emerald-500/10 border border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.12)] flex items-center justify-center">
                       <CheckCircle2 className="size-6 md:size-9 text-emerald-400" strokeWidth={1.5} />
                     </div>
-                    <h2 className="text-lg md:text-2xl font-bold text-muted-foreground">¡Ya es tu turno!</h2>
+                    <h2 className={cn('text-lg md:text-2xl font-bold', terminalBodyMuted)}>¡Ya es tu turno!</h2>
                     <div className="text-center">
-                      <p className="text-4xl md:text-6xl font-bold leading-tight mt-2">
+                      <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', terminalH1Gradient)}>
                         ¡Acercate!
                       </p>
                       <p className="text-base md:text-lg text-emerald-400 mt-2">
@@ -2246,15 +2346,15 @@ export default function CheckinPage() {
                   </>
                 ) : (
                   <>
-                    <div className="size-12 md:size-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                    <div className="size-12 md:size-16 rounded-full bg-emerald-500/10 border border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.12)] flex items-center justify-center">
                       <CheckCircle2 className="size-6 md:size-9 text-emerald-400" strokeWidth={1.5} />
                     </div>
-                    <h2 className="text-lg md:text-2xl font-bold text-muted-foreground">¡Estás en la fila!</h2>
+                    <h2 className={cn('text-lg md:text-2xl font-bold', terminalBodyMuted)}>¡Estás en la fila!</h2>
                     <div className="text-center">
-                      <p className="text-4xl md:text-6xl font-bold leading-tight mt-2">
+                      <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', terminalH1Gradient)}>
                         ¡Tomá asiento!
                       </p>
-                      <p className="text-base md:text-lg text-muted-foreground mt-2">
+                      <p className={cn('text-base md:text-lg mt-2', terminalBodyMuted)}>
                         Ya te llamamos cuando sea tu turno
                       </p>
                     </div>
@@ -2262,18 +2362,16 @@ export default function CheckinPage() {
                 )}
 
                 {myQueueEntry.barber && (
-                  <div className="w-full rounded-xl border border-white/8 bg-white/3 p-3 md:p-4 mt-1">
+                  <div className={cn('w-full p-3 md:p-4 mt-1', terminalGlassCardInner)}>
                     <div className="flex items-center gap-3 justify-center">
-                      <div className="flex size-10 md:size-12 items-center justify-center rounded-full bg-white/6 border border-white/10 text-sm md:text-base font-bold shrink-0">
+                      <div className="flex size-10 md:size-12 items-center justify-center rounded-full border border-cyan-500/20 bg-cyan-500/10 text-sm md:text-base font-bold text-cyan-100 shrink-0">
                         {(myQueueEntry.barber as Staff).full_name.charAt(0).toUpperCase()}
                       </div>
                       <div className="min-w-0">
                         <p className="text-base md:text-lg font-semibold truncate">
                           {(myQueueEntry.barber as Staff).full_name}
                         </p>
-                        <p className="text-xs md:text-sm text-muted-foreground">
-                          Tu barbero asignado
-                        </p>
+                        <p className={cn('text-xs md:text-sm', terminalBodyMuted)}>Tu barbero asignado</p>
                       </div>
                     </div>
                   </div>
@@ -2288,7 +2386,7 @@ export default function CheckinPage() {
                       setChangingBarberInManage(true)
                     }}
                     variant="outline"
-                    className="h-11 md:h-12 text-sm md:text-base rounded-xl w-full max-w-xs"
+                    className="h-11 md:h-12 text-sm md:text-base rounded-xl w-full max-w-xs border-cyan-500/25 bg-zinc-950/40 text-cyan-100 hover:bg-cyan-950/30 hover:text-white"
                   >
                     <RefreshCw className="size-4 mr-2" />
                     Cambiar barbero
@@ -2297,27 +2395,18 @@ export default function CheckinPage() {
               </div>
 
               {/* Countdown bar */}
-              <div className="w-full max-w-xs h-1 rounded-full bg-white/10 overflow-hidden">
+              <div className={terminalProgressTrack}>
                 <div
-                  className="h-full bg-white/40 rounded-full origin-left"
+                  className={terminalProgressFill}
                   style={{ animation: `checkin-countdown ${RESET_DELAY_MS}ms linear forwards` }}
                 />
               </div>
-              <p className="text-xs md:text-sm text-muted-foreground/50 text-center">
-                Volviendo al inicio...
-              </p>
-
-              <style>{`
-                @keyframes checkin-countdown {
-                  from { transform: scaleX(1); }
-                  to { transform: scaleX(0); }
-                }
-              `}</style>
+              <p className={cn('text-xs md:text-sm text-center', terminalBodyMuted)}>Volviendo al inicio...</p>
             </>
           ) : (
             <>
-              <div className="text-center">
-                <h2 className="text-2xl md:text-3xl font-bold">Cambiar barbero</h2>
+              <div className="relative text-center">
+                <h2 className={terminalH2}>Cambiar barbero</h2>
               </div>
 
               {loadingBarbers ? (

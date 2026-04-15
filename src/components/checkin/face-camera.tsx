@@ -20,6 +20,8 @@ interface FaceCameraProps {
   branchName?: string
   targetRole?: 'client' | 'staff'
   orgId?: string | null
+  /** Estilo kiosk neón (terminal de check-in). */
+  variant?: 'default' | 'terminal'
 }
 
 type CameraState =
@@ -44,7 +46,9 @@ export function FaceCamera({
   branchName,
   targetRole = 'client',
   orgId,
+  variant = 'default',
 }: FaceCameraProps) {
+  const isTerminal = variant === 'terminal'
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -259,16 +263,38 @@ export function FaceCamera({
   }
 
   return (
-    <div className="w-full max-w-sm md:max-w-md flex flex-col items-center gap-2 md:gap-3 flex-1 min-h-0">
+    <div className="relative z-[1] w-full max-w-sm md:max-w-md flex flex-col items-center gap-2 md:gap-3 flex-1 min-h-0">
       <div className="text-center">
-        <h2 className="text-2xl md:text-3xl font-bold">Check-in</h2>
+        <h2
+          className={
+            isTerminal
+              ? 'text-2xl md:text-3xl font-bold tracking-tight bg-gradient-to-r from-cyan-200 via-white to-violet-200 bg-clip-text text-transparent'
+              : 'text-2xl md:text-3xl font-bold'
+          }
+        >
+          Check-in
+        </h2>
         {branchName && (
-          <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">{branchName}</p>
+          <p
+            className={
+              isTerminal
+                ? 'mt-1 md:mt-2 text-base md:text-lg text-cyan-100/55'
+                : 'text-muted-foreground mt-1 md:mt-2 text-base md:text-lg'
+            }
+          >
+            {branchName}
+          </p>
         )}
       </div>
 
       {/* Camera viewport */}
-      <div className="relative w-full aspect-[3/4] max-h-[55dvh] rounded-2xl overflow-hidden bg-black/50 border border-white/10 shrink">
+      <div
+        className={
+          isTerminal
+            ? 'relative w-full aspect-[3/4] max-h-[55dvh] rounded-2xl overflow-hidden bg-zinc-950/80 border border-cyan-400/25 shadow-[0_0_40px_rgba(34,211,238,0.15)] shrink'
+            : 'relative w-full aspect-[3/4] max-h-[55dvh] rounded-2xl overflow-hidden bg-black/50 border border-white/10 shrink'
+        }
+      >
         <video
           ref={videoRef}
           className="absolute inset-0 w-full h-full object-cover mirror"
@@ -286,8 +312,13 @@ export function FaceCamera({
         {(state === 'scanning' || state === 'matching') && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div
-              className={`w-56 h-72 md:w-64 md:h-80 rounded-full border-2 border-dashed transition-colors duration-300 ${faceBox ? 'border-emerald-400 shadow-[0_0_30px_rgba(34,197,94,0.3)]' : 'border-white/20'
-                }`}
+              className={`w-56 h-72 md:w-64 md:h-80 rounded-full border-2 border-dashed transition-colors duration-300 ${
+                faceBox
+                  ? 'border-emerald-400 shadow-[0_0_30px_rgba(34,197,94,0.3)]'
+                  : isTerminal
+                    ? 'border-cyan-400/40 shadow-[0_0_24px_rgba(34,211,238,0.2)]'
+                    : 'border-white/20'
+              }`}
             />
           </div>
         )}
@@ -354,7 +385,11 @@ export function FaceCamera({
       <Button
         onClick={state === 'no_match' ? handleManualNoMatch : onManualEntry}
         variant="outline"
-        className="w-full h-11 md:h-12 text-sm md:text-base rounded-xl gap-2 md:gap-3 shrink-0"
+        className={
+          isTerminal
+            ? 'w-full h-11 md:h-12 text-sm md:text-base rounded-xl gap-2 md:gap-3 shrink-0 border-cyan-500/25 bg-zinc-950/50 text-cyan-100 hover:bg-cyan-950/40 hover:text-white hover:border-cyan-400/40'
+            : 'w-full h-11 md:h-12 text-sm md:text-base rounded-xl gap-2 md:gap-3 shrink-0'
+        }
       >
         <KeyboardIcon className="size-5" />
         Soy Nuevo

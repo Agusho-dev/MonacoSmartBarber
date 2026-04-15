@@ -86,7 +86,7 @@ export async function getPublicBranches(orgId?: string) {
 
   let query = supabase
     .from('branches')
-    .select('*')
+    .select('*, organizations(name)')
     .eq('is_active', true)
     .order('name')
 

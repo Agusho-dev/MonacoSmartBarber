@@ -35,6 +35,7 @@ export function FaceEnrollment({
   captureOnly = false,
   onCapture,
 }: FaceEnrollmentProps) {
+  const isTerminal = source === 'checkin'
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const mountedRef = useRef(true)
@@ -233,16 +234,36 @@ export function FaceEnrollment({
   }, [clientId, source, onComplete, stopCamera, captureOnly, onCapture])
 
   return (
-    <div className="w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6">
+    <div className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6">
       <div className="text-center">
-        <h2 className="text-2xl md:text-3xl font-bold">Registrar tu cara</h2>
-        <p className="text-muted-foreground mt-1 md:mt-2 text-base md:text-lg">
+        <h2
+          className={
+            isTerminal
+              ? 'text-2xl md:text-3xl font-bold tracking-tight bg-gradient-to-r from-cyan-200 via-white to-violet-200 bg-clip-text text-transparent'
+              : 'text-2xl md:text-3xl font-bold'
+          }
+        >
+          Registrar tu cara
+        </h2>
+        <p
+          className={
+            isTerminal
+              ? 'mt-1 md:mt-2 text-base md:text-lg text-cyan-100/55'
+              : 'text-muted-foreground mt-1 md:mt-2 text-base md:text-lg'
+          }
+        >
           {clientName}, mirá a la cámara para futuras visitas
         </p>
       </div>
 
       {/* Camera viewport */}
-      <div className="relative w-full aspect-[3/4] max-h-[70vh] rounded-3xl overflow-hidden bg-black/50 border border-white/10">
+      <div
+        className={
+          isTerminal
+            ? 'relative w-full aspect-[3/4] max-h-[70vh] rounded-3xl overflow-hidden bg-zinc-950/80 border border-cyan-400/25 shadow-[0_0_40px_rgba(34,211,238,0.12)]'
+            : 'relative w-full aspect-[3/4] max-h-[70vh] rounded-3xl overflow-hidden bg-black/50 border border-white/10'
+        }
+      >
         <video
           ref={videoRef}
           className="absolute inset-0 w-full h-full object-cover"
@@ -255,8 +276,13 @@ export function FaceEnrollment({
         {(state === 'positioning' || state === 'capturing') && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div
-              className={`w-56 h-72 md:w-64 md:h-80 rounded-full border-2 border-dashed transition-colors duration-300 ${faceDetected ? 'border-emerald-400 shadow-[0_0_30px_rgba(34,197,94,0.3)]' : 'border-white/20'
-                }`}
+              className={`w-56 h-72 md:w-64 md:h-80 rounded-full border-2 border-dashed transition-colors duration-300 ${
+                faceDetected
+                  ? 'border-emerald-400 shadow-[0_0_30px_rgba(34,197,94,0.3)]'
+                  : isTerminal
+                    ? 'border-cyan-400/40 shadow-[0_0_24px_rgba(34,211,238,0.2)]'
+                    : 'border-white/20'
+              }`}
             />
           </div>
         )}
@@ -335,7 +361,11 @@ export function FaceEnrollment({
             stopCamera()
             onSkip()
           }}
-          className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-2"
+          className={
+            isTerminal
+              ? 'flex items-center gap-2 rounded-xl border border-white/10 bg-zinc-950/40 px-4 py-2 text-cyan-100/70 hover:border-cyan-500/25 hover:bg-cyan-950/30 hover:text-cyan-50 transition-colors'
+              : 'flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-2'
+          }
         >
           <SkipForward className="size-4" />
           <span className="text-lg">Omitir por ahora</span>
