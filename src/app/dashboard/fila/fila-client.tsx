@@ -1363,7 +1363,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
         fetchQueue() // reset visual state
       }}
     >
-      <div className="flex h-[calc(100dvh-9rem)] lg:h-[calc(100dvh-9.5rem)] flex-col gap-2 lg:gap-4 overflow-hidden p-1">
+      <div className="flex flex-col gap-2 lg:gap-4 p-1 md:h-[calc(100dvh-9rem)] lg:h-[calc(100dvh-9.5rem)] md:overflow-hidden">
 
         {/* Encabezado y Descansos (Top Bar) */}
         <div className="flex shrink-0 flex-col gap-2 lg:gap-3 px-2">
@@ -1618,7 +1618,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
         </div>
 
         {/* Tablero Kanban (Grid Layout) */}
-        <div className="flex flex-1 overflow-auto bg-zinc-950/40 border-t border-zinc-800/80 mt-1 lg:mt-2 relative md:overflow-x-auto overflow-y-auto">
+        <div className="relative mt-1 flex flex-none overflow-visible border-t border-zinc-800/80 bg-zinc-950/40 lg:mt-2 md:min-h-0 md:flex-1 md:overflow-auto">
           <div className="flex flex-col md:flex-row md:min-w-max w-full md:h-full">
 
             {/* Columna Dinámicos (Sticky a la izquierda) */}
