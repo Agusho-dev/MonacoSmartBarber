@@ -180,11 +180,26 @@ interface SidebarContentProps {
   userRole: string
   userFullName: string
   organizationId: string | null
-  availableOrganizations: { id: string; name: string; slug: string }[]
+  availableOrganizations: { id: string; name: string; slug: string; logo_url: string | null }[]
+  orgLogoUrl: string | null
   children: React.ReactNode
 }
 
-function SidebarContent({ isEditMode, onToggleEditMode, userRole, userFullName, organizationId, availableOrganizations, children }: SidebarContentProps) {
+function OrgLogo({ url, size = 5 }: { url: string | null; size?: number }) {
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt=""
+        className="shrink-0 rounded-full object-cover"
+        style={{ width: `${size * 4}px`, height: `${size * 4}px` }}
+      />
+    )
+  }
+  return <Scissors className="size-5 shrink-0" />
+}
+
+function SidebarContent({ isEditMode, onToggleEditMode, userRole, userFullName, organizationId, availableOrganizations, orgLogoUrl, children }: SidebarContentProps) {
   const currentOrg = availableOrganizations.find(o => o.id === organizationId)
   
   const handleSwitchOrg = async (orgId: string) => {
@@ -204,7 +219,7 @@ function SidebarContent({ isEditMode, onToggleEditMode, userRole, userFullName, 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="w-full justify-start gap-2 px-0 hover:bg-transparent">
-                <Scissors className="size-5 shrink-0" />
+                <OrgLogo url={orgLogoUrl} />
                 <span className="truncate text-lg font-bold tracking-tight">
                   {currentOrg?.name || 'Monaco'}
                 </span>
@@ -228,7 +243,7 @@ function SidebarContent({ isEditMode, onToggleEditMode, userRole, userFullName, 
           </DropdownMenu>
         ) : (
           <>
-            <Scissors className="size-5 shrink-0" />
+            <OrgLogo url={orgLogoUrl} />
             <span className="text-lg font-bold tracking-tight truncate flex-1">
               {currentOrg?.name || 'Monaco'}
             </span>
@@ -267,11 +282,12 @@ interface DashboardShellProps {
   permissions: Record<string, boolean>
   allowedBranchIds: string[] | null
   organizationId: string | null
-  availableOrganizations: { id: string; name: string; slug: string }[]
+  availableOrganizations: { id: string; name: string; slug: string; logo_url: string | null }[]
+  orgLogoUrl: string | null
   children: React.ReactNode
 }
 
-export function DashboardShell({ user, permissions, allowedBranchIds, organizationId, availableOrganizations, children }: DashboardShellProps) {
+export function DashboardShell({ user, permissions, allowedBranchIds, organizationId, availableOrganizations, orgLogoUrl, children }: DashboardShellProps) {
   const pathname = usePathname()
   const router = useRouter()
   const touchStartX = useRef(0)
@@ -592,6 +608,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
           userFullName={user.full_name}
           organizationId={organizationId}
           availableOrganizations={availableOrganizations}
+          orgLogoUrl={orgLogoUrl}
         >
           {renderNavLinks()}
         </SidebarContent>
@@ -611,6 +628,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
             userFullName={user.full_name}
             organizationId={organizationId}
             availableOrganizations={availableOrganizations}
+            orgLogoUrl={orgLogoUrl}
           >
             {renderNavLinks()}
           </SidebarContent>

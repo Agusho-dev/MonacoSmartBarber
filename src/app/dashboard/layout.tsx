@@ -66,12 +66,13 @@ export default async function DashboardLayout({
   }
 
   // Obtain all organizations the user has access to
-  const [{ data: staffOrgs }, { data: memberOrgs }] = await Promise.all([
-    adminClient.from('staff').select('organization_id, organizations(id, name, slug)').eq('auth_user_id', authUser.id).eq('is_active', true),
-    adminClient.from('organization_members').select('organization_id, organizations(id, name, slug)').eq('user_id', authUser.id)
+  const [{ data: staffOrgs }, { data: memberOrgs }, { data: currentOrg }] = await Promise.all([
+    adminClient.from('staff').select('organization_id, organizations(id, name, slug, logo_url)').eq('auth_user_id', authUser.id).eq('is_active', true),
+    adminClient.from('organization_members').select('organization_id, organizations(id, name, slug, logo_url)').eq('user_id', authUser.id),
+    adminClient.from('organizations').select('logo_url').eq('id', orgId).single(),
   ])
 
-  const activeOrgsMap = new Map<string, { id: string; name: string; slug: string }>()
+  const activeOrgsMap = new Map<string, { id: string; name: string; slug: string; logo_url: string | null }>()
   staffOrgs?.forEach((s: any) => {
     if (s.organizations) activeOrgsMap.set(s.organization_id, s.organizations)
   })
@@ -128,6 +129,7 @@ export default async function DashboardLayout({
       allowedBranchIds={allowedBranchIds}
       organizationId={userProfile.organization_id}
       availableOrganizations={userOrganizations}
+      orgLogoUrl={currentOrg?.logo_url ?? null}
     >
       {children}
     </DashboardShell>

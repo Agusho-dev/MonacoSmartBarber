@@ -46,12 +46,14 @@ export default function BarberLoginPage() {
   const [loadingBarbers, setLoadingBarbers] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [loginBlock, setLoginBlock] = useState<LoginBlock>(null)
+  const [orgInfo, setOrgInfo] = useState<{ name: string; logo_url: string | null } | null>(null)
 
   useEffect(() => {
     const load = async () => {
-      const { getPublicBranches } = await import("@/lib/actions/org")
-      const data = await getPublicBranches()
+      const { getPublicBranches, getActiveOrganization } = await import("@/lib/actions/org")
+      const [data, org] = await Promise.all([getPublicBranches(), getActiveOrganization()])
       setBranches((data ?? []) as Branch[])
+      if (org) setOrgInfo({ name: org.name, logo_url: org.logo_url })
       setLoadingBranches(false)
     }
     load()
@@ -160,11 +162,19 @@ export default function BarberLoginPage() {
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center p-4">
       <div className="mb-8 flex flex-col items-center gap-2">
-        <div className="flex size-12 items-center justify-center rounded-full border border-muted-foreground/25">
-          <Scissors className="size-5 text-foreground" />
-        </div>
+        {orgInfo?.logo_url ? (
+          <img
+            src={orgInfo.logo_url}
+            alt={orgInfo.name}
+            className="size-12 rounded-full object-cover"
+          />
+        ) : (
+          <div className="flex size-12 items-center justify-center rounded-full border border-muted-foreground/25">
+            <Scissors className="size-5 text-foreground" />
+          </div>
+        )}
         <h1 className="text-lg font-semibold tracking-tight">
-          Monaco Smart Barber
+          {orgInfo?.name || 'Monaco Smart Barber'}
         </h1>
       </div>
 
