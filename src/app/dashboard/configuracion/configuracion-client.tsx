@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useRef } from 'react'
 import { toast } from 'sonner'
 import { updateAppSettings, updateBranchCheckinColor } from '@/lib/actions/settings'
+import { uploadOrgLogo, updateOrgName } from '@/lib/actions/onboarding'
 import type { AppSettings } from '@/lib/types/database'
 import {
   Card,
@@ -15,7 +16,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Clock, UserX, Save, Timer, AlertTriangle, Zap, Monitor } from 'lucide-react'
+import { Clock, UserX, Save, Timer, AlertTriangle, Zap, Monitor, ImagePlus, Building2, Loader2, X } from 'lucide-react'
 
 const DAY_OPTIONS = [
   { value: 1, label: 'Lun' },
@@ -33,17 +34,24 @@ interface BranchColor {
   checkin_bg_color: string | null
 }
 
+interface OrgInfo {
+  name: string
+  logo_url: string | null
+}
+
 interface Props {
   appSettings: AppSettings | null
   branches: BranchColor[]
+  org: OrgInfo | null
 }
 
-export function ConfiguracionClient({ appSettings, branches }: Props) {
+export function ConfiguracionClient({ appSettings, branches, org }: Props) {
   return (
     <div className="space-y-4 lg:space-y-6">
       <h2 className="text-xl lg:text-2xl font-bold tracking-tight">Configuración</h2>
 
       <div className="grid gap-4 lg:gap-6 lg:grid-cols-2">
+        <OrgBrandingCard org={org} />
         <BusinessHoursCard settings={appSettings} />
         <ThresholdsCard settings={appSettings} />
         <ShiftEndMarginCard settings={appSettings} />
@@ -52,6 +60,129 @@ export function ConfiguracionClient({ appSettings, branches }: Props) {
         <CheckinBgColorCard settings={appSettings} branches={branches} />
       </div>
     </div>
+  )
+}
+
+/* ─── Org Branding ─── */
+
+function OrgBrandingCard({ org }: { org: OrgInfo | null }) {
+  const [name, setName] = useState(org?.name ?? '')
+  const [logoUrl, setLogoUrl] = useState(org?.logo_url ?? null)
+  const [isPending, startTransition] = useTransition()
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleLogoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('El archivo no puede superar 5MB')
+      return
+    }
+
+    setUploading(true)
+    const fd = new FormData()
+    fd.set('logo', file)
+
+    startTransition(async () => {
+      const result = await uploadOrgLogo(fd)
+      setUploading(false)
+      if (result.success && result.url) {
+        setLogoUrl(`${result.url}?t=${Date.now()}`)
+        toast.success('Logo actualizado')
+      } else {
+        toast.error(result.error ?? 'Error al subir el logo')
+      }
+    })
+
+    // Limpiar el input para permitir subir el mismo archivo de nuevo
+    e.target.value = ''
+  }
+
+  const handleSaveName = () => {
+    startTransition(async () => {
+      const result = await updateOrgName(name)
+      if (result.success) toast.success('Nombre actualizado')
+      else toast.error(result.error ?? 'Error al guardar')
+    })
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Building2 className="size-5 text-muted-foreground" />
+          <CardTitle>Marca de la barbería</CardTitle>
+        </div>
+        <CardDescription>
+          Logo y nombre que aparecen en la pantalla de inicio
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Logo */}
+        <div className="space-y-2">
+          <Label>Logo</Label>
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || isPending}
+              className="group relative flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-dashed border-muted-foreground/30 bg-muted/50 transition-colors hover:border-primary/50 hover:bg-muted disabled:opacity-50"
+            >
+              {logoUrl ? (
+                <>
+                  <img
+                    src={logoUrl}
+                    alt="Logo"
+                    className="size-full rounded-full object-cover"
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+                    <ImagePlus className="size-5 text-white" />
+                  </div>
+                </>
+              ) : uploading ? (
+                <Loader2 className="size-6 animate-spin text-muted-foreground" />
+              ) : (
+                <ImagePlus className="size-6 text-muted-foreground" />
+              )}
+            </button>
+            <div className="space-y-1">
+              <p className="text-sm text-muted-foreground">
+                {logoUrl ? 'Hacé click para cambiar' : 'Hacé click para subir'}
+              </p>
+              <p className="text-xs text-muted-foreground/60">
+                PNG, JPG, WebP o SVG. Máx 5MB.
+              </p>
+            </div>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/svg+xml"
+            className="hidden"
+            onChange={handleLogoSelect}
+          />
+        </div>
+
+        {/* Nombre */}
+        <div className="space-y-2">
+          <Label htmlFor="org-name">Nombre de la barbería</Label>
+          <Input
+            id="org-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Mi Barbería"
+          />
+        </div>
+      </CardContent>
+      <CardFooter>
+        <Button onClick={handleSaveName} disabled={isPending || !name.trim()}>
+          <Save className="mr-2 size-4" />
+          {isPending ? 'Guardando...' : 'Guardar nombre'}
+        </Button>
+      </CardFooter>
+    </Card>
   )
 }
 

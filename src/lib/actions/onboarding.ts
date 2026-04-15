@@ -43,7 +43,34 @@ export async function uploadOrgLogo(formData: FormData) {
     return { success: false, error: 'Error al guardar el logo' }
   }
 
+  revalidatePath('/dashboard/configuracion')
+  revalidatePath('/')
   return { success: true, url: publicUrl.publicUrl }
+}
+
+/**
+ * Actualiza el nombre de la organización.
+ */
+export async function updateOrgName(name: string) {
+  if (!name.trim()) return { success: false, error: 'El nombre es obligatorio' }
+
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { success: false, error: 'Organización no encontrada' }
+
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from('organizations')
+    .update({ name: name.trim() })
+    .eq('id', orgId)
+
+  if (error) {
+    console.error('[updateOrgName] Error:', error)
+    return { success: false, error: 'Error al actualizar el nombre' }
+  }
+
+  revalidatePath('/dashboard/configuracion')
+  revalidatePath('/')
+  return { success: true }
 }
 
 // ---------------------------------------------------------------------------
