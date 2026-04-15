@@ -23,8 +23,8 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json()
-    // body: { phone: "+549...", message: "texto", timestamp: 1234567890, org_id?: "uuid", branch_id?: "uuid" }
-    const { phone, message, timestamp, org_id, branch_id } = body
+    // body: { phone, message, timestamp, org_id?, branch_id?, push_name? } — push_name = nombre en perfil WhatsApp (Baileys)
+    const { phone, message, timestamp, org_id, branch_id, push_name } = body
 
     if (!phone || !message) {
       return new Response(
@@ -41,6 +41,8 @@ Deno.serve(async (req: Request) => {
     }
 
     const phoneClean = (phone as string).replace(/\D/g, '')
+    const pushName =
+      typeof push_name === 'string' && push_name.trim().length > 0 ? push_name.trim() : null
 
     // Resolver organization_id desde org_id directo o desde branch_id
     let organizationId: string | null = org_id || null
@@ -97,7 +99,7 @@ Deno.serve(async (req: Request) => {
     let convId: string
     const { data: existingConv } = await supabase
       .from('conversations')
-      .select('id, unread_count, platform_user_id')
+      .select('id, unread_count, platform_user_id, platform_user_name')
       .eq('channel_id', waChannel.id)
       .ilike('platform_user_id', `%${phoneSuffix}`)
       .order('last_message_at', { ascending: false, nullsFirst: false })
@@ -113,6 +115,7 @@ Deno.serve(async (req: Request) => {
           last_message_at: new Date().toISOString(),
           client_id: (client as any)?.id ?? null,
           can_reply_until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          platform_user_name: (client as any)?.name ?? pushName ?? existingConv.platform_user_name ?? phone,
           // Normalizar al formato que llega para evitar futuros desmatches
           ...(existingConv.platform_user_id !== phoneClean ? { platform_user_id: phoneClean } : {}),
         })
@@ -124,7 +127,7 @@ Deno.serve(async (req: Request) => {
           channel_id: waChannel.id,
           client_id: (client as any)?.id ?? null,
           platform_user_id: phoneClean,
-          platform_user_name: (client as any)?.name ?? phone,
+          platform_user_name: (client as any)?.name ?? pushName ?? phone,
           status: 'open',
           unread_count: 1,
           last_message_at: new Date().toISOString(),

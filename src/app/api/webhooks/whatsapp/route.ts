@@ -8,6 +8,44 @@ function getSupabase() {
   )
 }
 
+/** Meta envía `contacts[].profile.name` (nombre en WhatsApp) junto a los mensajes. */
+type WaWebhookContact = { profile?: { name?: string }; wa_id?: string }
+
+function buildWhatsappContactNames(contacts: WaWebhookContact[] | undefined): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const c of contacts ?? []) {
+    const label = c.profile?.name?.trim()
+    const waId = c.wa_id?.replace(/\D/g, '')
+    if (!label || !waId) continue
+    map.set(waId, label)
+  }
+  return map
+}
+
+function waProfileNameForFrom(from: string, byWaId: Map<string, string>): string | null {
+  const digits = from.replace(/\D/g, '')
+  return byWaId.get(digits) ?? null
+}
+
+function isPlainWhatsAppAddressLabel(s: string | null | undefined): boolean {
+  if (!s) return true
+  const d = s.replace(/\D/g, '')
+  if (d.length < 10) return false
+  return !/[a-zA-Z\u00C0-\u024F]/.test(s)
+}
+
+function resolveWaConversationLabel(args: {
+  client: { name: string } | null | undefined
+  profileName: string | null
+  existingName: string | null | undefined
+  from: string
+}): string {
+  if (args.client?.name) return args.client.name
+  if (args.profileName) return args.profileName
+  if (args.existingName && !isPlainWhatsAppAddressLabel(args.existingName)) return args.existingName
+  return args.from
+}
+
 // Verifica la firma HMAC-SHA256 del payload enviado por Meta
 async function verifyHmacSignature(
   body: string,
@@ -176,6 +214,8 @@ export async function POST(req: NextRequest) {
 
       if (!waChannel) continue
 
+      const waContactNames = buildWhatsappContactNames(value.contacts)
+
       // Procesar mensajes entrantes (incluye interactive para botones/listas)
       for (const message of value.messages ?? []) {
         if (!['text', 'image', 'audio', 'video', 'document', 'interactive', 'button'].includes(message.type)) continue
@@ -240,9 +280,11 @@ export async function POST(req: NextRequest) {
         // IMPORTANTE: limit(1) antes de maybeSingle() para evitar error 406 si hay
         // múltiples conversaciones con el mismo sufijo (legacy duplicates)
         const fromSuffix = from.slice(-10)
+        const profileName = waProfileNameForFrom(from, waContactNames)
+
         const { data: existingConv } = await supabase
           .from('conversations')
-          .select('id, unread_count, platform_user_id')
+          .select('id, unread_count, platform_user_id, platform_user_name, client_id')
           .eq('channel_id', waChannel.id)
           .ilike('platform_user_id', `%${fromSuffix}`)
           .order('last_message_at', { ascending: false, nullsFirst: false })
@@ -251,6 +293,13 @@ export async function POST(req: NextRequest) {
 
         let convId: string
         const replyUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+
+        const platformUserName = resolveWaConversationLabel({
+          client: client ?? undefined,
+          profileName,
+          existingName: existingConv?.platform_user_name,
+          from,
+        })
 
         if (existingConv) {
           convId = existingConv.id
@@ -261,6 +310,7 @@ export async function POST(req: NextRequest) {
               last_message_at: new Date().toISOString(),
               client_id: client?.id ?? null,
               can_reply_until: replyUntil,
+              platform_user_name: platformUserName,
               // Normalizar al formato canónico de Meta para evitar futuros desmatches
               ...(existingConv.platform_user_id !== from ? { platform_user_id: from } : {}),
             })
@@ -272,7 +322,7 @@ export async function POST(req: NextRequest) {
               channel_id: waChannel.id,
               client_id: client?.id ?? null,
               platform_user_id: from,
-              platform_user_name: client?.name ?? from,
+              platform_user_name: platformUserName,
               status: 'open',
               unread_count: 1,
               last_message_at: new Date().toISOString(),

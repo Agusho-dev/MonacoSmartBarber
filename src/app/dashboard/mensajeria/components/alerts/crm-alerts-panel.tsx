@@ -9,11 +9,14 @@ import { createClient } from '@/lib/supabase/client'
 import type { CrmAlert, CrmAlertType } from '@/lib/types/database'
 import { formatDistanceToNow } from 'date-fns'
 import { es } from 'date-fns/locale'
+import { displayName } from '../shared/helpers'
 
 type AlertWithConversation = CrmAlert & {
   conversation?: {
     id: string
     platform_user_name: string
+    platform_user_id: string
+    channel?: { platform: string } | null
     client?: { id: string; name: string; phone: string }
   }
 }
@@ -176,7 +179,13 @@ export function CrmAlertsPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =
           alerts.map(alert => {
             const config = ALERT_CONFIG[alert.alert_type] || ALERT_CONFIG.info
             const Icon = config.icon
-            const clientName = alert.conversation?.client?.name || alert.conversation?.platform_user_name || 'Desconocido'
+            const rawAlertName =
+              alert.conversation?.client?.name
+              || alert.conversation?.platform_user_name
+              || alert.conversation?.platform_user_id
+            const clientName = rawAlertName
+              ? displayName(rawAlertName, alert.conversation?.channel?.platform)
+              : 'Desconocido'
             const timeAgo = formatDistanceToNow(new Date(alert.created_at), { addSuffix: true, locale: es })
 
             return (

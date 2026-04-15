@@ -380,7 +380,7 @@ export async function getCrmAlerts(onlyUnread = false) {
   const supabase = createAdminClient()
   let query = supabase
     .from('crm_alerts')
-    .select('*, conversation:conversations(id, platform_user_name, client:clients(id, name, phone))')
+    .select('*, conversation:conversations(id, platform_user_name, platform_user_id, channel:social_channels(platform), client:clients(id, name, phone))')
     .eq('organization_id', result.orgId)
     .order('created_at', { ascending: false })
     .limit(50)
@@ -391,7 +391,7 @@ export async function getCrmAlerts(onlyUnread = false) {
 
   const { data, error } = await query
   if (error) return { data: [], error: error.message }
-  return { data: data as (CrmAlert & { conversation?: { id: string; platform_user_name: string; client?: { id: string; name: string; phone: string } } })[], error: null }
+  return { data: data as (CrmAlert & { conversation?: { id: string; platform_user_name: string; platform_user_id: string; channel?: { platform: string } | null; client?: { id: string; name: string; phone: string } } })[], error: null }
 }
 
 export async function getUnreadAlertCount() {

@@ -1,12 +1,37 @@
 export function initials(name: string) {
-  if (/^\d+$/.test(name.trim())) return 'IG'
+  const t = name.trim()
+  if (/^\d+$/.test(t)) return 'IG'
+  // Número formateado como contacto WA sin nombre en perfil (ver displayName)
+  if (/^\+\d{10,}$/.test(t)) return 'WA'
   return name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() || '?'
+}
+
+/** Etiqueta legible para wa_id / teléfono solo dígitos (Cloud API envía `from` sin +). */
+export function formatWhatsAppPhoneForUi(raw: string): string {
+  const d = raw.replace(/\D/g, '')
+  if (!d) return raw.trim() || 'Sin nombre'
+  return `+${d}`
+}
+
+function isLikelyMetaPhoneHandle(name: string, platform?: string): boolean {
+  const trimmed = name.trim()
+  const digits = trimmed.replace(/\D/g, '')
+  if (digits.length < 10) return false
+  // Sin letras: es wa_id o teléfono guardado como "nombre" temporal
+  if (/[a-zA-Z\u00C0-\u024F]/.test(trimmed)) return false
+  if (platform === 'whatsapp') {
+    return /^\d{10,}$/.test(trimmed) || /^[\d+\s().-]+$/.test(trimmed)
+  }
+  return /^\d{10,}$/.test(trimmed)
 }
 
 export function displayName(name: string | undefined | null, platform?: string): string {
   if (!name) return platform === 'instagram' ? 'Usuario de Instagram' : 'Sin nombre'
-  if (/^\d{10,}$/.test(name.trim())) {
-    return platform === 'instagram' ? 'Usuario de Instagram' : `ID: ${name.slice(0, 8)}…`
+  if (isLikelyMetaPhoneHandle(name, platform)) {
+    const digits = name.replace(/\D/g, '')
+    if (platform === 'instagram') return 'Usuario de Instagram'
+    if (platform === 'whatsapp') return formatWhatsAppPhoneForUi(digits)
+    return `ID: ${digits.slice(0, 8)}…`
   }
   return name
 }
