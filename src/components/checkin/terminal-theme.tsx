@@ -292,7 +292,7 @@ export const terminalPrimaryInnerBtn =
   'relative z-[1] flex w-full flex-row items-center justify-center gap-3 md:gap-4 overflow-hidden rounded-[0.875rem] md:rounded-[1.375rem] border border-white/20 checkin-glass-surface px-3 py-3 md:px-5 md:py-4 text-white transition-all duration-300 hover:border-white/32 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60'
 
 export const terminalDialogSurface =
-  'max-w-[95vw] md:max-w-2xl max-h-[90dvh] border border-white/15 checkin-glass-surface p-4 md:p-8 rounded-2xl md:rounded-[2rem]'
+  'inset-4 translate-x-0 translate-y-0 m-auto h-fit max-w-[95vw] md:max-w-2xl max-h-[80dvh] flex flex-col overflow-hidden border border-white/15 checkin-glass-surface p-4 md:p-8 rounded-2xl md:rounded-[2rem]'
 
 export const terminalProgressTrack = 'w-full max-w-xs h-1 rounded-full bg-white/10 overflow-hidden border border-white/15'
 export const terminalProgressFill =

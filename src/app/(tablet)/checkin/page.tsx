@@ -1274,10 +1274,10 @@ export default function CheckinPage() {
         <Dialog open={showBarberPreference} onOpenChange={setShowBarberPreference}>
           <DialogContent className={cn(
             isLightBg
-              ? 'max-w-[95vw] md:max-w-2xl max-h-[85dvh] border border-zinc-200 bg-white p-4 md:p-8 rounded-2xl md:rounded-[2rem] shadow-xl'
+              ? 'inset-4 translate-x-0 translate-y-0 m-auto h-fit max-w-[95vw] md:max-w-2xl max-h-[80dvh] flex flex-col overflow-hidden border border-zinc-200 bg-white p-4 md:p-8 rounded-2xl md:rounded-[2rem] shadow-xl'
               : terminalDialogSurface
           )}>
-            <DialogHeader className="text-left mb-3 md:mb-6">
+            <DialogHeader className="text-left mb-3 md:mb-6 shrink-0">
               <DialogTitle className={cn(
                 'text-xl md:text-3xl font-extrabold',
                 isLightBg ? 'text-zinc-900' : 'bg-gradient-to-r from-violet-200 to-indigo-200 bg-clip-text text-transparent'
@@ -1290,7 +1290,7 @@ export default function CheckinPage() {
             </DialogHeader>
 
             <div className={cn(
-              'overflow-y-auto max-h-[60dvh] pr-2 -mr-2 space-y-3 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full',
+              'flex-1 min-h-0 overflow-y-auto pr-2 -mr-2 space-y-3 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full',
               isLightBg
                 ? '[&::-webkit-scrollbar-thumb]:bg-zinc-300 hover:[&::-webkit-scrollbar-thumb]:bg-zinc-400'
                 : '[&::-webkit-scrollbar-thumb]:bg-white/10 hover:[&::-webkit-scrollbar-thumb]:bg-white/20'
