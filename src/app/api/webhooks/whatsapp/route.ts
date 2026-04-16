@@ -362,8 +362,10 @@ export async function POST(req: NextRequest) {
       if (!waChannel) continue
 
       // Procesar mensajes entrantes (incluye interactive para botones/listas)
+      // en vez de ignorar tipos no soportados (sticker, reaction, etc.), los capturamos como texto
+      // para asegurar que la conversación se replique exactamente en el CRM.
       for (const message of value.messages ?? []) {
-        if (!['text', 'image', 'audio', 'video', 'document', 'interactive', 'button'].includes(message.type)) continue
+        const msgType = message.type
 
         const from: string          = message.from
         const platformMsgId: string = message.id
@@ -403,14 +405,24 @@ export async function POST(req: NextRequest) {
         const mediaId: string | undefined = message.image?.id ?? message.video?.id ?? message.audio?.id ?? message.document?.id
         const mediaCaption: string | undefined = message.image?.caption ?? message.video?.caption ?? message.document?.caption
         if (mediaCaption && !text) text = mediaCaption
-        // Importante: NO mapear interactive/button a 'text' — los workflows y el conteo
-        // "solo primer mensaje de texto" deben distinguir respuestas a plantillas/botones.
+        // Extraer texto o preparar fallbacks para tipos de mensajes no procesados nativamente
+        if (msgType === 'sticker') {
+          text = '[Sticker]'
+        } else if (msgType === 'reaction') {
+          text = `[Reacción: ${message.reaction?.emoji ?? ''}]`
+        } else if (msgType === 'location') {
+          text = `[Ubicación: ${message.location?.name ?? ''} ${message.location?.address ?? ''}]`.trim()
+        } else if (msgType === 'contacts') {
+          text = '[Contacto compartido]'
+        } else if (!text && !mediaCaption && !interactivePayload && !['image', 'video', 'audio', 'document'].includes(msgType)) {
+          text = `[Adjunto: ${msgType}]`
+        }
+
+        // Determinar el content type para la BD
         const contentType =
-          message.type === 'text'
-            ? 'text'
-            : message.type === 'interactive' || message.type === 'button'
-              ? 'interactive'
-              : message.type
+          ['image', 'video', 'audio', 'document', 'interactive', 'button', 'text', 'template'].includes(msgType)
+            ? (msgType === 'button' ? 'interactive' : msgType)
+            : 'text' // Fallback para sticker, reaction, contacts, etc.
 
         // Descargar y almacenar media si corresponde
         let mediaUrl: string | null = null
