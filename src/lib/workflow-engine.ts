@@ -254,6 +254,25 @@ export async function evaluateIncomingMessage(params: {
       }
     }
 
+    // 1c. Estado corrupto: waiting_reply sin current_node_id. No se puede reanudar ni
+    // coincide con ningún nodo; además startWorkflowExecution suele devolver false por
+    // overlap (skip_if_active). Cerramos la ejecución para liberar la conversación.
+    if (activeExec && !activeExec.current_node_id) {
+      console.error(
+        '[WorkflowEngine] Ejecución waiting_reply sin current_node_id — cerrando:',
+        activeExec.id
+      )
+      await supabase
+        .from('workflow_executions')
+        .update({
+          status: 'error',
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', activeExec.id)
+      activeExec = null
+    }
+
     if (activeExec) {
       // Hay un workflow esperando respuesta — procesar
       const node = activeExec.current_node as WorkflowNode | null
