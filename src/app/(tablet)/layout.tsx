@@ -12,7 +12,7 @@ export default async function TabletLayout({
   const supabase = await createClient()
   const { data } = await supabase.from('app_settings').select('checkin_bg_color').maybeSingle()
   const raw = data?.checkin_bg_color ?? '#3f3f46'
-  const { css, isLight } = resolveCheckinBackground(raw)
+  const { css, isLight } = resolveCheckinBackgrouInd(raw)
   const textClass = isLight ? 'text-zinc-900' : 'text-zinc-100'
 
   return (

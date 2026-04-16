@@ -20,6 +20,7 @@ import {
   Check,
   ChevronDown,
   Receipt,
+  Handshake,
 } from 'lucide-react'
 import {
   DndContext,
@@ -72,6 +73,7 @@ const navItems = [
   { href: '/dashboard/clientes', label: 'Clientes', icon: Users, requiredPermissions: ['clients.view'] },
   { href: '/dashboard/mensajeria', label: 'Mensajería', icon: MessageSquare, requiredPermissions: ['clients.view'] },
   { href: '/dashboard/app-movil', label: 'APP Móvil', icon: Smartphone, requiredPermissions: ['rewards.view'] },
+  { href: '/dashboard/convenios', label: 'Convenios', icon: Handshake, requiredPermissions: ['agreements.view'] },
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3, requiredPermissions: ['stats.view'] },
   { href: '/dashboard/caja', label: 'Caja', icon: Receipt, requiredPermissions: ['finances.view_summary'] },
   { href: '/dashboard/finanzas', label: 'Finanzas', icon: DollarSign, requiredPermissions: ['finances.view', 'salary.view'] },
