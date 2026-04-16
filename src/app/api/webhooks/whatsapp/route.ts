@@ -403,7 +403,14 @@ export async function POST(req: NextRequest) {
         const mediaId: string | undefined = message.image?.id ?? message.video?.id ?? message.audio?.id ?? message.document?.id
         const mediaCaption: string | undefined = message.image?.caption ?? message.video?.caption ?? message.document?.caption
         if (mediaCaption && !text) text = mediaCaption
-        const contentType = message.type === 'text' ? 'text' : message.type === 'interactive' || message.type === 'button' ? 'text' : message.type
+        // Importante: NO mapear interactive/button a 'text' — los workflows y el conteo
+        // "solo primer mensaje de texto" deben distinguir respuestas a plantillas/botones.
+        const contentType =
+          message.type === 'text'
+            ? 'text'
+            : message.type === 'interactive' || message.type === 'button'
+              ? 'interactive'
+              : message.type
 
         // Descargar y almacenar media si corresponde
         let mediaUrl: string | null = null

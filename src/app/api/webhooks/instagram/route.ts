@@ -345,7 +345,9 @@ export async function POST(req: NextRequest) {
         convId = newConv.id
       }
 
-      let contentType = isEcho ? 'text' : 'text'
+      const quickReply = !isEcho ? messaging.message?.quick_reply : undefined
+
+      let contentType = isEcho ? 'text' : quickReply ? 'interactive' : 'text'
       let mediaUrl = null
       let caption = text || null
 
@@ -388,8 +390,7 @@ export async function POST(req: NextRequest) {
       // ── Workflow Engine: solo para mensajes inbound ──
       if (!isEcho && igConfig.instagram_page_access_token) {
         try {
-          // Detectar quick_reply (respuestas a botones en IG)
-          const quickReply = messaging.message?.quick_reply
+          // quick_reply ya usado arriba para content_type al insertar
           let igInteractivePayload: { type?: string; button_reply?: { id: string; title: string } } | undefined
           let igMessageType = 'text'
 

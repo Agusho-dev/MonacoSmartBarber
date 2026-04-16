@@ -17,6 +17,12 @@ import { toast } from 'sonner'
 import { getWorkflow, saveWorkflowGraph, updateWorkflow, syncTriggerToWorkflow } from '@/lib/actions/workflows'
 import type { WorkflowNode, WorkflowEdge, WorkflowWithGraph, WorkflowNodeType, WorkflowTriggerType } from '@/lib/types/database'
 import { WorkflowNodeEditor } from './workflow-node-editor'
+import {
+  MessageReceivedTriggerConfig,
+  parseMessageReceivedTriggerState,
+  serializeMessageReceivedTriggerState,
+  type MessageReceivedTriggerState,
+} from './message-received-trigger-config'
 import { useMensajeria } from '../shared/mensajeria-context'
 
 // ─── Constantes ──────────────────────────────────────────────────
@@ -45,12 +51,12 @@ function getNodeMeta(type: string) {
 }
 
 const TRIGGER_TYPES = [
-  { value: 'message_received', label: 'Cualquier mensaje', icon: Inbox, description: 'Se activa con cualquier mensaje recibido (sin filtro)' },
+  { value: 'message_received', label: 'Cualquier mensaje', icon: Inbox, description: 'Configurá bienvenida, silencio tras reseñas y más en el panel siguiente' },
   { value: 'keyword', label: 'Palabra clave', icon: MessageSquare, description: 'Responde cuando un mensaje contiene palabras clave' },
   { value: 'template_reply', label: 'Respuesta a template', icon: GitBranch, description: 'Se activa cuando un cliente responde a un template' },
   { value: 'post_service', label: 'Post-servicio', icon: Clock, description: 'Envía un mensaje después de completar un servicio' },
   { value: 'days_after_visit', label: 'Seguimiento', icon: CalendarDays, description: 'Envía un mensaje X días después de la última visita' },
-  { value: 'conversation_reopened', label: 'Conversación reabierta', icon: Inbox, description: 'Se activa cuando el cliente escribe después de X horas de inactividad' },
+  { value: 'conversation_reopened', label: 'Conversación reabierta', icon: Inbox, description: 'Cliente vuelve a escribir tras inactividad o conversación cerrada (no es el primer mensaje salvo que lo permitas en la config.)' },
 ]
 
 const CHANNEL_OPTIONS = [
@@ -956,6 +962,9 @@ function WorkflowSettingsDialog({
   const [excludeFirstContact, setExcludeFirstContact] = useState<boolean>(
     (workflow.trigger_config?.exclude_first_ever_contact as boolean) ?? true
   )
+  const [messageReceivedState, setMessageReceivedState] = useState<MessageReceivedTriggerState>(() =>
+    parseMessageReceivedTriggerState(workflow.trigger_config as Record<string, unknown>)
+  )
   const [category, setCategory] = useState<string>(
     (workflow as { category?: string | null }).category ?? ''
   )
@@ -985,7 +994,18 @@ function WorkflowSettingsDialog({
     setTemplateName((workflow.trigger_config?.template_name as string) ?? '')
     setDelayMinutes((workflow.trigger_config?.delay_minutes as number) ?? 15)
     setDelayDays((workflow.trigger_config?.delay_days as number) ?? 7)
+    setReopenMode((workflow.trigger_config?.reopen_mode as string) ?? 'inactivity')
+    setMinHoursClient((workflow.trigger_config?.min_hours_since_client_msg as number) ?? 12)
+    setExcludeFirstContact((workflow.trigger_config?.exclude_first_ever_contact as boolean) ?? true)
+    setMessageReceivedState(parseMessageReceivedTriggerState(workflow.trigger_config as Record<string, unknown>))
   }, [workflow])
+
+  // Al elegir "Cualquier mensaje" en el selector, cargar la config guardada del workflow
+  useEffect(() => {
+    if (triggerType === 'message_received') {
+      setMessageReceivedState(parseMessageReceivedTriggerState(workflow.trigger_config as Record<string, unknown>))
+    }
+  }, [triggerType])
 
   const buildTriggerConfig = () => {
     if (triggerType === 'keyword') {
@@ -1003,6 +1023,9 @@ function WorkflowSettingsDialog({
         min_hours_since_client_msg: minHoursClient,
         exclude_first_ever_contact: excludeFirstContact,
       }
+    }
+    if (triggerType === 'message_received') {
+      return serializeMessageReceivedTriggerState(messageReceivedState)
     }
     return {}
   }
@@ -1049,7 +1072,7 @@ function WorkflowSettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings2 className="size-4 text-amber-400" />
@@ -1196,6 +1219,10 @@ function WorkflowSettingsDialog({
             </div>
           )}
 
+          {triggerType === 'message_received' && (
+            <MessageReceivedTriggerConfig value={messageReceivedState} onChange={setMessageReceivedState} variant="dialog" />
+          )}
+
           {triggerType === 'conversation_reopened' && (
             <div className="space-y-3 border rounded-lg p-3 bg-muted/30">
               <div className="space-y-1.5">
@@ -1215,22 +1242,32 @@ function WorkflowSettingsDialog({
                   <span className="text-xs text-muted-foreground">horas</span>
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-xs text-foreground">
-                <input type="checkbox" checked={excludeFirstContact}
+              <label className="flex items-start gap-2 text-xs text-foreground">
+                <input type="checkbox" className="mt-0.5" checked={excludeFirstContact}
                   onChange={e => setExcludeFirstContact(e.target.checked)} />
-                No disparar en el primer contacto del cliente
+                <span>
+                  No disparar en el primer contacto del cliente
+                  <span className="block text-[10px] text-muted-foreground mt-1">
+                    Por defecto está activado: &quot;Conversación reabierta&quot; no incluye el primer mensaje. Para bienvenida al primer mensaje usá el trigger &quot;Cualquier mensaje&quot; con &quot;Solo el primer mensaje&quot;.
+                  </span>
+                </span>
               </label>
             </div>
           )}
 
           {/* Avanzado: categoría, overlap, ventana Meta */}
           <div className="space-y-3 border rounded-lg p-3 bg-muted/30">
-            <p className="text-xs font-medium text-foreground">Convivencia y ventana Meta</p>
+            <div>
+              <p className="text-xs font-medium text-foreground">Convivencia entre workflows y ventana Meta</p>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                La <span className="text-foreground/80">categoría</span> identifica este flujo para solapamientos y para las reglas de &quot;silencio&quot; del trigger Cualquier mensaje.
+              </p>
+            </div>
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Categoría (opcional)</Label>
-              <Input className="bg-muted border text-foreground" placeholder="review, reengagement, support..."
+              <Label className="text-xs text-muted-foreground">Categoría de este workflow</Label>
+              <Input className="bg-muted border text-foreground" placeholder="review, promo, support…"
                 value={category} onChange={e => setCategory(e.target.value)} />
-              <p className="text-[10px] text-muted-foreground">Se usa para reglas de solapamiento entre workflows.</p>
+              <p className="text-[10px] text-muted-foreground">Ej.: los flujos de reseña suelen usar <code className="text-amber-400/90">review</code>.</p>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Política si hay otro workflow activo</Label>

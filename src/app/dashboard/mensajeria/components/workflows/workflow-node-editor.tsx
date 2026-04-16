@@ -9,6 +9,11 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useMensajeria } from '../shared/mensajeria-context'
 import type { WorkflowNode, AutomationWorkflow } from '@/lib/types/database'
+import {
+  MessageReceivedTriggerConfig,
+  parseMessageReceivedTriggerState,
+  serializeMessageReceivedTriggerState,
+} from './message-received-trigger-config'
 
 // ─── Variables disponibles en mensajes ──────────────────────────
 
@@ -670,12 +675,12 @@ function CrmAlertConfig({ config, onChange }: { config: Record<string, unknown>;
 // ─── Trigger config ─────────────────────────────────────────────
 
 const TRIGGER_TYPE_OPTIONS = [
-  { value: 'message_received', label: 'Cualquier mensaje', icon: Inbox, description: 'Se activa con cualquier mensaje recibido' },
+  { value: 'message_received', label: 'Cualquier mensaje', icon: Inbox, description: 'Bienvenida, silencio tras otros flujos, etc.' },
   { value: 'keyword', label: 'Palabra clave', icon: MessageSquare, description: 'Responde cuando un mensaje contiene palabras clave' },
   { value: 'template_reply', label: 'Respuesta a template', icon: GitBranch, description: 'Se activa cuando un cliente responde a un template' },
   { value: 'post_service', label: 'Post-servicio', icon: Clock, description: 'Envía mensaje después de completar un servicio' },
   { value: 'days_after_visit', label: 'Seguimiento', icon: CalendarDays, description: 'Envía mensaje X días después de la última visita' },
-  { value: 'conversation_reopened', label: 'Conversación reabierta', icon: Inbox, description: 'Se activa cuando el cliente escribe tras X horas de inactividad' },
+  { value: 'conversation_reopened', label: 'Conversación reabierta', icon: Inbox, description: 'Tras inactividad o conversación cerrada; por defecto excluye el primer contacto' },
 ]
 
 function TriggerConfig({
@@ -717,7 +722,7 @@ function TriggerConfig({
       conversation_reopened: {
         reopen_mode: 'inactivity',
         min_hours_since_client_msg: 12,
-        exclude_first_ever_contact: false,
+        exclude_first_ever_contact: true,
       },
     }
     onUpdateConfig({ ...config, trigger_type: type, ...defaults[type] })
@@ -839,9 +844,18 @@ function TriggerConfig({
       )}
 
       {triggerType === 'message_received' && (
-        <p className="text-[10px] text-muted-foreground">
-          El workflow se activará con cualquier mensaje entrante. Los workflows con triggers más específicos (palabra clave, template) tienen prioridad.
-        </p>
+        <MessageReceivedTriggerConfig
+          variant="panel"
+          value={parseMessageReceivedTriggerState(config)}
+          onChange={next => {
+            const ser = serializeMessageReceivedTriggerState(next)
+            const nextCfg: Record<string, unknown> = { ...config, trigger_type: triggerType }
+            delete nextCfg.only_first_inbound
+            delete nextCfg.only_first_inbound_plain_text
+            delete nextCfg.suppress_if_category_within_hours
+            onUpdateConfig({ ...nextCfg, ...ser })
+          }}
+        />
       )}
 
       {triggerType === 'conversation_reopened' && (
@@ -865,10 +879,15 @@ function TriggerConfig({
               <span className="text-xs text-muted-foreground">horas</span>
             </div>
           </div>
-          <label className="flex items-center gap-2 text-xs text-foreground">
-            <input type="checkbox" checked={(config.exclude_first_ever_contact as boolean) ?? false}
+          <label className="flex items-start gap-2 text-xs text-foreground">
+            <input type="checkbox" className="mt-0.5" checked={(config.exclude_first_ever_contact as boolean) ?? true}
               onChange={e => onUpdateConfig({ ...config, exclude_first_ever_contact: e.target.checked, trigger_type: triggerType })} />
-            No disparar en el primer contacto del cliente
+            <span>
+              No disparar en el primer contacto del cliente
+              <span className="block text-[10px] text-muted-foreground mt-1">
+                Activado por defecto. Para la primera vez que escriben, usá &quot;Cualquier mensaje&quot; con &quot;Solo el primer mensaje&quot;.
+              </span>
+            </span>
           </label>
         </div>
       )}

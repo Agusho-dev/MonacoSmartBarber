@@ -19,9 +19,10 @@ import {
 import type { AutomationWorkflow } from '@/lib/types/database'
 import { useMensajeria } from '../shared/mensajeria-context'
 import { WorkflowBuilder } from './workflow-builder'
+import { messageReceivedTriggerSummary } from './message-received-trigger-config'
 
 const TRIGGER_TYPES = [
-  { value: 'message_received', label: 'Cualquier mensaje', icon: Inbox, description: 'Se activa con cualquier mensaje recibido (sin filtro)' },
+  { value: 'message_received', label: 'Cualquier mensaje', icon: Inbox, description: 'Incluye modo bienvenida y silencio tras otros flujos' },
   { value: 'keyword', label: 'Palabra clave', icon: MessageSquare, description: 'Responde cuando un mensaje contiene palabras clave' },
   { value: 'template_reply', label: 'Respuesta a template', icon: GitBranch, description: 'Se activa cuando un cliente responde a un template (ej: botones de reseña)' },
   { value: 'post_service', label: 'Post-servicio', icon: Clock, description: 'Envía un mensaje después de completar un servicio' },
@@ -355,6 +356,16 @@ export function WorkflowList() {
                         {(wf.trigger_config as Record<string, unknown>).template_name as string}
                       </span>
                     )}
+                    {wf.trigger_type === 'message_received' &&
+                      messageReceivedTriggerSummary(wf.trigger_config as Record<string, unknown>).map((label, i) => (
+                        <span
+                          key={i}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300/90 max-w-[140px] truncate"
+                          title={label}
+                        >
+                          {label}
+                        </span>
+                      ))}
                   </div>
                 </div>
               ))}

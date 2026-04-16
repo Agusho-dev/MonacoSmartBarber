@@ -126,6 +126,7 @@ function getTriggerLabel(type: string): string {
     case 'post_service': return 'Post-servicio'
     case 'days_after_visit': return 'Seguimiento'
     case 'message_received': return 'Mensaje recibido'
+    case 'conversation_reopened': return 'Conversación reabierta'
     default: return 'Trigger'
   }
 }

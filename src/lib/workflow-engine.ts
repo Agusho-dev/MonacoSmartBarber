@@ -143,6 +143,44 @@ function matchesBranch(wf: { branch_id?: string | null }, branchId: string | nul
   return wf.branch_id === branchId
 }
 
+/**
+ * True si en esta conversación hubo una ejecución de workflow cuya categoría está en
+ * suppressMap y empezó dentro de la ventana en horas (p. ej. review → no bienvenida).
+ */
+async function shouldSuppressForRecentCategoryExecution(
+  supabase: SupabaseClient,
+  conversationId: string,
+  suppressMap: Record<string, number> | null | undefined
+): Promise<boolean> {
+  if (!suppressMap || typeof suppressMap !== 'object') return false
+  const entries = Object.entries(suppressMap).filter(
+    (e): e is [string, number] => typeof e[1] === 'number' && e[1] > 0
+  )
+  if (entries.length === 0) return false
+
+  const maxH = Math.max(...entries.map(([, h]) => h))
+  const since = new Date(Date.now() - maxH * 3600 * 1000).toISOString()
+
+  const { data: rows } = await supabase
+    .from('workflow_executions')
+    .select('created_at, status, workflow:automation_workflows(category)')
+    .eq('conversation_id', conversationId)
+    .gte('created_at', since)
+    .not('status', 'eq', 'cancelled')
+
+  const map = Object.fromEntries(entries) as Record<string, number>
+  for (const row of rows ?? []) {
+    const raw = row.workflow as { category?: string } | { category?: string }[] | null
+    const cat = Array.isArray(raw) ? raw[0]?.category : raw?.category
+    if (!cat) continue
+    const hours = map[cat]
+    if (typeof hours !== 'number' || hours <= 0) continue
+    const threshold = Date.now() - hours * 3600 * 1000
+    if (new Date(row.created_at).getTime() >= threshold) return true
+  }
+  return false
+}
+
 // ─── Punto de entrada principal ──────────────────────────────────
 
 /**
@@ -370,6 +408,39 @@ export async function evaluateIncomingMessage(params: {
           if (!matchesBranch(wf, branchId)) continue
           const channels = wf.channels as string[]
           if (!channels.includes('all') && !channels.includes(platform)) continue
+
+          const msgCfg = wf.trigger_config as Record<string, unknown> | null
+          if (msgCfg?.only_first_inbound === true) {
+            // Por defecto: solo el primer mensaje de texto libre (no botones/plantillas interactivas).
+            // Así una respuesta "4" a la plantilla de reseñas no dispara la bienvenida.
+            const plainTextOnly = msgCfg.only_first_inbound_plain_text !== false
+            if (plainTextOnly && messageType !== 'text') continue
+
+            if (plainTextOnly) {
+              const { count: textInboundCount } = await supabase
+                .from('messages')
+                .select('id', { count: 'exact', head: true })
+                .eq('conversation_id', conversationId)
+                .eq('direction', 'inbound')
+                .eq('content_type', 'text')
+              if ((textInboundCount ?? 0) !== 1) continue
+            } else {
+              const { count: inboundCount } = await supabase
+                .from('messages')
+                .select('id', { count: 'exact', head: true })
+                .eq('conversation_id', conversationId)
+                .eq('direction', 'inbound')
+              if ((inboundCount ?? 0) !== 1) continue
+            }
+          }
+
+          const suppressMap = msgCfg?.suppress_if_category_within_hours as Record<string, number> | undefined
+          if (
+            suppressMap &&
+            (await shouldSuppressForRecentCategoryExecution(supabase, conversationId, suppressMap))
+          ) {
+            continue
+          }
 
           const started = await startWorkflowExecution(supabase, wf.id, conversationId, 'message_received', params, {
             client_name: clientInfo.fullName,
