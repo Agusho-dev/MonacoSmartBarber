@@ -218,16 +218,15 @@ export function assignDynamicBarbers(
       return list
     }
 
-    let candidates = eligibleBarbers
-    if (candidates.length === 0) {
-      candidates = sortByLoad([...barbers])
-      if (candidates.length === 0) {
-        result.push(u)
-        continue
-      }
-    } else {
-      sortByLoad(candidates)
+    // Si no hay ningún barbero elegible (sin fichaje, ocultos, bloqueados por fin de turno, etc.),
+    // el cliente queda sin asignación dinámica. Antes se hacía fallback a *todos* los barberos,
+    // lo que ignoraba el clock-in y mostraba pre-asignaciones incorrectas.
+    if (eligibleBarbers.length === 0) {
+      result.push(u)
+      continue
     }
+
+    const candidates = sortByLoad(eligibleBarbers)
 
     const selectedBarber = candidates[0]
 
