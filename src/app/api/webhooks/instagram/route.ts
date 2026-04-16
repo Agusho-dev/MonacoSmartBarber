@@ -345,11 +345,38 @@ export async function POST(req: NextRequest) {
         convId = newConv.id
       }
 
+      let contentType = isEcho ? 'text' : 'text'
+      let mediaUrl = null
+      let caption = text || null
+
+      const attachments = messaging.message?.attachments
+      if (attachments && attachments.length > 0) {
+        const attachment = attachments[0]
+        mediaUrl = attachment.payload?.url || null
+        if (attachment.type === 'story_mention') {
+          contentType = 'image'
+          caption = caption ? `[Mención en Historia]\n${caption}` : '[Mención en Historia]'
+        } else if (attachment.type === 'image') {
+          contentType = 'image'
+        } else if (attachment.type === 'video') {
+          contentType = 'video'
+        } else if (attachment.type === 'audio') {
+          contentType = 'audio'
+        } else if (attachment.type === 'file') {
+          contentType = 'document'
+        } else if (['fallback', 'share'].includes(attachment.type)) {
+           // Meta also sends share or fallback types sometimes.
+           contentType = 'text'
+           caption = caption ? `[Adjunto: ${attachment.type}]\n${caption}` : `[Adjunto: ${attachment.type}]`
+        }
+      }
+
       const { error: msgErr } = await supabase.from('messages').insert({
         conversation_id: convId,
         direction: isEcho ? 'outbound' : 'inbound',
-        content_type: 'text',
-        content: text || null,
+        content_type: contentType,
+        content: caption,
+        media_url: mediaUrl,
         platform_message_id: platformMsgId,
         status: isEcho ? 'sent' : 'delivered',
         created_at: createdAt,

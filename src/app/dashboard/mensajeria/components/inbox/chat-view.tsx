@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Avatar } from '../shared/avatar'
 import { MessageStatusIcon } from '../shared/icons'
 import { displayName, formatTime, formatDateSeparator } from '../shared/helpers'
+import { AudioPlayer } from '../shared/audio-player'
 import { useMensajeria } from '../shared/mensajeria-context'
 import type { QuickReply } from '../shared/mensajeria-context'
 import type { Message } from '@/lib/types/database'
@@ -479,8 +480,8 @@ function MediaBubble({ msg, isOut }: { msg: Message; isOut: boolean }) {
         )}
 
         {msg.content_type === 'audio' && (
-          <div className="px-3 pt-2">
-            <audio src={url} controls preload="metadata" className="w-full max-w-[240px] h-10" />
+          <div className="pt-2">
+            <AudioPlayer src={url} isOut={isOut} />
           </div>
         )}
 
