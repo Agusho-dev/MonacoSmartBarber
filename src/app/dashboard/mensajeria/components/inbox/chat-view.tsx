@@ -5,6 +5,7 @@ import {
   Send, Clock, ArrowLeft, Plus, Settings,
   CheckCircle2, Archive, RotateCcw, User, MessageSquare, FileText,
   ExternalLink, MessageCircle, Search, X, Sparkles,
+  Download, FileIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -237,9 +238,17 @@ export function ChatView({
                           <InteractiveButtonsBubble msg={msg} isOut={isOut} />
                         ) : isTemplate && msg.template_name ? (
                           <TemplateBubble msg={msg} isOut={isOut} templates={waTemplates} />
+                        ) : msg.media_url && ['image', 'video', 'audio', 'document'].includes(msg.content_type) ? (
+                          <MediaBubble msg={msg} isOut={isOut} />
                         ) : (
                           <div className={`relative max-w-[65%] px-3 py-1.5 rounded-lg text-sm ${isOut ? 'bg-green-700 text-white rounded-tr-none' : 'bg-card text-card-foreground rounded-tl-none'}`}>
                             {msg.content && <p className="whitespace-pre-wrap wrap-break-word leading-[1.45]">{msg.content}</p>}
+                            {!msg.content && ['image', 'video', 'audio', 'document'].includes(msg.content_type) && (
+                              <p className="text-xs text-muted-foreground italic">
+                                {msg.content_type === 'image' ? '📷 Imagen' : msg.content_type === 'video' ? '🎬 Video' : msg.content_type === 'audio' ? '🎤 Audio' : '📎 Documento'}
+                                {' (archivo no disponible)'}
+                              </p>
+                            )}
                             {msg.error_message && isOut && (
                               <p className="text-[10px] text-red-300 mt-1 wrap-break-word opacity-90">{msg.error_message}</p>
                             )}
@@ -427,6 +436,91 @@ function InteractiveButtonsBubble({ msg, isOut }: { msg: Message; isOut: boolean
         <p className="text-[10px] text-red-300 bg-green-900/50 px-2 py-1 wrap-break-word">{msg.error_message}</p>
       )}
     </div>
+  )
+}
+
+function MediaBubble({ msg, isOut }: { msg: Message; isOut: boolean }) {
+  const [expanded, setExpanded] = useState(false)
+  const url = msg.media_url!
+
+  return (
+    <>
+      <div className={`relative max-w-[65%] rounded-lg overflow-hidden text-sm ${isOut ? 'bg-green-700 text-white rounded-tr-none' : 'bg-card text-card-foreground rounded-tl-none'}`}>
+        {msg.content_type === 'image' && (
+          <>
+            <button onClick={() => setExpanded(true)} className="block w-full cursor-pointer">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={url}
+                alt="Imagen"
+                className="w-full max-w-xs rounded-t-lg object-cover"
+                loading="lazy"
+              />
+            </button>
+            {expanded && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={() => setExpanded(false)}>
+                <button className="absolute top-4 right-4 text-white hover:text-gray-300" onClick={() => setExpanded(false)}>
+                  <X className="size-6" />
+                </button>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt="Imagen" className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg" />
+              </div>
+            )}
+          </>
+        )}
+
+        {msg.content_type === 'video' && (
+          <video
+            src={url}
+            controls
+            preload="metadata"
+            className="w-full max-w-xs rounded-t-lg"
+          />
+        )}
+
+        {msg.content_type === 'audio' && (
+          <div className="px-3 pt-2">
+            <audio src={url} controls preload="metadata" className="w-full max-w-[240px] h-10" />
+          </div>
+        )}
+
+        {msg.content_type === 'document' && (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`flex items-center gap-2.5 px-3 py-2.5 transition-colors ${isOut ? 'hover:bg-green-600/50' : 'hover:bg-muted'}`}
+          >
+            <div className={`flex items-center justify-center size-10 rounded-lg shrink-0 ${isOut ? 'bg-green-600/50' : 'bg-muted'}`}>
+              <FileIcon className="size-5 opacity-70" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium truncate">{msg.content || 'Documento'}</p>
+              <p className={`text-[10px] ${isOut ? 'text-white/50' : 'text-muted-foreground'}`}>
+                Toca para descargar
+              </p>
+            </div>
+            <Download className="size-4 opacity-50 shrink-0" />
+          </a>
+        )}
+
+        {/* Caption (para imágenes/videos/documentos) */}
+        {msg.content && msg.content_type !== 'document' && (
+          <div className="px-3 py-1">
+            <p className="whitespace-pre-wrap wrap-break-word text-[13px] leading-[1.45]">{msg.content}</p>
+          </div>
+        )}
+
+        {msg.error_message && isOut && (
+          <p className="text-[10px] text-red-300 px-3 pb-0.5 wrap-break-word opacity-90">{msg.error_message}</p>
+        )}
+
+        <div className={`flex items-center gap-1 px-3 pb-1.5 ${msg.content_type === 'audio' ? 'pt-0' : ''} ${isOut ? 'justify-end' : ''}`}>
+          <span className={`text-[10px] ${isOut ? 'text-white/50' : 'text-muted-foreground'}`}>{formatTime(msg.created_at)}</span>
+          {isOut && <MessageStatusIcon status={msg.status} />}
+        </div>
+      </div>
+    </>
   )
 }
 

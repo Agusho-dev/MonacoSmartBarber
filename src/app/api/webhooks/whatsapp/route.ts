@@ -105,6 +105,75 @@ function waProfileNameFromWebhookValue(
   return null
 }
 
+/**
+ * Descarga un archivo multimedia de WhatsApp Graph API y lo sube a Supabase Storage.
+ * Retorna la URL pública del archivo, o null si falla.
+ */
+async function downloadAndStoreWhatsAppMedia(
+  mediaId: string,
+  accessToken: string,
+  supabase: ReturnType<typeof getSupabase>,
+  orgId: string,
+  contentType: string,
+): Promise<{ url: string; mimeType: string } | null> {
+  try {
+    // 1. Obtener URL de descarga del media
+    const metaRes = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (!metaRes.ok) {
+      console.error('[WA Media] Error obteniendo metadata:', metaRes.status, await metaRes.text())
+      return null
+    }
+    const metaJson = await metaRes.json() as { url?: string; mime_type?: string }
+    if (!metaJson.url) return null
+
+    // 2. Descargar el binario
+    const mediaRes = await fetch(metaJson.url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (!mediaRes.ok) {
+      console.error('[WA Media] Error descargando media:', mediaRes.status)
+      return null
+    }
+
+    const mimeType = metaJson.mime_type || mediaRes.headers.get('content-type') || 'application/octet-stream'
+    const buffer = await mediaRes.arrayBuffer()
+
+    // 3. Determinar extensión
+    const extMap: Record<string, string> = {
+      'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp',
+      'video/mp4': 'mp4', 'video/3gpp': '3gp',
+      'audio/aac': 'aac', 'audio/mpeg': 'mp3', 'audio/ogg': 'ogg', 'audio/amr': 'amr', 'audio/opus': 'opus',
+      'application/pdf': 'pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+      'application/msword': 'doc',
+      'application/vnd.ms-excel': 'xls',
+      'text/plain': 'txt',
+    }
+    const ext = extMap[mimeType] || 'bin'
+    const fileName = `${orgId}/${contentType}/${Date.now()}_${mediaId}.${ext}`
+
+    // 4. Subir a Supabase Storage
+    const { error: uploadError } = await supabase.storage
+      .from('chat-media')
+      .upload(fileName, buffer, { contentType: mimeType, upsert: false })
+
+    if (uploadError) {
+      console.error('[WA Media] Error subiendo a storage:', uploadError.message)
+      return null
+    }
+
+    // 5. Obtener URL pública
+    const { data: publicUrl } = supabase.storage.from('chat-media').getPublicUrl(fileName)
+    return { url: publicUrl.publicUrl, mimeType }
+  } catch (err) {
+    console.error('[WA Media] Error inesperado:', err)
+    return null
+  }
+}
+
 function isPlainWhatsAppAddressLabel(s: string | null | undefined): boolean {
   if (!s) return true
   const d = s.replace(/\D/g, '')
@@ -330,8 +399,20 @@ export async function POST(req: NextRequest) {
           text = message.button?.text ?? ''
         }
 
-        const mediaUrl: string | undefined = message.image?.link ?? message.video?.link ?? message.audio?.link ?? message.document?.link
+        // Extraer media ID (WhatsApp envía ID, no URL directa)
+        const mediaId: string | undefined = message.image?.id ?? message.video?.id ?? message.audio?.id ?? message.document?.id
+        const mediaCaption: string | undefined = message.image?.caption ?? message.video?.caption ?? message.document?.caption
+        if (mediaCaption && !text) text = mediaCaption
         const contentType = message.type === 'text' ? 'text' : message.type === 'interactive' || message.type === 'button' ? 'text' : message.type
+
+        // Descargar y almacenar media si corresponde
+        let mediaUrl: string | null = null
+        if (mediaId && waConfig.whatsapp_access_token && ['image', 'video', 'audio', 'document'].includes(contentType)) {
+          const stored = await downloadAndStoreWhatsAppMedia(
+            mediaId, waConfig.whatsapp_access_token, supabase, orgId, contentType
+          )
+          if (stored) mediaUrl = stored.url
+        }
 
         // Deduplicación ANTES de crear/actualizar conversación
         const { data: existingMsg } = await supabase
