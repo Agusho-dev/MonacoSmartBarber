@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Camera, Check, X, ImagePlus } from 'lucide-react'
+import { Camera, Check, X, ImagePlus, AlertCircle } from 'lucide-react'
 
 export default function UploadPage({ params }: { params: Promise<{ token: string }> }) {
   const [token, setToken] = useState<string | null>(null)
@@ -26,7 +26,7 @@ function UploadClient({ token }: { token: string }) {
   const supabase = useMemo(() => createClient(), [])
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'invalid' | 'expired'>('loading')
-  const [uploads, setUploads] = useState<{ url: string; uploading: boolean }[]>([])
+  const [uploads, setUploads] = useState<{ url: string; uploading: boolean; failed?: boolean }[]>([])
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -143,7 +143,7 @@ function UploadClient({ token }: { token: string }) {
       } catch (err) {
         console.error('Upload failed', err)
         setUploads((prev) =>
-          prev.map((u, i) => (i === idx ? { ...u, uploading: false } : u))
+          prev.map((u, i) => (i === idx ? { ...u, uploading: false, failed: true } : u))
         )
       }
     }
@@ -220,9 +220,14 @@ function UploadClient({ token }: { token: string }) {
                   <div className="size-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
                 </div>
               )}
-              {!u.uploading && (
+              {!u.uploading && !u.failed && (
                 <div className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-emerald-500">
                   <Check className="size-3 text-white" />
+                </div>
+              )}
+              {u.failed && (
+                <div className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-red-500">
+                  <AlertCircle className="size-3 text-white" />
                 </div>
               )}
             </div>

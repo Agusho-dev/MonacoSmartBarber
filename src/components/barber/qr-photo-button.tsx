@@ -34,10 +34,22 @@ export function QrPhotoButton({
 
   // Create session when dialog opens
   const createSession = useCallback(async () => {
+    // Resolve organization_id from the authenticated user's staff record
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const { data: staff } = await supabase
+      .from('staff')
+      .select('organization_id')
+      .eq('auth_user_id', user.id)
+      .single()
+
+    if (!staff?.organization_id) return
+
     const newToken = crypto.randomUUID()
     const { data, error } = await supabase
       .from('qr_photo_sessions')
-      .insert({ token: newToken })
+      .insert({ token: newToken, organization_id: staff.organization_id })
       .select('id')
       .single()
 
