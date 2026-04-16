@@ -291,11 +291,12 @@ export async function evaluateIncomingMessage(params: {
             : keywords.some(kw => lowerText.includes(kw.toLowerCase()))
 
           if (matched) {
-            await startWorkflowExecution(supabase, wf.id, conversationId, 'keyword', params, {
+            const started = await startWorkflowExecution(supabase, wf.id, conversationId, 'keyword', params, {
               client_name: clientInfo.fullName,
               client_first_name: clientInfo.firstName,
             })
-            return
+            // Si overlap_policy bloqueó el arranque, seguir probando otros keywords / triggers abajo
+            if (started) return
           }
         }
       }
@@ -327,8 +328,8 @@ export async function evaluateIncomingMessage(params: {
               client_name: clientInfo.fullName,
               client_first_name: clientInfo.firstName,
             }
-            await startWorkflowExecution(supabase, wf.id, conversationId, 'template_reply', params, initialContext)
-            return
+            const started = await startWorkflowExecution(supabase, wf.id, conversationId, 'template_reply', params, initialContext)
+            if (started) return
           }
         }
       }
@@ -344,12 +345,13 @@ export async function evaluateIncomingMessage(params: {
         })
       const reopenedWf = Array.isArray(reopened) ? reopened[0] : reopened
       if (reopenedWf && matchesBranch(reopenedWf, branchId)) {
-        await startWorkflowExecution(supabase, reopenedWf.id, conversationId, 'conversation_reopened', params, {
+        const started = await startWorkflowExecution(supabase, reopenedWf.id, conversationId, 'conversation_reopened', params, {
           client_name: clientInfo.fullName,
           client_first_name: clientInfo.firstName,
           last_text_reply: text,
         })
-        return
+        // Si matcheó la RPC pero skip_if_active impidió arrancar, caer a message_received / legacy
+        if (started) return
       }
     }
 
@@ -369,12 +371,12 @@ export async function evaluateIncomingMessage(params: {
           const channels = wf.channels as string[]
           if (!channels.includes('all') && !channels.includes(platform)) continue
 
-          await startWorkflowExecution(supabase, wf.id, conversationId, 'message_received', params, {
+          const started = await startWorkflowExecution(supabase, wf.id, conversationId, 'message_received', params, {
             client_name: clientInfo.fullName,
             client_first_name: clientInfo.firstName,
             last_text_reply: text,
           })
-          return
+          if (started) return
         }
       }
     }
@@ -437,6 +439,7 @@ async function nextNodeExpectsReply(
 
 // ─── Iniciar ejecución de workflow ───────────────────────────────
 
+/** Devuelve true si se creó la ejecución y se llamó a advanceFromNode. */
 async function startWorkflowExecution(
   supabase: SupabaseClient,
   workflowId: string,
@@ -444,7 +447,7 @@ async function startWorkflowExecution(
   triggeredBy: string,
   params: Parameters<typeof evaluateIncomingMessage>[0],
   initialContext?: ExecutionContext
-): Promise<void> {
+): Promise<boolean> {
   // Respetar overlap_policy del workflow entrante
   const { data: wfMeta } = await supabase
     .from('automation_workflows')
@@ -465,7 +468,7 @@ async function startWorkflowExecution(
     if (activeList.length > 0) {
       if (policy === 'skip_if_active' || policy === 'queue') {
         // skip y queue: no arrancar si hay activa (queue se implementará con cron aparte)
-        return
+        return false
       }
       if (policy === 'replace') {
         // Cancelar sólo las que pertenezcan a interrupts_categories
@@ -476,7 +479,7 @@ async function startWorkflowExecution(
             return cat && interrupts.includes(cat)
           })
           .map((e) => e.id)
-        if (toCancel.length !== activeList.length) return // hay activas no interrumpibles
+        if (toCancel.length !== activeList.length) return false // hay activas no interrumpibles
         if (toCancel.length > 0) {
           await supabase
             .from('workflow_executions')
@@ -498,7 +501,7 @@ async function startWorkflowExecution(
 
   if (!entryNode) {
     console.warn('[WorkflowEngine] Workflow sin nodo de entrada:', workflowId)
-    return
+    return false
   }
 
   // Crear ejecución
@@ -515,11 +518,12 @@ async function startWorkflowExecution(
     .select('id')
     .single()
 
-  if (!execution) return
+  if (!execution) return false
 
   // El trigger node no hace nada por sí mismo, avanzar al siguiente
   await logExecution(supabase, execution.id, entryNode.id, 'trigger', 'success', { triggeredBy })
   await advanceFromNode(supabase, execution.id, workflowId, entryNode.id, initialContext ?? {}, params)
+  return true
 }
 
 // ─── Avanzar desde un nodo al siguiente ──────────────────────────

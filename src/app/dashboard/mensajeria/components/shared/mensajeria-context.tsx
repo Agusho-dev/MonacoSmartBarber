@@ -264,8 +264,14 @@ export function MensajeriaProvider({
 
   // Scroll to bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    if (!loadingMessages) {
+      // Usamos un pequeño delay para asegurarnos que el DOM y las imágenes se hayan renderizado
+      const timer = setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
+      }, 50)
+      return () => clearTimeout(timer)
+    }
+  }, [messages, loadingMessages])
 
   // Realtime
   useEffect(() => {
