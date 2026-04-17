@@ -2,7 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { getActiveOrganization } from './org'
-import { isValidUUID } from './guard'
+import { isValidUUID } from '@/lib/validation'
 
 /**
  * Valida que los branchIds recibidos pertenecen a la org activa (cookie active_organization).

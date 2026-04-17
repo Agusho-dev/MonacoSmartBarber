@@ -95,8 +95,5 @@ export const requireOrgAccessToEntity = cache(async function (
   return { ok: false, reason: 'unsupported_table' }
 })
 
-/** Valida UUID v4 antes de interpolarlo en .or() u otras queries dinámicas. */
-export function isValidUUID(str: string | undefined | null): boolean {
-  if (!str) return false
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str)
-}
+// NOTA: `isValidUUID` se movió a `@/lib/validation` porque Next.js 16
+// exige que todos los exports de un archivo 'use server' sean async functions.

@@ -1,5 +1,9 @@
-'use server'
+// NOTA: este archivo NO lleva 'use server' — exporta un objeto (RateLimits) con helpers,
+// y Next.js 16 solo permite async functions en archivos 'use server'. Los callers son
+// server actions que llaman estas functions desde dentro de sus propios 'use server'.
+// Todas las funciones exportadas son async y solo corren en server (usan createAdminClient + next/headers).
 
+import 'server-only'
 import { headers } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/server'
 

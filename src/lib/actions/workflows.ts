@@ -2,7 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from './org'
-import { isValidUUID } from './guard'
+import { isValidUUID } from '@/lib/validation'
 import { revalidatePath } from 'next/cache'
 import type { AutomationWorkflow, WorkflowNode, WorkflowEdge, WorkflowWithGraph, CrmAlert } from '@/lib/types/database'
 
