@@ -3,7 +3,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { checkTardiness } from './disciplinary'
 import { revalidatePath } from 'next/cache'
-import { generateCheckoutCommissionReport } from './salary'
 
 /**
  * Valida que el staffId pertenece al branchId indicado, que ambos existen,
@@ -80,11 +79,6 @@ export async function registerBarberClockOut(staffId: string, branchId: string, 
     if (logError) {
         return { error: 'Error al registrar salida: ' + logError.message }
     }
-
-    // Generar reporte de comisión automático para el turno
-    generateCheckoutCommissionReport(staffId, branchId).catch((err) => {
-        console.error('Error al generar reporte de comisión en checkout:', err)
-    })
 
     revalidatePath('/checkin')
     return { success: true }

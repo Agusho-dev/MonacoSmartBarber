@@ -7,7 +7,7 @@ import {
   getSalaryReports,
   getPaymentBatchesGrouped,
   createManualSalaryReport,
-  generateCommissionReport,
+  generateCommissionReportsInRange,
   generateBaseSalaryReport,
   deleteSalaryReport,
   paySelectedReports,
@@ -187,9 +187,12 @@ export function SueldosClient({ branches, barbers }: Props) {
     commission_pct: string
   }>({ scheme: 'fixed', base_amount: '0', commission_pct: '0' })
 
-  // Generar comisión
+  // Generar comisión (rango de fechas)
   const [commissionDialogOpen, setCommissionDialogOpen] = useState(false)
-  const [commissionDate, setCommissionDate] = useState(todayIso())
+  const [commissionRange, setCommissionRange] = useState<{ start: string; end: string }>({
+    start: firstOfMonthIso(),
+    end: todayIso(),
+  })
   const [commissionError, setCommissionError] = useState<string | null>(null)
 
   // Bono / Adelanto
@@ -371,17 +374,23 @@ export function SueldosClient({ branches, barbers }: Props) {
     if (!activeBarber || !selectedBranchId) return
     setCommissionError(null)
     startTransition(async () => {
-      const r = await generateCommissionReport(
+      const r = await generateCommissionReportsInRange(
         activeBarber.id,
         selectedBranchId,
-        commissionDate
+        commissionRange.start,
+        commissionRange.end
       )
       if (r.error) {
         setCommissionError(r.error)
       } else {
-        toast.success('Reporte de comisión generado')
+        const { created, skipped } = r.data ?? { created: 0, skipped: 0 }
+        const msg =
+          created === 1
+            ? '1 reporte de comisión generado'
+            : `${created} reportes de comisión generados`
+        toast.success(skipped > 0 ? `${msg} (${skipped} día${skipped === 1 ? '' : 's'} ya tenía${skipped === 1 ? '' : 'n'} reporte)` : msg)
         setCommissionDialogOpen(false)
-        setCommissionDate(todayIso())
+        setCommissionRange({ start: firstOfMonthIso(), end: todayIso() })
         await loadBarberData(activeBarber.id)
       }
     })
@@ -652,13 +661,13 @@ export function SueldosClient({ branches, barbers }: Props) {
                       size="sm"
                       variant="outline"
                       onClick={() => {
-                        setCommissionDate(todayIso())
+                        setCommissionRange({ start: firstOfMonthIso(), end: todayIso() })
                         setCommissionError(null)
                         setCommissionDialogOpen(true)
                       }}
                     >
                       <TrendingUp className="size-3.5 mr-1.5" />
-                      Generar comisión
+                      Generar comisiones
                     </Button>
                     <Button
                       size="sm"
@@ -1136,25 +1145,42 @@ export function SueldosClient({ branches, barbers }: Props) {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Generar comisión</DialogTitle>
+            <DialogTitle>Generar comisiones</DialogTitle>
             <DialogDescription>
-              Calculá y registrá las comisiones de {currentBarber?.full_name} para una fecha específica.
+              Generá los reportes de comisión de {currentBarber?.full_name} para un rango de fechas. Se crea un reporte por cada día con comisiones dentro del rango.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div>
-              <Label htmlFor="commission-date">Fecha</Label>
-              <Input
-                id="commission-date"
-                type="date"
-                className="mt-1.5"
-                value={commissionDate}
-                max={todayIso()}
-                onChange={(e) => {
-                  setCommissionDate(e.target.value)
-                  setCommissionError(null)
-                }}
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="commission-start">Desde</Label>
+                <Input
+                  id="commission-start"
+                  type="date"
+                  className="mt-1.5"
+                  value={commissionRange.start}
+                  max={commissionRange.end || todayIso()}
+                  onChange={(e) => {
+                    setCommissionRange((r) => ({ ...r, start: e.target.value }))
+                    setCommissionError(null)
+                  }}
+                />
+              </div>
+              <div>
+                <Label htmlFor="commission-end">Hasta</Label>
+                <Input
+                  id="commission-end"
+                  type="date"
+                  className="mt-1.5"
+                  value={commissionRange.end}
+                  min={commissionRange.start}
+                  max={todayIso()}
+                  onChange={(e) => {
+                    setCommissionRange((r) => ({ ...r, end: e.target.value }))
+                    setCommissionError(null)
+                  }}
+                />
+              </div>
             </div>
             {commissionError && (
               <div className="flex items-center gap-2 rounded-lg bg-destructive/10 border border-destructive/30 px-3 py-2.5 text-sm text-destructive">
@@ -1175,7 +1201,7 @@ export function SueldosClient({ branches, barbers }: Props) {
             </Button>
             <Button
               onClick={handleGenerateCommission}
-              disabled={isPending || !commissionDate}
+              disabled={isPending || !commissionRange.start || !commissionRange.end}
             >
               Generar
             </Button>

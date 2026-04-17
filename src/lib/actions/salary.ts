@@ -297,16 +297,22 @@ export async function createManualSalaryReport(
 }
 
 /**
- * Genera un reporte de comisión sumando commission_amount de visitas del día.
- * Usa la comisión ya calculada en cada visita (fuente de verdad desde completeService).
+ * Genera reportes de comisión para un rango de fechas.
+ * Crea un reporte pendiente por cada día con comisiones, saltando los días
+ * que ya tienen reporte. La comisión por día se calcula sumando
+ * commission_amount de las visitas completadas ese día (en TZ local).
  */
-export async function generateCommissionReport(
+export async function generateCommissionReportsInRange(
   staffId: string,
   branchId: string,
-  reportDate: string
+  startDate: string,
+  endDate: string
 ) {
-  if (!staffId || !branchId || !reportDate) {
-    return { error: 'El barbero, la sucursal y la fecha son obligatorios.' }
+  if (!staffId || !branchId || !startDate || !endDate) {
+    return { error: 'El barbero, la sucursal y el rango de fechas son obligatorios.' }
+  }
+  if (startDate > endDate) {
+    return { error: 'La fecha desde no puede ser posterior a la fecha hasta.' }
   }
 
   const orgId = await validateBranchAccess(branchId)
@@ -314,62 +320,97 @@ export async function generateCommissionReport(
 
   const supabase = createAdminClient()
 
-  // Verificar que no exista ya un reporte de comisión para este día
-  const { count: existingCount } = await supabase
-    .from('salary_reports')
-    .select('id', { count: 'exact', head: true })
-    .eq('staff_id', staffId)
-    .eq('branch_id', branchId)
-    .eq('type', 'commission')
-    .eq('report_date', reportDate)
-
-  if (existingCount && existingCount > 0) {
-    return { error: 'Ya existe un reporte de comisión para este día.' }
-  }
-
-  // Sumar commission_amount de visitas completadas en el día (fuente de verdad)
   const tz = await getActiveTimezone()
   const { getDayBounds } = await import('@/lib/time-utils')
-  const { start: dayStart, end: dayEnd } = getDayBounds(reportDate, tz)
+  const { start: rangeStart } = getDayBounds(startDate, tz)
+  const { end: rangeEnd } = getDayBounds(endDate, tz)
+
   const { data: visits, error: visitsError } = await supabase
     .from('visits')
-    .select('commission_amount, amount')
+    .select('commission_amount, completed_at')
     .eq('barber_id', staffId)
     .eq('branch_id', branchId)
-    .gte('completed_at', dayStart)
-    .lt('completed_at', dayEnd)
+    .gte('completed_at', rangeStart)
+    .lt('completed_at', rangeEnd)
 
   if (visitsError) {
     console.error('Error al obtener visitas para comisión:', visitsError)
-    return { error: 'Error al calcular las comisiones del día.' }
+    return { error: 'Error al calcular las comisiones del rango.' }
   }
 
-  const commissionAmount = (visits ?? []).reduce((sum, v) => sum + Number(v.commission_amount ?? 0), 0)
-  const totalRevenue = (visits ?? []).reduce((sum, v) => sum + Number(v.amount), 0)
+  // Agrupar comisiones por fecha local (TZ de la org)
+  const dateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz })
+  const commissionsByDate = new Map<string, number>()
+  for (const v of visits ?? []) {
+    if (!v.completed_at) continue
+    const amount = Number(v.commission_amount ?? 0)
+    if (amount <= 0) continue
+    const localDate = dateFmt.format(new Date(v.completed_at))
+    commissionsByDate.set(localDate, (commissionsByDate.get(localDate) ?? 0) + amount)
+  }
 
-  if (commissionAmount <= 0) {
-    return { error: 'No hay comisiones para este día.' }
+  if (commissionsByDate.size === 0) {
+    return { error: 'No hay comisiones en el rango seleccionado.' }
+  }
+
+  // Filtrar días que ya tienen reporte de comisión
+  const dates = Array.from(commissionsByDate.keys())
+  const { data: existing } = await supabase
+    .from('salary_reports')
+    .select('report_date')
+    .eq('staff_id', staffId)
+    .eq('branch_id', branchId)
+    .eq('type', 'commission')
+    .in('report_date', dates)
+
+  const existingDates = new Set((existing ?? []).map((r) => r.report_date))
+
+  const toInsert: {
+    staff_id: string
+    branch_id: string
+    type: 'commission'
+    amount: number
+    report_date: string
+    status: 'pending'
+  }[] = []
+  let totalAmount = 0
+  for (const [date, amount] of commissionsByDate) {
+    if (existingDates.has(date)) continue
+    toInsert.push({
+      staff_id: staffId,
+      branch_id: branchId,
+      type: 'commission',
+      amount,
+      report_date: date,
+      status: 'pending',
+    })
+    totalAmount += amount
+  }
+
+  const skipped = commissionsByDate.size - toInsert.length
+
+  if (toInsert.length === 0) {
+    return { error: 'Todos los días del rango ya tienen reporte de comisión.' }
   }
 
   const { error: insertError } = await supabase
     .from('salary_reports')
-    .insert({
-      staff_id: staffId,
-      branch_id: branchId,
-      type: 'commission',
-      amount: commissionAmount,
-      notes: null,
-      report_date: reportDate,
-      status: 'pending',
-    })
+    .insert(toInsert)
 
   if (insertError) {
-    console.error('Error al insertar reporte de comisión:', insertError)
-    return { error: 'Error al guardar el reporte de comisión.' }
+    console.error('Error al insertar reportes de comisión:', insertError)
+    return { error: 'Error al guardar los reportes de comisión.' }
   }
 
   revalidatePath('/dashboard/sueldos')
-  return { success: true, data: { commissionAmount, totalRevenue } }
+  return {
+    success: true,
+    data: {
+      created: toInsert.length,
+      skipped,
+      totalAmount,
+    },
+  }
 }
 
 /**
@@ -615,139 +656,6 @@ export async function deleteSalaryReport(reportId: string) {
 
   revalidatePath('/dashboard/sueldos')
   return { success: true }
-}
-
-// ─── Generación automática al checkout ──────────────────────────────────────
-
-/**
- * Genera un reporte de comisión automáticamente al hacer checkout.
- * Busca el último clock_in del día, suma visitas entre entrada y salida,
- * y crea el salary_report correspondiente según el esquema del barbero.
- */
-export async function generateCheckoutCommissionReport(
-  staffId: string,
-  branchId: string
-) {
-  // Validar staff+branch+org cruzado antes de cualquier query
-  const orgId = await getCurrentOrgId()
-  if (!orgId) return
-
-  const supabase = createAdminClient()
-
-  const { data: staffCheck } = await supabase
-    .from('staff')
-    .select('id')
-    .eq('id', staffId)
-    .eq('branch_id', branchId)
-    .eq('organization_id', orgId)
-    .maybeSingle()
-  if (!staffCheck) return
-
-  // Fecha local de hoy en el TZ de la org
-  const tz = await getActiveTimezone()
-  const now = new Date()
-  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now)
-
-  const { getDayBounds } = await import('@/lib/time-utils')
-  const { start: dayStart, end: dayEnd } = getDayBounds(todayStr, tz)
-
-  // Buscar el último clock_in de hoy para determinar el inicio del turno
-  const { data: clockInLog } = await supabase
-    .from('attendance_logs')
-    .select('created_at')
-    .eq('staff_id', staffId)
-    .eq('branch_id', branchId)
-    .eq('action_type', 'clock_in')
-    .gte('created_at', dayStart)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single()
-
-  // Si no hay clock_in hoy, usar inicio del día
-  const shiftStart = clockInLog?.created_at ?? dayStart
-  const shiftEnd = now.toISOString()
-
-  // Sumar commission_amount de TODAS las visitas del día completo
-  // (no solo del turno, para incluir ventas directas de productos)
-  const { data: visits } = await supabase
-    .from('visits')
-    .select('commission_amount')
-    .eq('barber_id', staffId)
-    .eq('branch_id', branchId)
-    .gte('completed_at', dayStart)
-    .lt('completed_at', dayEnd)
-
-  const totalCommission = (visits ?? []).reduce(
-    (sum, v) => sum + Number(v.commission_amount ?? 0), 0
-  )
-
-  if (totalCommission <= 0) {
-    return { success: true, skipped: true, reason: 'Sin comisiones en el día' }
-  }
-
-  // Obtener configuración salarial para registrar el esquema en las notas
-  const { data: salaryConfig } = await supabase
-    .from('salary_configs')
-    .select('scheme')
-    .eq('staff_id', staffId)
-    .single()
-
-  const scheme = salaryConfig?.scheme ?? 'commission'
-
-  // Verificar si ya existe un reporte de comisión para hoy (puede venir de venta de productos)
-  const { data: existingReport } = await supabase
-    .from('salary_reports')
-    .select('id, amount')
-    .eq('staff_id', staffId)
-    .eq('branch_id', branchId)
-    .eq('type', 'commission')
-    .eq('report_date', todayStr)
-    .eq('status', 'pending')
-    .maybeSingle()
-
-  if (existingReport) {
-    // Actualizar el reporte existente con el total real del día
-    if (Math.round(Number(existingReport.amount)) === Math.round(totalCommission)) {
-      return { success: true, skipped: true }
-    }
-    const { error: updateError } = await supabase
-      .from('salary_reports')
-      .update({
-        amount: totalCommission,
-        notes: `Generado automáticamente al checkout (${scheme})`,
-        period_start: shiftStart,
-        period_end: shiftEnd,
-      })
-      .eq('id', existingReport.id)
-
-    if (updateError) {
-      console.error('Error al actualizar reporte de comisión:', updateError)
-      return { error: updateError.message }
-    }
-    return { success: true, data: { totalCommission, scheme, updated: true } }
-  }
-
-  // No existe reporte para hoy, crear uno nuevo
-  const { error: insertError } = await supabase
-    .from('salary_reports')
-    .insert({
-      staff_id: staffId,
-      branch_id: branchId,
-      type: 'commission',
-      amount: totalCommission,
-      notes: `Generado automáticamente al checkout (${scheme})`,
-      report_date: todayStr,
-      period_start: shiftStart,
-      period_end: shiftEnd,
-      status: 'pending',
-    })
-
-  if (insertError) {
-    console.error('Error al insertar reporte de comisión automático:', insertError)
-    return { error: insertError.message }
-  }
-
-  return { success: true, data: { totalCommission, scheme } }
 }
 
 // ─── Liquidación de período híbrido ─────────────────────────────────────────
