@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { recordTransfer } from '@/lib/actions/paymentAccounts'
 import { validateBranchAccess, getCurrentOrgId } from './org'
 import { getActiveTimezone } from '@/lib/i18n'
+import { isValidUUID } from '@/lib/validation'
 
 export async function checkinClient(formData: FormData) {
   const supabase = createAdminClient()
@@ -121,6 +122,9 @@ export async function checkinClient(formData: FormData) {
 }
 
 export async function startService(queueEntryId: string, barberId: string) {
+  if (!isValidUUID(queueEntryId) || !isValidUUID(barberId)) {
+    return { error: 'Datos inválidos' }
+  }
   const supabase = createAdminClient()
 
   // Obtener la entrada para validar que la sucursal pertenece a la org activa
@@ -161,6 +165,12 @@ export async function startService(queueEntryId: string, barberId: string) {
  * SELECT ... FOR UPDATE SKIP LOCKED previene race conditions entre barberos.
  */
 export async function attendNextClient(barberId: string, branchId: string, preferredEntryId?: string) {
+  if (!isValidUUID(barberId) || !isValidUUID(branchId)) {
+    return { error: 'Datos inválidos' }
+  }
+  if (preferredEntryId && !isValidUUID(preferredEntryId)) {
+    preferredEntryId = undefined
+  }
   const supabase = createAdminClient()
 
   const orgAccess = await validateBranchAccess(branchId)
@@ -209,6 +219,10 @@ export async function completeService(
   extraServiceIds?: string[],
   productsToSell?: { id: string; quantity: number }[]
 ) {
+  if (!isValidUUID(queueEntryId)) return { error: 'queueEntryId inválido' }
+  if (serviceId && !isValidUUID(serviceId)) return { error: 'serviceId inválido' }
+  if (paymentAccountId && !isValidUUID(paymentAccountId)) return { error: 'paymentAccountId inválido' }
+
   // Use admin client because barber pin authentications do not set a Supabase Auth session
   // This causes RLS on visits and client_points to fail when the queue trigger fires using SECURITY INVOKER
   const supabase = createAdminClient()
@@ -729,6 +743,7 @@ export async function completeService(
 }
 
 export async function cancelQueueEntry(queueEntryId: string) {
+  if (!isValidUUID(queueEntryId)) return { error: 'ID inválido' }
   const supabase = createAdminClient()
 
   // Obtener la entrada para validar que la sucursal pertenece a la org activa
@@ -761,6 +776,8 @@ export async function reassignBarber(
   queueEntryId: string,
   newBarberId: string | null
 ) {
+  if (!isValidUUID(queueEntryId)) return { error: 'queueEntryId inválido' }
+  if (newBarberId !== null && !isValidUUID(newBarberId)) return { error: 'barberId inválido' }
   const supabase = createAdminClient()
 
   // Obtener branch_id de la entrada para validar acceso
@@ -797,6 +814,9 @@ export async function checkinClientByFace(
   barberId: string | null,
   serviceId: string | null = null
 ) {
+  if (!isValidUUID(clientId) || !isValidUUID(branchId)) return { error: 'Datos inválidos' }
+  if (barberId !== null && !isValidUUID(barberId)) barberId = null
+  if (serviceId !== null && !isValidUUID(serviceId)) serviceId = null
   const supabase = createAdminClient()
 
   // Operación pública del kiosko: verificar que la sucursal exista y obtener su organización
@@ -876,6 +896,7 @@ export async function reassignMyBarber(
   queueEntryId: string,
   newBarberId: string
 ) {
+  if (!isValidUUID(queueEntryId) || !isValidUUID(newBarberId)) return { error: 'Datos inválidos' }
   const supabase = createAdminClient()
 
   // Operación pública del kiosko: verificar que la entrada y la sucursal existan
@@ -928,6 +949,11 @@ export async function updateQueueOrder(
   updates: { id: string; position: number; barber_id?: string | null; is_dynamic?: boolean; priority_order?: string }[]
 ) {
   if (updates.length === 0) return { success: true }
+  // Validar que todos los IDs son UUIDs válidos antes de consultar DB
+  if (updates.some(u => !isValidUUID(u.id))) return { error: 'IDs inválidos' }
+  if (updates.some(u => u.barber_id != null && !isValidUUID(u.barber_id))) {
+    return { error: 'barberId inválido' }
+  }
 
   const supabase = createAdminClient()
 

@@ -3,6 +3,7 @@
 import { cache } from 'react'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
+import { isValidUUID } from '@/lib/validation'
 
 type OrgScopedTable =
   | 'visits' | 'branches' | 'staff' | 'clients' | 'services' | 'products'
@@ -23,7 +24,7 @@ export const requireOrgAccessToEntity = cache(async function (
 ): Promise<{ ok: true; orgId: string } | { ok: false; reason: string }> {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { ok: false, reason: 'no_session' }
-  if (!entityId || typeof entityId !== 'string') return { ok: false, reason: 'invalid_id' }
+  if (!isValidUUID(entityId)) return { ok: false, reason: 'invalid_id' }
 
   const supabase = createAdminClient()
 

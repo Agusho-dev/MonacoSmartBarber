@@ -2,6 +2,7 @@
 
 import { cache } from 'react'
 import { createAdminClient } from '@/lib/supabase/server'
+import { isValidUUID } from '@/lib/validation'
 
 /**
  * Obtiene el organization_id del usuario autenticado.
@@ -39,6 +40,7 @@ export async function getOrganizationId(authUserId: string): Promise<string | nu
  * Util para server actions que reciben branchId como input y necesitan verificar ownership.
  */
 export async function validateBranchAccess(branchId: string): Promise<string | null> {
+  if (!isValidUUID(branchId)) return null
   const orgId = await getCurrentOrgId()
   if (!orgId) return null
 
@@ -59,13 +61,13 @@ export async function validateBranchAccess(branchId: string): Promise<string | n
  */
 export const getOrgBranchIds = cache(async function getOrgBranchIds(): Promise<string[]> {
   const orgId = await getCurrentOrgId()
-  if (!orgId) return []
+  if (!isValidUUID(orgId)) return []
 
   const supabase = createAdminClient()
   const { data: branches } = await supabase
     .from('branches')
     .select('id')
-    .eq('organization_id', orgId)
+    .eq('organization_id', orgId!)
 
   return branches?.map(b => b.id) ?? []
 })
@@ -259,7 +261,9 @@ export const getCurrentOrgId = cache(async function getCurrentOrgId(): Promise<s
   if (barberSession) {
     try {
       const parsed = JSON.parse(barberSession.value)
-      if (parsed.staff_id) {
+      // Preferir organization_id de la cookie si es UUID válido (evita DB roundtrip)
+      if (isValidUUID(parsed.organization_id)) return parsed.organization_id
+      if (isValidUUID(parsed.staff_id)) {
         const adminClient = createAdminClient()
         const { data: staff } = await adminClient
           .from('staff')
@@ -280,7 +284,7 @@ export const getCurrentOrgId = cache(async function getCurrentOrgId(): Promise<s
 
     if (user) {
       const activeOrg = cookieStore.get('active_organization')?.value
-      if (activeOrg) return activeOrg
+      if (isValidUUID(activeOrg)) return activeOrg!
       return getOrganizationId(user.id)
     }
   } catch {
