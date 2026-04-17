@@ -69,6 +69,33 @@ export async function generatePartnerMagicLink(
   return { token: raw, url, expiresAt }
 }
 
+/**
+ * Valida el token sin consumirlo. Usar en GETs idempotentes (callback page)
+ * para evitar que crawlers de previews de links (Meta, antivirus, Safe Browsing,
+ * Chrome prerender, etc.) quemen el magic link antes que el usuario haga click.
+ */
+export async function validatePartnerMagicLink(
+  token: string
+): Promise<{ ok: true; partnerId: string } | { ok: false; error: string }> {
+  if (!token || token.length < 32) return { ok: false, error: 'Link inválido.' }
+
+  const supabase = createAdminClient()
+  const hash = hashTokenForStorage(token)
+
+  const { data: link } = await supabase
+    .from('partner_magic_links')
+    .select('partner_id, expires_at, used_at')
+    .eq('token_hash', hash)
+    .maybeSingle()
+
+  if (!link) return { ok: false, error: 'Link inválido.' }
+  if (link.used_at) return { ok: false, error: 'Este link ya fue utilizado.' }
+  if (new Date(link.expires_at) < new Date())
+    return { ok: false, error: 'El link expiró. Pedí uno nuevo.' }
+
+  return { ok: true, partnerId: link.partner_id }
+}
+
 /** Consume el token si es válido. Devuelve partner_id si éxito. */
 export async function consumePartnerMagicLink(
   token: string
