@@ -7,7 +7,7 @@ import type { Metadata } from 'next'
 import type { Role } from '@/lib/types/database'
 
 export const metadata: Metadata = {
-    title: 'Equipo | Monaco Smart Barber',
+    title: 'Equipo | BarberOS',
 }
 
 export default async function EquipoPage() {
@@ -149,6 +149,14 @@ export default async function EquipoPage() {
         isOwnerOrAdmin
     )
 
+    // Obtener nombre de la organización activa (para PDFs de boletín)
+    const { data: orgRow } = await createAdminClient()
+        .from('organizations')
+        .select('name')
+        .eq('id', orgId)
+        .maybeSingle()
+    const orgName = orgRow?.name ?? 'BarberOS'
+
     return (
         <EquipoClient
             barbers={barbers ?? []}
@@ -174,6 +182,7 @@ export default async function EquipoPage() {
             serviceHistory={serviceHistory}
             salaryConfigs={salaryConfigs ?? []}
             calendarBarbers={calendarBarbers ?? []}
+            orgName={orgName}
         />
     )
 }

@@ -198,6 +198,8 @@ interface TvClientProps {
   branches: BranchRow[]
   orgBranchIds: string[]
   orgId: string | null
+  orgName: string
+  orgLogoUrl: string
 }
 
 export function TvClient({
@@ -206,6 +208,8 @@ export function TvClient({
   branches,
   orgBranchIds,
   orgId,
+  orgName,
+  orgLogoUrl,
 }: TvClientProps) {
   const { selectedBranchId, setSelectedBranchId } = useBranchStore()
   const [entries, setEntries] = useState<QueueEntry[]>(initialEntries)
@@ -450,13 +454,12 @@ export function TvClient({
         <div className="flex items-center gap-4 2xl:gap-8">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/logo-monaco.png"
-            alt="Monaco Logo"
+            src={orgLogoUrl}
+            alt={`${orgName} Logo`}
             className="h-[80px] w-auto object-contain 2xl:h-[140px]"
           />
           <div className="ml-4 2xl:ml-8">
-            <h1 className="text-3xl lg:text-4xl 2xl:text-6xl font-semibold tracking-tight">Monaco</h1>
-            <p className="text-zinc-500 text-lg lg:text-xl 2xl:text-3xl font-medium uppercase tracking-widest mt-1 2xl:mt-2">Smart Barber</p>
+            <h1 className="text-3xl lg:text-4xl 2xl:text-6xl font-semibold tracking-tight">{orgName}</h1>
           </div>
         </div>
 

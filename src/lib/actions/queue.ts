@@ -3,7 +3,8 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { recordTransfer } from '@/lib/actions/paymentAccounts'
-import { validateBranchAccess } from './org'
+import { validateBranchAccess, getCurrentOrgId } from './org'
+import { getActiveTimezone } from '@/lib/i18n'
 
 export async function checkinClient(formData: FormData) {
   const supabase = createAdminClient()
@@ -15,6 +16,13 @@ export async function checkinClient(formData: FormData) {
 
   if (!name || !phone || !branchId) {
     return { error: 'Todos los campos son obligatorios' }
+  }
+
+  // Rate limit: 20 check-ins por IP+branch cada 60s (permisivo para uso real, restrictivo contra bots)
+  const { RateLimits } = await import('@/lib/rate-limit')
+  const gate = await RateLimits.kioskCheckin(branchId)
+  if (!gate.allowed) {
+    return { error: 'Demasiados check-ins en poco tiempo. Esperá un momento.' }
   }
 
   // Operación pública del kiosko: verificar que la sucursal exista y obtener su organización
@@ -338,6 +346,8 @@ export async function completeService(
 
   // 5. Handle reward redemption (deduct points)
   if (isRewardClaim && visit.client_id && visit.branch_id) {
+    const orgId = await getCurrentOrgId()
+
     const { data: config } = await supabase
       .from('rewards_config')
       .select('redemption_threshold')
@@ -347,12 +357,14 @@ export async function completeService(
 
     const cost = config?.redemption_threshold || 10
 
-    const { data: clientPoints } = await supabase
+    // Filtrar client_points por org para evitar canjes cruzados
+    let cpQuery = supabase
       .from('client_points')
       .select('points_balance, total_redeemed')
       .eq('client_id', visit.client_id)
       .eq('branch_id', visit.branch_id)
-      .single()
+    if (orgId) cpQuery = (cpQuery as typeof cpQuery).eq('organization_id', orgId)
+    const { data: clientPoints } = await cpQuery.maybeSingle()
 
     if (clientPoints && clientPoints.points_balance >= cost) {
       // Insert redemption transaction
@@ -364,8 +376,8 @@ export async function completeService(
         description: 'Canje de beneficio',
       })
 
-      // Update balance directly
-      await supabase
+      // Descontar puntos escopado a org+branch
+      let updateQuery = supabase
         .from('client_points')
         .update({
           points_balance: clientPoints.points_balance - cost,
@@ -373,6 +385,8 @@ export async function completeService(
         })
         .eq('client_id', visit.client_id)
         .eq('branch_id', visit.branch_id)
+      if (orgId) updateQuery = (updateQuery as typeof updateQuery).eq('organization_id', orgId)
+      await updateQuery
     }
   }
 
@@ -623,9 +637,8 @@ export async function completeService(
   // 8. Generar/actualizar salary_reports separados: servicio y producto
   const serviceCommissionAmount = commissionAmount - productCommissionAmount
   try {
-    const todayStr = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Argentina/Buenos_Aires',
-    }).format(new Date())
+    const tz = await getActiveTimezone()
+    const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date())
 
     // 8a. Reporte de comisión por servicio
     if (serviceCommissionAmount > 0) {
@@ -904,17 +917,26 @@ export async function updateQueueOrder(
 
   const supabase = createAdminClient()
 
-  // Validar que la primera entrada pertenece a una sucursal de la org activa
-  const { data: firstEntry } = await supabase
+  // Cargar branch_id de TODOS los IDs y validar que todos pertenecen a la misma org
+  const allIds = updates.map(u => u.id)
+  const { data: allEntries } = await supabase
     .from('queue_entries')
-    .select('branch_id')
-    .eq('id', updates[0].id)
-    .maybeSingle()
+    .select('id, branch_id')
+    .in('id', allIds)
 
-  if (!firstEntry) return { error: 'Entrada no encontrada' }
+  if (!allEntries || allEntries.length !== allIds.length) {
+    return { error: 'Una o más entradas no encontradas' }
+  }
 
-  const orgAccess = await validateBranchAccess(firstEntry.branch_id)
+  // Validar la primera sucursal (todas deben pertenecer a la misma org)
+  const orgAccess = await validateBranchAccess(allEntries[0].branch_id)
   if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+
+  // Verificar que no hay entradas de otras sucursales fuera de la org
+  const { getOrgBranchIds } = await import('./org')
+  const orgBranchIds = await getOrgBranchIds()
+  const foreignEntry = allEntries.find(e => !orgBranchIds.includes(e.branch_id))
+  if (foreignEntry) return { error: 'Acceso denegado: entradas de otra organización' }
 
   // Usar RPC para hacer todas las actualizaciones en una sola transacción
   const payload = updates.map((u) => ({

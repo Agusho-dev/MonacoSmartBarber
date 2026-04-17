@@ -11,7 +11,7 @@ import type { PaymentMethod } from '@/lib/types/database'
 export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
-  title: 'Facturación del día | Monaco Smart Barber',
+  title: 'Facturación del día | BarberOS',
 }
 
 const PAYMENT_LABELS: Record<PaymentMethod, string> = {

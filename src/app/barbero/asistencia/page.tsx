@@ -7,7 +7,7 @@ import { AsistenciaClient } from './asistencia-client'
 export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
-    title: 'Mi Asistencia | Monaco Smart Barber',
+    title: 'Mi Asistencia | BarberOS',
 }
 
 export default async function AsistenciaPage() {

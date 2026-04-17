@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from './org'
+import { requireOrgAccessToEntity } from './guard'
 import { revalidatePath } from 'next/cache'
 
 const META_API_VERSION = 'v22.0'
@@ -89,8 +90,10 @@ export async function sendMetaWhatsAppMessage(
   conversationId: string,
   staffId?: string
 ): Promise<{ success?: boolean; error?: string }> {
-  const orgId = await getCurrentOrgId()
-  if (!orgId) return { error: 'No autorizado' }
+  const orgAccess = await requireOrgAccessToEntity('conversations', conversationId)
+  if (!orgAccess.ok) return { error: 'Acceso denegado' }
+
+  const orgId = orgAccess.orgId
 
   const supabase = createAdminClient()
 
@@ -216,8 +219,10 @@ export async function sendMetaWhatsAppTemplate(
   components?: Record<string, unknown>[],
   staffId?: string
 ): Promise<{ success?: boolean; error?: string }> {
-  const orgId = await getCurrentOrgId()
-  if (!orgId) return { error: 'No autorizado' }
+  const orgAccess = await requireOrgAccessToEntity('conversations', conversationId)
+  if (!orgAccess.ok) return { error: 'Acceso denegado' }
+
+  const orgId = orgAccess.orgId
 
   const supabase = createAdminClient()
 

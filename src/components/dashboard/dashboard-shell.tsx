@@ -222,7 +222,7 @@ function SidebarContent({ isEditMode, onToggleEditMode, userRole, userFullName, 
               <Button variant="ghost" className="w-full justify-start gap-2 px-0 hover:bg-transparent">
                 <OrgLogo url={orgLogoUrl} />
                 <span className="truncate text-lg font-bold tracking-tight">
-                  {currentOrg?.name || 'Monaco'}
+                  {currentOrg?.name || 'BarberOS'}
                 </span>
                 <ChevronDown className="ml-auto size-4 opacity-50 shrink-0" />
               </Button>
@@ -246,7 +246,7 @@ function SidebarContent({ isEditMode, onToggleEditMode, userRole, userFullName, 
           <>
             <OrgLogo url={orgLogoUrl} />
             <span className="text-lg font-bold tracking-tight truncate flex-1">
-              {currentOrg?.name || 'Monaco'}
+              {currentOrg?.name || 'BarberOS'}
             </span>
           </>
         )}
@@ -649,7 +649,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
 
           <div className="flex items-center gap-2 lg:hidden min-w-0 flex-1">
             <span className="font-semibold text-sm truncate">
-              {currentNavIndex >= 0 ? orderedItems[currentNavIndex]?.label : (availableOrganizations.find(o => o.id === organizationId)?.name || 'Monaco')}
+              {currentNavIndex >= 0 ? orderedItems[currentNavIndex]?.label : (availableOrganizations.find(o => o.id === organizationId)?.name || 'BarberOS')}
             </span>
           </div>
 

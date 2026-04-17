@@ -50,7 +50,9 @@
       "Bash(echo \"exit=$?\")",
       "Bash(cat /Users/ignaciobaldovino/MSB_FULL/MonacoSmartBarber/supabase/functions/process-scheduled-messages/index.ts)",
       "Read(//tmp/**)",
-      "Bash(npx vercel *)"
+      "Bash(npx vercel *)",
+      "mcp__supabase__list_tables",
+      "mcp__supabase__get_advisors"
     ]
   },
   "enabledMcpjsonServers": [

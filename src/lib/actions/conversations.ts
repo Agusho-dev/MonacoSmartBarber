@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from './org'
+import { requireOrgAccessToEntity } from './guard'
 import { revalidatePath } from 'next/cache'
 
 // Busca o crea una conversación WhatsApp para un cliente dado
@@ -102,6 +103,9 @@ export async function updateConversationStatus(
   conversationId: string,
   status: 'open' | 'closed' | 'archived'
 ) {
+  const orgAccess = await requireOrgAccessToEntity('conversations', conversationId)
+  if (!orgAccess.ok) return { error: 'Acceso denegado' }
+
   const supabase = createAdminClient()
   const { error } = await supabase
     .from('conversations')
@@ -115,6 +119,9 @@ export async function updateConversationStatus(
 
 // Obtiene el historial de visitas de un cliente (para el panel lateral)
 export async function getClientVisits(clientId: string) {
+  const orgAccess = await requireOrgAccessToEntity('clients', clientId)
+  if (!orgAccess.ok) return { data: [], error: 'Acceso denegado' }
+
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('visits')

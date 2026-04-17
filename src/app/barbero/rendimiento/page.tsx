@@ -7,7 +7,7 @@ import { RendimientoClient } from './rendimiento-client'
 export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
-    title: 'Mi Rendimiento | Monaco Smart Barber',
+    title: 'Mi Rendimiento | BarberOS',
 }
 
 export default async function RendimientoPage() {

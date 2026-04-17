@@ -41,7 +41,7 @@ export function PartnerLoginClient() {
           </div>
           <h1 className="text-2xl font-bold">Portal de Partners</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Cargá y gestioná los beneficios que ofrecés a clientes Monaco.
+            Cargá y gestioná los beneficios que ofrecés a los clientes.
           </p>
         </div>
 
@@ -84,7 +84,7 @@ export function PartnerLoginClient() {
               </form>
 
               <p className="text-xs text-muted-foreground text-center mt-4">
-                ¿Todavía no te invitaron? Contactá a tu contacto en Monaco.
+                ¿Todavía no te invitaron? Contactá al equipo de la barbería.
               </p>
             </CardContent>
           </Card>

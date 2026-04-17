@@ -90,9 +90,10 @@ interface Props {
   visits: VisitRow[]
   points: PointsRow[]
   branches: { id: string; name: string }[]
+  orgName?: string
 }
 
-export function ClientesClient({ clients, visits, points, branches }: Props) {
+export function ClientesClient({ clients, visits, points, branches, orgName = 'BarberOS' }: Props) {
   const { selectedBranchId } = useBranchStore()
   const supabase = useMemo(() => createClient(), [])
   const [search, setSearch] = useState('')
@@ -724,7 +725,7 @@ export function ClientesClient({ clients, visits, points, branches }: Props) {
                                           return
                                         }
                                         const url = `${window.location.origin}/review/${res.token}`
-                                        const msg = `¡Hola ${detailClient?.name}! Gracias por visitarnos en Monaco Smart Barber. Podés contarnos qué te pareció el servicio acá: ${url}`
+                                        const msg = `¡Hola ${detailClient?.name}! Gracias por visitarnos en ${orgName}. Podés contarnos qué te pareció el servicio acá: ${url}`
                                         window.open(`https://wa.me/${detailClient?.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`, '_blank')
                                       } finally {
                                         setRequestingReview(null)

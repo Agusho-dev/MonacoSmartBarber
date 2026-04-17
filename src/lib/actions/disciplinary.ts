@@ -4,6 +4,7 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { DisciplinaryEventType, ConsequenceType } from '@/lib/types/database'
 import { validateBranchAccess } from './org'
+import { getActiveTimezone } from '@/lib/i18n'
 
 export async function getDisciplinaryRules(branchId: string) {
   const orgId = await validateBranchAccess(branchId)
@@ -90,6 +91,17 @@ export async function createDisciplinaryEvent(
   if (source !== 'system') {
     const orgId = await validateBranchAccess(branchId)
     if (!orgId) return { error: 'No autorizado' }
+
+    // Validar que el staff pertenece al branch indicado
+    const adminCheck = createAdminClient()
+    const { data: staffRow } = await adminCheck
+      .from('staff')
+      .select('branch_id')
+      .eq('id', staffId)
+      .maybeSingle()
+    if (!staffRow || staffRow.branch_id !== branchId) {
+      return { error: 'El barbero no pertenece a esta sucursal' }
+    }
   }
 
   const supabase = source === 'system' ? createAdminClient() : await createClient()
@@ -171,15 +183,16 @@ export async function getBarberDisciplinarySummary(branchId: string) {
 export async function checkTardiness(staffId: string, branchId: string) {
   const supabase = createAdminClient()
 
+  const tz = await getActiveTimezone()
   const now = new Date()
-  const argTimeOptions = { timeZone: 'America/Argentina/Buenos_Aires', hour12: false } as const
+  const argTimeOptions = { timeZone: tz, hour12: false } as const
 
   // Hora actual "HH:MM:SS"
   const currentTimeStr = now.toLocaleTimeString('en-US', argTimeOptions)
 
   // Día de la semana (0-6, donde 0 = domingo)
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Argentina/Buenos_Aires',
+    timeZone: tz,
     weekday: 'short'
   }).formatToParts(now)
   const argDayStr = parts.find(p => p.type === 'weekday')?.value || ''
@@ -187,7 +200,7 @@ export async function checkTardiness(staffId: string, branchId: string) {
   const dow = dowMap[argDayStr] ?? now.getDay()
 
   // Fecha "YYYY-MM-DD"
-  const ymdFormat = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(now)
+  const ymdFormat = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now)
 
   // Obtener bloques de horario del día
   const { data: schedules } = await supabase

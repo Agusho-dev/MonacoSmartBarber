@@ -9,7 +9,7 @@ import { CajaClient } from './caja-client'
 export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
-  title: 'Caja | Monaco Smart Barber',
+  title: 'Caja | BarberOS',
 }
 
 export default async function CajaPage() {

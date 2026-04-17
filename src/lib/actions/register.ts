@@ -48,6 +48,13 @@ export async function registerOrganization(formData: FormData) {
   const email = (formData.get('email') as string)?.trim()
   const password = formData.get('password') as string
 
+  // Rate limit: 3 orgs por IP cada hora (anti-spam)
+  const { RateLimits } = await import('@/lib/rate-limit')
+  const gate = await RateLimits.registerOrg()
+  if (!gate.allowed) {
+    return { success: false, error: 'Demasiados intentos de registro. Intentá más tarde.' }
+  }
+
   // — Validación —
   if (!orgName || orgName.length < 2) {
     return { success: false, error: 'El nombre de la organización debe tener al menos 2 caracteres.' }
@@ -61,8 +68,11 @@ export async function registerOrganization(formData: FormData) {
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { success: false, error: 'El email no es válido.' }
   }
-  if (!password || password.length < 6) {
-    return { success: false, error: 'La contraseña debe tener al menos 6 caracteres.' }
+  if (!password || password.length < 8) {
+    return { success: false, error: 'La contraseña debe tener al menos 8 caracteres.' }
+  }
+  if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+    return { success: false, error: 'La contraseña debe tener al menos una letra y un número.' }
   }
 
   const supabase = createAdminClient()
@@ -185,6 +195,13 @@ export async function registerOrganization(formData: FormData) {
     if (settingsError) {
       console.error('[registerOrganization] Error al crear app_settings:', settingsError)
       throw new Error('Error al crear la configuración inicial.')
+    }
+
+    // 7b. Seed defaults (roles, quick_replies, appointment_settings)
+    // No rompe el registro si falla — solo log
+    const { error: seedError } = await supabase.rpc('seed_new_organization', { p_org_id: org.id })
+    if (seedError) {
+      console.error('[registerOrganization] Seed defaults falló (no-crítico):', seedError)
     }
 
     // 8. Iniciar sesión automáticamente con el usuario recién registrado

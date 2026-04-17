@@ -192,8 +192,18 @@ export async function updateReviewAutoConfig(data: {
 export async function updateRewardsConfig(formData: FormData) {
   const supabase = await createClient()
 
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'No autorizado' }
+
   const id = formData.get('id') as string
   const branchId = (formData.get('branch_id') as string) || null
+
+  // Validar que la sucursal pertenece a esta organización
+  if (branchId) {
+    const { validateBranchAccess } = await import('./org')
+    const branchOrg = await validateBranchAccess(branchId)
+    if (!branchOrg) return { error: 'Sucursal no pertenece a tu organización' }
+  }
   const data = {
     branch_id: branchId,
     points_per_visit: Number(formData.get('points_per_visit')),

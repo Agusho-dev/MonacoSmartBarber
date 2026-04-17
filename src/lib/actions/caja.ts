@@ -2,6 +2,8 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId, getOrgBranchIds } from './org'
+import { getActiveTimezone } from '@/lib/i18n'
+import { getDayBounds } from '@/lib/time-utils'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -62,13 +64,6 @@ export interface CajaCSVRow {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function dayBounds(dateStr: string): { start: string; end: string } {
-  return {
-    start: `${dateStr}T00:00:00-03:00`,
-    end: `${dateStr}T23:59:59.999-03:00`,
-  }
-}
-
 function paymentLabel(method: string): string {
   switch (method) {
     case 'cash': return 'Efectivo'
@@ -90,11 +85,17 @@ export async function fetchCajaTickets(params: {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: [], error: 'No autorizado' }
 
-  const branchIds = params.branchId ? [params.branchId] : await getOrgBranchIds()
+  const orgBranchIds = await getOrgBranchIds()
+  // Validar que el branchId solicitado pertenece a la org
+  if (params.branchId && !orgBranchIds.includes(params.branchId)) {
+    return { data: [], error: 'No autorizado para esta sucursal' }
+  }
+  const branchIds = params.branchId ? [params.branchId] : orgBranchIds
   if (branchIds.length === 0) return { data: [], error: null }
 
+  const tz = await getActiveTimezone()
   const supabase = createAdminClient()
-  const { start, end } = dayBounds(params.date)
+  const { start, end } = getDayBounds(params.date, tz)
 
   // Query visits del día
   let query = supabase
@@ -217,11 +218,16 @@ export async function fetchCajaSummary(params: {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: emptySummary(), error: 'No autorizado' }
 
-  const branchIds = params.branchId ? [params.branchId] : await getOrgBranchIds()
+  const orgBranchIds = await getOrgBranchIds()
+  if (params.branchId && !orgBranchIds.includes(params.branchId)) {
+    return { data: emptySummary(), error: 'No autorizado para esta sucursal' }
+  }
+  const branchIds = params.branchId ? [params.branchId] : orgBranchIds
   if (branchIds.length === 0) return { data: emptySummary(), error: null }
 
+  const tz = await getActiveTimezone()
   const supabase = createAdminClient()
-  const { start, end } = dayBounds(params.date)
+  const { start, end } = getDayBounds(params.date, tz)
 
   const [
     { data: visits },
@@ -331,12 +337,17 @@ export async function fetchCajaCSVData(params: {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: [], error: 'No autorizado' }
 
-  const branchIds = params.branchId ? [params.branchId] : await getOrgBranchIds()
+  const orgBranchIds = await getOrgBranchIds()
+  if (params.branchId && !orgBranchIds.includes(params.branchId)) {
+    return { data: [], error: 'No autorizado para esta sucursal' }
+  }
+  const branchIds = params.branchId ? [params.branchId] : orgBranchIds
   if (branchIds.length === 0) return { data: [], error: null }
 
+  const tz = await getActiveTimezone()
   const supabase = createAdminClient()
-  const { start } = dayBounds(params.startDate)
-  const { end } = dayBounds(params.endDate)
+  const { start } = getDayBounds(params.startDate, tz)
+  const { end } = getDayBounds(params.endDate, tz)
 
   let query = supabase
     .from('visits')

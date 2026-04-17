@@ -282,7 +282,7 @@ export function SucursalesClient({ branches }: Props) {
               <Input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Monaco Centro"
+                placeholder="Sucursal Centro"
               />
             </div>
             <div className="grid gap-2">

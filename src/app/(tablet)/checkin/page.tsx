@@ -1416,7 +1416,7 @@ export default function CheckinPage() {
               />
             </div>
             <div className="text-center">
-              <h1 className={cn(terminalH1, isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>Monaco Smart Barber</h1>
+              <h1 className={cn(terminalH1, isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>BarberOS</h1>
               <p className={cn('text-base md:text-xl mt-1 md:mt-3', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
                 Bienvenido
               </p>
@@ -1512,7 +1512,11 @@ export default function CheckinPage() {
               />
               <div className="relative size-full rounded-full overflow-hidden flex items-center justify-center ring-1 ring-white/10 bg-zinc-950/80 backdrop-blur-sm shadow-[0_8px_32px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.08)]">
                 <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/10 via-transparent to-violet-500/10" />
-                <img src="/logo-monaco.png" alt="Monaco Smart Barber" className="absolute inset-0 z-[1] size-full object-cover" />
+                <img
+                  src={selectedBranch.organizations?.logo_url || '/logo-barberos.png'}
+                  alt={selectedBranch.organizations?.name?.trim() || 'BarberOS'}
+                  className="absolute inset-0 z-[1] size-full object-cover"
+                />
               </div>
             </div>
             <div className="text-center space-y-1.5 md:space-y-2.5">
@@ -1524,7 +1528,7 @@ export default function CheckinPage() {
               >
                 Bienvenido a{' '}
                 <span className={isLightBg ? '' : 'drop-shadow-[0_0_24px_rgba(34,211,238,0.25)]'}>
-                  {selectedBranch.organizations?.name?.trim() || 'Monaco Smart Barber'}
+                  {selectedBranch.organizations?.name?.trim() || 'BarberOS'}
                 </span>
               </h1>
               <div

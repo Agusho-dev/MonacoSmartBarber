@@ -7,7 +7,7 @@ import { QueuePanel } from '@/components/barber/queue-panel'
 export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
-  title: 'Fila | Monaco Smart Barber',
+  title: 'Fila | BarberOS',
 }
 
 export default async function FilaPage() {

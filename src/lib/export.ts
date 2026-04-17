@@ -79,6 +79,7 @@ export interface ReceiptData {
   totalAmount: number
   notes: string | null
   reports: ReceiptReport[]
+  orgName?: string
 }
 
 export async function exportPaymentReceiptPDF(data: ReceiptData) {
@@ -88,6 +89,8 @@ export async function exportPaymentReceiptPDF(data: ReceiptData) {
   const doc = new jsPDF()
   const pageWidth = doc.internal.pageSize.getWidth()
 
+  const orgName = data.orgName ?? 'BarberOS'
+
   // Header
   doc.setFontSize(18)
   doc.setFont('helvetica', 'bold')
@@ -95,7 +98,7 @@ export async function exportPaymentReceiptPDF(data: ReceiptData) {
 
   doc.setFontSize(10)
   doc.setFont('helvetica', 'normal')
-  doc.text('Monaco Smart Barber', pageWidth / 2, 30, { align: 'center' })
+  doc.text(orgName, pageWidth / 2, 30, { align: 'center' })
 
   doc.setDrawColor(200)
   doc.line(14, 34, pageWidth - 14, 34)
@@ -204,7 +207,7 @@ export async function exportPaymentReceiptPDF(data: ReceiptData) {
     doc.setFontSize(8)
     doc.setTextColor(150)
     doc.text(
-      `Monaco Smart Barber · Recibo de pago · Página ${i} de ${pageCount}`,
+      `${orgName} · Recibo de pago · Página ${i} de ${pageCount}`,
       pageWidth / 2,
       doc.internal.pageSize.getHeight() - 10,
       { align: 'center' }

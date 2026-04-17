@@ -242,6 +242,17 @@ export async function fetchBarberDayStats(staffId: string, branchId: string) {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { servicesCount: 0, revenue: 0 }
 
+  // Validar que el staff pertenece a esta org y a este branch
+  const adminClient = createAdminClient()
+  const { data: staffCheck } = await adminClient
+    .from('staff')
+    .select('id')
+    .eq('id', staffId)
+    .eq('branch_id', branchId)
+    .eq('organization_id', orgId)
+    .maybeSingle()
+  if (!staffCheck) return { servicesCount: 0, revenue: 0 }
+
   const supabase = await createClient()
 
   const today = new Date()
@@ -262,7 +273,20 @@ export async function fetchBarberDayStats(staffId: string, branchId: string) {
 }
 
 export async function fetchBranchAssignmentData(branchId: string) {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { dailyServiceCounts: {}, lastServiceAt: {} }
+
   const supabase = createAdminClient()
+
+  // Validar que el branch pertenece a la org del caller
+  const { data: branchCheck } = await supabase
+    .from('branches')
+    .select('id')
+    .eq('id', branchId)
+    .eq('organization_id', orgId)
+    .maybeSingle()
+  if (!branchCheck) return { dailyServiceCounts: {}, lastServiceAt: {} }
+
   const dayStart = new Date()
   dayStart.setHours(0, 0, 0, 0)
 

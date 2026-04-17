@@ -3,6 +3,8 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
+import { timingSafeEqual } from 'crypto'
+import { RateLimits, getClientIP } from '@/lib/rate-limit'
 
 export async function loginWithEmail(
   _prevState: { error?: string; success?: boolean } | null,
@@ -11,6 +13,14 @@ export async function loginWithEmail(
   const supabase = await createClient()
   const email = formData.get('email') as string
   const password = formData.get('password') as string
+
+  // Rate limit login email: 5 intentos por IP+email cada 2min
+  const ip = await getClientIP()
+  const { rateLimit } = await import('@/lib/rate-limit')
+  const gate = await rateLimit('email_login', `${ip}:${email.toLowerCase()}`, { limit: 5, window: 120 })
+  if (!gate.allowed) {
+    return { error: 'Demasiados intentos de inicio de sesión. Esperá unos minutos.' }
+  }
 
   const { error } = await supabase.auth.signInWithPassword({ email, password })
 
@@ -34,6 +44,13 @@ export async function loginWithPin(formData: FormData) {
   const staffId = formData.get('staff_id') as string
   const pin = formData.get('pin') as string
 
+  // Rate limit: 5 intentos por IP+staff cada 60s (evita brute-force de PIN)
+  const ip = await getClientIP()
+  const gate = await RateLimits.pinLogin(`${ip}:${staffId}`)
+  if (!gate.allowed) {
+    return { error: `Demasiados intentos. Esperá hasta ${new Date(gate.reset_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}.` }
+  }
+
   const { data: staff, error } = await supabase
     .from('staff')
     .select('id, pin, full_name, branch_id, role, role_id, organization_id')
@@ -41,7 +58,19 @@ export async function loginWithPin(formData: FormData) {
     .eq('is_active', true)
     .single()
 
-  if (error || !staff || staff.pin !== pin) {
+  // Comparación en tiempo constante para evitar timing attacks
+  const pinMatch = (() => {
+    if (error || !staff || !staff.pin) return false
+    try {
+      const a = Buffer.from(pin)
+      const b = Buffer.from(staff.pin)
+      if (a.length !== b.length) return false
+      return timingSafeEqual(a, b)
+    } catch {
+      return false
+    }
+  })()
+  if (!pinMatch) {
     return { error: 'PIN incorrecto' }
   }
 
@@ -195,7 +224,19 @@ export async function verifyBarberPin(staffId: string, pin: string) {
     .eq('is_active', true)
     .single()
 
-  if (error || !staff || staff.pin !== pin) {
+  // Comparación en tiempo constante para evitar timing attacks
+  const pinMatch2 = (() => {
+    if (error || !staff || !staff.pin) return false
+    try {
+      const a = Buffer.from(pin)
+      const b = Buffer.from(staff.pin)
+      if (a.length !== b.length) return false
+      return timingSafeEqual(a, b)
+    } catch {
+      return false
+    }
+  })()
+  if (!pinMatch2) {
     return { error: 'PIN incorrecto' }
   }
 

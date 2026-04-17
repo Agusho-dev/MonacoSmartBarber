@@ -2,17 +2,16 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { fetchAll } from '@/lib/supabase/fetch-all'
-import { getCurrentOrgId } from './org'
+import { getCurrentOrgId, getOrgBranchIds } from './org'
+import { getActiveTimezone } from '@/lib/i18n'
 
-const ARG_TZ = 'America/Argentina/Buenos_Aires'
-
-function toArgLocalDate(isoString: string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: ARG_TZ }).format(new Date(isoString))
+function toLocalDate(isoString: string, tz: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(isoString))
 }
 
-function toArgDayHour(isoString: string): { day: number; hour: number } {
+function toDayHour(isoString: string, tz: string): { day: number; hour: number } {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: ARG_TZ,
+    timeZone: tz,
     weekday: 'short',
     hour: '2-digit',
     hourCycle: 'h23',
@@ -79,17 +78,23 @@ export async function fetchStats(
   branchId?: string | null
 ): Promise<StatsData> {
   const supabase = createAdminClient()
+  const tz = await getActiveTimezone()
 
   const orgId = await getCurrentOrgId()
 
   // Obtener sucursales de la org
-  let orgBranchIds: string[] = []
-  if (orgId) {
-    const { data: orgBranches } = await supabase
-      .from('branches')
-      .select('id')
-      .eq('organization_id', orgId)
-    orgBranchIds = orgBranches?.map((b) => b.id) ?? []
+  const orgBranchIds = await getOrgBranchIds()
+
+  // Validar que el branchId solicitado pertenece a la org
+  if (branchId && !orgBranchIds.includes(branchId)) {
+    return {
+      heatmap: [],
+      ranking: [],
+      trends: [],
+      revenueByMethod: [],
+      segmentation: { new_count: 0, recurring: 0, at_risk: 0, lost: 0, total: 0 },
+      totals: { revenue: 0, cuts: 0, avgTicket: 0, clients: 0 },
+    }
   }
 
   // Visitas del periodo (paginadas)
@@ -164,7 +169,7 @@ export async function fetchStats(
   // Heatmap
   const heatMap = new Map<string, number>()
   for (const v of safe) {
-    const { day, hour } = toArgDayHour(v.completed_at)
+    const { day, hour } = toDayHour(v.completed_at, tz)
     const key = `${day}-${hour}`
     heatMap.set(key, (heatMap.get(key) || 0) + 1)
   }
@@ -206,7 +211,7 @@ export async function fetchStats(
   // Daily trends
   const dailyAgg = new Map<string, { revenue: number; cuts: number }>()
   for (const v of safe) {
-    const day = toArgLocalDate(v.completed_at)
+    const day = toLocalDate(v.completed_at, tz)
     const d = dailyAgg.get(day) || { revenue: 0, cuts: 0 }
     d.revenue += v.amount
     d.cuts++
@@ -281,16 +286,14 @@ export async function fetchWeekHeatmap(
   branchId?: string | null
 ): Promise<HeatmapCell[]> {
   const supabase = createAdminClient()
+  const tz = await getActiveTimezone()
 
-  const orgId = await getCurrentOrgId()
-  let filterBranchIds: string[] = branchId ? [branchId] : []
-  if (!branchId && orgId) {
-    const { data: orgBranches } = await supabase
-      .from('branches')
-      .select('id')
-      .eq('organization_id', orgId)
-    filterBranchIds = orgBranches?.map((b) => b.id) ?? []
-  }
+  const orgBranchIds = await getOrgBranchIds()
+
+  // Validar que el branchId solicitado pertenece a la org
+  if (branchId && !orgBranchIds.includes(branchId)) return []
+
+  const filterBranchIds = branchId ? [branchId] : orgBranchIds
   if (filterBranchIds.length === 0) return []
 
   const data = await fetchAll((from, to) => {
@@ -305,7 +308,7 @@ export async function fetchWeekHeatmap(
 
   const heatMap = new Map<string, number>()
   for (const v of data) {
-    const { day, hour } = toArgDayHour(v.completed_at)
+    const { day, hour } = toDayHour(v.completed_at, tz)
     const key = `${day}-${hour}`
     heatMap.set(key, (heatMap.get(key) || 0) + 1)
   }

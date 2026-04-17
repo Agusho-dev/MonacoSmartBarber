@@ -5,7 +5,7 @@ import { CalendarioClient } from './calendario-client'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Calendario laboral | Monaco Smart Barber',
+  title: 'Calendario laboral | BarberOS',
 }
 
 export default async function CalendarioPage() {

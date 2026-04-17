@@ -20,7 +20,7 @@ export default async function ClientesPage() {
 
   const branchIds = (orgBranches ?? []).map((b) => b.id)
 
-  const [clients, visits, points] = await Promise.all([
+  const [clients, visits, points, { data: orgRow }] = await Promise.all([
     fetchAll((from, to) =>
       supabase
         .from('clients')
@@ -48,6 +48,7 @@ export default async function ClientesPage() {
           .in('branch_id', branchIds)
           .then(({ data }) => data ?? [])
       : Promise.resolve([]),
+    supabase.from('organizations').select('name').eq('id', orgId).maybeSingle(),
   ])
 
   return (
@@ -56,6 +57,7 @@ export default async function ClientesPage() {
       visits={visits as any}
       points={points as any}
       branches={orgBranches ?? []}
+      orgName={orgRow?.name ?? 'BarberOS'}
     />
   )
 }

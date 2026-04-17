@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Portal de Partners · Monaco',
-  description: 'Portal para comercios aliados de Monaco Smart Barber',
+  title: 'Portal de Partners · BarberOS',
+  description: 'Portal para comercios aliados de BarberOS',
 }
 
 export default function PartnersLayout({ children }: { children: React.ReactNode }) {

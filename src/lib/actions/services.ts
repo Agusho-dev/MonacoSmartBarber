@@ -38,7 +38,25 @@ export async function upsertService(data: {
   let serviceId = data.id
 
   if (data.id) {
-    // Al actualizar, asegurarse de que el servicio también pertenece a la org (via branch o null)
+    // Al actualizar, validar el branch_id ORIGINAL del registro (no el del form)
+    const { data: existing } = await supabase
+      .from('services')
+      .select('branch_id')
+      .eq('id', data.id)
+      .maybeSingle()
+
+    if (!existing) return { error: 'Servicio no encontrado' }
+
+    if (existing.branch_id) {
+      const { data: ownerBranch } = await supabase
+        .from('branches')
+        .select('id')
+        .eq('id', existing.branch_id)
+        .eq('organization_id', orgId)
+        .maybeSingle()
+      if (!ownerBranch) return { error: 'El servicio no pertenece a esta organización' }
+    }
+
     const { error } = await supabase
       .from('services')
       .update({

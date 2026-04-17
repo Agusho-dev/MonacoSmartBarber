@@ -174,7 +174,7 @@ export default function BarberLoginPage() {
           </div>
         )}
         <h1 className="text-lg font-semibold tracking-tight">
-          {orgInfo?.name || 'Monaco Smart Barber'}
+          {orgInfo?.name || 'BarberOS'}
         </h1>
       </div>
 

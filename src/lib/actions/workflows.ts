@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from './org'
+import { isValidUUID } from './guard'
 import { revalidatePath } from 'next/cache'
 import type { AutomationWorkflow, WorkflowNode, WorkflowEdge, WorkflowWithGraph, CrmAlert } from '@/lib/types/database'
 
@@ -29,6 +30,7 @@ export async function getWorkflows(branchId?: string | null) {
 
   // Si se filtra por branch, mostrar los de esa branch + los generales (sin branch)
   if (branchId) {
+    if (!isValidUUID(branchId)) return { data: [], error: 'branchId inválido' }
     query = query.or(`branch_id.eq.${branchId},branch_id.is.null`)
   }
 

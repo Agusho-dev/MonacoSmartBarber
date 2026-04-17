@@ -110,6 +110,7 @@ interface Props {
   accounts: AccountWithBranch[]
   expenseTickets: ExpenseTicket[]
   commissionSummary: CommissionSummaryData
+  orgSlug?: string
 }
 
 type AccountBalance = { id: string; name: string; balance: number; income: number; expenses: number }
@@ -120,6 +121,7 @@ export function FinanzasClient({
   accounts,
   expenseTickets,
   commissionSummary,
+  orgSlug = 'barberos',
 }: Props) {
   const { selectedBranchId } = useBranchStore()
   const [data, setData] = useState(initialData)
@@ -256,7 +258,7 @@ export function FinanzasClient({
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `finanzas_monaco_${period}meses.csv`
+    a.download = `finanzas_${orgSlug}_${period}meses.csv`
     a.click()
     URL.revokeObjectURL(url)
   }

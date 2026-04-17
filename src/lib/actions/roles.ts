@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { getCurrentOrgId } from './org'
+import { getCurrentOrgId, getOrgBranchIds } from './org'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -66,6 +66,13 @@ export async function createRole(input: {
 }) {
     const { supabase, orgId } = await requireOwner()
 
+    // Validar que todos los branchIds pertenecen a la org
+    if (input.branchIds.length > 0) {
+        const orgBranchIds = await getOrgBranchIds()
+        const foreign = input.branchIds.find(id => !orgBranchIds.includes(id))
+        if (foreign) return { error: 'Una sucursal no pertenece a tu organización' }
+    }
+
     const { data: role, error: roleError } = await supabase
         .from('roles')
         .insert({
@@ -110,6 +117,13 @@ export async function updateRole(
     }
 ) {
     const { supabase, orgId } = await requireOwner()
+
+    // Validar que todos los branchIds pertenecen a la org
+    if (input.branchIds.length > 0) {
+        const orgBranchIds = await getOrgBranchIds()
+        const foreign = input.branchIds.find(id => !orgBranchIds.includes(id))
+        if (foreign) return { error: 'Una sucursal no pertenece a tu organización' }
+    }
 
     const { error: updateError } = await supabase
         .from('roles')

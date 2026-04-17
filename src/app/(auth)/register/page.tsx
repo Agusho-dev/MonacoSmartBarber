@@ -190,7 +190,7 @@ export default function RegisterPage() {
                   icon={Building2}
                   value={orgName}
                   onChange={(e) => handleOrgNameChange(e.target.value)}
-                  placeholder="Monaco Barbería"
+                  placeholder="Mi Barbería"
                   required
                 />
               </div>

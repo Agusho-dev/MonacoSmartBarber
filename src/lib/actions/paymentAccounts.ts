@@ -176,6 +176,10 @@ export async function getActiveAccountForTransfer(branchId: string, transferAmou
 }
 
 export async function recordTransfer(visitId: string, accountId: string, amount: number, branchId: string) {
+  // Verificar que la cuenta pertenece a la org del caller
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
+
   const supabase = createAdminClient()
 
   // 1. Log the transfer
@@ -190,20 +194,16 @@ export async function recordTransfer(visitId: string, accountId: string, amount:
 
   if (logError) return { error: logError.message }
 
-  // 2. We need to increment the accumulated_today for the account.
-  // The best way to do this concurrently is via a database RPC, but since there's no RPC,
-  // we'll fetch the current value and update it. A small race condition exists here.
-  const { data: acc } = await supabase
-    .from('payment_accounts')
-    .select('accumulated_today')
-    .eq('id', accountId)
-    .single()
+  // 2. Incremento atómico via RPC (evita race condition: read-modify-write no era seguro bajo concurrencia).
+  const { error: rpcError } = await supabase.rpc('increment_account_accumulated', {
+    p_account_id: accountId,
+    p_amount: amount,
+  })
 
-  if (acc) {
-    await supabase
-      .from('payment_accounts')
-      .update({ accumulated_today: acc.accumulated_today + amount })
-      .eq('id', accountId)
+  if (rpcError) {
+    console.error('[recordTransfer] increment_account_accumulated falló:', rpcError)
+    // El log ya se insertó — retornamos success con warning. La UI puede recargar
+    // para ver el balance real; el daily_limit queda un ciclo desactualizado máximo.
   }
 
   return { success: true }

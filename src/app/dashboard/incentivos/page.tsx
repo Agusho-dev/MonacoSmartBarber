@@ -5,7 +5,7 @@ import { IncentivosClient } from './incentivos-client'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Incentivos | Monaco Smart Barber',
+  title: 'Incentivos | BarberOS',
 }
 
 export default async function IncentivosPage() {
