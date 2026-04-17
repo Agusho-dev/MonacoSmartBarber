@@ -18,6 +18,7 @@ import {
 import { formatCurrency } from '@/lib/format'
 import type { QueueEntry, Staff, Client, BreakConfig, StaffSchedule } from '@/lib/types/database'
 import { assignDynamicBarbers } from '@/lib/barber-utils'
+import { AppointmentList } from '@/components/appointments/appointment-list'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -106,6 +107,8 @@ interface QueuePanelProps {
   session: BarberSession
   branchName: string
   breakConfigs?: BreakConfig[]
+  appointments?: import('@/lib/types/database').Appointment[]
+  noShowToleranceMinutes?: number
 }
 
 interface BreakRequestRow {
@@ -124,6 +127,8 @@ export function QueuePanel({
   session,
   branchName,
   breakConfigs = [],
+  appointments = [],
+  noShowToleranceMinutes = 15,
 }: QueuePanelProps) {
   const [entries, setEntries] = useState<QueueEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -1092,6 +1097,14 @@ export function QueuePanel({
                     {allWaitingEntries.filter((e) => !e.is_break).length}
                   </Badge>
                 </TabsTrigger>
+                {appointments.length > 0 && (
+                  <TabsTrigger value="appointments" className="flex-1 text-sm h-9">
+                    Turnos
+                    <Badge variant="secondary" className="ml-2 px-1.5 py-0 min-w-5 h-5 flex items-center justify-center text-[11px] font-bold shadow-sm bg-background">
+                      {appointments.filter((a) => ['confirmed', 'checked_in'].includes(a.status)).length}
+                    </Badge>
+                  </TabsTrigger>
+                )}
               </TabsList>
             </div>
 
@@ -1127,6 +1140,19 @@ export function QueuePanel({
                 </div>
               </ScrollArea>
             </TabsContent>
+            {appointments.length > 0 && (
+              <TabsContent value="appointments" className="mt-0 flex-1 overflow-hidden bg-muted/10">
+                <ScrollArea className="h-full">
+                  <div className="p-3 pb-8">
+                    <AppointmentList
+                      appointments={appointments}
+                      staffId={session.staff_id}
+                      noShowToleranceMinutes={noShowToleranceMinutes}
+                    />
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+            )}
           </Tabs>
 
           {/* TIMER PARA ABAJO (Sticky Footer for Active Client) */}

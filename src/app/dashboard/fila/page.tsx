@@ -1,8 +1,10 @@
 import type { Metadata } from 'next'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId, getOrgBranchIds } from '@/lib/actions/org'
+import { getAppointmentsForDate, getAppointmentSettings } from '@/lib/actions/appointments'
 import { redirect } from 'next/navigation'
 import { FilaClient } from './fila-client'
+import { FilaTabsWrapper } from './fila-tabs-wrapper'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,11 +19,14 @@ export default async function FilaAdminPage() {
 
   const supabase = createAdminClient()
 
+  const today = new Date().toISOString().split('T')[0]
+
   const [
     { data: entries },
     { data: barbers },
     { data: branches },
     { data: breakConfigs },
+    settings,
   ] = await Promise.all([
     branchIds.length > 0
       ? supabase
@@ -51,14 +56,25 @@ export default async function FilaAdminPage() {
           .eq('is_active', true)
           .order('name')
       : Promise.resolve({ data: [] }),
+    getAppointmentSettings(orgId),
   ])
 
+  // Cargar turnos del día para todas las sucursales
+  const appointmentPromises = (branches ?? []).map(b => getAppointmentsForDate(b.id, today))
+  const appointmentArrays = await Promise.all(appointmentPromises)
+  const allAppointments = appointmentArrays.flat()
+
   return (
-    <FilaClient
-      initialEntries={entries ?? []}
-      barbers={barbers ?? []}
-      branches={branches ?? []}
-      breakConfigs={breakConfigs ?? []}
-    />
+    <FilaTabsWrapper
+      appointments={allAppointments}
+      noShowToleranceMinutes={settings?.no_show_tolerance_minutes ?? 15}
+    >
+      <FilaClient
+        initialEntries={entries ?? []}
+        barbers={barbers ?? []}
+        branches={branches ?? []}
+        breakConfigs={breakConfigs ?? []}
+      />
+    </FilaTabsWrapper>
   )
 }

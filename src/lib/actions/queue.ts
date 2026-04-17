@@ -233,6 +233,20 @@ export async function completeService(
     return { error: 'Error al completar servicio: ' + error.message }
   }
 
+  // 1b. Si la queue entry proviene de un turno, marcarlo como completado
+  const { data: queueEntryData } = await supabase
+    .from('queue_entries')
+    .select('appointment_id')
+    .eq('id', queueEntryId)
+    .maybeSingle()
+
+  if (queueEntryData?.appointment_id) {
+    await supabase
+      .from('appointments')
+      .update({ status: 'completed' })
+      .eq('id', queueEntryData.appointment_id)
+  }
+
   // 2. Get the visit created by the trigger
   const { data: visit } = await supabase
     .from('visits')

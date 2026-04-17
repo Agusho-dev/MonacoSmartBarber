@@ -5,7 +5,7 @@ import {
   Send, Clock, ArrowLeft, Plus, Settings,
   CheckCircle2, Archive, RotateCcw, User, MessageSquare, FileText,
   ExternalLink, MessageCircle, Search, X, Sparkles,
-  Download, FileIcon,
+  Download, FileIcon, CalendarPlus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -17,6 +17,7 @@ import { useMensajeria } from '../shared/mensajeria-context'
 import type { QuickReply } from '../shared/mensajeria-context'
 import type { Message } from '@/lib/types/database'
 import type { WaTemplate } from '../shared/types'
+import { AppointmentGridDialog } from '@/components/appointments/appointment-grid-dialog'
 
 export function ChatView({
   onOpenSettings,
@@ -39,9 +40,21 @@ export function ChatView({
     isSending, isActing,
     waTemplates,
     quickReplies,
+    branches,
   } = useMensajeria()
 
   const [showQuickReplies, setShowQuickReplies] = useState(false)
+  const [showAppointmentGrid, setShowAppointmentGrid] = useState(false)
+  const [appointmentServices, setAppointmentServices] = useState<{ id: string; name: string; price: number; duration_minutes: number | null }[]>([])
+
+  const loadAppointmentServices = async () => {
+    if (appointmentServices.length) { setShowAppointmentGrid(true); return }
+    const { createClient } = await import('@/lib/supabase/client')
+    const supabase = createClient()
+    const { data } = await supabase.from('services').select('id, name, price, duration_minutes').eq('is_active', true)
+    setAppointmentServices(data ?? [])
+    setShowAppointmentGrid(true)
+  }
   const [quickReplySearch, setQuickReplySearch] = useState('')
   const quickReplySearchRef = useRef<HTMLInputElement>(null)
   const messageTextareaRef = useRef<HTMLTextAreaElement>(null)
@@ -355,6 +368,13 @@ export function ChatView({
                     <MessageCircle className="size-4" />
                   </button>
                 )}
+                <button
+                  onClick={loadAppointmentServices}
+                  className="size-10 shrink-0 rounded-full bg-accent hover:bg-accent flex items-center justify-center transition-colors"
+                  title="Agendar turno"
+                >
+                  <CalendarPlus className="size-4 text-muted-foreground" />
+                </button>
                 <textarea
                   ref={messageTextareaRef}
                   rows={1}
@@ -398,6 +418,18 @@ export function ChatView({
           )}
         </div>
       </div>
+
+      <AppointmentGridDialog
+        open={showAppointmentGrid}
+        onOpenChange={setShowAppointmentGrid}
+        branches={branches}
+        services={appointmentServices}
+        clientId={activeConv?.client_id}
+        clientName={activeConv ? (activeConv as any).platform_user_name : null}
+        clientPhone={activeConv ? (activeConv as any).platform_user_id : null}
+        onInsertText={(text) => setMessageInput(text)}
+        onBooked={() => setShowAppointmentGrid(false)}
+      />
     </div>
   )
 }

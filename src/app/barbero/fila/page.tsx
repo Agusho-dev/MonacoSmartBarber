@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { getBarberSession } from '@/lib/actions/auth'
 import { createAdminClient } from '@/lib/supabase/server'
 import { QueuePanel } from '@/components/barber/queue-panel'
+import { getAppointmentsForBarber, getAppointmentSettings } from '@/lib/actions/appointments'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,8 +16,9 @@ export default async function FilaPage() {
   if (!session) redirect('/barbero/login')
 
   const supabase = createAdminClient()
+  const today = new Date().toISOString().split('T')[0]
 
-  const [{ data: branch }, { data: breakConfigs }] = await Promise.all([
+  const [{ data: branch }, { data: breakConfigs }, appointments, settings] = await Promise.all([
     supabase
       .from('branches')
       .select('name')
@@ -28,6 +30,8 @@ export default async function FilaPage() {
       .eq('branch_id', session.branch_id)
       .eq('is_active', true)
       .order('name'),
+    getAppointmentsForBarber(session.staff_id, today),
+    getAppointmentSettings(session.organization_id),
   ])
 
   return (
@@ -35,6 +39,8 @@ export default async function FilaPage() {
       session={session}
       branchName={branch?.name ?? 'Sucursal'}
       breakConfigs={breakConfigs ?? []}
+      appointments={appointments}
+      noShowToleranceMinutes={settings?.no_show_tolerance_minutes ?? 15}
     />
   )
 }

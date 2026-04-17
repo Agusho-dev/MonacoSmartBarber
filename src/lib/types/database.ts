@@ -12,7 +12,10 @@ export type ConsequenceType = 'none' | 'presentismo_loss' | 'warning' | 'incenti
 export type ReviewRequestStatus = 'pending' | 'completed' | 'expired'
 export type ReviewRatingCategory = 'high' | 'improvement' | 'low'
 export type BreakRequestStatus = 'pending' | 'approved' | 'rejected' | 'completed'
-export type ServiceAvailability = 'checkin' | 'upsell' | 'both'
+export type ServiceAvailability = 'checkin' | 'upsell' | 'both' | 'appointment' | 'all'
+export type BookingMode = 'self_service' | 'manual_only' | 'both'
+export type AppointmentStatus = 'confirmed' | 'checked_in' | 'in_progress' | 'completed' | 'cancelled' | 'no_show'
+export type AppointmentSource = 'public' | 'manual'
 export type MessagePlatform = 'whatsapp' | 'facebook' | 'instagram'
 export type MessageDirection = 'inbound' | 'outbound'
 export type MessageContentType = 'text' | 'image' | 'video' | 'audio' | 'document' | 'template' | 'location' | 'interactive'
@@ -218,6 +221,7 @@ export interface Service {
   price: number
   duration_minutes: number | null
   availability: ServiceAvailability
+  booking_mode: BookingMode
   default_commission_pct: number
   is_active: boolean
   created_at: string
@@ -274,6 +278,8 @@ export interface QueueEntry {
   reward_claimed: boolean
   is_break: boolean
   is_dynamic: boolean
+  is_appointment: boolean
+  appointment_id: string | null
   break_request_id: string | null
   checked_in_at: string
   priority_order: string
@@ -806,6 +812,65 @@ export interface WorkflowWithGraph extends AutomationWorkflow {
   edges: WorkflowEdge[]
 }
 
+// Appointment system types
+export interface AppointmentSettings {
+  id: string
+  organization_id: string
+  is_enabled: boolean
+  appointment_hours_open: string
+  appointment_hours_close: string
+  appointment_days: number[]
+  slot_interval_minutes: number
+  max_advance_days: number
+  no_show_tolerance_minutes: number
+  cancellation_min_hours: number
+  confirmation_template_name: string | null
+  reminder_template_name: string | null
+  reminder_hours_before: number
+  payment_mode: 'prepago' | 'postpago'
+  created_at: string
+  updated_at: string
+}
+
+export interface AppointmentStaff {
+  id: string
+  organization_id: string
+  staff_id: string
+  is_active: boolean
+  created_at: string
+  staff?: Staff
+}
+
+export interface Appointment {
+  id: string
+  organization_id: string
+  branch_id: string
+  client_id: string
+  barber_id: string | null
+  service_id: string | null
+  appointment_date: string
+  start_time: string
+  end_time: string
+  duration_minutes: number
+  status: AppointmentStatus
+  source: AppointmentSource
+  cancellation_token: string | null
+  payment_flag: string | null
+  queue_entry_id: string | null
+  created_by_staff_id: string | null
+  cancelled_at: string | null
+  cancelled_by: string | null
+  no_show_marked_at: string | null
+  no_show_marked_by: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+  client?: Client
+  barber?: Staff
+  service?: Service
+  branch?: Branch
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -850,6 +915,9 @@ export interface Database {
       messages: { Row: Message; Insert: Partial<Message> & Pick<Message, 'conversation_id' | 'direction'>; Update: Partial<Message> }
       message_templates: { Row: MessageTemplate; Insert: Partial<MessageTemplate> & Pick<MessageTemplate, 'channel_id' | 'name'>; Update: Partial<MessageTemplate> }
       scheduled_messages: { Row: ScheduledMessage; Insert: Partial<ScheduledMessage> & Pick<ScheduledMessage, 'channel_id' | 'client_id' | 'scheduled_for'>; Update: Partial<ScheduledMessage> }
+      appointment_settings: { Row: AppointmentSettings; Insert: Partial<AppointmentSettings> & Pick<AppointmentSettings, 'organization_id'>; Update: Partial<AppointmentSettings> }
+      appointment_staff: { Row: AppointmentStaff; Insert: Partial<AppointmentStaff> & Pick<AppointmentStaff, 'organization_id' | 'staff_id'>; Update: Partial<AppointmentStaff> }
+      appointments: { Row: Appointment; Insert: Partial<Appointment> & Pick<Appointment, 'organization_id' | 'branch_id' | 'client_id' | 'appointment_date' | 'start_time' | 'end_time' | 'duration_minutes'>; Update: Partial<Appointment> }
     }
     Views: {
       branch_occupancy: { Row: BranchOccupancy }

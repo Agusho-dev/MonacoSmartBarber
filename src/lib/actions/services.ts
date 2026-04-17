@@ -13,6 +13,7 @@ export async function upsertService(data: {
   branch_id: string | null
   availability: ServiceAvailability
   default_commission_pct: number
+  booking_mode?: 'self_service' | 'manual_only' | 'both'
   barberOverrides?: Record<string, number>
 }) {
   const supabase = createAdminClient()
@@ -48,6 +49,7 @@ export async function upsertService(data: {
         branch_id: data.branch_id,
         availability: data.availability,
         default_commission_pct: data.default_commission_pct,
+        booking_mode: data.booking_mode ?? 'self_service',
       })
       .eq('id', data.id)
 
@@ -62,6 +64,7 @@ export async function upsertService(data: {
         branch_id: data.branch_id,
         availability: data.availability,
         default_commission_pct: data.default_commission_pct,
+        booking_mode: data.booking_mode ?? 'self_service',
       })
       .select('id')
       .single()

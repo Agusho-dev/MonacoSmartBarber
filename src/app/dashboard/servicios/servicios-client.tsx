@@ -9,7 +9,7 @@ import { formatCurrency } from '@/lib/format'
 import { HistorialServicios } from './historial-servicios'
 import { upsertService, toggleService, deleteService } from '@/lib/actions/services'
 import { upsertProduct, toggleProduct, deleteProduct, sellProductFromDashboard } from '@/lib/actions/products'
-import type { Service, Branch, ServiceAvailability, StaffServiceCommission, Product, ProductSale } from '@/lib/types/database'
+import type { Service, Branch, ServiceAvailability, BookingMode, StaffServiceCommission, Product, ProductSale } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -62,6 +62,7 @@ const emptyServiceForm = {
   duration_minutes: '',
   branch_id: '',
   availability: 'both' as ServiceAvailability,
+  booking_mode: 'self_service' as BookingMode,
   default_commission_pct: '',
 }
 
@@ -149,6 +150,7 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
       duration_minutes: service.duration_minutes ? String(service.duration_minutes) : '',
       branch_id: service.branch_id ?? '',
       availability: service.availability ?? 'both',
+      booking_mode: service.booking_mode ?? 'self_service',
       default_commission_pct: service.default_commission_pct ? String(service.default_commission_pct) : '',
     })
     const overrides: Record<string, string> = {}
@@ -174,6 +176,7 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
       duration_minutes: svcForm.duration_minutes ? Number(svcForm.duration_minutes) : null,
       branch_id: svcForm.branch_id || null,
       availability: svcForm.availability,
+      booking_mode: svcForm.booking_mode,
       default_commission_pct: svcForm.default_commission_pct ? Number(svcForm.default_commission_pct) : 0,
       barberOverrides: overridesMap,
     })
@@ -673,6 +676,19 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
                   </SelectContent>
                 </Select>
               </div>
+              <div className="grid gap-2">
+                <Label>Reserva de turnos</Label>
+                <Select value={svcForm.booking_mode} onValueChange={(v) => setSvcForm({ ...svcForm, booking_mode: v as BookingMode })}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="self_service">Cliente puede agendar</SelectItem>
+                    <SelectItem value="manual_only">Solo por staff</SelectItem>
+                    <SelectItem value="both">Ambos canales</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Sucursal</Label>
                 <Select value={svcForm.branch_id || 'all'} onValueChange={(v) => setSvcForm({ ...svcForm, branch_id: v === 'all' ? '' : v })}>
