@@ -52,7 +52,9 @@
       "Read(//tmp/**)",
       "Bash(npx vercel *)",
       "mcp__supabase__list_tables",
-      "mcp__supabase__get_advisors"
+      "mcp__supabase__get_advisors",
+      "Bash(git log *)",
+      "Bash(vercel ls *)"
     ]
   },
   "enabledMcpjsonServers": [
