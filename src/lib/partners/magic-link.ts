@@ -1,3 +1,4 @@
+import { headers } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/server'
 import { generateRawToken, hashTokenForStorage } from './session'
 import type { PartnerMagicLinkPurpose } from '@/lib/types/database'
@@ -11,10 +12,26 @@ export interface MagicLinkResult {
   expiresAt: string
 }
 
-function buildAppUrl(): string {
+/**
+ * Resuelve el origin de la app. Prioridad:
+ * 1. Env explícito (NEXT_PUBLIC_APP_URL / NEXT_PUBLIC_SITE_URL) — para custom domain
+ * 2. Headers del request (x-forwarded-host + x-forwarded-proto) — funciona en cualquier deploy
+ * 3. VERCEL env vars — fallback si no hay request context
+ * 4. localhost — solo desarrollo
+ */
+async function buildAppUrl(): Promise<string> {
   const explicit =
     process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL
   if (explicit) return explicit.replace(/\/$/, '')
+
+  try {
+    const h = await headers()
+    const host = h.get('x-forwarded-host') || h.get('host')
+    const proto = h.get('x-forwarded-proto') || 'https'
+    if (host) return `${proto}://${host}`
+  } catch {
+    // No request context (cron, background jobs) — caer a Vercel env
+  }
 
   const vercelHost =
     process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL
@@ -47,7 +64,7 @@ export async function generatePartnerMagicLink(
 
   if (error) throw new Error(error.message)
 
-  const url = `${buildAppUrl()}/partners/auth/callback?token=${raw}`
+  const url = `${await buildAppUrl()}/partners/auth/callback?token=${raw}`
 
   return { token: raw, url, expiresAt }
 }
