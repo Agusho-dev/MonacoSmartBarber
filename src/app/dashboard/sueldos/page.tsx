@@ -6,7 +6,7 @@ import type { Metadata } from 'next'
 import type { SalaryConfig } from '@/lib/types/database'
 
 export const metadata: Metadata = {
-  title: 'Sueldos | Monaco Smart Barber',
+  title: 'Sueldos | BarberOS',
 }
 
 export interface BarberWithConfig {

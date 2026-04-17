@@ -163,6 +163,15 @@ export async function requestBreak(staffId: string, branchId: string, breakConfi
 
     const supabase = createAdminClient()
 
+    // Validar que el staff pertenece al branch y la org
+    const { data: staffRow } = await supabase
+        .from('staff')
+        .select('branch_id')
+        .eq('id', staffId)
+        .eq('branch_id', branchId)
+        .maybeSingle()
+    if (!staffRow) return { error: 'El barbero no pertenece a esta sucursal' }
+
     const { data: existing } = await supabase
         .from('break_requests')
         .select('id')

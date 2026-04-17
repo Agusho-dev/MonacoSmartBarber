@@ -18,6 +18,18 @@ export default async function TvPage() {
 
   const branchIds = (branches ?? []).map(b => b.id)
 
+  // Obtener organización activa (para logo y nombre en el header del TV)
+  let orgInfo: { name: string; logo_url: string | null } | null = null
+  if (orgId) {
+    const { data } = await supabase
+      .from('organizations')
+      .select('name, logo_url')
+      .eq('id', orgId)
+      .eq('is_active', true)
+      .maybeSingle()
+    if (data) orgInfo = data as { name: string; logo_url: string | null }
+  }
+
   // Fetch inicial filtrado por branches de la org
   const [entriesRes, barbersRes] = await Promise.all([
     branchIds.length > 0
@@ -46,6 +58,8 @@ export default async function TvPage() {
       branches={(branches ?? []).map(b => ({ id: b.id, name: b.name }))}
       orgBranchIds={branchIds}
       orgId={orgId || null}
+      orgName={orgInfo?.name ?? 'BarberOS'}
+      orgLogoUrl={orgInfo?.logo_url ?? '/logo-barberos.png'}
     />
   )
 }

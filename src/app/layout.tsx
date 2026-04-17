@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "Monaco Smart Barber",
+  title: "BarberOS",
   description: "Sistema inteligente de gestión para barberías",
 }
 

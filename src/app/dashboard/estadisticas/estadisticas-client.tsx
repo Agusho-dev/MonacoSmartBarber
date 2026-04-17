@@ -80,9 +80,10 @@ const METHOD_COLORS = ['var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)']
 interface Props {
   initialData: StatsData
   branches: { id: string; name: string }[]
+  orgName?: string
 }
 
-export function EstadisticasClient({ initialData, branches }: Props) {
+export function EstadisticasClient({ initialData, branches, orgName = 'BarberOS' }: Props) {
   const { selectedBranchId } = useBranchStore()
   const [data, setData] = useState(initialData)
   const [from, setFrom] = useState(() => startOfMonth(new Date()))
@@ -138,7 +139,7 @@ export function EstadisticasClient({ initialData, branches }: Props) {
 
   const handleExportPDF = async () => {
     await exportPDF(
-      'Reporte de Estadísticas – Monaco Smart Barber',
+      `Reporte de Estadísticas – ${orgName}`,
       ['Barbero', 'Cortes', 'Ingresos', 'Clientes', 'Comisión'],
       data.ranking.map((r) => [
         r.name,

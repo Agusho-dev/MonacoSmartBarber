@@ -111,8 +111,8 @@ export interface Branch {
   checkin_bg_color: string | null
   created_at: string
   updated_at: string
-  /** Presente cuando el query incluye el embed `organizations(name)` (p. ej. getPublicBranches). */
-  organizations?: Pick<Organization, 'name'> | null
+  /** Presente cuando el query incluye el embed `organizations(name, logo_url)` (p. ej. getPublicBranches). */
+  organizations?: Pick<Organization, 'name' | 'logo_url'> | null
 }
 
 export interface ReviewRequest {
@@ -923,4 +923,88 @@ export interface Database {
       branch_occupancy: { Row: BranchOccupancy }
     }
   }
+}
+
+// =============================================================
+// Convenios Comerciales (migration 085)
+// =============================================================
+
+export type PartnerRelationStatus = 'active' | 'paused' | 'revoked'
+export type PartnerBenefitStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'paused' | 'archived'
+export type PartnerRedemptionStatus = 'issued' | 'used' | 'expired'
+export type PartnerMagicLinkPurpose = 'invitation' | 'login'
+
+export interface CommercialPartner {
+  id: string
+  business_name: string
+  contact_email: string | null
+  contact_phone: string | null
+  logo_url: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PartnerOrgRelation {
+  id: string
+  partner_id: string
+  organization_id: string
+  status: PartnerRelationStatus
+  invited_by: string | null
+  invited_at: string
+  revoked_at: string | null
+}
+
+export interface PartnerBenefit {
+  id: string
+  partner_id: string
+  organization_id: string
+  title: string
+  description: string | null
+  discount_text: string | null
+  image_url: string | null
+  terms: string | null
+  location_address: string | null
+  location_map_url: string | null
+  valid_from: string | null
+  valid_until: string | null
+  status: PartnerBenefitStatus
+  rejection_reason: string | null
+  approved_by: string | null
+  approved_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PartnerBenefitWithPartner extends PartnerBenefit {
+  commercial_partners?: Pick<CommercialPartner, 'id' | 'business_name' | 'logo_url'> | null
+}
+
+export interface PartnerBenefitRedemption {
+  id: string
+  benefit_id: string
+  client_id: string
+  code: string
+  status: PartnerRedemptionStatus
+  used_at: string | null
+  validated_by_partner_id: string | null
+  created_at: string
+}
+
+export interface PartnerMagicLink {
+  id: string
+  partner_id: string
+  token_hash: string
+  purpose: PartnerMagicLinkPurpose
+  expires_at: string
+  used_at: string | null
+  created_at: string
+}
+
+export interface PartnerSession {
+  id: string
+  partner_id: string
+  session_token_hash: string
+  expires_at: string
+  created_at: string
+  last_used_at: string
 }

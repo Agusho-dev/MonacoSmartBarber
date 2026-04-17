@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { recordTransfer } from '@/lib/actions/paymentAccounts'
 import { validateBranchAccess } from './org'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { getActiveTimezone } from '@/lib/i18n'
 
 // ─── Función compartida para procesar venta de productos ────────────────────
 
@@ -78,11 +79,11 @@ export async function processProductSales(
       commission_amount: comm * qty,
     })
 
-    // Descontar stock si está trackeado (proteger contra negativos)
+    // Descontar stock si está trackeado (proteger contra negativos, escopado a branch)
     if (dbp.stock !== null) {
       await supabase.from('products').update({
         stock: Math.max(0, dbp.stock - qty)
-      }).eq('id', p.id)
+      }).eq('id', p.id).eq('branch_id', branchId)
     }
   }
 
@@ -112,16 +113,29 @@ export async function directProductSale(
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { error: 'No autorizado' }
 
+  // Validar que el barbero pertenece al branch y la org
+  const { data: staffRow } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('id', barberId)
+    .eq('branch_id', branchId)
+    .maybeSingle()
+  if (!staffRow) return { error: 'El barbero no pertenece a esta sucursal' }
+
   if (!productsToSell || productsToSell.length === 0) {
     return { error: 'No se seleccionaron productos' }
   }
 
   // Calcular total para crear la visita fantasma primero
   const productIds = productsToSell.map(p => p.id)
+  // Validar que los productos pertenecen al branch de la org
+  const { getOrgBranchIds } = await import('./org')
+  const orgBranchIds = await getOrgBranchIds()
   const { data: dbProducts } = await supabase
     .from('products')
     .select('id, sale_price, barber_commission')
     .in('id', productIds)
+    .in('branch_id', orgBranchIds)
 
   if (!dbProducts || dbProducts.length === 0) {
     return { error: 'Productos no encontrados' }
@@ -175,9 +189,8 @@ export async function directProductSale(
 
   // Actualizar o crear salary_report de comisión por producto
   if (preCommission > 0) {
-    const todayStr = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Argentina/Buenos_Aires',
-    }).format(new Date())
+    const tz = await getActiveTimezone()
+    const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date())
 
     const { data: existing } = await supabase
       .from('salary_reports')

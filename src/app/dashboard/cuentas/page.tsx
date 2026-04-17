@@ -5,7 +5,7 @@ import { CuentasClient } from './cuentas-client'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Cuentas de cobro | Monaco Smart Barber',
+  title: 'Cuentas de cobro | BarberOS',
 }
 
 export default async function CuentasPage() {

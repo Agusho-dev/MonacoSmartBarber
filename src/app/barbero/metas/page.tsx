@@ -7,7 +7,7 @@ import { MetasClient } from './metas-client'
 export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
-    title: 'Mis Metas | Monaco Smart Barber',
+    title: 'Mis Metas | BarberOS',
 }
 
 export default async function MetasPage() {

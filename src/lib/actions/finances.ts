@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getMonthBoundsStr, getLocalNow } from '@/lib/time-utils'
+import { getActiveTimezone } from '@/lib/i18n'
 import { validateBranchAccess, getOrgBranchIds } from './org'
 
 export interface MonthlyFinancial {
@@ -144,7 +145,8 @@ export async function fetchFinancialData(
     }
   }
 
-  const { start: startDateStr, end: endDateStr } = getMonthBoundsStr(actualMonthsBack, 'America/Argentina/Buenos_Aires', localNow)
+  const tz = await getActiveTimezone()
+  const { start: startDateStr, end: endDateStr } = getMonthBoundsStr(actualMonthsBack, tz, localNow)
 
   // ── Queries paralelas: todas las fuentes de datos del rango ──
   const branchFilter = <T extends { eq: (col: string, val: string) => T; in: (col: string, vals: string[]) => T }>(q: T, col = 'branch_id') =>
@@ -213,13 +215,11 @@ export async function fetchFinancialData(
     monthMap.set(key, { revenue: 0, commissions: 0, cuts: 0, variableExp: 0, bonuses: 0, advances: 0, salaryPayments: 0, baseSalaryPaid: 0 })
   }
 
-  const TZ = 'America/Argentina/Buenos_Aires'
-
   // Agrupar visitas por mes local usando Intl
   for (const v of visits ?? []) {
     // Convertir timestamp UTC a "YYYY-MM" local
     const localMonth = new Intl.DateTimeFormat('en-CA', {
-      timeZone: TZ,
+      timeZone: tz,
       year: 'numeric',
       month: '2-digit',
     }).format(new Date(v.completed_at)) // retorna "YYYY-MM"

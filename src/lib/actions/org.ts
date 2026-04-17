@@ -86,7 +86,7 @@ export async function getPublicBranches(orgId?: string) {
 
   let query = supabase
     .from('branches')
-    .select('*, organizations(name)')
+    .select('*, organizations(name, logo_url)')
     .eq('is_active', true)
     .order('name')
 
@@ -98,10 +98,20 @@ export async function getPublicBranches(orgId?: string) {
   return data ?? []
 }
 
-/** Color global del kiosk (app_settings). Público vía service role. */
+/** Color del kiosk (app_settings) para la org activa. Público vía service role. */
 export async function getPublicAppCheckinBgColor(): Promise<string> {
   const supabase = createAdminClient()
-  const { data } = await supabase.from('app_settings').select('checkin_bg_color').limit(1).maybeSingle()
+  const cookieStore = await cookies()
+  const orgId = cookieStore.get('active_organization')?.value
+
+  if (!orgId) return '#3f3f46'
+
+  const { data } = await supabase
+    .from('app_settings')
+    .select('checkin_bg_color')
+    .eq('organization_id', orgId)
+    .maybeSingle()
+
   const c = data?.checkin_bg_color
   if (typeof c === 'string' && c.trim()) return c.trim()
   return '#3f3f46'
@@ -129,9 +139,10 @@ export async function setActiveOrgFromBranch(branchId: string) {
 }
 
 /**
- * Selecciona una organización por su slug (acceso público).
- * Setea la cookie active_organization para que las páginas públicas
- * (checkin, barbero, TV) sepan qué org usar.
+ * Selecciona una organización por su slug (acceso público desde kiosk/TV).
+ * Usa cookie separada `public_organization` para NO pisar la sesión del dashboard
+ * cuando un admin logueado entra a una ruta pública. Las páginas públicas leen
+ * de `public_organization` primero, y caen a `active_organization` si no existe.
  */
 export async function selectOrganizationBySlug(slug: string) {
   if (!slug?.trim()) return { error: 'El slug es requerido' }
@@ -139,31 +150,43 @@ export async function selectOrganizationBySlug(slug: string) {
   const supabase = createAdminClient()
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, name, slug, logo_url, is_active')
+    .select('id, name, slug, logo_url, is_active, subscription_status')
     .eq('slug', slug.toLowerCase().trim())
     .eq('is_active', true)
     .maybeSingle()
 
   if (!org) return { error: 'Barbería no encontrada' }
+  if (org.subscription_status === 'suspended' || org.subscription_status === 'cancelled') {
+    return { error: 'Esta barbería no está disponible en este momento' }
+  }
 
   const cookieStore = await cookies()
-  cookieStore.set('active_organization', org.id, { maxAge: 60 * 60 * 24 * 365, path: '/' })
+  // public_organization es exclusiva para rutas públicas (kiosk/TV/review)
+  cookieStore.set('public_organization', org.id, { maxAge: 60 * 60 * 24 * 365, path: '/' })
+  // Solo setear active_organization si NO hay una sesión dashboard autenticada
+  // (evita pisar la org del admin cuando entra al kiosk físico)
+  const hasAuthSession = cookieStore.getAll().some(c => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'))
+  if (!hasAuthSession) {
+    cookieStore.set('active_organization', org.id, { maxAge: 60 * 60 * 24 * 365, path: '/' })
+  }
 
   return { success: true, organization: org }
 }
 
 /**
  * Obtiene la organización activa desde la cookie (para páginas públicas).
+ * Prioridad: public_organization (kiosk/TV) > active_organization (dashboard).
  */
 export async function getActiveOrganization() {
   const cookieStore = await cookies()
-  const orgId = cookieStore.get('active_organization')?.value
+  const orgId = cookieStore.get('public_organization')?.value
+    ?? cookieStore.get('active_organization')?.value
   if (!orgId) return null
 
   const supabase = createAdminClient()
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, name, slug, logo_url, is_active')
+    .select('id, name, slug, logo_url, is_active, timezone, currency, locale, primary_color')
     .eq('id', orgId)
     .eq('is_active', true)
     .maybeSingle()

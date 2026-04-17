@@ -61,7 +61,7 @@ export function ReviewClient({ reqInfo }: { reqInfo: any }) {
             <div className="text-center space-y-2">
                 <h1 className="text-2xl font-bold">¿Cómo fue tu experiencia?</h1>
                 <p className="text-muted-foreground">
-                    En {reqInfo.branch?.name || 'Monaco Smart Barber'} nos importa tu opinión.
+                    En {reqInfo.branch?.name || 'BarberOS'} nos importa tu opinión.
                 </p>
             </div>
 

@@ -8,7 +8,7 @@ import type { Metadata } from 'next'
 import type { BarberWithConfig } from '../sueldos/page'
 
 export const metadata: Metadata = {
-  title: 'Finanzas | Monaco Smart Barber',
+  title: 'Finanzas | BarberOS',
 }
 
 export default async function FinanzasPage() {
@@ -60,6 +60,7 @@ export default async function FinanzasPage() {
     { data: barbersRaw },
     { data: salaryConfigsRaw },
     { data: expenseTickets },
+    { data: orgRow },
   ] = await Promise.all([
     fetchFinancialData(1),
     getFixedExpenses(),
@@ -79,6 +80,7 @@ export default async function FinanzasPage() {
     branchIds.length > 0
       ? supabase.from('expense_tickets').select('*, created_by_staff:created_by(full_name), payment_account:payment_accounts(name, alias_or_cbu)').in('branch_id', branchIds).order('expense_date', { ascending: false }).limit(100)
       : Promise.resolve({ data: [] }),
+    admin.from('organizations').select('slug').eq('id', orgId).maybeSingle(),
   ])
 
   // Mergear salary_configs con barbers manualmente (evita problemas con el embedded select de PostgREST)
@@ -98,6 +100,7 @@ export default async function FinanzasPage() {
       fixedExpenses={fixedExpenses}
       commissionSummary={commissionSummary}
       permissions={userPermissions}
+      orgSlug={orgRow?.slug ?? 'barberos'}
     />
   )
 }

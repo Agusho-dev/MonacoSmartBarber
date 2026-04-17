@@ -62,6 +62,8 @@ interface EquipoClientProps {
     // Perfiles
     salaryConfigs: unknown[]
     calendarBarbers: unknown[]
+    // Nombre de la organización activa (para PDFs)
+    orgName?: string
 }
 
 export function EquipoClient({
@@ -85,6 +87,7 @@ export function EquipoClient({
     serviceHistory,
     salaryConfigs,
     calendarBarbers,
+    orgName = 'BarberOS',
 }: EquipoClientProps) {
     const searchParams = useSearchParams()
     const router = useRouter()
@@ -273,6 +276,7 @@ export function EquipoClient({
                         breakOvertimeHistory={breakOvertimeHistory as Parameters<typeof PerfilesClient>[0]['breakOvertimeHistory']}
                         salaryConfigs={salaryConfigs as Parameters<typeof PerfilesClient>[0]['salaryConfigs']}
                         calendarBarbers={calendarBarbers as Parameters<typeof PerfilesClient>[0]['calendarBarbers']}
+                        orgName={orgName}
                     />
                 )}
                 {activeTab === 'calendario' && (

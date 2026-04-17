@@ -13,7 +13,7 @@ export default async function EstadisticasPage() {
   const { start: from } = getMonthBoundsStr(1)
   const { end: to } = getLocalDayBounds()
 
-  const [data, { data: branches }] = await Promise.all([
+  const [data, { data: branches }, { data: orgRow }] = await Promise.all([
     fetchStats(from, to),
     supabase
       .from('branches')
@@ -21,7 +21,14 @@ export default async function EstadisticasPage() {
       .eq('organization_id', orgId)
       .eq('is_active', true)
       .order('name'),
+    supabase.from('organizations').select('name').eq('id', orgId).maybeSingle(),
   ])
 
-  return <EstadisticasClient initialData={data} branches={branches ?? []} />
+  return (
+    <EstadisticasClient
+      initialData={data}
+      branches={branches ?? []}
+      orgName={orgRow?.name ?? 'BarberOS'}
+    />
+  )
 }

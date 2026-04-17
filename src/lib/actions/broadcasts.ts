@@ -1,7 +1,8 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/server'
-import { getCurrentOrgId } from './org'
+import { getCurrentOrgId, getOrgBranchIds } from './org'
+import { requireOrgAccessToEntity } from './guard'
 import { revalidatePath } from 'next/cache'
 import type { AudienceFilters } from './client-segments'
 
@@ -211,8 +212,12 @@ export async function sendBroadcast(broadcastId: string) {
 export async function cancelBroadcast(broadcastId: string) {
   const result = await requireOrgId()
   if ('error' in result) return { error: result.error }
-  const orgId = result.orgId
 
+  // Verificar ownership del broadcast ANTES de cancelar mensajes
+  const orgAccess = await requireOrgAccessToEntity('broadcasts', broadcastId)
+  if (!orgAccess.ok) return { error: 'Acceso denegado' }
+
+  const orgId = result.orgId
   const supabase = createAdminClient()
 
   // Cancelar scheduled_messages pendientes
@@ -254,18 +259,32 @@ function resolveTemplateVariables(
   }))
 }
 
-// Obtener templates filtrados por canal (sucursal)
+// Obtener templates filtrados por canal (sucursal), escopado a canales de la org
 export async function getTemplatesByChannel(channelId?: string) {
   const result = await requireOrgId()
   if ('error' in result) return { data: [], error: result.error }
 
   const supabase = createAdminClient()
+
+  // Obtener canales de la org para acotar la query
+  const orgBranchIds = await getOrgBranchIds()
+  const { data: orgChannels } = await supabase
+    .from('social_channels')
+    .select('id')
+    .in('branch_id', orgBranchIds)
+  const orgChannelIds = (orgChannels ?? []).map(c => c.id)
+
+  if (orgChannelIds.length === 0) return { data: [], error: null }
+
   let query = supabase
     .from('message_templates')
     .select('id, name, language, category, status, components, channel_id')
     .eq('status', 'approved')
+    .in('channel_id', orgChannelIds)
 
   if (channelId) {
+    // Si se filtra por canal, validar que ese canal pertenece a la org
+    if (!orgChannelIds.includes(channelId)) return { data: [], error: 'Canal no autorizado' }
     query = query.eq('channel_id', channelId)
   }
 

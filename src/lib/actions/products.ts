@@ -50,6 +50,20 @@ export async function upsertProduct(data: {
     }
 
     if (data.id) {
+        // Validar branch_id ORIGINAL del producto (no el del form)
+        const { data: existing } = await supabase
+            .from('products')
+            .select('branch_id')
+            .eq('id', data.id)
+            .maybeSingle()
+
+        if (!existing) return { error: 'Producto no encontrado' }
+
+        if (existing.branch_id) {
+            const originalOrgId = await validateBranchAccess(existing.branch_id)
+            if (!originalOrgId) return { error: 'El producto no pertenece a esta organización' }
+        }
+
         const { error } = await supabase
             .from('products')
             .update({

@@ -1,13 +1,42 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/server'
+import { getActiveOrganization } from './org'
+import { isValidUUID } from '@/lib/validation'
+
+/**
+ * Valida que los branchIds recibidos pertenecen a la org activa (cookie active_organization).
+ * La TV es pública pero debe estar acotada a la org del dispositivo.
+ */
+async function validateTvBranchIds(branchIds: string[]): Promise<string[]> {
+  if (!branchIds.length) return []
+
+  // Filtrar primero los que no son UUID válidos
+  const validUUIDs = branchIds.filter(id => isValidUUID(id))
+  if (!validUUIDs.length) return []
+
+  const org = await getActiveOrganization()
+  if (!org) return []
+
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from('branches')
+    .select('id')
+    .in('id', validUUIDs)
+    .eq('organization_id', org.id)
+
+  return (data ?? []).map(b => b.id)
+}
 
 /**
  * Obtiene todos los datos necesarios para la pantalla TV.
  * Usa createAdminClient() para bypasear RLS (TV es público, sin auth).
- * Filtra por branch IDs de la organización.
+ * Filtra por branch IDs de la organización activa (cookie).
  */
 export async function refreshTvQueue(branchIds: string[]) {
+  const safeBranchIds = await validateTvBranchIds(branchIds)
+  if (!safeBranchIds.length) return { entries: [] }
+  branchIds = safeBranchIds
   if (!branchIds.length) return { entries: [] }
 
   const supabase = createAdminClient()
@@ -22,6 +51,9 @@ export async function refreshTvQueue(branchIds: string[]) {
 }
 
 export async function refreshTvBarbers(branchIds: string[]) {
+  const safeBranchIds = await validateTvBranchIds(branchIds)
+  if (!safeBranchIds.length) return { barbers: [] }
+  branchIds = safeBranchIds
   if (!branchIds.length) return { barbers: [] }
 
   const supabase = createAdminClient()
@@ -37,6 +69,8 @@ export async function refreshTvBarbers(branchIds: string[]) {
 }
 
 export async function refreshTvSchedules(branchIds: string[], orgId: string) {
+  const safeBranchIds = await validateTvBranchIds(branchIds)
+  branchIds = safeBranchIds
   if (!branchIds.length) return {
     schedules: [],
     shiftEndMargin: 35,

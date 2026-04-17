@@ -197,7 +197,7 @@ function UploadClient({ token }: { token: string }) {
     <div className="flex min-h-dvh flex-col bg-black text-white">
       {/* Header */}
       <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-        <h1 className="text-lg font-bold">Monaco Smart Barber</h1>
+        <h1 className="text-lg font-bold">BarberOS</h1>
         {uploads.length > 0 && (
           <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-medium text-emerald-400">
             {uploads.length} foto{uploads.length !== 1 ? 's' : ''}

@@ -20,6 +20,7 @@ import {
   Check,
   ChevronDown,
   Receipt,
+  Handshake,
 } from 'lucide-react'
 import {
   DndContext,
@@ -72,6 +73,7 @@ const navItems = [
   { href: '/dashboard/clientes', label: 'Clientes', icon: Users, requiredPermissions: ['clients.view'] },
   { href: '/dashboard/mensajeria', label: 'Mensajería', icon: MessageSquare, requiredPermissions: ['clients.view'] },
   { href: '/dashboard/app-movil', label: 'APP Móvil', icon: Smartphone, requiredPermissions: ['rewards.view'] },
+  { href: '/dashboard/convenios', label: 'Convenios', icon: Handshake, requiredPermissions: ['agreements.view'] },
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3, requiredPermissions: ['stats.view'] },
   { href: '/dashboard/caja', label: 'Caja', icon: Receipt, requiredPermissions: ['finances.view_summary'] },
   { href: '/dashboard/finanzas', label: 'Finanzas', icon: DollarSign, requiredPermissions: ['finances.view', 'salary.view'] },
@@ -220,7 +222,7 @@ function SidebarContent({ isEditMode, onToggleEditMode, userRole, userFullName, 
               <Button variant="ghost" className="w-full justify-start gap-2 px-0 hover:bg-transparent">
                 <OrgLogo url={orgLogoUrl} />
                 <span className="truncate text-lg font-bold tracking-tight">
-                  {currentOrg?.name || 'Monaco'}
+                  {currentOrg?.name || 'BarberOS'}
                 </span>
                 <ChevronDown className="ml-auto size-4 opacity-50 shrink-0" />
               </Button>
@@ -244,7 +246,7 @@ function SidebarContent({ isEditMode, onToggleEditMode, userRole, userFullName, 
           <>
             <OrgLogo url={orgLogoUrl} />
             <span className="text-lg font-bold tracking-tight truncate flex-1">
-              {currentOrg?.name || 'Monaco'}
+              {currentOrg?.name || 'BarberOS'}
             </span>
           </>
         )}
@@ -647,7 +649,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
 
           <div className="flex items-center gap-2 lg:hidden min-w-0 flex-1">
             <span className="font-semibold text-sm truncate">
-              {currentNavIndex >= 0 ? orderedItems[currentNavIndex]?.label : (availableOrganizations.find(o => o.id === organizationId)?.name || 'Monaco')}
+              {currentNavIndex >= 0 ? orderedItems[currentNavIndex]?.label : (availableOrganizations.find(o => o.id === organizationId)?.name || 'BarberOS')}
             </span>
           </div>
 

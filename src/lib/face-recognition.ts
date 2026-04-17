@@ -8,7 +8,9 @@ let modelsLoading: Promise<void> | null = null
 
 const MODEL_URL = '/models'
 const DETECTION_SCORE_THRESHOLD = 0.3 // umbral más permisivo para detectar caras con poca luz o ángulo
-const MATCH_THRESHOLD = 0.40 // umbral estricto para evitar falsos positivos con caras nuevas
+// 0.40 era demasiado estricto (rechazaba mismo cliente con luz/ángulo distintos).
+// 0.50 es el estándar de face-api.js; 0.45 ofrece balance entre recall y falsos positivos.
+const MATCH_THRESHOLD = 0.48
 
 async function loadFaceApi(): Promise<FaceApiModule> {
   if (faceapi) return faceapi

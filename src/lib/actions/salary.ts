@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { SalaryScheme } from '@/lib/types/database'
 import { validateBranchAccess, getCurrentOrgId } from './org'
+import { getActiveTimezone } from '@/lib/i18n'
 
 // Tipos locales para las nuevas tablas (migración 037/044)
 export type SalaryReportType = 'commission' | 'base_salary' | 'bonus' | 'advance' | 'hybrid_deficit' | 'product_commission'
@@ -327,13 +328,16 @@ export async function generateCommissionReport(
   }
 
   // Sumar commission_amount de visitas completadas en el día (fuente de verdad)
+  const tz = await getActiveTimezone()
+  const { getDayBounds } = await import('@/lib/time-utils')
+  const { start: dayStart, end: dayEnd } = getDayBounds(reportDate, tz)
   const { data: visits, error: visitsError } = await supabase
     .from('visits')
     .select('commission_amount, amount')
     .eq('barber_id', staffId)
     .eq('branch_id', branchId)
-    .gte('completed_at', `${reportDate}T00:00:00.000Z`)
-    .lt('completed_at', `${reportDate}T23:59:59.999Z`)
+    .gte('completed_at', dayStart)
+    .lt('completed_at', dayEnd)
 
   if (visitsError) {
     console.error('Error al obtener visitas para comisión:', visitsError)
@@ -615,8 +619,6 @@ export async function deleteSalaryReport(reportId: string) {
 
 // ─── Generación automática al checkout ──────────────────────────────────────
 
-const TZ = 'America/Argentina/Buenos_Aires'
-
 /**
  * Genera un reporte de comisión automáticamente al hacer checkout.
  * Busca el último clock_in del día, suma visitas entre entrada y salida,
@@ -626,11 +628,28 @@ export async function generateCheckoutCommissionReport(
   staffId: string,
   branchId: string
 ) {
+  // Validar staff+branch+org cruzado antes de cualquier query
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return
+
   const supabase = createAdminClient()
 
-  // Fecha local de hoy en Argentina
+  const { data: staffCheck } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('id', staffId)
+    .eq('branch_id', branchId)
+    .eq('organization_id', orgId)
+    .maybeSingle()
+  if (!staffCheck) return
+
+  // Fecha local de hoy en el TZ de la org
+  const tz = await getActiveTimezone()
   const now = new Date()
-  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(now)
+  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now)
+
+  const { getDayBounds } = await import('@/lib/time-utils')
+  const { start: dayStart, end: dayEnd } = getDayBounds(todayStr, tz)
 
   // Buscar el último clock_in de hoy para determinar el inicio del turno
   const { data: clockInLog } = await supabase
@@ -639,13 +658,13 @@ export async function generateCheckoutCommissionReport(
     .eq('staff_id', staffId)
     .eq('branch_id', branchId)
     .eq('action_type', 'clock_in')
-    .gte('created_at', `${todayStr}T00:00:00.000Z`)
+    .gte('created_at', dayStart)
     .order('created_at', { ascending: false })
     .limit(1)
     .single()
 
   // Si no hay clock_in hoy, usar inicio del día
-  const shiftStart = clockInLog?.created_at ?? `${todayStr}T00:00:00.000Z`
+  const shiftStart = clockInLog?.created_at ?? dayStart
   const shiftEnd = now.toISOString()
 
   // Sumar commission_amount de TODAS las visitas del día completo
@@ -655,8 +674,8 @@ export async function generateCheckoutCommissionReport(
     .select('commission_amount')
     .eq('barber_id', staffId)
     .eq('branch_id', branchId)
-    .gte('completed_at', `${todayStr}T00:00:00.000Z`)
-    .lt('completed_at', `${todayStr}T23:59:59.999Z`)
+    .gte('completed_at', dayStart)
+    .lt('completed_at', dayEnd)
 
   const totalCommission = (visits ?? []).reduce(
     (sum, v) => sum + Number(v.commission_amount ?? 0), 0

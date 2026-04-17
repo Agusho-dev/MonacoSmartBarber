@@ -149,6 +149,7 @@ export interface PerfilesProps {
   breakOvertimeHistory: BreakOvertimeRow[]
   salaryConfigs: SalaryConfig[]
   calendarBarbers: BarberWithSchedules[]
+  orgName?: string
 }
 
 // --- Constantes ---
@@ -231,6 +232,7 @@ export function PerfilesClient({
   breakOvertimeHistory,
   salaryConfigs,
   calendarBarbers,
+  orgName = 'BarberOS',
 }: PerfilesProps) {
   const { selectedBranchId } = useBranchStore()
   const [selectedBarber, setSelectedBarber] = useState<Staff | null>(null)
@@ -404,6 +406,7 @@ export function PerfilesClient({
             calendarBarber={calendarBarbers.find((cb) => cb.id === selectedBarber.id) ?? null}
             period={period}
             setPeriod={setPeriod}
+            orgName={orgName}
           />
         ) : (
           <EmptyProfileState />
@@ -442,6 +445,7 @@ function BarberDetailPanel({
   calendarBarber,
   period,
   setPeriod,
+  orgName,
 }: {
   barber: Staff
   roles: Role[]
@@ -453,6 +457,7 @@ function BarberDetailPanel({
   calendarBarber: BarberWithSchedules | null
   period: PeriodFilter
   setPeriod: (p: PeriodFilter) => void
+  orgName: string
 }) {
   const [exporting, setExporting] = useState(false)
   const [contactingStaff, setContactingStaff] = useState(false)
@@ -772,7 +777,7 @@ function BarberDetailPanel({
 
       doc.setFontSize(20)
       doc.setFont('helvetica', 'bold')
-      doc.text('Monaco Smart Barber', pageWidth / 2, 20, { align: 'center' })
+      doc.text(orgName, pageWidth / 2, 20, { align: 'center' })
       doc.setFontSize(14)
       doc.text('Boletín de Rendimiento', pageWidth / 2, 30, { align: 'center' })
       doc.setFontSize(11)
@@ -944,7 +949,7 @@ function BarberDetailPanel({
         doc.setFontSize(8)
         doc.setTextColor(150)
         doc.text(
-          `Monaco Smart Barber · Página ${i} de ${pageCount}`,
+          `${orgName} · Página ${i} de ${pageCount}`,
           pageWidth / 2,
           doc.internal.pageSize.getHeight() - 10,
           { align: 'center' }

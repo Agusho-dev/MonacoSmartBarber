@@ -4,7 +4,7 @@ import { DescansosDashboard } from './descansos-client'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Descansos | Monaco Smart Barber',
+  title: 'Descansos | BarberOS',
 }
 
 export default async function DescansosPage() {

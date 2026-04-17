@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from './org'
+import { requireOrgAccessToEntity } from './guard'
 import { revalidatePath } from 'next/cache'
 
 export async function getConversations(channelFilter?: string) {
@@ -63,6 +64,9 @@ export async function getConversations(channelFilter?: string) {
 }
 
 export async function getMessages(conversationId: string) {
+  const orgAccess = await requireOrgAccessToEntity('conversations', conversationId)
+  if (!orgAccess.ok) return { data: [], error: 'Acceso denegado' }
+
   const supabase = createAdminClient()
 
   const { data, error } = await supabase
@@ -80,6 +84,9 @@ export async function sendMessage(
   content: string,
   staffId?: string
 ) {
+  const orgAccess = await requireOrgAccessToEntity('conversations', conversationId)
+  if (!orgAccess.ok) return { error: 'Acceso denegado' }
+
   const supabase = createAdminClient()
 
   // Obtener conversación para conocer el teléfono y la plataforma
@@ -114,6 +121,9 @@ export async function sendTemplateToConversation(
   components?: Record<string, unknown>[],
   staffId?: string
 ) {
+  const orgAccess = await requireOrgAccessToEntity('conversations', conversationId)
+  if (!orgAccess.ok) return { error: 'Acceso denegado' }
+
   const supabase = createAdminClient()
 
   const { data: conv } = await supabase
@@ -232,6 +242,9 @@ export async function sendTemplateToClient(
 }
 
 export async function markAsRead(conversationId: string) {
+  const orgAccess = await requireOrgAccessToEntity('conversations', conversationId)
+  if (!orgAccess.ok) return { success: false, error: 'Acceso denegado' }
+
   const supabase = createAdminClient()
 
   await supabase
@@ -252,6 +265,14 @@ export async function scheduleMessage(data: {
   scheduledFor: string
   createdBy?: string
 }) {
+  // Validar ownership del canal y del cliente antes de insertar
+  const [channelAccess, clientAccess] = await Promise.all([
+    requireOrgAccessToEntity('social_channels', data.channelId),
+    requireOrgAccessToEntity('clients', data.clientId),
+  ])
+  if (!channelAccess.ok) return { error: 'Acceso denegado al canal' }
+  if (!clientAccess.ok) return { error: 'Acceso denegado al cliente' }
+
   const supabase = createAdminClient()
 
   const { error } = await supabase
@@ -272,6 +293,9 @@ export async function scheduleMessage(data: {
 }
 
 export async function cancelScheduledMessage(id: string) {
+  const orgAccess = await requireOrgAccessToEntity('scheduled_messages', id)
+  if (!orgAccess.ok) return { error: 'Acceso denegado' }
+
   const supabase = createAdminClient()
 
   const { error } = await supabase

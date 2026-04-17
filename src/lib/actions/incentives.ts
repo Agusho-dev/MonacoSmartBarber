@@ -90,6 +90,16 @@ export async function logAchievement(staffId: string, ruleId: string, periodLabe
   const orgId = await validateBranchAccess(rule.branch_id)
   if (!orgId) return { error: 'No autorizado' }
 
+  // Validar que el staff pertenece al mismo branch que la regla
+  const { data: staffRow } = await supabase
+    .from('staff')
+    .select('branch_id')
+    .eq('id', staffId)
+    .maybeSingle()
+  if (!staffRow || staffRow.branch_id !== rule.branch_id) {
+    return { error: 'El barbero no pertenece al branch de la regla' }
+  }
+
   const { error } = await supabase.from('incentive_achievements').insert({
     staff_id: staffId,
     rule_id: ruleId,
@@ -108,7 +118,7 @@ export async function getBarberProgress(branchId: string, periodLabel: string) {
 
   const supabase = await createClient()
 
-  const [barbersRes, achievementsRes, rulesRes] = await Promise.all([
+  const [barbersRes, rulesRes] = await Promise.all([
     supabase
       .from('staff')
       .select('id, full_name')
@@ -117,15 +127,22 @@ export async function getBarberProgress(branchId: string, periodLabel: string) {
       .eq('is_active', true)
       .order('full_name'),
     supabase
-      .from('incentive_achievements')
-      .select('*, rule:incentive_rules(name)')
-      .eq('period_label', periodLabel),
-    supabase
       .from('incentive_rules')
       .select('*')
       .eq('branch_id', branchId)
       .eq('is_active', true),
   ])
+
+  const orgBarberIds = (barbersRes.data ?? []).map(b => b.id)
+
+  // Filtrar logros solo de barberos de la org para evitar fuga cross-org
+  const achievementsRes = orgBarberIds.length > 0
+    ? await supabase
+        .from('incentive_achievements')
+        .select('*, rule:incentive_rules(name)')
+        .eq('period_label', periodLabel)
+        .in('staff_id', orgBarberIds)
+    : { data: [] }
 
   return {
     barbers: barbersRes.data ?? [],

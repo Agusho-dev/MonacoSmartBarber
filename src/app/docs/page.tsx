@@ -16,7 +16,7 @@ export default function DocsIndexPage() {
   return (
     <div className="min-h-screen bg-background text-foreground p-8 max-w-2xl mx-auto">
       <h1 className="text-3xl font-bold mb-2">Documentación interna</h1>
-      <p className="text-muted-foreground mb-8">Monaco Smart Barber</p>
+      <p className="text-muted-foreground mb-8">BarberOS</p>
       <ul className="space-y-3">
         {docs.map(({ file, title }) => (
           <li key={file}>

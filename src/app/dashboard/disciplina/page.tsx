@@ -5,7 +5,7 @@ import { DisciplinaClient } from './disciplina-client'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Disciplina | Monaco Smart Barber',
+  title: 'Disciplina | BarberOS',
 }
 
 export default async function DisciplinaPage() {

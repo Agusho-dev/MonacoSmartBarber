@@ -125,6 +125,13 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
             'rewards.manage': 'Gestionar recompensas y catálogo',
         },
     },
+    agreements: {
+        label: 'Convenios Comerciales',
+        permissions: {
+            'agreements.view': 'Ver convenios y partners',
+            'agreements.manage': 'Invitar partners, aprobar/rechazar convenios',
+        },
+    },
     settings: {
         label: 'Configuración',
         permissions: {
@@ -200,6 +207,9 @@ export const PERMISSION_DESCRIPTIONS: Record<string, string> = {
 
     'rewards.view': 'Permite ver el programa de fidelización y el catálogo de recompensas.',
     'rewards.manage': 'Permite crear y editar recompensas, niveles y reglas del programa de fidelización.',
+
+    'agreements.view': 'Permite ver el listado de partners aliados y los beneficios que ofrecen a los clientes.',
+    'agreements.manage': 'Permite invitar nuevos partners, aprobar o rechazar beneficios y pausar convenios.',
 
     'settings.view': 'Permite ver la configuración general del negocio.',
     'settings.manage': 'Permite modificar la configuración del sistema, datos del negocio y preferencias.',

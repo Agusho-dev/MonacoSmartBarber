@@ -223,35 +223,71 @@ export async function evaluateIncomingMessage(params: {
       .maybeSingle()
 
     // 1b. Si no hay ejecución activa en esta conversación, buscar en conversaciones
-    // duplicadas del mismo teléfono (safety net para datos legacy con dedup roto)
+    // duplicadas del mismo teléfono DE LA MISMA ORG (safety net para datos legacy).
     if (!activeExec && params.platformUserId) {
       const phoneSuffix = params.platformUserId.slice(-10)
       if (phoneSuffix.length === 10) {
-        const { data: siblingConvs } = await supabase
-          .from('conversations')
+        // Resolver branches de la org actual para limitar la búsqueda
+        const { data: orgBranches } = await supabase
+          .from('branches')
           .select('id')
-          .neq('id', conversationId)
-          .ilike('platform_user_id', `%${phoneSuffix}`)
-        const siblingIds = siblingConvs?.map(c => c.id) ?? []
-        if (siblingIds.length > 0) {
-          const { data: siblingExec } = await supabase
-            .from('workflow_executions')
-            .select('*, current_node:workflow_nodes(*)')
-            .in('conversation_id', siblingIds)
-            .in('status', ['waiting_reply'])
-            .order('updated_at', { ascending: false })
-            .limit(1)
-            .maybeSingle()
-          if (siblingExec) {
-            // Migrar la ejecución a la conversación canónica (la actual del webhook)
-            await supabase
-              .from('workflow_executions')
-              .update({ conversation_id: conversationId })
-              .eq('id', siblingExec.id)
-            activeExec = siblingExec
+          .eq('organization_id', orgId)
+        const branchIds = orgBranches?.map(b => b.id) ?? []
+        if (branchIds.length > 0) {
+          // Canales que pertenecen a esta org
+          const { data: orgChannels } = await supabase
+            .from('social_channels')
+            .select('id')
+            .in('branch_id', branchIds)
+          const channelIds = orgChannels?.map(c => c.id) ?? []
+
+          if (channelIds.length > 0) {
+            const { data: siblingConvs } = await supabase
+              .from('conversations')
+              .select('id')
+              .neq('id', conversationId)
+              .ilike('platform_user_id', `%${phoneSuffix}`)
+              .in('channel_id', channelIds)
+            const siblingIds = siblingConvs?.map(c => c.id) ?? []
+            if (siblingIds.length > 0) {
+              const { data: siblingExec } = await supabase
+                .from('workflow_executions')
+                .select('*, current_node:workflow_nodes(*)')
+                .in('conversation_id', siblingIds)
+                .in('status', ['waiting_reply'])
+                .order('updated_at', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+              if (siblingExec) {
+                await supabase
+                  .from('workflow_executions')
+                  .update({ conversation_id: conversationId })
+                  .eq('id', siblingExec.id)
+                activeExec = siblingExec
+              }
+            }
           }
         }
       }
+    }
+
+    // 1c. Estado corrupto: waiting_reply sin current_node_id. No se puede reanudar ni
+    // coincide con ningún nodo; además startWorkflowExecution suele devolver false por
+    // overlap (skip_if_active). Cerramos la ejecución para liberar la conversación.
+    if (activeExec && !activeExec.current_node_id) {
+      console.error(
+        '[WorkflowEngine] Ejecución waiting_reply sin current_node_id — cerrando:',
+        activeExec.id
+      )
+      await supabase
+        .from('workflow_executions')
+        .update({
+          status: 'error',
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', activeExec.id)
+      activeExec = null
     }
 
     if (activeExec) {
@@ -458,10 +494,7 @@ export async function evaluateIncomingMessage(params: {
       await executeLegacyAutoReply(supabase, orgId, conversationId, text, platform, params)
     }
 
-    // 6. Polling oportunista: avanzar delays largos vencidos.
-    // Funciona como red de seguridad si el cron no está configurado.
-    // No bloquea el flujo si falla.
-    processExpiredDelays().catch(err => console.error('[WorkflowEngine] processExpiredDelays fallback:', err))
+    // Los delays vencidos los avanza pg_cron cada minuto via /api/cron/process-workflow-delays.
   } catch (err) {
     console.error('[WorkflowEngine] Error evaluando mensaje:', err)
   } finally {
@@ -935,21 +968,19 @@ async function executeNode(
 
         if (seconds <= 10) {
           // Delays cortos: ejecutar inline dentro del mismo request.
-          // Funciona sin cron y es la UX esperada para pausas pequeñas entre mensajes.
           await new Promise(r => setTimeout(r, seconds * 1000))
           await logExecution(supabase, executionId, node.id, node.node_type, 'success', { seconds, mode: 'inline' })
           await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
           break
         }
 
-        // Delays largos: quedan en waiting_reply con delay_until. Se resuelven por
-        // processExpiredDelays() — que se llama desde el cron si está configurado,
-        // y oportunísticamente desde el webhook cuando llegan mensajes nuevos.
+        // Delays largos: estado dedicado 'delayed' (NO waiting_reply). evaluateIncomingMessage
+        // ignora 'delayed' para que un mensaje inbound no dispare el avance antes de tiempo.
         const delayUntilDate = new Date(Date.now() + seconds * 1000).toISOString()
         await supabase
           .from('workflow_executions')
           .update({
-            status: 'waiting_reply',
+            status: 'delayed',
             current_node_id: node.id,
             context: { ...context, delay_until: delayUntilDate },
             updated_at: new Date().toISOString(),
@@ -1098,6 +1129,23 @@ async function executeNode(
         const bodyTemplate = resolveVariables(config.body_template as string || '', context, params)
         const responseVar = (config.response_variable as string) || 'http_response'
 
+        // SSRF protection: reject private/metadata hosts and non-http(s) protocols
+        try {
+          const urlObj = new URL(url)
+          if (!['http:', 'https:'].includes(urlObj.protocol)) {
+            throw new Error(`Protocolo ${urlObj.protocol} no permitido`)
+          }
+          const host = urlObj.hostname.toLowerCase()
+          const BLOCKED = /^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|::1|fc00:|fe80:|0\.0\.0\.0|metadata\.google|metadata\.internal)/i
+          if (BLOCKED.test(host)) {
+            throw new Error(`Host bloqueado por política de seguridad: ${host}`)
+          }
+        } catch (urlErr) {
+          await logExecution(supabase, executionId, node.id, node.node_type, 'error', { url }, (urlErr as Error).message)
+          await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
+          break
+        }
+
         try {
           const controller = new AbortController()
           const timeout = setTimeout(() => controller.abort(), 10000)
@@ -1106,6 +1154,7 @@ async function executeNode(
             headers: { 'Content-Type': 'application/json', ...headers },
             body: method !== 'GET' ? bodyTemplate : undefined,
             signal: controller.signal,
+            redirect: 'error', // Prevent redirect-based SSRF bypass
           })
           clearTimeout(timeout)
           const responseText = await resp.text()
@@ -1529,7 +1578,7 @@ async function callAiModel(opts: {
     }
     if (provider === 'openrouter') {
       headers['HTTP-Referer'] = 'https://monacosmartbarber.com'
-      headers['X-Title'] = 'Monaco Smart Barber'
+      headers['X-Title'] = 'BarberOS'
     }
 
     const resp = await fetch(baseUrl, {
@@ -1617,12 +1666,13 @@ export async function processExpiredDelays(): Promise<{ processed: number; error
   const errors: string[] = []
   let processed = 0
 
-  // Buscar ejecuciones en waiting_reply en nodos delay con delay_until vencido
+  // Buscar ejecuciones en 'delayed' (estado dedicado desde la migración P0).
+  // Incluimos también las legacy en 'waiting_reply' por compatibilidad hasta que se vacíen.
   const { data: executions } = await supabase
     .from('workflow_executions')
     .select('*, current_node:workflow_nodes(*), workflow:automation_workflows(organization_id)')
-    .eq('status', 'waiting_reply')
-    .limit(20)
+    .in('status', ['delayed', 'waiting_reply'])
+    .limit(50)
 
   if (!executions || executions.length === 0) return { processed: 0, errors: [] }
 

@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { DashboardShell } from '@/components/dashboard/dashboard-shell'
+import { ImpersonationBanner } from '@/components/dashboard/impersonation-banner'
 import { hasPermission } from '@/lib/permissions'
 import { getCurrentOrgId } from '@/lib/actions/org'
 
@@ -28,6 +30,22 @@ export default async function DashboardLayout({
   }
 
   const adminClient = createAdminClient()
+
+  // Guard: si la org aún no completó onboarding, forzar al wizard
+  const { data: orgRow } = await adminClient
+    .from('organizations')
+    .select('settings, subscription_status')
+    .eq('id', orgId)
+    .maybeSingle()
+
+  if (orgRow?.subscription_status === 'suspended' || orgRow?.subscription_status === 'cancelled') {
+    redirect('/login?reason=inactive')
+  }
+
+  const onboardingCompleted = (orgRow?.settings as { onboarding_completed?: boolean } | null)?.onboarding_completed === true
+  if (!onboardingCompleted) {
+    redirect('/onboarding')
+  }
 
   // Find staff profile for CURRENT org
   const { data: staff, error: staffError } = await supabase
@@ -122,16 +140,28 @@ export default async function DashboardLayout({
     redirect('/login')
   }
 
+  // Banner de impersonation si el user es platform admin impersonando
+  const cookieStore = await cookies()
+  const isImpersonating = cookieStore.get('platform_impersonation')?.value === '1'
+  const { data: activeOrgRow } = isImpersonating
+    ? await adminClient.from('organizations').select('name').eq('id', orgId).maybeSingle()
+    : { data: null as { name: string } | null }
+
   return (
-    <DashboardShell
-      user={{ full_name: userProfile.full_name, email: userProfile.email, role: userProfile.role }}
-      permissions={userPermissions}
-      allowedBranchIds={allowedBranchIds}
-      organizationId={userProfile.organization_id}
-      availableOrganizations={userOrganizations}
-      orgLogoUrl={currentOrg?.logo_url ?? null}
-    >
-      {children}
-    </DashboardShell>
+    <>
+      {isImpersonating && activeOrgRow?.name && (
+        <ImpersonationBanner orgName={activeOrgRow.name} />
+      )}
+      <DashboardShell
+        user={{ full_name: userProfile.full_name, email: userProfile.email, role: userProfile.role }}
+        permissions={userPermissions}
+        allowedBranchIds={allowedBranchIds}
+        organizationId={userProfile.organization_id}
+        availableOrganizations={userOrganizations}
+        orgLogoUrl={currentOrg?.logo_url ?? null}
+      >
+        {children}
+      </DashboardShell>
+    </>
   )
 }

@@ -209,7 +209,7 @@ export function TenantSelector() {
                 />
               </div>
               <p className="text-xs text-white/25">
-                Ej: <span className="text-white/40">monaco</span>,{" "}
+                Ej: <span className="text-white/40">mi-barberia</span>,{" "}
                 <span className="text-white/40">barber-kings</span>
               </p>
             </div>

@@ -66,6 +66,13 @@ export async function submitReview(
     // Operación pública (acceso por token): usamos admin client para no depender de sesión
     const supabase = createAdminClient()
 
+    // Rate limit por requestId: 3 intentos cada 5 min (evita flood de reviews desde un token)
+    const { RateLimits } = await import('@/lib/rate-limit')
+    const gate = await RateLimits.reviewSubmit(requestId)
+    if (!gate.allowed) {
+        return { error: 'Esta reseña ya fue procesada' }
+    }
+
     const { data: reqData } = await supabase
         .from('review_requests')
         .select('*')

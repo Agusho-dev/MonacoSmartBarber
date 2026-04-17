@@ -9,7 +9,7 @@ import { FilaTabsWrapper } from './fila-tabs-wrapper'
 export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
-  title: 'Fila | Monaco Smart Barber',
+  title: 'Fila | BarberOS',
 }
 
 export default async function FilaAdminPage() {

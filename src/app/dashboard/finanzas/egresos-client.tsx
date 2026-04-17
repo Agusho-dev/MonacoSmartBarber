@@ -234,7 +234,7 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = `egresos_monaco.csv`
+        a.download = `egresos.csv`
         a.click()
         URL.revokeObjectURL(url)
     }

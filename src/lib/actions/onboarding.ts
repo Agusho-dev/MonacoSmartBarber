@@ -5,6 +5,47 @@ import { getCurrentOrgId } from '@/lib/actions/org'
 import { revalidatePath } from 'next/cache'
 
 /**
+ * Actualiza timezone, currency, locale y country_code de la org (step i18n del wizard).
+ */
+export async function updateOrgI18n(input: {
+  country_code: string
+  timezone:     string
+  currency:     string
+  locale:       string
+}) {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { success: false, error: 'Organización no encontrada' }
+
+  const COUNTRIES = ['AR','UY','CL','PE','CO','MX','BR','PY','BO','VE','EC','ES','US']
+  const CURRENCIES = ['ARS','USD','BRL','CLP','UYU','PEN','COP','MXN','PYG','BOB','EUR','VES']
+  if (!COUNTRIES.includes(input.country_code)) return { success: false, error: 'País inválido' }
+  if (!CURRENCIES.includes(input.currency))    return { success: false, error: 'Moneda inválida' }
+  if (!input.timezone || !/^[A-Z][a-z_]+\/[A-Z][a-zA-Z_]+/.test(input.timezone)) {
+    return { success: false, error: 'Timezone inválida' }
+  }
+
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from('organizations')
+    .update({
+      country_code: input.country_code,
+      timezone:     input.timezone,
+      currency:     input.currency,
+      locale:       input.locale,
+    })
+    .eq('id', orgId)
+
+  if (error) {
+    console.error('[updateOrgI18n] Error:', error)
+    return { success: false, error: 'Error al guardar configuración regional' }
+  }
+
+  revalidatePath('/onboarding')
+  revalidatePath('/dashboard/configuracion')
+  return { success: true }
+}
+
+/**
  * Sube el logo de la organización a Supabase Storage y actualiza el registro.
  */
 export async function uploadOrgLogo(formData: FormData) {
@@ -138,6 +179,14 @@ export async function createOnboardingBranch(formData: FormData) {
     .map((d) => parseInt(d.trim(), 10))
     .filter((d) => !isNaN(d) && d >= 0 && d <= 6)
 
+  // Timezone se hereda de organizations.timezone (default si org no lo tiene)
+  const { data: orgRow } = await supabase
+    .from('organizations')
+    .select('timezone')
+    .eq('id', orgId)
+    .maybeSingle()
+  const tz = orgRow?.timezone ?? 'America/Argentina/Buenos_Aires'
+
   const { data: branch, error } = await supabase
     .from('branches')
     .insert({
@@ -149,7 +198,7 @@ export async function createOnboardingBranch(formData: FormData) {
       business_hours_close: businessHoursClose,
       business_days: businessDays,
       is_active: true,
-      timezone: 'America/Argentina/Buenos_Aires',
+      timezone: tz,
     })
     .select()
     .single()
@@ -158,6 +207,14 @@ export async function createOnboardingBranch(formData: FormData) {
     console.error('[createOnboardingBranch] Error al crear sucursal:', error)
     return { success: false, error: 'Error al crear la sucursal' }
   }
+
+  // Asignar la primera sucursal al staff owner que aún no tiene branch_id
+  await supabase
+    .from('staff')
+    .update({ branch_id: branch.id })
+    .eq('organization_id', orgId)
+    .eq('role', 'owner')
+    .is('branch_id', null)
 
   await completeOnboardingStep(1)
   revalidatePath('/dashboard/sucursales')

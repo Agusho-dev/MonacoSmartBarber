@@ -30,6 +30,7 @@ interface FinanzasTabsClientProps {
     fixedExpenses: Parameters<typeof GastosFijosClient>[0]['fixedExpenses']
     commissionSummary: CommissionSummaryData
     permissions: Record<string, boolean>
+    orgSlug?: string
 }
 
 export function FinanzasTabsClient({
@@ -41,6 +42,7 @@ export function FinanzasTabsClient({
     fixedExpenses,
     commissionSummary,
     permissions,
+    orgSlug,
 }: FinanzasTabsClientProps) {
     const searchParams = useSearchParams()
 
@@ -111,6 +113,7 @@ export function FinanzasTabsClient({
                         accounts={accounts}
                         expenseTickets={expenseTickets}
                         commissionSummary={commissionSummary}
+                        orgSlug={orgSlug}
                     />
                 )}
                 {activeTab === 'cuentas' && (

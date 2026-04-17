@@ -10,6 +10,7 @@ import {
   completeOnboarding,
   completeOnboardingStep,
   uploadOrgLogo,
+  updateOrgI18n,
 } from "@/lib/actions/onboarding"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -362,6 +363,32 @@ export default function OnboardingPage() {
   const [staffName, setStaffName] = useState("")
   const [staffPin, setStaffPin] = useState("")
 
+  // i18n step 0
+  const [i18nCountry, setI18nCountry]   = useState("AR")
+  const [i18nCurrency, setI18nCurrency] = useState("ARS")
+  const [i18nTimezone, setI18nTimezone] = useState("America/Argentina/Buenos_Aires")
+
+  async function handleI18nNext() {
+    setIsPending(true)
+    setError(null)
+    // Derivar locale del país
+    const LOCALE_MAP: Record<string, string> = {
+      AR: "es-AR", UY: "es-UY", CL: "es-CL", PE: "es-PE", CO: "es-CO",
+      MX: "es-MX", BR: "pt-BR", PY: "es-PY", BO: "es-BO", VE: "es-VE",
+      EC: "es-EC", ES: "es-ES", US: "en-US",
+    }
+    const locale = LOCALE_MAP[i18nCountry] ?? "es-AR"
+    const result = await updateOrgI18n({
+      country_code: i18nCountry,
+      timezone:     i18nTimezone,
+      currency:     i18nCurrency,
+      locale,
+    })
+    if (!result.success) setError(result.error ?? "Error guardando configuración regional")
+    else goTo(1)
+    setIsPending(false)
+  }
+
   function goTo(s: number) {
     setError(null)
     setAnimKey((k) => k + 1)
@@ -495,7 +522,7 @@ export default function OnboardingPage() {
         <div className="flex-1 flex flex-col items-center justify-center px-6 lg:px-10 overflow-y-auto">
           <div key={animKey} className="w-full max-w-lg animate-step-enter">
 
-            {/* ── STEP 0: BIENVENIDA ────────────────────────────────────── */}
+            {/* ── STEP 0: BIENVENIDA + i18n ─────────────────────────────── */}
             {currentStep === 0 && (
               <div className="space-y-6">
                 <div className="space-y-2">
@@ -515,36 +542,88 @@ export default function OnboardingPage() {
                     className="text-white/40 text-sm animate-reveal-up"
                     style={{ animationDelay: "120ms", opacity: 0 }}
                   >
-                    En los proximos pasos vas a configurar tu barberia. Todo se puede cambiar despues.
+                    Primero elegí el país y la moneda con la que opera tu barbería. Esto configura horarios, formatos y símbolos.
                   </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { Icon: Palette,  title: "Branding",  desc: "Logo y nombre" },
-                    { Icon: MapPin,   title: "Sucursal",  desc: "Direccion y horarios" },
-                    { Icon: Scissors, title: "Servicios", desc: "Lo que ofreces" },
-                    { Icon: Users,    title: "Equipo",    desc: "Barberos y staff" },
-                  ].map((item, i) => (
-                    <div
-                      key={item.title}
-                      className="glass-card rounded-xl px-4 py-3.5 animate-reveal-up"
-                      style={{ animationDelay: `${180 + i * 60}ms`, opacity: 0 }}
+                <div className="space-y-3 animate-reveal-up" style={{ animationDelay: "180ms", opacity: 0 }}>
+                  <div>
+                    <Label className="text-xs font-medium text-white/50 uppercase tracking-wider">País</Label>
+                    <select
+                      value={i18nCountry}
+                      onChange={(e) => setI18nCountry(e.target.value)}
+                      className="mt-2 w-full h-11 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-sm focus:border-[oklch(0.78_0.12_85/0.5)] focus:outline-none"
                     >
-                      <item.Icon className="size-5 mb-2" style={{ color: "oklch(0.78 0.12 85)" }} />
-                      <p className="text-sm font-medium">{item.title}</p>
-                      <p className="text-xs text-white/30 mt-0.5">{item.desc}</p>
-                    </div>
-                  ))}
+                      <option value="AR">🇦🇷 Argentina</option>
+                      <option value="UY">🇺🇾 Uruguay</option>
+                      <option value="CL">🇨🇱 Chile</option>
+                      <option value="PE">🇵🇪 Perú</option>
+                      <option value="CO">🇨🇴 Colombia</option>
+                      <option value="MX">🇲🇽 México</option>
+                      <option value="BR">🇧🇷 Brasil</option>
+                      <option value="PY">🇵🇾 Paraguay</option>
+                      <option value="BO">🇧🇴 Bolivia</option>
+                      <option value="VE">🇻🇪 Venezuela</option>
+                      <option value="EC">🇪🇨 Ecuador</option>
+                      <option value="ES">🇪🇸 España</option>
+                      <option value="US">🇺🇸 Estados Unidos</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <Label className="text-xs font-medium text-white/50 uppercase tracking-wider">Moneda</Label>
+                    <select
+                      value={i18nCurrency}
+                      onChange={(e) => setI18nCurrency(e.target.value)}
+                      className="mt-2 w-full h-11 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-sm focus:border-[oklch(0.78_0.12_85/0.5)] focus:outline-none"
+                    >
+                      <option value="ARS">ARS — Peso Argentino ($)</option>
+                      <option value="USD">USD — Dólar (US$)</option>
+                      <option value="BRL">BRL — Real (R$)</option>
+                      <option value="CLP">CLP — Peso Chileno ($)</option>
+                      <option value="UYU">UYU — Peso Uruguayo ($U)</option>
+                      <option value="PEN">PEN — Sol (S/)</option>
+                      <option value="COP">COP — Peso Colombiano ($)</option>
+                      <option value="MXN">MXN — Peso Mexicano ($)</option>
+                      <option value="PYG">PYG — Guaraní (₲)</option>
+                      <option value="BOB">BOB — Boliviano (Bs)</option>
+                      <option value="EUR">EUR — Euro (€)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <Label className="text-xs font-medium text-white/50 uppercase tracking-wider">Zona horaria</Label>
+                    <select
+                      value={i18nTimezone}
+                      onChange={(e) => setI18nTimezone(e.target.value)}
+                      className="mt-2 w-full h-11 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-sm focus:border-[oklch(0.78_0.12_85/0.5)] focus:outline-none"
+                    >
+                      <option value="America/Argentina/Buenos_Aires">Buenos Aires (-03:00)</option>
+                      <option value="America/Montevideo">Montevideo (-03:00)</option>
+                      <option value="America/Santiago">Santiago (-03:00/-04:00)</option>
+                      <option value="America/Lima">Lima (-05:00)</option>
+                      <option value="America/Bogota">Bogotá (-05:00)</option>
+                      <option value="America/Mexico_City">Ciudad de México (-06:00)</option>
+                      <option value="America/Sao_Paulo">São Paulo (-03:00)</option>
+                      <option value="America/Asuncion">Asunción (-03:00/-04:00)</option>
+                      <option value="America/La_Paz">La Paz (-04:00)</option>
+                      <option value="America/Caracas">Caracas (-04:00)</option>
+                      <option value="America/Guayaquil">Guayaquil (-05:00)</option>
+                      <option value="Europe/Madrid">Madrid (+01:00)</option>
+                      <option value="America/New_York">Nueva York (-05:00)</option>
+                    </select>
+                  </div>
                 </div>
+
+                {error && <ErrorAlert message={error} />}
 
                 <div className="animate-reveal-up" style={{ animationDelay: "500ms", opacity: 0 }}>
                   <button
-                    onClick={() => goTo(1)}
-                    className="btn-gold w-full h-12 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold"
+                    onClick={handleI18nNext}
+                    disabled={isPending}
+                    className="btn-gold w-full h-12 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold disabled:opacity-60"
                   >
-                    Empezar
-                    <ChevronRight className="size-4" />
+                    {isPending ? (<><Loader2 className="size-4 animate-spin"/> Guardando…</>) : (<>Empezar <ChevronRight className="size-4" /></>)}
                   </button>
                 </div>
               </div>

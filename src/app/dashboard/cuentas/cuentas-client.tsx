@@ -284,7 +284,7 @@ export function CuentasClient({ accounts, branches }: Props) {
               <Label>Nombre de la cuenta</Label>
               <Input
                 className="mt-1.5"
-                placeholder="Ej: monaco.barber.1"
+                placeholder="Ej: barberia.principal"
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                 required
@@ -297,7 +297,7 @@ export function CuentasClient({ accounts, branches }: Props) {
               </Label>
               <Input
                 className="mt-1.5 font-mono"
-                placeholder="Ej: monaco.barber.uno o 0000003100..."
+                placeholder="Ej: barberia.principal o 0000003100..."
                 value={form.alias_or_cbu}
                 onChange={(e) => setForm((f) => ({ ...f, alias_or_cbu: e.target.value }))}
               />

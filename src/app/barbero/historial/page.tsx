@@ -7,7 +7,7 @@ import { HistorialClient } from './historial-client'
 export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
-    title: 'Mi Historial | Monaco Smart Barber',
+    title: 'Mi Historial | BarberOS',
 }
 
 export default async function HistorialPage() {

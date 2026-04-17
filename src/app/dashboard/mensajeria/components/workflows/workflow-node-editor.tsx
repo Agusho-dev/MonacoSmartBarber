@@ -933,7 +933,7 @@ function AiResponseConfig({ config, onChange }: { config: Record<string, unknown
           ref={promptRef}
           className="bg-muted border text-foreground resize-none text-sm transition-colors focus:border-purple-500/50"
           rows={5}
-          placeholder="Sos un asistente de la barbería Monaco. Respondé consultas sobre horarios, servicios y precios..."
+          placeholder="Sos un asistente de la barbería {nombre}. Respondé consultas sobre horarios, servicios y precios..."
           value={promptValue}
           onChange={e => onChange('system_prompt', e.target.value)}
         />

@@ -3,6 +3,7 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { validateBranchAccess, getOrgBranchIds } from './org'
+import { requireOrgAccessToEntity } from './guard'
 
 export async function saveVisitDetails(
   visitId: string,
@@ -10,6 +11,9 @@ export async function saveVisitDetails(
   tags: string[] | null,
   photoPaths: string[]
 ) {
+  const orgAccess = await requireOrgAccessToEntity('visits', visitId)
+  if (!orgAccess.ok) return { error: 'Acceso denegado' }
+
   const supabase = await createClient()
 
   const { error: updateError } = await supabase
@@ -58,6 +62,9 @@ export interface ClientProfileData {
 export async function getClientProfile(
   clientId: string
 ): Promise<ClientProfileData> {
+  const orgAccess = await requireOrgAccessToEntity('clients', clientId)
+  if (!orgAccess.ok) return { visits: [], frequentBarber: null, totalVisits: 0 }
+
   const supabase = await createClient()
 
   const { data: visits } = await supabase

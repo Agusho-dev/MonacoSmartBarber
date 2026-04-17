@@ -1,9 +1,10 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/server'
+import { isValidUUID } from '@/lib/validation'
 
 export async function getCheckinData(branchId: string) {
-  if (!branchId) return { error: 'No branch provided' }
+  if (!branchId || !isValidUUID(branchId)) return { error: 'No branch provided' }
 
   const supabase = createAdminClient()
 
