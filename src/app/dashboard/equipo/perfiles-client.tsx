@@ -406,6 +406,7 @@ export function PerfilesClient({
             calendarBarber={calendarBarbers.find((cb) => cb.id === selectedBarber.id) ?? null}
             period={period}
             setPeriod={setPeriod}
+            orgName={orgName}
           />
         ) : (
           <EmptyProfileState />
@@ -444,6 +445,7 @@ function BarberDetailPanel({
   calendarBarber,
   period,
   setPeriod,
+  orgName,
 }: {
   barber: Staff
   roles: Role[]
@@ -455,6 +457,7 @@ function BarberDetailPanel({
   calendarBarber: BarberWithSchedules | null
   period: PeriodFilter
   setPeriod: (p: PeriodFilter) => void
+  orgName: string
 }) {
   const [exporting, setExporting] = useState(false)
   const [contactingStaff, setContactingStaff] = useState(false)

@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { getDashboardOverview } from '@/lib/actions/overview'
-import { OverviewClient } from '@/components/dashboard/overview-client'
+import { OverviewClient } from './overview-client'
 import { formatCurrency } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import {

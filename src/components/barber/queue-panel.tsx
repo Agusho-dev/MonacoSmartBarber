@@ -264,8 +264,8 @@ export function QueuePanel({
       }
     }
 
-    setDailyServiceCounts(assignmentData.dailyServiceCounts)
-    setLastCompletedAt(assignmentData.lastCompletedAt)
+    setDailyServiceCounts(assignmentData.dailyServiceCounts ?? {})
+    setLastCompletedAt(assignmentData.lastCompletedAt ?? {})
   }, [supabase, session.branch_id, session.staff_id])
 
   const fetchBreakRequestStatus = useCallback(async () => {
