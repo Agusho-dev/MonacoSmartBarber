@@ -58,18 +58,19 @@ export async function loginWithPin(formData: FormData) {
     .eq('is_active', true)
     .single()
 
+  if (error || !staff || !staff.pin) {
+    return { error: 'PIN incorrecto' }
+  }
+
   // Comparación en tiempo constante para evitar timing attacks
-  const pinMatch = (() => {
-    if (error || !staff || !staff.pin) return false
-    try {
-      const a = Buffer.from(pin)
-      const b = Buffer.from(staff.pin)
-      if (a.length !== b.length) return false
-      return timingSafeEqual(a, b)
-    } catch {
-      return false
-    }
-  })()
+  let pinMatch = false
+  try {
+    const a = Buffer.from(pin)
+    const b = Buffer.from(staff.pin)
+    if (a.length === b.length) pinMatch = timingSafeEqual(a, b)
+  } catch {
+    pinMatch = false
+  }
   if (!pinMatch) {
     return { error: 'PIN incorrecto' }
   }
@@ -224,18 +225,19 @@ export async function verifyBarberPin(staffId: string, pin: string) {
     .eq('is_active', true)
     .single()
 
+  if (error || !staff || !staff.pin) {
+    return { error: 'PIN incorrecto' }
+  }
+
   // Comparación en tiempo constante para evitar timing attacks
-  const pinMatch2 = (() => {
-    if (error || !staff || !staff.pin) return false
-    try {
-      const a = Buffer.from(pin)
-      const b = Buffer.from(staff.pin)
-      if (a.length !== b.length) return false
-      return timingSafeEqual(a, b)
-    } catch {
-      return false
-    }
-  })()
+  let pinMatch2 = false
+  try {
+    const a = Buffer.from(pin)
+    const b = Buffer.from(staff.pin)
+    if (a.length === b.length) pinMatch2 = timingSafeEqual(a, b)
+  } catch {
+    pinMatch2 = false
+  }
   if (!pinMatch2) {
     return { error: 'PIN incorrecto' }
   }

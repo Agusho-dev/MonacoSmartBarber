@@ -146,10 +146,10 @@ export async function getDashboardOverview(): Promise<DashboardOverviewData | nu
   return {
     branches: (branches ?? []) as Pick<Branch, 'id' | 'name'>[],
     organization: org ?? null,
-    todayVisits: (todayVisits ?? []) as Visit[],
+    todayVisits: (todayVisits ?? []) as unknown as Visit[],
     todayRevenue,
     newClientsThisMonth: newClientsCount ?? 0,
-    recentVisits: (recentVisits ?? []) as Visit[],
+    recentVisits: (recentVisits ?? []) as unknown as Visit[],
     setupChecklist: {
       whatsappConfigurado: !!waConfig,
       puntosConfigurado: !!rewardsConfig,
