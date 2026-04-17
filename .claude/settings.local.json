@@ -54,7 +54,9 @@
       "mcp__supabase__list_tables",
       "mcp__supabase__get_advisors",
       "Bash(git log *)",
-      "Bash(vercel ls *)"
+      "Bash(vercel ls *)",
+      "Bash(git commit -m 'fix: resolve partner magic link origin from request headers *)",
+      "Bash(git push *)"
     ]
   },
   "enabledMcpjsonServers": [
