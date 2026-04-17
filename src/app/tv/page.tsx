@@ -7,7 +7,9 @@ export const dynamic = 'force-dynamic'
 export default async function TvPage() {
   const supabase = createAdminClient()
   const cookieStore = await cookies()
-  const orgId = cookieStore.get('active_organization')?.value
+  // TV es ruta pública — prioriza public_organization (kiosk/TV) sobre active_organization (dashboard)
+  const orgId = cookieStore.get('public_organization')?.value
+    ?? cookieStore.get('active_organization')?.value
 
   // Obtener branches filtradas por org
   let branchQuery = supabase.from('branches').select('id, name, organization_id').eq('is_active', true)
