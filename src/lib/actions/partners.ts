@@ -221,6 +221,45 @@ export async function updatePartnerRelationStatus(
   return { success: true }
 }
 
+export async function deletePartnerFromOrg(
+  partnerId: string
+): Promise<{ success: boolean; error?: string }> {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { success: false, error: 'No autorizado' }
+
+  const supabase = createAdminClient()
+
+  // Verificar que la relación exista antes de borrar
+  const { data: rel } = await supabase
+    .from('partner_org_relations')
+    .select('id')
+    .eq('partner_id', partnerId)
+    .eq('organization_id', orgId)
+    .maybeSingle()
+  if (!rel) return { success: false, error: 'Partner no pertenece a esta organización' }
+
+  // Borrar beneficios scoped a esta org (no afecta otros orgs aliados al mismo partner)
+  const { error: benefitsErr } = await supabase
+    .from('partner_benefits')
+    .delete()
+    .eq('partner_id', partnerId)
+    .eq('organization_id', orgId)
+  if (benefitsErr) return { success: false, error: benefitsErr.message }
+
+  // Borrar la relación. El partner global (`commercial_partners`) sigue existiendo
+  // si está aliado a otras orgs.
+  const { error: relErr } = await supabase
+    .from('partner_org_relations')
+    .delete()
+    .eq('partner_id', partnerId)
+    .eq('organization_id', orgId)
+  if (relErr) return { success: false, error: relErr.message }
+
+  revalidatePath('/dashboard/convenios/partners')
+  revalidatePath('/dashboard/convenios')
+  return { success: true }
+}
+
 export async function listOrgPartners() {
   const orgId = await getCurrentOrgId()
   if (!orgId) return []
