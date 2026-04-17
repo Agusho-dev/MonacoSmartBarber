@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server'
+import { normalizeArgentinePhoneForMeta } from '@/lib/phone'
 
 /**
  * Entrega del magic link. Para el MVP:
@@ -28,8 +29,10 @@ export async function sendMagicLinkViaWhatsApp(params: {
     return { sent: false, error: 'WhatsApp no configurado' }
   }
 
-  const normalizedPhone = phone.replace(/[^\d]/g, '')
-  if (!normalizedPhone) return { sent: false, error: 'Teléfono inválido' }
+  const normalizedPhone = normalizeArgentinePhoneForMeta(phone)
+  if (!normalizedPhone || normalizedPhone.length < 10) {
+    return { sent: false, error: 'Teléfono inválido' }
+  }
 
   const message =
     purpose === 'invitation'

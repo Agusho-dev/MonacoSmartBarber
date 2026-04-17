@@ -12,11 +12,15 @@ export interface MagicLinkResult {
 }
 
 function buildAppUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    'http://localhost:3000'
-  )
+  const explicit =
+    process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL
+  if (explicit) return explicit.replace(/\/$/, '')
+
+  const vercelHost =
+    process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL
+  if (vercelHost) return `https://${vercelHost}`
+
+  return 'http://localhost:3000'
 }
 
 export async function generatePartnerMagicLink(
