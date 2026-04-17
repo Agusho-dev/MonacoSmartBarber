@@ -13,9 +13,10 @@ import {
   PauseCircle,
   PlayCircle,
   Ban,
-  Loader2,
   Copy,
   Check,
+  Trash2,
+  Loader2,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -27,9 +28,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { toast } from 'sonner'
-import { regeneratePartnerMagicLink, updatePartnerRelationStatus } from '@/lib/actions/partners'
+import {
+  deletePartnerFromOrg,
+  regeneratePartnerMagicLink,
+  updatePartnerRelationStatus,
+} from '@/lib/actions/partners'
 
 interface PartnerRow {
   id: string
@@ -51,6 +56,7 @@ export function PartnersClient({ partners }: { partners: PartnerRow[] }) {
   const [isPending, startTransition] = useTransition()
   const [linkDialog, setLinkDialog] = useState<{ url: string; whatsappSent: boolean; partnerName: string } | null>(null)
   const [copied, setCopied] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
 
   const onRegenerate = (partnerId: string, partnerName: string) => {
     startTransition(async () => {
@@ -73,6 +79,21 @@ export function PartnersClient({ partners }: { partners: PartnerRow[] }) {
         )
         router.refresh()
       } else toast.error(r.error ?? 'Error')
+    })
+  }
+
+  const onConfirmDelete = () => {
+    if (!deleteTarget) return
+    const target = deleteTarget
+    startTransition(async () => {
+      const r = await deletePartnerFromOrg(target.id)
+      if (r.success) {
+        toast.success(`"${target.name}" eliminado`)
+        setDeleteTarget(null)
+        router.refresh()
+      } else {
+        toast.error(r.error ?? 'No se pudo eliminar')
+      }
     })
   }
 
@@ -192,6 +213,13 @@ export function PartnersClient({ partners }: { partners: PartnerRow[] }) {
                             Reactivar convenio
                           </DropdownMenuItem>
                         )}
+                        <DropdownMenuItem
+                          onClick={() => setDeleteTarget({ id: p.id, name: p.business_name })}
+                          className="text-red-600 focus:text-red-600"
+                        >
+                          <Trash2 className="size-4 mr-2" />
+                          Eliminar partner
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -201,6 +229,42 @@ export function PartnersClient({ partners }: { partners: PartnerRow[] }) {
           })}
         </div>
       )}
+
+      <Dialog
+        open={!!deleteTarget}
+        onOpenChange={(v) => !v && !isPending && setDeleteTarget(null)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Eliminar partner</DialogTitle>
+            <DialogDescription>
+              ¿Seguro que querés eliminar a <strong>{deleteTarget?.name}</strong> de tus partners?
+              Esta acción quita la relación y borra todos sus beneficios cargados para tu organización.
+              No se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              disabled={isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={onConfirmDelete}
+              disabled={isPending}
+            >
+              {isPending ? (
+                <><Loader2 className="size-4 mr-2 animate-spin" /> Eliminando...</>
+              ) : (
+                <><Trash2 className="size-4 mr-2" /> Eliminar</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!linkDialog} onOpenChange={(v) => !v && setLinkDialog(null)}>
         <DialogContent className="max-w-md">
