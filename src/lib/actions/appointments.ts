@@ -3,6 +3,8 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getCurrentOrgId, validateBranchAccess } from './org'
+import { RateLimits } from '@/lib/rate-limit'
+import { absoluteUrl } from '@/lib/app-url'
 import type { Appointment, AppointmentSettings, AppointmentStaff } from '@/lib/types/database'
 
 // ─── Settings ───────────────────────────────────────────────────────
@@ -49,6 +51,8 @@ export async function updateAppointmentSettings(updates: Partial<AppointmentSett
   }
 
   revalidatePath('/dashboard/configuracion')
+  revalidatePath('/dashboard/turnos/configuracion')
+  revalidatePath('/dashboard/turnos/personalizacion')
   return { success: true }
 }
 
@@ -61,11 +65,11 @@ export async function getAppointmentStaff(orgId?: string) {
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('appointment_staff')
-    .select('*, staff:staff_id(id, full_name, branch_id, is_active)')
+    .select('*, staff:staff_id(id, full_name, branch_id, is_active, avatar_url)')
     .eq('organization_id', resolvedOrgId)
     .eq('is_active', true)
 
-  return (data ?? []) as (AppointmentStaff & { staff: { id: string; full_name: string; branch_id: string; is_active: boolean } })[]
+  return (data ?? []) as (AppointmentStaff & { staff: { id: string; full_name: string; branch_id: string; is_active: boolean; avatar_url: string | null } })[]
 }
 
 export async function toggleAppointmentStaff(staffId: string, isActive: boolean) {
@@ -94,6 +98,37 @@ export async function toggleAppointmentStaff(staffId: string, isActive: boolean)
   }
 
   revalidatePath('/dashboard/configuracion')
+  revalidatePath('/dashboard/turnos/configuracion')
+  return { success: true }
+}
+
+export async function updateAppointmentStaffWalkinMode(
+  staffId: string,
+  walkinMode: 'both' | 'appointments_only'
+) {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
+  const supabase = createAdminClient()
+
+  const { data: existing } = await supabase
+    .from('appointment_staff')
+    .select('id, organization_id')
+    .eq('staff_id', staffId)
+    .maybeSingle()
+
+  if (!existing || existing.organization_id !== orgId) {
+    return { error: 'Staff no habilitado para turnos en esta organización' }
+  }
+
+  const { error } = await supabase
+    .from('appointment_staff')
+    .update({ walkin_mode: walkinMode })
+    .eq('id', existing.id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/dashboard/turnos/configuracion')
   return { success: true }
 }
 
@@ -116,6 +151,12 @@ export async function getAvailableSlots(
   serviceId?: string,
   barberId?: string
 ): Promise<{ slots: BarberAvailability[]; error?: string }> {
+  // Rate-limit: endpoint público, sin auth
+  const gate = await RateLimits.publicBookingList(branchId)
+  if (!gate.allowed) {
+    return { slots: [], error: 'Demasiadas consultas, esperá un momento' }
+  }
+
   const supabase = createAdminClient()
 
   const { data: branch } = await supabase
@@ -130,6 +171,8 @@ export async function getAvailableSlots(
   const settings = await getAppointmentSettings(branch.organization_id)
   if (!settings?.is_enabled) return { slots: [], error: 'Turnos no habilitados' }
 
+  const tz = branch.timezone || 'America/Argentina/Buenos_Aires'
+
   const targetDate = new Date(date + 'T12:00:00')
   const dayOfWeek = targetDate.getDay()
 
@@ -137,7 +180,6 @@ export async function getAvailableSlots(
     return { slots: [], error: 'Día no habilitado para turnos' }
   }
 
-  const today = new Date()
   const maxDate = new Date()
   maxDate.setDate(maxDate.getDate() + settings.max_advance_days)
   if (targetDate > maxDate) {
@@ -156,10 +198,10 @@ export async function getAvailableSlots(
     }
   }
 
-  // Cargar staff habilitado para turnos en esta sucursal
+  // Staff habilitado para turnos en esta sucursal
   const { data: appointmentStaff } = await supabase
     .from('appointment_staff')
-    .select('staff_id, staff:staff_id(id, full_name, branch_id, is_active)')
+    .select('staff_id, walkin_mode, staff:staff_id(id, full_name, branch_id, is_active, avatar_url)')
     .eq('organization_id', branch.organization_id)
     .eq('is_active', true)
 
@@ -178,7 +220,9 @@ export async function getAvailableSlots(
     ? [barberId]
     : branchStaff.map((s: any) => s.staff_id)
 
-  // Cargar horarios de trabajo para ese día
+  if (!staffIds.length) return { slots: [] }
+
+  // Horarios de trabajo para ese día
   const { data: schedules } = await supabase
     .from('staff_schedules')
     .select('staff_id, start_time, end_time')
@@ -186,7 +230,7 @@ export async function getAvailableSlots(
     .eq('day_of_week', dayOfWeek)
     .eq('is_active', true)
 
-  // Cargar excepciones (ausencias)
+  // Excepciones (ausencias)
   const { data: exceptions } = await supabase
     .from('staff_schedule_exceptions')
     .select('staff_id')
@@ -196,13 +240,24 @@ export async function getAvailableSlots(
 
   const absentStaff = new Set(exceptions?.map(e => e.staff_id) ?? [])
 
-  // Cargar turnos existentes para ese día
+  // Turnos existentes para ese día
   const { data: existingAppointments } = await supabase
     .from('appointments')
     .select('barber_id, start_time, end_time')
     .eq('branch_id', branchId)
     .eq('appointment_date', date)
     .not('status', 'in', '("cancelled","no_show")')
+
+  const openMinutes = timeToMinutes(settings.appointment_hours_open)
+  const closeMinutes = timeToMinutes(settings.appointment_hours_close)
+  const buffer = settings.buffer_minutes ?? 0
+
+  // "Ahora" en timezone de la sucursal
+  const nowInTz = new Date(new Date().toLocaleString('en-US', { timeZone: tz }))
+  const todayStr = nowInTz.toISOString().split('T')[0]
+  const isToday = date === todayStr
+  const nowMinutesInTz = nowInTz.getHours() * 60 + nowInTz.getMinutes()
+  const earliestBookableMinute = nowMinutesInTz + (settings.lead_time_minutes ?? 0)
 
   const result: BarberAvailability[] = []
 
@@ -216,10 +271,7 @@ export async function getAvailableSlots(
     const staffName = (staffRecord as any)?.staff?.full_name ?? ''
     const staffAppointments = existingAppointments?.filter(a => a.barber_id === staffId) ?? []
 
-    // Generar slots
     const slots: AvailableSlot[] = []
-    const openMinutes = timeToMinutes(settings.appointment_hours_open)
-    const closeMinutes = timeToMinutes(settings.appointment_hours_close)
 
     for (let m = openMinutes; m + serviceDuration <= closeMinutes; m += settings.slot_interval_minutes) {
       const slotStart = minutesToTime(m)
@@ -234,19 +286,17 @@ export async function getAvailableSlots(
         continue
       }
 
+      // Overlap extendiendo cada turno existente por buffer_minutes a ambos lados
       const overlaps = staffAppointments.some(appt => {
-        const apptStart = appt.start_time.substring(0, 5)
-        const apptEnd = appt.end_time.substring(0, 5)
-        return slotStart < apptEnd && slotEnd > apptStart
+        const apptStart = timeToMinutes(appt.start_time.substring(0, 5)) - buffer
+        const apptEnd = timeToMinutes(appt.end_time.substring(0, 5)) + buffer
+        return m < apptEnd && (m + serviceDuration) > apptStart
       })
 
-      // Si es hoy, excluir slots pasados
-      const tz = branch.timezone || 'America/Argentina/Buenos_Aires'
-      const nowInTz = new Date(new Date().toLocaleString('en-US', { timeZone: tz }))
-      const isToday = date === nowInTz.toISOString().split('T')[0]
-      const slotPassed = isToday && timeToMinutes(slotStart) <= nowInTz.getHours() * 60 + nowInTz.getMinutes()
+      // Lead time: si es hoy, no reservar antes de (ahora + lead_time_minutes)
+      const tooSoon = isToday && m < earliestBookableMinute
 
-      slots.push({ time: slotStart, available: !overlaps && !slotPassed })
+      slots.push({ time: slotStart, available: !overlaps && !tooSoon })
     }
 
     result.push({ barberId: staffId, barberName: staffName, slots })
@@ -283,11 +333,20 @@ interface CreateAppointmentInput {
 }
 
 export async function createAppointment(input: CreateAppointmentInput) {
+  // Rate-limit por IP antes de tocar DB (solo para creación vía turnero público).
+  // Los turnos 'manual' vienen del dashboard autenticado, no los rate-limiteamos.
+  if (input.source === 'public') {
+    const ipGate = await RateLimits.publicBookingCreateByIp()
+    if (!ipGate.allowed) {
+      return { error: 'Demasiadas reservas desde esta dirección, esperá un minuto' }
+    }
+  }
+
   const supabase = createAdminClient()
 
   const { data: branch } = await supabase
     .from('branches')
-    .select('id, organization_id, name')
+    .select('id, organization_id, name, timezone')
     .eq('id', input.branchId)
     .eq('is_active', true)
     .single()
@@ -298,7 +357,15 @@ export async function createAppointment(input: CreateAppointmentInput) {
   const settings = await getAppointmentSettings(orgId)
   if (!settings?.is_enabled) return { error: 'Turnos no habilitados' }
 
-  // Buscar o crear cliente
+  // Rate-limit por teléfono+org (anti-spam orientado al turnero público)
+  if (input.source === 'public') {
+    const phoneGate = await RateLimits.publicBookingCreateByPhone(input.clientPhone, orgId)
+    if (!phoneGate.allowed) {
+      return { error: 'Ya creaste varios turnos recientemente. Contactanos si necesitás más.' }
+    }
+  }
+
+  // Buscar o crear cliente (tenant-scoped por phone+org)
   let clientId: string
 
   const { data: existingClient } = await supabase
@@ -321,9 +388,30 @@ export async function createAppointment(input: CreateAppointmentInput) {
     clientId = newClient.id
   }
 
-  // Calcular end_time
+  // Anti-doble-booking: un cliente no puede tener otro turno activo el mismo día en esta org
+  const { data: clientAppointmentsToday } = await supabase
+    .from('appointments')
+    .select('id')
+    .eq('organization_id', orgId)
+    .eq('client_id', clientId)
+    .eq('appointment_date', input.appointmentDate)
+    .in('status', ['confirmed', 'checked_in', 'in_progress'])
+    .limit(1)
+
+  if (clientAppointmentsToday?.length) {
+    return { error: 'Ya tenés un turno activo para esa fecha' }
+  }
+
+  // Calcular end_time, clampeando al cierre del horario de turnos
   const startMinutes = timeToMinutes(input.startTime)
-  const endTime = minutesToTime(startMinutes + input.durationMinutes)
+  const closeMinutes = timeToMinutes(settings.appointment_hours_close)
+  const rawEndMinutes = startMinutes + input.durationMinutes
+
+  if (rawEndMinutes > closeMinutes) {
+    return { error: 'El servicio no termina dentro del horario de atención' }
+  }
+
+  const endTime = minutesToTime(rawEndMinutes)
 
   // Auto-asignar barbero si no se especificó
   let barberId = input.barberId || null
@@ -416,7 +504,7 @@ export async function createAppointment(input: CreateAppointmentInput) {
           status: 'pending',
         })
       } else {
-        const managementUrl = `/turnos/gestionar/${cancellationToken}`
+        const managementUrl = await absoluteUrl(`/turnos/gestionar/${cancellationToken}`)
         const confirmationText = `Tu turno para ${serviceName} el ${dateFormatted} a las ${input.startTime} en ${branch.name} fue confirmado. Podés gestionar tu turno aquí: ${managementUrl}`
         await supabase.from('scheduled_messages').insert({
           client_id: clientId,
@@ -460,6 +548,7 @@ export async function createAppointment(input: CreateAppointmentInput) {
   }
 
   revalidatePath('/dashboard/fila')
+  revalidatePath('/dashboard/turnos/agenda')
   revalidatePath('/barbero/fila')
   return { success: true, appointment }
 }
@@ -522,11 +611,17 @@ export async function cancelAppointment(
     .gte('scheduled_for', new Date().toISOString())
 
   revalidatePath('/dashboard/fila')
+  revalidatePath('/dashboard/turnos/agenda')
   revalidatePath('/barbero/fila')
   return { success: true }
 }
 
 export async function cancelAppointmentByToken(token: string) {
+  const gate = await RateLimits.publicBookingCancel(token)
+  if (!gate.allowed) {
+    return { error: 'Demasiados intentos, esperá un momento' }
+  }
+
   const supabase = createAdminClient()
 
   const { data: appointment } = await supabase
@@ -611,6 +706,7 @@ export async function markNoShow(appointmentId: string, staffId: string) {
   }
 
   revalidatePath('/dashboard/fila')
+  revalidatePath('/dashboard/turnos/agenda')
   revalidatePath('/barbero/fila')
   return { success: true }
 }
@@ -661,11 +757,45 @@ export async function checkinAppointment(appointmentId: string) {
     .eq('id', appointmentId)
 
   revalidatePath('/dashboard/fila')
+  revalidatePath('/dashboard/turnos/agenda')
   revalidatePath('/barbero/fila')
   return { success: true, queueEntryId: queueEntry.id }
 }
 
 // ─── Queries ────────────────────────────────────────────────────────
+
+/**
+ * Listado público (rate-limited) de barberos habilitados para turnos en una
+ * sucursal. Devuelve sólo nombre + avatar — seguro para exponer en el turnero.
+ */
+export async function getPublicBranchAppointmentStaff(branchId: string) {
+  const gate = await RateLimits.publicBookingList(branchId)
+  if (!gate.allowed) return []
+
+  const supabase = createAdminClient()
+  const { data: branch } = await supabase
+    .from('branches')
+    .select('organization_id')
+    .eq('id', branchId)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!branch) return []
+
+  const { data } = await supabase
+    .from('appointment_staff')
+    .select('staff_id, staff:staff_id(id, full_name, branch_id, is_active, avatar_url)')
+    .eq('organization_id', branch.organization_id)
+    .eq('is_active', true)
+
+  return (data ?? [])
+    .filter((as: any) => as.staff?.branch_id === branchId && as.staff?.is_active)
+    .map((as: any) => ({
+      id: as.staff.id,
+      full_name: as.staff.full_name,
+      avatar_url: as.staff.avatar_url as string | null,
+    }))
+}
 
 export async function getAppointmentsForDate(branchId: string, date: string) {
   const supabase = createAdminClient()
@@ -710,6 +840,9 @@ export async function getAppointmentsForClient(clientId: string) {
 }
 
 export async function getAppointmentByToken(token: string) {
+  const gate = await RateLimits.publicBookingManage(token)
+  if (!gate.allowed) return null
+
   const supabase = createAdminClient()
 
   const { data } = await supabase

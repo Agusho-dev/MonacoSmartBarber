@@ -94,4 +94,29 @@ export const RateLimits = {
     const ip = await getClientIP()
     return rateLimit('register_org', ip, { limit: 3, window: 3600 })
   },
+
+  // Turnero público: listado de slots — 20 por IP+branch cada 60s
+  publicBookingList: async (branchId: string) => {
+    const ip = await getClientIP()
+    return rateLimit('public_booking_list', `${ip}:${branchId}`, { limit: 20, window: 60 })
+  },
+
+  // Turnero público: creación de turno — 5 por IP cada 60s, y 3 por teléfono+org cada hora
+  publicBookingCreateByIp: async () => {
+    const ip = await getClientIP()
+    return rateLimit('public_booking_create_ip', ip, { limit: 5, window: 60 })
+  },
+  publicBookingCreateByPhone: async (phone: string, orgId: string) => {
+    return rateLimit('public_booking_create_phone', `${phone}:${orgId}`, { limit: 3, window: 3600 })
+  },
+
+  // Turnero público: lookup por token — 10 por token cada 60s
+  publicBookingManage: async (token: string) => {
+    return rateLimit('public_booking_manage', token, { limit: 10, window: 60 })
+  },
+
+  // Turnero público: cancelación por token — 3 por token cada hora
+  publicBookingCancel: async (token: string) => {
+    return rateLimit('public_booking_cancel', token, { limit: 3, window: 3600 })
+  },
 }

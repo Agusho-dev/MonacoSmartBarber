@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useMemo } from 'react'
 import { Save, Loader2, CalendarClock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,9 +14,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
-import { updateAppointmentSettings, toggleAppointmentStaff } from '@/lib/actions/appointments'
-import type { AppointmentSettings } from '@/lib/types/database'
+import {
+  updateAppointmentSettings,
+  toggleAppointmentStaff,
+  updateAppointmentStaffWalkinMode,
+} from '@/lib/actions/appointments'
+import type { AppointmentSettings, AppointmentStaffWalkinMode } from '@/lib/types/database'
 import { toast } from 'sonner'
 
 const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
@@ -27,15 +30,20 @@ interface StaffRow {
   branch_id: string | null
   role: string
   is_active: boolean
+  avatar_url?: string | null
   enabledForAppointments: boolean
+  walkinMode: AppointmentStaffWalkinMode
 }
+
+interface Branch { id: string; name: string }
 
 interface Props {
   settings: AppointmentSettings | null
   allStaff: StaffRow[]
+  branches: Branch[]
 }
 
-export function TurnosConfigClient({ settings, allStaff }: Props) {
+export function TurnosConfigClient({ settings, allStaff, branches }: Props) {
   const [isPending, startTransition] = useTransition()
   const [isEnabled, setIsEnabled] = useState(settings?.is_enabled ?? false)
   const [hoursOpen, setHoursOpen] = useState(settings?.appointment_hours_open ?? '09:00')
@@ -49,9 +57,21 @@ export function TurnosConfigClient({ settings, allStaff }: Props) {
   const [confirmationTemplate, setConfirmationTemplate] = useState(settings?.confirmation_template_name ?? '')
   const [reminderTemplate, setReminderTemplate] = useState(settings?.reminder_template_name ?? '')
   const [paymentMode, setPaymentMode] = useState(settings?.payment_mode ?? 'postpago')
-  const [staffStates, setStaffStates] = useState<Record<string, boolean>>(
-    Object.fromEntries(allStaff.map(s => [s.id, s.enabledForAppointments]))
+  const [bufferMinutes, setBufferMinutes] = useState(String(settings?.buffer_minutes ?? 10))
+  const [leadTimeMinutes, setLeadTimeMinutes] = useState(String(settings?.lead_time_minutes ?? 30))
+  const [staffStates, setStaffStates] = useState<Record<string, { enabled: boolean; walkinMode: AppointmentStaffWalkinMode }>>(
+    Object.fromEntries(allStaff.map(s => [s.id, { enabled: s.enabledForAppointments, walkinMode: s.walkinMode }]))
   )
+
+  const branchGroups = useMemo(() => {
+    const map = new Map<string, StaffRow[]>()
+    allStaff.forEach(s => {
+      const key = s.branch_id ?? 'sin-sucursal'
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(s)
+    })
+    return Array.from(map.entries())
+  }, [allStaff])
 
   function toggleDay(day: number) {
     setDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort())
@@ -72,36 +92,45 @@ export function TurnosConfigClient({ settings, allStaff }: Props) {
         confirmation_template_name: confirmationTemplate || null,
         reminder_template_name: reminderTemplate || null,
         payment_mode: paymentMode as 'prepago' | 'postpago',
+        buffer_minutes: Number(bufferMinutes),
+        lead_time_minutes: Number(leadTimeMinutes),
       })
 
-      if (result.error) {
-        toast.error(result.error)
-      } else {
-        toast.success('Configuración de turnos guardada')
-      }
+      if (result.error) toast.error(result.error)
+      else toast.success('Configuración de turnos guardada')
     })
   }
 
   async function handleToggleStaff(staffId: string, enabled: boolean) {
-    setStaffStates(prev => ({ ...prev, [staffId]: enabled }))
+    setStaffStates(prev => ({ ...prev, [staffId]: { ...prev[staffId], enabled } }))
     const result = await toggleAppointmentStaff(staffId, enabled)
     if (result.error) {
-      setStaffStates(prev => ({ ...prev, [staffId]: !enabled }))
+      setStaffStates(prev => ({ ...prev, [staffId]: { ...prev[staffId], enabled: !enabled } }))
       toast.error(result.error)
     }
   }
 
+  async function handleWalkinModeChange(staffId: string, mode: AppointmentStaffWalkinMode) {
+    const prev = staffStates[staffId]?.walkinMode
+    setStaffStates(s => ({ ...s, [staffId]: { ...s[staffId], walkinMode: mode } }))
+    const result = await updateAppointmentStaffWalkinMode(staffId, mode)
+    if (result.error) {
+      setStaffStates(s => ({ ...s, [staffId]: { ...s[staffId], walkinMode: prev ?? 'both' } }))
+      toast.error(result.error)
+    }
+  }
+
+  const branchName = (id: string) => branches.find(b => b.id === id)?.name ?? 'Sin sucursal'
+
   return (
-    <div className="space-y-6 p-4 md:p-6">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold">
-            <CalendarClock className="h-6 w-6" />
-            Configuración de Turnos
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Configurá el sistema de reserva de turnos para tus clientes.
-          </p>
+          <h3 className="flex items-center gap-2 text-lg font-semibold">
+            <CalendarClock className="h-5 w-5" />
+            Configuración del sistema
+          </h3>
+          <p className="text-sm text-muted-foreground">Horarios, slots, staff y mensajería automática.</p>
         </div>
         <Button onClick={handleSave} disabled={isPending}>
           {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
@@ -114,7 +143,7 @@ export function TurnosConfigClient({ settings, allStaff }: Props) {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle>Sistema de Turnos</CardTitle>
-              <CardDescription>Habilitá o deshabilitá el sistema de turnos</CardDescription>
+              <CardDescription>Habilitá o deshabilitá el turnero público. Al desactivar, el link deja de aceptar reservas.</CardDescription>
             </div>
             <Switch checked={isEnabled} onCheckedChange={setIsEnabled} />
           </div>
@@ -124,7 +153,7 @@ export function TurnosConfigClient({ settings, allStaff }: Props) {
       <Card>
         <CardHeader>
           <CardTitle>Horarios y Días</CardTitle>
-          <CardDescription>Definí el subconjunto de horarios disponibles para turnos</CardDescription>
+          <CardDescription>Definí el subconjunto de horarios disponibles para turnos.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -140,7 +169,7 @@ export function TurnosConfigClient({ settings, allStaff }: Props) {
 
           <div className="space-y-1.5">
             <Label>Días habilitados</Label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {DAY_NAMES.map((name, i) => (
                 <button
                   key={i}
@@ -162,6 +191,7 @@ export function TurnosConfigClient({ settings, allStaff }: Props) {
       <Card>
         <CardHeader>
           <CardTitle>Slots y Reservas</CardTitle>
+          <CardDescription>Controlan cuándo y cuánto se puede reservar online.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -179,6 +209,19 @@ export function TurnosConfigClient({ settings, allStaff }: Props) {
             <div className="space-y-1.5">
               <Label>Máximo días de anticipación</Label>
               <Input type="number" min={1} max={90} value={maxAdvanceDays} onChange={e => setMaxAdvanceDays(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>Buffer entre turnos (minutos)</Label>
+              <Input type="number" min={0} max={120} value={bufferMinutes} onChange={e => setBufferMinutes(e.target.value)} />
+              <p className="text-xs text-muted-foreground">Margen protegido antes y después de cada turno.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Anticipación mínima online (minutos)</Label>
+              <Input type="number" min={0} max={1440} value={leadTimeMinutes} onChange={e => setLeadTimeMinutes(e.target.value)} />
+              <p className="text-xs text-muted-foreground">Tiempo mínimo antes de la hora del turno para poder reservarlo.</p>
             </div>
           </div>
 
@@ -209,7 +252,7 @@ export function TurnosConfigClient({ settings, allStaff }: Props) {
       <Card>
         <CardHeader>
           <CardTitle>Mensajería Automática</CardTitle>
-          <CardDescription>Templates de WhatsApp para confirmación y recordatorio</CardDescription>
+          <CardDescription>Templates de WhatsApp para confirmación y recordatorio.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-1.5">
@@ -219,7 +262,7 @@ export function TurnosConfigClient({ settings, allStaff }: Props) {
               onChange={e => setConfirmationTemplate(e.target.value)}
               placeholder="Nombre del template en Meta"
             />
-            <p className="text-xs text-muted-foreground">Si se deja vacío, se envía texto plano</p>
+            <p className="text-xs text-muted-foreground">Si se deja vacío, se envía texto plano.</p>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
@@ -240,18 +283,49 @@ export function TurnosConfigClient({ settings, allStaff }: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Staff Habilitado para Turnos</CardTitle>
-          <CardDescription>Seleccioná qué miembros del equipo pueden recibir turnos</CardDescription>
+          <CardTitle>Staff habilitado</CardTitle>
+          <CardDescription>
+            Activá quiénes reciben turnos. Los barberos en modo &quot;Solo turnos&quot; no aparecen para walk-ins desde la fila.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
-            {allStaff.map(staff => (
-              <div key={staff.id} className="flex items-center justify-between rounded-lg border p-3">
-                <span className="font-medium">{staff.full_name}</span>
-                <Switch
-                  checked={staffStates[staff.id] ?? false}
-                  onCheckedChange={(checked) => handleToggleStaff(staff.id, checked)}
-                />
+          <div className="space-y-6">
+            {branchGroups.map(([branchId, list]) => (
+              <div key={branchId} className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{branchName(branchId)}</p>
+                {list.map(staff => {
+                  const state = staffStates[staff.id] ?? { enabled: false, walkinMode: 'both' as const }
+                  return (
+                    <div key={staff.id} className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-3">
+                        {staff.avatar_url ? (
+                          <img src={staff.avatar_url} alt="" className="h-9 w-9 rounded-full object-cover" />
+                        ) : (
+                          <div className="h-9 w-9 rounded-full bg-muted" />
+                        )}
+                        <span className="font-medium">{staff.full_name}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {state.enabled && (
+                          <Select
+                            value={state.walkinMode}
+                            onValueChange={(v) => handleWalkinModeChange(staff.id, v as AppointmentStaffWalkinMode)}
+                          >
+                            <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="both">Turnos + walk-in</SelectItem>
+                              <SelectItem value="appointments_only">Solo turnos</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
+                        <Switch
+                          checked={state.enabled}
+                          onCheckedChange={(checked) => handleToggleStaff(staff.id, checked)}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             ))}
             {allStaff.length === 0 && (

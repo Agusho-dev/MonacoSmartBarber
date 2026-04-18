@@ -828,15 +828,24 @@ export interface AppointmentSettings {
   reminder_template_name: string | null
   reminder_hours_before: number
   payment_mode: 'prepago' | 'postpago'
+  brand_primary_color: string
+  brand_bg_color: string
+  brand_text_color: string
+  welcome_message: string | null
+  buffer_minutes: number
+  lead_time_minutes: number
   created_at: string
   updated_at: string
 }
+
+export type AppointmentStaffWalkinMode = 'both' | 'appointments_only'
 
 export interface AppointmentStaff {
   id: string
   organization_id: string
   staff_id: string
   is_active: boolean
+  walkin_mode: AppointmentStaffWalkinMode
   created_at: string
   staff?: Staff
 }

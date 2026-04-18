@@ -21,6 +21,7 @@ import {
   ChevronDown,
   Receipt,
   Handshake,
+  CalendarClock,
 } from 'lucide-react'
 import {
   DndContext,
@@ -67,6 +68,7 @@ import { switchOrganization } from '@/lib/actions/org'
 
 const navItems = [
   { href: '/dashboard/fila', label: 'Fila', icon: ListOrdered, requiredPermissions: ['queue.view'] },
+  { href: '/dashboard/turnos', label: 'Turnos', icon: CalendarClock, requiredPermissions: ['appointments.view'] },
   { href: '/dashboard/sucursales', label: 'Sucursales', icon: Building2, requiredPermissions: ['branches.view'] },
   { href: '/dashboard/equipo', label: 'Equipo', icon: Scissors, requiredPermissions: ['staff.view', 'roles.manage', 'breaks.view', 'incentives.view', 'discipline.view'] },
   { href: '/dashboard/servicios', label: 'Servicios y Productos', icon: Sparkles, requiredPermissions: ['services.view'] },

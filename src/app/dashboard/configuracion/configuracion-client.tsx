@@ -16,8 +16,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Clock, UserX, Save, Timer, AlertTriangle, Zap, Monitor, ImagePlus, Building2, Loader2, X, CalendarClock, ChevronRight } from 'lucide-react'
-import Link from 'next/link'
+import { Clock, UserX, Save, Timer, AlertTriangle, Zap, Monitor, ImagePlus, Building2, Loader2, X } from 'lucide-react'
 
 const DAY_OPTIONS = [
   { value: 1, label: 'Lun' },
@@ -50,22 +49,6 @@ export function ConfiguracionClient({ appSettings, branches, org }: Props) {
   return (
     <div className="space-y-4 lg:space-y-6">
       <h2 className="text-xl lg:text-2xl font-bold tracking-tight">Configuración</h2>
-
-      <Link
-        href="/dashboard/configuracion/turnos"
-        className="flex items-center justify-between rounded-lg border bg-card p-4 transition-colors hover:bg-accent"
-      >
-        <div className="flex items-center gap-3">
-          <CalendarClock className="size-5 text-muted-foreground" />
-          <div>
-            <p className="font-medium">Configuración de Turnos</p>
-            <p className="text-sm text-muted-foreground">
-              Horarios, slots, staff habilitado y mensajería automática
-            </p>
-          </div>
-        </div>
-        <ChevronRight className="size-5 text-muted-foreground" />
-      </Link>
 
       <div className="grid gap-4 lg:gap-6 lg:grid-cols-2">
         <OrgBrandingCard org={org} />

@@ -111,6 +111,14 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
             'calendar.manage': 'Gestionar horarios y excepciones',
         },
     },
+    appointments: {
+        label: 'Turnos',
+        permissions: {
+            'appointments.view': 'Ver agenda de turnos y link público',
+            'appointments.manage': 'Crear, confirmar, cancelar y marcar no-show',
+            'appointments.configure': 'Configurar el sistema de turnos y personalización',
+        },
+    },
     branches: {
         label: 'Sucursales',
         permissions: {
@@ -201,6 +209,10 @@ export const PERMISSION_DESCRIPTIONS: Record<string, string> = {
 
     'calendar.view': 'Permite ver los horarios semanales y excepciones de los barberos.',
     'calendar.manage': 'Permite editar horarios, agregar bloques y registrar ausencias o días especiales.',
+
+    'appointments.view': 'Permite ver la agenda de turnos reservados y acceder al link público del turnero.',
+    'appointments.manage': 'Permite crear turnos manualmente, confirmarlos, cancelarlos y marcar no-shows.',
+    'appointments.configure': 'Permite configurar el sistema de turnos: horarios, buffer, servicios, staff y personalización.',
 
     'branches.view': 'Permite ver el listado de sucursales y sus datos básicos.',
     'branches.manage': 'Permite crear nuevas sucursales y modificar la configuración de las existentes.',
