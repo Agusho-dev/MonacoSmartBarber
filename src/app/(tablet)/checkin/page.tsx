@@ -562,12 +562,12 @@ export default function CheckinPage() {
         // Retroalimentación: si el cliente negó ser el match facial, guardar foto/descriptor al cliente real
         if (capturedScanPhoto) {
            const { saveFacePhoto } = await import('@/lib/face-recognition')
-           saveFacePhoto(data.id, capturedScanPhoto).catch(() => {})
+           saveFacePhoto(data.id, capturedScanPhoto, selectedBranch.id).catch(() => {})
            setCapturedScanPhoto(null)
         }
         if (faceDescriptor) {
            const { enrollFaceDescriptor } = await import('@/lib/face-recognition')
-           enrollFaceDescriptor(data.id, faceDescriptor, 'checkin', 0.85).catch(() => {})
+           enrollFaceDescriptor(data.id, faceDescriptor, 'checkin', 0.85, selectedBranch.id).catch(() => {})
            setFaceDescriptor(null)
         }
 
@@ -718,12 +718,12 @@ export default function CheckinPage() {
   )
 
   const handleFaceConfirmYes = useCallback(async () => {
-    if (!faceClientId || !faceDescriptor) return
+    if (!faceClientId || !faceDescriptor || !selectedBranch) return
 
     // Retroalimentar el sistema con el descriptor y foto confirmados (fire & forget)
-    enrollFaceDescriptor(faceClientId, faceDescriptor, 'checkin', 0.85).catch(() => {})
+    enrollFaceDescriptor(faceClientId, faceDescriptor, 'checkin', 0.85, selectedBranch.id).catch(() => {})
     if (capturedScanPhoto) {
-      saveFacePhoto(faceClientId, capturedScanPhoto).catch(() => {})
+      saveFacePhoto(faceClientId, capturedScanPhoto, selectedBranch.id).catch(() => {})
     }
 
     const supabase = createClient()
@@ -743,7 +743,7 @@ export default function CheckinPage() {
     } else {
       goTo('service_selection')
     }
-  }, [faceClientId, faceDescriptor, capturedScanPhoto])
+  }, [faceClientId, faceDescriptor, capturedScanPhoto, selectedBranch])
 
   const handleFaceConfirmNo = useCallback(() => {
     // Mantenemos faceDescriptor y capturedScanPhoto para guardarlos al cliente real que ingrese por teléfono
@@ -876,11 +876,11 @@ export default function CheckinPage() {
 
         // If we captured face data during this flow, save it now to the real client
         if (wantsEnrollment && capturedFaceDescriptors.length > 0 && newClientId) {
-          const savePromises = capturedFaceDescriptors.map((d, i) =>
-            enrollFaceDescriptor(newClientId, d, 'checkin', i === 0 ? 0.99 : 0) // We use 0.99 as a placeholder score for the best descriptor
+          const savePromises: Promise<boolean>[] = capturedFaceDescriptors.map((d, i) =>
+            enrollFaceDescriptor(newClientId, d, 'checkin', i === 0 ? 0.99 : 0, selectedBranch.id) // placeholder score for best descriptor
           )
           if (capturedFacePhoto) {
-            savePromises.push(saveFacePhoto(newClientId, capturedFacePhoto).then(() => true))
+            savePromises.push(saveFacePhoto(newClientId, capturedFacePhoto, selectedBranch.id).then((url) => url !== null))
           }
           await Promise.all(savePromises)
           setHasExistingFace(true)
@@ -1871,6 +1871,7 @@ export default function CheckinPage() {
             clientId={faceClientId || undefined}
             clientName={name || 'Cliente'}
             source="checkin"
+            branchId={selectedBranch?.id}
             captureOnly={wantsEnrollment}
             onCapture={(descriptors, photo) => {
               setCapturedFaceDescriptors(descriptors)
