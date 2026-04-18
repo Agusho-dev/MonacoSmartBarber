@@ -606,8 +606,13 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
 
   return (
     <div className="flex h-screen overflow-hidden">
-      {!isFocusMode && (
-        <aside className="hidden w-64 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
+      <aside
+        className={cn(
+          'hidden lg:flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shrink-0 overflow-hidden transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]',
+          isFocusMode ? 'w-0' : 'w-64'
+        )}
+      >
+        <div className="w-64 h-full shrink-0">
           <SidebarContent
             isEditMode={isEditMode}
             onToggleEditMode={() => setIsEditMode(p => !p)}
@@ -619,8 +624,8 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
           >
             {renderNavLinks()}
           </SidebarContent>
-        </aside>
-      )}
+        </div>
+      </aside>
 
       {!isFocusMode && (
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -646,8 +651,15 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
       )}
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        {!isFocusMode && (
-        <header className="flex h-12 lg:h-14 shrink-0 items-center gap-2 lg:gap-4 border-b px-3 lg:px-6">
+        <header
+          className={cn(
+            'flex shrink-0 items-center gap-2 lg:gap-4 border-b overflow-hidden transition-[height,opacity,padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]',
+            isFocusMode
+              ? 'h-0 opacity-0 px-0 border-b-0 pointer-events-none'
+              : 'h-12 lg:h-14 opacity-100 px-3 lg:px-6'
+          )}
+          aria-hidden={isFocusMode}
+        >
           <Button
             variant="ghost"
             size="icon"
@@ -690,17 +702,18 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
             </DropdownMenuContent>
           </DropdownMenu>
         </header>
-        )}
 
         {/* Contenedor de swipe — overflow-hidden recorta el panel entrante */}
         <div className="relative flex-1 overflow-hidden">
           <main
             ref={mainRef}
             className={cn(
-              'h-full overflow-y-auto overflow-x-hidden',
+              'h-full overflow-y-auto overflow-x-hidden transition-[padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]',
               !isFocusMode && 'p-3 lg:p-6 lg:pb-6'
             )}
-            style={isFocusMode ? undefined : { paddingBottom: 'calc(4.5rem + env(safe-area-inset-bottom, 0px))' }}
+            style={{
+              paddingBottom: isFocusMode ? 0 : 'calc(4.5rem + env(safe-area-inset-bottom, 0px))',
+            }}
             onTouchStart={isFocusMode ? undefined : handleTouchStart}
             onTouchEnd={isFocusMode ? undefined : handleTouchEnd}
           >
@@ -728,12 +741,11 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
             )}
           </div>
         </div>
-        {!isFocusMode && (
-          <MobileBottomNav
-            orderedItems={orderedItems}
-            currentIndex={currentNavIndex < 0 ? 0 : currentNavIndex}
-          />
-        )}
+        <MobileBottomNav
+          orderedItems={orderedItems}
+          currentIndex={currentNavIndex < 0 ? 0 : currentNavIndex}
+          hidden={isFocusMode}
+        />
       </div>
     </div>
   )

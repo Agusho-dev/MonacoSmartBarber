@@ -89,7 +89,7 @@ export function MensajeriaClient(props: MensajeriaProps) {
       branches={props.branches}
     >
       <div
-        className={`flex flex-col h-full min-h-0 overflow-hidden bg-background ${
+        className={`flex flex-col h-full min-h-0 overflow-hidden bg-background transition-[padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${
           isFocusMode ? 'max-lg:pb-[calc(2.75rem+env(safe-area-inset-bottom,0px))]' : ''
         }`}
       >
