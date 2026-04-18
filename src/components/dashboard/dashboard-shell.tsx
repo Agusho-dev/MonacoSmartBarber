@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useEffect, useMemo, useCallback, useRef } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import {
   Building2,
   Scissors,
@@ -293,6 +293,9 @@ interface DashboardShellProps {
 export function DashboardShell({ user, permissions, allowedBranchIds, organizationId, availableOrganizations, orgLogoUrl, children }: DashboardShellProps) {
   const pathname = usePathname()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const isFocusMode =
+    pathname.startsWith('/dashboard/mensajeria') && searchParams.get('foco') === '1'
   const touchStartX = useRef(0)
   const touchStartY = useRef(0)
   const touchStartTime = useRef(0)
@@ -603,27 +606,8 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <aside className="hidden w-64 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
-        <SidebarContent
-          isEditMode={isEditMode}
-          onToggleEditMode={() => setIsEditMode(p => !p)}
-          userRole={user.role}
-          userFullName={user.full_name}
-          organizationId={organizationId}
-          availableOrganizations={availableOrganizations}
-          orgLogoUrl={orgLogoUrl}
-        >
-          {renderNavLinks()}
-        </SidebarContent>
-      </aside>
-
-      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent
-          side="left"
-          className="w-64 p-0 bg-sidebar text-sidebar-foreground"
-          showCloseButton={false}
-        >
-          <SheetTitle className="sr-only">Menú de navegación</SheetTitle>
+      {!isFocusMode && (
+        <aside className="hidden w-64 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
           <SidebarContent
             isEditMode={isEditMode}
             onToggleEditMode={() => setIsEditMode(p => !p)}
@@ -635,10 +619,34 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
           >
             {renderNavLinks()}
           </SidebarContent>
-        </SheetContent>
-      </Sheet>
+        </aside>
+      )}
+
+      {!isFocusMode && (
+        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+          <SheetContent
+            side="left"
+            className="w-64 p-0 bg-sidebar text-sidebar-foreground"
+            showCloseButton={false}
+          >
+            <SheetTitle className="sr-only">Menú de navegación</SheetTitle>
+            <SidebarContent
+              isEditMode={isEditMode}
+              onToggleEditMode={() => setIsEditMode(p => !p)}
+              userRole={user.role}
+              userFullName={user.full_name}
+              organizationId={organizationId}
+              availableOrganizations={availableOrganizations}
+              orgLogoUrl={orgLogoUrl}
+            >
+              {renderNavLinks()}
+            </SidebarContent>
+          </SheetContent>
+        </Sheet>
+      )}
 
       <div className="flex flex-1 flex-col overflow-hidden">
+        {!isFocusMode && (
         <header className="flex h-12 lg:h-14 shrink-0 items-center gap-2 lg:gap-4 border-b px-3 lg:px-6">
           <Button
             variant="ghost"
@@ -682,15 +690,19 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
             </DropdownMenuContent>
           </DropdownMenu>
         </header>
+        )}
 
         {/* Contenedor de swipe — overflow-hidden recorta el panel entrante */}
         <div className="relative flex-1 overflow-hidden">
           <main
             ref={mainRef}
-            className="h-full overflow-y-auto overflow-x-hidden p-3 lg:p-6 lg:pb-6"
-            style={{ paddingBottom: 'calc(4.5rem + env(safe-area-inset-bottom, 0px))' }}
-            onTouchStart={handleTouchStart}
-            onTouchEnd={handleTouchEnd}
+            className={cn(
+              'h-full overflow-y-auto overflow-x-hidden',
+              !isFocusMode && 'p-3 lg:p-6 lg:pb-6'
+            )}
+            style={isFocusMode ? undefined : { paddingBottom: 'calc(4.5rem + env(safe-area-inset-bottom, 0px))' }}
+            onTouchStart={isFocusMode ? undefined : handleTouchStart}
+            onTouchEnd={isFocusMode ? undefined : handleTouchEnd}
           >
             <BranchScopeProvider allowedBranchIds={allowedBranchIds} organizationId={organizationId}>
               {children}
@@ -716,10 +728,12 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
             )}
           </div>
         </div>
-        <MobileBottomNav
-          orderedItems={orderedItems}
-          currentIndex={currentNavIndex < 0 ? 0 : currentNavIndex}
-        />
+        {!isFocusMode && (
+          <MobileBottomNav
+            orderedItems={orderedItems}
+            currentIndex={currentNavIndex < 0 ? 0 : currentNavIndex}
+          />
+        )}
       </div>
     </div>
   )

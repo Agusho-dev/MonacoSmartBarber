@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { MessageSquare, Megaphone, Zap, MessageCircle, Settings, Bell } from 'lucide-react'
+import { MessageSquare, Megaphone, Zap, MessageCircle, Settings, Bell, Maximize2, Minimize2 } from 'lucide-react'
 import { MensajeriaProvider, useMensajeria } from './components/shared/mensajeria-context'
 import { ConversationList } from './components/inbox/conversation-list'
 import { ChatView } from './components/inbox/chat-view'
@@ -34,6 +34,18 @@ export function MensajeriaClient(props: MensajeriaProps) {
   const [showNewChat, setShowNewChat] = useState(false)
   const [showScheduleDialog, setShowScheduleDialog] = useState(false)
   const [alertCount, setAlertCount] = useState(0)
+
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const isFocusMode = searchParams.get('foco') === '1'
+
+  const toggleFocusMode = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (isFocusMode) params.delete('foco')
+    else params.set('foco', '1')
+    const qs = params.toString()
+    router.replace(`/dashboard/mensajeria${qs ? `?${qs}` : ''}`, { scroll: false })
+  }, [isFocusMode, router, searchParams])
 
   // Cargar count de alertas no leídas
   useEffect(() => {
@@ -76,7 +88,11 @@ export function MensajeriaClient(props: MensajeriaProps) {
       appSettings={props.appSettings}
       branches={props.branches}
     >
-      <div className="flex flex-col h-full min-h-0 overflow-hidden bg-background">
+      <div
+        className={`flex flex-col h-full min-h-0 overflow-hidden bg-background ${
+          isFocusMode ? 'max-lg:pb-[calc(2.75rem+env(safe-area-inset-bottom,0px))]' : ''
+        }`}
+      >
 
         <TopTagsBar />
 
@@ -107,10 +123,30 @@ export function MensajeriaClient(props: MensajeriaProps) {
               </button>
             )
           })}
+          {/* Separador + toggle modo foco */}
+          <div className="mt-auto flex flex-col items-center gap-1 pt-2">
+            <div className="h-px w-8 bg-border" />
+            <button
+              onClick={toggleFocusMode}
+              className={`relative flex flex-col items-center justify-center w-11 h-11 rounded-xl transition-colors ${
+                isFocusMode
+                  ? 'bg-green-600/15 text-green-400'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
+              title={isFocusMode ? 'Salir de modo foco' : 'Modo foco'}
+              aria-pressed={isFocusMode}
+            >
+              {isFocusMode ? <Minimize2 className="size-4.5" /> : <Maximize2 className="size-4.5" />}
+              <span className="text-[9px] mt-0.5 font-medium leading-none">Foco</span>
+            </button>
+          </div>
         </div>
 
         {/* ═══ MOBILE NAV — Bottom bar (solo mobile) ═══ */}
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around bg-background border-t border py-1 px-2">
+        <div
+          className="lg:hidden fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around bg-background border-t border py-1 px-2"
+          style={{ paddingBottom: 'max(0.25rem, env(safe-area-inset-bottom))' }}
+        >
           {NAV_ITEMS.map(({ key, icon: Icon, label }) => {
             const isActive = key === section
             return (
@@ -131,6 +167,17 @@ export function MensajeriaClient(props: MensajeriaProps) {
               </button>
             )
           })}
+          <button
+            onClick={toggleFocusMode}
+            className={`relative flex flex-col items-center justify-center py-1.5 px-2 rounded-lg transition-colors ${
+              isFocusMode ? 'text-green-400' : 'text-muted-foreground'
+            }`}
+            aria-pressed={isFocusMode}
+            aria-label={isFocusMode ? 'Salir de modo foco' : 'Modo foco'}
+          >
+            {isFocusMode ? <Minimize2 className="size-4.5" /> : <Maximize2 className="size-4.5" />}
+            <span className="text-[9px] mt-0.5 font-medium">Foco</span>
+          </button>
         </div>
 
         <DeepLinkHandler onSection={setSection} />

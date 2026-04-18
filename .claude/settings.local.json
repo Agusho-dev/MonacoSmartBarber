@@ -57,7 +57,8 @@
       "Bash(vercel ls *)",
       "Bash(git commit -m 'fix: resolve partner magic link origin from request headers *)",
       "Bash(git push *)",
-      "Bash(git commit -m 'fix: typescript build errors in auth.ts and overview.ts *)"
+      "Bash(git commit -m 'fix: typescript build errors in auth.ts and overview.ts *)",
+      "Bash(claude mcp *)"
     ]
   },
   "enabledMcpjsonServers": [
