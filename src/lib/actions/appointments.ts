@@ -496,9 +496,22 @@ export async function createAppointment(input: CreateAppointmentInput) {
         .toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
 
       if (settings.confirmation_template_name) {
+        // Orden fijo de variables de body: {{1}}=nombre, {{2}}=servicio, {{3}}=fecha, {{4}}=hora
+        const confirmationParams = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: input.clientName },
+              { type: 'text', text: serviceName },
+              { type: 'text', text: dateFormatted },
+              { type: 'text', text: input.startTime },
+            ],
+          },
+        ]
         await supabase.from('scheduled_messages').insert({
           client_id: clientId,
           template_name: settings.confirmation_template_name,
+          template_params: confirmationParams,
           scheduled_for: new Date().toISOString(),
           phone: client.phone,
           status: 'pending',
@@ -524,9 +537,21 @@ export async function createAppointment(input: CreateAppointmentInput) {
           const reminderText = `Recordatorio: tenés un turno para ${serviceName} hoy a las ${input.startTime} en ${branch.name}.`
 
           if (settings.reminder_template_name) {
+            const reminderParams = [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: input.clientName },
+                  { type: 'text', text: serviceName },
+                  { type: 'text', text: dateFormatted },
+                  { type: 'text', text: input.startTime },
+                ],
+              },
+            ]
             await supabase.from('scheduled_messages').insert({
               client_id: clientId,
               template_name: settings.reminder_template_name,
+              template_params: reminderParams,
               scheduled_for: reminderTime.toISOString(),
               phone: client.phone,
               status: 'pending',
@@ -793,6 +818,35 @@ export async function getPublicBranchAppointmentStaff(branchId: string) {
     .map((as: any) => ({
       id: as.staff.id,
       full_name: as.staff.full_name,
+      avatar_url: as.staff.avatar_url as string | null,
+    }))
+}
+
+/**
+ * Listado interno (sin rate-limit) de barberos habilitados para turnos en una
+ * sucursal. Uso: dashboard/agenda, dialogs de mensajería.
+ */
+export async function getBranchAppointmentStaff(branchId: string) {
+  const supabase = createAdminClient()
+  const { data: branch } = await supabase
+    .from('branches')
+    .select('organization_id')
+    .eq('id', branchId)
+    .maybeSingle()
+
+  if (!branch) return []
+
+  const { data } = await supabase
+    .from('appointment_staff')
+    .select('staff_id, staff:staff_id(id, full_name, branch_id, is_active, avatar_url)')
+    .eq('organization_id', branch.organization_id)
+    .eq('is_active', true)
+
+  return (data ?? [])
+    .filter((as: any) => as.staff?.branch_id === branchId && as.staff?.is_active)
+    .map((as: any) => ({
+      id: as.staff.id as string,
+      full_name: as.staff.full_name as string,
       avatar_url: as.staff.avatar_url as string | null,
     }))
 }
