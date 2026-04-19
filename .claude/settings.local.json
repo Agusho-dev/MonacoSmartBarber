@@ -60,7 +60,11 @@
       "Bash(git fetch:*)",
       "Bash(git stash:*)",
       "Bash(git *)",
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "Bash(git commit -m 'fix: resolve partner magic link origin from request headers *)",
+      "Bash(git push *)",
+      "Bash(git commit -m 'fix: typescript build errors in auth.ts and overview.ts *)",
+      "Bash(claude mcp *)"
     ]
   },
   "enabledMcpjsonServers": [

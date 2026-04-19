@@ -88,6 +88,58 @@ export const statusConfig: Record<
   },
 }
 
+// ────────────────────────────────────────────────────────────────
+// Status semantics compartidas con la app mobile (BarberStatusTile).
+// El mobile clasifica a cada barbero como:
+//   - 'ocupado'    → tiene un cliente en in_progress
+//   - 'descanso'   → staff.status en {paused, blocked}
+//   - 'disponible' → el resto
+// El kiosk usaba antes un esquema de 4 niveles (sillas). Para alinear
+// la experiencia, la terminal de check-in ahora muestra la misma
+// clasificación + ETA + fila visible.
+// ────────────────────────────────────────────────────────────────
+export type MobileBarberStatus = 'disponible' | 'ocupado' | 'descanso'
+
+export function getMobileBarberStatus(
+  barber: Staff,
+  attending: boolean,
+): MobileBarberStatus {
+  if (attending) return 'ocupado'
+  const raw = (barber as unknown as { status?: string }).status
+  if (raw === 'paused' || raw === 'blocked') return 'descanso'
+  return 'disponible'
+}
+
+export const mobileStatusColors: Record<
+  MobileBarberStatus,
+  { hex: string; badge: string; stripe: string; accentText: string }
+> = {
+  disponible: {
+    hex: '#22C55E',
+    badge: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+    stripe: 'bg-emerald-500',
+    accentText: 'text-emerald-400',
+  },
+  ocupado: {
+    hex: '#F59E0B',
+    badge: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    stripe: 'bg-amber-500',
+    accentText: 'text-amber-400',
+  },
+  descanso: {
+    hex: '#9CA3AF',
+    badge: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
+    stripe: 'bg-zinc-500',
+    accentText: 'text-zinc-400',
+  },
+}
+
+export const mobileStatusLabels: Record<MobileBarberStatus, string> = {
+  disponible: 'Disponible',
+  ocupado: 'Ocupado',
+  descanso: 'En descanso',
+}
+
 export function getLoadColor(totalLoad: number): string {
   if (totalLoad === 0) return 'bg-emerald-500'
   if (totalLoad <= 2) return 'bg-amber-500'

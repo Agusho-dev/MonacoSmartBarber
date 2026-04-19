@@ -13,9 +13,11 @@ interface NavItem {
 interface MobileBottomNavProps {
   orderedItems: NavItem[]
   currentIndex: number
+  className?: string
+  hidden?: boolean
 }
 
-export function MobileBottomNav({ orderedItems, currentIndex }: MobileBottomNavProps) {
+export function MobileBottomNav({ orderedItems, currentIndex, className, hidden = false }: MobileBottomNavProps) {
   const router = useRouter()
   const total = orderedItems.length
   const currentItem = orderedItems[currentIndex]
@@ -34,7 +36,14 @@ export function MobileBottomNav({ orderedItems, currentIndex }: MobileBottomNavP
   const visibleDotIndices = getVisibleDots()
 
   return (
-    <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border">
+    <div
+      className={cn(
+        'lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border transition-transform duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]',
+        hidden && 'translate-y-full pointer-events-none',
+        className
+      )}
+      aria-hidden={hidden}
+    >
       <div className="flex items-center justify-between px-3 py-1.5" style={{ paddingBottom: 'max(0.375rem, env(safe-area-inset-bottom))' }}>
         <button
           onClick={() => currentIndex > 0 && router.push(orderedItems[currentIndex - 1].href)}

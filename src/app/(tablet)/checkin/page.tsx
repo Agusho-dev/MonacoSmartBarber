@@ -42,10 +42,13 @@ import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule, AppSetti
 import {
   buildBarberAvgMinutes,
   getBarberStats,
-  statusConfig,
   assignDynamicBarbers,
   isBarberBlockedByShiftEnd,
   calculateEffectiveAhead,
+  getMobileBarberStatus,
+  mobileStatusColors,
+  mobileStatusLabels,
+  formatWaitTime,
   type BarberStats,
 } from '@/lib/barber-utils'
 import { FaceCamera } from '@/components/checkin/face-camera'
@@ -562,12 +565,12 @@ export default function CheckinPage() {
         // Retroalimentación: si el cliente negó ser el match facial, guardar foto/descriptor al cliente real
         if (capturedScanPhoto) {
            const { saveFacePhoto } = await import('@/lib/face-recognition')
-           saveFacePhoto(data.id, capturedScanPhoto).catch(() => {})
+           saveFacePhoto(data.id, capturedScanPhoto, selectedBranch.id).catch(() => {})
            setCapturedScanPhoto(null)
         }
         if (faceDescriptor) {
            const { enrollFaceDescriptor } = await import('@/lib/face-recognition')
-           enrollFaceDescriptor(data.id, faceDescriptor, 'checkin', 0.85).catch(() => {})
+           enrollFaceDescriptor(data.id, faceDescriptor, 'checkin', 0.85, selectedBranch.id).catch(() => {})
            setFaceDescriptor(null)
         }
 
@@ -679,14 +682,9 @@ export default function CheckinPage() {
     return calculateEffectiveAhead(dynamicEntries, queueEntryId, activeBarberCount)
   }, [dynamicEntries, queueEntryId, activeBarberCount])
 
-  // ── Availability level: 1 (sin espera), 2 (baja), 3 (media), 4 (alta) ──
-  const getAvailabilityLevel = useCallback((stats: BarberStats): 1 | 2 | 3 | 4 => {
-    if (stats.status === 'available') return 1  // sin espera: barbero libre
-    if (stats.waiting === 0) return 2           // baja: atendiendo, sin cola
-    if (stats.waiting === 1) return 3           // media: 1 en espera
-    return 4                                     // alta: 2+ en espera
-  }, [])
-
+  // Nivel de disponibilidad global (1-4) usado por el CTA "Menor espera".
+  // La vista por barbero usa directamente la lógica del mobile
+  // (getMobileBarberStatus + ETA + fila) en lugar de este nivel agregado.
   const globalAvailability = useMemo((): 1 | 2 | 3 | 4 => {
     const activeBarbersList = barbers.filter(b => !notClockedInBarbers.has(b.id))
     const availableCount = activeBarbersList.filter(b =>
@@ -718,12 +716,12 @@ export default function CheckinPage() {
   )
 
   const handleFaceConfirmYes = useCallback(async () => {
-    if (!faceClientId || !faceDescriptor) return
+    if (!faceClientId || !faceDescriptor || !selectedBranch) return
 
     // Retroalimentar el sistema con el descriptor y foto confirmados (fire & forget)
-    enrollFaceDescriptor(faceClientId, faceDescriptor, 'checkin', 0.85).catch(() => {})
+    enrollFaceDescriptor(faceClientId, faceDescriptor, 'checkin', 0.85, selectedBranch.id).catch(() => {})
     if (capturedScanPhoto) {
-      saveFacePhoto(faceClientId, capturedScanPhoto).catch(() => {})
+      saveFacePhoto(faceClientId, capturedScanPhoto, selectedBranch.id).catch(() => {})
     }
 
     const supabase = createClient()
@@ -743,7 +741,7 @@ export default function CheckinPage() {
     } else {
       goTo('service_selection')
     }
-  }, [faceClientId, faceDescriptor, capturedScanPhoto])
+  }, [faceClientId, faceDescriptor, capturedScanPhoto, selectedBranch])
 
   const handleFaceConfirmNo = useCallback(() => {
     // Mantenemos faceDescriptor y capturedScanPhoto para guardarlos al cliente real que ingrese por teléfono
@@ -876,11 +874,11 @@ export default function CheckinPage() {
 
         // If we captured face data during this flow, save it now to the real client
         if (wantsEnrollment && capturedFaceDescriptors.length > 0 && newClientId) {
-          const savePromises = capturedFaceDescriptors.map((d, i) =>
-            enrollFaceDescriptor(newClientId, d, 'checkin', i === 0 ? 0.99 : 0) // We use 0.99 as a placeholder score for the best descriptor
+          const savePromises: Promise<boolean>[] = capturedFaceDescriptors.map((d, i) =>
+            enrollFaceDescriptor(newClientId, d, 'checkin', i === 0 ? 0.99 : 0, selectedBranch.id) // placeholder score for best descriptor
           )
           if (capturedFacePhoto) {
-            savePromises.push(saveFacePhoto(newClientId, capturedFacePhoto).then(() => true))
+            savePromises.push(saveFacePhoto(newClientId, capturedFacePhoto, selectedBranch.id).then((url) => url !== null))
           }
           await Promise.all(savePromises)
           setHasExistingFace(true)
@@ -1078,20 +1076,42 @@ export default function CheckinPage() {
   const renderBarberCard = (
     barber: Staff,
     onSelect: (barberId: string) => void,
-    showExpand = true
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _showExpand = true
   ) => {
     const isNotClockedIn = notClockedInBarbers.has(barber.id)
     const stats = getBarberStats(barber, dynamicEntries, barberAvgMinutes)
-    const cfg = statusConfig[stats.status]
-    const availLevel = getAvailabilityLevel(stats)
+    const mobileStatus = getMobileBarberStatus(barber, stats.attending)
+    const palette = mobileStatusColors[mobileStatus]
+    const statusLabel = mobileStatusLabels[mobileStatus]
 
+    // Ring color alineado con el estado
     const ringColor = isNotClockedIn
       ? 'ring-orange-500/60'
-      : stats.status === 'available'
+      : mobileStatus === 'disponible'
         ? 'ring-emerald-500/60'
-        : stats.status === 'occupied'
-          ? 'ring-blue-500/60'
-          : 'ring-amber-500/60'
+        : mobileStatus === 'ocupado'
+          ? 'ring-amber-500/60'
+          : 'ring-zinc-500/60'
+
+    // Línea de subtítulo: igual al mobile
+    //   - ocupado: "~X min de espera" si hay fila, si no 'Atendiendo ahora'
+    //   - disponible: 'Libre ahora'
+    //   - descanso: 'En descanso'
+    const subtitle = isNotClockedIn
+      ? null
+      : mobileStatus === 'ocupado'
+        ? stats.eta > 0
+          ? `Espera ${formatWaitTime(stats.eta)}`
+          : 'Atendiendo ahora'
+        : mobileStatus === 'descanso'
+          ? 'En descanso'
+          : 'Libre ahora'
+
+    // Queue "tijeras" — max 5 visibles + contador
+    const queueAhead = stats.waiting
+    const displayScissors = Math.min(queueAhead, 5)
+    const extra = queueAhead > 5 ? queueAhead - 5 : 0
 
     return (
       <GlassRing key={barber.id} halo={false}>
@@ -1105,6 +1125,14 @@ export default function CheckinPage() {
               : 'border-white/15 checkin-glass-surface hover:border-white/28 focus-visible:ring-white/50'
           )}
         >
+          {/* Stripe lateral coloreado (misma señal visual que mobile BarberStatusTile) */}
+          {!isNotClockedIn && (
+            <span
+              aria-hidden
+              className={cn('absolute left-0 top-0 bottom-0 w-[3px] rounded-l-2xl', palette.stripe)}
+            />
+          )}
+
           <div className="relative flex flex-col items-center gap-3">
             <div className={`shrink-0 rounded-full ring-2 ring-offset-2 ring-offset-transparent ${ringColor}`}>
               {barber.avatar_url ? (
@@ -1122,6 +1150,7 @@ export default function CheckinPage() {
 
             <div className="w-full text-center space-y-1.5">
               <p className={cn('text-xl md:text-2xl font-bold truncate', isLightBg ? 'text-zinc-900' : 'text-white')}>{barber.full_name}</p>
+
               {isNotClockedIn ? (
                 <>
                   <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs md:text-sm font-medium bg-orange-500/15 text-orange-300 border-orange-400/40">
@@ -1135,22 +1164,47 @@ export default function CheckinPage() {
                 </>
               ) : (
                 <>
+                  {/* Badge de estado con dot pulsante (mismo patrón que mobile) */}
                   <span
-                    className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs md:text-sm font-medium ${cfg.className}`}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs md:text-sm font-semibold',
+                      palette.badge,
+                    )}
                   >
-                    {cfg.label}
+                    <span className="relative inline-flex size-2">
+                      {mobileStatus !== 'descanso' && (
+                        <span
+                          className={cn('absolute inline-flex size-full rounded-full opacity-75 animate-ping', palette.stripe)}
+                        />
+                      )}
+                      <span className={cn('relative inline-flex size-2 rounded-full', palette.stripe)} />
+                    </span>
+                    {statusLabel}
                   </span>
-                  <p className={cn('text-sm md:text-base', isLightBg ? 'text-zinc-500' : 'text-white/65')}>
-                    {stats.attending && 'Atendiendo 1'}
-                    {stats.attending && stats.waiting > 0 && ' · '}
-                    {stats.waiting > 0 &&
-                      `${stats.waiting} ${stats.waiting === 1 ? 'espera' : 'esperan'}`}
-                    {!stats.attending && stats.waiting === 0 && 'Sin espera'}
-                  </p>
 
-                  <div className="pt-1">
-                    <AvailabilityIndicator level={availLevel} size="sm" />
-                  </div>
+                  {subtitle && (
+                    <p className={cn('text-sm md:text-base font-medium', palette.accentText)}>
+                      {subtitle}
+                    </p>
+                  )}
+
+                  {/* Indicador de fila con tijeras, idéntico a BarberStatusTile */}
+                  {queueAhead > 0 && (
+                    <div className="flex items-center justify-center gap-1 pt-1" aria-label={`${queueAhead} en fila`}>
+                      {Array.from({ length: displayScissors }).map((_, i) => (
+                        <Scissors
+                          key={i}
+                          className={cn('size-3.5 md:size-4', palette.accentText)}
+                          strokeWidth={2.5}
+                        />
+                      ))}
+                      {extra > 0 && (
+                        <span className={cn('ml-0.5 text-xs md:text-sm font-bold', palette.accentText)}>
+                          +{extra}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -1871,6 +1925,7 @@ export default function CheckinPage() {
             clientId={faceClientId || undefined}
             clientName={name || 'Cliente'}
             source="checkin"
+            branchId={selectedBranch?.id}
             captureOnly={wantsEnrollment}
             onCapture={(descriptors, photo) => {
               setCapturedFaceDescriptors(descriptors)

@@ -146,16 +146,18 @@ export async function enrollFaceDescriptor(
   clientId: string,
   descriptor: Float32Array,
   source: 'checkin' | 'barber' = 'checkin',
-  qualityScore = 0
+  qualityScore = 0,
+  branchId?: string | null,
 ): Promise<boolean> {
   const descriptorArray = Array.from(descriptor)
   const { enrollClientFace } = await import('@/lib/actions/clients')
-  return await enrollClientFace(clientId, descriptorArray, source, qualityScore)
+  return await enrollClientFace(clientId, descriptorArray, source, qualityScore, branchId)
 }
 
 export async function saveFacePhoto(
   clientId: string,
-  photoBlob: Blob
+  photoBlob: Blob,
+  branchId?: string | null,
 ): Promise<string | null> {
   const supabase = createClient()
   const filename = `${clientId}/${crypto.randomUUID()}.webp`
@@ -177,7 +179,7 @@ export async function saveFacePhoto(
 
   // Use Server Action to update the client's photo_url (bypasses RLS limits for anonymous users)
   const { saveClientFacePhotoUrl } = await import('@/lib/actions/clients')
-  const success = await saveClientFacePhotoUrl(clientId, data.publicUrl)
+  const success = await saveClientFacePhotoUrl(clientId, data.publicUrl, branchId)
   
   if (!success) {
     console.error('Failed to save public URL to client record via Server Action')

@@ -22,6 +22,8 @@ interface FaceEnrollmentProps {
   source?: 'checkin' | 'barber'
   captureOnly?: boolean
   onCapture?: (descriptors: Float32Array[], photo: Blob | null) => void
+  /** Sucursal seleccionada en el kiosk — usada para autorizar el enrolment en flujos públicos. */
+  branchId?: string | null
 }
 
 type EnrollState = 'loading' | 'positioning' | 'capturing' | 'saving' | 'done' | 'error'
@@ -36,6 +38,7 @@ export function FaceEnrollment({
   source = 'checkin',
   captureOnly = false,
   onCapture,
+  branchId = null,
 }: FaceEnrollmentProps) {
   const isTerminal = source === 'checkin'
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -259,26 +262,31 @@ export function FaceEnrollment({
 
     setState('saving')
 
-    const savePromises = descriptors.map((d, i) =>
-      enrollFaceDescriptor(clientId, d, source, i === 0 ? bestScore : 0)
+    const savePromises: Promise<boolean>[] = descriptors.map((d, i) =>
+      enrollFaceDescriptor(clientId, d, source, i === 0 ? bestScore : 0, branchId)
     )
 
     if (bestPhoto) {
       savePromises.push(
-        saveFacePhoto(clientId, bestPhoto).then(() => true)
+        saveFacePhoto(clientId, bestPhoto, branchId).then((url) => url !== null)
       )
     }
 
-    await Promise.all(savePromises)
+    const results = await Promise.all(savePromises)
 
     if (!mountedRef.current) return
+    // Si TODOS los saves fallaron, mostramos error en vez de "done" engañoso.
+    if (results.every((ok) => !ok)) {
+      setState('error')
+      return
+    }
     setState('done')
     stopCamera()
 
     setTimeout(() => {
       if (mountedRef.current) onComplete()
     }, 1500)
-  }, [clientId, source, onComplete, stopCamera, captureOnly, onCapture])
+  }, [clientId, source, branchId, onComplete, stopCamera, captureOnly, onCapture])
 
   return (
     <div className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-4 md:gap-6">
