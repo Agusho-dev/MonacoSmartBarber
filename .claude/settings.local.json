@@ -55,9 +55,12 @@
       "mcp__supabase__get_advisors",
       "Bash(git log *)",
       "Bash(vercel ls *)",
-      "Bash(git commit -m 'fix: resolve partner magic link origin from request headers *)",
-      "Bash(git push *)",
-      "Bash(git commit -m 'fix: typescript build errors in auth.ts and overview.ts *)"
+      "Bash(mkdir -p /mnt/c/Users/Agust/MonacoSmartBarber-1/src/app/turnos/\\\\[slug\\\\]/components)",
+      "Bash(mkdir -p /mnt/c/Users/Agust/MonacoSmartBarber-1/src/app/turnos/gestionar/\\\\[token\\\\])",
+      "Bash(git fetch:*)",
+      "Bash(git stash:*)",
+      "Bash(git *)",
+      "Bash(npx eslint *)"
     ]
   },
   "enabledMcpjsonServers": [
