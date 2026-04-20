@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { upsertPaymentAccount, togglePaymentAccount, deletePaymentAccount, getAccountBalanceSummary } from '@/lib/actions/paymentAccounts'
+import { upsertPaymentAccount, togglePaymentAccount, deletePaymentAccount, getAccountBalanceSummary, getAccountMonthlyAccumulated } from '@/lib/actions/paymentAccounts'
 import type { Branch, PaymentAccount } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -48,7 +48,7 @@ interface Props {
 
 type BalanceSummary = Awaited<ReturnType<typeof getAccountBalanceSummary>>
 
-const EMPTY_FORM = { id: '', branch_id: '', name: '', alias_or_cbu: '', daily_limit: '', sort_order: '0', is_active: true }
+const EMPTY_FORM = { id: '', branch_id: '', name: '', alias_or_cbu: '', daily_limit: '', sort_order: '0', is_active: true, is_salary_account: false }
 
 export function CuentasClient({ accounts, branches }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -65,6 +65,16 @@ export function CuentasClient({ accounts, branches }: Props) {
   const [balanceAccount, setBalanceAccount] = useState<AccountWithBranch | null>(null)
   const [balanceData, setBalanceData] = useState<BalanceSummary | null>(null)
   const [balanceLoading, setBalanceLoading] = useState(false)
+  // Rango de fechas configurable para el balance (F9)
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const [balanceFrom, setBalanceFrom] = useState<string>(todayStr)
+  const [balanceTo, setBalanceTo] = useState<string>(todayStr)
+  // Histórico mensual (F10): año y mes seleccionados para ver acumulado
+  const nowDate = new Date()
+  const [histYear, setHistYear] = useState<number>(nowDate.getFullYear())
+  const [histMonth, setHistMonth] = useState<number>(nowDate.getMonth() + 1)
+  const [histTotal, setHistTotal] = useState<number | null>(null)
+  const [histLoading, setHistLoading] = useState(false)
 
   function openCreate() {
     setForm({ ...EMPTY_FORM, branch_id: branches[0]?.id ?? '' })
@@ -80,6 +90,7 @@ export function CuentasClient({ accounts, branches }: Props) {
       daily_limit: acc.daily_limit ? String(acc.daily_limit) : '',
       sort_order: String(acc.sort_order ?? 0),
       is_active: acc.is_active,
+      is_salary_account: acc.is_salary_account ?? false,
     })
     setDialogOpen(true)
   }
@@ -88,15 +99,45 @@ export function CuentasClient({ accounts, branches }: Props) {
     setBalanceAccount(acc)
     setBalanceData(null)
     setBalanceDialogOpen(true)
+    setBalanceFrom(todayStr)
+    setBalanceTo(todayStr)
+    setHistYear(nowDate.getFullYear())
+    setHistMonth(nowDate.getMonth() + 1)
+    setHistTotal(null)
+    await loadBalance(acc.id, todayStr, todayStr)
+    await loadHistorical(acc.id, nowDate.getFullYear(), nowDate.getMonth() + 1)
+  }
+
+  async function loadBalance(accountId: string, from: string, to: string) {
     setBalanceLoading(true)
     try {
-      const data = await getAccountBalanceSummary(acc.id)
+      const fromISO = new Date(`${from}T00:00:00`).toISOString()
+      const toISO = new Date(`${to}T23:59:59.999`).toISOString()
+      const data = await getAccountBalanceSummary(accountId, { from: fromISO, to: toISO })
       setBalanceData(data)
     } catch {
       toast.error('Error al cargar el balance')
     }
     setBalanceLoading(false)
   }
+
+  async function loadHistorical(accountId: string, year: number, month: number) {
+    setHistLoading(true)
+    try {
+      const res = await getAccountMonthlyAccumulated(accountId, year, month)
+      setHistTotal(res.total)
+    } catch {
+      setHistTotal(null)
+    }
+    setHistLoading(false)
+  }
+
+  const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+  const historyYearOptions = (() => {
+    const years = [] as number[]
+    for (let y = nowDate.getFullYear(); y >= nowDate.getFullYear() - 3; y--) years.push(y)
+    return years
+  })()
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -108,6 +149,7 @@ export function CuentasClient({ accounts, branches }: Props) {
     if (form.daily_limit) fd.append('daily_limit', form.daily_limit)
     fd.append('sort_order', form.sort_order)
     fd.append('is_active', String(form.is_active))
+    fd.append('is_salary_account', String(form.is_salary_account))
 
     startTransition(async () => {
       const result = await upsertPaymentAccount(fd)
@@ -198,23 +240,33 @@ export function CuentasClient({ accounts, branches }: Props) {
                 {acc.alias_or_cbu && (
                   <p className="text-sm text-muted-foreground font-mono">{acc.alias_or_cbu}</p>
                 )}
-                <div className="flex gap-2 items-center mt-1">
+                <div className="flex gap-2 items-center mt-1 flex-wrap">
                   <Badge variant="outline" className="text-xs">Orden: {acc.sort_order}</Badge>
+                  {acc.is_salary_account && (
+                    <Badge variant="outline" className="text-xs bg-indigo-500/10 text-indigo-400 border-indigo-500/30">
+                      Sueldos
+                    </Badge>
+                  )}
                 </div>
-                {acc.daily_limit !== null && (
-                  <div className="mt-3 text-xs text-muted-foreground max-w-[240px]">
-                    <div className="flex justify-between mb-1.5">
-                      <span>Acumulado hoy:</span>
-                      <span className="font-medium text-foreground">{formatCurrency(acc.accumulated_today ?? 0)} / {formatCurrency(acc.daily_limit)}</span>
-                    </div>
+                <div className="mt-3 text-xs text-muted-foreground max-w-[240px]">
+                  <div className="flex justify-between mb-1.5">
+                    <span>Acumulado del mes:</span>
+                    <span className="font-medium text-foreground">
+                      {formatCurrency(acc.accumulated_today ?? 0)}
+                      {acc.daily_limit !== null && <> / {formatCurrency(acc.daily_limit)}</>}
+                    </span>
+                  </div>
+                  {acc.daily_limit !== null ? (
                     <div className="w-full bg-secondary h-1.5 rounded-full overflow-hidden">
                       <div
                         className={`h-full ${((acc.accumulated_today ?? 0) / acc.daily_limit) >= 1 ? 'bg-destructive' : 'bg-primary'}`}
                         style={{ width: `${Math.min(((acc.accumulated_today ?? 0) / acc.daily_limit) * 100, 100)}%` }}
                       />
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <p className="text-[11px] italic">Sin tope configurado</p>
+                  )}
+                </div>
                 {acc.branch && (
                   <p className="text-xs text-muted-foreground mt-1.5">{acc.branch.name}</p>
                 )}
@@ -336,6 +388,20 @@ export function CuentasClient({ accounts, branches }: Props) {
                 onCheckedChange={(checked) => setForm((f) => ({ ...f, is_active: checked }))}
               />
             </div>
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div>
+                <Label>Cuenta de sueldos</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {form.is_salary_account
+                    ? 'Se usa para pagar sueldos — filtrable en caja'
+                    : 'Cuenta de cobro estándar'}
+                </p>
+              </div>
+              <Switch
+                checked={form.is_salary_account}
+                onCheckedChange={(checked) => setForm((f) => ({ ...f, is_salary_account: checked }))}
+              />
+            </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
                 Cancelar
@@ -361,6 +427,32 @@ export function CuentasClient({ accounts, branches }: Props) {
             )}
           </DialogHeader>
 
+          {/* Filtro de rango de fechas para el balance (F9) */}
+          <div className="grid grid-cols-2 gap-3 rounded-lg border p-3">
+            <div>
+              <Label className="text-xs">Desde</Label>
+              <Input
+                type="date"
+                value={balanceFrom}
+                max={balanceTo}
+                onChange={(e) => setBalanceFrom(e.target.value)}
+                onBlur={() => balanceAccount && loadBalance(balanceAccount.id, balanceFrom, balanceTo)}
+                className="h-8 text-xs mt-1"
+              />
+            </div>
+            <div>
+              <Label className="text-xs">Hasta</Label>
+              <Input
+                type="date"
+                value={balanceTo}
+                min={balanceFrom}
+                onChange={(e) => setBalanceTo(e.target.value)}
+                onBlur={() => balanceAccount && loadBalance(balanceAccount.id, balanceFrom, balanceTo)}
+                className="h-8 text-xs mt-1"
+              />
+            </div>
+          </div>
+
           {balanceLoading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="size-6 animate-spin text-muted-foreground" />
@@ -371,12 +463,12 @@ export function CuentasClient({ accounts, branches }: Props) {
               <div className="grid grid-cols-3 gap-3">
                 <div className="rounded-lg border bg-emerald-500/10 border-emerald-500/20 p-3 text-center">
                   <ArrowDownRight className="size-4 mx-auto mb-1 text-emerald-500" />
-                  <p className="text-xs text-muted-foreground">Ingresos hoy</p>
+                  <p className="text-xs text-muted-foreground">Ingresos</p>
                   <p className="text-lg font-bold text-emerald-500">{formatCurrency(balanceData.totalIncome)}</p>
                 </div>
                 <div className="rounded-lg border bg-red-500/10 border-red-500/20 p-3 text-center">
                   <ArrowUpRight className="size-4 mx-auto mb-1 text-red-500" />
-                  <p className="text-xs text-muted-foreground">Egresos hoy</p>
+                  <p className="text-xs text-muted-foreground">Egresos</p>
                   <p className="text-lg font-bold text-red-500">{formatCurrency(balanceData.totalExpenses)}</p>
                 </div>
                 <div className="rounded-lg border p-3 text-center">
@@ -409,11 +501,58 @@ export function CuentasClient({ accounts, branches }: Props) {
                 </div>
               )}
 
+              {/* Acumulado mensual histórico (F10) */}
+              <div className="rounded-lg border p-3 space-y-2">
+                <p className="text-sm font-medium">Acumulado mensual histórico</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Select
+                    value={String(histMonth)}
+                    onValueChange={(v) => {
+                      const m = Number(v)
+                      setHistMonth(m)
+                      if (balanceAccount) loadHistorical(balanceAccount.id, histYear, m)
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MONTH_NAMES.map((name, i) => (
+                        <SelectItem key={i + 1} value={String(i + 1)}>{name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={String(histYear)}
+                    onValueChange={(v) => {
+                      const y = Number(v)
+                      setHistYear(y)
+                      if (balanceAccount) loadHistorical(balanceAccount.id, y, histMonth)
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {historyYearOptions.map((y) => (
+                        <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center justify-between text-sm pt-1">
+                  <span className="text-muted-foreground">Total ingresado</span>
+                  <span className="font-semibold">
+                    {histLoading ? '…' : formatCurrency(histTotal ?? 0)}
+                  </span>
+                </div>
+              </div>
+
               {/* Recent movements */}
               <div>
-                <p className="text-sm font-medium mb-2">Movimientos del día</p>
+                <p className="text-sm font-medium mb-2">Movimientos del rango</p>
                 {balanceData.transfers.length === 0 && balanceData.expenses.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-6">No hay movimientos hoy</p>
+                  <p className="text-sm text-muted-foreground text-center py-6">No hay movimientos en el rango</p>
                 ) : (
                   <div className="space-y-1.5 max-h-[250px] overflow-y-auto">
                     {balanceData.transfers.map((t) => {

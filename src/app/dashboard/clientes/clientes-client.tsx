@@ -1,7 +1,8 @@
 'use client'
 
 import { useMemo, useState, useEffect, useCallback, useTransition } from 'react'
-import { Search, Eye, Star, Tag, Camera, Save, MessageCircle, Instagram, Plus, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Search, Eye, Star, Tag, Camera, Save, MessageCircle, MessagesSquare, Instagram, Plus, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
@@ -92,7 +93,12 @@ interface Props {
 
 export function ClientesClient({ clients, visits, points, branches, orgName = 'BarberOS' }: Props) {
   const { selectedBranchId } = useBranchStore()
+  const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
+
+  function openCrmChat(clientId: string) {
+    router.push(`/dashboard/mensajeria?clientId=${clientId}`)
+  }
   const [search, setSearch] = useState('')
   const [segmentFilter, setSegmentFilter] = useState<Segment | 'all'>('all')
   const [sortBy, setSortBy] = useState<'lastVisit' | 'totalVisits' | null>(null)
@@ -442,13 +448,24 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
                   </TableCell>
                   <TableCell className="text-right">{pts}</TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() => setDetailClient(client)}
-                    >
-                      <Eye className="size-3" />
-                    </Button>
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        title="Abrir chat en CRM"
+                        onClick={() => openCrmChat(client.id)}
+                      >
+                        <MessagesSquare className="size-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        title="Ver detalle"
+                        onClick={() => setDetailClient(client)}
+                      >
+                        <Eye className="size-3" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               )
@@ -484,6 +501,14 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
                   <Badge variant="outline" className={`text-xs ${segCfg.className}`}>
                     {segCfg.label}
                   </Badge>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    title="Abrir chat en CRM"
+                    onClick={() => openCrmChat(client.id)}
+                  >
+                    <MessagesSquare className="size-3.5" />
+                  </Button>
                   <Button
                     variant="ghost"
                     size="icon-xs"

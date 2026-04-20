@@ -91,14 +91,15 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
 
     // Estado de filtros
     const [filterAccount, setFilterAccount] = useState<string>('__all__')
-    const [filterYear, setFilterYear] = useState<string>('__all__')
-    const [filterMonth, setFilterMonth] = useState<string>('__all__')
-
-    // Años disponibles calculados desde los tickets
-    const availableYears = useMemo(() => {
-        const years = [...new Set(expenseTickets.map(t => t.expense_date.slice(0, 4)))]
-        return years.sort().reverse()
-    }, [expenseTickets])
+    // F12: rango libre de fechas (default = mes actual)
+    const defaultFromDate = useMemo(() => {
+        const d = new Date()
+        d.setDate(1)
+        return d.toISOString().slice(0, 10)
+    }, [])
+    const defaultToDate = useMemo(() => new Date().toISOString().slice(0, 10), [])
+    const [filterFrom, setFilterFrom] = useState<string>(defaultFromDate)
+    const [filterTo, setFilterTo] = useState<string>(defaultToDate)
 
     const filteredTickets = expenseTickets.filter((t) => {
         if (selectedBranchId && t.branch_id !== selectedBranchId) return false
@@ -106,8 +107,8 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
             if (filterAccount === '__cash__') { if (t.payment_account_id) return false }
             else if (t.payment_account_id !== filterAccount) return false
         }
-        if (filterYear !== '__all__' && !t.expense_date.startsWith(filterYear)) return false
-        if (filterMonth !== '__all__' && !t.expense_date.startsWith(`${filterYear}-${filterMonth}`)) return false
+        if (filterFrom && t.expense_date < filterFrom) return false
+        if (filterTo && t.expense_date > filterTo) return false
         return true
     })
 
@@ -251,35 +252,27 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                     </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                    {/* Filtro por año */}
-                    <Select value={filterYear} onValueChange={(v) => { setFilterYear(v); setFilterMonth('__all__') }}>
-                        <SelectTrigger className="w-[110px] h-9">
-                            <SelectValue placeholder="Año" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="__all__">Todos</SelectItem>
-                            {availableYears.map(y => (
-                                <SelectItem key={y} value={y}>{y}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-
-                    {/* Filtro por mes — solo visible si hay año seleccionado */}
-                    {filterYear !== '__all__' && (
-                        <Select value={filterMonth} onValueChange={setFilterMonth}>
-                            <SelectTrigger className="w-[120px] h-9">
-                                <SelectValue placeholder="Mes" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="__all__">Todos</SelectItem>
-                                {[
-                                    ['01', 'Enero'], ['02', 'Febrero'], ['03', 'Marzo'], ['04', 'Abril'],
-                                    ['05', 'Mayo'], ['06', 'Junio'], ['07', 'Julio'], ['08', 'Agosto'],
-                                    ['09', 'Septiembre'], ['10', 'Octubre'], ['11', 'Noviembre'], ['12', 'Diciembre']
-                                ].map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
-                    )}
+                    {/* Filtro por rango de fechas (F12) */}
+                    <div className="flex items-center gap-1.5">
+                        <Label className="text-xs text-muted-foreground">Desde</Label>
+                        <Input
+                            type="date"
+                            value={filterFrom}
+                            max={filterTo || undefined}
+                            onChange={(e) => setFilterFrom(e.target.value)}
+                            className="h-9 w-[145px] text-xs"
+                        />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <Label className="text-xs text-muted-foreground">Hasta</Label>
+                        <Input
+                            type="date"
+                            value={filterTo}
+                            min={filterFrom || undefined}
+                            onChange={(e) => setFilterTo(e.target.value)}
+                            className="h-9 w-[145px] text-xs"
+                        />
+                    </div>
 
                     {/* Filtro por cuenta */}
                     <Select value={filterAccount} onValueChange={setFilterAccount}>

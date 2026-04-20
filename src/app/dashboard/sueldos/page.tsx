@@ -23,7 +23,7 @@ export default async function SueldosPage() {
 
   const supabase = createAdminClient()
 
-  const [{ data: branches }, { data: barbersRaw }, { data: salaryConfigsRaw }] = await Promise.all([
+  const [{ data: branches }, { data: barbersRaw }, { data: salaryConfigsRaw }, { data: paymentAccounts }] = await Promise.all([
     supabase.from('branches').select('*').eq('organization_id', orgId).eq('is_active', true).order('name'),
     supabase
       .from('staff')
@@ -33,6 +33,11 @@ export default async function SueldosPage() {
       .eq('is_active', true)
       .order('full_name'),
     supabase.from('salary_configs').select('*, staff!inner(organization_id)').eq('staff.organization_id', orgId),
+    supabase
+      .from('payment_accounts')
+      .select('id, name, branch_id, is_salary_account, alias_or_cbu')
+      .eq('is_active', true)
+      .order('sort_order'),
   ])
 
   const configsByStaffId = new Map((salaryConfigsRaw ?? []).map((c) => [c.staff_id, c]))
@@ -41,10 +46,15 @@ export default async function SueldosPage() {
     return { ...b, salary_configs: cfg ? [cfg] : [] }
   })
 
+  // Filtrar cuentas a la org (solo las que pertenecen a branches de esta org)
+  const branchIds = new Set((branches ?? []).map(b => b.id))
+  const orgPaymentAccounts = (paymentAccounts ?? []).filter(a => branchIds.has(a.branch_id))
+
   return (
     <SueldosClient
       branches={branches ?? []}
       barbers={barbers}
+      paymentAccounts={orgPaymentAccounts}
     />
   )
 }

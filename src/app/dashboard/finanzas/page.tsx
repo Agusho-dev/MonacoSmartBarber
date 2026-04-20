@@ -90,12 +90,24 @@ export default async function FinanzasPage() {
     return { ...b, salary_configs: cfg ? [cfg] : [] }
   })
 
+  // Cuentas simplificadas para SueldosClient (incluye is_salary_account)
+  const paymentAccountsForSalary = (accounts ?? [])
+    .filter(a => a.is_active)
+    .map(a => ({
+      id: a.id,
+      name: a.name,
+      branch_id: a.branch_id,
+      is_salary_account: a.is_salary_account ?? false,
+      alias_or_cbu: a.alias_or_cbu ?? null,
+    }))
+
   return (
     <FinanzasTabsClient
       initialData={financialData}
       branches={branches ?? []}
       accounts={accounts ?? []}
       barbers={barbers}
+      paymentAccounts={paymentAccountsForSalary}
       expenseTickets={expenseTickets ?? []}
       fixedExpenses={fixedExpenses}
       commissionSummary={commissionSummary}

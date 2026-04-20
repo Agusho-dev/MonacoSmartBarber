@@ -161,6 +161,39 @@ export async function toggleBarberVisibility(staffId: string) {
   return { success: true, hidden: newValue }
 }
 
+export async function toggleBarberMobileVisibility(staffId: string) {
+  const supabase = createAdminClient()
+
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'Organización no encontrada' }
+
+  const { data: staff, error: fetchError } = await supabase
+    .from('staff')
+    .select('hidden_from_mobile')
+    .eq('id', staffId)
+    .eq('organization_id', orgId)
+    .single()
+
+  if (fetchError || !staff) {
+    return { error: 'Error al obtener el estado del barbero.' }
+  }
+
+  const newValue = !staff.hidden_from_mobile
+
+  const { error } = await supabase
+    .from('staff')
+    .update({ hidden_from_mobile: newValue })
+    .eq('id', staffId)
+    .eq('organization_id', orgId)
+
+  if (error) {
+    return { error: 'Error al cambiar visibilidad en app: ' + error.message }
+  }
+
+  revalidatePath('/dashboard/barberos')
+  return { success: true, hidden: newValue }
+}
+
 export async function createStaffMember(data: {
   full_name: string
   branch_id: string | null

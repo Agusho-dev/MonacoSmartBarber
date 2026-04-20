@@ -65,9 +65,18 @@ import { useBranchStore } from '@/stores/branch-store'
 
 // ─── Tipos y constantes ───────────────────────────────────────────────────────
 
+interface SalaryAccountOption {
+  id: string
+  name: string
+  branch_id: string
+  is_salary_account: boolean | null
+  alias_or_cbu: string | null
+}
+
 interface Props {
   branches: Branch[]
   barbers: BarberWithConfig[]
+  paymentAccounts: SalaryAccountOption[]
 }
 
 const SCHEME_LABELS: Record<SalaryScheme, string> = {
@@ -142,7 +151,7 @@ function formatBatchDate(dateStr: string) {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-export function SueldosClient({ branches, barbers }: Props) {
+export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
   const router = useRouter()
   const { selectedBranchId: storeBranchId, setSelectedBranchId: setStoreBranchId } =
     useBranchStore()
@@ -215,6 +224,8 @@ export function SueldosClient({ branches, barbers }: Props) {
   // Confirmación de pago
   const [payDialogOpen, setPayDialogOpen] = useState(false)
   const [payNotes, setPayNotes] = useState('')
+  const [payMethod, setPayMethod] = useState<'cash' | 'transfer' | 'card' | 'other'>('cash')
+  const [payAccountId, setPayAccountId] = useState<string>('')
 
   // ─── Carga de datos por barbero ────────────────────────────────────────────
 
@@ -452,7 +463,9 @@ export function SueldosClient({ branches, barbers }: Props) {
         Array.from(selectedIds),
         activeBarber.id,
         selectedBranchId,
-        payNotes || undefined
+        payNotes || undefined,
+        payMethod,
+        payMethod === 'transfer' ? payAccountId || null : null,
       )
       if (r.error) {
         toast.error(r.error)
@@ -460,6 +473,8 @@ export function SueldosClient({ branches, barbers }: Props) {
         toast.success('Pago registrado correctamente')
         setPayDialogOpen(false)
         setPayNotes('')
+        setPayMethod('cash')
+        setPayAccountId('')
         // Generar recibo PDF
         try {
           await exportPaymentReceiptPDF({
@@ -891,14 +906,30 @@ export function SueldosClient({ branches, barbers }: Props) {
                                   </span>
                                 </div>
                                 <div className="divide-y divide-border">
-                                  {week.batches.map(({ batch, reports: batchReports }) => (
+                                  {week.batches.map(({ batch, reports: batchReports }) => {
+                                    const methodLabels: Record<string, string> = {
+                                      cash: 'Efectivo',
+                                      transfer: 'Transferencia',
+                                      card: 'Tarjeta',
+                                      other: 'Otro',
+                                    }
+                                    const accountName = batch.payment_account_id
+                                      ? paymentAccounts.find(a => a.id === batch.payment_account_id)?.name
+                                      : null
+                                    return (
                                     <div key={batch.id} className="px-4 py-3">
                                       <div className="flex items-center justify-between mb-2">
-                                        <div className="flex items-center gap-2">
+                                        <div className="flex items-center gap-2 flex-wrap">
                                           <Banknote className="size-3.5 text-muted-foreground shrink-0" />
                                           <span className="text-sm font-medium">
                                             {formatBatchDate(batch.paid_at)}
                                           </span>
+                                          {batch.payment_method && (
+                                            <Badge variant="outline" className="text-[10px]">
+                                              {methodLabels[batch.payment_method] ?? batch.payment_method}
+                                              {accountName ? ` · ${accountName}` : ''}
+                                            </Badge>
+                                          )}
                                         </div>
                                         <div className="flex items-center gap-2">
                                           <span className="text-sm font-semibold tabular-nums">
@@ -959,7 +990,8 @@ export function SueldosClient({ branches, barbers }: Props) {
                                         })}
                                       </div>
                                     </div>
-                                  ))}
+                                  )
+                                })}
                                 </div>
                               </div>
                             ))}
@@ -1369,6 +1401,64 @@ export function SueldosClient({ branches, barbers }: Props) {
                 </span>
               </div>
             </div>
+            {/* Método de pago */}
+            <div>
+              <Label>Método de pago</Label>
+              <Select value={payMethod} onValueChange={(v) => {
+                setPayMethod(v as 'cash' | 'transfer' | 'card' | 'other')
+                if (v !== 'transfer') setPayAccountId('')
+              }}>
+                <SelectTrigger className="mt-1.5">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Efectivo</SelectItem>
+                  <SelectItem value="transfer">Transferencia</SelectItem>
+                  <SelectItem value="card">Tarjeta</SelectItem>
+                  <SelectItem value="other">Otro</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Selector de cuenta sólo para transferencia */}
+            {payMethod === 'transfer' && (() => {
+              const branchAccounts = paymentAccounts.filter(a => a.branch_id === selectedBranchId)
+              const salaryAccounts = branchAccounts.filter(a => a.is_salary_account)
+              const orderedAccounts = [
+                ...salaryAccounts,
+                ...branchAccounts.filter(a => !a.is_salary_account),
+              ]
+              if (orderedAccounts.length === 0) {
+                return (
+                  <p className="text-xs text-amber-500">
+                    No hay cuentas activas en esta sucursal. Configurá una en Cuentas de cobro.
+                  </p>
+                )
+              }
+              return (
+                <div>
+                  <Label>Cuenta a debitar</Label>
+                  <Select value={payAccountId} onValueChange={setPayAccountId}>
+                    <SelectTrigger className="mt-1.5">
+                      <SelectValue placeholder="Seleccionar cuenta" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {orderedAccounts.map((acc) => (
+                        <SelectItem key={acc.id} value={acc.id}>
+                          {acc.name}
+                          {acc.is_salary_account ? ' · Sueldos' : ''}
+                          {acc.alias_or_cbu ? ` · ${acc.alias_or_cbu}` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Se registrará un egreso automático en la cuenta elegida.
+                  </p>
+                </div>
+              )
+            })()}
+
             {/* Notas opcionales */}
             <div>
               <Label htmlFor="pay-notes">Notas (opcional)</Label>
@@ -1385,7 +1475,10 @@ export function SueldosClient({ branches, barbers }: Props) {
             <Button variant="outline" onClick={() => setPayDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={handlePay} disabled={isPending}>
+            <Button
+              onClick={handlePay}
+              disabled={isPending || (payMethod === 'transfer' && !payAccountId)}
+            >
               Confirmar pago
             </Button>
           </DialogFooter>

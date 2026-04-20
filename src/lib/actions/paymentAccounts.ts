@@ -30,10 +30,12 @@ export async function upsertPaymentAccount(formData: FormData) {
   const dailyLimitStr = formData.get('daily_limit') as string | null
   const sortOrderStr = formData.get('sort_order') as string | null
   const isActiveStr = formData.get('is_active') as string | null
+  const isSalaryAccountStr = formData.get('is_salary_account') as string | null
 
   const dailyLimit = dailyLimitStr && dailyLimitStr !== '' ? Number(dailyLimitStr) : null
   const sortOrder = sortOrderStr && sortOrderStr !== '' ? Number(sortOrderStr) : 0
   const isActive = isActiveStr !== null ? isActiveStr === 'true' : true
+  const isSalaryAccount = isSalaryAccountStr === 'true'
 
   if (!branchId || !name) return { error: 'Nombre y sucursal son obligatorios' }
 
@@ -50,6 +52,7 @@ export async function upsertPaymentAccount(formData: FormData) {
         daily_limit: dailyLimit,
         sort_order: sortOrder,
         is_active: isActive,
+        is_salary_account: isSalaryAccount,
       })
       .eq('id', id)
     if (error) return { error: error.message }
@@ -63,12 +66,14 @@ export async function upsertPaymentAccount(formData: FormData) {
         daily_limit: dailyLimit,
         sort_order: sortOrder,
         is_active: isActive,
+        is_salary_account: isSalaryAccount,
       })
     if (error) return { error: error.message }
   }
 
   revalidatePath('/dashboard/cuentas')
   revalidatePath('/dashboard/finanzas')
+  revalidatePath('/dashboard/caja')
   return { success: true }
 }
 
@@ -293,36 +298,72 @@ export async function getAllAccountBalanceTotals(branchId?: string | null) {
   return balances
 }
 
-export async function getAccountBalanceSummary(accountId: string) {
+export async function getAccountBalanceSummary(
+  accountId: string,
+  range?: { from?: string; to?: string } // ISO datetimes; if omitted se usa el día actual
+) {
   const supabase = await createClient()
   const today = getLocalDateStr()
   const { start: todayStart, end: todayEnd } = getLocalDayBounds()
 
-  // Get income (transfer_logs) for this account today
-  const { data: todayTransfers } = await supabase
+  const fromISO = range?.from ?? todayStart
+  const toISO = range?.to ?? todayEnd
+  const fromDate = fromISO.slice(0, 10) // YYYY-MM-DD
+  const toDate = toISO.slice(0, 10)
+
+  // Get income (transfer_logs) for this account in range
+  const { data: transfers } = await supabase
     .from('transfer_logs')
     .select('id, amount, transferred_at, visit:visits(client:clients(name), barber:staff(full_name))')
     .eq('payment_account_id', accountId)
-    .gte('transferred_at', todayStart)
-    .lte('transferred_at', todayEnd)
+    .gte('transferred_at', fromISO)
+    .lte('transferred_at', toISO)
     .order('transferred_at', { ascending: false })
 
-  // Get expenses (expense_tickets) associated with this account today
-  const { data: todayExpenses } = await supabase
+  // Get expenses (expense_tickets) in range
+  const { data: expenses } = await supabase
     .from('expense_tickets')
     .select('id, amount, category, description, expense_date, created_by_staff:created_by(full_name)')
     .eq('payment_account_id', accountId)
-    .eq('expense_date', today)
+    .gte('expense_date', fromDate)
+    .lte('expense_date', toDate)
     .order('created_at', { ascending: false })
 
-  const totalIncome = (todayTransfers ?? []).reduce((s, t) => s + Number(t.amount), 0)
-  const totalExpenses = (todayExpenses ?? []).reduce((s, e) => s + Number(e.amount), 0)
+  const totalIncome = (transfers ?? []).reduce((s, t) => s + Number(t.amount), 0)
+  const totalExpenses = (expenses ?? []).reduce((s, e) => s + Number(e.amount), 0)
+
+  // Retrocompatibilidad: si no se pasó rango mantenemos el campo "hoy"
+  void today
 
   return {
     totalIncome,
     totalExpenses,
     estimatedBalance: totalIncome - totalExpenses,
-    transfers: todayTransfers ?? [],
-    expenses: todayExpenses ?? [],
+    transfers: transfers ?? [],
+    expenses: expenses ?? [],
+    range: { from: fromISO, to: toISO },
   }
+}
+
+/**
+ * Calcula el acumulado (suma de ingresos vía transfer_logs) de una cuenta en un mes dado.
+ * Permite ver histórico de meses anteriores aunque accumulated_today ya se haya reseteado.
+ */
+export async function getAccountMonthlyAccumulated(accountId: string, year: number, month: number) {
+  const supabase = await createClient()
+  // month: 1-12
+  const start = new Date(year, month - 1, 1, 0, 0, 0, 0).toISOString()
+  const end = new Date(year, month, 0, 23, 59, 59, 999).toISOString()
+
+  const { data, error } = await supabase
+    .from('transfer_logs')
+    .select('amount')
+    .eq('payment_account_id', accountId)
+    .gte('transferred_at', start)
+    .lte('transferred_at', end)
+
+  if (error) return { total: 0, count: 0, error: error.message }
+
+  const total = (data ?? []).reduce((s, t) => s + Number(t.amount), 0)
+  return { total, count: data?.length ?? 0, error: null }
 }

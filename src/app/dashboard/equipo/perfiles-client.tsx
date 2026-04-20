@@ -67,6 +67,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { useBranchStore } from '@/stores/branch-store'
+import { DateRangePicker } from '@/components/dashboard/date-range-picker'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -178,7 +179,7 @@ const SCHEME_LABELS: Record<string, string> = {
   hybrid: 'Híbrido',
 }
 
-type PeriodFilter = 'day' | 'week' | 'month' | '3months' | '6months' | '9months' | '12months'
+type PeriodFilter = 'day' | 'week' | 'month' | '3months' | '6months' | '9months' | '12months' | 'custom'
 
 const PERIOD_OPTIONS: { value: PeriodFilter; label: string }[] = [
   { value: 'day', label: 'Hoy' },
@@ -188,9 +189,10 @@ const PERIOD_OPTIONS: { value: PeriodFilter; label: string }[] = [
   { value: '6months', label: '6 meses' },
   { value: '9months', label: '9 meses' },
   { value: '12months', label: '12 meses' },
+  { value: 'custom', label: 'Personalizado' },
 ]
 
-function getFilterDate(period: PeriodFilter): Date {
+function getFilterDate(period: Exclude<PeriodFilter, 'custom'>): Date {
   const now = new Date()
   switch (period) {
     case 'day':
@@ -531,15 +533,39 @@ function BarberDetailPanel({
     }
   }
 
-  const filterDate = useMemo(() => getFilterDate(period), [period])
+  // Rango personalizado (cuando period === 'custom'). Default: hoy (día puntual).
+  const [customFrom, setCustomFrom] = useState(() => {
+    const d = new Date()
+    d.setHours(0, 0, 0, 0)
+    return d
+  })
+  const [customTo, setCustomTo] = useState(() => {
+    const d = new Date()
+    d.setHours(23, 59, 59, 999)
+    return d
+  })
+
+  const { filterFrom, filterTo } = useMemo(() => {
+    if (period === 'custom') {
+      return { filterFrom: customFrom, filterTo: customTo }
+    }
+    const to = new Date()
+    to.setHours(23, 59, 59, 999)
+    return { filterFrom: getFilterDate(period), filterTo: to }
+  }, [period, customFrom, customTo])
+
+  // Alias para cálculos que solo miran el límite inferior
+  const filterDate = filterFrom
 
   // Visitas filtradas por barbero + período
   const visits = useMemo(
     () =>
-      serviceHistory.filter(
-        (v) => v.barber?.id === barber.id && new Date(v.completed_at) >= filterDate
-      ),
-    [serviceHistory, barber.id, filterDate]
+      serviceHistory.filter((v) => {
+        if (v.barber?.id !== barber.id) return false
+        const d = new Date(v.completed_at)
+        return d >= filterFrom && d <= filterTo
+      }),
+    [serviceHistory, barber.id, filterFrom, filterTo]
   )
 
   // Visitas del mes actual (para KPIs siempre en contexto mensual)
@@ -566,10 +592,12 @@ function BarberDetailPanel({
 
   const events = useMemo(
     () =>
-      disciplinaryEvents.filter(
-        (e) => e.staff_id === barber.id && new Date(e.event_date) >= filterDate
-      ),
-    [disciplinaryEvents, barber.id, filterDate]
+      disciplinaryEvents.filter((e) => {
+        if (e.staff_id !== barber.id) return false
+        const d = new Date(e.event_date)
+        return d >= filterFrom && d <= filterTo
+      }),
+    [disciplinaryEvents, barber.id, filterFrom, filterTo]
   )
 
   const breakOvertimes = useMemo(
@@ -635,39 +663,50 @@ function BarberDetailPanel({
 
   // Progreso de cortes según período seleccionado (para el gráfico de actividad)
   const progressData = useMemo(() => {
-    const allBarberVisits = serviceHistory.filter(
-      (v) => v.barber?.id === barber.id && new Date(v.completed_at) >= filterDate
-    )
+    const allBarberVisits = serviceHistory.filter((v) => {
+      if (v.barber?.id !== barber.id) return false
+      const d = new Date(v.completed_at)
+      return d >= filterFrom && d <= filterTo
+    })
     const buckets = new Map<string, number>()
+
+    // Determinar granularidad efectiva
+    const rangeMs = filterTo.getTime() - filterFrom.getTime()
+    const rangeDays = rangeMs / 86400000
+    let effective: 'hour' | 'dayOfWeek' | 'dayOfMonth' | 'month'
+    if (period === 'day' || rangeDays <= 1.5) effective = 'hour'
+    else if (period === 'week' || rangeDays <= 8) effective = 'dayOfWeek'
+    else if (period === 'month' || rangeDays <= 62) effective = 'dayOfMonth'
+    else effective = 'month'
 
     allBarberVisits.forEach((v) => {
       let key: string
       const d = new Date(v.completed_at)
-      if (period === 'day') {
+      if (effective === 'hour') {
         const h = d.getHours()
         key = `${String(h).padStart(2, '0')}:00`
-      } else if (period === 'week') {
+      } else if (effective === 'dayOfWeek') {
         key = DAYS[d.getDay()]
-      } else if (period === 'month') {
-        key = String(d.getDate())
+      } else if (effective === 'dayOfMonth') {
+        key = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`
       } else {
         key = d.toLocaleDateString('es-AR', { month: 'short', year: '2-digit' })
       }
       buckets.set(key, (buckets.get(key) ?? 0) + 1)
     })
 
-    if (period === 'day') {
+    if (effective === 'hour') {
       return Array.from(buckets.entries())
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([label, cortes]) => ({ label, cortes }))
     }
-    if (period === 'week') {
+    if (effective === 'dayOfWeek') {
       const order = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
       return order.map((d) => ({ label: d, cortes: buckets.get(d) ?? 0 }))
     }
-    if (period === 'month') {
+    if (effective === 'dayOfMonth') {
       return Array.from(buckets.entries())
-        .sort(([a], [b]) => Number(a) - Number(b))
+        .sort(([a], [b]) => a.localeCompare(b))
         .map(([label, cortes]) => ({ label, cortes }))
     }
     return allBarberVisits
@@ -690,7 +729,7 @@ function BarberDetailPanel({
         label: date.toLocaleDateString('es-AR', { month: 'short', year: '2-digit' }),
         cortes: count,
       }))
-  }, [serviceHistory, barber.id, filterDate, period])
+  }, [serviceHistory, barber.id, filterFrom, filterTo, period])
 
   // Desglose diario
   const dailyBreakdown = useMemo(() => {
@@ -1100,7 +1139,7 @@ function BarberDetailPanel({
       {/* Selector de período + gráfico de actividad */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle className="text-base flex items-center gap-2">
               <TrendingUp className="size-4" />
               Actividad de cortes
@@ -1118,6 +1157,21 @@ function BarberDetailPanel({
               </SelectContent>
             </Select>
           </div>
+          {period === 'custom' && (
+            <div className="mt-3">
+              <DateRangePicker
+                from={customFrom}
+                to={customTo}
+                onChange={(f, t) => {
+                  setCustomFrom(f)
+                  setCustomTo(t)
+                }}
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Seleccioná un día puntual o un rango. Click simple para día único, doble click para rango.
+              </p>
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           {progressData.length === 0 ? (

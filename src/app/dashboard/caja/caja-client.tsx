@@ -61,7 +61,7 @@ import {
 
 interface BranchRow { id: string; name: string }
 interface BarberRow { id: string; full_name: string; branch_id: string | null }
-interface AccountRow { id: string; name: string; branch_id: string }
+interface AccountRow { id: string; name: string; branch_id: string; is_salary_account?: boolean }
 
 interface CajaClientProps {
   initialTickets: CajaTicket[]
@@ -176,13 +176,18 @@ export function CajaClient({
         result = result.filter(t => t.paymentMethod === 'cash')
       } else if (filterPayment === 'card') {
         result = result.filter(t => t.paymentMethod === 'card')
+      } else if (filterPayment === 'salary_accounts') {
+        const salaryIds = new Set(filteredAccounts.filter(a => a.is_salary_account).map(a => a.id))
+        result = result.filter(t =>
+          t.paymentMethod === 'transfer' && t.paymentAccountId != null && salaryIds.has(t.paymentAccountId)
+        )
       } else if (filterPayment.startsWith('acct:')) {
         const accountId = filterPayment.slice(5)
         result = result.filter(t => t.paymentMethod === 'transfer' && t.paymentAccountId === accountId)
       }
     }
     return result
-  }, [tickets, filterBarber, filterPayment])
+  }, [tickets, filterBarber, filterPayment, filteredAccounts])
 
   const toggleTicket = (id: string) => {
     setExpandedTickets(prev => {
@@ -221,6 +226,7 @@ export function CajaClient({
     if (filterPayment === 'all') return null
     if (filterPayment === 'cash') return 'Efectivo'
     if (filterPayment === 'card') return 'Tarjeta'
+    if (filterPayment === 'salary_accounts') return 'Cuentas sueldos'
     if (filterPayment.startsWith('acct:')) {
       const id = filterPayment.slice(5)
       return accounts.find(a => a.id === id)?.name ?? 'Cuenta'
@@ -287,13 +293,24 @@ export function CajaClient({
                 <SelectItem value="cash">Efectivo</SelectItem>
                 <SelectItem value="card">Tarjeta</SelectItem>
               </SelectGroup>
+              {filteredAccounts.some(a => a.is_salary_account) && (
+                <>
+                  <SelectSeparator />
+                  <SelectGroup>
+                    <SelectLabel className="text-[10px]">Grupos</SelectLabel>
+                    <SelectItem value="salary_accounts">Cuentas sueldos</SelectItem>
+                  </SelectGroup>
+                </>
+              )}
               {filteredAccounts.length > 0 && (
                 <>
                   <SelectSeparator />
                   <SelectGroup>
                     <SelectLabel className="text-[10px]">Cuentas (transferencia)</SelectLabel>
                     {filteredAccounts.map(a => (
-                      <SelectItem key={a.id} value={`acct:${a.id}`}>{a.name}</SelectItem>
+                      <SelectItem key={a.id} value={`acct:${a.id}`}>
+                        {a.name}{a.is_salary_account ? ' · Sueldos' : ''}
+                      </SelectItem>
                     ))}
                   </SelectGroup>
                 </>
@@ -706,6 +723,7 @@ function ExportDialog({
     if (filterPayment === 'all') return { paymentMethod: null, paymentAccountId: null }
     if (filterPayment === 'cash') return { paymentMethod: 'cash' as const, paymentAccountId: null }
     if (filterPayment === 'card') return { paymentMethod: 'card' as const, paymentAccountId: null }
+    if (filterPayment === 'salary_accounts') return { paymentMethod: 'transfer' as const, paymentAccountId: 'salary_accounts' }
     if (filterPayment.startsWith('acct:')) {
       return { paymentMethod: 'transfer' as const, paymentAccountId: filterPayment.slice(5) }
     }
@@ -716,6 +734,7 @@ function ExportDialog({
     if (filterPayment === 'all') return 'Todos los pagos'
     if (filterPayment === 'cash') return 'Efectivo'
     if (filterPayment === 'card') return 'Tarjeta'
+    if (filterPayment === 'salary_accounts') return 'Cuentas sueldos'
     if (filterPayment.startsWith('acct:')) {
       const id = filterPayment.slice(5)
       return accounts.find(a => a.id === id)?.name ?? 'Cuenta'

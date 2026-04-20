@@ -34,6 +34,9 @@ export interface SalaryPaymentBatch {
   paid_at: string
   notes: string | null
   created_at: string
+  payment_method: 'cash' | 'transfer' | 'card' | 'other'
+  payment_account_id: string | null
+  expense_ticket_id: string | null
 }
 
 // ─── Acciones originales (sin cambios) ───────────────────────────────────────
@@ -477,11 +480,15 @@ export async function generateBaseSalaryReport(
  * Paga los reportes seleccionados creando un lote de pago (batch).
  * Suma los montos, inserta el batch y marca los reportes como pagados.
  */
+export type SalaryPaymentMethod = 'cash' | 'transfer' | 'card' | 'other'
+
 export async function paySelectedReports(
   reportIds: string[],
   staffId: string,
   branchId: string,
-  notes?: string
+  notes?: string,
+  paymentMethod: SalaryPaymentMethod = 'cash',
+  paymentAccountId?: string | null
 ) {
   if (!reportIds || reportIds.length === 0) {
     return { error: 'Debe seleccionar al menos un reporte para pagar.' }
@@ -489,11 +496,26 @@ export async function paySelectedReports(
   if (!staffId || !branchId) {
     return { error: 'El barbero y la sucursal son obligatorios.' }
   }
+  if (paymentMethod === 'transfer' && !paymentAccountId) {
+    return { error: 'Para pagos por transferencia seleccioná una cuenta.' }
+  }
 
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { error: 'No autorizado' }
 
   const supabase = createAdminClient()
+
+  // Si es transferencia, validar que la cuenta pertenece a la sucursal
+  if (paymentMethod === 'transfer' && paymentAccountId) {
+    const { data: account } = await supabase
+      .from('payment_accounts')
+      .select('id, branch_id, is_active')
+      .eq('id', paymentAccountId)
+      .eq('branch_id', branchId)
+      .maybeSingle()
+    if (!account) return { error: 'La cuenta seleccionada no pertenece a esta sucursal.' }
+    if (!account.is_active) return { error: 'La cuenta seleccionada está inactiva.' }
+  }
 
   // Buscar los reportes seleccionados para calcular el total
   const { data: reports, error: reportsError } = await supabase
@@ -508,18 +530,24 @@ export async function paySelectedReports(
     return { error: 'Error al obtener los reportes seleccionados.' }
   }
 
-  // Verificar que todos los reportes encontrados estén pendientes
   const nonPending = reports.filter((r) => r.status !== 'pending')
   if (nonPending.length > 0) {
     return { error: 'Algunos reportes seleccionados ya fueron pagados.' }
   }
 
-  // Verificar que se encontraron todos los IDs solicitados
   if (reports.length !== reportIds.length) {
     return { error: 'Algunos reportes no se encontraron o no pertenecen a este barbero.' }
   }
 
   const totalAmount = reports.reduce((sum, r) => sum + Number(r.amount), 0)
+
+  // Obtener nombre del barbero para la descripción del egreso
+  const { data: staffRow } = await supabase
+    .from('staff')
+    .select('full_name')
+    .eq('id', staffId)
+    .maybeSingle()
+  const staffName = staffRow?.full_name ?? 'barbero'
 
   // Insertar el lote de pago
   const { data: batch, error: batchError } = await supabase
@@ -530,6 +558,8 @@ export async function paySelectedReports(
       total_amount: totalAmount,
       paid_at: new Date().toISOString(),
       notes: notes ?? null,
+      payment_method: paymentMethod,
+      payment_account_id: paymentMethod === 'transfer' ? paymentAccountId ?? null : null,
     })
     .select('id')
     .single()
@@ -537,6 +567,38 @@ export async function paySelectedReports(
   if (batchError || !batch) {
     console.error('Error al crear lote de pago:', batchError)
     return { error: 'Error al registrar el pago.' }
+  }
+
+  // Generar expense_ticket para reflejar el egreso en caja/finanzas
+  const { data: expenseTicket, error: expenseError } = await supabase
+    .from('expense_tickets')
+    .insert({
+      branch_id: branchId,
+      amount: totalAmount,
+      category: 'Sueldos',
+      description: `Pago de sueldo a ${staffName} (${reports.length} reporte${reports.length === 1 ? '' : 's'})`,
+      payment_account_id: paymentMethod === 'transfer' ? paymentAccountId ?? null : null,
+      expense_date: new Date().toISOString().slice(0, 10),
+    })
+    .select('id')
+    .single()
+
+  if (expenseError) {
+    console.error('Error al crear expense_ticket del sueldo:', expenseError)
+    // No bloqueamos el pago — dejamos el batch sin expense_ticket_id (queda warning en logs)
+  } else if (expenseTicket) {
+    await supabase
+      .from('salary_payment_batches')
+      .update({ expense_ticket_id: expenseTicket.id })
+      .eq('id', batch.id)
+
+    // Si fue transferencia, incrementar accumulated de la cuenta (para tope mensual)
+    if (paymentMethod === 'transfer' && paymentAccountId) {
+      await supabase.rpc('increment_account_accumulated', {
+        p_account_id: paymentAccountId,
+        p_amount: totalAmount,
+      })
+    }
   }
 
   // Marcar los reportes como pagados y asociarlos al batch
@@ -551,6 +613,9 @@ export async function paySelectedReports(
   }
 
   revalidatePath('/dashboard/sueldos')
+  revalidatePath('/dashboard/finanzas')
+  revalidatePath('/dashboard/caja')
+  revalidatePath('/dashboard/cuentas')
   return { success: true, data: { batchId: batch.id, totalAmount } }
 }
 

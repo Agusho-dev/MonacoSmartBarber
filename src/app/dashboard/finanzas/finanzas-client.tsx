@@ -40,6 +40,12 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
   DollarSign,
   TrendingUp,
   TrendingDown,
@@ -49,6 +55,8 @@ import {
   ShoppingBag,
   Users,
   Download,
+  FileText,
+  FileSpreadsheet,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
@@ -235,25 +243,133 @@ export function FinanzasClient({
   // Escapar campo CSV: envolver en comillas si contiene coma, comillas o salto de línea
   function csvField(val: string | number): string {
     const s = String(val)
-    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes(';')) {
       return `"${s.replace(/"/g, '""')}"`
     }
     return s
   }
 
-  // Función para exportar los datos del resumen como CSV
+  function formatAmountCSV(n: number): string {
+    // Formato con separador de miles y dos decimales, usando coma como decimal
+    return n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
+
+  // Nombre del período actual para la cabecera del reporte
+  const reportPeriodLabel = useMemo(() => {
+    if (period === '1') return formatMonthLabel(getMonthFromOffset(monthOffset))
+    const opt = PERIOD_OPTIONS.find(o => o.value === period)
+    return opt?.label ?? `${period} meses`
+  }, [period, monthOffset])
+
+  const branchLabel = useMemo(() => {
+    if (!selectedBranchId) return 'Todas las sucursales'
+    return branches.find(b => b.id === selectedBranchId)?.name ?? 'Sucursal'
+  }, [selectedBranchId, branches])
+
+  // CSV multi-sección legible con BOM + metadata + totales
   function exportToCSV() {
-    const headers = ['Mes', 'Ingresos', 'Gastos Fijos', 'Gastos Variables', 'Comisiones', 'Resultado Neto', 'Cortes']
-    const rows = data.months.map(m => [
-      m.label,
-      m.revenue,
-      m.fixedExpenses,
-      m.variableExpenses,
-      m.commissions,
-      m.netProfit,
-      m.cuts,
-    ])
-    const csvContent = [headers, ...rows].map(row => row.map(csvField).join(',')).join('\n')
+    const sep = ';' // Excel ES reconoce ; como delimitador
+    const eol = '\r\n'
+    const lines: string[] = []
+
+    const row = (...cells: (string | number)[]) => lines.push(cells.map(c => csvField(c)).join(sep))
+
+    // Cabecera
+    row('Reporte financiero BarberOS')
+    row('Generado', new Date().toLocaleString('es-AR'))
+    row('Período', reportPeriodLabel)
+    row('Sucursal', branchLabel)
+    lines.push('')
+
+    // Resumen totales
+    row('RESUMEN DEL PERÍODO')
+    row('Métrica', 'Valor')
+    row('Ingresos brutos', formatAmountCSV(totals.revenue))
+    row('Gastos fijos', formatAmountCSV(totals.fixedExpenses))
+    row('Gastos variables', formatAmountCSV(totals.variableExpenses))
+    row('Comisiones', formatAmountCSV(totals.commissions))
+    row('Sueldos fijos pagados', formatAmountCSV(totals.salaryPayments ?? 0))
+    row('Resultado neto', formatAmountCSV(totals.netProfit))
+    row('Cortes', totals.cuts)
+    row('Ticket promedio', formatAmountCSV(breakEven.avgRevenuePerCut))
+    row('Comisiones pendientes', formatAmountCSV(commissionSummary.totalPending))
+    row('Comisiones pagadas', formatAmountCSV(commissionSummary.totalPaid))
+    lines.push('')
+
+    // Punto de equilibrio
+    row('PUNTO DE EQUILIBRIO')
+    row('Cortes necesarios por mes', breakEven.cutsNeeded)
+    row('Cortes del mes en curso', data.currentMonthCuts)
+    row('Ticket promedio', formatAmountCSV(breakEven.avgRevenuePerCut))
+    row('Comisión promedio/corte', formatAmountCSV(breakEven.avgCommissionPerCut))
+    row('Ganancia neta/corte', formatAmountCSV(breakEven.netPerCut))
+    row('Gastos fijos mensuales', formatAmountCSV(breakEven.monthlyFixedExpenses))
+    lines.push('')
+
+    // Evolución mensual
+    row('EVOLUCIÓN MENSUAL')
+    row('Mes', 'Ingresos', 'Gastos fijos', 'Gastos variables', 'Comisiones', 'Sueldos fijos', 'Resultado neto', 'Cortes')
+    for (const m of data.months) {
+      row(
+        m.label,
+        formatAmountCSV(m.revenue),
+        formatAmountCSV(m.fixedExpenses),
+        formatAmountCSV(m.variableExpenses),
+        formatAmountCSV(m.commissions),
+        formatAmountCSV(m.baseSalaryPaid ?? 0),
+        formatAmountCSV(m.netProfit),
+        m.cuts,
+      )
+    }
+    lines.push('')
+
+    // Saldos por cuenta
+    if (accountBalances.length > 0) {
+      row('SALDOS POR CUENTA')
+      row('Cuenta', 'Ingresos', 'Egresos', 'Saldo')
+      for (const a of accountBalances) {
+        row(a.name, formatAmountCSV(a.income), formatAmountCSV(a.expenses), formatAmountCSV(a.balance))
+      }
+      lines.push('')
+    }
+
+    // Egresos por categoría
+    if (expensesByCategory.length > 0) {
+      row('EGRESOS POR CATEGORÍA')
+      row('Categoría', 'Monto')
+      for (const e of expensesByCategory) row(e.category, formatAmountCSV(e.amount))
+      row('Total', formatAmountCSV(expensesByCategory.reduce((s, e) => s + e.amount, 0)))
+      lines.push('')
+    }
+
+    // Rendimiento por barbero
+    if (data.barberPerformance.length > 0) {
+      row('RENDIMIENTO POR BARBERO')
+      row('Barbero', 'Cortes', 'Ticket promedio', 'Ingresos', 'Comisión', 'Margen neto', '% Margen')
+      for (const b of data.barberPerformance) {
+        row(
+          b.name,
+          b.cuts,
+          formatAmountCSV(b.avgTicket),
+          formatAmountCSV(b.revenue),
+          formatAmountCSV(b.commissions),
+          formatAmountCSV(b.netContribution),
+          `${b.marginPct}%`,
+        )
+      }
+      lines.push('')
+    }
+
+    // Ingresos por servicio
+    if (data.serviceRevenue.length > 0) {
+      row('INGRESOS POR SERVICIO')
+      row('Servicio', 'Cortes', 'Ticket promedio', 'Ingresos')
+      for (const s of data.serviceRevenue) {
+        row(s.serviceName, s.cuts, formatAmountCSV(s.avgTicket), formatAmountCSV(s.revenue))
+      }
+    }
+
+    const csvContent = '\ufeff' + lines.join(eol)
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -261,6 +377,169 @@ export function FinanzasClient({
     a.download = `finanzas_${orgSlug}_${period}meses.csv`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  // PDF multi-sección usando jsPDF + autotable
+  async function exportToPDF() {
+    const { default: jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+
+    const doc = new jsPDF()
+    let y = 14
+
+    doc.setFontSize(16)
+    doc.text('Reporte Financiero BarberOS', 14, y)
+    y += 7
+    doc.setFontSize(9)
+    doc.setTextColor(100)
+    doc.text(`Período: ${reportPeriodLabel}`, 14, y)
+    y += 5
+    doc.text(`Sucursal: ${branchLabel}`, 14, y)
+    y += 5
+    doc.text(`Generado: ${new Date().toLocaleString('es-AR')}`, 14, y)
+    y += 6
+    doc.setTextColor(0)
+
+    // Resumen
+    autoTable(doc, {
+      startY: y,
+      head: [['Métrica', 'Valor']],
+      body: [
+        ['Ingresos brutos', formatCurrency(totals.revenue)],
+        ['Gastos fijos', formatCurrency(totals.fixedExpenses)],
+        ['Gastos variables', formatCurrency(totals.variableExpenses)],
+        ['Comisiones', formatCurrency(totals.commissions)],
+        ['Sueldos fijos pagados', formatCurrency(totals.salaryPayments ?? 0)],
+        ['Resultado neto', formatCurrency(totals.netProfit)],
+        ['Cortes', String(totals.cuts)],
+        ['Ticket promedio', formatCurrency(breakEven.avgRevenuePerCut)],
+        ['Comisiones pendientes', formatCurrency(commissionSummary.totalPending)],
+        ['Comisiones pagadas', formatCurrency(commissionSummary.totalPaid)],
+      ],
+      theme: 'grid',
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [40, 40, 40] },
+      margin: { left: 14, right: 14 },
+    })
+    // @ts-expect-error lastAutoTable
+    y = (doc.lastAutoTable?.finalY ?? y) + 8
+
+    // Evolución mensual
+    if (data.months.length > 0) {
+      doc.setFontSize(12)
+      doc.text('Evolución mensual', 14, y)
+      y += 2
+      autoTable(doc, {
+        startY: y + 2,
+        head: [['Mes', 'Ingresos', 'G. fijos', 'G. var.', 'Comis.', 'Sueldos', 'Neto', 'Cortes']],
+        body: data.months.map(m => [
+          m.label,
+          formatCurrency(m.revenue),
+          formatCurrency(m.fixedExpenses),
+          formatCurrency(m.variableExpenses),
+          formatCurrency(m.commissions),
+          formatCurrency(m.baseSalaryPaid ?? 0),
+          formatCurrency(m.netProfit),
+          String(m.cuts),
+        ]),
+        theme: 'grid',
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [40, 40, 40] },
+        margin: { left: 14, right: 14 },
+      })
+      // @ts-expect-error lastAutoTable
+      y = (doc.lastAutoTable?.finalY ?? y) + 8
+    }
+
+    // Saldos por cuenta
+    if (accountBalances.length > 0) {
+      doc.setFontSize(12)
+      doc.text('Saldos por cuenta', 14, y)
+      autoTable(doc, {
+        startY: y + 2,
+        head: [['Cuenta', 'Ingresos', 'Egresos', 'Saldo']],
+        body: accountBalances.map(a => [
+          a.name,
+          formatCurrency(a.income),
+          formatCurrency(a.expenses),
+          formatCurrency(a.balance),
+        ]),
+        theme: 'grid',
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [40, 40, 40] },
+        margin: { left: 14, right: 14 },
+      })
+      // @ts-expect-error lastAutoTable
+      y = (doc.lastAutoTable?.finalY ?? y) + 8
+    }
+
+    // Egresos por categoría
+    if (expensesByCategory.length > 0) {
+      doc.setFontSize(12)
+      doc.text('Egresos por categoría', 14, y)
+      autoTable(doc, {
+        startY: y + 2,
+        head: [['Categoría', 'Monto']],
+        body: expensesByCategory.map(e => [e.category, formatCurrency(e.amount)]),
+        foot: [['Total', formatCurrency(expensesByCategory.reduce((s, e) => s + e.amount, 0))]],
+        theme: 'grid',
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [40, 40, 40] },
+        footStyles: { fillColor: [240, 240, 240], textColor: 0, fontStyle: 'bold' },
+        margin: { left: 14, right: 14 },
+      })
+      // @ts-expect-error lastAutoTable
+      y = (doc.lastAutoTable?.finalY ?? y) + 8
+    }
+
+    // Rendimiento por barbero
+    if (data.barberPerformance.length > 0) {
+      if (y > 230) { doc.addPage(); y = 14 }
+      doc.setFontSize(12)
+      doc.text('Rendimiento por barbero', 14, y)
+      autoTable(doc, {
+        startY: y + 2,
+        head: [['Barbero', 'Cortes', 'Ticket', 'Ingresos', 'Comisión', 'Neto', '% Margen']],
+        body: data.barberPerformance.map(b => [
+          b.name,
+          String(b.cuts),
+          formatCurrency(b.avgTicket),
+          formatCurrency(b.revenue),
+          formatCurrency(b.commissions),
+          formatCurrency(b.netContribution),
+          `${b.marginPct}%`,
+        ]),
+        theme: 'grid',
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [40, 40, 40] },
+        margin: { left: 14, right: 14 },
+      })
+      // @ts-expect-error lastAutoTable
+      y = (doc.lastAutoTable?.finalY ?? y) + 8
+    }
+
+    // Ingresos por servicio
+    if (data.serviceRevenue.length > 0) {
+      if (y > 230) { doc.addPage(); y = 14 }
+      doc.setFontSize(12)
+      doc.text('Ingresos por servicio', 14, y)
+      autoTable(doc, {
+        startY: y + 2,
+        head: [['Servicio', 'Cortes', 'Ticket promedio', 'Ingresos']],
+        body: data.serviceRevenue.map(s => [
+          s.serviceName,
+          String(s.cuts),
+          formatCurrency(s.avgTicket),
+          formatCurrency(s.revenue),
+        ]),
+        theme: 'grid',
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [40, 40, 40] },
+        margin: { left: 14, right: 14 },
+      })
+    }
+
+    doc.save(`finanzas_${orgSlug}_${period}meses.pdf`)
   }
 
   return (
@@ -300,10 +579,24 @@ export function FinanzasClient({
               </Button>
             </div>
           )}
-          <Button variant="outline" size="sm" onClick={exportToCSV}>
-            <Download className="mr-1.5 size-3.5" />
-            Exportar CSV
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Download className="mr-1.5 size-3.5" />
+                Exportar
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={exportToPDF}>
+                <FileText className="mr-2 size-4" />
+                Reporte PDF
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={exportToCSV}>
+                <FileSpreadsheet className="mr-2 size-4" />
+                Reporte CSV
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 

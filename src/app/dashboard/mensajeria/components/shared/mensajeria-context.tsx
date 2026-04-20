@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useContext, useState, useMemo, useRef, useCallback, useTransition, useEffect } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { sendMessage as sendMessageAction, markAsRead, cancelScheduledMessage, sendTemplateToConversation, sendTemplateToClient } from '@/lib/actions/messaging'
 import { getQuickReplies } from '@/lib/actions/quick-replies'
@@ -472,6 +473,32 @@ export function MensajeriaProvider({
       setShowMobileChat(true)
     })
   }
+
+  // Deep-link: abrir/crear conversación con cliente vía ?clientId=
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const deepLinkConsumed = useRef(false)
+  useEffect(() => {
+    const clientIdParam = searchParams.get('clientId')
+    if (!clientIdParam || deepLinkConsumed.current) return
+    deepLinkConsumed.current = true
+
+    const existing = conversations.find(c => c.client_id === clientIdParam || c.client?.id === clientIdParam)
+    if (existing) {
+      setActiveConv(existing)
+      setShowMobileChat(true)
+      setInboxTab('inbox')
+    } else {
+      handleStartConversation(clientIdParam)
+      setInboxTab('inbox')
+    }
+
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('clientId')
+    const qs = params.toString()
+    router.replace(`/dashboard/mensajeria${qs ? `?${qs}` : ''}`, { scroll: false })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, conversations])
 
   const handleSchedule = (data: { clientId: string; content: string; scheduledFor: string }) => {
     if (!data.clientId || !data.content || !data.scheduledFor) {

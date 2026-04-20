@@ -45,7 +45,7 @@ export default async function CajaPage() {
     branchIds.length > 0
       ? supabase
           .from('payment_accounts')
-          .select('id, name, branch_id')
+          .select('id, name, branch_id, is_salary_account')
           .in('branch_id', branchIds)
           .eq('is_active', true)
           .order('sort_order')

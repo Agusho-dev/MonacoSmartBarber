@@ -26,6 +26,7 @@ interface FinanzasTabsClientProps {
     branches: Parameters<typeof FinanzasClient>[0]['branches']
     accounts: Parameters<typeof CuentasClient>[0]['accounts']
     barbers: Parameters<typeof SueldosClient>[0]['barbers']
+    paymentAccounts: Parameters<typeof SueldosClient>[0]['paymentAccounts']
     expenseTickets: Parameters<typeof EgresosClient>[0]['expenseTickets']
     fixedExpenses: Parameters<typeof GastosFijosClient>[0]['fixedExpenses']
     commissionSummary: CommissionSummaryData
@@ -38,6 +39,7 @@ export function FinanzasTabsClient({
     branches,
     accounts,
     barbers,
+    paymentAccounts,
     expenseTickets,
     fixedExpenses,
     commissionSummary,
@@ -124,6 +126,7 @@ export function FinanzasTabsClient({
                     <SueldosClient
                         branches={branches}
                         barbers={barbers}
+                        paymentAccounts={paymentAccounts}
                     />
                 </div>
                 {activeTab === 'egresos' && (

@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useRef, useMemo } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Power, Trash2, Camera, Clock, Eye, EyeOff } from 'lucide-react'
+import { Plus, Pencil, Power, Trash2, Camera, Eye, EyeOff, Smartphone } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
 import { formatCurrency } from '@/lib/format'
@@ -35,25 +35,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts'
 
 interface BarberVisitRow {
   barber_id: string
   amount: number
-}
-
-interface ServiceHistoryItem {
-  barber: { id: string; full_name: string } | null
-  started_at: string | null
-  completed_at: string | null
 }
 
 interface Props {
@@ -61,45 +46,7 @@ interface Props {
   branches: { id: string; name: string }[]
   todayVisits: BarberVisitRow[]
   roles: Role[]
-  serviceHistory?: ServiceHistoryItem[]
   canHideStaff?: boolean
-}
-
-function computeIdleTimes(visits: ServiceHistoryItem[]) {
-  const byBarber = new Map<string, { name: string; sessions: Array<{ start: Date; end: Date }> }>()
-
-  for (const v of visits) {
-    if (!v.barber || !v.started_at || !v.completed_at) continue
-    const start = new Date(v.started_at)
-    const end = new Date(v.completed_at)
-    if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) continue
-
-    const entry = byBarber.get(v.barber.id) ?? { name: v.barber.full_name, sessions: [] }
-    entry.sessions.push({ start, end })
-    byBarber.set(v.barber.id, entry)
-  }
-
-  const result: Array<{ name: string; avgIdleMin: number; gapCount: number }> = []
-
-  for (const { name, sessions } of byBarber.values()) {
-    sessions.sort((a, b) => a.start.getTime() - b.start.getTime())
-
-    const gaps: number[] = []
-    for (let i = 1; i < sessions.length; i++) {
-      const gapMin = (sessions[i].start.getTime() - sessions[i - 1].end.getTime()) / 60_000
-      // Only count gaps that are positive and under 2 hours (exclude end-of-day / overnight gaps)
-      if (gapMin > 0 && gapMin < 120) {
-        gaps.push(gapMin)
-      }
-    }
-
-    if (gaps.length === 0) continue
-
-    const avg = gaps.reduce((a, b) => a + b, 0) / gaps.length
-    result.push({ name, avgIdleMin: Math.round(avg * 10) / 10, gapCount: gaps.length })
-  }
-
-  return result.sort((a, b) => b.avgIdleMin - a.avgIdleMin)
 }
 
 const roleLabels: Record<UserRole, string> = {
@@ -119,7 +66,7 @@ const emptyForm = {
   phone: '',
 }
 
-export function BarberosClient({ barbers, branches, todayVisits, roles, serviceHistory, canHideStaff }: Props) {
+export function BarberosClient({ barbers, branches, todayVisits, roles, canHideStaff }: Props) {
   const router = useRouter()
   const supabase = createClient()
   const { selectedBranchId } = useBranchStore()
@@ -127,15 +74,6 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
   const filtered = selectedBranchId
     ? barbers.filter((b) => b.branch_id === selectedBranchId)
     : barbers
-
-  const idleTimeData = useMemo(() => {
-    // Only compute idle times for barbers that belong to the active branch
-    const branchBarberIds = new Set(filtered.map((b) => b.id))
-    const validVisits = (serviceHistory ?? []).filter(
-      (v) => v.barber && branchBarberIds.has(v.barber.id)
-    )
-    return computeIdleTimes(validVisits)
-  }, [serviceHistory, filtered])
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -307,6 +245,16 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
     router.refresh()
   }
 
+  async function toggleMobileVisibility(barber: Staff) {
+    const { toggleBarberMobileVisibility } = await import('@/lib/actions/barber')
+    const result = await toggleBarberMobileVisibility(barber.id)
+    if (result.error) {
+      alert(result.error)
+      return
+    }
+    router.refresh()
+  }
+
   async function handleDelete(id: string) {
     if (!confirm('¿Estás seguro de que querés eliminar a este miembro del equipo? Su historial de cortes y registros se mantendrá.')) return
 
@@ -403,6 +351,14 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
                           {barber.hidden_from_checkin ? <EyeOff className="size-3 text-amber-500" /> : <Eye className="size-3" />}
                         </Button>
                       )}
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        title={barber.hidden_from_mobile ? 'Mostrar en app mobile' : 'Ocultar de app mobile'}
+                        onClick={() => toggleMobileVisibility(barber)}
+                      >
+                        <Smartphone className={`size-3 ${barber.hidden_from_mobile ? 'text-amber-500 opacity-60' : ''}`} />
+                      </Button>
                       <Button variant="ghost" size="icon-xs" className="text-destructive hover:text-destructive hover:bg-destructive/10" title="Eliminar" onClick={() => handleDelete(barber.id)}>
                         <Trash2 className="size-3" />
                       </Button>
@@ -505,6 +461,15 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
                 <Button
                   variant="outline"
                   size="sm"
+                  className="h-8 px-3"
+                  title={barber.hidden_from_mobile ? 'Mostrar en app mobile' : 'Ocultar de app mobile'}
+                  onClick={() => toggleMobileVisibility(barber)}
+                >
+                  <Smartphone className={`size-3 ${barber.hidden_from_mobile ? 'text-amber-500 opacity-60' : ''}`} />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   className="h-8 px-3 text-destructive hover:text-destructive hover:bg-destructive/10 hover:border-destructive/30"
                   title="Eliminar"
                   onClick={() => handleDelete(barber.id)}
@@ -516,73 +481,6 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, serviceH
           )
         })}
       </div>
-
-      {idleTimeData.length > 0 && (
-        <div className="rounded-lg border p-5 space-y-4">
-          <div className="flex items-center gap-2">
-            <Clock className="size-4 text-muted-foreground" />
-            <div>
-              <h3 className="text-sm font-semibold">Tiempo promedio sin atención</h3>
-              <p className="text-xs text-muted-foreground">
-                Promedio de minutos entre clientes · mes actual
-              </p>
-            </div>
-          </div>
-          <ResponsiveContainer width="100%" height={Math.max(100, idleTimeData.length * 48)}>
-            <BarChart
-              data={idleTimeData}
-              layout="vertical"
-              margin={{ top: 0, right: 48, bottom: 0, left: 0 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border)" />
-              <XAxis
-                type="number"
-                tickFormatter={(v: number) => `${v} min`}
-                tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                type="category"
-                dataKey="name"
-                width={130}
-                tick={{ fontSize: 13, fill: 'var(--muted-foreground)' }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <Tooltip
-                cursor={{ fill: 'transparent' }}
-                content={({ active, payload, label }) => {
-                  if (!active || !Array.isArray(payload) || payload.length === 0) return null
-                  return (
-                    <div className="rounded-lg border bg-card p-3 shadow-md">
-                      <p className="mb-1 text-sm font-medium text-foreground">{String(label)}</p>
-                      {payload.map((p: any, i: number) => (
-                        <p key={i} className="text-sm text-muted-foreground">
-                          Promedio inactivo: {String(p.value)} min
-                        </p>
-                      ))}
-                    </div>
-                  )
-                }}
-              />
-              <Bar
-                dataKey="avgIdleMin"
-                fill="var(--chart-2)"
-                radius={[0, 4, 4, 0]}
-                activeBar={{ stroke: 'var(--foreground)', strokeWidth: 1, fillOpacity: 0.8 }}
-                label={{
-                  position: 'right',
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  formatter: (v: any) => `${v} min`,
-                  fontSize: 11,
-                  fill: 'var(--muted-foreground)',
-                }}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90vh] flex flex-col sm:max-w-[550px]">

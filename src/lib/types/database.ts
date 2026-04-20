@@ -157,6 +157,7 @@ export interface Staff {
   is_active: boolean
   avatar_url: string | null
   hidden_from_checkin: boolean
+  hidden_from_mobile: boolean
   is_also_barber: boolean
   created_at: string
   updated_at: string
@@ -453,7 +454,6 @@ export interface BreakConfig {
   branch_id: string
   name: string
   duration_minutes: number
-  scheduled_time: string | null
   is_active: boolean
   created_at: string
   updated_at: string
@@ -484,6 +484,7 @@ export interface PaymentAccount {
   name: string
   alias_or_cbu: string | null
   is_active: boolean
+  is_salary_account: boolean
   daily_limit: number | null
   sort_order: number
   accumulated_today: number

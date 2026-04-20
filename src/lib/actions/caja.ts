@@ -80,7 +80,7 @@ export async function fetchCajaTickets(params: {
   date: string // YYYY-MM-DD
   barberId?: string | null
   paymentMethod?: string | null
-  paymentAccountId?: string | null
+  paymentAccountId?: string | null  // puede ser un uuid, 'cash' o 'salary_accounts'
 }): Promise<{ data: CajaTicket[]; error: string | null }> {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: [], error: 'No autorizado' }
@@ -118,6 +118,15 @@ export async function fetchCajaTickets(params: {
   if (params.paymentAccountId) {
     if (params.paymentAccountId === 'cash') {
       query = query.eq('payment_method', 'cash')
+    } else if (params.paymentAccountId === 'salary_accounts') {
+      const { data: salaryAccounts } = await supabase
+        .from('payment_accounts')
+        .select('id')
+        .in('branch_id', branchIds)
+        .eq('is_salary_account', true)
+      const ids = (salaryAccounts ?? []).map(a => a.id)
+      if (ids.length === 0) return { data: [], error: null }
+      query = query.in('payment_account_id', ids)
     } else {
       query = query.eq('payment_account_id', params.paymentAccountId)
     }
@@ -332,7 +341,7 @@ export async function fetchCajaCSVData(params: {
   endDate: string   // YYYY-MM-DD
   barberIds: string[]
   paymentMethod?: 'cash' | 'card' | 'transfer' | null
-  paymentAccountId?: string | null
+  paymentAccountId?: string | null  // puede ser uuid o 'salary_accounts'
 }): Promise<{ data: CajaCSVRow[]; error: string | null }> {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: [], error: 'No autorizado' }
@@ -370,7 +379,18 @@ export async function fetchCajaCSVData(params: {
     query = query.eq('payment_method', params.paymentMethod)
   }
   if (params.paymentAccountId) {
-    query = query.eq('payment_account_id', params.paymentAccountId)
+    if (params.paymentAccountId === 'salary_accounts') {
+      const { data: salaryAccounts } = await supabase
+        .from('payment_accounts')
+        .select('id')
+        .in('branch_id', branchIds)
+        .eq('is_salary_account', true)
+      const ids = (salaryAccounts ?? []).map(a => a.id)
+      if (ids.length === 0) return { data: [], error: null }
+      query = query.in('payment_account_id', ids)
+    } else {
+      query = query.eq('payment_account_id', params.paymentAccountId)
+    }
   }
 
   const { data: visits, error } = await query

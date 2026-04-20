@@ -130,16 +130,16 @@ export async function fetchStats(
   const lostDays = settings?.lost_client_days ?? 40
   const riskDays = settings?.at_risk_client_days ?? 25
 
-  // Clientes nuevos: registrados en el periodo con visitas en la org
+  // Clientes nuevos: clientes cuya primera visita (en la sucursal si se filtra, o en toda la org) cae en el periodo
   let newCount = 0
   if (orgId) {
-    const { count } = await supabase
-      .from('clients')
-      .select('id', { count: 'exact', head: true })
-      .eq('organization_id', orgId)
-      .gte('created_at', fromISO)
-      .lte('created_at', toISO)
-    newCount = count ?? 0
+    const { data: newCountData } = await supabase.rpc('count_new_clients_scoped', {
+      p_org_id: orgId,
+      p_from: fromISO,
+      p_to: toISO,
+      p_branch_id: branchId ?? null,
+    })
+    newCount = (newCountData as number | null) ?? 0
   }
 
   // Visitas para segmentación (periodo extendido, paginadas)
@@ -154,14 +154,14 @@ export async function fetchStats(
       .range(from, to)
   })
 
-  // Total de clientes registrados en la org
+  // Total de clientes: en la org, o con al menos una visita en la sucursal filtrada
   let totalClients = 0
   if (orgId) {
-    const { count } = await supabase
-      .from('clients')
-      .select('id', { count: 'exact', head: true })
-      .eq('organization_id', orgId)
-    totalClients = count ?? 0
+    const { data: totalData } = await supabase.rpc('count_clients_scoped', {
+      p_org_id: orgId,
+      p_branch_id: branchId ?? null,
+    })
+    totalClients = (totalData as number | null) ?? 0
   }
 
   const safe = visits

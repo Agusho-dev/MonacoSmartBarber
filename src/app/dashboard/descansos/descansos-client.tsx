@@ -33,7 +33,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { Coffee, Plus, Pencil, Trash2, CheckCircle2, XCircle, HandMetal, Clock } from 'lucide-react'
+import { Coffee, Plus, Pencil, Trash2, CheckCircle2, XCircle, HandMetal } from 'lucide-react'
 import { toast } from 'sonner'
 import { useBranchStore } from '@/stores/branch-store'
 
@@ -54,7 +54,7 @@ interface Props {
   breakRequests: BreakRequestRow[]
 }
 
-const EMPTY_FORM = { id: '', branch_id: '', name: '', duration_minutes: '30', scheduled_time: '' }
+const EMPTY_FORM = { id: '', branch_id: '', name: '', duration_minutes: '30' }
 
 function BreakRequestCard({ request }: { request: BreakRequestRow }) {
   const router = useRouter()
@@ -167,7 +167,6 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
       branch_id: bc.branch_id,
       name: bc.name,
       duration_minutes: String(bc.duration_minutes),
-      scheduled_time: bc.scheduled_time ?? '',
     })
     setDialogOpen(true)
   }
@@ -227,12 +226,6 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
                     <span className="text-sm text-muted-foreground">
                       {bc.duration_minutes} min
                     </span>
-                    {bc.scheduled_time && (
-                      <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-500 border-blue-500/25">
-                        <Clock className="size-3 mr-1" />
-                        {bc.scheduled_time.substring(0, 5)}
-                      </Badge>
-                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -318,18 +311,6 @@ export function DescansosDashboard({ breakConfigs, breakRequests }: Props) {
                 value={form.duration_minutes}
                 onChange={(e) => setForm((f) => ({ ...f, duration_minutes: e.target.value }))}
                 required
-              />
-            </div>
-            <div>
-              <Label>Hora programada (opcional)</Label>
-              <p className="text-xs text-muted-foreground mt-0.5 mb-1.5">
-                A esta hora se crearán solicitudes automáticas para todos los barberos activos.
-              </p>
-              <Input
-                type="time"
-                className="mt-1.5 w-40"
-                value={form.scheduled_time}
-                onChange={(e) => setForm((f) => ({ ...f, scheduled_time: e.target.value }))}
               />
             </div>
             <DialogFooter>
