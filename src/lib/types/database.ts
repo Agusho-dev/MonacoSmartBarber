@@ -431,6 +431,7 @@ export interface ExpenseTicket {
   payment_account_id: string | null
   expense_date: string
   created_at: string
+  source: 'manual' | 'fixed_expense_period'
   created_by_staff?: Staff
   payment_account?: PaymentAccount
 }
@@ -448,15 +449,52 @@ export interface TransferLog {
 
 export interface FixedExpense {
   id: string
-  branch_id: string
+  branch_id: string | null
+  organization_id: string | null
   name: string
+  description: string | null
   category: string | null
   amount: number
   is_active: boolean
   due_day: number | null
+  payment_url: string | null
+  copyable_1_label: string | null
+  copyable_1_value: string | null
+  copyable_2_label: string | null
+  copyable_2_value: string | null
   created_at: string
   updated_at: string
-  branch?: Branch
+  branch?: Branch | null
+}
+
+export interface FixedExpensePeriod {
+  id: string
+  fixed_expense_id: string
+  organization_id: string
+  branch_id: string | null
+  period_year: number
+  period_month: number
+  snapshot_name: string
+  snapshot_category: string | null
+  snapshot_due_day: number | null
+  snapshot_payment_url: string | null
+  snapshot_copyable_1_label: string | null
+  snapshot_copyable_1_value: string | null
+  snapshot_copyable_2_label: string | null
+  snapshot_copyable_2_value: string | null
+  due_date: string | null
+  status: 'pending' | 'paid' | 'cancelled'
+  paid_amount: number | null
+  paid_at: string | null
+  paid_by: string | null
+  payment_account_id: string | null
+  payment_notes: string | null
+  expense_ticket_id: string | null
+  created_at: string
+  updated_at: string
+  branch?: Branch | null
+  paid_by_staff?: Pick<Staff, 'id' | 'full_name'> | null
+  payment_account?: Pick<PaymentAccount, 'id' | 'name'> | null
 }
 
 export interface BreakConfig {
@@ -514,6 +552,7 @@ export interface ExpenseTicket {
   payment_account_id: string | null
   expense_date: string
   created_at: string
+  source: 'manual' | 'fixed_expense_period'
   created_by_staff?: Staff
   payment_account?: PaymentAccount
 }

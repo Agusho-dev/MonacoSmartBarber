@@ -9,7 +9,9 @@ import type { CommissionSummaryData } from './finanzas-client'
 import { CuentasClient } from '../cuentas/cuentas-client'
 import { SueldosClient } from '../sueldos/sueldos-client'
 import { EgresosClient } from './egresos-client'
-import { GastosFijosClient } from './gastos-fijos-client'
+import { GastosFijosHubClient } from './gastos-fijos-hub-client'
+import type { FixedExpense, FixedExpensePeriod } from '@/lib/types/database'
+import type { PeriodSummary } from '@/lib/actions/fixed-expenses'
 
 const TABS = [
     { id: 'resumen', label: 'Resumen', icon: DollarSign, permission: 'finances.view_summary' },
@@ -28,7 +30,13 @@ interface FinanzasTabsClientProps {
     barbers: Parameters<typeof SueldosClient>[0]['barbers']
     paymentAccounts: Parameters<typeof SueldosClient>[0]['paymentAccounts']
     expenseTickets: Parameters<typeof EgresosClient>[0]['expenseTickets']
-    fixedExpenses: Parameters<typeof GastosFijosClient>[0]['fixedExpenses']
+    fixedExpenses: FixedExpense[]
+    fixedExpensePeriods: FixedExpensePeriod[]
+    fixedExpenseSummary: PeriodSummary
+    fixedExpenseAccounts: { id: string; name: string; branch_id: string | null }[]
+    fixedExpenseYear: number
+    fixedExpenseMonth: number
+    todayLocal: string
     commissionSummary: CommissionSummaryData
     permissions: Record<string, boolean>
     orgSlug?: string
@@ -42,10 +50,17 @@ export function FinanzasTabsClient({
     paymentAccounts,
     expenseTickets,
     fixedExpenses,
+    fixedExpensePeriods,
+    fixedExpenseSummary,
+    fixedExpenseAccounts,
+    fixedExpenseYear,
+    fixedExpenseMonth,
+    todayLocal,
     commissionSummary,
     permissions,
     orgSlug,
 }: FinanzasTabsClientProps) {
+    const canManageFixed = !!permissions['finances.manage_fixed']
     const searchParams = useSearchParams()
 
     const visibleTabs = TABS.filter(tab => permissions[tab.permission])
@@ -137,9 +152,16 @@ export function FinanzasTabsClient({
                     />
                 )}
                 {activeTab === 'gastos-fijos' && (
-                    <GastosFijosClient
+                    <GastosFijosHubClient
                         fixedExpenses={fixedExpenses}
+                        periods={fixedExpensePeriods}
+                        summary={fixedExpenseSummary}
+                        currentYear={fixedExpenseYear}
+                        currentMonth={fixedExpenseMonth}
+                        todayLocal={todayLocal}
                         branches={branches}
+                        paymentAccounts={fixedExpenseAccounts}
+                        canManage={canManageFixed}
                     />
                 )}
             </div>

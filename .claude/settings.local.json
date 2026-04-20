@@ -71,7 +71,9 @@
       "Bash(tee /tmp/tsc.log)",
       "Bash(echo \"--- EXIT CODE: $? ---\")",
       "Bash(echo \"EXIT: $?\")",
-      "Read(//private/tmp/**)"
+      "Read(//private/tmp/**)",
+      "Bash(npm run *)",
+      "Bash(echo \"started pid=$!\")"
     ]
   },
   "enabledMcpjsonServers": [

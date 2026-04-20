@@ -164,9 +164,28 @@ export async function fetchFinancialData(
     .select('amount, branch_id, created_at, is_active')
   fq = branchFilter(fq)
 
+  // Pagos REALES de gastos fijos (fixed_expense_periods con status=paid) en el rango
+  let fpq = supabase
+    .from('fixed_expense_periods')
+    .select('paid_amount, paid_at, branch_id, organization_id, period_year, period_month')
+    .eq('status', 'paid')
+    .gte('paid_at', startDateStr.slice(0, 10))
+    .lte('paid_at', endDateStr.slice(0, 10))
+  if (branchId) {
+    fpq = fpq.eq('branch_id', branchId)
+  } else if (orgBranchIds.length > 0) {
+    // Incluye gastos org-wide (branch_id null pero organization_id = org)
+    // Para org-wide sin branchFilter específico hay que hacer una condición compuesta.
+    // Estrategia: traer todos los períodos de las branches de la org + los org-wide,
+    // filtrando por organization_id usando la FK.
+    fpq = fpq.or(`branch_id.in.(${orgBranchIds.join(',')}),branch_id.is.null`)
+  }
+
+  // Gastos variables reales: solo tickets "manuales" (no duplicar pagos de gastos fijos)
   let eq = supabase
     .from('expense_tickets')
     .select('amount, expense_date, branch_id')
+    .eq('source', 'manual')
     .gte('expense_date', startDateStr.slice(0, 10))
     .lte('expense_date', endDateStr.slice(0, 10))
   eq = branchFilter(eq)
@@ -183,12 +202,27 @@ export async function fetchFinancialData(
   const [
     { data: visits },
     { data: allFixedExpenses },
+    { data: fixedExpensePayments },
     { data: variableExpenses },
     { data: salaryReports },
-  ] = await Promise.all([vq, fq, eq, sq])
+  ] = await Promise.all([vq, fq, fpq, eq, sq])
 
-  // Calcula los gastos fijos que existían al final de un mes dado
+  // Gastos fijos REALES pagados por mes (desde fixed_expense_periods.status='paid').
+  // Agrupado por YYYY-MM del paid_at (fecha local ya viene en esa forma).
+  const paidFixedByMonth = new Map<string, number>()
+  for (const p of fixedExpensePayments ?? []) {
+    if (!p.paid_at) continue
+    const key = p.paid_at.slice(0, 7)
+    paidFixedByMonth.set(key, (paidFixedByMonth.get(key) ?? 0) + Number(p.paid_amount ?? 0))
+  }
+
+  // Fallback: si para un mes no hay registros reales (catálogo recién instalado
+  // o antes de la migración 102), usamos el snapshot histórico del catálogo
+  // como referencia. Una vez que se adopte la nueva modalidad, paidFixedByMonth
+  // domina.
   function getHistoricalFixedForMonth(ym: string): number {
+    const realPaid = paidFixedByMonth.get(ym)
+    if (realPaid !== undefined && realPaid > 0) return realPaid
     const [y, m] = ym.split('-')
     const monthEnd = new Date(Number(y), Number(m), 0, 23, 59, 59, 999)
     return (allFixedExpenses ?? [])

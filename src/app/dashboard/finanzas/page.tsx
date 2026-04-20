@@ -1,8 +1,15 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId, getOrgBranchIds } from '@/lib/actions/org'
 import { redirect } from 'next/navigation'
-import { fetchFinancialData, getFixedExpenses } from '@/lib/actions/finances'
+import { fetchFinancialData } from '@/lib/actions/finances'
 import { getCommissionSummary } from '@/lib/actions/salary'
+import {
+  getFixedExpensesCatalog,
+  getFixedExpensePeriods,
+  getFixedExpensePeriodsSummary,
+} from '@/lib/actions/fixed-expenses'
+import { getLocalDateStr, getLocalNow } from '@/lib/time-utils'
+import { getActiveTimezone } from '@/lib/i18n'
 import { FinanzasTabsClient } from './finanzas-tabs-client'
 import type { Metadata } from 'next'
 import type { BarberWithConfig } from '../sueldos/page'
@@ -51,9 +58,18 @@ export default async function FinanzasPage() {
 
   const admin = createAdminClient()
 
+  // Resolver mes actual local y "hoy" en la TZ de la org
+  const tz = await getActiveTimezone()
+  const localNow = getLocalNow(tz)
+  const currentYear = localNow.getUTCFullYear()
+  const currentMonth = localNow.getUTCMonth() + 1
+  const todayLocal = getLocalDateStr(tz)
+
   const [
     financialData,
-    fixedExpenses,
+    fixedExpensesCatalog,
+    fixedExpensePeriods,
+    fixedExpenseSummary,
     commissionSummary,
     { data: branches },
     { data: accounts },
@@ -63,7 +79,9 @@ export default async function FinanzasPage() {
     { data: orgRow },
   ] = await Promise.all([
     fetchFinancialData(1),
-    getFixedExpenses(),
+    getFixedExpensesCatalog(),
+    getFixedExpensePeriods({ year: currentYear, month: currentMonth, status: 'all' }),
+    getFixedExpensePeriodsSummary(currentYear, currentMonth),
     getCommissionSummary(),
     supabase.from('branches').select('*').eq('organization_id', orgId).eq('is_active', true).order('name'),
     branchIds.length > 0
@@ -101,6 +119,11 @@ export default async function FinanzasPage() {
       alias_or_cbu: a.alias_or_cbu ?? null,
     }))
 
+  // Cuentas simplificadas para el hub de gastos fijos (permite pagar desde cualquier cuenta activa)
+  const fixedExpensesAccounts = (accounts ?? [])
+    .filter(a => a.is_active)
+    .map(a => ({ id: a.id, name: a.name, branch_id: a.branch_id }))
+
   return (
     <FinanzasTabsClient
       initialData={financialData}
@@ -109,7 +132,13 @@ export default async function FinanzasPage() {
       barbers={barbers}
       paymentAccounts={paymentAccountsForSalary}
       expenseTickets={expenseTickets ?? []}
-      fixedExpenses={fixedExpenses}
+      fixedExpenses={fixedExpensesCatalog}
+      fixedExpensePeriods={fixedExpensePeriods}
+      fixedExpenseSummary={fixedExpenseSummary}
+      fixedExpenseAccounts={fixedExpensesAccounts}
+      fixedExpenseYear={currentYear}
+      fixedExpenseMonth={currentMonth}
+      todayLocal={todayLocal}
       commissionSummary={commissionSummary}
       permissions={userPermissions}
       orgSlug={orgRow?.slug ?? 'barberos'}
