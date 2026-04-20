@@ -217,11 +217,18 @@ export async function completeService(
   isRewardClaim: boolean = false,
   paymentAccountId?: string | null,
   extraServiceIds?: string[],
-  productsToSell?: { id: string; quantity: number }[]
+  productsToSell?: { id: string; quantity: number }[],
+  tipAmount: number = 0,
+  tipPaymentMethod: 'cash' | 'card' | 'transfer' | null = null,
+  barberNote: string | null = null,
 ) {
   if (!isValidUUID(queueEntryId)) return { error: 'queueEntryId inválido' }
   if (serviceId && !isValidUUID(serviceId)) return { error: 'serviceId inválido' }
   if (paymentAccountId && !isValidUUID(paymentAccountId)) return { error: 'paymentAccountId inválido' }
+  if (!Number.isFinite(tipAmount) || tipAmount < 0) return { error: 'tipAmount inválido' }
+  if (tipPaymentMethod && !['cash','card','transfer'].includes(tipPaymentMethod)) {
+    return { error: 'tipPaymentMethod inválido' }
+  }
 
   // Use admin client because barber pin authentications do not set a Supabase Auth session
   // This causes RLS on visits and client_points to fail when the queue trigger fires using SECURITY INVOKER
@@ -362,6 +369,13 @@ export async function completeService(
   if (serviceId) visitUpdate.service_id = serviceId
   if (paymentAccountId) visitUpdate.payment_account_id = paymentAccountId
   if (extraServiceIds && extraServiceIds.length > 0) visitUpdate.extra_services = extraServiceIds
+  if (tipAmount > 0) {
+    visitUpdate.tip_amount = tipAmount
+    visitUpdate.tip_payment_method = tipPaymentMethod ?? paymentMethod
+  }
+  if (barberNote && barberNote.trim().length > 0) {
+    visitUpdate.barber_note = barberNote.trim().slice(0, 500)
+  }
 
   await supabase
     .from('visits')
@@ -997,6 +1011,80 @@ export async function updateQueueOrder(
 
   // No revalidatePath: la UI ya se actualizó optimísticamente
   // y Realtime sincroniza a los demás clientes
+  return { success: true }
+}
+
+/**
+ * Pausa el corte activo: marca `paused_at = now()` si no está ya pausado.
+ * La duración total de la pausa se acumula en `paused_duration_seconds` al reanudar.
+ */
+export async function pauseActiveService(queueEntryId: string) {
+  if (!isValidUUID(queueEntryId)) return { error: 'ID inválido' }
+  const supabase = createAdminClient()
+
+  const { data: entry } = await supabase
+    .from('queue_entries')
+    .select('branch_id, status, is_break, paused_at')
+    .eq('id', queueEntryId)
+    .maybeSingle()
+
+  if (!entry) return { error: 'Entrada no encontrada' }
+  if (entry.is_break) return { error: 'No se pueden pausar descansos' }
+  if (entry.status !== 'in_progress') return { error: 'El corte no está activo' }
+
+  const orgAccess = await validateBranchAccess(entry.branch_id)
+  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+
+  if (entry.paused_at) return { success: true, alreadyPaused: true }
+
+  const { error } = await supabase
+    .from('queue_entries')
+    .update({ paused_at: new Date().toISOString() })
+    .eq('id', queueEntryId)
+    .eq('status', 'in_progress')
+    .is('paused_at', null)
+
+  if (error) return { error: 'Error al pausar: ' + error.message }
+
+  revalidatePath('/barbero/fila')
+  return { success: true }
+}
+
+/**
+ * Reanuda el corte: acumula en `paused_duration_seconds` el tiempo que estuvo
+ * pausado y setea `paused_at = null`.
+ */
+export async function resumeActiveService(queueEntryId: string) {
+  if (!isValidUUID(queueEntryId)) return { error: 'ID inválido' }
+  const supabase = createAdminClient()
+
+  const { data: entry } = await supabase
+    .from('queue_entries')
+    .select('branch_id, status, is_break, paused_at, paused_duration_seconds')
+    .eq('id', queueEntryId)
+    .maybeSingle()
+
+  if (!entry) return { error: 'Entrada no encontrada' }
+  if (entry.is_break) return { error: 'Operación inválida para descansos' }
+  if (entry.status !== 'in_progress') return { error: 'El corte no está activo' }
+  if (!entry.paused_at) return { success: true, alreadyRunning: true }
+
+  const pausedMs = Date.now() - new Date(entry.paused_at).getTime()
+  const additionalSec = Math.max(0, Math.floor(pausedMs / 1000))
+  const newTotal = (entry.paused_duration_seconds ?? 0) + additionalSec
+
+  const { error } = await supabase
+    .from('queue_entries')
+    .update({
+      paused_at: null,
+      paused_duration_seconds: newTotal,
+    })
+    .eq('id', queueEntryId)
+    .eq('status', 'in_progress')
+
+  if (error) return { error: 'Error al reanudar: ' + error.message }
+
+  revalidatePath('/barbero/fila')
   return { success: true }
 }
 

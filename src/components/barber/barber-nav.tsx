@@ -7,7 +7,7 @@ import {
     Target,
     ClipboardCheck,
     History,
-    Receipt,
+    PiggyBank,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -16,7 +16,7 @@ const navItems = [
     { href: '/barbero/metas', label: 'Metas', icon: Target },
     { href: '/barbero/asistencia', label: 'Asistencia', icon: ClipboardCheck },
     { href: '/barbero/historial', label: 'Historial', icon: History },
-    { href: '/barbero/facturacion', label: 'Caja', icon: Receipt },
+    { href: '/barbero/cerrar-turno', label: 'Caja', icon: PiggyBank },
 ]
 
 export function BarberNav() {
@@ -33,18 +33,16 @@ export function BarberNav() {
                         <Link
                             key={item.href}
                             href={item.href}
+                            aria-current={isActive ? 'page' : undefined}
                             className={cn(
-                                'flex flex-col items-center gap-1 rounded-xl px-3 py-2 text-xs font-medium transition-colors min-w-[4rem] hover:bg-muted/50',
+                                'flex flex-col items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold transition-colors min-w-[4rem] hover:bg-muted/50',
                                 isActive
                                     ? 'text-primary'
                                     : 'text-muted-foreground hover:text-foreground'
                             )}
                         >
                             <item.icon
-                                className={cn(
-                                    'size-5 transition-all',
-                                    isActive && 'scale-110'
-                                )}
+                                className={cn('size-5 transition-all', isActive && 'scale-110')}
                             />
                             <span className="leading-none">{item.label}</span>
                         </Link>

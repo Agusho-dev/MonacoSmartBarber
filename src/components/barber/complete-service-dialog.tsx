@@ -26,9 +26,6 @@ import {
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import {
-  Banknote,
-  CreditCard,
-  ArrowRightLeft,
   ImagePlus,
   X,
   ArrowRight,
@@ -36,19 +33,11 @@ import {
   Gift,
   Wallet,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
-
-const PAYMENT_OPTIONS: {
-  value: PaymentMethod | 'points'
-  label: string
-  icon: React.ElementType
-}[] = [
-    { value: 'cash', label: 'Efectivo', icon: Banknote },
-    { value: 'card', label: 'Tarjeta', icon: CreditCard },
-    { value: 'transfer', label: 'Transferencia', icon: ArrowRightLeft },
-    { value: 'points', label: 'Puntos', icon: Gift },
-  ]
+import { formatCurrency } from '@/lib/format'
+import { AliasCopyHero } from './alias-copy-hero'
+import { PaymentMethodButtons, type PaymentOptionValue } from './payment-method-buttons'
+import { TipSelector } from './tip-selector'
 
 interface CompleteServiceDialogProps {
   entry: QueueEntry | null
@@ -86,8 +75,11 @@ export function CompleteServiceDialog({
   const [originalClientNotes, setOriginalClientNotes] = useState('')
 
   // Step 2 — payment
-  const [selectedPayment, setSelectedPayment] = useState<PaymentMethod | 'points' | null>(null)
+  const [selectedPayment, setSelectedPayment] = useState<PaymentOptionValue | null>(null)
   const [selectedAccountId, setSelectedAccountId] = useState<string>('')
+  const [tipAmount, setTipAmount] = useState<number>(0)
+  const [tipMethod, setTipMethod] = useState<PaymentMethod | null>(null)
+  const [barberNote, setBarberNote] = useState<string>('')
 
   useEffect(() => {
     if (!entry) {
@@ -104,6 +96,9 @@ export function CompleteServiceDialog({
       setClientNotes('')
       setOriginalClientNotes('')
       setSelectedAccountId('')
+      setTipAmount(0)
+      setTipMethod(null)
+      setBarberNote('')
       return
     }
 
@@ -199,7 +194,10 @@ export function CompleteServiceDialog({
         selectedPayment === 'points',
         selectedAccountId || null,
         extraServices.length > 0 ? extraServices : undefined,
-        selectedProducts.length > 0 ? selectedProducts : undefined
+        selectedProducts.length > 0 ? selectedProducts : undefined,
+        tipAmount,
+        tipAmount > 0 ? (tipMethod ?? (selectedPayment === 'points' ? 'cash' : selectedPayment)) : null,
+        barberNote.trim() || null,
       )
 
       if ('error' in result) {
@@ -257,7 +255,7 @@ export function CompleteServiceDialog({
 
   return (
     <Dialog open={!!entry} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-xl max-h-[90dvh] overflow-y-auto p-5 sm:p-6 gap-3 sm:gap-4">
         <DialogHeader>
           <DialogTitle>
             {step === 1 ? 'Detalles del corte' : 'Cobro'}
@@ -527,87 +525,132 @@ export function CompleteServiceDialog({
               </Button>
             </div>
           ) : (
-            <div className="space-y-6">
-
-              <div className="pb-4 border-b text-center mb-6 mt-[-1rem]">
-                <p className="text-sm font-medium text-muted-foreground mb-1">Monto Total</p>
-                <p className="text-5xl font-black">${totalPrice}</p>
+            <div className="space-y-5">
+              {/* Monto GIGANTE */}
+              <div className="-mt-1 rounded-2xl border bg-muted/30 px-4 py-4 sm:px-6 sm:py-5 text-center">
+                <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+                  Monto a cobrar
+                </p>
+                <p className="mt-1 text-[clamp(44px,11vw,80px)] font-black leading-none tracking-tighter tabular-nums break-all">
+                  {formatCurrency(totalPrice + tipAmount)}
+                </p>
+                {tipAmount > 0 && (
+                  <p className="mt-2 text-xs sm:text-sm text-muted-foreground">
+                    {formatCurrency(totalPrice)} servicio · <span className="font-semibold text-foreground">{formatCurrency(tipAmount)}</span> propina
+                  </p>
+                )}
               </div>
 
               {/* Payment method */}
               <div>
-                <p className="mb-3 text-sm font-medium">Método de pago</p>
-                <div className="grid grid-cols-3 gap-3">
-                  {PAYMENT_OPTIONS.map((option) => {
-                    if (option.value === 'points' && !entry?.reward_claimed) return null
-                    const Icon = option.icon
-                    const selected = selectedPayment === option.value
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => setSelectedPayment(option.value)}
-                        className={cn(
-                          'flex flex-col items-center gap-3 rounded-xl border-2 p-6 transition-colors',
-                          selected
-                            ? 'border-primary bg-primary/10 text-foreground'
-                            : 'border-border text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground'
-                        )}
-                      >
-                        <Icon className="size-10" />
-                        <span className="text-base font-semibold">{option.label}</span>
-                      </button>
-                    )
-                  })}
-                </div>
+                <p className="mb-3 text-sm font-bold uppercase tracking-wider text-muted-foreground">
+                  Método de pago
+                </p>
+                <PaymentMethodButtons
+                  value={selectedPayment}
+                  onChange={setSelectedPayment}
+                  allowPoints={!!entry?.reward_claimed}
+                />
               </div>
 
-              {/* Payment account */}
+              {/* Transfer: alias gigante */}
               {selectedPayment === 'transfer' && paymentAccounts.length > 0 && (
-                <div>
-                  <p className="mb-2 text-sm font-medium flex items-center gap-1.5">
-                    <Wallet className="size-4" />
-                    Cuenta de cobro{' '}
-                    <span className="text-muted-foreground">(opcional)</span>
-                  </p>
-                  <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
-                    <SelectTrigger className="h-14 w-full text-lg">
-                      <SelectValue placeholder="Seleccionar cuenta..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {paymentAccounts.map((acc) => (
-                        <SelectItem key={acc.id} value={acc.id}>
-                          <span className="font-medium">{acc.name}</span>
-                          {acc.alias_or_cbu && (
-                            <span className="ml-2 text-muted-foreground text-sm">
-                              {acc.alias_or_cbu}
-                            </span>
-                          )}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="space-y-3">
+                  {paymentAccounts.length > 1 && (
+                    <div>
+                      <p className="mb-1.5 text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                        <Wallet className="size-3.5" />
+                        Cuenta de cobro
+                      </p>
+                      <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+                        <SelectTrigger className="h-11 w-full text-sm">
+                          <SelectValue placeholder="Seleccionar cuenta..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {paymentAccounts.map((acc) => (
+                            <SelectItem key={acc.id} value={acc.id}>
+                              <span className="font-medium">{acc.name}</span>
+                              {acc.alias_or_cbu && (
+                                <span className="ml-2 text-muted-foreground text-xs">
+                                  {acc.alias_or_cbu}
+                                </span>
+                              )}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  {(() => {
+                    const selectedAccount = paymentAccounts.find(a => a.id === selectedAccountId) ?? paymentAccounts[0]
+                    if (!selectedAccount?.alias_or_cbu) {
+                      return (
+                        <div className="rounded-2xl border border-dashed border-amber-500/40 bg-amber-500/5 p-4 text-center text-sm text-amber-700 dark:text-amber-400">
+                          Esta cuenta no tiene alias configurado. Avisá a tu admin.
+                        </div>
+                      )
+                    }
+                    return (
+                      <AliasCopyHero
+                        alias={selectedAccount.alias_or_cbu}
+                        accountName={selectedAccount.name}
+                        amountText={formatCurrency(totalPrice + tipAmount)}
+                      />
+                    )
+                  })()}
                 </div>
               )}
 
-              <div className="flex gap-4">
+              {/* Propina */}
+              {selectedPayment && selectedPayment !== 'points' && (
+                <TipSelector
+                  baseAmount={totalPrice}
+                  value={tipAmount}
+                  method={tipMethod}
+                  onChange={(amt, m) => { setTipAmount(amt); setTipMethod(m) }}
+                  serviceMethod={selectedPayment as PaymentMethod}
+                />
+              )}
+
+              {/* Nota del barbero para esta visita */}
+              {selectedPayment && (
+                <div>
+                  <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    Nota para este corte <span className="normal-case font-normal">(opcional — solo vos la ves)</span>
+                  </p>
+                  <textarea
+                    value={barberNote}
+                    onChange={(e) => setBarberNote(e.target.value.slice(0, 500))}
+                    placeholder="Ej: quiso un poco más corto de lo habitual, probar producto X la próxima..."
+                    rows={2}
+                    className="w-full resize-none rounded-lg border bg-transparent p-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+              )}
+
+              <div className="flex gap-2 sm:gap-3">
                 <Button
                   variant="outline"
                   size="lg"
-                  className="h-16 px-6 text-lg"
+                  className="h-14 sm:h-16 w-14 sm:w-auto sm:px-5 sm:text-base shrink-0"
                   onClick={() => setStep(1)}
                   disabled={loading}
+                  aria-label="Volver a detalles"
                 >
-                  <ArrowLeft className="mr-2 size-5" />
-                  Atrás
+                  <ArrowLeft className="size-5" />
+                  <span className="hidden sm:inline ml-2">Atrás</span>
                 </Button>
                 <Button
-                  className="h-16 flex-1 text-xl"
+                  className="h-14 sm:h-16 flex-1 text-base sm:text-lg font-black uppercase tracking-wide min-w-0"
                   size="lg"
                   onClick={finishService}
                   disabled={loading || !selectedPayment}
                 >
-                  {loading ? 'Procesando...' : 'Confirmar cobro'}
+                  <span className="truncate">
+                    {loading
+                      ? 'Procesando...'
+                      : `Cobrar ${formatCurrency(totalPrice + tipAmount)}`}
+                  </span>
                 </Button>
               </div>
             </div>

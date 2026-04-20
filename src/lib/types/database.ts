@@ -287,6 +287,10 @@ export interface QueueEntry {
   priority_order: string
   started_at: string | null
   completed_at: string | null
+  /** Migración 101: pausa del corte activo (null = no está pausado). */
+  paused_at: string | null
+  /** Migración 101: segundos acumulados en pausa durante este corte. */
+  paused_duration_seconds: number
   created_at: string
   client?: Client
   barber?: Staff
@@ -309,6 +313,12 @@ export interface Visit {
   commission_amount: number
   notes: string | null
   tags: string[] | null
+  /** Migración 101: propina separada del amount. */
+  tip_amount: number
+  /** Migración 101: método de pago de la propina (null si no hubo). */
+  tip_payment_method: PaymentMethod | null
+  /** Migración 101: nota corta del barbero sobre esta visita. */
+  barber_note: string | null
   started_at: string
   completed_at: string
   created_at: string

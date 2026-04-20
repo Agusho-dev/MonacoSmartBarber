@@ -117,6 +117,38 @@
   --sidebar-border: oklch(0.85 0 0);
   --sidebar-ring: oklch(0.14 0 0);
   color-scheme: light;
+
+  /* ── Semáforo del timer del corte activo ───────────────────────────
+   * El barbero identifica cómo viene de tiempo por color.
+   *   0–25 min: blanco · 25–30: celeste · 30–35: azul ·
+   *   35–45: amarillo · 45+: rojo.
+   * Cada etapa define bg + fg + un tono "glow" para sombras.
+   * Contraste validado WCAG AA en cada stage. */
+  --timer-ok-bg:       oklch(1 0 0);
+  --timer-ok-fg:       oklch(0.14 0 0);
+  --timer-ok-glow:     oklch(0.14 0 0 / 0.08);
+
+  --timer-heads-bg:    oklch(0.90 0.065 230);
+  --timer-heads-fg:    oklch(0.18 0 0);
+  --timer-heads-glow:  oklch(0.62 0.15 230 / 0.25);
+
+  --timer-focus-bg:    oklch(0.62 0.18 250);
+  --timer-focus-fg:    oklch(0.99 0 0);
+  --timer-focus-glow:  oklch(0.62 0.18 250 / 0.45);
+
+  --timer-warn-bg:     oklch(0.88 0.16 95);
+  --timer-warn-fg:     oklch(0.16 0 0);
+  --timer-warn-glow:   oklch(0.78 0.17 90 / 0.45);
+
+  --timer-danger-bg:   oklch(0.58 0.22 25);
+  --timer-danger-fg:   oklch(0.99 0 0);
+  --timer-danger-glow: oklch(0.58 0.22 25 / 0.55);
+
+  /* Semánticos adicionales — útiles para stats bar y cierre de turno */
+  --success: oklch(0.72 0.17 150);
+  --warning: oklch(0.82 0.17 85);
+  --info:    oklch(0.70 0.14 240);
+  --danger:  oklch(0.60 0.24 27);
 }
 
 @layer base {
@@ -303,4 +335,71 @@
 :root {
   --gold: oklch(0.78 0.12 85);
   --gold-dim: oklch(0.65 0.10 85);
+}
+
+/* ── Timer semáforo (panel de barberos) ──────────────────────────────
+ * Transición smooth entre etapas de color del recuadro del corte activo.
+ * El componente pone `style={{ '--timer-bg', '--timer-fg', '--timer-glow' }}`
+ * desde React, y las transiciones CSS animan el cambio sin re-renders. */
+@keyframes timerBreathe {
+  0%, 100% { filter: brightness(1); }
+  50%      { filter: brightness(1.06); }
+}
+@keyframes timerDangerPulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--timer-glow, transparent), 0 12px 40px -12px var(--timer-glow, transparent); }
+  50%      { box-shadow: 0 0 0 14px oklch(0.58 0.22 25 / 0), 0 18px 50px -10px var(--timer-glow, transparent); }
+}
+@keyframes tickPulse {
+  0%, 100% { opacity: 0.9; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.08); }
+}
+
+.timer-card {
+  background-color: var(--timer-bg, var(--card));
+  color: var(--timer-fg, var(--card-foreground));
+  box-shadow: 0 12px 40px -12px var(--timer-glow, oklch(0 0 0 / 0.1));
+  transition:
+    background-color 900ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 900ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 900ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.timer-card--danger {
+  animation: timerDangerPulse 1.8s ease-in-out infinite, timerBreathe 2.6s ease-in-out infinite;
+}
+.timer-tick {
+  animation: tickPulse 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timer-card,
+  .timer-card--danger,
+  .timer-tick {
+    animation: none !important;
+    transition: background-color 100ms linear, color 100ms linear !important;
+  }
+}
+
+/* Utilidad para pantalla de cobro: el ALIAS gigante */
+.alias-hero {
+  background: linear-gradient(135deg,
+    oklch(0.98 0.015 85),
+    oklch(0.94 0.03 80),
+    oklch(0.98 0.015 85)
+  );
+  background-size: 200% 200%;
+  animation: gradient-shift 8s ease infinite;
+  border: 1.5px solid oklch(0.78 0.12 85 / 0.35);
+}
+.dark .alias-hero,
+.barber-theme .alias-hero {
+  background: linear-gradient(135deg,
+    oklch(0.98 0.015 85),
+    oklch(0.94 0.03 80),
+    oklch(0.98 0.015 85)
+  );
+  background-size: 200% 200%;
+  animation: gradient-shift 8s ease infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .alias-hero { animation: none !important; }
 }

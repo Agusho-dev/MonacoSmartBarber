@@ -38,7 +38,7 @@ export function FullscreenButton() {
             variant="ghost"
             size="icon"
             onClick={toggleFullscreen}
-            className="fixed bottom-4 right-4 z-[100] rounded-full bg-background/80 backdrop-blur-md border border-border/50 shadow-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground md:bottom-6 md:right-6 md:h-12 md:w-12 h-10 w-10"
+            className="fixed top-2 right-2 z-[30] rounded-full bg-background/70 backdrop-blur-md border border-border/40 shadow-sm hover:bg-muted/60 text-muted-foreground hover:text-foreground h-8 w-8 md:top-3 md:right-3 md:h-10 md:w-10 opacity-60 hover:opacity-100 transition-opacity"
             aria-label="Toggle Fullscreen"
         >
             {isFullscreen ? (
