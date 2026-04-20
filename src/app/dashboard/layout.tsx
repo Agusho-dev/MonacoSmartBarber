@@ -3,7 +3,6 @@ import { cookies } from 'next/headers'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { DashboardShell } from '@/components/dashboard/dashboard-shell'
 import { ImpersonationBanner } from '@/components/dashboard/impersonation-banner'
-import { hasPermission } from '@/lib/permissions'
 import { getCurrentOrgId } from '@/lib/actions/org'
 
 export const dynamic = 'force-dynamic'

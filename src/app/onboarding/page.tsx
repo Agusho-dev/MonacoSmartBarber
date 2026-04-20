@@ -9,6 +9,8 @@ import {
   createOnboardingStaff,
   completeOnboarding,
   completeOnboardingStep,
+  deleteOnboardingStaff,
+  setOwnerIsBarber,
   uploadOrgLogo,
   updateOrgI18n,
 } from "@/lib/actions/onboarding"
@@ -32,6 +34,7 @@ import {
   Palette,
   Store,
   CheckCircle2,
+  Trash2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -362,6 +365,8 @@ export default function OnboardingPage() {
 
   const [staffName, setStaffName] = useState("")
   const [staffPin, setStaffPin] = useState("")
+  const [ownerIsBarber, setOwnerIsBarberState] = useState(false)
+  const [removingStaffId, setRemovingStaffId] = useState<string | null>(null)
 
   // i18n step 0
   const [i18nCountry, setI18nCountry]   = useState("AR")
@@ -495,10 +500,36 @@ export default function OnboardingPage() {
     setIsPending(false)
   }
 
+  async function handleDeleteStaff(staffId: string) {
+    setRemovingStaffId(staffId)
+    setError(null)
+    const result = await deleteOnboardingStaff(staffId)
+    if (result.success) {
+      setCreatedStaff((p) => p.filter((s) => s.id !== staffId))
+    } else {
+      setError(result.error ?? "No se pudo eliminar el barbero")
+    }
+    setRemovingStaffId(null)
+  }
+
+  async function handleTeamNext() {
+    setIsPending(true)
+    setError(null)
+    const result = await setOwnerIsBarber(ownerIsBarber)
+    if (!result.success) {
+      setError(result.error ?? "Error al guardar la configuración del propietario")
+      setIsPending(false)
+      return
+    }
+    await completeOnboardingStep(4)
+    goTo(5)
+    setIsPending(false)
+  }
+
   async function handleComplete() {
     setIsPending(true)
     await completeOnboarding()
-    router.push("/dashboard")
+    router.push("/dashboard/fila")
   }
 
   return (
@@ -776,6 +807,8 @@ export default function OnboardingPage() {
                 <StepHeader title="Agrega a tu equipo" subtitle="Los barberos usan PIN para iniciar sesion" />
                 {error && <ErrorAlert message={error} />}
 
+                <OwnerRoleToggle value={ownerIsBarber} onChange={setOwnerIsBarberState} />
+
                 <div className="glass-card rounded-xl p-4 space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Nombre *">
@@ -795,20 +828,32 @@ export default function OnboardingPage() {
                   <div className="space-y-2">
                     <p className="text-[10px] font-semibold text-white/25 uppercase tracking-[0.15em]">Equipo ({createdStaff.length})</p>
                     <div className="space-y-2 max-h-[20vh] overflow-y-auto pr-1">
-                      {createdStaff.map((s) => (
-                        <div key={s.id} className="flex items-center gap-3 rounded-xl border px-4 py-2.5 animate-reveal-up" style={{ opacity: 0, borderColor: "oklch(1 0 0 / 0.08)", background: "oklch(1 0 0 / 0.02)" }}>
-                          <div className="flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ring-2 ring-[oklch(0.78_0.12_85/0.3)]" style={{ background: "oklch(0.78 0.12 85)", color: "oklch(0.07 0 0)" }}>
-                            {s.full_name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                      {createdStaff.map((s) => {
+                        const isRemoving = removingStaffId === s.id
+                        return (
+                          <div key={s.id} className="flex items-center gap-3 rounded-xl border px-4 py-2.5 animate-reveal-up" style={{ opacity: 0, borderColor: "oklch(1 0 0 / 0.08)", background: "oklch(1 0 0 / 0.02)" }}>
+                            <div className="flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ring-2 ring-[oklch(0.78_0.12_85/0.3)]" style={{ background: "oklch(0.78 0.12 85)", color: "oklch(0.07 0 0)" }}>
+                              {s.full_name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                            </div>
+                            <p className="text-sm font-medium flex-1 truncate">{s.full_name}</p>
+                            <span className="text-xs text-white/30">Barbero</span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteStaff(s.id)}
+                              disabled={isRemoving || isPending}
+                              aria-label={`Eliminar ${s.full_name}`}
+                              className="flex size-8 items-center justify-center rounded-lg border border-white/10 text-white/40 hover:text-red-400 hover:border-red-400/40 hover:bg-red-500/5 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                            >
+                              {isRemoving ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                            </button>
                           </div>
-                          <p className="text-sm font-medium">{s.full_name}</p>
-                          <span className="ml-auto text-xs text-white/30">Barbero</span>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 )}
 
-                <NavButtons onBack={() => goTo(3)} onNext={() => { completeOnboardingStep(4); goTo(5) }} isPending={isPending} nextLabel="Finalizar" onSkip={() => { completeOnboardingStep(4); goTo(5) }} />
+                <NavButtons onBack={() => goTo(3)} onNext={handleTeamNext} isPending={isPending} nextLabel="Finalizar" onSkip={handleTeamNext} />
               </div>
             )}
 
@@ -901,6 +946,50 @@ function NavButtons({
           Omitir este paso
         </button>
       )}
+    </div>
+  )
+}
+
+function OwnerRoleToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div
+      className="rounded-xl border p-3 space-y-2"
+      style={{ borderColor: "oklch(1 0 0 / 0.08)", background: "oklch(1 0 0 / 0.02)" }}
+    >
+      <p className="text-[10px] font-semibold text-white/30 uppercase tracking-[0.15em]">
+        Sobre vos como propietario
+      </p>
+      <p className="text-xs text-white/50">¿También atendés clientes como barbero?</p>
+      <div className="flex gap-2 pt-1">
+        <button
+          type="button"
+          onClick={() => onChange(false)}
+          aria-pressed={!value}
+          className={cn(
+            "flex-1 h-10 rounded-xl text-xs font-semibold border transition-all duration-200",
+            !value
+              ? "border-[oklch(0.78_0.12_85)] text-black"
+              : "border-white/10 text-white/40 hover:border-white/20"
+          )}
+          style={!value ? { background: "oklch(0.78 0.12 85)" } : { background: "oklch(1 0 0 / 0.03)" }}
+        >
+          No, sólo administro
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange(true)}
+          aria-pressed={value}
+          className={cn(
+            "flex-1 h-10 rounded-xl text-xs font-semibold border transition-all duration-200",
+            value
+              ? "border-[oklch(0.78_0.12_85)] text-black"
+              : "border-white/10 text-white/40 hover:border-white/20"
+          )}
+          style={value ? { background: "oklch(0.78 0.12 85)" } : { background: "oklch(1 0 0 / 0.03)" }}
+        >
+          Sí, también atiendo
+        </button>
+      </div>
     </div>
   )
 }

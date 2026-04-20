@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
 
 /**
  * Custom hook that triggers a callback whenever the page becomes visible again

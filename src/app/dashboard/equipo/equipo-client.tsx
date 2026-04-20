@@ -296,7 +296,10 @@ export function EquipoClient({
                         rules={incentiveRules as Parameters<typeof IncentivosClient>[0]['rules']}
                         barbers={
                             (barbers as unknown[])
-                                .filter((b: unknown) => (b as { role: string }).role === 'barber' && (b as { is_active: boolean }).is_active)
+                                .filter((b: unknown) => {
+                                  const r = b as { role: string; is_active: boolean; is_also_barber?: boolean }
+                                  return (r.role === 'barber' || r.is_also_barber === true) && r.is_active
+                                })
                                 .map((b: unknown) => ({
                                     id: (b as { id: string }).id,
                                     full_name: (b as { full_name: string }).full_name,

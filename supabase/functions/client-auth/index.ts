@@ -140,10 +140,12 @@ Deno.serve(async (req) => {
     if (existingClient?.auth_user_id) {
       // --- CLIENTE EXISTENTE CON CUENTA AUTH ---
       // Intentar login con device_secret
-      let { data: signInData, error: signInError } = await adminClient.auth.signInWithPassword({
+      const signInResult = await adminClient.auth.signInWithPassword({
         email,
         password: device_secret,
       })
+      const signInError = signInResult.error
+      let signInData = signInResult.data
 
       if (signInError || !signInData?.session) {
         // device_secret no coincide → dispositivo nuevo o reinstalación

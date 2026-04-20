@@ -255,11 +255,11 @@ export function TvClient({
   }, [orgBranchIds, orgId])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+     
     fetchQueue()
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+     
     fetchBarbers()
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+     
     fetchSchedules()
 
     const channel = supabase

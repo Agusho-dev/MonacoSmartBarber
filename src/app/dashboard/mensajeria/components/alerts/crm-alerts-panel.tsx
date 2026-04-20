@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition, useCallback } from 'react'
-import { Bell, AlertTriangle, Info, AlertCircle, CheckCheck, MessageSquare, ExternalLink, X, User, Clock } from 'lucide-react'
+import { Bell, AlertTriangle, Info, AlertCircle, CheckCheck, MessageSquare, X, User, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { getCrmAlerts, markAlertRead, markAllAlertsRead } from '@/lib/actions/workflows'
 import { useMensajeria } from '../shared/mensajeria-context'

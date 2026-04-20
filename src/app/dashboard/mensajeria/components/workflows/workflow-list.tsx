@@ -3,7 +3,7 @@
 import { useState, useEffect, useTransition } from 'react'
 import {
   Zap, Plus, Pencil, Trash2, MessageSquare, Clock, CalendarDays, GitBranch,
-  Play, Pause, MoreVertical, Bell, MapPin, Globe, Copy, Inbox,
+  Bell, MapPin, Globe, Copy, Inbox,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'

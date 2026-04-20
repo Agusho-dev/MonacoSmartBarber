@@ -358,7 +358,7 @@ function SendButtonsConfig({ config, onUpdateConfig }: { config: Record<string, 
 
       <p className="text-[10px] text-muted-foreground">
         Después de enviar botones, el workflow esperará la respuesta automáticamente.
-        Conectá un nodo "Condición" para bifurcar según el botón presionado.
+        Conectá un nodo &ldquo;Condición&rdquo; para bifurcar según el botón presionado.
       </p>
     </div>
   )

@@ -22,7 +22,7 @@ export default async function IncentivosPage() {
     branchIds.length > 0
       ? supabase.from('incentive_rules').select('*').in('branch_id', branchIds).order('name')
       : Promise.resolve({ data: [] }),
-    supabase.from('staff').select('id, full_name, branch_id').eq('organization_id', orgId).eq('role', 'barber').eq('is_active', true).order('full_name'),
+    supabase.from('staff').select('id, full_name, branch_id').eq('organization_id', orgId).or('role.eq.barber,is_also_barber.eq.true').eq('is_active', true).order('full_name'),
     supabase.from('incentive_achievements').select('*, rule:incentive_rules(name)').eq('period_label', defaultPeriod),
   ])
 

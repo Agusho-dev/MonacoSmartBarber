@@ -17,7 +17,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Plus, X, AlertTriangle, Trash2, ChevronDown } from 'lucide-react'
+import { Plus, X, AlertTriangle, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 

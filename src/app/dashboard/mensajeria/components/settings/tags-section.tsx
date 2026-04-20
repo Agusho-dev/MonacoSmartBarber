@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Plus, X, Sparkles, ChevronDown, ChevronRight, Bot, Pencil, Check } from 'lucide-react'
+import { Plus, Sparkles, ChevronDown, ChevronRight, Bot, Pencil, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'

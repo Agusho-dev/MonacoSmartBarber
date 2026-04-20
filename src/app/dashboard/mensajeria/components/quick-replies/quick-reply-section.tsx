@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
-import { MessageCircle, Plus, Pencil, Trash2, GripVertical, ArrowUp, ArrowDown } from 'lucide-react'
+import { MessageCircle, Plus, Pencil, Trash2, ArrowUp, ArrowDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -188,7 +188,7 @@ export function QuickReplySection() {
           <p className="text-sm font-medium text-foreground/70 mb-1">Mensajes rápidos</p>
           <p className="text-xs text-muted-foreground leading-relaxed">
             Mensajes predefinidos que podés insertar con un clic durante una conversación.
-            Usá el shortcut "/" en el chat para acceder rápidamente.
+            Usá el shortcut &ldquo;/&rdquo; en el chat para acceder rápidamente.
           </p>
         </div>
       </div>

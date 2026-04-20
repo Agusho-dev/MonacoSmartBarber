@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button'
 
 interface FaceCameraProps {
   onMatch: (match: FaceMatchResult, descriptor: Float32Array, photoBlob: Blob | null) => void
-  onNoMatch: (descriptor: Float32Array) => void
+  onNoMatch: (descriptor: Float32Array, photoBlob: Blob | null) => void
   onManualEntry: () => void
   branchName?: string
   targetRole?: 'client' | 'staff'
@@ -42,6 +42,7 @@ const SCAN_INTERVAL_MS = 200
 const MATCH_HOLD_MS = 1000
 const CONSECUTIVE_MATCHES_REQUIRED = 2 // confirmaciones consecutivas antes de aceptar un match
 const MIN_FACE_WIDTH_RATIO = 0.08 // cara debe ocupar al menos 8% del ancho del video
+const MAX_NO_MATCH_ATTEMPTS = 3 // tras N no-matches consecutivos pedimos teléfono y actualizamos descriptores
 
 export function FaceCamera({
   onMatch,
@@ -63,8 +64,10 @@ export function FaceCamera({
   const [state, setState] = useState<CameraState>('loading_models')
   const [matchResult, setMatchResult] = useState<FaceMatchResult | null>(null)
   const [lastDescriptor, setLastDescriptor] = useState<Float32Array | null>(null)
+  const lastPhotoBlobRef = useRef<Blob | null>(null)
   const [faceBox, setFaceBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const consecutiveMatchRef = useRef<{ clientId: string; count: number } | null>(null)
+  const noMatchCountRef = useRef(0)
   const landmarksRef = useRef<FaceLandmarkPoint[] | null>(null)
   const faceBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
   const faceValidRef = useRef(false)
@@ -206,6 +209,9 @@ export function FaceCamera({
       showMeshRef.current = true
       setState('matching')
       setLastDescriptor(detection.descriptor)
+      // Capturar foto del frame actual — queda cacheada por si hay que enviarla en el onNoMatch
+      const currentPhoto = videoRef.current ? await captureFrameAsBlob(videoRef.current) : null
+      lastPhotoBlobRef.current = currentPhoto
 
       const match = await matchFaceInDB(detection.descriptor, targetRole, orgId)
       if (!mountedRef.current) return
@@ -221,12 +227,11 @@ export function FaceCamera({
 
         if (consecutiveMatchRef.current && consecutiveMatchRef.current.count >= CONSECUTIVE_MATCHES_REQUIRED) {
           consecutiveMatchRef.current = null
-          // Capturar foto del frame actual para retroalimentación antes de navegar
-          const photoBlob = videoRef.current ? await captureFrameAsBlob(videoRef.current) : null
+          noMatchCountRef.current = 0
           setState('matched')
           setMatchResult(match)
           setTimeout(() => {
-            if (mountedRef.current) onMatch(match, detection.descriptor, photoBlob)
+            if (mountedRef.current) onMatch(match, detection.descriptor, currentPhoto)
           }, MATCH_HOLD_MS)
         } else {
           // Aún no suficientes confirmaciones, seguir escaneando
@@ -235,6 +240,21 @@ export function FaceCamera({
       } else {
         consecutiveMatchRef.current = null
         showMeshRef.current = false
+        noMatchCountRef.current += 1
+
+        if (noMatchCountRef.current >= MAX_NO_MATCH_ATTEMPTS) {
+          // Tras N intentos, pasamos al flujo manual por teléfono llevando el último
+          // descriptor y la foto capturada para re-enrolar al cliente real.
+          const descriptorToSend = detection.descriptor
+          const photoToSend = currentPhoto
+          noMatchCountRef.current = 0
+          setState('no_match')
+          setTimeout(() => {
+            if (mountedRef.current) onNoMatch(descriptorToSend, photoToSend)
+          }, MATCH_HOLD_MS)
+          return
+        }
+
         setState('no_match')
         setTimeout(() => {
           if (mountedRef.current) {
@@ -247,7 +267,7 @@ export function FaceCamera({
       showMeshRef.current = false
       scanTimerRef.current = setTimeout(runScanLoop, SCAN_INTERVAL_MS)
     }
-  }, [state, drawFaceOverlay, onMatch, targetRole, orgId])
+  }, [state, drawFaceOverlay, onMatch, onNoMatch, targetRole, orgId])
 
   useEffect(() => {
     if (state === 'scanning') {
@@ -260,7 +280,7 @@ export function FaceCamera({
 
   const handleManualNoMatch = () => {
     if (lastDescriptor) {
-      onNoMatch(lastDescriptor)
+      onNoMatch(lastDescriptor, lastPhotoBlobRef.current)
     } else {
       onManualEntry()
     }
@@ -392,7 +412,11 @@ export function FaceCamera({
               <XCircle className="size-10 text-orange-400" />
             </div>
             <p className="text-xl font-bold text-white">No te reconocemos</p>
-            <p className="text-orange-400/80 mt-2">Reintentando...</p>
+            <p className="text-orange-400/80 mt-2">
+              {noMatchCountRef.current === 0
+                ? 'Pedíte el ingreso manual'
+                : `Reintentando... (${noMatchCountRef.current}/${MAX_NO_MATCH_ATTEMPTS})`}
+            </p>
           </div>
         )}
 

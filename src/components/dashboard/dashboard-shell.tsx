@@ -365,11 +365,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   }, [navOrder, permissions])
 
   const currentNavIndex = useMemo(() => {
-    return orderedItems.findIndex(item =>
-      item.href === '/dashboard'
-        ? pathname === '/dashboard'
-        : pathname.startsWith(item.href)
-    )
+    return orderedItems.findIndex(item => pathname.startsWith(item.href))
   }, [orderedItems, pathname])
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -583,10 +579,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={orderedItems.map(i => i.href)} strategy={verticalListSortingStrategy}>
             {orderedItems.map((item) => {
-              const isActive =
-                item.href === '/dashboard'
-                  ? pathname === '/dashboard'
-                  : pathname.startsWith(item.href)
+              const isActive = pathname.startsWith(item.href)
               return (
                 <SortableNavItem
                   key={item.href}

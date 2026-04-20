@@ -46,7 +46,7 @@ export default async function TvPage() {
       ? supabase
           .from('staff')
           .select('id, full_name, branch_id, status, is_active, avatar_url')
-          .eq('role', 'barber')
+          .or('role.eq.barber,is_also_barber.eq.true')
           .eq('is_active', true)
           .in('branch_id', branchIds)
           .order('full_name')

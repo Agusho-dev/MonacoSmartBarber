@@ -157,6 +157,7 @@ export interface Staff {
   is_active: boolean
   avatar_url: string | null
   hidden_from_checkin: boolean
+  is_also_barber: boolean
   created_at: string
   updated_at: string
   branch?: Branch

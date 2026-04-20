@@ -23,7 +23,7 @@ export default function StaffLoginPage() {
 
   useEffect(() => {
     if (state?.success) {
-      router.push("/dashboard")
+      router.push("/dashboard/fila")
     }
   }, [state, router])
 

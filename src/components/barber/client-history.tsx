@@ -10,7 +10,6 @@ import { formatDate } from '@/lib/format'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
-import { History } from 'lucide-react'
 
 interface ClientHistoryProps {
   clientId: string

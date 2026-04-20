@@ -27,7 +27,7 @@ export async function getCheckinData(branchId: string) {
         .from('staff')
         .select('*')
         .eq('branch_id', branchId)
-        .eq('role', 'barber')
+        .or('role.eq.barber,is_also_barber.eq.true')
         .eq('is_active', true)
         .order('full_name'),
       supabase

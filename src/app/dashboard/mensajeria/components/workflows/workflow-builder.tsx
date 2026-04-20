@@ -5,7 +5,7 @@ import { flushSync } from 'react-dom'
 import {
   ArrowLeft, Save, Plus, ZoomIn, ZoomOut, Maximize2,
   MessageSquare, Image, LayoutGrid, List, Tag,
-  GitBranch, Bell, Clock, Send, Trash2, Pencil, MapPin, Settings2, CalendarDays,
+  GitBranch, Bell, Clock, Send, Trash2, Pencil, Settings2, CalendarDays,
   Bot, UserCheck, Globe, Inbox, RefreshCw, Sparkles,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'

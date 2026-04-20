@@ -448,7 +448,7 @@ export async function createScheduledBreakRequests(branchId: string, breakConfig
     .from('staff')
     .select('id')
     .eq('branch_id', branchId)
-    .eq('role', 'barber')
+    .or('role.eq.barber,is_also_barber.eq.true')
     .eq('is_active', true)
 
   if (!barbers || barbers.length === 0) {

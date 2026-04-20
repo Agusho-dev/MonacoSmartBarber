@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Camera, Check, X, ImagePlus, AlertCircle } from 'lucide-react'
+import { Camera, Check, X, AlertCircle } from 'lucide-react'
 
 export default function UploadPage({ params }: { params: Promise<{ token: string }> }) {
   const [token, setToken] = useState<string | null>(null)

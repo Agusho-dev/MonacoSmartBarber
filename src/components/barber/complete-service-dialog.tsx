@@ -34,12 +34,10 @@ import {
   ArrowRight,
   ArrowLeft,
   Gift,
-  ScanFace,
   Wallet,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
-import { FaceEnrollment } from '@/components/checkin/face-enrollment'
 
 const PAYMENT_OPTIONS: {
   value: PaymentMethod | 'points'

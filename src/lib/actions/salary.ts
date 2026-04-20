@@ -185,7 +185,7 @@ export async function getAllBarbersWithSalaryConfig(branchId: string) {
     .from('staff')
     .select('id, full_name, commission_pct, salary_configs(*)')
     .eq('branch_id', branchId)
-    .eq('role', 'barber')
+    .or('role.eq.barber,is_also_barber.eq.true')
     .eq('is_active', true)
     .order('full_name')
   return { data: data ?? [], error }

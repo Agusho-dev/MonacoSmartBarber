@@ -10,7 +10,7 @@ import {
   approveBreak,
   rejectBreak,
 } from '@/lib/actions/break-requests'
-import type { Branch, BreakConfig } from '@/lib/types/database'
+import type { BreakConfig } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -33,13 +33,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Coffee, Plus, Pencil, Trash2, CheckCircle2, XCircle, HandMetal, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import { useBranchStore } from '@/stores/branch-store'

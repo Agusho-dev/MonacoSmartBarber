@@ -44,7 +44,7 @@ export async function getConversations(channelFilter?: string) {
 
   // Traer el último mensaje de cada conversación en una sola query
   const convIds = (data ?? []).map(c => c.id)
-  let lastMessages: Record<string, { content: string | null; direction: string; content_type: string; created_at: string }> = {}
+  const lastMessages: Record<string, { content: string | null; direction: string; content_type: string; created_at: string }> = {}
 
   if (convIds.length > 0) {
     const { data: msgs } = await supabase.rpc('get_last_messages_for_conversations', { conv_ids: convIds })

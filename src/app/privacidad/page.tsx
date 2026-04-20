@@ -18,7 +18,7 @@ export default function PrivacidadPage() {
         <section className="mb-8">
           <h3 className="text-lg font-semibold mb-3">1. Introducción</h3>
           <p className="text-gray-600 leading-relaxed">
-            {appName} ("nosotros", "nuestro") opera una plataforma de gestión para negocios de barbería y peluquería.
+            {appName} (&ldquo;nosotros&rdquo;, &ldquo;nuestro&rdquo;) opera una plataforma de gestión para negocios de barbería y peluquería.
             Esta Política de Privacidad describe cómo recopilamos, usamos y protegemos la información personal
             cuando utilizás nuestra aplicación y los servicios de mensajería integrados, incluyendo WhatsApp Business API.
           </p>

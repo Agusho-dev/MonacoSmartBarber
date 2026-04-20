@@ -29,7 +29,7 @@ export default async function SueldosPage() {
       .from('staff')
       .select('id, full_name, commission_pct, branch_id')
       .eq('organization_id', orgId)
-      .eq('role', 'barber')
+      .or('role.eq.barber,is_also_barber.eq.true')
       .eq('is_active', true)
       .order('full_name'),
     supabase.from('salary_configs').select('*, staff!inner(organization_id)').eq('staff.organization_id', orgId),

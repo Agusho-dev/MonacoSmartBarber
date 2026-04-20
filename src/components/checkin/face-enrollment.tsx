@@ -12,7 +12,6 @@ import {
 } from '@/lib/face-recognition'
 import { drawFaceOverlayWithMesh } from '@/lib/face-mesh'
 import { Loader2, Camera, CheckCircle2, SkipForward } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 
 interface FaceEnrollmentProps {
   clientId?: string

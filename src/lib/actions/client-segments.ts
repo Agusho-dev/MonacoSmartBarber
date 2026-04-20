@@ -96,7 +96,7 @@ async function fetchAllRows<T>(
   const PAGE = 1000
   const all: T[] = []
   let offset = 0
-  // eslint-disable-next-line no-constant-condition
+   
   while (true) {
     const { data } = await queryFn(offset, offset + PAGE - 1)
     if (!data || data.length === 0) break

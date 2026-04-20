@@ -40,7 +40,7 @@ export default async function FilaAdminPage() {
       .from('staff')
       .select('id, full_name, branch_id, status, is_active, hidden_from_checkin, avatar_url')
       .eq('organization_id', orgId)
-      .eq('role', 'barber')
+      .or('role.eq.barber,is_also_barber.eq.true')
       .eq('is_active', true)
       .order('full_name'),
     supabase

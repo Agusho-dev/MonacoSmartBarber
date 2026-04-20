@@ -1,4 +1,4 @@
-import type { Conversation, Message, SocialChannel, Client, OrgWhatsAppConfig, OrgInstagramConfig, ConversationTag } from '@/lib/types/database'
+import type { Conversation, SocialChannel, Client, OrgWhatsAppConfig, OrgInstagramConfig, ConversationTag } from '@/lib/types/database'
 import type { OrgAiConfig } from '@/lib/actions/ai-config'
 
 export interface ConversationWithRelations extends Conversation {

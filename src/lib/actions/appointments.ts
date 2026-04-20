@@ -2,7 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { getCurrentOrgId, validateBranchAccess } from './org'
+import { getCurrentOrgId } from './org'
 import { RateLimits } from '@/lib/rate-limit'
 import { absoluteUrl } from '@/lib/app-url'
 import type { Appointment, AppointmentSettings, AppointmentStaff } from '@/lib/types/database'

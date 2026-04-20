@@ -2,7 +2,6 @@
 
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import type { StaffStatus } from '@/lib/types/database'
 import { getCurrentOrgId } from './org'
 
 export async function toggleBarberStatus(staffId: string) {
@@ -31,7 +30,7 @@ export async function deactivateBarber(staffId: string) {
       .from('staff')
       .select('id')
       .eq('branch_id', inProgressEntry.branch_id)
-      .eq('role', 'barber')
+      .or('role.eq.barber,is_also_barber.eq.true')
       .eq('is_active', true)
       .eq('organization_id', orgId)
       .neq('id', staffId)

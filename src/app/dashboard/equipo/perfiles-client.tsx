@@ -7,7 +7,6 @@ import {
   Banknote,
   TrendingUp,
   AlertTriangle,
-  Clock,
   Coffee,
   CalendarDays,
   Download,

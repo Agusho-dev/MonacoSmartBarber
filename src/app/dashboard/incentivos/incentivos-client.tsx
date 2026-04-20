@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { upsertIncentiveRule, toggleIncentiveRule, deleteIncentiveRule, logAchievement } from '@/lib/actions/incentives'
 import { formatCurrency } from '@/lib/format'
-import type { Branch, IncentiveRule, IncentiveAchievement, IncentiveMetric, IncentivePeriod } from '@/lib/types/database'
+import type { IncentiveRule, IncentiveAchievement, IncentiveMetric, IncentivePeriod } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'

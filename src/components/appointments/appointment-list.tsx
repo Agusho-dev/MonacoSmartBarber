@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Clock, User, Scissors, Check, XCircle, AlertTriangle, Loader2, UserCheck } from 'lucide-react'
+import { Clock, User, Scissors, XCircle, AlertTriangle, Loader2, UserCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cancelAppointment, markNoShow, checkinAppointment } from '@/lib/actions/appointments'

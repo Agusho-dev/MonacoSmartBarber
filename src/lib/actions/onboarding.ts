@@ -332,6 +332,73 @@ export async function createOnboardingStaff(formData: FormData) {
 }
 
 /**
+ * Elimina un staff creado durante el onboarding. Sólo permite borrar staff
+ * de la organización del usuario actual y que todavía no tenga actividad
+ * (sin visitas/logs). Uso: botón "deshacer" cuando el admin cargó mal un barbero.
+ */
+export async function deleteOnboardingStaff(staffId: string) {
+  if (!staffId) return { success: false, error: 'ID de barbero inválido' }
+
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { success: false, error: 'Organización no encontrada' }
+
+  const supabase = createAdminClient()
+
+  const { data: staff } = await supabase
+    .from('staff')
+    .select('id, organization_id, role')
+    .eq('id', staffId)
+    .maybeSingle()
+
+  if (!staff) return { success: false, error: 'Barbero no encontrado' }
+  if (staff.organization_id !== orgId) {
+    return { success: false, error: 'No podés eliminar este barbero' }
+  }
+  // Nunca borrar al owner desde onboarding (romperían su propia cuenta)
+  if (staff.role === 'owner') {
+    return { success: false, error: 'No se puede eliminar al propietario' }
+  }
+
+  const { error } = await supabase.from('staff').delete().eq('id', staffId)
+  if (error) {
+    console.error('[deleteOnboardingStaff] Error:', error)
+    return { success: false, error: 'Error al eliminar el barbero' }
+  }
+
+  revalidatePath('/dashboard/barberos')
+  revalidatePath('/dashboard/equipo')
+  return { success: true }
+}
+
+/**
+ * Marca al propietario como barbero (is_also_barber=true) o no.
+ * Si el propietario también atiende clientes, aparece en los listados de
+ * barberos (fila, turnos, servicios, sueldos, etc.) sin perder sus permisos
+ * de owner/admin.
+ */
+export async function setOwnerIsBarber(isBarber: boolean) {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { success: false, error: 'Organización no encontrada' }
+
+  const supabase = createAdminClient()
+
+  const { error } = await supabase
+    .from('staff')
+    .update({ is_also_barber: isBarber })
+    .eq('organization_id', orgId)
+    .eq('role', 'owner')
+
+  if (error) {
+    console.error('[setOwnerIsBarber] Error:', error)
+    return { success: false, error: 'Error al actualizar el rol del propietario' }
+  }
+
+  revalidatePath('/dashboard/equipo')
+  revalidatePath('/dashboard/fila')
+  return { success: true }
+}
+
+/**
  * Marca el onboarding como completado.
  */
 export async function completeOnboarding() {

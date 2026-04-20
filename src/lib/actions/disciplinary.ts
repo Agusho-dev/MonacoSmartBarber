@@ -155,7 +155,7 @@ export async function getBarberDisciplinarySummary(branchId: string) {
     .from('staff')
     .select('id, full_name')
     .eq('branch_id', branchId)
-    .eq('role', 'barber')
+    .or('role.eq.barber,is_also_barber.eq.true')
     .eq('is_active', true)
     .order('full_name')
 

@@ -29,13 +29,13 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { createClient } from '@/lib/supabase/client'
-import { cancelQueueEntry, updateQueueOrder, createBreakEntry, startService, attendNextClient, checkinClient } from '@/lib/actions/queue'
+import { cancelQueueEntry, updateQueueOrder, createBreakEntry, startService, checkinClient } from '@/lib/actions/queue'
 import { searchClients } from '@/lib/actions/clients'
 import { CompleteServiceDialog } from '@/components/barber/complete-service-dialog'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import type { QueueEntry, StaffStatus, StaffSchedule, Staff, BreakConfig, Service } from '@/lib/types/database'
-import { assignDynamicBarbers, isBarberBlockedByShiftEnd } from '@/lib/barber-utils'
+import { isBarberBlockedByShiftEnd } from '@/lib/barber-utils'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -58,7 +58,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Clock, User, Scissors, X, Pause, GripVertical, Zap, Plus, UserPlus, Play, Check, ChevronDown, Search, FileEdit, ExternalLink } from 'lucide-react'
+import { Clock, User, Scissors, X, Pause, GripVertical, Zap, UserPlus, Play, Check, ChevronDown, Search, FileEdit, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -811,7 +811,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   const [manualDialogOpen, setManualDialogOpen] = useState(false)
   const [searchDialogOpen, setSearchDialogOpen] = useState(false)
   const [services, setServices] = useState<Service[]>([])
-  const [manualForm, setManualForm] = useState({ phone: '', name: '', serviceId: '' })
+  const DYNAMIC_BARBER = '__dynamic__'
+  const [manualForm, setManualForm] = useState({ phone: '', name: '', serviceId: '', barberId: DYNAMIC_BARBER })
   const [manualLoading, setManualLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<{ id: string; name: string; phone: string }[]>([])
@@ -819,6 +820,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   const [searchExecuted, setSearchExecuted] = useState(false)
   const [selectedSearchClient, setSelectedSearchClient] = useState<{ id: string; name: string; phone: string } | null>(null)
   const [searchServiceId, setSearchServiceId] = useState('')
+  const [searchBarberId, setSearchBarberId] = useState(DYNAMIC_BARBER)
   const [searchCheckinLoading, setSearchCheckinLoading] = useState(false)
 
   const supabase = useMemo(() => createClient(), [])
@@ -848,7 +850,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
     const { data } = await supabase
       .from('staff')
       .select('id, full_name, branch_id, status, is_active, hidden_from_checkin, avatar_url')
-      .eq('role', 'barber')
+      .or('role.eq.barber,is_also_barber.eq.true')
       .eq('is_active', true)
       .order('full_name')
     if (data) setLiveBarbers(data as BarberRow[])
@@ -981,6 +983,9 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
     fd.set('phone', manualForm.phone)
     fd.set('branch_id', selectedBranchId)
     if (manualForm.serviceId) fd.set('service_id', manualForm.serviceId)
+    if (manualForm.barberId && manualForm.barberId !== DYNAMIC_BARBER) {
+      fd.set('barber_id', manualForm.barberId)
+    }
     const result = await checkinClient(fd)
     setManualLoading(false)
     if (result.error) {
@@ -989,7 +994,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
       toast.info('El cliente ya está en la fila')
     } else {
       toast.success('Cliente registrado en la fila')
-      setManualForm({ phone: '', name: '', serviceId: '' })
+      setManualForm({ phone: '', name: '', serviceId: '', barberId: DYNAMIC_BARBER })
       setManualDialogOpen(false)
     }
   }
@@ -1035,6 +1040,9 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
     fd.set('phone', client.phone)
     fd.set('branch_id', selectedBranchId)
     if (searchServiceId) fd.set('service_id', searchServiceId)
+    if (searchBarberId && searchBarberId !== DYNAMIC_BARBER) {
+      fd.set('barber_id', searchBarberId)
+    }
     const result = await checkinClient(fd)
     setSearchCheckinLoading(false)
     if (result.error) {
@@ -1047,6 +1055,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
       setSearchResults([])
       setSelectedSearchClient(null)
       setSearchServiceId('')
+      setSearchBarberId(DYNAMIC_BARBER)
       setSearchDialogOpen(false)
     }
   }
@@ -1457,6 +1466,31 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Barbero</Label>
+                    <Select
+                      value={manualForm.barberId}
+                      onValueChange={(v) => setManualForm((f) => ({ ...f, barberId: v }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Elegir barbero" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={DYNAMIC_BARBER}>Menor espera</SelectItem>
+                        {liveBarbers
+                          .filter((b) =>
+                            b.is_active &&
+                            !b.hidden_from_checkin &&
+                            (!selectedBranchId || b.branch_id === selectedBranchId)
+                          )
+                          .map((b) => (
+                            <SelectItem key={b.id} value={b.id}>
+                              {b.full_name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <Button onClick={handleManualCheckin} disabled={manualLoading} className="w-full">
                     {manualLoading ? 'Registrando…' : 'Agregar a la fila'}
                   </Button>
@@ -1473,6 +1507,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
                 setSearchExecuted(false)
                 setSelectedSearchClient(null)
                 setSearchServiceId('')
+                setSearchBarberId(DYNAMIC_BARBER)
               }
             }}>
               <DialogContent className="sm:max-w-md">
@@ -1539,6 +1574,28 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
                               .map((s) => (
                                 <SelectItem key={s.id} value={s.id}>
                                   {s.name}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Barbero</Label>
+                        <Select value={searchBarberId} onValueChange={setSearchBarberId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Elegir barbero" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={DYNAMIC_BARBER}>Menor espera</SelectItem>
+                            {liveBarbers
+                              .filter((b) =>
+                                b.is_active &&
+                                !b.hidden_from_checkin &&
+                                (!selectedBranchId || b.branch_id === selectedBranchId)
+                              )
+                              .map((b) => (
+                                <SelectItem key={b.id} value={b.id}>
+                                  {b.full_name}
                                 </SelectItem>
                               ))}
                           </SelectContent>

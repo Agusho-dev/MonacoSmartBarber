@@ -13,7 +13,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
   Cell,
 } from 'recharts'
 import { useBranchStore } from '@/stores/branch-store'
@@ -477,7 +476,7 @@ function HeatmapTab() {
       const result = await fetchWeekHeatmap(start, end, selectedBranchId)
       setHeatmap(result)
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [start, end, selectedBranchId])
 
   const hours = Array.from({ length: 14 }, (_, i) => i + 8)

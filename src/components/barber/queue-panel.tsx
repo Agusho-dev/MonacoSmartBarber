@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
-import { startService, attendNextClient, cancelQueueEntry, reassignBarber } from '@/lib/actions/queue'
+import { attendNextClient, cancelQueueEntry, reassignBarber } from '@/lib/actions/queue'
 import { fetchBarberDayStats, fetchBranchAssignmentData } from '@/lib/actions/barber'
 import { logoutBarber } from '@/lib/actions/auth'
 import {
@@ -15,7 +15,6 @@ import {
   rejectBreak as rejectBreakAction,
   getPendingBreakRequests,
 } from '@/lib/actions/break-requests'
-import { formatCurrency } from '@/lib/format'
 import type { QueueEntry, Staff, Client, BreakConfig, StaffSchedule } from '@/lib/types/database'
 import { assignDynamicBarbers } from '@/lib/barber-utils'
 import { AppointmentList } from '@/components/appointments/appointment-list'
@@ -53,10 +52,7 @@ import {
   LogOut,
   Check,
   X,
-  DollarSign,
   Gift,
-  ArrowRightLeft,
-  Receipt,
   Coffee,
   CheckCircle2,
   XCircle,
@@ -67,7 +63,6 @@ import {
   AlertTriangle,
   MoreHorizontal,
 } from 'lucide-react'
-import Link from 'next/link'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
 import { DirectSaleDialog } from './direct-sale-dialog'
@@ -207,7 +202,7 @@ export function QueuePanel({
         .from('staff')
         .select('*')
         .eq('branch_id', session.branch_id)
-        .eq('role', 'barber')
+        .or('role.eq.barber,is_also_barber.eq.true')
         .eq('is_active', true)
         .order('full_name'),
       supabase

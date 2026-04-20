@@ -16,7 +16,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Clock, UserX, Save, Timer, AlertTriangle, Zap, Monitor, ImagePlus, Building2, Loader2, X } from 'lucide-react'
+import { Clock, UserX, Save, Timer, AlertTriangle, Zap, Monitor, ImagePlus, Building2, Loader2 } from 'lucide-react'
 
 const DAY_OPTIONS = [
   { value: 1, label: 'Lun' },
@@ -312,7 +312,7 @@ function ThresholdsCard({ settings }: { settings: AppSettings | null }) {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="risk-days">Días para "en riesgo"</Label>
+          <Label htmlFor="risk-days">Días para &ldquo;en riesgo&rdquo;</Label>
           <div className="flex items-center gap-3">
             <Input
               id="risk-days"
@@ -328,7 +328,7 @@ function ThresholdsCard({ settings }: { settings: AppSettings | null }) {
           </div>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="lost-days">Días para "perdido"</Label>
+          <Label htmlFor="lost-days">Días para &ldquo;perdido&rdquo;</Label>
           <div className="flex items-center gap-3">
             <Input
               id="lost-days"
@@ -728,7 +728,7 @@ function DynamicCooldownCard({ settings }: { settings: AppSettings | null }) {
           <CardTitle>Cooldown de cliente dinámico</CardTitle>
         </div>
         <CardDescription>
-          Segundos que un barbero queda "bloqueado" para recibir clientes dinámicos tras finalizar un servicio, evitando que se le asigne un cliente que aún está caminando hacia su silla
+          Segundos que un barbero queda &ldquo;bloqueado&rdquo; para recibir clientes dinámicos tras finalizar un servicio, evitando que se le asigne un cliente que aún está caminando hacia su silla
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

@@ -4,7 +4,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
 import { checkinClient, checkinClientByFace, reassignMyBarber } from '@/lib/actions/queue'
 import { registerBarberClockIn, registerBarberClockOut } from '@/lib/actions/attendance'
 import { verifyBarberPin } from '@/lib/actions/auth'
@@ -29,7 +28,6 @@ import {
   RefreshCw,
   LogIn,
   LogOut,
-  Coffee,
   ScanFace,
   Settings2,
   ChevronDown,
@@ -38,7 +36,7 @@ import {
   X,
   UserPlus,
 } from 'lucide-react'
-import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule, AppSettings } from '@/lib/types/database'
+import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule } from '@/lib/types/database'
 import {
   buildBarberAvgMinutes,
   getBarberStats,
@@ -49,14 +47,12 @@ import {
   mobileStatusColors,
   mobileStatusLabels,
   formatWaitTime,
-  type BarberStats,
 } from '@/lib/barber-utils'
 import { FaceCamera } from '@/components/checkin/face-camera'
 import { FaceEnrollment } from '@/components/checkin/face-enrollment'
 import {
   TerminalAmbient,
   TerminalGlobalStyles,
-  TerminalNeoFrame,
   GlassRing,
   TerminalSectionGlow,
   terminalBodyMuted,
@@ -72,7 +68,6 @@ import {
   terminalPrimaryInnerBtn,
   terminalProgressFill,
   terminalProgressTrack,
-  terminalSecondaryFlat,
 } from '@/components/checkin/terminal-theme'
 import type { FaceMatchResult } from '@/lib/face-recognition'
 import { saveFacePhoto, enrollFaceDescriptor, enrollStaffFaceDescriptor, saveStaffFacePhoto } from '@/lib/face-recognition'
@@ -755,8 +750,9 @@ export default function CheckinPage() {
   }, [])
 
   const handleFaceNoMatch = useCallback(
-    (descriptor: Float32Array) => {
+    (descriptor: Float32Array, photoBlob: Blob | null) => {
       setFaceDescriptor(descriptor)
+      setCapturedScanPhoto(photoBlob)
       setPhone('')
       setName('')
       goTo('phone')
@@ -1955,7 +1951,16 @@ export default function CheckinPage() {
             </p>
           </div>
 
-          <div className="relative w-full grid gap-3 md:gap-4 mt-1 md:mt-2 overflow-y-auto min-h-0 flex-1">
+          <div
+            className={cn(
+              'relative w-full grid gap-3 md:gap-4 mt-1 md:mt-2 overflow-y-auto min-h-0 flex-1 auto-rows-[minmax(7rem,1fr)] md:auto-rows-[minmax(9rem,1fr)] place-content-start',
+              services.length === 1 && 'grid-cols-1 max-w-xs mx-auto',
+              services.length === 2 && 'grid-cols-2 max-w-xl mx-auto',
+              services.length === 3 && 'grid-cols-1 sm:grid-cols-3 max-w-3xl mx-auto',
+              services.length === 4 && 'grid-cols-2 max-w-2xl mx-auto',
+              services.length >= 5 && 'grid-cols-2 md:grid-cols-3',
+            )}
+          >
             {services.map(s => (
               <button
                 key={s.id}
@@ -1964,27 +1969,25 @@ export default function CheckinPage() {
                   goTo('barber')
                 }}
                 className={cn(
-                  'flex items-center justify-between gap-4 w-full p-5 md:p-6 rounded-xl md:rounded-2xl text-left overflow-hidden transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]',
+                  'flex flex-col items-center justify-center text-center gap-2 w-full h-full p-4 md:p-5 rounded-xl md:rounded-2xl overflow-hidden transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]',
                   isLightBg
                     ? 'border border-zinc-300 bg-white text-zinc-900 shadow-sm hover:border-zinc-400 hover:shadow-md'
                     : terminalListItem
                 )}
               >
-                <div className="min-w-0">
-                  <h3
-                    className={cn(
-                      'text-xl md:text-3xl font-semibold truncate',
-                      isLightBg ? 'text-zinc-900' : 'text-white'
-                    )}
-                  >
-                    {s.name}
-                  </h3>
-                </div>
-                <div className="shrink-0 text-right">
+                <h3
+                  className={cn(
+                    'text-lg md:text-2xl font-semibold leading-tight line-clamp-2',
+                    isLightBg ? 'text-zinc-900' : 'text-white'
+                  )}
+                >
+                  {s.name}
+                </h3>
+                <div className="flex flex-col items-center gap-0.5">
                   {s.duration_minutes && (
                     <p
                       className={cn(
-                        'text-base md:text-lg font-medium mb-1',
+                        'text-sm md:text-base font-medium',
                         isLightBg ? 'text-zinc-600' : 'text-white/60'
                       )}
                     >
@@ -1992,7 +1995,7 @@ export default function CheckinPage() {
                     </p>
                   )}
                   {s.price > 0 && (
-                    <p className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-900' : 'text-white')}>
+                    <p className={cn('text-base md:text-xl font-bold', isLightBg ? 'text-zinc-900' : 'text-white')}>
                       ${s.price}
                     </p>
                   )}
@@ -2241,7 +2244,7 @@ export default function CheckinPage() {
                 <p className={cn('mt-1 md:mt-2 text-base md:text-lg', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>¿Qué querés registrar?</p>
               </div>
 
-              <div className="relative w-full grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+              <div className="relative w-full grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 max-w-2xl mx-auto">
                 <button
                   onClick={async () => {
                     const branchId = selectedBranch?.id
@@ -2256,7 +2259,7 @@ export default function CheckinPage() {
                     setStaffActionDone(true)
                     resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
                   }}
-                  className="flex flex-col items-center gap-3 rounded-2xl border border-emerald-400/35 bg-emerald-950/35 p-6 text-left shadow-[0_0_24px_rgba(52,211,153,0.08)] backdrop-blur-sm transition-all hover:border-emerald-300/50 hover:bg-emerald-950/50 hover:shadow-[0_0_32px_rgba(52,211,153,0.15)] active:scale-95"
+                  className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-emerald-400/35 bg-emerald-950/35 p-6 shadow-[0_0_24px_rgba(52,211,153,0.08)] backdrop-blur-sm transition-all hover:border-emerald-300/50 hover:bg-emerald-950/50 hover:shadow-[0_0_32px_rgba(52,211,153,0.15)] active:scale-95"
                 >
                   <LogIn className="size-10 text-emerald-400 drop-shadow-[0_0_12px_rgba(52,211,153,0.4)]" />
                   <span className="text-lg font-semibold text-emerald-200">Entrada</span>
@@ -2276,25 +2279,24 @@ export default function CheckinPage() {
                     setStaffActionDone(true)
                     resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
                   }}
-                  className="flex flex-col items-center gap-3 rounded-2xl border border-red-400/35 bg-red-950/35 p-6 text-left shadow-[0_0_24px_rgba(248,113,113,0.08)] backdrop-blur-sm transition-all hover:border-red-300/50 hover:bg-red-950/50 hover:shadow-[0_0_32px_rgba(248,113,113,0.15)] active:scale-95"
+                  className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-red-400/35 bg-red-950/35 p-6 shadow-[0_0_24px_rgba(248,113,113,0.08)] backdrop-blur-sm transition-all hover:border-red-300/50 hover:bg-red-950/50 hover:shadow-[0_0_32px_rgba(248,113,113,0.15)] active:scale-95"
                 >
                   <LogOut className="size-10 text-red-400 drop-shadow-[0_0_12px_rgba(248,113,113,0.4)]" />
                   <span className="text-lg font-semibold text-red-200">Salida</span>
                 </button>
-
-                <button
-                  onClick={() => {
-                    goTo('branch')
-                  }}
-                  className={cn(
-                    'flex flex-col items-center gap-3 rounded-2xl p-6 text-left',
-                    terminalSecondaryFlat
-                  )}
-                >
-                  <Coffee className="size-10 text-amber-300 drop-shadow-[0_0_10px_rgba(251,191,36,0.25)]" />
-                  <span className="text-lg font-semibold text-amber-100/90">Volver</span>
-                </button>
               </div>
+
+              <button
+                type="button"
+                onClick={() => goTo('branch')}
+                className={cn(
+                  'mt-2 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.02] px-4 py-2 text-sm text-white/60 hover:bg-white/[0.05] hover:text-white transition-colors',
+                  isLightBg && 'border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900'
+                )}
+              >
+                <ArrowLeft className="size-4" />
+                Cancelar
+              </button>
 
               {error && <p className="text-destructive text-center text-base md:text-lg">{error}</p>}
             </>

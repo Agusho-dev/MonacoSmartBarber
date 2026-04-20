@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import {
-  Copy, Eye, EyeOff, Wifi, WifiOff, ExternalLink, Instagram, Facebook, Plus, X, Bot, ScrollText,
+  Copy, Eye, EyeOff, Wifi, WifiOff, ExternalLink, Instagram, Facebook, Bot, ScrollText,
 } from 'lucide-react'
 import { ModelPicker } from '../shared/model-picker'
 import { AiLogsPanel } from './ai-logs-panel'
