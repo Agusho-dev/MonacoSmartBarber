@@ -214,10 +214,7 @@ export async function recordTransfer(visitId: string, accountId: string, amount:
   return { success: true }
 }
 
-export async function getAllAccountBalanceTotals(
-  branchId?: string | null,
-  range?: { from: string; to: string }, // ISO datetimes; si se pasa, limita las cuentas y el efectivo al rango
-) {
+export async function getAllAccountBalanceTotals(branchId?: string | null) {
   const supabase = await createClient()
 
   if (branchId) {
@@ -238,23 +235,18 @@ export async function getAllAccountBalanceTotals(
     accountsQuery = accountsQuery.in('branch_id', orgBranchIds)
   }
 
-  const rangeFromDate = range ? range.from.slice(0, 10) : null
-  const rangeToDate = range ? range.to.slice(0, 10) : null
-
   // Preparar query de cash en paralelo con la de cuentas
   let cashVisitsQuery = supabase
     .from('visits')
     .select('amount')
     .eq('payment_method', 'cash')
   if (branchId) cashVisitsQuery = cashVisitsQuery.eq('branch_id', branchId)
-  if (range) cashVisitsQuery = cashVisitsQuery.gte('completed_at', range.from).lte('completed_at', range.to)
 
   let cashExpensesQuery = supabase
     .from('expense_tickets')
     .select('amount')
     .is('payment_account_id', null)
   if (branchId) cashExpensesQuery = cashExpensesQuery.eq('branch_id', branchId)
-  if (rangeFromDate && rangeToDate) cashExpensesQuery = cashExpensesQuery.gte('expense_date', rangeFromDate).lte('expense_date', rangeToDate)
 
   // Fetch cuentas + cash en paralelo
   const [{ data: accounts }, { data: cashVisits }, { data: cashExpenses }] = await Promise.all([
@@ -265,23 +257,14 @@ export async function getAllAccountBalanceTotals(
 
   const accountIds = accounts?.map(a => a.id) || []
 
-  // Transfers + expenses de cuentas en paralelo (con filtro opcional de rango)
-  const transfersQueryBuilder = (() => {
-    if (accountIds.length === 0) return Promise.resolve({ data: [] as { payment_account_id: string; amount: number }[] })
-    let q = supabase.from('transfer_logs').select('payment_account_id, amount').in('payment_account_id', accountIds)
-    if (range) q = q.gte('transferred_at', range.from).lte('transferred_at', range.to)
-    return q
-  })()
-  const expensesQueryBuilder = (() => {
-    if (accountIds.length === 0) return Promise.resolve({ data: [] as { payment_account_id: string; amount: number }[] })
-    let q = supabase.from('expense_tickets').select('payment_account_id, amount').in('payment_account_id', accountIds)
-    if (rangeFromDate && rangeToDate) q = q.gte('expense_date', rangeFromDate).lte('expense_date', rangeToDate)
-    return q
-  })()
-
+  // Transfers + expenses de cuentas en paralelo
   const [{ data: allTransfers }, { data: allExpenses }] = await Promise.all([
-    transfersQueryBuilder,
-    expensesQueryBuilder,
+    accountIds.length > 0
+      ? supabase.from('transfer_logs').select('payment_account_id, amount').in('payment_account_id', accountIds)
+      : Promise.resolve({ data: [] as { payment_account_id: string; amount: number }[] }),
+    accountIds.length > 0
+      ? supabase.from('expense_tickets').select('payment_account_id, amount').in('payment_account_id', accountIds)
+      : Promise.resolve({ data: [] as { payment_account_id: string; amount: number }[] }),
   ])
 
   const cashIncome = (cashVisits ?? []).reduce((s, v) => s + Number(v.amount), 0)
