@@ -266,8 +266,28 @@ export function FinanzasClient({
     return branches.find(b => b.id === selectedBranchId)?.name ?? 'Sucursal'
   }, [selectedBranchId, branches])
 
+  // Calcula rango ISO correspondiente al período activo (para alinear saldos del reporte)
+  function getReportDateRange(): { from: string; to: string } | null {
+    if (data.months.length === 0) return null
+    const firstMonth = data.months[0].month // 'YYYY-MM'
+    const lastMonth = data.months[data.months.length - 1].month
+    const [fy, fm] = firstMonth.split('-').map(Number)
+    const [ly, lm] = lastMonth.split('-').map(Number)
+    const from = new Date(fy, fm - 1, 1, 0, 0, 0, 0).toISOString()
+    const to = new Date(ly, lm, 0, 23, 59, 59, 999).toISOString()
+    return { from, to }
+  }
+
+  // Saldos por cuenta limitados al período del reporte (para que matcheen con ingresos brutos)
+  async function fetchScopedBalances(): Promise<AccountBalance[]> {
+    const range = getReportDateRange()
+    if (!range) return accountBalances
+    return await getAllAccountBalanceTotals(selectedBranchId, range)
+  }
+
   // CSV multi-sección legible con BOM + metadata + totales
-  function exportToCSV() {
+  async function exportToCSV() {
+    const scopedBalances = await fetchScopedBalances()
     const sep = ';' // Excel ES reconoce ; como delimitador
     const eol = '\r\n'
     const lines: string[] = []
@@ -323,11 +343,11 @@ export function FinanzasClient({
     }
     lines.push('')
 
-    // Saldos por cuenta
-    if (accountBalances.length > 0) {
-      row('SALDOS POR CUENTA')
-      row('Cuenta', 'Ingresos', 'Egresos', 'Saldo')
-      for (const a of accountBalances) {
+    // Movimientos por cuenta en el período (alineado con Ingresos brutos)
+    if (scopedBalances.length > 0) {
+      row('MOVIMIENTOS POR CUENTA (PERÍODO)')
+      row('Cuenta', 'Ingresos', 'Egresos', 'Neto')
+      for (const a of scopedBalances) {
         row(a.name, formatAmountCSV(a.income), formatAmountCSV(a.expenses), formatAmountCSV(a.balance))
       }
       lines.push('')
@@ -381,6 +401,7 @@ export function FinanzasClient({
 
   // PDF multi-sección usando jsPDF + autotable
   async function exportToPDF() {
+    const scopedBalances = await fetchScopedBalances()
     const { default: jsPDF } = await import('jspdf')
     const { default: autoTable } = await import('jspdf-autotable')
 
@@ -451,14 +472,14 @@ export function FinanzasClient({
       y = (doc.lastAutoTable?.finalY ?? y) + 8
     }
 
-    // Saldos por cuenta
-    if (accountBalances.length > 0) {
+    // Movimientos por cuenta en el período (alineado con Ingresos brutos)
+    if (scopedBalances.length > 0) {
       doc.setFontSize(12)
-      doc.text('Saldos por cuenta', 14, y)
+      doc.text('Movimientos por cuenta (período)', 14, y)
       autoTable(doc, {
         startY: y + 2,
-        head: [['Cuenta', 'Ingresos', 'Egresos', 'Saldo']],
-        body: accountBalances.map(a => [
+        head: [['Cuenta', 'Ingresos', 'Egresos', 'Neto']],
+        body: scopedBalances.map(a => [
           a.name,
           formatCurrency(a.income),
           formatCurrency(a.expenses),
