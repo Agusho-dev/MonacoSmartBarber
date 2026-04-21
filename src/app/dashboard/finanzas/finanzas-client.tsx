@@ -9,11 +9,12 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
   PieChart,
   Pie,
   Cell,
+  LabelList,
+  ReferenceLine,
 } from 'recharts'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
@@ -97,6 +98,14 @@ const COLORS = {
   netProfit: '#4ade80',  // verde — resultado neto
   grid: '#262626',
   axis: '#737373',
+}
+
+/** Formatea valores monetarios del eje Y con 1M / 10k para no saturar. */
+function formatAxis(v: number): string {
+  const abs = Math.abs(v)
+  if (abs >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
+  if (abs >= 1_000) return `$${Math.round(v / 1_000)}k`
+  return `$${Math.round(v)}`
 }
 
 const PIE_COLORS = ['#a78bfa', '#22d3ee', '#fbbf24', '#f87171', '#34d399', '#f472b6', '#818cf8', '#2dd4bf']
@@ -226,11 +235,20 @@ export function FinanzasClient({
   const { totals, breakEven } = data
   const isPositive = totals.netProfit >= 0
 
-  // Enriquecer cada mes con el ingreso del mes anterior para mostrarlo en el tooltip
-  const chartMonths = data.months.map((m, i) => ({
-    ...m,
-    prevRevenue: i > 0 ? data.months[i - 1].revenue : -1,
-  }))
+  // Enriquecer cada mes con totales derivados: costos totales y margen neto %,
+  // para que el dueño vea de un vistazo "cuánto entra vs cuánto se va" y la
+  // rentabilidad, sin tener que hacer la cuenta de cabeza.
+  const chartMonths = data.months.map((m, i) => {
+    const totalCosts =
+      m.fixedExpenses + m.variableExpenses + m.commissions + m.baseSalaryPaid
+    const marginPct = m.revenue > 0 ? Math.round((m.netProfit / m.revenue) * 100) : 0
+    return {
+      ...m,
+      prevRevenue: i > 0 ? data.months[i - 1].revenue : -1,
+      totalCosts,
+      marginPct,
+    }
+  })
 
   const balancePieData = accountBalances.filter(a => a.balance > 0)
   const totalExpensesPie = expensesByCategory.reduce((s, e) => s + e.amount, 0)
@@ -651,37 +669,63 @@ export function FinanzasClient({
           />
         </div>
 
-        {/* Gráfico principal con toggles de series */}
+        {/* Gráfico principal — Ingresos vs. Costos stackeados + línea de Resultado.
+            Pensado para que el dueño lea de un vistazo: cuánto entra, cuánto se
+            va (y por qué), y cuánto queda en el bolsillo cada mes. */}
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>Evolución financiera mensual</CardTitle>
             <CardDescription>
-              Ingresos, gastos y resultado neto
+              Ingresos vs. costos operativos · resultado neto del mes
             </CardDescription>
           </CardHeader>
-          {/* Botones de toggle para series del gráfico */}
-          <div className="flex flex-wrap gap-2 px-6 pb-2">
-            {[
-              { key: 'revenue', label: 'Ingresos', color: COLORS.revenue },
-              { key: 'fixedExpenses', label: 'G. Fijos', color: COLORS.fixed },
-              { key: 'variableExpenses', label: 'G. Variables', color: COLORS.variable },
-              { key: 'commissions', label: 'Comisiones', color: COLORS.commissions },
-              { key: 'baseSalaryPaid', label: 'Sueldos fijos', color: COLORS.salaries },
-              { key: 'netProfit', label: 'Resultado', color: COLORS.netProfit },
-            ].map(({ key, label, color }) => (
-              <button
-                key={key}
-                onClick={() => toggleSeries(key as keyof typeof visibleSeries)}
-                className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border transition-all ${
-                  visibleSeries[key as keyof typeof visibleSeries]
-                    ? 'border-transparent text-background'
-                    : 'border-border text-muted-foreground bg-transparent'
-                }`}
-                style={visibleSeries[key as keyof typeof visibleSeries] ? { backgroundColor: color } : {}}
-              >
-                {label}
-              </button>
-            ))}
+          {/* Toggles agrupados por categoría para que se entienda que los 4
+              gastos suman dentro de la barra de "Costos" stackeada. */}
+          <div className="flex flex-col gap-2 px-6 pb-3 md:flex-row md:flex-wrap md:items-center">
+            <div className="flex flex-wrap items-center gap-2">
+              <SeriesToggle
+                active={visibleSeries.revenue}
+                color={COLORS.revenue}
+                label="Ingresos"
+                onClick={() => toggleSeries('revenue')}
+              />
+              <SeriesToggle
+                active={visibleSeries.netProfit}
+                color={COLORS.netProfit}
+                label="Resultado neto"
+                onClick={() => toggleSeries('netProfit')}
+              />
+            </div>
+            <div className="hidden h-5 w-px bg-border md:block" />
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Costos:
+              </span>
+              <SeriesToggle
+                active={visibleSeries.fixedExpenses}
+                color={COLORS.fixed}
+                label="Fijos"
+                onClick={() => toggleSeries('fixedExpenses')}
+              />
+              <SeriesToggle
+                active={visibleSeries.variableExpenses}
+                color={COLORS.variable}
+                label="Variables"
+                onClick={() => toggleSeries('variableExpenses')}
+              />
+              <SeriesToggle
+                active={visibleSeries.commissions}
+                color={COLORS.commissions}
+                label="Comisiones"
+                onClick={() => toggleSeries('commissions')}
+              />
+              <SeriesToggle
+                active={visibleSeries.baseSalaryPaid}
+                color={COLORS.salaries}
+                label="Sueldos"
+                onClick={() => toggleSeries('baseSalaryPaid')}
+              />
+            </div>
           </div>
           <CardContent>
             {data.months.length === 0 ? (
@@ -691,8 +735,13 @@ export function FinanzasClient({
                 </p>
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={280} className="md:!h-[350px]">
-                <ComposedChart data={chartMonths} barGap={0}>
+              <ResponsiveContainer width="100%" height={320} className="md:!h-[400px]">
+                <ComposedChart
+                  data={chartMonths}
+                  barGap={8}
+                  barCategoryGap="25%"
+                  margin={{ top: 28, right: 16, left: 0, bottom: 8 }}
+                >
                   <CartesianGrid
                     strokeDasharray="3 3"
                     stroke={COLORS.grid}
@@ -700,7 +749,7 @@ export function FinanzasClient({
                   />
                   <XAxis
                     dataKey="label"
-                    tick={{ fill: COLORS.axis, fontSize: 12 }}
+                    tick={{ fill: COLORS.axis, fontSize: 12, fontWeight: 600 }}
                     axisLine={{ stroke: COLORS.grid }}
                     tickLine={false}
                   />
@@ -708,31 +757,46 @@ export function FinanzasClient({
                     tick={{ fill: COLORS.axis, fontSize: 12 }}
                     axisLine={false}
                     tickLine={false}
-                    tickFormatter={(v) =>
-                      v >= 1000000
-                        ? `$${(v / 1000000).toFixed(1)}M`
-                        : `$${(v / 1000).toFixed(0)}k`
-                    }
+                    tickFormatter={(v) => formatAxis(v)}
+                    width={56}
                   />
-                  <Tooltip content={<FinanceTooltip />} cursor={{ fill: 'transparent' }} />
-                  <Legend
-                    wrapperStyle={{ fontSize: 12, color: COLORS.axis }}
+                  <Tooltip
+                    content={<FinanceTooltip />}
+                    cursor={{ fill: 'rgba(255,255,255,0.04)' }}
                   />
+                  {/* Línea de break-even visual. Si el Resultado está debajo
+                      del 0, es mes en rojo; si está arriba, mes en verde. */}
+                  <ReferenceLine
+                    y={0}
+                    stroke={COLORS.axis}
+                    strokeWidth={1}
+                    strokeDasharray="2 4"
+                  />
+
+                  {/* Barra 1: Ingresos (sólida, una sola pieza). */}
                   {visibleSeries.revenue && (
                     <Bar
                       dataKey="revenue"
                       name="Ingresos"
                       fill={COLORS.revenue}
-                      radius={[4, 4, 0, 0]}
+                      stackId="ingresos"
+                      radius={[6, 6, 0, 0]}
+                      maxBarSize={72}
                       animationDuration={800}
                     />
                   )}
-                  {visibleSeries.fixedExpenses && (
+
+                  {/* Barra 2: Costos — los 4 componentes stackeados forman la
+                      "torre de costos" del mes. El radio redondeado se aplica
+                      sólo al último segmento visible (manejado por recharts
+                      automáticamente al tener el mismo stackId). */}
+                  {visibleSeries.commissions && (
                     <Bar
-                      dataKey="fixedExpenses"
-                      name="Gastos fijos"
-                      fill={COLORS.fixed}
-                      radius={[4, 4, 0, 0]}
+                      dataKey="commissions"
+                      name="Comisiones"
+                      fill={COLORS.commissions}
+                      stackId="costos"
+                      maxBarSize={72}
                       animationDuration={800}
                     />
                   )}
@@ -741,16 +805,8 @@ export function FinanzasClient({
                       dataKey="variableExpenses"
                       name="Gastos variables"
                       fill={COLORS.variable}
-                      radius={[4, 4, 0, 0]}
-                      animationDuration={800}
-                    />
-                  )}
-                  {visibleSeries.commissions && (
-                    <Bar
-                      dataKey="commissions"
-                      name="Comisiones"
-                      fill={COLORS.commissions}
-                      radius={[4, 4, 0, 0]}
+                      stackId="costos"
+                      maxBarSize={72}
                       animationDuration={800}
                     />
                   )}
@@ -759,21 +815,49 @@ export function FinanzasClient({
                       dataKey="baseSalaryPaid"
                       name="Sueldos fijos"
                       fill={COLORS.salaries}
-                      radius={[4, 4, 0, 0]}
+                      stackId="costos"
+                      maxBarSize={72}
                       animationDuration={800}
                     />
                   )}
+                  {visibleSeries.fixedExpenses && (
+                    <Bar
+                      dataKey="fixedExpenses"
+                      name="Gastos fijos"
+                      fill={COLORS.fixed}
+                      stackId="costos"
+                      radius={[6, 6, 0, 0]}
+                      maxBarSize={72}
+                      animationDuration={800}
+                    />
+                  )}
+
+                  {/* Línea de Resultado neto con el valor impreso arriba de
+                      cada punto — así el dueño no depende del tooltip para ver
+                      cuánto le quedó este mes. */}
                   {visibleSeries.netProfit && (
                     <Line
                       type="monotone"
                       dataKey="netProfit"
                       name="Resultado neto"
                       stroke={COLORS.netProfit}
-                      strokeWidth={2}
-                      strokeDasharray="5 5"
-                      dot={{ r: 4, fill: COLORS.netProfit }}
+                      strokeWidth={3}
+                      dot={{ r: 5, strokeWidth: 2, stroke: '#0a0a0a', fill: COLORS.netProfit }}
+                      activeDot={{ r: 7 }}
                       animationDuration={800}
-                    />
+                    >
+                      <LabelList
+                        dataKey="netProfit"
+                        position="top"
+                        offset={10}
+                        formatter={(v) => (typeof v === 'number' ? formatAxis(v) : '')}
+                        style={{
+                          fill: COLORS.netProfit,
+                          fontWeight: 700,
+                          fontSize: 12,
+                        }}
+                      />
+                    </Line>
                   )}
                 </ComposedChart>
               </ResponsiveContainer>
@@ -1178,36 +1262,148 @@ function SummaryCard({
   )
 }
 
+/* ─── Componentes auxiliares del gráfico ─── */
+
+function SeriesToggle({
+  active,
+  color,
+  label,
+  onClick,
+}: {
+  active: boolean
+  color: string
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition-all ${
+        active
+          ? 'border-transparent text-background'
+          : 'border-border bg-transparent text-muted-foreground hover:text-foreground'
+      }`}
+      style={active ? { backgroundColor: color } : {}}
+    >
+      <span
+        className="inline-block size-2 rounded-full"
+        style={{ backgroundColor: active ? 'rgba(0,0,0,0.4)' : color }}
+      />
+      {label}
+    </button>
+  )
+}
+
 /* ─── Tooltips de gráficos ─── */
 
+/** Tooltip "P&L del mes": rearma el estado de resultados del mes en una mini
+ *  tarjeta — ingresos arriba, costos desagregados en el medio, resultado y
+ *  margen abajo. Le da al dueño el panorama completo sin leer varias barras. */
 function FinanceTooltip({
   active,
   payload,
   label,
 }: Record<string, unknown>) {
   if (!active || !Array.isArray(payload) || payload.length === 0) return null
-  // Buscar variación de ingresos vs mes anterior desde el payload del gráfico
-  const revenueEntry = payload.find((p: Record<string, unknown>) => p.dataKey === 'revenue')
-  const currentRevenue = revenueEntry ? Number((revenueEntry as Record<string, unknown>).value) : null
-  const prevRevenue = revenueEntry
-    ? Number(((revenueEntry as Record<string, unknown>).payload as Record<string, unknown>)?.prevRevenue ?? -1)
-    : null
-  const hasPrev = prevRevenue !== null && prevRevenue >= 0
-  const pctChange = hasPrev && prevRevenue > 0 && currentRevenue !== null
-    ? Math.round(((currentRevenue - prevRevenue) / prevRevenue) * 100)
+
+  // El payload de recharts trae la misma fila de datos en todos los entries.
+  const row = (payload[0] as Record<string, unknown>)?.payload as
+    | Record<string, number>
+    | undefined
+  if (!row) return null
+
+  const revenue = Number(row.revenue ?? 0)
+  const fixedExpenses = Number(row.fixedExpenses ?? 0)
+  const variableExpenses = Number(row.variableExpenses ?? 0)
+  const commissions = Number(row.commissions ?? 0)
+  const baseSalaryPaid = Number(row.baseSalaryPaid ?? 0)
+  const totalCosts = Number(row.totalCosts ?? 0)
+  const netProfit = Number(row.netProfit ?? 0)
+  const marginPct = Number(row.marginPct ?? 0)
+  const prevRevenue = Number(row.prevRevenue ?? -1)
+
+  const hasPrev = prevRevenue >= 0
+  const momPct = hasPrev && prevRevenue > 0
+    ? Math.round(((revenue - prevRevenue) / prevRevenue) * 100)
     : null
 
+  const costRows: Array<{ label: string; value: number; color: string }> = [
+    { label: 'Gastos fijos', value: fixedExpenses, color: COLORS.fixed },
+    { label: 'Gastos variables', value: variableExpenses, color: COLORS.variable },
+    { label: 'Sueldos fijos', value: baseSalaryPaid, color: COLORS.salaries },
+    { label: 'Comisiones', value: commissions, color: COLORS.commissions },
+  ].filter(r => r.value !== 0)
+
   return (
-    <div className="rounded-lg border bg-card p-3 shadow-md">
-      <p className="mb-2 text-sm font-medium text-foreground">{String(label)}</p>
-      {payload.map((p: Record<string, unknown>, i: number) => (
-        <p key={i} className="text-sm text-muted-foreground">
-          {String(p.name)}: {formatCurrency(Number(p.value))}
-        </p>
-      ))}
-      {pctChange !== null && (
-        <p className={`mt-1.5 text-xs font-medium border-t border-border pt-1.5 ${pctChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-          Ingresos: {pctChange >= 0 ? '+' : ''}{pctChange}% vs mes anterior
+    <div className="min-w-[240px] rounded-lg border bg-card p-3 shadow-lg">
+      <p className="mb-2 text-sm font-bold text-foreground">{String(label)}</p>
+
+      {/* Ingresos */}
+      <div className="flex items-center justify-between text-sm">
+        <span className="flex items-center gap-1.5 text-muted-foreground">
+          <span className="size-2 rounded-full" style={{ backgroundColor: COLORS.revenue }} />
+          Ingresos
+        </span>
+        <span className="font-semibold text-foreground tabular-nums">
+          {formatCurrency(revenue)}
+        </span>
+      </div>
+
+      {/* Desglose de costos */}
+      {costRows.length > 0 && (
+        <div className="mt-2 space-y-1 border-t border-border pt-2">
+          {costRows.map(r => (
+            <div key={r.label} className="flex items-center justify-between text-xs">
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <span className="size-2 rounded-full" style={{ backgroundColor: r.color }} />
+                {r.label}
+              </span>
+              <span className="text-muted-foreground tabular-nums">
+                −{formatCurrency(r.value)}
+              </span>
+            </div>
+          ))}
+          <div className="flex items-center justify-between pt-1 text-xs font-semibold">
+            <span className="text-foreground">Total costos</span>
+            <span className="text-foreground tabular-nums">
+              −{formatCurrency(totalCosts)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Resultado + margen */}
+      <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
+        <span className="text-sm font-bold text-foreground">Resultado neto</span>
+        <span
+          className={`text-sm font-bold tabular-nums ${
+            netProfit >= 0 ? 'text-green-400' : 'text-red-400'
+          }`}
+        >
+          {netProfit >= 0 ? '' : '−'}{formatCurrency(Math.abs(netProfit))}
+        </span>
+      </div>
+      {revenue > 0 && (
+        <div className="mt-0.5 flex items-center justify-between text-[11px]">
+          <span className="text-muted-foreground">Margen</span>
+          <span
+            className={`font-semibold tabular-nums ${
+              marginPct >= 0 ? 'text-green-400' : 'text-red-400'
+            }`}
+          >
+            {marginPct >= 0 ? '+' : ''}{marginPct}%
+          </span>
+        </div>
+      )}
+
+      {/* MoM en ingresos */}
+      {momPct !== null && (
+        <p
+          className={`mt-2 border-t border-border pt-2 text-[11px] font-medium ${
+            momPct >= 0 ? 'text-green-400' : 'text-red-400'
+          }`}
+        >
+          Ingresos {momPct >= 0 ? '+' : ''}{momPct}% vs mes anterior
         </p>
       )}
     </div>
