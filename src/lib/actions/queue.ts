@@ -296,12 +296,18 @@ export async function completeService(
     ...(extraServiceIds || [])
   ]
 
-  // Obtener comisión global: salary_configs como fuente primaria, visit.commission_pct (staff) como fallback
+  // Obtener esquema y comisión global: salary_configs como fuente primaria,
+  // visit.commission_pct (staff) como fallback. El `scheme` determina si se le
+  // paga comisión por servicios: los barberos con sueldo 'fixed' sólo cobran
+  // comisión sobre productos, nunca sobre servicios.
   const { data: barberSalaryConfig } = await supabase
     .from('salary_configs')
-    .select('commission_pct')
+    .select('scheme, commission_pct')
     .eq('staff_id', visit.barber_id)
     .single()
+
+  const barberScheme = barberSalaryConfig?.scheme ?? null
+  const isFixedSalary = barberScheme === 'fixed'
 
   const globalCommPct = barberSalaryConfig?.commission_pct != null
     ? Number(barberSalaryConfig.commission_pct)
@@ -332,6 +338,11 @@ export async function completeService(
       for (const s of activeServices) {
         const price = Number(s.price)
         amount += price
+
+        // Sueldo fijo → 0 comisión por servicio, independientemente de overrides
+        // por-servicio o por-barbero. La única vía de comisión para este
+        // esquema es la venta de productos (ver bloque 3.5).
+        if (isFixedSalary) continue
 
         // Resolve commission: barber override → service default → salary_configs → staff
         let commPct: number

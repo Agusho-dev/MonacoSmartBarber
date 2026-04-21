@@ -323,6 +323,21 @@ export async function generateCommissionReportsInRange(
 
   const supabase = createAdminClient()
 
+  // Gate por esquema de sueldo: los barberos con sueldo fijo no cobran
+  // comisión por servicios, así que bloqueamos el generador retroactivo para
+  // no dejar reportes incorrectos que luego hay que limpiar a mano.
+  const { data: salaryConfig } = await supabase
+    .from('salary_configs')
+    .select('scheme')
+    .eq('staff_id', staffId)
+    .single()
+  if (salaryConfig?.scheme === 'fixed') {
+    return {
+      error:
+        'Este barbero tiene sueldo fijo: sólo le corresponden comisiones por venta de productos, no por servicios.',
+    }
+  }
+
   const tz = await getActiveTimezone()
   const { getDayBounds } = await import('@/lib/time-utils')
   const { start: rangeStart } = getDayBounds(startDate, tz)
