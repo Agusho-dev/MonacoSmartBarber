@@ -227,44 +227,44 @@ export async function evaluateIncomingMessage(params: {
     if (!activeExec && params.platformUserId) {
       const phoneSuffix = params.platformUserId.slice(-10)
       if (phoneSuffix.length === 10) {
-        // Resolver branches de la org actual para limitar la búsqueda
+        // Canales de esta org: org-wide (organization_id) o por-branch (legacy).
         const { data: orgBranches } = await supabase
           .from('branches')
           .select('id')
           .eq('organization_id', orgId)
         const branchIds = orgBranches?.map(b => b.id) ?? []
-        if (branchIds.length > 0) {
-          // Canales que pertenecen a esta org
-          const { data: orgChannels } = await supabase
-            .from('social_channels')
-            .select('id')
-            .in('branch_id', branchIds)
-          const channelIds = orgChannels?.map(c => c.id) ?? []
+        const channelFilters: string[] = [`organization_id.eq.${orgId}`]
+        if (branchIds.length > 0) channelFilters.push(`branch_id.in.(${branchIds.join(',')})`)
 
-          if (channelIds.length > 0) {
-            const { data: siblingConvs } = await supabase
-              .from('conversations')
-              .select('id')
-              .neq('id', conversationId)
-              .ilike('platform_user_id', `%${phoneSuffix}`)
-              .in('channel_id', channelIds)
-            const siblingIds = siblingConvs?.map(c => c.id) ?? []
-            if (siblingIds.length > 0) {
-              const { data: siblingExec } = await supabase
+        const { data: orgChannels } = await supabase
+          .from('social_channels')
+          .select('id')
+          .or(channelFilters.join(','))
+        const channelIds = orgChannels?.map(c => c.id) ?? []
+
+        if (channelIds.length > 0) {
+          const { data: siblingConvs } = await supabase
+            .from('conversations')
+            .select('id')
+            .neq('id', conversationId)
+            .ilike('platform_user_id', `%${phoneSuffix}`)
+            .in('channel_id', channelIds)
+          const siblingIds = siblingConvs?.map(c => c.id) ?? []
+          if (siblingIds.length > 0) {
+            const { data: siblingExec } = await supabase
+              .from('workflow_executions')
+              .select('*, current_node:workflow_nodes(*)')
+              .in('conversation_id', siblingIds)
+              .in('status', ['waiting_reply'])
+              .order('updated_at', { ascending: false })
+              .limit(1)
+              .maybeSingle()
+            if (siblingExec) {
+              await supabase
                 .from('workflow_executions')
-                .select('*, current_node:workflow_nodes(*)')
-                .in('conversation_id', siblingIds)
-                .in('status', ['waiting_reply'])
-                .order('updated_at', { ascending: false })
-                .limit(1)
-                .maybeSingle()
-              if (siblingExec) {
-                await supabase
-                  .from('workflow_executions')
-                  .update({ conversation_id: conversationId })
-                  .eq('id', siblingExec.id)
-                activeExec = siblingExec
-              }
+                .update({ conversation_id: conversationId })
+                .eq('id', siblingExec.id)
+              activeExec = siblingExec
             }
           }
         }

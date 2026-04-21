@@ -15,9 +15,16 @@ export default async function MensajeriaPage() {
     : { data: [] }
   const branchIds = orgBranches?.map((b) => b.id) ?? []
 
-  // Obtener canales de las branches de esta org
-  const { data: orgChannels } = branchIds.length > 0
-    ? await supabase.from('social_channels').select('id').in('branch_id', branchIds)
+  // Obtener canales de la org: pueden estar scopeados por `organization_id`
+  // (modelo org-wide, nuevo) o por `branch_id` (legacy). Sin este OR, los
+  // canales de WhatsApp/Instagram globales quedan invisibles y el inbox
+  // aparece vacío aunque existan cientos de conversaciones activas.
+  const channelFilters: string[] = []
+  if (orgId) channelFilters.push(`organization_id.eq.${orgId}`)
+  if (branchIds.length > 0) channelFilters.push(`branch_id.in.(${branchIds.join(',')})`)
+
+  const { data: orgChannels } = channelFilters.length > 0
+    ? await supabase.from('social_channels').select('id').or(channelFilters.join(','))
     : { data: [] }
   const channelIds = orgChannels?.map((c) => c.id) ?? []
 
@@ -44,11 +51,11 @@ export default async function MensajeriaPage() {
           .in('channel_id', channelIds)
           .order('last_message_at', { ascending: false, nullsFirst: false })
       : Promise.resolve({ data: [] }),
-    branchIds.length > 0
+    channelFilters.length > 0
       ? supabase
           .from('social_channels')
           .select('*')
-          .in('branch_id', branchIds)
+          .or(channelFilters.join(','))
           .eq('is_active', true)
           .order('platform')
       : Promise.resolve({ data: [] }),

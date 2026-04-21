@@ -78,17 +78,27 @@ export const requireOrgAccessToEntity = cache(async function (
     return { ok: true, orgId }
   }
 
-  // conversations / scheduled_messages via social_channels → branches → organization_id
+  // conversations / scheduled_messages: el org se resuelve desde social_channels.
+  // Hay dos variantes: canales org-wide (organization_id seteado, branch_id
+  // null) y canales por-branch (organization_id null, branch_id seteado).
+  // Hay que aceptar ambos; un !inner sobre branches rompe los canales
+  // org-wide y deja pasar 0 conversaciones.
   if (table === 'conversations' || table === 'scheduled_messages') {
     const { data } = await supabase
       .from(table)
-      .select('channel_id, social_channels!inner(branch_id, branches!inner(organization_id))')
+      .select('channel_id, social_channels(organization_id, branch_id, branches(organization_id))')
       .eq('id', entityId)
       .maybeSingle()
     if (!data) return { ok: false, reason: 'not_found' }
-    const convOrg = (data as unknown as {
-      social_channels: { branches: { organization_id: string } }
-    }).social_channels?.branches?.organization_id
+    const channel = (data as unknown as {
+      social_channels: {
+        organization_id: string | null
+        branch_id: string | null
+        branches: { organization_id: string } | null
+      } | null
+    }).social_channels
+    const convOrg = channel?.organization_id ?? channel?.branches?.organization_id ?? null
+    if (!convOrg) return { ok: false, reason: 'not_found' }
     if (convOrg !== orgId) return { ok: false, reason: 'cross_org' }
     return { ok: true, orgId }
   }
