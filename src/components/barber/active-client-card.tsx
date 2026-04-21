@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState, type CSSProperties } from 'react'
 import { cn } from '@/lib/utils'
 import { useTimerStage, useCrossesThreshold, type TimerStage } from '@/hooks/use-timer-stage'
 import { LiveTimerText } from './live-timer-text'
-import { vibrate, playBeep, playWarnBeep, playDangerBeep } from '@/lib/barber-feedback'
+import { vibrate } from '@/lib/barber-feedback'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -71,22 +71,20 @@ export function ActiveClientCard({
   const [pausing, setPausing] = useState(false)
 
   const handleStageChange = useCallback((next: TimerStage, prev: TimerStage) => {
-    // Disparamos haptics/sonido en cada nuevo milestone.
+    // Sólo haptics silenciosos durante el corte: nada de sonido para no
+    // interrumpir la experiencia del cliente.
     switch (next) {
       case 'heads-up':
         vibrate(15)
         break
       case 'focus':
         vibrate([15, 50, 15])
-        playBeep({ frequency: 660, duration: 0.22, volume: 0.09 })
         break
       case 'warn':
         vibrate([30, 80, 30])
-        playWarnBeep()
         break
       case 'danger':
         vibrate([220, 120, 220])
-        playDangerBeep()
         break
     }
     void prev // silence unused
