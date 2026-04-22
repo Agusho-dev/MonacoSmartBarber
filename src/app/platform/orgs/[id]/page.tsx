@@ -1,8 +1,12 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { ArrowLeft, Building2, Users, UserCheck, Eye } from 'lucide-react'
 import { requirePlatformAdmin } from '@/lib/actions/platform'
 import { createAdminClient } from '@/lib/supabase/server'
+import { getOrgBilling, listPlans, listModules } from '@/lib/actions/platform-billing'
+import { KpiCard } from '@/components/platform/kpi-card'
 import { OrgPlatformDetailClient } from './detail-client'
+import { SubscriptionManager } from './subscription-manager'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,42 +20,75 @@ export default async function PlatformOrgDetail({ params }: { params: Promise<{ 
     .select('*')
     .eq('id', id)
     .maybeSingle()
-
   if (!org) return notFound()
 
-  const [{ data: branches }, { data: staff }, { data: clientsCount }, { data: visitsCount }, { data: lastVisit }] = await Promise.all([
+  const [branchesRes, , , visitsRes, lastVisitRes, billing, plans, modules] = await Promise.all([
     admin.from('branches').select('id, name, is_active, created_at').eq('organization_id', id).order('created_at'),
     admin.from('staff').select('id, full_name, role, is_active').eq('organization_id', id).eq('is_active', true),
     admin.from('clients').select('id', { count: 'exact', head: true }).eq('organization_id', id),
     admin.from('visits').select('id', { count: 'exact', head: true }).eq('organization_id', id),
     admin.from('visits').select('completed_at').eq('organization_id', id).order('completed_at', { ascending: false }).limit(1).maybeSingle(),
+    getOrgBilling(id),
+    listPlans(),
+    listModules(),
   ])
 
   return (
     <div className="space-y-6">
       <div>
-        <Link href="/platform" className="text-sm text-zinc-500 hover:text-zinc-300">← Volver</Link>
-        <h1 className="mt-2 text-2xl font-semibold">{org.name}</h1>
-        <p className="text-zinc-500">/{org.slug} · Creada {new Date(org.created_at).toLocaleDateString('es-AR')}</p>
+        <Link href="/platform/organizations" className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-300">
+          <ArrowLeft className="size-3.5" /> Volver
+        </Link>
+        <div className="mt-2 flex flex-wrap items-baseline gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight">{org.name}</h1>
+          <span className="text-zinc-500">/{org.slug}</span>
+        </div>
+        <p className="mt-1 text-xs text-zinc-500">Creada {new Date(org.created_at).toLocaleDateString('es-AR')}</p>
       </div>
 
+      {/* KPIs */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Kpi label="Sucursales" value={`${branches?.filter(b => b.is_active).length ?? 0} / ${org.max_branches}`} />
-        <Kpi label="Staff activo" value={staff?.length ?? 0} />
-        <Kpi label="Clientes" value={(clientsCount as unknown as { count?: number })?.count ?? 0} />
-        <Kpi label="Visitas" value={(visitsCount as unknown as { count?: number })?.count ?? 0} />
+        <KpiCard
+          label="Sucursales"
+          value={`${billing.usage.branches}`}
+          hint={`Límite del plan: ${billing.subscription?.plan_id ?? '—'}`}
+          icon={Building2}
+          accent="indigo"
+        />
+        <KpiCard
+          label="Staff activo"
+          value={billing.usage.staff}
+          icon={UserCheck}
+          accent="emerald"
+        />
+        <KpiCard
+          label="Clientes"
+          value={(billing.usage.clients ?? 0).toLocaleString('es-AR')}
+          icon={Users}
+        />
+        <KpiCard
+          label="Visitas totales"
+          value={((visitsRes as unknown as { count?: number })?.count ?? 0).toLocaleString('es-AR')}
+          icon={Eye}
+          hint={lastVisitRes.data?.completed_at ? `Última: ${new Date(lastVisitRes.data.completed_at).toLocaleDateString('es-AR')}` : 'Sin visitas'}
+        />
       </div>
 
-      <OrgPlatformDetailClient org={org} branches={branches ?? []} lastVisitAt={lastVisit?.completed_at ?? null} />
-    </div>
-  )
-}
+      {/* Subscription management (nuevo) */}
+      <SubscriptionManager
+        orgId={id}
+        orgName={org.name}
+        billing={billing}
+        plans={plans}
+        modules={modules}
+      />
 
-function Kpi({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
-      <div className="text-xs text-zinc-500">{label}</div>
-      <div className="text-2xl font-semibold">{value}</div>
+      {/* Legacy billing editor existente (fields viejos sobre organizations) */}
+      <OrgPlatformDetailClient
+        org={org}
+        branches={branchesRes.data ?? []}
+        lastVisitAt={lastVisitRes.data?.completed_at ?? null}
+      />
     </div>
   )
 }
