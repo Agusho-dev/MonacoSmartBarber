@@ -33,7 +33,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: pendingMessages, error } = await supabase
       .from('scheduled_messages')
-      .select('id, phone, content, client_id, channel_id, template_name, template_language, template_params, workflow_id, workflow_trigger_data, broadcast_id')
+      .select('id, phone, content, client_id, channel_id, template_name, template_language, template_params, workflow_id, workflow_trigger_data, broadcast_id, organization_id')
       .eq('status', 'pending')
       .lte('scheduled_for', new Date().toISOString())
       .limit(BATCH_SIZE)
@@ -54,16 +54,17 @@ Deno.serve(async (req: Request) => {
       let sent = false
       let errorMsg: string | null = null
 
-      // Resolver organization_id
-      let orgId: string | null = null
+      // Resolver organization_id (preferimos la columna directa agregada en migración 105)
+      let orgId: string | null = (msg as any).organization_id ?? null
 
-      if (msg.channel_id) {
+      if (!orgId && msg.channel_id) {
         const { data: channelData } = await supabase
           .from('social_channels')
-          .select('branch_id')
+          .select('organization_id, branch_id')
           .eq('id', msg.channel_id)
           .maybeSingle()
-        if (channelData?.branch_id) {
+        orgId = channelData?.organization_id ?? null
+        if (!orgId && channelData?.branch_id) {
           const { data: branchData } = await supabase
             .from('branches')
             .select('organization_id')
@@ -189,7 +190,12 @@ Deno.serve(async (req: Request) => {
 
       // Registrar en conversaciones si fue exitoso
       if (sent) {
-        await recordInConversation(msg, orgId, orgChannelCache)
+        try {
+          await recordInConversation(msg, orgId, orgChannelCache)
+        } catch (recErr: any) {
+          // No bloquea el envío ya hecho, pero queda visible para diagnosticar
+          console.error('[recordInConversation] error msg_id=' + msg.id + ':', recErr?.message ?? recErr)
+        }
       }
 
       // Actualizar estado del scheduled_message
@@ -270,36 +276,36 @@ function buildTemplatePayload(
   return payload
 }
 
-// Registra el mensaje enviado en la tabla de conversaciones para que aparezca en el inbox
+// Registra el mensaje enviado en la tabla de conversaciones para que aparezca en el inbox.
+// Cada operación verifica errores y los loguea: si una falla silenciosa rompe el flujo
+// (como pasó con la migración 103 dejando social_channels.branch_id NULL), aparece en logs.
 async function recordInConversation(msg: any, orgId: string, orgChannelCache: Map<string, { id: string }[]>) {
   if (!orgChannelCache.has(orgId)) {
-    const { data: orgBranches } = await supabase
-      .from('branches')
+    // Org-scope desde migración 103: filtramos por organization_id directo.
+    // Esto cubre tanto canales org-wide (branch_id=NULL) como legacy por sucursal.
+    const { data: channels, error: chErr } = await supabase
+      .from('social_channels')
       .select('id')
+      .eq('platform', 'whatsapp')
+      .eq('is_active', true)
       .eq('organization_id', orgId)
-    const branchIds = orgBranches?.map((b: { id: string }) => b.id) ?? []
-
-    if (branchIds.length > 0) {
-      const { data: channels } = await supabase
-        .from('social_channels')
-        .select('id')
-        .eq('platform', 'whatsapp')
-        .eq('is_active', true)
-        .in('branch_id', branchIds)
-      orgChannelCache.set(orgId, channels ?? [])
-    } else {
-      orgChannelCache.set(orgId, [])
+    if (chErr) {
+      console.error('[recordInConversation] social_channels lookup error:', chErr.message)
     }
+    orgChannelCache.set(orgId, channels ?? [])
   }
   const waChannels = orgChannelCache.get(orgId) as { id: string }[]
   const waChannel = waChannels[0] ?? null
-  if (!waChannel) return
+  if (!waChannel) {
+    console.error('[recordInConversation] No hay canal whatsapp activo para org=' + orgId + ' (msg_id=' + msg.id + ')')
+    return
+  }
 
   const phoneNorm = normalizePhone(msg.phone)
   const phoneSuffix = phoneNorm.slice(-10)
   const allChannelIds = waChannels.map(c => c.id)
 
-  const { data: existingConv } = await supabase
+  const { data: existingConv, error: lookupErr } = await supabase
     .from('conversations')
     .select('id')
     .in('channel_id', allChannelIds)
@@ -307,12 +313,15 @@ async function recordInConversation(msg: any, orgId: string, orgChannelCache: Ma
     .order('last_message_at', { ascending: false, nullsFirst: false })
     .limit(1)
     .maybeSingle()
+  if (lookupErr) {
+    console.error('[recordInConversation] conversations lookup error:', lookupErr.message)
+  }
 
   let convId: string | null = null
   if (existingConv) {
     convId = existingConv.id
   } else {
-    const { data: newConv } = await supabase
+    const { data: newConv, error: convInsErr } = await supabase
       .from('conversations')
       .insert({
         channel_id: waChannel.id,
@@ -324,12 +333,18 @@ async function recordInConversation(msg: any, orgId: string, orgChannelCache: Ma
       })
       .select('id')
       .single()
+    if (convInsErr) {
+      console.error('[recordInConversation] conversations.insert error:', convInsErr.message)
+    }
     convId = newConv?.id ?? null
   }
 
-  if (!convId) return
+  if (!convId) {
+    console.error('[recordInConversation] convId nulo, abortando msg_id=' + msg.id)
+    return
+  }
 
-  await supabase.from('messages').insert({
+  const { error: msgInsErr } = await supabase.from('messages').insert({
     conversation_id: convId,
     direction: 'outbound',
     content_type: msg.template_name ? 'template' : 'text',
@@ -337,65 +352,78 @@ async function recordInConversation(msg: any, orgId: string, orgChannelCache: Ma
     template_name: msg.template_name || null,
     status: 'sent',
   })
+  if (msgInsErr) {
+    console.error('[recordInConversation] messages.insert error msg_id=' + msg.id + ':', msgInsErr.message)
+  }
 
-  await supabase
+  // El trigger trg_conversation_on_message_insert ya actualiza last_message_at,
+  // pero lo hacemos explícito por idempotencia ante triggers ausentes.
+  const { error: convUpdErr } = await supabase
     .from('conversations')
     .update({ last_message_at: new Date().toISOString() })
     .eq('id', convId)
+  if (convUpdErr) {
+    console.error('[recordInConversation] conversations.update error:', convUpdErr.message)
+  }
 
   // Workflow execution
   if (msg.workflow_id && msg.workflow_trigger_data) {
-    try {
-      const triggerData = msg.workflow_trigger_data as Record<string, any>
-      const nextNodeId = triggerData.next_node_id as string | null
-      const entryNodeId = triggerData.entry_node_id as string | null
-      const firstActionNodeId = triggerData.first_action_node_id as string | null
-      const clientName = (triggerData.client_name as string) ?? ''
-      const firstName = clientName.split(/\s+/)[0] ?? ''
+    const triggerData = msg.workflow_trigger_data as Record<string, any>
+    const nextNodeId = triggerData.next_node_id as string | null
+    const entryNodeId = triggerData.entry_node_id as string | null
+    const firstActionNodeId = triggerData.first_action_node_id as string | null
+    const clientName = (triggerData.client_name as string) ?? ''
+    const firstName = clientName.split(/\s+/)[0] ?? ''
 
-      await supabase
-        .from('workflow_executions')
-        .update({ status: 'cancelled', completed_at: new Date().toISOString() })
-        .eq('conversation_id', convId)
-        .in('status', ['active', 'waiting_reply'])
+    const { error: cancelErr } = await supabase
+      .from('workflow_executions')
+      .update({ status: 'cancelled', completed_at: new Date().toISOString() })
+      .eq('conversation_id', convId)
+      .in('status', ['active', 'waiting_reply'])
+    if (cancelErr) {
+      console.error('[Workflow] cancel previas error:', cancelErr.message)
+    }
 
-      const currentNodeId = nextNodeId ?? firstActionNodeId
-      const execStatus = nextNodeId ? 'waiting_reply' : 'completed'
+    const currentNodeId = nextNodeId ?? firstActionNodeId
+    const execStatus = nextNodeId ? 'waiting_reply' : 'completed'
 
-      const { data: execution } = await supabase
-        .from('workflow_executions')
-        .insert({
-          workflow_id: msg.workflow_id,
-          conversation_id: convId,
-          current_node_id: currentNodeId,
-          status: execStatus,
-          context: { client_name: clientName, client_first_name: firstName },
-          triggered_by: 'post_service',
-          completed_at: execStatus === 'completed' ? new Date().toISOString() : null,
-        })
-        .select('id')
-        .single()
+    const { data: execution, error: execErr } = await supabase
+      .from('workflow_executions')
+      .insert({
+        workflow_id: msg.workflow_id,
+        conversation_id: convId,
+        current_node_id: currentNodeId,
+        status: execStatus,
+        context: { client_name: clientName, client_first_name: firstName },
+        triggered_by: 'post_service',
+        completed_at: execStatus === 'completed' ? new Date().toISOString() : null,
+      })
+      .select('id')
+      .single()
+    if (execErr) {
+      console.error('[Workflow] insert execution error:', execErr.message)
+      return
+    }
 
-      if (execution && entryNodeId) {
-        await supabase.from('workflow_execution_log').insert({
-          execution_id: execution.id,
-          node_id: entryNodeId,
-          node_type: 'trigger',
-          status: 'success',
-          output_data: { triggered_by: 'post_service' },
-        })
-      }
-      if (execution && firstActionNodeId) {
-        await supabase.from('workflow_execution_log').insert({
-          execution_id: execution.id,
-          node_id: firstActionNodeId,
-          node_type: msg.template_name ? 'send_template' : 'send_message',
-          status: 'success',
-          output_data: { template_name: msg.template_name, content: msg.content },
-        })
-      }
-    } catch (wfErr: any) {
-      console.error('[Workflow] Error creando ejecución:', wfErr.message)
+    if (execution && entryNodeId) {
+      const { error: logErr } = await supabase.from('workflow_execution_log').insert({
+        execution_id: execution.id,
+        node_id: entryNodeId,
+        node_type: 'trigger',
+        status: 'success',
+        output_data: { triggered_by: 'post_service' },
+      })
+      if (logErr) console.error('[Workflow] log trigger error:', logErr.message)
+    }
+    if (execution && firstActionNodeId) {
+      const { error: logErr } = await supabase.from('workflow_execution_log').insert({
+        execution_id: execution.id,
+        node_id: firstActionNodeId,
+        node_type: msg.template_name ? 'send_template' : 'send_message',
+        status: 'success',
+        output_data: { template_name: msg.template_name, content: msg.content },
+      })
+      if (logErr) console.error('[Workflow] log action error:', logErr.message)
     }
   }
 }
