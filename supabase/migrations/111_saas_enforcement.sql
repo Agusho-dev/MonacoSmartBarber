@@ -1,5 +1,5 @@
 -- ============================================================
--- Migración 107: Enforcement de límites de plan en DB
+-- Migración 111: Enforcement de límites de plan en DB
 -- ============================================================
 --
 -- Define funciones + triggers que actúan como red de seguridad:

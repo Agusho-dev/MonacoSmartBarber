@@ -1,5 +1,5 @@
 -- ============================================================
--- Migración 106: Fundamentos de SaaS billing multi-tenant
+-- Migración 110: Fundamentos de SaaS billing multi-tenant
 -- ============================================================
 --
 -- Introduce el modelo de planes, módulos, suscripciones y uso que

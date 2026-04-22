@@ -1,5 +1,5 @@
 -- ============================================================
--- Migración 108: Backfill de suscripciones para orgs existentes
+-- Migración 112: Backfill de suscripciones para orgs existentes
 -- ============================================================
 --
 -- Los clientes que ya usan el producto antes de la comercialización

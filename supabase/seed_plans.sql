@@ -1,7 +1,7 @@
 -- ============================================================
 -- Seed: planes y módulos comerciales MSB
 -- ============================================================
--- Ejecutar DESPUÉS de 106_saas_billing_foundation.sql.
+-- Ejecutar DESPUÉS de 110_saas_billing_foundation.sql.
 -- Idempotente: usa ON CONFLICT para actualizar precios/features en caliente.
 --
 -- Precios en centavos de ARS (AR$ 29.900 = 2.990.000).
