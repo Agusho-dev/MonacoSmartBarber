@@ -72,6 +72,18 @@ Role-based access also supports per-branch scoping via the `role_branch_scope` t
 
 `supabase/functions/wa-incoming/` handles inbound WhatsApp/Instagram webhooks (Meta Business API). `supabase/functions/process-scheduled-messages/` sends queued outbound messages on a cron. Server actions for messaging live in `src/lib/actions/messaging.ts`, `whatsapp-meta.ts`, `instagram-meta.ts`, `conversations.ts`, and `tags.ts`.
 
+### Channels org-scope (migración 103)
+
+`social_channels` es **org-scope**: un canal puede tener `branch_id=NULL` (default org-wide) o un `branch_id` específico (legacy/exclusivo de sucursal). Para resolver canales WhatsApp de una org, usar siempre `.eq('organization_id', orgId)` — **nunca** `.in('branch_id', branchIds)`, porque eso excluye los canales org-wide. Saltarse esta regla rompió todo el flujo de reseñas entre 21/abr y 22/abr 2026 (templates llegaban a Meta pero no se registraban en `messages` ni se creaba `workflow_execution`).
+
+### Post-service automation flow
+
+Cuando una visita se completa (`queue.ts → completeVisit`), el sistema busca `automation_workflows` con `trigger_type='post_service'` activos para esa org+sucursal y programa un `scheduled_messages` por workflow matching. El cron `process-scheduled-messages` (corre cada minuto vía pg_cron) hace 3 cosas: envía el template a Meta Cloud API, inserta el mensaje en `messages` (para el inbox), y crea la `workflow_execution` apuntando al siguiente nodo del workflow (status `waiting_reply`). Cuando el cliente responde al template, `/api/webhooks/whatsapp` resuelve la execution activa y avanza al nodo según `condition_value`.
+
+`overlap_policy='skip_if_active'` en `automation_workflows`: `queue.ts` chequea antes de encolar si ya hay un `scheduled_message` pending o una `workflow_execution` activa para ese cliente+workflow, y si hay, no re-encola.
+
+Patrón obligatorio en edge functions: siempre chequear `error` de cada `.insert()/.update()`. Sin eso, fallos silenciosos como el bug de migración 103 son imposibles de detectar desde logs.
+
 ### Realtime
 
 Supabase Realtime WebSocket subscriptions on `queue_entries` and `staff` power the live queue in the barber panel and TV display.
