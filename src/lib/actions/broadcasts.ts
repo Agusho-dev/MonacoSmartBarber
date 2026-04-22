@@ -59,6 +59,17 @@ export async function createBroadcast(input: {
   if (!input.name.trim()) return { error: 'Nombre requerido' }
   if (!input.templateName) return { error: 'Template requerido' }
 
+  // Gate de plan: broadcasts requiere feature + cap mensual (Pro = 500/mes).
+  const { requireFeature, requireMonthlyCap } = await import('@/lib/actions/entitlements')
+  const { EntitlementError } = await import('@/lib/billing/types')
+  try {
+    await requireFeature('messaging.broadcasts')
+    await requireMonthlyCap('broadcasts_monthly', 1)
+  } catch (e) {
+    if (e instanceof EntitlementError) return { error: e.message, entitlement: e.toResponse() }
+    throw e
+  }
+
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('broadcasts')
@@ -204,6 +215,10 @@ export async function sendBroadcast(broadcastId: string) {
       started_at: new Date().toISOString(),
     })
     .eq('id', broadcastId)
+
+  // Registrar uso (cada broadcast cuenta como 1 del cap mensual del plan).
+  const { incrementUsage } = await import('@/lib/actions/entitlements')
+  await incrementUsage('broadcasts_sent', 1, orgId)
 
   revalidatePath('/dashboard/mensajeria')
   return { success: true, recipientCount: clients.length }

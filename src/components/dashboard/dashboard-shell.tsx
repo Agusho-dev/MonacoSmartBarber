@@ -65,6 +65,13 @@ import { MobileBottomNav } from '@/components/dashboard/mobile-bottom-nav'
 import { useBranchStore } from '@/stores/branch-store'
 import { createClient } from '@/lib/supabase/client'
 import { switchOrganization } from '@/lib/actions/org'
+import { EntitlementsProvider, type EntitlementsSnapshot } from '@/components/billing/entitlements-provider'
+import { UpgradePromptDialog } from '@/components/billing/upgrade-prompt-dialog'
+import { ComingSoonDialog } from '@/components/billing/coming-soon-dialog'
+import { TrialBanner } from '@/components/billing/trial-banner'
+import { Badge } from '@/components/ui/badge'
+import { Lock, Clock as ClockIcon } from 'lucide-react'
+import { NAV_FEATURE_MAP } from '@/lib/billing/nav-feature-map'
 
 const navItems = [
   { href: '/dashboard/fila', label: 'Fila', icon: ListOrdered, requiredPermissions: ['queue.view'] },
@@ -90,6 +97,16 @@ interface NavItem {
   requiredPermissions: string[]
 }
 
+type NavLockState = 'unlocked' | 'upgrade' | 'coming_soon'
+type NavItemLockMeta = {
+  state: NavLockState
+  minPlan?: 'start' | 'pro' | 'enterprise'
+  moduleId?: string | null
+  moduleName?: string
+  moduleTeaser?: string | null
+  estimatedRelease?: string | null
+}
+
 // Props para el componente de ítem sorteable — debe estar fuera de DashboardShell
 // para evitar violaciones de las reglas de hooks (hooks dentro de funciones anidadas)
 interface SortableNavItemProps {
@@ -98,6 +115,8 @@ interface SortableNavItemProps {
   isEditMode: boolean
   pendingBreakCount: number
   onNavigate: () => void
+  lockMeta?: NavItemLockMeta
+  onLockedClick?: (item: NavItem, meta: NavItemLockMeta) => void
 }
 
 function SortableNavItem({
@@ -106,6 +125,8 @@ function SortableNavItem({
   isEditMode,
   pendingBreakCount,
   onNavigate,
+  lockMeta,
+  onLockedClick,
 }: SortableNavItemProps) {
   const {
     attributes,
@@ -148,6 +169,43 @@ function SortableNavItem({
             {pendingBreakCount}
           </span>
         )}
+      </div>
+    )
+  }
+
+  // Estado bloqueado (upgrade o coming_soon): reemplaza Link por botón que abre modal.
+  const isLocked = lockMeta && lockMeta.state !== 'unlocked'
+
+  if (isLocked && onLockedClick) {
+    const isComing = lockMeta!.state === 'coming_soon'
+    return (
+      <div ref={setNodeRef} style={style}>
+        <button
+          type="button"
+          onClick={() => onLockedClick(item, lockMeta!)}
+          className={cn(
+            'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+            'text-sidebar-foreground/40 hover:bg-sidebar-accent/30 hover:text-sidebar-foreground/60',
+            'cursor-pointer text-left',
+          )}
+          aria-label={`${item.label} — ${isComing ? 'Próximamente' : 'Requiere upgrade'}`}
+        >
+          <item.icon className="size-4 shrink-0 opacity-70" />
+          <span className="flex-1 truncate">{item.label}</span>
+          <Badge
+            variant={isComing ? 'outline' : 'secondary'}
+            className={cn(
+              'ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-wide',
+              isComing && 'border-amber-500/50 text-amber-500',
+            )}
+          >
+            {isComing ? (
+              <><ClockIcon className="mr-1 size-3" /> Pronto</>
+            ) : (
+              <><Lock className="mr-1 size-3" /> {lockMeta!.minPlan === 'enterprise' ? 'Enterprise' : lockMeta!.minPlan === 'start' ? 'Start' : 'Pro'}</>
+            )}
+          </Badge>
+        </button>
       </div>
     )
   }
@@ -287,10 +345,12 @@ interface DashboardShellProps {
   organizationId: string | null
   availableOrganizations: { id: string; name: string; slug: string; logo_url: string | null }[]
   orgLogoUrl: string | null
+  entitlements: EntitlementsSnapshot | null
+  visibleModulesMeta?: { moduleId: string; name: string; teaser: string | null; estimatedRelease: string | null; status: 'active'|'beta'|'coming_soon' }[]
   children: React.ReactNode
 }
 
-export function DashboardShell({ user, permissions, allowedBranchIds, organizationId, availableOrganizations, orgLogoUrl, children }: DashboardShellProps) {
+export function DashboardShell({ user, permissions, allowedBranchIds, organizationId, availableOrganizations, orgLogoUrl, entitlements, visibleModulesMeta, children }: DashboardShellProps) {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -349,7 +409,52 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     })
   )
 
-  // Ítems filtrados por permisos y ordenados según preferencia del usuario
+  // Mapa de metadatos de módulo por moduleId para el estado coming_soon
+  const moduleMetaById = useMemo(() => {
+    const map = new Map<string, { name: string; teaser: string | null; estimatedRelease: string | null; status: 'active'|'beta'|'coming_soon' }>()
+    for (const m of visibleModulesMeta ?? []) {
+      map.set(m.moduleId, { name: m.name, teaser: m.teaser, estimatedRelease: m.estimatedRelease, status: m.status })
+    }
+    return map
+  }, [visibleModulesMeta])
+
+  // Estado de bloqueo por href (basado en entitlements + plan gating)
+  const lockStateByHref = useMemo(() => {
+    const map = new Map<string, NavItemLockMeta>()
+    if (!entitlements) {
+      // Sin entitlements: asumimos todo desbloqueado (fallback seguro).
+      for (const item of navItems) map.set(item.href, { state: 'unlocked' })
+      return map
+    }
+    for (const item of navItems) {
+      const meta = NAV_FEATURE_MAP[item.href]
+      if (!meta || !meta.featureKey) {
+        map.set(item.href, { state: 'unlocked' })
+        continue
+      }
+      const moduleMeta = meta.moduleId ? moduleMetaById.get(meta.moduleId) : undefined
+      if (moduleMeta?.status === 'coming_soon') {
+        map.set(item.href, {
+          state: 'coming_soon',
+          moduleId: meta.moduleId ?? null,
+          moduleName: moduleMeta.name,
+          moduleTeaser: moduleMeta.teaser,
+          estimatedRelease: moduleMeta.estimatedRelease,
+        })
+        continue
+      }
+      if (entitlements.features[meta.featureKey] === true) {
+        map.set(item.href, { state: 'unlocked' })
+      } else {
+        map.set(item.href, { state: 'upgrade', minPlan: meta.minPlan ?? 'pro', moduleId: meta.moduleId ?? null })
+      }
+    }
+    return map
+  }, [entitlements, moduleMetaById])
+
+  // Ítems filtrados por permisos y ordenados según preferencia del usuario.
+  // NO filtramos por entitlements: los items bloqueados se renderizan con lock/badge
+  // para incentivar upgrade en lugar de ocultarlos.
   const orderedItems = useMemo(() => {
     const filtered = navItems.filter(item =>
       item.requiredPermissions.some(p => permissions[p])
@@ -363,6 +468,32 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
       return ai - bi
     })
   }, [navOrder, permissions])
+
+  // Estado de los modales de upgrade / coming_soon
+  const [upgradeModal, setUpgradeModal] = useState<{ open: boolean; featureName: string; minPlan: 'start'|'pro'|'enterprise' }>(
+    { open: false, featureName: '', minPlan: 'pro' },
+  )
+  const [comingSoonModal, setComingSoonModal] = useState<{ open: boolean; moduleId: string; name: string; teaser: string | null; estimatedRelease: string | null }>(
+    { open: false, moduleId: '', name: '', teaser: null, estimatedRelease: null },
+  )
+
+  const handleLockedClick = useCallback((item: NavItem, meta: NavItemLockMeta) => {
+    if (meta.state === 'coming_soon' && meta.moduleId) {
+      setComingSoonModal({
+        open: true,
+        moduleId: meta.moduleId,
+        name: meta.moduleName ?? item.label,
+        teaser: meta.moduleTeaser ?? null,
+        estimatedRelease: meta.estimatedRelease ?? null,
+      })
+      return
+    }
+    setUpgradeModal({
+      open: true,
+      featureName: item.label,
+      minPlan: meta.minPlan ?? 'pro',
+    })
+  }, [])
 
   const currentNavIndex = useMemo(() => {
     return orderedItems.findIndex(item => pathname.startsWith(item.href))
@@ -580,6 +711,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
           <SortableContext items={orderedItems.map(i => i.href)} strategy={verticalListSortingStrategy}>
             {orderedItems.map((item) => {
               const isActive = pathname.startsWith(item.href)
+              const lockMeta = lockStateByHref.get(item.href)
               return (
                 <SortableNavItem
                   key={item.href}
@@ -588,6 +720,8 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
                   isEditMode={isEditMode}
                   pendingBreakCount={pendingBreakCount}
                   onNavigate={handleMobileClose}
+                  lockMeta={lockMeta}
+                  onLockedClick={handleLockedClick}
                 />
               )
             })}
@@ -598,6 +732,23 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   }
 
   return (
+    <EntitlementsProvider value={entitlements}>
+      {!isFocusMode && <TrialBanner />}
+      <UpgradePromptDialog
+        open={upgradeModal.open}
+        onOpenChange={(open) => setUpgradeModal(p => ({ ...p, open }))}
+        featureName={upgradeModal.featureName}
+        minPlan={upgradeModal.minPlan}
+        currentPlanName={entitlements?.planName}
+      />
+      <ComingSoonDialog
+        open={comingSoonModal.open}
+        onOpenChange={(open) => setComingSoonModal(p => ({ ...p, open }))}
+        moduleId={comingSoonModal.moduleId}
+        name={comingSoonModal.name}
+        teaserCopy={comingSoonModal.teaser}
+        estimatedRelease={comingSoonModal.estimatedRelease}
+      />
     <div className="flex h-screen overflow-hidden">
       <aside
         className={cn(
@@ -741,5 +892,6 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
         />
       </div>
     </div>
+    </EntitlementsProvider>
   )
 }

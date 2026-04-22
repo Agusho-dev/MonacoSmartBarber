@@ -30,6 +30,16 @@ export async function saveOrgInstagramConfig(config: {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'No autorizado' }
 
+  // Gate: Instagram es Enterprise.
+  const { requireFeature } = await import('./entitlements')
+  const { EntitlementError } = await import('@/lib/billing/types')
+  try {
+    await requireFeature('messaging.instagram')
+  } catch (e) {
+    if (e instanceof EntitlementError) return { error: e.message, entitlement: e.toResponse() }
+    throw e
+  }
+
   const supabase = createAdminClient()
   const { error } = await supabase
     .from('organization_instagram_config')

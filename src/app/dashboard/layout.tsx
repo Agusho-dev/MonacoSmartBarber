@@ -4,6 +4,8 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { DashboardShell } from '@/components/dashboard/dashboard-shell'
 import { ImpersonationBanner } from '@/components/dashboard/impersonation-banner'
 import { getCurrentOrgId } from '@/lib/actions/org'
+import { getEntitlements } from '@/lib/actions/entitlements'
+import type { EntitlementsSnapshot } from '@/components/billing/entitlements-provider'
 
 export const dynamic = 'force-dynamic'
 
@@ -89,11 +91,12 @@ export default async function DashboardLayout({
     adminClient.from('organizations').select('logo_url').eq('id', orgId).single(),
   ])
 
+  type OrgJoin = { organization_id: string; organizations: { id: string; name: string; slug: string; logo_url: string | null } | null }
   const activeOrgsMap = new Map<string, { id: string; name: string; slug: string; logo_url: string | null }>()
-  staffOrgs?.forEach((s: any) => {
+  ;(staffOrgs as OrgJoin[] | null)?.forEach((s) => {
     if (s.organizations) activeOrgsMap.set(s.organization_id, s.organizations)
   })
-  memberOrgs?.forEach((m: any) => {
+  ;(memberOrgs as OrgJoin[] | null)?.forEach((m) => {
     if (m.organizations) activeOrgsMap.set(m.organization_id, m.organizations)
   })
   
@@ -146,6 +149,34 @@ export default async function DashboardLayout({
     ? await adminClient.from('organizations').select('name').eq('id', orgId).maybeSingle()
     : { data: null as { name: string } | null }
 
+  // Resolver entitlements de la org (cacheado por request). Si todavía no hay
+  // suscripción (instalación vieja, pre-migración 108 de backfill), entitlements
+  // será null y el sidebar trata todo como desbloqueado.
+  const fullEntitlements = await getEntitlements(orgId)
+
+  const entitlements: EntitlementsSnapshot | null = fullEntitlements ? {
+    orgId: fullEntitlements.orgId,
+    planId: fullEntitlements.plan.id,
+    planName: fullEntitlements.plan.name,
+    status: fullEntitlements.status,
+    trialEndsAt: fullEntitlements.trialEndsAt?.toISOString() ?? null,
+    features: fullEntitlements.features,
+    limits: fullEntitlements.limits,
+    currentUsage: fullEntitlements.currentUsage,
+    enabledModuleIds: fullEntitlements.enabledModuleIds,
+    isAccessAllowed: fullEntitlements.isAccessAllowed,
+    cancelAtPeriodEnd: fullEntitlements.cancelAtPeriodEnd,
+    isGrandfathered: fullEntitlements.isGrandfathered,
+  } : null
+
+  const visibleModulesMeta = fullEntitlements?.visibleModules.map((m) => ({
+    moduleId: m.id,
+    name: m.name,
+    teaser: m.teaser_copy,
+    estimatedRelease: m.estimated_release,
+    status: (m.status === 'hidden' ? 'coming_soon' : m.status) as 'active' | 'beta' | 'coming_soon',
+  })) ?? []
+
   return (
     <>
       {isImpersonating && activeOrgRow?.name && (
@@ -158,6 +189,8 @@ export default async function DashboardLayout({
         organizationId={userProfile.organization_id}
         availableOrganizations={userOrganizations}
         orgLogoUrl={currentOrg?.logo_url ?? null}
+        entitlements={entitlements}
+        visibleModulesMeta={visibleModulesMeta}
       >
         {children}
       </DashboardShell>

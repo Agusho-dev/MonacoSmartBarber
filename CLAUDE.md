@@ -95,6 +95,12 @@ Supabase Realtime WebSocket subscriptions on `queue_entries` and `staff` power t
 - `process-scheduled-messages` — cron-triggered outbound message sender
 - `client-auth` — mobile app client authentication
 
+### Cron jobs
+
+**No usar CRON_SECRET ni `vercel.json` crons en este proyecto.** El plan Vercel Hobby limita crons a 2 entradas con schedule diario y romper esos límites bloquea los deploys. Mantener `vercel.json` como `{}`.
+
+Los crons se disparan desde **pg_cron en Supabase** (ver migración 087) haciendo un HTTP request al route handler correspondiente en `/api/cron/*`. Las rutas deben ser **idempotentes** (safe de ejecutar más de una vez y safe de ser hit manualmente, porque no hay auth). Los crons existentes en `/api/cron/auto-clockout` y `/api/cron/process-appointments` todavía referencian `CRON_SECRET` por legacy, pero las rutas nuevas no deben agregar esa validación.
+
 ## Conventions
 
 - **Language**: UI text and code comments in Spanish
