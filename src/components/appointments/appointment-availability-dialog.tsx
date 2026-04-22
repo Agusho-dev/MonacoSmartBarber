@@ -74,7 +74,7 @@ export function AppointmentAvailabilityDialog({
     const [staffList, apts, cfg] = await Promise.all([
       getBranchAppointmentStaff(branchId),
       getAppointmentsForDate(branchId, date),
-      getAppointmentSettings(),
+      getAppointmentSettings(undefined, branchId),
     ])
     setBarbers(staffList)
     setAppointments(apts)
@@ -109,7 +109,7 @@ export function AppointmentAvailabilityDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90vh] w-[min(96vw,1100px)] max-w-[1100px] flex-col p-0">
+      <DialogContent className="flex max-h-[90vh] w-[min(96vw,1100px)] !max-w-[1100px] flex-col p-0 sm:!max-w-[1100px]">
         <DialogHeader className="border-b px-5 py-4">
           <DialogTitle className="flex items-center gap-2">
             <CalendarIcon className="size-4" />

@@ -1,11 +1,13 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
-import { Calendar, Clock, Scissors, User, MapPin, ChevronLeft, Check, Loader2 } from 'lucide-react'
+import { Calendar as CalendarIcon, Clock, Scissors, User, MapPin, ChevronLeft, Check, Loader2, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Calendar } from '@/components/ui/calendar'
+import { es } from 'date-fns/locale'
 import {
   getAvailableSlots,
   createAppointment,
@@ -43,11 +45,18 @@ interface Props {
   initialBranchId: string | null
 }
 
-type Step = 'branch' | 'service' | 'barber' | 'date' | 'time' | 'client' | 'summary' | 'success'
+type Step = 'branch' | 'service' | 'datetime' | 'client' | 'summary' | 'success'
 
 function normalizeHex(value: string | null | undefined, fallback: string): string {
   if (!value) return fallback
   return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value) ? value : fallback
+}
+
+function formatDateISO(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 export function TurnosClient({ org, branches, services, settings, initialBranchId }: Props) {
@@ -60,17 +69,18 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
   const [step, setStep] = useState<Step>(preselectedBranch ? 'service' : 'branch')
   const [branchId, setBranchId] = useState(preselectedBranch)
   const [serviceId, setServiceId] = useState('')
-  const [barberId, setBarberId] = useState<string | null>(null)
-  const [date, setDate] = useState('')
-  const [time, setTime] = useState('')
-  const [barberName, setBarberName] = useState('')
+  const [barberFilter, setBarberFilter] = useState<string | null>(null) // null = cualquiera
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined)
+  const [selectedTime, setSelectedTime] = useState('')
+  const [selectedBarberId, setSelectedBarberId] = useState<string | null>(null)
+  const [selectedBarberName, setSelectedBarberName] = useState('')
   const [clientName, setClientName] = useState('')
   const [clientPhone, setClientPhone] = useState('')
   const [durationMinutes, setDurationMinutes] = useState(settings.slot_interval_minutes)
   const [availability, setAvailability] = useState<BarberAvailability[]>([])
   const [publicBarbers, setPublicBarbers] = useState<PublicBarber[]>([])
   const [loadingBarbers, setLoadingBarbers] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [loadingSlots, setLoadingSlots] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState('')
 
@@ -80,14 +90,21 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
     ? services.filter(s => !s.branch_id || s.branch_id === branchId)
     : services
 
-  const today = new Date().toISOString().split('T')[0]
-  const maxDate = new Date()
-  maxDate.setDate(maxDate.getDate() + settings.max_advance_days)
-  const maxDateStr = maxDate.toISOString().split('T')[0]
+  const today = useMemo(() => {
+    const d = new Date()
+    d.setHours(0, 0, 0, 0)
+    return d
+  }, [])
+  const maxDate = useMemo(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + settings.max_advance_days)
+    d.setHours(23, 59, 59, 999)
+    return d
+  }, [settings.max_advance_days])
 
-  // Cargar barberos cuando entramos al paso 'barber'
+  // Cargar barberos públicos cuando seleccionamos sucursal+servicio (para poder filtrar)
   useEffect(() => {
-    if (step !== 'barber' || !branchId) return
+    if (step !== 'datetime' || !branchId) return
     let cancelled = false
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingBarbers(true)
@@ -99,14 +116,22 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
     return () => { cancelled = true }
   }, [step, branchId])
 
-  async function loadSlots(selectedDate: string) {
-    setLoading(true)
+  // Cargar slots cuando cambia fecha o filtro de barbero
+  useEffect(() => {
+    if (step !== 'datetime' || !selectedDate || !branchId || !serviceId) return
+    let cancelled = false
+    const dateStr = formatDateISO(selectedDate)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoadingSlots(true)
     setError('')
-    const result = await getAvailableSlots(branchId, selectedDate, serviceId, barberId ?? undefined)
-    setAvailability(result.slots)
-    if (result.error) setError(result.error)
-    setLoading(false)
-  }
+    getAvailableSlots(branchId, dateStr, serviceId, barberFilter ?? undefined).then((result) => {
+      if (cancelled) return
+      setAvailability(result.slots)
+      if (result.error) setError(result.error)
+      setLoadingSlots(false)
+    })
+    return () => { cancelled = true }
+  }, [step, selectedDate, branchId, serviceId, barberFilter])
 
   function handleSelectBranch(id: string) {
     setBranchId(id)
@@ -117,27 +142,13 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
     setServiceId(id)
     const svc = services.find(s => s.id === id)
     if (svc?.duration_minutes) setDurationMinutes(svc.duration_minutes)
-    setStep('barber')
+    setStep('datetime')
   }
 
-  function handleSelectBarber(id: string | null, name: string) {
-    setBarberId(id)
-    setBarberName(name)
-    setStep('date')
-  }
-
-  async function handleSelectDate(selectedDate: string) {
-    setDate(selectedDate)
-    await loadSlots(selectedDate)
-    setStep('time')
-  }
-
-  function handleSelectTime(selectedTime: string, selectedBarberId: string, selectedBarberName: string) {
-    setTime(selectedTime)
-    if (!barberId) {
-      setBarberId(selectedBarberId)
-      setBarberName(selectedBarberName)
-    }
+  function handleSelectSlot(time: string, barber: BarberAvailability) {
+    setSelectedTime(time)
+    setSelectedBarberId(barber.barberId)
+    setSelectedBarberName(barber.barberName)
     setStep('client')
   }
 
@@ -149,15 +160,16 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
 
   function handleConfirm() {
     setError('')
+    if (!selectedDate) { setError('Seleccioná una fecha'); return }
     startTransition(async () => {
       const result = await createAppointment({
         branchId,
         clientPhone: clientPhone.trim(),
         clientName: clientName.trim(),
-        barberId,
+        barberId: selectedBarberId,
         serviceId,
-        appointmentDate: date,
-        startTime: time,
+        appointmentDate: formatDateISO(selectedDate),
+        startTime: selectedTime,
         durationMinutes,
         source: 'public',
       })
@@ -167,7 +179,7 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
   }
 
   function goBack() {
-    const steps: Step[] = ['branch', 'service', 'barber', 'date', 'time', 'client', 'summary']
+    const steps: Step[] = ['branch', 'service', 'datetime', 'client', 'summary']
     const currentIndex = steps.indexOf(step)
     if (currentIndex > 0) {
       const prevStep = steps[currentIndex - 1]
@@ -176,13 +188,13 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
     }
   }
 
-  const dateFormatted = date
-    ? new Date(date + 'T12:00:00').toLocaleDateString('es-AR', {
+  const dateFormatted = selectedDate
+    ? selectedDate.toLocaleDateString('es-AR', {
         weekday: 'long', day: 'numeric', month: 'long',
       })
     : ''
 
-  // Estilos que dependen de la marca
+  // Estilos dependientes de la marca
   const surfaceStyle = useMemo(
     () => ({ backgroundColor: bg, color: textColor }),
     [bg, textColor]
@@ -193,13 +205,35 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
   )
   const mutedTextStyle = { color: textColor, opacity: 0.7 }
 
+  // Ancho del contenedor: más grande en el paso datetime, más estrecho en el resto
+  const containerWidthClass = step === 'datetime'
+    ? 'w-full max-w-4xl'
+    : 'w-full max-w-lg'
+
+  // Dias deshabilitados en el calendario
+  const disabledDays = useMemo(() => [
+    { before: today },
+    { after: maxDate },
+    (date: Date) => !settings.appointment_days.includes(date.getDay()),
+  ], [today, maxDate, settings.appointment_days])
+
+  // Barberos que tienen al menos un slot disponible (para resaltar en el listado)
+  const availableByBarber = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const b of availability) {
+      const count = b.slots.filter(s => s.available).length
+      map.set(b.barberId, count)
+    }
+    return map
+  }, [availability])
+
   return (
     <div
       className="flex min-h-screen items-start justify-center p-4 sm:items-center"
       style={{ backgroundColor: bg }}
     >
       <div
-        className="w-full max-w-lg overflow-hidden rounded-xl border shadow-sm"
+        className={`${containerWidthClass} overflow-hidden rounded-xl border shadow-sm`}
         style={surfaceStyle}
       >
         <div className="px-6 pt-6 text-center">
@@ -284,108 +318,177 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
             </div>
           )}
 
-          {step === 'barber' && (
-            <div className="space-y-3">
-              <h3 className="flex items-center gap-2 font-medium" style={{ color: textColor }}>
-                <User className="h-4 w-4" /> Elegí el profesional
-              </h3>
-              <button
-                onClick={() => handleSelectBarber(null, 'Cualquier disponible')}
-                className="w-full rounded-lg border p-4 text-left transition-colors hover:opacity-90"
-                style={{ borderColor: 'rgba(0,0,0,0.1)' }}
-              >
-                <p className="font-medium" style={{ color: textColor }}>Cualquier disponible</p>
-                <p className="text-sm" style={mutedTextStyle}>Se asignará automáticamente</p>
-              </button>
-              {loadingBarbers ? (
-                <div className="flex justify-center py-4">
-                  <Loader2 className="h-5 w-5 animate-spin" style={{ color: textColor, opacity: 0.5 }} />
-                </div>
-              ) : (
-                publicBarbers.map(b => (
-                  <button
-                    key={b.id}
-                    onClick={() => handleSelectBarber(b.id, b.full_name)}
-                    className="flex w-full items-center gap-3 rounded-lg border p-4 text-left transition-colors hover:opacity-90"
-                    style={{ borderColor: 'rgba(0,0,0,0.1)' }}
-                  >
-                    {b.avatar_url ? (
-                      <img src={b.avatar_url} alt="" className="h-10 w-10 shrink-0 rounded-full object-cover" />
-                    ) : (
-                      <div
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
-                        style={{ backgroundColor: primary, opacity: 0.15 }}
+          {step === 'datetime' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="flex items-center gap-2 font-medium" style={{ color: textColor }}>
+                  <CalendarIcon className="h-4 w-4" /> Elegí día y horario
+                </h3>
+                {selectedService && (
+                  <p className="mt-1 text-xs" style={mutedTextStyle}>
+                    {selectedService.name} · {durationMinutes} min · ${selectedService.price.toLocaleString('es-AR')}
+                  </p>
+                )}
+              </div>
+
+              {/* Filtro de profesional */}
+              {publicBarbers.length > 1 && (
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1.5 text-xs" style={mutedTextStyle}>
+                    <Users className="h-3.5 w-3.5" /> Profesional
+                  </Label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setBarberFilter(null)}
+                      className="rounded-full border px-3 py-1.5 text-xs font-medium transition-colors"
+                      style={
+                        barberFilter === null
+                          ? { backgroundColor: primary, color: bg, borderColor: primary }
+                          : { borderColor: 'rgba(0,0,0,0.15)', color: textColor }
+                      }
+                    >
+                      Cualquiera
+                    </button>
+                    {publicBarbers.map(b => (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => setBarberFilter(b.id)}
+                        className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors"
+                        style={
+                          barberFilter === b.id
+                            ? { backgroundColor: primary, color: bg, borderColor: primary }
+                            : { borderColor: 'rgba(0,0,0,0.15)', color: textColor }
+                        }
                       >
-                        <User className="h-5 w-5" style={{ color: primary }} />
-                      </div>
-                    )}
-                    <p className="font-medium" style={{ color: textColor }}>{b.full_name}</p>
-                  </button>
-                ))
-              )}
-            </div>
-          )}
-
-          {step === 'date' && (
-            <div className="space-y-3">
-              <h3 className="flex items-center gap-2 font-medium" style={{ color: textColor }}>
-                <Calendar className="h-4 w-4" /> Elegí la fecha
-              </h3>
-              <Input
-                type="date"
-                min={today}
-                max={maxDateStr}
-                value={date}
-                onChange={e => handleSelectDate(e.target.value)}
-                className="text-lg"
-              />
-            </div>
-          )}
-
-          {step === 'time' && (
-            <div className="space-y-3">
-              <h3 className="flex items-center gap-2 font-medium" style={{ color: textColor }}>
-                <Clock className="h-4 w-4" /> Elegí el horario — {dateFormatted}
-              </h3>
-              {loading ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin" style={{ color: textColor, opacity: 0.5 }} />
+                        {b.avatar_url ? (
+                          <img src={b.avatar_url} alt="" className="h-4 w-4 rounded-full object-cover" />
+                        ) : (
+                          <User className="h-3 w-3" />
+                        )}
+                        {b.full_name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              ) : (
-                availability.map(barber => {
-                  const availableSlots = barber.slots.filter(s => s.available)
-                  if (!availableSlots.length) return null
-                  return (
-                    <div key={barber.barberId} className="space-y-2">
-                      {!barberId && (
-                        <p className="text-sm font-medium" style={mutedTextStyle}>{barber.barberName}</p>
-                      )}
-                      <div className="grid grid-cols-4 gap-2">
-                        {barber.slots.map(slot => (
-                          <button
-                            key={slot.time}
-                            disabled={!slot.available}
-                            onClick={() => handleSelectTime(slot.time, barber.barberId, barber.barberName)}
-                            className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
-                              slot.available
-                                ? 'hover:opacity-90'
-                                : 'cursor-not-allowed opacity-30'
-                            }`}
-                            style={slot.available ? { borderColor: primary, color: primary } : { color: textColor }}
-                          >
-                            {slot.time}
-                          </button>
-                        ))}
-                      </div>
+              )}
+
+              <div className="grid gap-5 md:grid-cols-[auto_1fr]">
+                {/* Calendario grande — forzamos fondo claro neutral para que no compita con brand colors */}
+                <div
+                  className="flex justify-center rounded-lg border bg-white p-2 text-slate-900 md:p-3"
+                  style={{ borderColor: 'rgba(0,0,0,0.08)' }}
+                >
+                  <Calendar
+                    mode="single"
+                    locale={es}
+                    selected={selectedDate}
+                    onSelect={(d) => {
+                      setSelectedDate(d)
+                      setAvailability([])
+                    }}
+                    disabled={disabledDays}
+                    defaultMonth={selectedDate ?? today}
+                    className="!bg-transparent [--cell-size:--spacing(10)] sm:[--cell-size:--spacing(11)]"
+                    classNames={{
+                      day: 'group/day relative aspect-square h-full w-full p-0 text-center select-none text-slate-900',
+                      weekday: 'flex-1 rounded-md text-[0.8rem] font-normal text-slate-500 select-none',
+                      caption_label: 'font-medium select-none text-sm text-slate-900',
+                      today: 'rounded-md bg-slate-100 text-slate-900 data-[selected=true]:rounded-none',
+                      outside: 'text-slate-400 aria-selected:text-slate-400',
+                      disabled: 'text-slate-300 opacity-50',
+                    }}
+                  />
+                </div>
+
+                {/* Panel de slots */}
+                <div className="min-h-0">
+                  {!selectedDate ? (
+                    <div
+                      className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-6 text-center"
+                      style={{ borderColor: 'rgba(0,0,0,0.15)' }}
+                    >
+                      <CalendarIcon className="h-8 w-8 opacity-40" style={{ color: textColor }} />
+                      <p className="text-sm" style={mutedTextStyle}>
+                        Elegí una fecha en el calendario para ver los turnos disponibles.
+                      </p>
                     </div>
-                  )
-                })
-              )}
-              {!loading && availability.every(b => b.slots.every(s => !s.available)) && (
-                <p className="py-4 text-center text-sm" style={mutedTextStyle}>
-                  No hay horarios disponibles para esta fecha.
-                </p>
-              )}
+                  ) : loadingSlots || loadingBarbers ? (
+                    <div className="flex h-full min-h-[240px] items-center justify-center">
+                      <Loader2 className="h-6 w-6 animate-spin" style={{ color: textColor, opacity: 0.5 }} />
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4" style={{ color: textColor, opacity: 0.7 }} />
+                        <p className="text-sm font-medium capitalize" style={{ color: textColor }}>
+                          {dateFormatted}
+                        </p>
+                      </div>
+
+                      {availability.length === 0 || availability.every(b => b.slots.every(s => !s.available)) ? (
+                        <div
+                          className="rounded-lg border border-dashed p-6 text-center"
+                          style={{ borderColor: 'rgba(0,0,0,0.15)' }}
+                        >
+                          <p className="text-sm" style={mutedTextStyle}>
+                            No hay horarios disponibles para esta fecha.
+                          </p>
+                          <p className="mt-1 text-xs" style={mutedTextStyle}>
+                            Probá con otro día o profesional.
+                          </p>
+                        </div>
+                      ) : (
+                        availability.map(barber => {
+                          const availableCount = availableByBarber.get(barber.barberId) ?? 0
+                          if (availableCount === 0) return null
+                          const pubBarber = publicBarbers.find(b => b.id === barber.barberId)
+                          return (
+                            <div
+                              key={barber.barberId}
+                              className="rounded-lg border p-3"
+                              style={{ borderColor: 'rgba(0,0,0,0.1)' }}
+                            >
+                              <div className="mb-2 flex items-center gap-2">
+                                {pubBarber?.avatar_url ? (
+                                  <img src={pubBarber.avatar_url} alt="" className="h-7 w-7 rounded-full object-cover" />
+                                ) : (
+                                  <div
+                                    className="flex h-7 w-7 items-center justify-center rounded-full"
+                                    style={{ backgroundColor: primary, opacity: 0.15 }}
+                                  >
+                                    <User className="h-3.5 w-3.5" style={{ color: primary }} />
+                                  </div>
+                                )}
+                                <p className="text-sm font-medium" style={{ color: textColor }}>
+                                  {barber.barberName}
+                                </p>
+                                <Badge variant="secondary" className="ml-auto text-[10px]">
+                                  {availableCount} disp.
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 md:grid-cols-5">
+                                {barber.slots.filter(s => s.available).map(slot => (
+                                  <button
+                                    key={slot.time}
+                                    type="button"
+                                    onClick={() => handleSelectSlot(slot.time, barber)}
+                                    className="rounded-md border px-2 py-1.5 text-xs font-medium transition-colors hover:opacity-80"
+                                    style={{ borderColor: primary, color: primary }}
+                                  >
+                                    {slot.time}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -394,6 +497,14 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
               <h3 className="flex items-center gap-2 font-medium" style={{ color: textColor }}>
                 <User className="h-4 w-4" /> Tus datos
               </h3>
+              <div
+                className="rounded-md border p-3 text-xs"
+                style={{ borderColor: 'rgba(0,0,0,0.1)' }}
+              >
+                <p style={mutedTextStyle}>
+                  <strong style={{ color: textColor }}>{selectedService?.name}</strong> · <span className="capitalize">{dateFormatted}</span> · {selectedTime} · {selectedBarberName}
+                </p>
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="name" style={{ color: textColor }}>Nombre</Label>
                 <Input
@@ -436,9 +547,9 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
               >
                 <p><strong>Sucursal:</strong> {selectedBranch?.name}</p>
                 <p><strong>Servicio:</strong> {selectedService?.name}</p>
-                <p><strong>Profesional:</strong> {barberName}</p>
-                <p><strong>Fecha:</strong> {dateFormatted}</p>
-                <p><strong>Hora:</strong> {time}</p>
+                <p><strong>Profesional:</strong> {selectedBarberName}</p>
+                <p><strong>Fecha:</strong> <span className="capitalize">{dateFormatted}</span></p>
+                <p><strong>Hora:</strong> {selectedTime}</p>
                 <p><strong>Duración:</strong> {durationMinutes} min</p>
                 <p><strong>Nombre:</strong> {clientName}</p>
                 <p><strong>Teléfono:</strong> {clientPhone}</p>
@@ -462,7 +573,7 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
               </div>
               <h3 className="text-lg font-semibold" style={{ color: textColor }}>¡Turno confirmado!</h3>
               <p className="text-sm" style={mutedTextStyle}>
-                Tu turno para <strong>{selectedService?.name}</strong> el <strong>{dateFormatted}</strong> a las <strong>{time}</strong> fue registrado.
+                Tu turno para <strong>{selectedService?.name}</strong> el <strong className="capitalize">{dateFormatted}</strong> a las <strong>{selectedTime}</strong> fue registrado.
               </p>
               <p className="text-sm" style={mutedTextStyle}>
                 Recibirás un mensaje de confirmación y un recordatorio antes de tu turno.

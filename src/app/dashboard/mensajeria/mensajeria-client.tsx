@@ -29,15 +29,15 @@ const NAV_ITEMS: { key: CrmSection; icon: React.ElementType; label: string }[] =
 ]
 
 export function MensajeriaClient(props: MensajeriaProps) {
-  const [section, setSection] = useState<CrmSection>('inbox')
-  const [showSettings, setShowSettings] = useState(false)
-  const [showNewChat, setShowNewChat] = useState(false)
-  const [showScheduleDialog, setShowScheduleDialog] = useState(false)
-  const [alertCount, setAlertCount] = useState(0)
-
   const router = useRouter()
   const searchParams = useSearchParams()
   const isFocusMode = searchParams.get('foco') === '1'
+
+  const [section, setSection] = useState<CrmSection>('inbox')
+  const [showSettings, setShowSettings] = useState(() => searchParams.get('settings') === '1')
+  const [showNewChat, setShowNewChat] = useState(false)
+  const [showScheduleDialog, setShowScheduleDialog] = useState(false)
+  const [alertCount, setAlertCount] = useState(0)
 
   const toggleFocusMode = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString())

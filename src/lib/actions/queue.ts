@@ -371,6 +371,25 @@ export async function completeService(
     }
   }
 
+  // 3.6 Restar prepagos ya cobrados del turno asociado (migración 109).
+  //     Si el turno ya tiene una visita de prepago (queue_entry_id IS NULL,
+  //     mismo appointment_id), esa plata ya impactó en caja; esta visita
+  //     sólo registra el remanente.
+  if (queueEntryData?.appointment_id) {
+    const { data: priorPrepayments } = await supabase
+      .from('visits')
+      .select('amount')
+      .eq('appointment_id', queueEntryData.appointment_id)
+      .is('queue_entry_id', null)
+
+    const prepaidTotal = (priorPrepayments ?? []).reduce((sum, v) => sum + Number(v.amount ?? 0), 0)
+    if (prepaidTotal > 0) {
+      amount = Math.max(0, amount - prepaidTotal)
+      // Las comisiones se calculan sobre el precio total del servicio (ya computadas
+      // arriba); el prepago es sólo una partición del cobro, no afecta la comisión.
+    }
+  }
+
   // 4. Update the visit with correct data
   const visitUpdate: Record<string, unknown> = {
     payment_method: paymentMethod,

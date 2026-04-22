@@ -23,9 +23,9 @@ export function FilaTabsWrapper({ children, appointments, noShowToleranceMinutes
           <TabsTrigger value="turnos" className="gap-1.5">
             <CalendarClock className="h-4 w-4" />
             Turnos del día
-            {appointments.filter(a => ['confirmed', 'checked_in'].includes(a.status)).length > 0 && (
+            {appointments.filter(a => ['pending_payment', 'confirmed', 'checked_in'].includes(a.status)).length > 0 && (
               <span className="ml-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
-                {appointments.filter(a => ['confirmed', 'checked_in'].includes(a.status)).length}
+                {appointments.filter(a => ['pending_payment', 'confirmed', 'checked_in'].includes(a.status)).length}
               </span>
             )}
           </TabsTrigger>

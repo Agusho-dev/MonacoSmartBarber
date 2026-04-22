@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { getAppointmentSettings, getAppointmentStaff } from '@/lib/actions/appointments'
+import { listTemplatesForPicker } from '@/lib/actions/messaging'
 import { createAdminClient } from '@/lib/supabase/server'
 import { TurnosConfigClient } from './turnos-config-client'
 
@@ -17,7 +18,7 @@ export default async function TurnosConfigPage() {
 
   const supabase = createAdminClient()
 
-  const [settings, appointmentStaff, { data: allStaff }, { data: branches }] = await Promise.all([
+  const [settings, appointmentStaff, { data: allStaff }, { data: branches }, templatesResult] = await Promise.all([
     getAppointmentSettings(orgId),
     getAppointmentStaff(orgId),
     supabase
@@ -33,6 +34,7 @@ export default async function TurnosConfigPage() {
       .eq('organization_id', orgId)
       .eq('is_active', true)
       .order('name'),
+    listTemplatesForPicker(),
   ])
 
   const staffMap = new Map(appointmentStaff.map(s => [s.staff_id, s]))
@@ -49,6 +51,8 @@ export default async function TurnosConfigPage() {
         }
       })}
       branches={branches ?? []}
+      templates={templatesResult.data}
+      hasWhatsAppChannel={templatesResult.hasChannel}
     />
   )
 }

@@ -14,7 +14,7 @@ export type ReviewRatingCategory = 'high' | 'improvement' | 'low'
 export type BreakRequestStatus = 'pending' | 'approved' | 'rejected' | 'completed'
 export type ServiceAvailability = 'checkin' | 'upsell' | 'both' | 'appointment' | 'all'
 export type BookingMode = 'self_service' | 'manual_only' | 'both'
-export type AppointmentStatus = 'confirmed' | 'checked_in' | 'in_progress' | 'completed' | 'cancelled' | 'no_show'
+export type AppointmentStatus = 'pending_payment' | 'confirmed' | 'checked_in' | 'in_progress' | 'completed' | 'cancelled' | 'no_show'
 export type AppointmentSource = 'public' | 'manual'
 export type MessagePlatform = 'whatsapp' | 'facebook' | 'instagram'
 export type MessageDirection = 'inbound' | 'outbound'
@@ -306,6 +306,8 @@ export interface Visit {
   service_id: string | null
   extra_services: string[] | null
   queue_entry_id: string | null
+  /** Migración 109: turno asociado (prepago o servicio completado de un turno). */
+  appointment_id: string | null
   payment_method: PaymentMethod
   payment_account_id: string | null
   amount: number
@@ -683,7 +685,8 @@ export interface DisciplinaryEvent {
 
 export interface SocialChannel {
   id: string
-  branch_id: string
+  organization_id: string
+  branch_id: string | null
   platform: MessagePlatform
   platform_account_id: string
   display_name: string
@@ -867,6 +870,7 @@ export interface WorkflowWithGraph extends AutomationWorkflow {
 export interface AppointmentSettings {
   id: string
   organization_id: string
+  branch_id: string | null
   is_enabled: boolean
   appointment_hours_open: string
   appointment_hours_close: string
@@ -878,7 +882,17 @@ export interface AppointmentSettings {
   confirmation_template_name: string | null
   reminder_template_name: string | null
   reminder_hours_before: number
+  reminder_hours_before_list: number[]
+  confirmation_template_id: string | null
+  reminder_template_id: string | null
+  reschedule_template_id: string | null
+  cancellation_template_id: string | null
+  waitlist_template_id: string | null
   payment_mode: 'prepago' | 'postpago'
+  prepayment_type: 'fixed' | 'percentage'
+  prepayment_percentage: number
+  payment_request_template_id: string | null
+  payment_instructions: string | null
   brand_primary_color: string
   brand_bg_color: string
   brand_text_color: string
@@ -901,6 +915,15 @@ export interface AppointmentStaff {
   staff?: Staff
 }
 
+export type AppointmentPaymentStatus = 'unpaid' | 'paid' | 'partial' | 'refunded'
+export type AppointmentPaymentMethod =
+  | 'efectivo'
+  | 'transferencia'
+  | 'mercadopago'
+  | 'tarjeta_debito'
+  | 'tarjeta_credito'
+  | 'otro'
+
 export interface Appointment {
   id: string
   organization_id: string
@@ -915,7 +938,14 @@ export interface Appointment {
   status: AppointmentStatus
   source: AppointmentSource
   cancellation_token: string | null
+  token_expires_at: string | null
   payment_flag: string | null
+  payment_status: AppointmentPaymentStatus
+  payment_amount: number | null
+  payment_method: AppointmentPaymentMethod | null
+  paid_at: string | null
+  paid_by_staff_id: string | null
+  payment_notes: string | null
   queue_entry_id: string | null
   created_by_staff_id: string | null
   cancelled_at: string | null
@@ -928,6 +958,51 @@ export interface Appointment {
   client?: Client
   barber?: Staff
   service?: Service
+  branch?: Branch
+}
+
+export interface AppointmentBlock {
+  id: string
+  organization_id: string
+  branch_id: string | null
+  barber_id: string | null
+  start_at: string
+  end_at: string
+  reason: string | null
+  created_by_staff_id: string | null
+  created_at: string
+  updated_at: string
+  branch?: Branch
+  barber?: Staff
+}
+
+export type WaitlistStatus = 'waiting' | 'notified' | 'booked' | 'expired' | 'cancelled'
+export type WaitlistSource = 'public' | 'manual'
+
+export interface AppointmentWaitlist {
+  id: string
+  organization_id: string
+  branch_id: string
+  client_id: string
+  service_id: string | null
+  barber_id: string | null
+  preferred_date_from: string
+  preferred_date_to: string
+  preferred_time_from: string | null
+  preferred_time_to: string | null
+  status: WaitlistStatus
+  access_token: string | null
+  notified_at: string | null
+  notification_expires_at: string | null
+  notification_count: number
+  booked_appointment_id: string | null
+  source: WaitlistSource
+  notes: string | null
+  created_at: string
+  updated_at: string
+  client?: Client
+  service?: Service
+  barber?: Staff
   branch?: Branch
 }
 
@@ -978,6 +1053,8 @@ export interface Database {
       appointment_settings: { Row: AppointmentSettings; Insert: Partial<AppointmentSettings> & Pick<AppointmentSettings, 'organization_id'>; Update: Partial<AppointmentSettings> }
       appointment_staff: { Row: AppointmentStaff; Insert: Partial<AppointmentStaff> & Pick<AppointmentStaff, 'organization_id' | 'staff_id'>; Update: Partial<AppointmentStaff> }
       appointments: { Row: Appointment; Insert: Partial<Appointment> & Pick<Appointment, 'organization_id' | 'branch_id' | 'client_id' | 'appointment_date' | 'start_time' | 'end_time' | 'duration_minutes'>; Update: Partial<Appointment> }
+      appointment_blocks: { Row: AppointmentBlock; Insert: Partial<AppointmentBlock> & Pick<AppointmentBlock, 'organization_id' | 'start_at' | 'end_at'>; Update: Partial<AppointmentBlock> }
+      appointment_waitlist: { Row: AppointmentWaitlist; Insert: Partial<AppointmentWaitlist> & Pick<AppointmentWaitlist, 'organization_id' | 'branch_id' | 'client_id' | 'preferred_date_from' | 'preferred_date_to'>; Update: Partial<AppointmentWaitlist> }
     }
     Views: {
       branch_occupancy: { Row: BranchOccupancy }
