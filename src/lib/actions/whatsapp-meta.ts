@@ -36,6 +36,16 @@ export async function saveOrgWhatsAppConfig(config: {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'No autorizado' }
 
+  // Gate: WhatsApp Business es Pro+.
+  const { requireFeature } = await import('./entitlements')
+  const { EntitlementError } = await import('@/lib/billing/types')
+  try {
+    await requireFeature('messaging.whatsapp')
+  } catch (e) {
+    if (e instanceof EntitlementError) return { error: e.message, entitlement: e.toResponse() }
+    throw e
+  }
+
   const supabase = createAdminClient()
 
   // 1) Upsert de credenciales

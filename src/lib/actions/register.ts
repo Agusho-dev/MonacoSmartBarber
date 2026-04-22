@@ -204,6 +204,27 @@ export async function registerOrganization(formData: FormData) {
       console.error('[registerOrganization] Seed defaults falló (no-crítico):', seedError)
     }
 
+    // 7c. Crear suscripción en trial. La org arranca con acceso Pro durante
+    // 14 días. Al expirar, el cron /api/cron/expire-trials la baja a 'free'.
+    const trialDays = 14
+    const trialEndsAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000)
+    const { error: subError } = await supabase
+      .from('organization_subscriptions')
+      .insert({
+        organization_id: org.id,
+        plan_id: 'pro',
+        status: 'trialing',
+        billing_cycle: 'monthly',
+        currency: 'ARS',
+        trial_ends_at: trialEndsAt.toISOString(),
+        current_period_start: new Date().toISOString(),
+        current_period_end: trialEndsAt.toISOString(),
+      })
+    if (subError) {
+      console.error('[registerOrganization] Error al crear suscripción trial:', subError)
+      throw new Error('Error al activar el trial de 14 días.')
+    }
+
     // 8. Iniciar sesión automáticamente con el usuario recién registrado
     const ssrClient = await createClient()
     const { error: signInError } = await ssrClient.auth.signInWithPassword({ email, password })

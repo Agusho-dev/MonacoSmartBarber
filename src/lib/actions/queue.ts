@@ -590,15 +590,69 @@ export async function completeService(
           // Buscar automation_workflows con trigger post_service
           const { data: postServiceWorkflows } = await supabase
             .from('automation_workflows')
-            .select('id, trigger_config, branch_id')
+            .select('id, trigger_config, branch_id, overlap_policy, category')
             .eq('organization_id', visitOrgId)
             .eq('trigger_type', 'post_service')
             .eq('is_active', true)
             .order('priority', { ascending: false })
 
           if (postServiceWorkflows && postServiceWorkflows.length > 0) {
+            // Resolver convId del cliente una sola vez para chequeos de overlap.
+            // Coincide con la lógica de process-scheduled-messages: lookup por sufijo
+            // de teléfono dentro de los canales WA activos de la org.
+            const phoneSuffix = (client.phone ?? '').replace(/\D/g, '').slice(-10)
+            let clientConvId: string | null = null
+            if (phoneSuffix) {
+              const { data: orgChannels } = await supabase
+                .from('social_channels')
+                .select('id')
+                .eq('platform', 'whatsapp')
+                .eq('is_active', true)
+                .eq('organization_id', visitOrgId)
+              const channelIds = orgChannels?.map((c: { id: string }) => c.id) ?? []
+              if (channelIds.length > 0) {
+                const { data: convRow } = await supabase
+                  .from('conversations')
+                  .select('id')
+                  .in('channel_id', channelIds)
+                  .ilike('platform_user_id', `%${phoneSuffix}`)
+                  .order('last_message_at', { ascending: false, nullsFirst: false })
+                  .limit(1)
+                  .maybeSingle()
+                clientConvId = convRow?.id ?? null
+              }
+            }
+
             for (const wf of postServiceWorkflows) {
               if (wf.branch_id && wf.branch_id !== visit.branch_id) continue
+
+              // Respetar overlap_policy del workflow.
+              // skip_if_active: si ya hay scheduled_message pending o workflow_execution
+              // activa para este cliente+workflow, no re-encolar (evita el solape).
+              if (wf.overlap_policy === 'skip_if_active') {
+                const { count: pendingCount } = await supabase
+                  .from('scheduled_messages')
+                  .select('id', { count: 'exact', head: true })
+                  .eq('workflow_id', wf.id)
+                  .eq('client_id', visit.client_id)
+                  .eq('status', 'pending')
+                if ((pendingCount ?? 0) > 0) {
+                  console.log('[PostService:Workflow] skip_if_active: ya hay pending para wf', wf.id)
+                  continue
+                }
+                if (clientConvId) {
+                  const { count: activeCount } = await supabase
+                    .from('workflow_executions')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('workflow_id', wf.id)
+                    .eq('conversation_id', clientConvId)
+                    .in('status', ['active', 'waiting_reply'])
+                  if ((activeCount ?? 0) > 0) {
+                    console.log('[PostService:Workflow] skip_if_active: ya hay execution activa para wf', wf.id)
+                    continue
+                  }
+                }
+              }
 
               const delayMinutes = (wf.trigger_config as any)?.delay_minutes ?? 10
               const scheduledFor = new Date()
@@ -645,6 +699,7 @@ export async function completeService(
               const insertData: Record<string, unknown> = {
                 client_id: visit.client_id,
                 phone: client.phone,
+                organization_id: visitOrgId,
                 scheduled_for: scheduledFor.toISOString(),
                 status: 'pending',
                 workflow_id: wf.id,

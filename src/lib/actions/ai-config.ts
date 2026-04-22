@@ -50,6 +50,16 @@ export async function saveOrgAiConfig(config: {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: null, error: 'No autorizado' }
 
+  // Gate: AI Assistant es Enterprise (o add-on pagable).
+  const { requireFeature } = await import('./entitlements')
+  const { EntitlementError } = await import('@/lib/billing/types')
+  try {
+    await requireFeature('ai.enabled')
+  } catch (e) {
+    if (e instanceof EntitlementError) return { data: null, error: e.message, entitlement: e.toResponse() }
+    throw e
+  }
+
   const supabase = createAdminClient()
 
   const { data: existingRaw } = await supabase

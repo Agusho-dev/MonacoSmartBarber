@@ -147,29 +147,24 @@ export async function POST(req: NextRequest) {
 
     const orgId = igConfig.organization_id
 
-    // Buscar canal Instagram de la org
-    const { data: orgBranches } = await supabase
-      .from('branches')
-      .select('id')
-      .eq('organization_id', orgId)
-
-    const branchIds = orgBranches?.map((b: any) => b.id) ?? []
-    if (branchIds.length === 0) continue
-
+    // Canal Instagram de la org. Matcheamos por organization_id porque los canales
+    // pueden ser org-wide (branch_id = null) o legacy por sucursal.
     let { data: igChannel } = await supabase
       .from('social_channels')
       .select('id')
-      .in('branch_id', branchIds)
+      .eq('organization_id', orgId)
       .eq('platform', 'instagram')
       .eq('is_active', true)
+      .order('branch_id', { ascending: true, nullsFirst: true })
       .limit(1)
       .maybeSingle()
 
     if (!igChannel) {
-      const { data: newChannel } = await supabase
+      const { data: newChannel, error: newChannelErr } = await supabase
         .from('social_channels')
         .insert({
-          branch_id: branchIds[0],
+          organization_id: orgId,
+          branch_id: null,
           platform: 'instagram',
           platform_account_id: entryId,
           display_name: 'Instagram Business',
@@ -177,6 +172,9 @@ export async function POST(req: NextRequest) {
         })
         .select('id')
         .single()
+      if (newChannelErr) {
+        console.error('[IG Webhook] No se pudo crear canal fallback:', newChannelErr.message)
+      }
       igChannel = newChannel
     }
 

@@ -62,17 +62,15 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    // Buscar canal WhatsApp activo filtrado por organización (via branch)
+    // Org-scope desde migración 103: el canal puede ser org-wide (branch_id NULL)
+    // o por sucursal. Filtramos por organization_id directo.
     const { data: waChannel } = await supabase
       .from('social_channels')
       .select('id, branch_id')
       .eq('platform', 'whatsapp')
       .eq('is_active', true)
-      .in('branch_id', (await supabase
-        .from('branches')
-        .select('id')
-        .eq('organization_id', organizationId)
-      ).data?.map((b: { id: string }) => b.id) ?? [])
+      .eq('organization_id', organizationId)
+      .order('branch_id', { ascending: true, nullsFirst: true })
       .limit(1)
       .maybeSingle()
 
