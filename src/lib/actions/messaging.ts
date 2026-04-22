@@ -372,21 +372,17 @@ export async function getChannels() {
 export async function getTemplates(channelId?: string) {
   const supabase = createAdminClient()
 
-  // Limitar templates a canales de la org actual
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: [], error: 'No autorizado' }
 
-  const { data: orgBranches } = await supabase
-    .from('branches')
-    .select('id')
-    .eq('organization_id', orgId)
-  const branchIds = orgBranches?.map((b) => b.id) ?? []
-
+  // Post migración 103: social_channels.organization_id es la fuente de verdad
   const { data: orgChannels } = await supabase
     .from('social_channels')
     .select('id')
-    .in('branch_id', branchIds)
+    .eq('organization_id', orgId)
   const channelIds = orgChannels?.map((c) => c.id) ?? []
+
+  if (!channelIds.length) return { data: [], error: null }
 
   let query = supabase
     .from('message_templates')
@@ -403,4 +399,36 @@ export async function getTemplates(channelId?: string) {
 
   if (error) return { data: [], error: error.message }
   return { data: data ?? [], error: null }
+}
+
+/**
+ * Lista templates aptos para el picker de turnos. Devuelve un shape liviano
+ * (id, name, category, status, platform) — sin components.
+ * Incluye también los no-aprobados para que el admin vea el estado en UI.
+ */
+export async function listTemplatesForPicker() {
+  const supabase = createAdminClient()
+
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { data: [], hasChannel: false, error: null as string | null }
+
+  const { data: orgChannels } = await supabase
+    .from('social_channels')
+    .select('id, platform')
+    .eq('organization_id', orgId)
+    .eq('is_active', true)
+
+  const channels = orgChannels ?? []
+  const hasChannel = channels.some((c) => c.platform === 'whatsapp')
+  const channelIds = channels.map((c) => c.id)
+  if (!channelIds.length) return { data: [], hasChannel, error: null }
+
+  const { data, error } = await supabase
+    .from('message_templates')
+    .select('id, name, language, category, status, channel_id')
+    .in('channel_id', channelIds)
+    .order('name')
+
+  if (error) return { data: [], hasChannel, error: error.message }
+  return { data: data ?? [], hasChannel, error: null }
 }

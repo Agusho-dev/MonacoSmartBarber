@@ -65,15 +65,10 @@
       "Bash(git push *)",
       "Bash(git commit -m 'fix: typescript build errors in auth.ts and overview.ts *)",
       "Bash(claude mcp *)",
-      "mcp__supabase-msb__execute_sql",
-      "mcp__supabase-msb__get_advisors",
-      "mcp__supabase-msb__apply_migration",
-      "Bash(tee /tmp/tsc.log)",
-      "Bash(echo \"--- EXIT CODE: $? ---\")",
-      "Bash(echo \"EXIT: $?\")",
-      "Read(//private/tmp/**)",
-      "Bash(npm run *)",
-      "Bash(echo \"started pid=$!\")"
+      "WebSearch",
+      "WebFetch(domain:ayuda.agendapro.com)",
+      "WebFetch(domain:agendapro.com)",
+      "Bash(npx --no tsc --noEmit)"
     ]
   },
   "enabledMcpjsonServers": [

@@ -22,6 +22,11 @@ export async function getOrgWhatsAppConfig() {
   return { data, error: null }
 }
 
+/**
+ * Guarda la config de WhatsApp de la org y sincroniza el canal social_channels
+ * a nivel org (no por sucursal). Un solo canal WA sirve para todas las sucursales
+ * de la organización.
+ */
 export async function saveOrgWhatsAppConfig(config: {
   whatsapp_access_token: string
   whatsapp_phone_id: string
@@ -32,6 +37,8 @@ export async function saveOrgWhatsAppConfig(config: {
   if (!orgId) return { error: 'No autorizado' }
 
   const supabase = createAdminClient()
+
+  // 1) Upsert de credenciales
   const { error } = await supabase
     .from('organization_whatsapp_config')
     .upsert(
@@ -48,31 +55,50 @@ export async function saveOrgWhatsAppConfig(config: {
 
   if (error) return { error: error.message }
 
-  // Crear/actualizar automáticamente el canal social de WhatsApp para esta org
-  // Un canal es el registro que vincula el número de WA con una sucursal
-  const { data: firstBranch } = await supabase
-    .from('branches')
+  // 2) Canal org-default de WhatsApp (branch_id = NULL) — sirve para todas las sucursales
+  const { data: existingChannel } = await supabase
+    .from('social_channels')
     .select('id')
     .eq('organization_id', orgId)
-    .limit(1)
+    .eq('platform', 'whatsapp')
+    .is('branch_id', null)
     .maybeSingle()
 
-  if (firstBranch) {
+  if (existingChannel) {
     await supabase
       .from('social_channels')
-      .upsert(
-        {
-          branch_id: firstBranch.id,
-          platform: 'whatsapp',
-          platform_account_id: config.whatsapp_phone_id,
-          display_name: 'WhatsApp Business',
-          is_active: true,
-        },
-        { onConflict: 'branch_id, platform' }
-      )
+      .update({
+        platform_account_id: config.whatsapp_phone_id,
+        display_name: 'WhatsApp Business',
+        is_active: true,
+      })
+      .eq('id', existingChannel.id)
+  } else {
+    await supabase.from('social_channels').insert({
+      organization_id: orgId,
+      branch_id: null,
+      platform: 'whatsapp',
+      platform_account_id: config.whatsapp_phone_id,
+      display_name: 'WhatsApp Business',
+      is_active: true,
+    })
   }
 
-  // Retornar la config completa (incluyendo verify_token generado) para mostrarlo en la UI
+  // 3) Auto-semilla de templates default (idempotente: skippea si ya existen)
+  //    Lo hacemos best-effort; si falla, logueamos pero no bloqueamos el guardado.
+  try {
+    await seedDefaultTemplates()
+  } catch (e) {
+    console.error('[WhatsApp Meta] seedDefaultTemplates falló:', e)
+  }
+
+  // 4) Sync inicial desde Meta para traer lo que ya tenga el user
+  try {
+    await syncWhatsAppTemplates()
+  } catch (e) {
+    console.error('[WhatsApp Meta] syncWhatsAppTemplates inicial falló:', e)
+  }
+
   const { data: saved } = await supabase
     .from('organization_whatsapp_config')
     .select('*')
@@ -80,7 +106,24 @@ export async function saveOrgWhatsAppConfig(config: {
     .maybeSingle()
 
   revalidatePath('/dashboard/mensajeria')
+  revalidatePath('/dashboard/turnos/configuracion')
   return { success: true, data: saved }
+}
+
+/**
+ * Resuelve el canal de WA default de una org (branch_id IS NULL).
+ */
+async function getOrgWhatsAppChannel(orgId: string) {
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from('social_channels')
+    .select('id')
+    .eq('organization_id', orgId)
+    .eq('platform', 'whatsapp')
+    .is('branch_id', null)
+    .eq('is_active', true)
+    .maybeSingle()
+  return data
 }
 
 // Envía un mensaje de texto vía Meta Cloud API e inserta el registro en DB
@@ -107,25 +150,7 @@ export async function sendMetaWhatsAppMessage(
     return { error: 'WhatsApp no configurado. Completá las credenciales en Configuración.' }
   }
 
-  // Normalizar número a formato E.164 para Meta Cloud API (sin el +)
-  // Argentina: Meta espera 54XXXXXXXXXX (SIN el 9 intermedio)
-  // Ejemplos:
-  //   "3584402511"     → "543584402511"
-  //   "93584402511"    → "543584402511"  (quitar el 9)
-  //   "5493584402511"  → "543584402511"  (quitar el 9)
-  //   "+54 9 358..."   → "543584402511"
-  let phone = to.replace(/\D/g, '')
-  if (!phone.startsWith('54')) {
-    // Sin código de país — puede tener o no el 9 adelante
-    if (phone.startsWith('9') && phone.length === 11) {
-      phone = '54' + phone.slice(1) // quitar el 9: 93584402511 → 543584402511
-    } else {
-      phone = '54' + phone
-    }
-  } else if (phone.startsWith('549') && phone.length === 13) {
-    // Tiene 54 + 9 + 10 dígitos → quitar el 9: 5493584402511 → 543584402511
-    phone = '54' + phone.slice(3)
-  }
+  const phone = normalizeArgPhone(to)
 
   let res: Response
   try {
@@ -318,10 +343,14 @@ export async function sendMetaWhatsAppTemplate(
   return { success: true }
 }
 
-// Sincroniza templates aprobados desde Meta y los guarda en la tabla message_templates
+/**
+ * Sincroniza templates (todos, no sólo approved) desde Meta con paginación cursor-based.
+ * Up/dates por (channel_id, name).
+ */
 export async function syncWhatsAppTemplates(): Promise<{
   data?: Array<{ name: string; language: string; category: string; status: string; components: unknown }>
   error?: string
+  count?: number
 }> {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'No autorizado' }
@@ -338,54 +367,58 @@ export async function syncWhatsAppTemplates(): Promise<{
     return { error: 'WhatsApp no configurado' }
   }
 
-  // Obtener templates desde Meta
-  const res = await fetch(
-    `https://graph.facebook.com/${META_API_VERSION}/${waConfig.whatsapp_business_id}/message_templates?limit=100`,
-    {
-      headers: { Authorization: `Bearer ${waConfig.whatsapp_access_token}` },
-      signal: AbortSignal.timeout(10000),
-    }
-  )
+  const channel = await getOrgWhatsAppChannel(orgId)
+  if (!channel) return { error: 'Canal WhatsApp no encontrado. Guardá la configuración primero.' }
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    return { error: err.error?.message ?? 'Error al obtener templates de Meta' }
+  const MAX_PAGES = 10 // hard cap por seguridad
+  const PAGE_SIZE = 100
+  let next: string | null =
+    `https://graph.facebook.com/${META_API_VERSION}/${waConfig.whatsapp_business_id}/message_templates?limit=${PAGE_SIZE}`
+
+  const allTemplates: Array<{ name: string; language: string; category: string; status: string; components: unknown }> = []
+
+  for (let page = 0; page < MAX_PAGES && next; page++) {
+    const res: Response = await fetch(next, {
+      headers: { Authorization: `Bearer ${waConfig.whatsapp_access_token}` },
+      signal: AbortSignal.timeout(15000),
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      return { error: err.error?.message ?? 'Error al obtener templates de Meta' }
+    }
+
+    const json = await res.json()
+    const pageData = json?.data
+    if (!Array.isArray(pageData)) {
+      return { error: 'Respuesta inesperada de Meta' }
+    }
+
+    for (const t of pageData) {
+      allTemplates.push({
+        name: t.name,
+        language: t.language,
+        category: (t.category as string)?.toLowerCase?.() ?? 'utility',
+        status: (t.status as string)?.toLowerCase?.() ?? 'pending',
+        components: t.components,
+      })
+    }
+
+    next = json?.paging?.next ?? null
   }
 
-  const { data: metaTemplates } = await res.json()
-  if (!Array.isArray(metaTemplates)) return { error: 'Respuesta inesperada de Meta' }
-
-  // Obtener el canal WhatsApp de la org
-  const { data: orgBranches } = await supabase
-    .from('branches')
-    .select('id')
-    .eq('organization_id', orgId)
-  const branchIds = orgBranches?.map((b: { id: string }) => b.id) ?? []
-
-  const { data: waChannel } = await supabase
-    .from('social_channels')
-    .select('id')
-    .in('branch_id', branchIds)
-    .eq('platform', 'whatsapp')
-    .eq('is_active', true)
-    .limit(1)
-    .maybeSingle()
-
-  if (!waChannel) return { error: 'Canal WhatsApp no encontrado' }
-
-  // Guardar/actualizar en DB solo los aprobados
-  const approved = metaTemplates.filter((t: any) => t.status === 'APPROVED')
-
-  for (const tpl of approved) {
+  // Upsert por (channel_id, name). Guardamos todos los status (approved, pending, rejected)
+  // así el picker puede mostrar solo los approved pero el admin ve el resto.
+  for (const tpl of allTemplates) {
     await supabase
       .from('message_templates')
       .upsert(
         {
-          channel_id: waChannel.id,
+          channel_id: channel.id,
           name: tpl.name,
           language: tpl.language,
-          category: (tpl.category as string).toLowerCase(),
-          status: 'approved',
+          category: tpl.category,
+          status: tpl.status,
           components: tpl.components,
         },
         { onConflict: 'channel_id, name' }
@@ -393,13 +426,177 @@ export async function syncWhatsAppTemplates(): Promise<{
   }
 
   revalidatePath('/dashboard/mensajeria')
-  return {
-    data: approved.map((t: any) => ({
-      name: t.name,
-      language: t.language,
-      category: t.category,
-      status: t.status,
-      components: t.components,
-    })),
-  }
+  revalidatePath('/dashboard/turnos/configuracion')
+  return { data: allTemplates, count: allTemplates.length }
 }
+
+// ===========================================================================
+// Auto-seed de templates para turnos
+// ===========================================================================
+
+interface TemplateSpec {
+  name: string
+  category: 'UTILITY' | 'MARKETING'
+  body_text: string
+  body_examples: string[]  // ejemplos por variable {{1}}, {{2}}, ...
+}
+
+/**
+ * Templates default que creamos automáticamente en la WABA del cliente al
+ * conectar WA por primera vez. Esto elimina la fricción de configurar el CRM
+ * antes de usar turnos.
+ *
+ * IMPORTANTE: Meta requiere que templates con variables tengan `example` en el
+ * body. Usamos la sintaxis de `body_text` con placeholders {{1}}, {{2}}, etc.
+ */
+const DEFAULT_TEMPLATES: TemplateSpec[] = [
+  {
+    name: 'monaco_turno_confirmacion',
+    category: 'UTILITY',
+    body_text:
+      'Hola {{1}}! Tu turno para {{2}} el {{3}} a las {{4}} en {{5}} fue confirmado. Te esperamos.',
+    body_examples: ['Juan', 'Corte clásico', 'lunes 21 de abril', '15:30', 'Monaco Rondeau'],
+  },
+  {
+    name: 'monaco_turno_recordatorio',
+    category: 'UTILITY',
+    body_text:
+      'Hola {{1}}, te recordamos tu turno para {{2}} el {{3}} a las {{4}} en {{5}}.',
+    body_examples: ['Juan', 'Corte clásico', 'mañana', '15:30', 'Monaco Rondeau'],
+  },
+  {
+    name: 'monaco_turno_reprogramado',
+    category: 'UTILITY',
+    body_text:
+      'Hola {{1}}, reprogramamos tu turno de {{2}}. Nueva fecha: {{3}} a las {{4}} en {{5}}. Cualquier duda, respondenos.',
+    body_examples: ['Juan', 'Corte clásico', 'martes 22 de abril', '16:00', 'Monaco Rondeau'],
+  },
+  {
+    name: 'monaco_turno_cancelado',
+    category: 'UTILITY',
+    body_text:
+      'Hola {{1}}, tu turno para {{2}} el {{3}} a las {{4}} fue cancelado. Podés agendar otro cuando quieras.',
+    body_examples: ['Juan', 'Corte clásico', 'lunes 21 de abril', '15:30'],
+  },
+  {
+    name: 'monaco_turno_waitlist_disponible',
+    category: 'UTILITY',
+    body_text:
+      'Hola {{1}}! Se liberó un turno para {{2}} el {{3}} a las {{4}} en {{5}}. Respondé "SI" en los próximos 30 minutos para reservarlo.',
+    body_examples: ['Juan', 'Corte clásico', 'lunes 21 de abril', '15:30', 'Monaco Rondeau'],
+  },
+]
+
+/**
+ * Crea templates default en la WABA del cliente si no existen. Idempotente.
+ * Se llama tras saveOrgWhatsAppConfig() exitoso. Los templates necesitan
+ * aprobación de Meta (~minutos). Hasta que se aprueban, status=pending.
+ */
+export async function seedDefaultTemplates(): Promise<{ created: number; skipped: number; errors: Array<{ name: string; message: string }> }> {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { created: 0, skipped: 0, errors: [{ name: '', message: 'No autorizado' }] }
+
+  const supabase = createAdminClient()
+
+  const { data: waConfig } = await supabase
+    .from('organization_whatsapp_config')
+    .select('whatsapp_access_token, whatsapp_business_id')
+    .eq('organization_id', orgId)
+    .maybeSingle()
+
+  if (!waConfig?.whatsapp_access_token || !waConfig?.whatsapp_business_id) {
+    return { created: 0, skipped: 0, errors: [{ name: '', message: 'WhatsApp no configurado' }] }
+  }
+
+  const channel = await getOrgWhatsAppChannel(orgId)
+  if (!channel) {
+    return { created: 0, skipped: 0, errors: [{ name: '', message: 'Canal WhatsApp no encontrado' }] }
+  }
+
+  // Traer templates existentes (un sync rápido) para saber cuáles skippear
+  const { data: existing } = await supabase
+    .from('message_templates')
+    .select('name')
+    .eq('channel_id', channel.id)
+
+  const existingNames = new Set((existing ?? []).map(t => t.name))
+
+  let created = 0
+  let skipped = 0
+  const errors: Array<{ name: string; message: string }> = []
+
+  for (const tpl of DEFAULT_TEMPLATES) {
+    if (existingNames.has(tpl.name)) {
+      skipped++
+      continue
+    }
+
+    const payload = {
+      name: tpl.name,
+      language: 'es',
+      category: tpl.category,
+      components: [
+        {
+          type: 'BODY',
+          text: tpl.body_text,
+          example: {
+            body_text: [tpl.body_examples],
+          },
+        },
+      ],
+    }
+
+    try {
+      const res = await fetch(
+        `https://graph.facebook.com/${META_API_VERSION}/${waConfig.whatsapp_business_id}/message_templates`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${waConfig.whatsapp_access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(15000),
+        }
+      )
+
+      const result = await res.json()
+
+      if (!res.ok) {
+        const metaErr = result?.error?.message ?? 'Error desconocido'
+        // Si Meta ya tiene el template con ese nombre, no es un error real
+        if (typeof metaErr === 'string' && metaErr.toLowerCase().includes('already exists')) {
+          skipped++
+          continue
+        }
+        errors.push({ name: tpl.name, message: metaErr })
+        continue
+      }
+
+      // Guardar registro local
+      await supabase.from('message_templates').upsert(
+        {
+          channel_id: channel.id,
+          name: tpl.name,
+          language: 'es',
+          category: tpl.category.toLowerCase(),
+          status: 'pending', // Meta los marca así hasta aprobación
+          components: payload.components,
+        },
+        { onConflict: 'channel_id, name' }
+      )
+
+      created++
+    } catch (e) {
+      errors.push({
+        name: tpl.name,
+        message: e instanceof Error ? e.message : 'Error de red',
+      })
+    }
+  }
+
+  revalidatePath('/dashboard/mensajeria')
+  revalidatePath('/dashboard/turnos/configuracion')
+  return { created, skipped, errors }
+}
+

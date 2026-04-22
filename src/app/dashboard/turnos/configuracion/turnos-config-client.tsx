@@ -1,9 +1,11 @@
 'use client'
 
 import { useState, useTransition, useMemo } from 'react'
-import { Save, Loader2, CalendarClock, AlertCircle } from 'lucide-react'
+import Link from 'next/link'
+import { Save, Loader2, CalendarClock, AlertCircle, MessageSquare, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
@@ -23,6 +25,15 @@ import {
 import type { AppointmentSettings, AppointmentStaffWalkinMode } from '@/lib/types/database'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { TemplatePickerSelect, type TemplateOption } from '@/components/messaging/template-picker-select'
+
+const RECOMMENDED_TEMPLATES = {
+  confirmation: 'monaco_turno_confirmacion',
+  reminder: 'monaco_turno_recordatorio',
+  reschedule: 'monaco_turno_reprogramado',
+  cancellation: 'monaco_turno_cancelado',
+  waitlist: 'monaco_turno_waitlist_disponible',
+} as const
 
 const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 
@@ -43,9 +54,11 @@ interface Props {
   settings: AppointmentSettings | null
   allStaff: StaffRow[]
   branches: Branch[]
+  templates: TemplateOption[]
+  hasWhatsAppChannel: boolean
 }
 
-export function TurnosConfigClient({ settings, allStaff, branches }: Props) {
+export function TurnosConfigClient({ settings, allStaff, branches, templates, hasWhatsAppChannel }: Props) {
   const [isPending, startTransition] = useTransition()
   const [isEnabled, setIsEnabled] = useState(settings?.is_enabled ?? false)
   const [hoursOpen, setHoursOpen] = useState(settings?.appointment_hours_open ?? '09:00')
@@ -55,12 +68,24 @@ export function TurnosConfigClient({ settings, allStaff, branches }: Props) {
   const [maxAdvanceDays, setMaxAdvanceDays] = useState(String(settings?.max_advance_days ?? 30))
   const [noShowTolerance, setNoShowTolerance] = useState(String(settings?.no_show_tolerance_minutes ?? 15))
   const [cancellationMinHours, setCancellationMinHours] = useState(String(settings?.cancellation_min_hours ?? 2))
-  const [reminderHours, setReminderHours] = useState(String(settings?.reminder_hours_before ?? 24))
-  const [confirmationTemplate, setConfirmationTemplate] = useState(settings?.confirmation_template_name ?? '')
-  const [reminderTemplate, setReminderTemplate] = useState(settings?.reminder_template_name ?? '')
+  const [reminderHoursList, setReminderHoursList] = useState<number[]>(
+    settings?.reminder_hours_before_list && settings.reminder_hours_before_list.length > 0
+      ? settings.reminder_hours_before_list
+      : [24, 2]
+  )
+  const [confirmationTemplateId, setConfirmationTemplateId] = useState<string | null>(settings?.confirmation_template_id ?? null)
+  const [reminderTemplateId, setReminderTemplateId] = useState<string | null>(settings?.reminder_template_id ?? null)
+  const [rescheduleTemplateId, setRescheduleTemplateId] = useState<string | null>(settings?.reschedule_template_id ?? null)
+  const [cancellationTemplateId, setCancellationTemplateId] = useState<string | null>(settings?.cancellation_template_id ?? null)
+  const [waitlistTemplateId, setWaitlistTemplateId] = useState<string | null>(settings?.waitlist_template_id ?? null)
   const [paymentMode, setPaymentMode] = useState(settings?.payment_mode ?? 'postpago')
+  const [prepaymentType, setPrepaymentType] = useState<'fixed' | 'percentage'>(settings?.prepayment_type ?? 'fixed')
+  const [prepaymentPercentage, setPrepaymentPercentage] = useState(String(settings?.prepayment_percentage ?? 50))
+  const [paymentRequestTemplateId, setPaymentRequestTemplateId] = useState<string | null>(settings?.payment_request_template_id ?? null)
+  const [paymentInstructions, setPaymentInstructions] = useState(settings?.payment_instructions ?? '')
   const [bufferMinutes, setBufferMinutes] = useState(String(settings?.buffer_minutes ?? 10))
   const [leadTimeMinutes, setLeadTimeMinutes] = useState(String(settings?.lead_time_minutes ?? 30))
+  const [newReminderHours, setNewReminderHours] = useState('')
   const [staffStates, setStaffStates] = useState<Record<string, { enabled: boolean; walkinMode: AppointmentStaffWalkinMode }>>(
     Object.fromEntries(allStaff.map(s => [s.id, { enabled: s.enabledForAppointments, walkinMode: s.walkinMode }]))
   )
@@ -75,10 +100,21 @@ export function TurnosConfigClient({ settings, allStaff, branches }: Props) {
     maxAdvanceDays: String(settings?.max_advance_days ?? 30),
     noShowTolerance: String(settings?.no_show_tolerance_minutes ?? 15),
     cancellationMinHours: String(settings?.cancellation_min_hours ?? 2),
-    reminderHours: String(settings?.reminder_hours_before ?? 24),
-    confirmationTemplate: settings?.confirmation_template_name ?? '',
-    reminderTemplate: settings?.reminder_template_name ?? '',
+    reminderHoursList: JSON.stringify(
+      settings?.reminder_hours_before_list && settings.reminder_hours_before_list.length > 0
+        ? settings.reminder_hours_before_list
+        : [24, 2]
+    ),
+    confirmationTemplateId: settings?.confirmation_template_id ?? null,
+    reminderTemplateId: settings?.reminder_template_id ?? null,
+    rescheduleTemplateId: settings?.reschedule_template_id ?? null,
+    cancellationTemplateId: settings?.cancellation_template_id ?? null,
+    waitlistTemplateId: settings?.waitlist_template_id ?? null,
     paymentMode: settings?.payment_mode ?? 'postpago',
+    prepaymentType: settings?.prepayment_type ?? 'fixed',
+    prepaymentPercentage: String(settings?.prepayment_percentage ?? 50),
+    paymentRequestTemplateId: settings?.payment_request_template_id ?? null,
+    paymentInstructions: settings?.payment_instructions ?? '',
     bufferMinutes: String(settings?.buffer_minutes ?? 10),
     leadTimeMinutes: String(settings?.lead_time_minutes ?? 30),
   })
@@ -92,10 +128,17 @@ export function TurnosConfigClient({ settings, allStaff, branches }: Props) {
     maxAdvanceDays !== savedSnapshot.maxAdvanceDays ||
     noShowTolerance !== savedSnapshot.noShowTolerance ||
     cancellationMinHours !== savedSnapshot.cancellationMinHours ||
-    reminderHours !== savedSnapshot.reminderHours ||
-    confirmationTemplate !== savedSnapshot.confirmationTemplate ||
-    reminderTemplate !== savedSnapshot.reminderTemplate ||
+    JSON.stringify(reminderHoursList) !== savedSnapshot.reminderHoursList ||
+    confirmationTemplateId !== savedSnapshot.confirmationTemplateId ||
+    reminderTemplateId !== savedSnapshot.reminderTemplateId ||
+    rescheduleTemplateId !== savedSnapshot.rescheduleTemplateId ||
+    cancellationTemplateId !== savedSnapshot.cancellationTemplateId ||
+    waitlistTemplateId !== savedSnapshot.waitlistTemplateId ||
     paymentMode !== savedSnapshot.paymentMode ||
+    prepaymentType !== savedSnapshot.prepaymentType ||
+    prepaymentPercentage !== savedSnapshot.prepaymentPercentage ||
+    paymentRequestTemplateId !== savedSnapshot.paymentRequestTemplateId ||
+    paymentInstructions !== savedSnapshot.paymentInstructions ||
     bufferMinutes !== savedSnapshot.bufferMinutes ||
     leadTimeMinutes !== savedSnapshot.leadTimeMinutes
 
@@ -124,10 +167,18 @@ export function TurnosConfigClient({ settings, allStaff, branches }: Props) {
         max_advance_days: Number(maxAdvanceDays),
         no_show_tolerance_minutes: Number(noShowTolerance),
         cancellation_min_hours: Number(cancellationMinHours),
-        reminder_hours_before: Number(reminderHours),
-        confirmation_template_name: confirmationTemplate || null,
-        reminder_template_name: reminderTemplate || null,
+        reminder_hours_before: reminderHoursList[0] ?? 0, // legacy fallback
+        reminder_hours_before_list: reminderHoursList,
+        confirmation_template_id: confirmationTemplateId,
+        reminder_template_id: reminderTemplateId,
+        reschedule_template_id: rescheduleTemplateId,
+        cancellation_template_id: cancellationTemplateId,
+        waitlist_template_id: waitlistTemplateId,
         payment_mode: paymentMode as 'prepago' | 'postpago',
+        prepayment_type: prepaymentType,
+        prepayment_percentage: Number(prepaymentPercentage),
+        payment_request_template_id: paymentRequestTemplateId,
+        payment_instructions: paymentInstructions.trim() || null,
         buffer_minutes: Number(bufferMinutes),
         lead_time_minutes: Number(leadTimeMinutes),
       })
@@ -145,15 +196,40 @@ export function TurnosConfigClient({ settings, allStaff, branches }: Props) {
           maxAdvanceDays,
           noShowTolerance,
           cancellationMinHours,
-          reminderHours,
-          confirmationTemplate,
-          reminderTemplate,
+          reminderHoursList: JSON.stringify(reminderHoursList),
+          confirmationTemplateId,
+          reminderTemplateId,
+          rescheduleTemplateId,
+          cancellationTemplateId,
+          waitlistTemplateId,
           paymentMode,
+          prepaymentType,
+          prepaymentPercentage,
+          paymentRequestTemplateId,
+          paymentInstructions,
           bufferMinutes,
           leadTimeMinutes,
         })
       }
     })
+  }
+
+  function addReminderHour() {
+    const hours = Number(newReminderHours)
+    if (!Number.isFinite(hours) || hours <= 0 || hours > 168) {
+      toast.error('Ingresá un valor entre 1 y 168 horas')
+      return
+    }
+    if (reminderHoursList.includes(hours)) {
+      toast.error('Ese recordatorio ya está configurado')
+      return
+    }
+    setReminderHoursList(prev => [...prev, hours].sort((a, b) => b - a))
+    setNewReminderHours('')
+  }
+
+  function removeReminderHour(hours: number) {
+    setReminderHoursList(prev => prev.filter(h => h !== hours))
   }
 
   async function handleToggleStaff(staffId: string, enabled: boolean) {
@@ -302,6 +378,75 @@ export function TurnosConfigClient({ settings, allStaff, branches }: Props) {
                   </SelectContent>
                 </Select>
               </div>
+
+              {paymentMode === 'prepago' && (
+                <div className="space-y-4 rounded-md border border-amber-500/30 bg-amber-500/5 p-4">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="mt-0.5 size-4 text-amber-500" />
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-medium">Prepago activo</p>
+                      <p className="text-xs text-muted-foreground">
+                        Los turnos nuevos quedan en &ldquo;Esperando pago&rdquo; hasta que confirmes manualmente el cobro.
+                        Se envía al cliente un mensaje con las instrucciones de pago.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>Tipo de prepago</Label>
+                      <Select value={prepaymentType} onValueChange={v => setPrepaymentType(v as 'fixed' | 'percentage')}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="fixed">100% del precio del servicio</SelectItem>
+                          <SelectItem value="percentage">Seña (porcentaje)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {prepaymentType === 'percentage' && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="prepay-pct">Porcentaje de seña (%)</Label>
+                        <Input
+                          id="prepay-pct"
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={prepaymentPercentage}
+                          onChange={e => setPrepaymentPercentage(e.target.value)}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label>Template de solicitud de pago (opcional)</Label>
+                    <TemplatePickerSelect
+                      templates={templates}
+                      value={paymentRequestTemplateId}
+                      onChange={setPaymentRequestTemplateId}
+                      recommendedName={undefined}
+                      placeholder="Mensaje libre (usa instrucciones de abajo)"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Variables esperadas: nombre, servicio, fecha, hora, sucursal, monto, instrucciones.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="payment-instructions">Instrucciones de pago</Label>
+                    <Textarea
+                      id="payment-instructions"
+                      rows={3}
+                      placeholder="Ej: Transferí a CBU 000... / Alias: barberia.mp / Link MP: https://..."
+                      value={paymentInstructions}
+                      onChange={e => setPaymentInstructions(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Se envía al cliente junto al monto. Incluí CBU, alias, link de MP, o lo que uses.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             <Separator />
@@ -330,47 +475,149 @@ export function TurnosConfigClient({ settings, allStaff, branches }: Props) {
         <Card>
           <CardHeader>
             <CardTitle>Mensajería automática</CardTitle>
-            <CardDescription>Templates de WhatsApp para confirmación y recordatorio.</CardDescription>
+            <CardDescription>
+              Templates de WhatsApp para cada etapa del turno. Si no hay canal configurado,
+              los turnos igual funcionan — los mensajes se omiten silenciosamente.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
+            {!hasWhatsAppChannel && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-xs leading-relaxed">
+                <div className="flex items-start gap-2">
+                  <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                  <div className="space-y-1.5">
+                    <p className="font-semibold text-foreground">WhatsApp no configurado</p>
+                    <p className="text-muted-foreground">
+                      Los turnos funcionan sin WhatsApp, pero no se enviarán confirmaciones
+                      ni recordatorios automáticos. Configurá el canal en mensajería para activarlos.
+                    </p>
+                    <Button asChild size="sm" variant="outline" className="h-7 text-xs">
+                      <Link href="/dashboard/mensajeria?settings=1">Configurar WhatsApp</Link>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs leading-relaxed">
-              <p className="mb-1.5 font-semibold text-foreground">Formato de variables requerido</p>
-              <p className="text-muted-foreground mb-2">Los templates deben tener exactamente 4 variables en este orden:</p>
+              <p className="mb-1.5 font-semibold text-foreground">Variables disponibles en los templates</p>
               <pre className="rounded bg-background px-3 py-2 font-mono text-[11px] text-foreground whitespace-pre-wrap">
 {`{{1}} → nombre del cliente
 {{2}} → servicio reservado
 {{3}} → fecha del turno
 {{4}} → hora del turno
-
-Ejemplo: "Hola {{1}}, tu turno de {{2}}
-el {{3}} a las {{4}} está confirmado."`}
+{{5}} → nombre de la sucursal`}
               </pre>
+              <p className="mt-1.5 text-muted-foreground">
+                Los templates recomendados (prefijo <span className="font-mono">monaco_turno_*</span>) se crean
+                automáticamente al conectar WhatsApp.
+              </p>
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="conf-template">Template de confirmación (opcional)</Label>
-              <Input
-                id="conf-template"
-                value={confirmationTemplate}
-                onChange={e => setConfirmationTemplate(e.target.value)}
-                placeholder="Nombre del template en Meta"
+              <Label>Template de confirmación</Label>
+              <TemplatePickerSelect
+                templates={templates}
+                value={confirmationTemplateId}
+                onChange={setConfirmationTemplateId}
+                recommendedName={RECOMMENDED_TEMPLATES.confirmation}
+                disabled={!hasWhatsAppChannel}
               />
-              <p className="text-xs text-muted-foreground">Si se deja vacío, se envía texto plano.</p>
+              <p className="text-xs text-muted-foreground">Se envía al crear el turno.</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Template de recordatorio</Label>
+              <TemplatePickerSelect
+                templates={templates}
+                value={reminderTemplateId}
+                onChange={setReminderTemplateId}
+                recommendedName={RECOMMENDED_TEMPLATES.reminder}
+                disabled={!hasWhatsAppChannel}
+              />
+              <p className="text-xs text-muted-foreground">Se envía para cada horario configurado abajo.</p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label htmlFor="rem-template">Template de recordatorio (opcional)</Label>
-                <Input
-                  id="rem-template"
-                  value={reminderTemplate}
-                  onChange={e => setReminderTemplate(e.target.value)}
-                  placeholder="Nombre del template en Meta"
+                <Label>Template de reprogramación</Label>
+                <TemplatePickerSelect
+                  templates={templates}
+                  value={rescheduleTemplateId}
+                  onChange={setRescheduleTemplateId}
+                  recommendedName={RECOMMENDED_TEMPLATES.reschedule}
+                  disabled={!hasWhatsAppChannel}
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="rem-hours">Horas antes del recordatorio</Label>
-                <Input id="rem-hours" type="number" min={1} max={72} value={reminderHours} onChange={e => setReminderHours(e.target.value)} />
+                <Label>Template de cancelación</Label>
+                <TemplatePickerSelect
+                  templates={templates}
+                  value={cancellationTemplateId}
+                  onChange={setCancellationTemplateId}
+                  recommendedName={RECOMMENDED_TEMPLATES.cancellation}
+                  disabled={!hasWhatsAppChannel}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Template lista de espera</Label>
+              <TemplatePickerSelect
+                templates={templates}
+                value={waitlistTemplateId}
+                onChange={setWaitlistTemplateId}
+                recommendedName={RECOMMENDED_TEMPLATES.waitlist}
+                disabled={!hasWhatsAppChannel}
+              />
+              <p className="text-xs text-muted-foreground">
+                Se envía al primer cliente de la cola cuando se libera un turno.
+              </p>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Recordatorios programados</Label>
+                <span className="text-xs text-muted-foreground">
+                  {reminderHoursList.length} {reminderHoursList.length === 1 ? 'recordatorio' : 'recordatorios'}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Cada entrada envía un recordatorio X horas antes del turno.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {reminderHoursList.length === 0 && (
+                  <span className="text-xs text-muted-foreground italic">Sin recordatorios configurados</span>
+                )}
+                {reminderHoursList.map(h => (
+                  <button
+                    key={h}
+                    type="button"
+                    onClick={() => removeReminderHour(h)}
+                    className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20"
+                  >
+                    {h}h antes
+                    <X className="h-3 w-3" />
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  max={168}
+                  placeholder="Ej: 24"
+                  value={newReminderHours}
+                  onChange={e => setNewReminderHours(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addReminderHour() } }}
+                  className="w-32"
+                />
+                <Button type="button" variant="outline" size="sm" onClick={addReminderHour}>
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Agregar
+                </Button>
               </div>
             </div>
           </CardContent>
