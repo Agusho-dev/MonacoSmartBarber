@@ -225,23 +225,12 @@ export function PeriodsView({
             )}
 
             {/* ── Filtros ── */}
-            {periods.length > 0 && (
+            {(periods.length > 0 || (canFilterBranches && visibleBranches.length > 1)) && (
                 <div className="flex flex-wrap items-center gap-2">
                     <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
                         <Filter className="size-3.5" />
                         Filtrar:
                     </div>
-                    <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
-                        <SelectTrigger className="h-8 w-[160px] text-xs">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">Todos los estados</SelectItem>
-                            <SelectItem value="pending">Solo pendientes</SelectItem>
-                            <SelectItem value="paid">Solo pagados</SelectItem>
-                            <SelectItem value="cancelled">Cancelados</SelectItem>
-                        </SelectContent>
-                    </Select>
 
                     {canFilterBranches && visibleBranches.length > 1 && (
                         <Select
@@ -267,36 +256,52 @@ export function PeriodsView({
                         </Select>
                     )}
 
-                    {categories.length > 0 && (
-                        <Select value={category} onValueChange={setCategory}>
-                            <SelectTrigger className="h-8 w-[180px] text-xs">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Todas las categorías</SelectItem>
-                                {categories.map((c) => (
-                                    <SelectItem key={c} value={c}>
-                                        {c}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    )}
+                    {periods.length > 0 && (
+                        <>
+                            <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
+                                <SelectTrigger className="h-8 w-[160px] text-xs">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Todos los estados</SelectItem>
+                                    <SelectItem value="pending">Solo pendientes</SelectItem>
+                                    <SelectItem value="paid">Solo pagados</SelectItem>
+                                    <SelectItem value="cancelled">Cancelados</SelectItem>
+                                </SelectContent>
+                            </Select>
 
-                    {(status !== 'all' || category !== 'all') && (
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => { setStatus('all'); setCategory('all') }}
-                            className="h-8 text-xs"
-                        >
-                            Limpiar
-                        </Button>
-                    )}
+                            {categories.length > 0 && (
+                                <Select value={category} onValueChange={setCategory}>
+                                    <SelectTrigger className="h-8 w-[180px] text-xs">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">Todas las categorías</SelectItem>
+                                        {categories.map((c) => (
+                                            <SelectItem key={c} value={c}>
+                                                {c}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            )}
 
-                    <Badge variant="outline" className="ml-auto text-xs">
-                        {filtered.length} / {periods.length}
-                    </Badge>
+                            {(status !== 'all' || category !== 'all') && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => { setStatus('all'); setCategory('all') }}
+                                    className="h-8 text-xs"
+                                >
+                                    Limpiar
+                                </Button>
+                            )}
+
+                            <Badge variant="outline" className="ml-auto text-xs">
+                                {filtered.length} / {periods.length}
+                            </Badge>
+                        </>
+                    )}
 
                     {isPending && (
                         <RefreshCw className="size-3.5 animate-spin text-muted-foreground" />
