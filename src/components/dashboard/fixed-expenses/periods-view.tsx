@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
-import { ChevronLeft, ChevronRight, Filter, Receipt, RefreshCw, CheckCircle2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Filter, Receipt, RefreshCw, CheckCircle2, Building2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -17,10 +17,13 @@ import {
     getFixedExpensePeriodsSummary,
     type PeriodSummary,
 } from '@/lib/actions/fixed-expenses'
+import { useBranchStore } from '@/stores/branch-store'
 import { KpiSummary } from './kpi-summary'
 import { PeriodCard } from './period-card'
 import { GeneratePeriodsButton } from './generate-periods-button'
 import { cn } from '@/lib/utils'
+
+const ALL_BRANCHES_VALUE = '__all__'
 
 interface PaymentAccountOption {
     id: string
@@ -68,6 +71,12 @@ export function PeriodsView({
     selectedBranchId,
     canManage,
 }: PeriodsViewProps) {
+    const { setSelectedBranchId, allowedBranchIds } = useBranchStore()
+    const canFilterBranches = allowedBranchIds === null
+    const visibleBranches = canFilterBranches
+        ? branches
+        : branches.filter((b) => allowedBranchIds?.includes(b.id))
+
     const [year, setYear] = useState(initialYear)
     const [month, setMonth] = useState(initialMonth)
     const [periods, setPeriods] = useState(initialPeriods)
@@ -233,6 +242,30 @@ export function PeriodsView({
                             <SelectItem value="cancelled">Cancelados</SelectItem>
                         </SelectContent>
                     </Select>
+
+                    {canFilterBranches && visibleBranches.length > 1 && (
+                        <Select
+                            value={selectedBranchId ?? ALL_BRANCHES_VALUE}
+                            onValueChange={(v) =>
+                                setSelectedBranchId(v === ALL_BRANCHES_VALUE ? null : v)
+                            }
+                        >
+                            <SelectTrigger className="h-8 w-[200px] text-xs">
+                                <span className="flex items-center gap-1.5 min-w-0">
+                                    <Building2 className="size-3.5 shrink-0 text-muted-foreground" />
+                                    <SelectValue />
+                                </span>
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value={ALL_BRANCHES_VALUE}>Todas las sucursales</SelectItem>
+                                {visibleBranches.map((b) => (
+                                    <SelectItem key={b.id} value={b.id}>
+                                        {b.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    )}
 
                     {categories.length > 0 && (
                         <Select value={category} onValueChange={setCategory}>

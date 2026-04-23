@@ -116,13 +116,8 @@ export function PeriodCard({
                                 <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/20">
                                     <ExternalLink className="size-4 text-primary" />
                                 </div>
-                                <div className="min-w-0">
-                                    <div className="text-xs font-semibold uppercase tracking-wider text-primary">
-                                        Pagar online
-                                    </div>
-                                    <div className="text-[11px] text-muted-foreground truncate">
-                                        {period.snapshot_payment_url.replace(/^https?:\/\//, '')}
-                                    </div>
+                                <div className="text-xs font-semibold uppercase tracking-wider text-primary">
+                                    Pagar online
                                 </div>
                             </div>
                             <ExternalLink className="size-3.5 text-primary/60 group-hover:text-primary transition-transform group-hover:translate-x-0.5" />

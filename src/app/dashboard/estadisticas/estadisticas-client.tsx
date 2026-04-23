@@ -463,6 +463,21 @@ function getArgWeekBounds(weekOffset: number) {
   }
 }
 
+function heatmapColor(intensity: number): string {
+  const t = Math.max(0, Math.min(1, intensity))
+  const sat = 35 + t * 30
+  const light = 10 + t * 40
+  return `hsl(142, ${sat}%, ${light}%)`
+}
+
+function heatmapGlow(intensity: number): string {
+  const t = Math.max(0, Math.min(1, intensity))
+  if (t < 0.45) return 'none'
+  const spread = 6 + t * 14
+  const alpha = (t - 0.3) * 0.45
+  return `0 0 ${spread}px hsla(145, 75%, 60%, ${alpha})`
+}
+
 function HeatmapTab() {
   const { selectedBranchId } = useBranchStore()
   const [weekOffset, setWeekOffset] = useState(0)
@@ -553,12 +568,10 @@ function HeatmapTab() {
                     return (
                       <div key={hour} className="flex-1 px-0.5">
                         <div
-                          className="aspect-square rounded-sm border border-border transition-colors"
+                          className="aspect-square rounded-md transition-all duration-300"
                           style={{
-                            backgroundColor:
-                              count === 0
-                                ? 'transparent'
-                                : `rgba(229, 229, 229, ${0.15 + intensity * 0.85})`,
+                            backgroundColor: heatmapColor(intensity),
+                            boxShadow: heatmapGlow(intensity),
                           }}
                           title={`${label} ${hour}:00 – ${count} visita${count !== 1 ? 's' : ''}`}
                         />
@@ -572,12 +585,10 @@ function HeatmapTab() {
                 {[0, 0.25, 0.5, 0.75, 1].map((v) => (
                   <div
                     key={v}
-                    className="size-4 rounded-sm border border-border"
+                    className="size-4 rounded-sm"
                     style={{
-                      backgroundColor:
-                        v === 0
-                          ? 'transparent'
-                          : `rgba(229, 229, 229, ${0.15 + v * 0.85})`,
+                      backgroundColor: heatmapColor(v),
+                      boxShadow: heatmapGlow(v),
                     }}
                   />
                 ))}
