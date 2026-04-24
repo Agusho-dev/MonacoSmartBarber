@@ -2,7 +2,7 @@
 
 import { cache } from 'react'
 import { createAdminClient, createClient } from '@/lib/supabase/server'
-import { getCurrentOrgId } from './org'
+import { getCurrentOrgId, getOrgBranchIds } from './org'
 import { isValidUUID } from '@/lib/validation'
 import { cookies } from 'next/headers'
 
@@ -128,6 +128,25 @@ export async function assertBranchAccess(branchId: string): Promise<{ ok: true; 
   }
   return { ok: true, orgId }
 }
+
+/**
+ * Resuelve los branch_ids que el usuario puede ver dentro de su org actual.
+ * Intersección entre getOrgBranchIds() (todas las de la org) y getAllowedBranchIds()
+ * (las que el rol permite). Owner/admin obtiene todas.
+ *
+ * Usar en lugar de getOrgBranchIds() en server actions que fetchean datos que el
+ * usuario "puede ver" — así un encargado scoped a una sucursal no obtiene agregados
+ * de sucursales ajenas cuando no pasa branchId explícito.
+ */
+export const getScopedBranchIds = cache(async function getScopedBranchIds(): Promise<string[]> {
+  const [orgBranchIds, allowed] = await Promise.all([
+    getOrgBranchIds(),
+    getAllowedBranchIds(),
+  ])
+  if (allowed === null) return orgBranchIds
+  const allowedSet = new Set(allowed)
+  return orgBranchIds.filter(id => allowedSet.has(id))
+})
 
 /**
  * Filtra un array de branch_ids a los que el usuario realmente puede ver/manipular.

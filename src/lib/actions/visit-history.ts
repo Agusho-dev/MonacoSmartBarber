@@ -2,7 +2,8 @@
 
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { validateBranchAccess, getOrgBranchIds } from './org'
+import { validateBranchAccess } from './org'
+import { getScopedBranchIds } from './branch-access'
 import { requireOrgAccessToEntity } from './guard'
 
 export async function saveVisitDetails(
@@ -263,7 +264,7 @@ export async function deleteVisit(
 
   if (!visit) return { error: 'Visita no encontrada' }
 
-  const orgBranchIds = await getOrgBranchIds()
+  const orgBranchIds = await getScopedBranchIds()
   if (!orgBranchIds.includes(visit.branch_id)) return { error: 'No autorizado' }
 
   const { error } = await supabase.from('visits').delete().eq('id', visitId)

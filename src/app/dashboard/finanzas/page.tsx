@@ -1,5 +1,6 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
-import { getCurrentOrgId, getOrgBranchIds } from '@/lib/actions/org'
+import { getCurrentOrgId } from '@/lib/actions/org'
+import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { redirect } from 'next/navigation'
 import { fetchFinancialData } from '@/lib/actions/finances'
 import { getCommissionSummary } from '@/lib/actions/salary'
@@ -21,7 +22,7 @@ export const metadata: Metadata = {
 export default async function FinanzasPage() {
   const orgId = await getCurrentOrgId()
   if (!orgId) redirect('/login')
-  const branchIds = await getOrgBranchIds()
+  const branchIds = await getScopedBranchIds()
 
   const supabase = await createClient()
 
@@ -83,18 +84,23 @@ export default async function FinanzasPage() {
     getFixedExpensePeriods({ year: currentYear, month: currentMonth, status: 'all' }),
     getFixedExpensePeriodsSummary(currentYear, currentMonth),
     getCommissionSummary(),
-    supabase.from('branches').select('*').eq('organization_id', orgId).eq('is_active', true).order('name'),
+    branchIds.length > 0
+      ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', branchIds).eq('is_active', true).order('name')
+      : Promise.resolve({ data: [] }),
     branchIds.length > 0
       ? supabase.from('payment_accounts').select('*, branch:branches(name)').in('branch_id', branchIds).order('name')
       : Promise.resolve({ data: [] }),
-    admin
-      .from('staff')
-      .select('id, full_name, commission_pct, branch_id')
-      .eq('organization_id', orgId)
-      .or('role.eq.barber,is_also_barber.eq.true')
-      .eq('is_active', true)
-      .order('full_name'),
-    admin.from('salary_configs').select('*, staff!inner(organization_id)').eq('staff.organization_id', orgId),
+    branchIds.length > 0
+      ? admin
+          .from('staff')
+          .select('id, full_name, commission_pct, branch_id')
+          .eq('organization_id', orgId)
+          .in('branch_id', branchIds)
+          .or('role.eq.barber,is_also_barber.eq.true')
+          .eq('is_active', true)
+          .order('full_name')
+      : Promise.resolve({ data: [] }),
+    admin.from('salary_configs').select('*, staff!inner(organization_id, branch_id)').eq('staff.organization_id', orgId),
     branchIds.length > 0
       ? supabase.from('expense_tickets').select('*, created_by_staff:created_by(full_name), payment_account:payment_accounts(name, alias_or_cbu)').in('branch_id', branchIds).order('expense_date', { ascending: false }).limit(100)
       : Promise.resolve({ data: [] }),

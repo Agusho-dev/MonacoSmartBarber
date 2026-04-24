@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
+import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { MensajeriaClient } from './mensajeria-client'
 
@@ -9,9 +10,10 @@ export default async function MensajeriaPage() {
   const supabase = createAdminClient()
   const orgId = await getCurrentOrgId()
 
-  // Obtener branches de la org para filtrar por tenant
-  const { data: orgBranches } = orgId
-    ? await supabase.from('branches').select('id, name').eq('organization_id', orgId).order('name')
+  // Obtener branches permitidas al usuario para filtrar el inbox
+  const scopedIds = await getScopedBranchIds()
+  const { data: orgBranches } = orgId && scopedIds.length > 0
+    ? await supabase.from('branches').select('id, name').eq('organization_id', orgId).in('id', scopedIds).order('name')
     : { data: [] }
   const branchIds = orgBranches?.map((b) => b.id) ?? []
 

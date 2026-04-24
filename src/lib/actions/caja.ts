@@ -1,7 +1,8 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/server'
-import { getCurrentOrgId, getOrgBranchIds } from './org'
+import { getCurrentOrgId } from './org'
+import { getScopedBranchIds } from './branch-access'
 import { getActiveTimezone } from '@/lib/i18n'
 import { getDayBounds } from '@/lib/time-utils'
 
@@ -85,8 +86,8 @@ export async function fetchCajaTickets(params: {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: [], error: 'No autorizado' }
 
-  const orgBranchIds = await getOrgBranchIds()
-  // Validar que el branchId solicitado pertenece a la org
+  const orgBranchIds = await getScopedBranchIds()
+  // Validar que el branchId solicitado pertenece al scope del usuario
   if (params.branchId && !orgBranchIds.includes(params.branchId)) {
     return { data: [], error: 'No autorizado para esta sucursal' }
   }
@@ -227,7 +228,7 @@ export async function fetchCajaSummary(params: {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: emptySummary(), error: 'No autorizado' }
 
-  const orgBranchIds = await getOrgBranchIds()
+  const orgBranchIds = await getScopedBranchIds()
   if (params.branchId && !orgBranchIds.includes(params.branchId)) {
     return { data: emptySummary(), error: 'No autorizado para esta sucursal' }
   }
@@ -346,7 +347,7 @@ export async function fetchCajaCSVData(params: {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: [], error: 'No autorizado' }
 
-  const orgBranchIds = await getOrgBranchIds()
+  const orgBranchIds = await getScopedBranchIds()
   if (params.branchId && !orgBranchIds.includes(params.branchId)) {
     return { data: [], error: 'No autorizado para esta sucursal' }
   }

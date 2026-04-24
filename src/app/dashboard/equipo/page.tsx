@@ -1,5 +1,6 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
-import { getCurrentOrgId, getOrgBranchIds } from '@/lib/actions/org'
+import { getCurrentOrgId } from '@/lib/actions/org'
+import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { redirect } from 'next/navigation'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { EquipoClient } from './equipo-client'
@@ -13,7 +14,7 @@ export const metadata: Metadata = {
 export default async function EquipoPage() {
     const orgId = await getCurrentOrgId()
     if (!orgId) redirect('/login')
-    const branchIds = await getOrgBranchIds()
+    const branchIds = await getScopedBranchIds()
 
     const supabase = await createClient()
 
@@ -74,8 +75,12 @@ export default async function EquipoPage() {
         { data: salaryConfigs },
         { data: calendarBarbers },
     ] = await Promise.all([
-        supabase.from('staff').select('*, branch:branches(*)').eq('organization_id', orgId).is('deleted_at', null).order('full_name'),
-        supabase.from('branches').select('*').eq('organization_id', orgId).eq('is_active', true).order('name'),
+        branchIds.length > 0
+            ? supabase.from('staff').select('*, branch:branches(*)').eq('organization_id', orgId).in('branch_id', branchIds).is('deleted_at', null).order('full_name')
+            : Promise.resolve({ data: [] }),
+        branchIds.length > 0
+            ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', branchIds).eq('is_active', true).order('name')
+            : Promise.resolve({ data: [] }),
         branchIds.length > 0
             ? supabase.from('visits').select('barber_id, amount').in('branch_id', branchIds).gte('completed_at', todayStr).lt('completed_at', tomorrowStr)
             : Promise.resolve({ data: [] }),
@@ -109,26 +114,34 @@ export default async function EquipoPage() {
         branchIds.length > 0
             ? supabase.from('break_requests').select('*, staff:staff_id(id, full_name, branch_id), break_config:break_config_id(name, duration_minutes)').in('branch_id', branchIds).eq('status', 'completed').gt('overtime_seconds', 0).gte('actual_completed_at', thirtyDaysAgoStr).order('actual_completed_at', { ascending: false })
             : Promise.resolve({ data: [] }),
-        fetchAll((from, to) =>
-            createAdminClient()
-                .from('visits')
-                .select('id, amount, payment_method, commission_amount, started_at, completed_at, branch_id, service:services(name), client:clients(name), barber:staff(id, full_name)')
-                .eq('organization_id', orgId)
-                .gte('completed_at', twelveMonthsAgoStr)
-                .order('completed_at', { ascending: false })
-                .range(from, to)
-        ),
+        branchIds.length > 0
+            ? fetchAll((from, to) =>
+                createAdminClient()
+                    .from('visits')
+                    .select('id, amount, payment_method, commission_amount, started_at, completed_at, branch_id, service:services(name), client:clients(name), barber:staff(id, full_name)')
+                    .eq('organization_id', orgId)
+                    .in('branch_id', branchIds)
+                    .gte('completed_at', twelveMonthsAgoStr)
+                    .order('completed_at', { ascending: false })
+                    .range(from, to)
+            )
+            : Promise.resolve([]),
         branchIds.length > 0
             ? supabase.from('attendance_logs').select('id, staff_id, branch_id, action_type, recorded_at, face_verified').in('branch_id', branchIds).gte('recorded_at', fromDate).order('recorded_at', { ascending: false })
             : Promise.resolve({ data: [] }),
-        supabase.from('salary_configs').select('*, staff!inner(organization_id)').eq('staff.organization_id', orgId),
-        supabase
-            .from('staff')
-            .select('id, full_name, branch_id, staff_schedules(*), staff_schedule_exceptions(*)')
-            .eq('organization_id', orgId)
-            .or('role.eq.barber,is_also_barber.eq.true')
-            .eq('is_active', true)
-            .order('full_name'),
+        branchIds.length > 0
+            ? supabase.from('salary_configs').select('*, staff!inner(organization_id, branch_id)').eq('staff.organization_id', orgId).in('staff.branch_id', branchIds)
+            : Promise.resolve({ data: [] }),
+        branchIds.length > 0
+            ? supabase
+                .from('staff')
+                .select('id, full_name, branch_id, staff_schedules(*), staff_schedule_exceptions(*)')
+                .eq('organization_id', orgId)
+                .in('branch_id', branchIds)
+                .or('role.eq.barber,is_also_barber.eq.true')
+                .eq('is_active', true)
+                .order('full_name')
+            : Promise.resolve({ data: [] }),
     ])
 
     // Get user permissions

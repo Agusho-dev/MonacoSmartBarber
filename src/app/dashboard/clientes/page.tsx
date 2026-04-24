@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
+import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { ClientesClient } from './clientes-client'
 
@@ -11,12 +12,16 @@ export default async function ClientesPage() {
     return <div className="p-8 text-center text-muted-foreground">Organización no encontrada</div>
   }
 
-  const { data: orgBranches } = await supabase
-    .from('branches')
-    .select('id, name')
-    .eq('organization_id', orgId)
-    .eq('is_active', true)
-    .order('name')
+  const scopedIds = await getScopedBranchIds()
+  const { data: orgBranches } = scopedIds.length > 0
+    ? await supabase
+        .from('branches')
+        .select('id, name')
+        .eq('organization_id', orgId)
+        .in('id', scopedIds)
+        .eq('is_active', true)
+        .order('name')
+    : { data: [] }
 
   const branchIds = (orgBranches ?? []).map((b) => b.id)
 

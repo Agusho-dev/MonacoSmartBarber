@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { getCurrentOrgId } from '@/lib/actions/org'
+import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { getAppointmentSettings, getAppointmentStaff } from '@/lib/actions/appointments'
 import { listTemplatesForPicker } from '@/lib/actions/messaging'
 import { createAdminClient } from '@/lib/supabase/server'
@@ -17,23 +18,30 @@ export default async function TurnosConfigPage() {
   if (!orgId) redirect('/login')
 
   const supabase = createAdminClient()
+  const branchIds = await getScopedBranchIds()
 
   const [settings, appointmentStaff, { data: allStaff }, { data: branches }, templatesResult] = await Promise.all([
     getAppointmentSettings(orgId),
     getAppointmentStaff(orgId),
-    supabase
-      .from('staff')
-      .select('id, full_name, branch_id, role, is_active, avatar_url')
-      .eq('organization_id', orgId)
-      .or('role.eq.barber,is_also_barber.eq.true')
-      .eq('is_active', true)
-      .order('full_name'),
-    supabase
-      .from('branches')
-      .select('id, name')
-      .eq('organization_id', orgId)
-      .eq('is_active', true)
-      .order('name'),
+    branchIds.length > 0
+      ? supabase
+          .from('staff')
+          .select('id, full_name, branch_id, role, is_active, avatar_url')
+          .eq('organization_id', orgId)
+          .in('branch_id', branchIds)
+          .or('role.eq.barber,is_also_barber.eq.true')
+          .eq('is_active', true)
+          .order('full_name')
+      : Promise.resolve({ data: [] }),
+    branchIds.length > 0
+      ? supabase
+          .from('branches')
+          .select('id, name')
+          .eq('organization_id', orgId)
+          .in('id', branchIds)
+          .eq('is_active', true)
+          .order('name')
+      : Promise.resolve({ data: [] }),
     listTemplatesForPicker(),
   ])
 

@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { getCurrentOrgId, getOrgBranchIds } from '@/lib/actions/org'
+import { getCurrentOrgId } from '@/lib/actions/org'
+import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { redirect } from 'next/navigation'
 import { DisciplinaClient } from './disciplina-client'
 import type { Metadata } from 'next'
@@ -11,7 +12,7 @@ export const metadata: Metadata = {
 export default async function DisciplinaPage() {
   const orgId = await getCurrentOrgId()
   if (!orgId) redirect('/login')
-  const branchIds = await getOrgBranchIds()
+  const branchIds = await getScopedBranchIds()
 
   const supabase = createAdminClient()
 
@@ -20,11 +21,15 @@ export default async function DisciplinaPage() {
   const fromDate = startOfMonth.toISOString().slice(0, 10)
 
   const [{ data: branches }, { data: rules }, { data: staff }, { data: events }, { data: attendanceLogs }] = await Promise.all([
-    supabase.from('branches').select('*').eq('organization_id', orgId).eq('is_active', true).order('name'),
+    branchIds.length > 0
+      ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', branchIds).eq('is_active', true).order('name')
+      : Promise.resolve({ data: [] }),
     branchIds.length > 0
       ? supabase.from('disciplinary_rules').select('*').in('branch_id', branchIds).order('event_type').order('occurrence_number')
       : Promise.resolve({ data: [] }),
-    supabase.from('staff').select('id, full_name, branch_id, role').eq('organization_id', orgId).eq('is_active', true).order('full_name'),
+    branchIds.length > 0
+      ? supabase.from('staff').select('id, full_name, branch_id, role').eq('organization_id', orgId).in('branch_id', branchIds).eq('is_active', true).order('full_name')
+      : Promise.resolve({ data: [] }),
     branchIds.length > 0
       ? supabase.from('disciplinary_events').select('*, staff:staff(id, full_name, branch_id)').in('branch_id', branchIds).gte('event_date', fromDate).order('event_date', { ascending: false })
       : Promise.resolve({ data: [] }),

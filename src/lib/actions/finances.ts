@@ -4,7 +4,8 @@ import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getMonthBoundsStr, getLocalNow } from '@/lib/time-utils'
 import { getActiveTimezone } from '@/lib/i18n'
-import { validateBranchAccess, getOrgBranchIds } from './org'
+import { validateBranchAccess } from './org'
+import { getScopedBranchIds } from './branch-access'
 
 export interface MonthlyFinancial {
   month: string
@@ -117,7 +118,7 @@ export async function fetchFinancialData(
   // Resolver el scope de branches para filtrar: una sucursal específica o todas las de la org
   let orgBranchIds: string[] = []
   if (!branchId) {
-    orgBranchIds = await getOrgBranchIds()
+    orgBranchIds = await getScopedBranchIds()
   }
 
   // Si monthsBack === 0, detectar el primer mes con registros para mostrar todo el historial
@@ -468,7 +469,7 @@ export async function getFixedExpenses(branchId?: string | null) {
   if (branchId) {
     q = q.eq('branch_id', branchId)
   } else {
-    const orgBranchIds = await getOrgBranchIds()
+    const orgBranchIds = await getScopedBranchIds()
     q = q.in('branch_id', orgBranchIds)
   }
   const { data } = await q

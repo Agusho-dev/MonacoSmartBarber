@@ -2,7 +2,8 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { fetchAll } from '@/lib/supabase/fetch-all'
-import { getCurrentOrgId, getOrgBranchIds } from './org'
+import { getCurrentOrgId } from './org'
+import { getScopedBranchIds } from './branch-access'
 import { getActiveTimezone } from '@/lib/i18n'
 
 function toLocalDate(isoString: string, tz: string): string {
@@ -83,7 +84,7 @@ export async function fetchStats(
   const orgId = await getCurrentOrgId()
 
   // Obtener sucursales de la org
-  const orgBranchIds = await getOrgBranchIds()
+  const orgBranchIds = await getScopedBranchIds()
 
   // Validar que el branchId solicitado pertenece a la org
   if (branchId && !orgBranchIds.includes(branchId)) {
@@ -288,7 +289,7 @@ export async function fetchWeekHeatmap(
   const supabase = createAdminClient()
   const tz = await getActiveTimezone()
 
-  const orgBranchIds = await getOrgBranchIds()
+  const orgBranchIds = await getScopedBranchIds()
 
   // Validar que el branchId solicitado pertenece a la org
   if (branchId && !orgBranchIds.includes(branchId)) return []

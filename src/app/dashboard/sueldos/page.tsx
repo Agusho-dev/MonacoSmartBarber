@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
+import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { redirect } from 'next/navigation'
 import { SueldosClient } from './sueldos-client'
 import type { Metadata } from 'next'
@@ -22,22 +23,33 @@ export default async function SueldosPage() {
   if (!orgId) redirect('/login')
 
   const supabase = createAdminClient()
+  const scopedBranchIds = await getScopedBranchIds()
 
   const [{ data: branches }, { data: barbersRaw }, { data: salaryConfigsRaw }, { data: paymentAccounts }] = await Promise.all([
-    supabase.from('branches').select('*').eq('organization_id', orgId).eq('is_active', true).order('name'),
-    supabase
-      .from('staff')
-      .select('id, full_name, commission_pct, branch_id')
-      .eq('organization_id', orgId)
-      .or('role.eq.barber,is_also_barber.eq.true')
-      .eq('is_active', true)
-      .order('full_name'),
-    supabase.from('salary_configs').select('*, staff!inner(organization_id)').eq('staff.organization_id', orgId),
-    supabase
-      .from('payment_accounts')
-      .select('id, name, branch_id, is_salary_account, alias_or_cbu')
-      .eq('is_active', true)
-      .order('sort_order'),
+    scopedBranchIds.length > 0
+      ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', scopedBranchIds).eq('is_active', true).order('name')
+      : Promise.resolve({ data: [] }),
+    scopedBranchIds.length > 0
+      ? supabase
+          .from('staff')
+          .select('id, full_name, commission_pct, branch_id')
+          .eq('organization_id', orgId)
+          .in('branch_id', scopedBranchIds)
+          .or('role.eq.barber,is_also_barber.eq.true')
+          .eq('is_active', true)
+          .order('full_name')
+      : Promise.resolve({ data: [] }),
+    scopedBranchIds.length > 0
+      ? supabase.from('salary_configs').select('*, staff!inner(organization_id, branch_id)').eq('staff.organization_id', orgId).in('staff.branch_id', scopedBranchIds)
+      : Promise.resolve({ data: [] }),
+    scopedBranchIds.length > 0
+      ? supabase
+          .from('payment_accounts')
+          .select('id, name, branch_id, is_salary_account, alias_or_cbu')
+          .in('branch_id', scopedBranchIds)
+          .eq('is_active', true)
+          .order('sort_order')
+      : Promise.resolve({ data: [] }),
   ])
 
   const configsByStaffId = new Map((salaryConfigsRaw ?? []).map((c) => [c.staff_id, c]))

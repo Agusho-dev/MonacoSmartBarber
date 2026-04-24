@@ -129,8 +129,8 @@ export async function directProductSale(
   // Calcular total para crear la visita fantasma primero
   const productIds = productsToSell.map(p => p.id)
   // Validar que los productos pertenecen al branch de la org
-  const { getOrgBranchIds } = await import('./org')
-  const orgBranchIds = await getOrgBranchIds()
+  const { getScopedBranchIds } = await import('./branch-access')
+  const orgBranchIds = await getScopedBranchIds()
   const { data: dbProducts } = await supabase
     .from('products')
     .select('id, sale_price, barber_commission')

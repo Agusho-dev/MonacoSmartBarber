@@ -1071,11 +1071,11 @@ export async function updateQueueOrder(
   const orgAccess = await validateBranchAccess(allEntries[0].branch_id)
   if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
 
-  // Verificar que no hay entradas de otras sucursales fuera de la org
-  const { getOrgBranchIds } = await import('./org')
-  const orgBranchIds = await getOrgBranchIds()
-  const foreignEntry = allEntries.find(e => !orgBranchIds.includes(e.branch_id))
-  if (foreignEntry) return { error: 'Acceso denegado: entradas de otra organización' }
+  // Verificar que todas las entradas pertenecen al scope del usuario (org + sucursal permitida)
+  const { getScopedBranchIds } = await import('./branch-access')
+  const scopedBranchIds = await getScopedBranchIds()
+  const foreignEntry = allEntries.find(e => !scopedBranchIds.includes(e.branch_id))
+  if (foreignEntry) return { error: 'Acceso denegado: entradas fuera de tu alcance' }
 
   // Usar RPC para hacer todas las actualizaciones en una sola transacción
   const payload = updates.map((u) => ({

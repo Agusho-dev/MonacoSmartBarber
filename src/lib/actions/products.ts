@@ -3,7 +3,8 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { directProductSale } from '@/lib/actions/sales'
-import { getCurrentOrgId, validateBranchAccess, getOrgBranchIds } from './org'
+import { getCurrentOrgId, validateBranchAccess } from './org'
+import { getScopedBranchIds } from './branch-access'
 
 const REVALIDATE_PATH = '/dashboard/servicios'
 
@@ -22,7 +23,7 @@ export async function getProducts(branchId?: string) {
         query = query.eq('branch_id', branchId)
     } else {
         // Sin branchId: filtrar solo productos de branches de la org
-        const orgBranchIds = await getOrgBranchIds()
+        const orgBranchIds = await getScopedBranchIds()
         if (orgBranchIds.length === 0) return { products: [] }
         query = query.in('branch_id', orgBranchIds)
     }
@@ -181,7 +182,7 @@ export async function getProductSales(branchId?: string, startDate?: string, end
         query = query.eq('branch_id', branchId)
     } else {
         // Sin branchId: filtrar solo ventas de branches de la org
-        const orgBranchIds = await getOrgBranchIds()
+        const orgBranchIds = await getScopedBranchIds()
         if (orgBranchIds.length === 0) return { sales: [] }
         query = query.in('branch_id', orgBranchIds)
     }

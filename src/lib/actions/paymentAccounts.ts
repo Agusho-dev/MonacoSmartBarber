@@ -3,7 +3,8 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getLocalDateStr, getLocalDayBounds } from '@/lib/time-utils'
-import { validateBranchAccess, getOrgBranchIds } from './org'
+import { validateBranchAccess } from './org'
+import { getScopedBranchIds } from './branch-access'
 
 export async function getPaymentAccounts(branchId: string) {
   const orgId = await validateBranchAccess(branchId)
@@ -116,7 +117,7 @@ export async function deletePaymentAccount(id: string) {
  * se reinicia perezosamente cuando el mes de last_reset_date es anterior al mes actual.
  */
 export async function resetMonthlyAccumulation() {
-  const branchIds = await getOrgBranchIds()
+  const branchIds = await getScopedBranchIds()
   if (branchIds.length === 0) return { error: 'No autorizado' }
 
   const supabase = createAdminClient()
@@ -230,7 +231,7 @@ export async function getAllAccountBalanceTotals(branchId?: string | null) {
   if (branchId) {
     accountsQuery = accountsQuery.eq('branch_id', branchId)
   } else {
-    const orgBranchIds = await getOrgBranchIds()
+    const orgBranchIds = await getScopedBranchIds()
     if (orgBranchIds.length === 0) return []
     accountsQuery = accountsQuery.in('branch_id', orgBranchIds)
   }

@@ -1,12 +1,13 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { getCurrentOrgId, getOrgBranchIds } from '@/lib/actions/org'
+import { getCurrentOrgId } from '@/lib/actions/org'
+import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { redirect } from 'next/navigation'
 import { BarberosClient } from './barberos-client'
 
 export default async function BarberosPage() {
   const orgId = await getCurrentOrgId()
   if (!orgId) redirect('/login')
-  const branchIds = await getOrgBranchIds()
+  const branchIds = await getScopedBranchIds()
 
   const supabase = createAdminClient()
 
@@ -17,13 +18,18 @@ export default async function BarberosPage() {
     .slice(0, 10)
 
   const [{ data: barbers }, { data: branches }, { data: todayVisits }, { data: roles }] = await Promise.all([
-    supabase
-      .from('staff')
-      .select('*, branch:branches(*)')
-      .eq('organization_id', orgId)
-      .is('deleted_at', null)
-      .order('full_name'),
-    supabase.from('branches').select('*').eq('organization_id', orgId).eq('is_active', true).order('name'),
+    branchIds.length > 0
+      ? supabase
+          .from('staff')
+          .select('*, branch:branches(*)')
+          .eq('organization_id', orgId)
+          .in('branch_id', branchIds)
+          .is('deleted_at', null)
+          .order('full_name')
+      : Promise.resolve({ data: [] }),
+    branchIds.length > 0
+      ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', branchIds).eq('is_active', true).order('name')
+      : Promise.resolve({ data: [] }),
     branchIds.length > 0
       ? supabase.from('visits').select('barber_id, amount').in('branch_id', branchIds).gte('completed_at', todayStr).lt('completed_at', tomorrowStr)
       : Promise.resolve({ data: [] }),

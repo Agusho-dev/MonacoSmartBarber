@@ -1,21 +1,25 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { getCurrentOrgId, getOrgBranchIds } from '@/lib/actions/org'
+import { getCurrentOrgId } from '@/lib/actions/org'
+import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { redirect } from 'next/navigation'
 import { FidelizacionClient } from './fidelizacion-client'
 
 export default async function FidelizacionPage() {
   const orgId = await getCurrentOrgId()
   if (!orgId) redirect('/login')
-  const branchIds = await getOrgBranchIds()
+  const branchIds = await getScopedBranchIds()
 
   const supabase = createAdminClient()
 
-  // Fetch branches for config filtering
-  const { data: branches } = await supabase
-    .from('branches')
-    .select('id, name')
-    .eq('organization_id', orgId)
-    .order('name')
+  // Fetch branches para el filtro, limitadas al scope del usuario
+  const { data: branches } = branchIds.length > 0
+    ? await supabase
+        .from('branches')
+        .select('id, name')
+        .eq('organization_id', orgId)
+        .in('id', branchIds)
+        .order('name')
+    : { data: [] }
 
   // Fetch reward configs
   const { data: configs } = branchIds.length > 0

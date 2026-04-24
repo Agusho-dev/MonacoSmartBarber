@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { getCurrentOrgId, getOrgBranchIds } from '@/lib/actions/org'
+import { getCurrentOrgId } from '@/lib/actions/org'
+import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { redirect } from 'next/navigation'
 import { IncentivosClient } from './incentivos-client'
 import type { Metadata } from 'next'
@@ -11,18 +12,22 @@ export const metadata: Metadata = {
 export default async function IncentivosPage() {
   const orgId = await getCurrentOrgId()
   if (!orgId) redirect('/login')
-  const branchIds = await getOrgBranchIds()
+  const branchIds = await getScopedBranchIds()
 
   const supabase = createAdminClient()
   const today = new Date()
   const defaultPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
 
   const [{ data: branches }, { data: rules }, { data: barbers }, { data: achievements }] = await Promise.all([
-    supabase.from('branches').select('*').eq('organization_id', orgId).eq('is_active', true).order('name'),
+    branchIds.length > 0
+      ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', branchIds).eq('is_active', true).order('name')
+      : Promise.resolve({ data: [] }),
     branchIds.length > 0
       ? supabase.from('incentive_rules').select('*').in('branch_id', branchIds).order('name')
       : Promise.resolve({ data: [] }),
-    supabase.from('staff').select('id, full_name, branch_id').eq('organization_id', orgId).or('role.eq.barber,is_also_barber.eq.true').eq('is_active', true).order('full_name'),
+    branchIds.length > 0
+      ? supabase.from('staff').select('id, full_name, branch_id').eq('organization_id', orgId).in('branch_id', branchIds).or('role.eq.barber,is_also_barber.eq.true').eq('is_active', true).order('full_name')
+      : Promise.resolve({ data: [] }),
     supabase.from('incentive_achievements').select('*, rule:incentive_rules(name)').eq('period_label', defaultPeriod),
   ])
 

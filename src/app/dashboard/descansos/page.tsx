@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { getOrgBranchIds } from '@/lib/actions/org'
+import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { DescansosDashboard } from './descansos-client'
 import type { Metadata } from 'next'
 
@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default async function DescansosPage() {
   const supabase = createAdminClient()
-  const branchIds = await getOrgBranchIds()
+  const branchIds = await getScopedBranchIds()
 
   if (branchIds.length === 0) {
     return <DescansosDashboard breakConfigs={[]} breakRequests={[]} />

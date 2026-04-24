@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { createAdminClient } from '@/lib/supabase/server'
-import { getCurrentOrgId, getOrgBranchIds } from '@/lib/actions/org'
+import { getCurrentOrgId } from '@/lib/actions/org'
+import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { getAppointmentsForDate, getAppointmentSettings } from '@/lib/actions/appointments'
 import { redirect } from 'next/navigation'
 import { FilaClient } from './fila-client'
@@ -15,7 +16,7 @@ export const metadata: Metadata = {
 export default async function FilaAdminPage() {
   const orgId = await getCurrentOrgId()
   if (!orgId) redirect('/login')
-  const branchIds = await getOrgBranchIds()
+  const branchIds = await getScopedBranchIds()
 
   const supabase = createAdminClient()
 
@@ -36,18 +37,24 @@ export default async function FilaAdminPage() {
           .in('status', ['waiting', 'in_progress'])
           .order('position')
       : Promise.resolve({ data: [] }),
-    supabase
-      .from('staff')
-      .select('id, full_name, branch_id, status, is_active, hidden_from_checkin, avatar_url')
-      .eq('organization_id', orgId)
-      .or('role.eq.barber,is_also_barber.eq.true')
-      .eq('is_active', true)
-      .order('full_name'),
-    supabase
-      .from('branches')
-      .select('id, name')
-      .eq('organization_id', orgId)
-      .eq('is_active', true),
+    branchIds.length > 0
+      ? supabase
+          .from('staff')
+          .select('id, full_name, branch_id, status, is_active, hidden_from_checkin, avatar_url')
+          .eq('organization_id', orgId)
+          .in('branch_id', branchIds)
+          .or('role.eq.barber,is_also_barber.eq.true')
+          .eq('is_active', true)
+          .order('full_name')
+      : Promise.resolve({ data: [] }),
+    branchIds.length > 0
+      ? supabase
+          .from('branches')
+          .select('id, name')
+          .eq('organization_id', orgId)
+          .in('id', branchIds)
+          .eq('is_active', true)
+      : Promise.resolve({ data: [] }),
     branchIds.length > 0
       ? supabase
           .from('break_configs')

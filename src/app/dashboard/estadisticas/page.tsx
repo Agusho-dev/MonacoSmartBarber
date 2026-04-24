@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
+import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { redirect } from 'next/navigation'
 import { fetchStats } from '@/lib/actions/stats'
 import { EstadisticasClient } from './estadisticas-client'
@@ -12,15 +13,19 @@ export default async function EstadisticasPage() {
   const supabase = createAdminClient()
   const { start: from } = getMonthBoundsStr(1)
   const { end: to } = getLocalDayBounds()
+  const branchIds = await getScopedBranchIds()
 
   const [data, { data: branches }, { data: orgRow }] = await Promise.all([
     fetchStats(from, to),
-    supabase
-      .from('branches')
-      .select('id, name')
-      .eq('organization_id', orgId)
-      .eq('is_active', true)
-      .order('name'),
+    branchIds.length > 0
+      ? supabase
+          .from('branches')
+          .select('id, name')
+          .eq('organization_id', orgId)
+          .in('id', branchIds)
+          .eq('is_active', true)
+          .order('name')
+      : Promise.resolve({ data: [] }),
     supabase.from('organizations').select('name').eq('id', orgId).maybeSingle(),
   ])
 

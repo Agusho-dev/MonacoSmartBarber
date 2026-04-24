@@ -2,7 +2,8 @@
 
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { getCurrentOrgId, getOrgBranchIds, validateBranchAccess } from './org'
+import { getCurrentOrgId, validateBranchAccess } from './org'
+import { getScopedBranchIds } from './branch-access'
 import { getLocalDateStr } from '@/lib/time-utils'
 import { getActiveTimezone } from '@/lib/i18n'
 import type { FixedExpense, FixedExpensePeriod } from '@/lib/types/database'
@@ -70,7 +71,7 @@ export async function getFixedExpensesCatalog(branchId?: string | null): Promise
     if (branchId) {
         q = q.eq('branch_id', branchId)
     } else {
-        const branchIds = await getOrgBranchIds()
+        const branchIds = await getScopedBranchIds()
         // Incluye (a) gastos de cualquier branch de la org O (b) gastos org-wide (branch_id null, organization_id = org)
         q = q.or(
             `branch_id.in.(${branchIds.join(',') || 'null'}),and(branch_id.is.null,organization_id.eq.${orgId})`

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { getCurrentOrgId } from '@/lib/actions/org'
+import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { getAppointmentSettings } from '@/lib/actions/appointments'
 import { buildAppUrl } from '@/lib/app-url'
 import { createAdminClient } from '@/lib/supabase/server'
@@ -17,17 +18,21 @@ export default async function LinkPublicoPage() {
   if (!orgId) redirect('/login')
 
   const supabase = createAdminClient()
+  const branchIds = await getScopedBranchIds()
 
   const [settings, baseUrl, { data: org }, { data: branches }] = await Promise.all([
     getAppointmentSettings(orgId),
     buildAppUrl(),
     supabase.from('organizations').select('name, slug').eq('id', orgId).single(),
-    supabase
-      .from('branches')
-      .select('id, name, address')
-      .eq('organization_id', orgId)
-      .eq('is_active', true)
-      .order('name'),
+    branchIds.length > 0
+      ? supabase
+          .from('branches')
+          .select('id, name, address')
+          .eq('organization_id', orgId)
+          .in('id', branchIds)
+          .eq('is_active', true)
+          .order('name')
+      : Promise.resolve({ data: [] }),
   ])
 
   return (

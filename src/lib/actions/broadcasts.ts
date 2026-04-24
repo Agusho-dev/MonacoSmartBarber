@@ -1,7 +1,8 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/server'
-import { getCurrentOrgId, getOrgBranchIds } from './org'
+import { getCurrentOrgId } from './org'
+import { getScopedBranchIds } from './branch-access'
 import { requireOrgAccessToEntity } from './guard'
 import { revalidatePath } from 'next/cache'
 import type { AudienceFilters } from './client-segments'
@@ -282,7 +283,7 @@ export async function getTemplatesByChannel(channelId?: string) {
   const supabase = createAdminClient()
 
   // Obtener canales de la org para acotar la query
-  const orgBranchIds = await getOrgBranchIds()
+  const orgBranchIds = await getScopedBranchIds()
   const { data: orgChannels } = await supabase
     .from('social_channels')
     .select('id')
