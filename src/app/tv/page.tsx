@@ -1,36 +1,49 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
 import { TvClient } from './tv-client'
 
 export const dynamic = 'force-dynamic'
 
-export default async function TvPage() {
+export default async function TvPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ slug?: string }>
+}) {
   const supabase = createAdminClient()
   const cookieStore = await cookies()
   // TV es ruta pública — prioriza public_organization (kiosk/TV) sobre active_organization (dashboard)
   const orgId = cookieStore.get('public_organization')?.value
     ?? cookieStore.get('active_organization')?.value
 
-  // Obtener branches filtradas por org
-  let branchQuery = supabase.from('branches').select('id, name, organization_id').eq('is_active', true)
-  if (orgId) {
-    branchQuery = branchQuery.eq('organization_id', orgId)
+  // Si no hay cookie de organización, redirigir según haya o no slug en la URL.
+  // El route handler /api/tv/setup setea la cookie y vuelve acá.
+  if (!orgId) {
+    const { slug } = await searchParams
+    if (slug) {
+      redirect(`/api/tv/setup?slug=${encodeURIComponent(slug)}`)
+    }
+    redirect('/')
   }
-  const { data: branches } = await branchQuery
+
+  // Obtener branches filtradas por org
+  const { data: branches } = await supabase
+    .from('branches')
+    .select('id, name, organization_id')
+    .eq('is_active', true)
+    .eq('organization_id', orgId)
 
   const branchIds = (branches ?? []).map(b => b.id)
 
   // Obtener organización activa (para logo y nombre en el header del TV)
   let orgInfo: { name: string; logo_url: string | null } | null = null
-  if (orgId) {
-    const { data } = await supabase
-      .from('organizations')
-      .select('name, logo_url')
-      .eq('id', orgId)
-      .eq('is_active', true)
-      .maybeSingle()
-    if (data) orgInfo = data as { name: string; logo_url: string | null }
-  }
+  const { data: orgData } = await supabase
+    .from('organizations')
+    .select('name, logo_url')
+    .eq('id', orgId)
+    .eq('is_active', true)
+    .maybeSingle()
+  if (orgData) orgInfo = orgData as { name: string; logo_url: string | null }
 
   // Fetch inicial filtrado por branches de la org
   const [entriesRes, barbersRes] = await Promise.all([
@@ -59,7 +72,7 @@ export default async function TvPage() {
       barbers={barbersRes.data || []}
       branches={(branches ?? []).map(b => ({ id: b.id, name: b.name }))}
       orgBranchIds={branchIds}
-      orgId={orgId || null}
+      orgId={orgId}
       orgName={orgInfo?.name ?? 'BarberOS'}
       orgLogoUrl={orgInfo?.logo_url ?? '/logo-barberos.png'}
     />
