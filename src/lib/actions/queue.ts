@@ -518,20 +518,32 @@ export async function completeService(
   // 7. Reglas post-servicio: buscar reglas con trigger_type='post_service' y programar mensajes
   if (visit.client_id) {
     try {
-      const { data: branch } = await supabase
+      const { data: branch, error: branchErr } = await supabase
         .from('branches')
         .select('organization_id')
         .eq('id', visit.branch_id)
         .single()
+      if (branchErr) {
+        console.error(`[PostService visit=${visit.id}] branch lookup error:`, branchErr.message)
+      }
 
       const visitOrgId = branch?.organization_id
+      if (!visitOrgId) {
+        console.warn(`[PostService visit=${visit.id}] skip: sucursal sin organization_id (branch=${visit.branch_id})`)
+      }
       if (visitOrgId) {
-        const { data: client } = await supabase
+        const { data: client, error: clientErr } = await supabase
           .from('clients')
           .select('name, phone')
           .eq('id', visit.client_id)
           .single()
+        if (clientErr) {
+          console.error(`[PostService visit=${visit.id}] client lookup error:`, clientErr.message)
+        }
 
+        if (!client?.phone) {
+          console.warn(`[PostService visit=${visit.id}] skip: cliente sin teléfono (client=${visit.client_id})`)
+        }
         if (client?.phone) {
           // Buscar reglas post_service activas para esta org
           const { data: postServiceRules } = await supabase
@@ -588,13 +600,17 @@ export async function completeService(
           }
 
           // Buscar automation_workflows con trigger post_service
-          const { data: postServiceWorkflows } = await supabase
+          const { data: postServiceWorkflows, error: wfLookupErr } = await supabase
             .from('automation_workflows')
-            .select('id, trigger_config, branch_id, overlap_policy, category')
+            .select('id, name, trigger_config, branch_id, overlap_policy, category')
             .eq('organization_id', visitOrgId)
             .eq('trigger_type', 'post_service')
             .eq('is_active', true)
             .order('priority', { ascending: false })
+
+          if (wfLookupErr) {
+            console.error('[PostService:Workflow] lookup error visit=' + visit.id + ':', wfLookupErr.message)
+          }
 
           if (postServiceWorkflows && postServiceWorkflows.length > 0) {
             // Resolver convId del cliente una sola vez para chequeos de overlap.
@@ -624,7 +640,11 @@ export async function completeService(
             }
 
             for (const wf of postServiceWorkflows) {
-              if (wf.branch_id && wf.branch_id !== visit.branch_id) continue
+              const wfTag = `[PostService:Workflow wf=${wf.id} name="${wf.name}" visit=${visit.id}]`
+              if (wf.branch_id && wf.branch_id !== visit.branch_id) {
+                console.log(`${wfTag} skip: branch_id mismatch (wf=${wf.branch_id} visit=${visit.branch_id})`)
+                continue
+              }
 
               // Respetar overlap_policy del workflow.
               // skip_if_active: si ya hay scheduled_message pending o workflow_execution
@@ -637,7 +657,7 @@ export async function completeService(
                   .eq('client_id', visit.client_id)
                   .eq('status', 'pending')
                 if ((pendingCount ?? 0) > 0) {
-                  console.log('[PostService:Workflow] skip_if_active: ya hay pending para wf', wf.id)
+                  console.log(`${wfTag} skip_if_active: ya hay pending para este cliente`)
                   continue
                 }
                 if (clientConvId) {
@@ -648,7 +668,7 @@ export async function completeService(
                     .eq('conversation_id', clientConvId)
                     .in('status', ['active', 'waiting_reply'])
                   if ((activeCount ?? 0) > 0) {
-                    console.log('[PostService:Workflow] skip_if_active: ya hay execution activa para wf', wf.id)
+                    console.log(`${wfTag} skip_if_active: ya hay execution activa conv=${clientConvId}`)
                     continue
                   }
                 }
@@ -658,7 +678,7 @@ export async function completeService(
               const scheduledFor = new Date()
               scheduledFor.setMinutes(scheduledFor.getMinutes() + delayMinutes)
 
-              const [{ data: entryNode }, { data: edges }] = await Promise.all([
+              const [entryRes, edgesRes] = await Promise.all([
                 supabase
                   .from('workflow_nodes')
                   .select('id')
@@ -673,17 +693,44 @@ export async function completeService(
                   .order('sort_order')
               ])
 
-              if (!entryNode || !edges || edges.length === 0) continue
+              if (entryRes.error) {
+                console.error(`${wfTag} entry node lookup error:`, entryRes.error.message)
+                continue
+              }
+              if (edgesRes.error) {
+                console.error(`${wfTag} edges lookup error:`, edgesRes.error.message)
+                continue
+              }
+              const entryNode = entryRes.data
+              const edges = edgesRes.data
+              if (!entryNode) {
+                console.warn(`${wfTag} skip: workflow sin entry_point (marcá un nodo como is_entry_point=true)`)
+                continue
+              }
+              if (!edges || edges.length === 0) {
+                console.warn(`${wfTag} skip: workflow sin edges (grafo vacío — ¿se guardó correctamente?)`)
+                continue
+              }
 
               const firstEdge = edges.find((e: any) => e.source_node_id === entryNode.id)
-              if (!firstEdge) continue
-              const { data: firstActionNode } = await supabase
+              if (!firstEdge) {
+                console.warn(`${wfTag} skip: entry_point ${entryNode.id} sin edge saliente`)
+                continue
+              }
+              const { data: firstActionNode, error: firstActionErr } = await supabase
                 .from('workflow_nodes')
                 .select('id, node_type, config')
                 .eq('id', firstEdge.target_node_id)
-                .single()
+                .maybeSingle()
 
-              if (!firstActionNode) continue
+              if (firstActionErr) {
+                console.error(`${wfTag} first action lookup error:`, firstActionErr.message)
+                continue
+              }
+              if (!firstActionNode) {
+                console.warn(`${wfTag} skip: primer nodo de acción no encontrado (target=${firstEdge.target_node_id})`)
+                continue
+              }
 
               // Buscar el nodo siguiente al primer action (para workflow_trigger_data)
               const { data: nextEdges } = await supabase
@@ -717,8 +764,19 @@ export async function completeService(
               if (firstActionNode.node_type === 'send_template') {
                 insertData.template_name = actionConfig.template_name as string
                 insertData.template_language = (actionConfig.language_code as string) || 'es_AR'
+                if (!insertData.template_name) {
+                  console.error(`${wfTag} skip: send_template sin template_name configurado`)
+                  continue
+                }
               } else if (firstActionNode.node_type === 'send_message') {
                 insertData.content = actionConfig.text as string
+                if (!insertData.content) {
+                  console.error(`${wfTag} skip: send_message sin texto configurado`)
+                  continue
+                }
+              } else {
+                console.warn(`${wfTag} primer nodo de acción de tipo no soportado: ${firstActionNode.node_type}`)
+                continue
               }
 
               const { error: schedErr } = await supabase
@@ -726,9 +784,9 @@ export async function completeService(
                 .insert(insertData)
 
               if (schedErr) {
-                console.error('[PostService:Workflow] Error programando workflow:', schedErr.message)
+                console.error(`${wfTag} insert scheduled_message error:`, schedErr.message)
               } else {
-                console.log('[PostService:Workflow] Workflow', wf.id, 'programado para', client.phone)
+                console.log(`${wfTag} programado (phone=${client.phone}, delay=${delayMinutes}min, action=${firstActionNode.node_type})`)
               }
             }
           } else if (
@@ -757,8 +815,14 @@ export async function completeService(
         }
       }
     } catch (err) {
-      console.error('[PostService] Error en reglas post-servicio:', err)
+      // NO re-throw: el servicio ya se completó, un fallo acá no debe romper
+      // la finalización de la visita. Pero logueamos con detalle para que
+      // cualquier error silencioso sea detectable en logs de Vercel.
+      const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err)
+      console.error(`[PostService visit=${visit.id}] excepción inesperada:`, msg)
     }
+  } else {
+    console.log(`[PostService visit=${visit.id}] skip: visita sin client_id`)
   }
 
   // 8. Generar/actualizar salary_reports separados: servicio y producto

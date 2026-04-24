@@ -314,64 +314,39 @@ export async function saveWorkflowGraph(
   const result = await requireOrgId()
   if ('error' in result) return { error: result.error }
 
-  // Verificar que el workflow pertenece a la org
   const supabase = createAdminClient()
-  const { data: wf } = await supabase
-    .from('automation_workflows')
-    .select('id')
-    .eq('id', workflowId)
-    .eq('organization_id', result.orgId)
-    .single()
 
-  if (!wf) return { error: 'Workflow no encontrado' }
+  // Atómico vía RPC: DELETE+INSERT en la misma transacción.
+  // Evita la ventana en la que el grafo queda vacío y queue.ts → completeService
+  // encuentra edges.length===0 y skippea el post_service silenciosamente.
+  const { data, error } = await supabase.rpc('save_workflow_graph', {
+    p_workflow_id: workflowId,
+    p_organization_id: result.orgId,
+    p_nodes: nodes.map(n => ({
+      id: n.id,
+      node_type: n.node_type,
+      label: n.label,
+      config: n.config,
+      position_x: n.position_x,
+      position_y: n.position_y,
+      width: n.width ?? 200,
+      height: n.height ?? 80,
+      is_entry_point: n.is_entry_point,
+    })),
+    p_edges: edges.map((e, i) => ({
+      source_node_id: e.source_node_id,
+      target_node_id: e.target_node_id,
+      source_handle: e.source_handle || 'default',
+      label: e.label || null,
+      condition_value: e.condition_value || null,
+      sort_order: e.sort_order ?? i,
+    })),
+  })
 
-  // Borrar nodos y edges existentes (cascade borra edges por FK)
-  await supabase.from('workflow_edges').delete().eq('workflow_id', workflowId)
-  await supabase.from('workflow_nodes').delete().eq('workflow_id', workflowId)
-
-  // Insertar nuevos nodos
-  if (nodes.length > 0) {
-    const { error: nodesErr } = await supabase
-      .from('workflow_nodes')
-      .insert(nodes.map(n => ({
-        id: n.id,
-        workflow_id: workflowId,
-        node_type: n.node_type,
-        label: n.label,
-        config: n.config,
-        position_x: n.position_x,
-        position_y: n.position_y,
-        width: n.width ?? 200,
-        height: n.height ?? 80,
-        is_entry_point: n.is_entry_point,
-      })))
-    if (nodesErr) return { error: `Error guardando nodos: ${nodesErr.message}` }
-  }
-
-  // Insertar nuevos edges
-  if (edges.length > 0) {
-    const { error: edgesErr } = await supabase
-      .from('workflow_edges')
-      .insert(edges.map((e, i) => ({
-        workflow_id: workflowId,
-        source_node_id: e.source_node_id,
-        target_node_id: e.target_node_id,
-        source_handle: e.source_handle || 'default',
-        label: e.label || null,
-        condition_value: e.condition_value || null,
-        sort_order: e.sort_order ?? i,
-      })))
-    if (edgesErr) return { error: `Error guardando edges: ${edgesErr.message}` }
-  }
-
-  // Actualizar timestamp del workflow
-  await supabase
-    .from('automation_workflows')
-    .update({ updated_at: new Date().toISOString() })
-    .eq('id', workflowId)
+  if (error) return { error: `Error guardando workflow: ${error.message}` }
 
   revalidatePath('/dashboard/mensajeria')
-  return { success: true }
+  return { success: true, ...(data as Record<string, unknown>) }
 }
 
 // ─── CRM Alerts ──────────────────────────────────────────────────
