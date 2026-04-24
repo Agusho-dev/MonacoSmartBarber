@@ -532,7 +532,7 @@ export function WorkflowList() {
                     className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border"
                   >
                     <option value="">Seleccionar template...</option>
-                    {waTemplates.filter(t => t.status === 'APPROVED').map(tpl => (
+                    {waTemplates.filter(t => t.status === 'approved').map(tpl => (
                       <option key={tpl.name} value={tpl.name}>
                         {tpl.name} ({tpl.language}) — {tpl.category}
                       </option>

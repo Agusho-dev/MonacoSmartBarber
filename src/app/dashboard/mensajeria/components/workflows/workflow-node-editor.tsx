@@ -451,7 +451,7 @@ function SendTemplateConfig({ config, onUpdateConfig }: { config: Record<string,
     if (waTemplates.length === 0) handleSyncTemplates()
   }, [])
 
-  const approvedTemplates = waTemplates.filter(t => t.status === 'APPROVED')
+  const approvedTemplates = waTemplates.filter(t => t.status === 'approved')
 
   return (
     <div className="space-y-3">
@@ -809,7 +809,7 @@ function TriggerConfig({
               className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border"
             >
               <option value="">Seleccionar template...</option>
-              {waTemplates.filter(t => t.status === 'APPROVED').map(tpl => (
+              {waTemplates.filter(t => t.status === 'approved').map(tpl => (
                 <option key={tpl.name} value={tpl.name}>
                   {tpl.name} ({tpl.language}) — {tpl.category}
                 </option>
