@@ -1940,7 +1940,12 @@ export default function CheckinPage() {
       {step === 'service_selection' && (
         <div
           key={`service-${animKey}`}
-          className="relative z-[1] w-full max-w-sm md:max-w-3xl flex flex-col items-center gap-3 md:gap-6 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className={cn(
+            'relative z-[1] w-full flex flex-col items-center gap-3 md:gap-6 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400',
+            services.length <= 6 && 'max-w-sm md:max-w-3xl',
+            services.length > 6 && services.length <= 12 && 'max-w-sm md:max-w-5xl',
+            services.length > 12 && 'max-w-sm md:max-w-7xl',
+          )}
         >
           <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
 
@@ -1953,12 +1958,10 @@ export default function CheckinPage() {
 
           <div
             className={cn(
-              'relative w-full grid gap-3 md:gap-4 mt-1 md:mt-2 overflow-y-auto min-h-0 auto-rows-[minmax(8rem,auto)] md:auto-rows-[minmax(10rem,auto)] place-content-start',
-              services.length === 1 && 'grid-cols-1 max-w-md mx-auto',
-              services.length === 2 && 'grid-cols-1 sm:grid-cols-2 max-w-3xl mx-auto',
-              services.length === 3 && 'grid-cols-1 sm:grid-cols-3 max-w-5xl mx-auto',
-              services.length === 4 && 'grid-cols-1 sm:grid-cols-2 max-w-3xl mx-auto',
-              services.length >= 5 && 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3',
+              'relative w-full grid gap-3 md:gap-4 mt-1 md:mt-2 min-h-0 flex-1 auto-rows-fr',
+              services.length <= 6 && 'grid-cols-1',
+              services.length > 6 && services.length <= 12 && 'grid-cols-1 md:grid-cols-2',
+              services.length > 12 && 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3',
             )}
           >
             {services.map(s => (
@@ -1969,7 +1972,7 @@ export default function CheckinPage() {
                   goTo('barber')
                 }}
                 className={cn(
-                  'flex flex-col items-center justify-center text-center gap-2 w-full h-full p-4 md:p-5 rounded-xl md:rounded-2xl overflow-hidden transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]',
+                  'flex items-center justify-between gap-4 w-full h-full min-h-[4.5rem] px-5 md:px-7 py-4 md:py-5 rounded-xl md:rounded-2xl overflow-hidden transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] text-left',
                   isLightBg
                     ? 'border border-zinc-300 bg-white text-zinc-900 shadow-sm hover:border-zinc-400 hover:shadow-md'
                     : terminalListItem
@@ -1977,17 +1980,17 @@ export default function CheckinPage() {
               >
                 <h3
                   className={cn(
-                    'text-lg md:text-2xl font-semibold leading-tight line-clamp-2',
+                    'text-lg md:text-2xl font-semibold leading-tight line-clamp-2 flex-1 min-w-0',
                     isLightBg ? 'text-zinc-900' : 'text-white'
                   )}
                 >
                   {s.name}
                 </h3>
-                <div className="flex flex-col items-center gap-0.5">
+                <div className="flex flex-col items-end gap-0.5 shrink-0">
                   {s.duration_minutes && (
                     <p
                       className={cn(
-                        'text-sm md:text-base font-medium',
+                        'text-xs md:text-sm font-medium',
                         isLightBg ? 'text-zinc-600' : 'text-white/60'
                       )}
                     >
