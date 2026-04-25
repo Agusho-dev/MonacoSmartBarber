@@ -1953,12 +1953,12 @@ export default function CheckinPage() {
 
           <div
             className={cn(
-              'relative w-full grid gap-3 md:gap-4 mt-1 md:mt-2 overflow-y-auto min-h-0 flex-1 auto-rows-[minmax(7rem,1fr)] md:auto-rows-[minmax(9rem,1fr)] place-content-start',
-              services.length === 1 && 'grid-cols-1 max-w-xs mx-auto',
-              services.length === 2 && 'grid-cols-2 max-w-xl mx-auto',
-              services.length === 3 && 'grid-cols-1 sm:grid-cols-3 max-w-3xl mx-auto',
-              services.length === 4 && 'grid-cols-2 max-w-2xl mx-auto',
-              services.length >= 5 && 'grid-cols-2 md:grid-cols-3',
+              'relative w-full grid gap-3 md:gap-4 mt-1 md:mt-2 overflow-y-auto min-h-0 auto-rows-[minmax(8rem,auto)] md:auto-rows-[minmax(10rem,auto)] place-content-start',
+              services.length === 1 && 'grid-cols-1 max-w-md mx-auto',
+              services.length === 2 && 'grid-cols-1 sm:grid-cols-2 max-w-3xl mx-auto',
+              services.length === 3 && 'grid-cols-1 sm:grid-cols-3 max-w-5xl mx-auto',
+              services.length === 4 && 'grid-cols-1 sm:grid-cols-2 max-w-3xl mx-auto',
+              services.length >= 5 && 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3',
             )}
           >
             {services.map(s => (
