@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { TrendingUp, Scissors, Percent } from 'lucide-react'
+import { Scissors } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const PERIODS = [
@@ -14,20 +14,15 @@ type PeriodId = (typeof PERIODS)[number]['id']
 
 interface Stats {
     cuts: number
-    revenue: number
-    commission: number
-    avgTicket: number
 }
+
+
 
 interface RendimientoClientProps {
     session: { staff_id: string; full_name: string; branch_id: string; role: string }
     dayStats: Stats
     weekStats: Stats
     monthStats: Stats
-}
-
-function formatCurrency(n: number) {
-    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 }
 
 export function RendimientoClient({ session, dayStats, weekStats, monthStats }: RendimientoClientProps) {
@@ -42,20 +37,6 @@ export function RendimientoClient({ session, dayStats, weekStats, monthStats }: 
             icon: Scissors,
             color: 'text-blue-400',
             bg: 'bg-blue-500/10',
-        },
-        {
-            label: 'Comisión',
-            value: formatCurrency(stats.commission),
-            icon: Percent,
-            color: 'text-purple-400',
-            bg: 'bg-purple-500/10',
-        },
-        {
-            label: 'Ticket Promedio',
-            value: formatCurrency(stats.avgTicket),
-            icon: TrendingUp,
-            color: 'text-amber-400',
-            bg: 'bg-amber-500/10',
         },
     ]
 
@@ -112,9 +93,6 @@ export function RendimientoClient({ session, dayStats, weekStats, monthStats }: 
                             {period === 'day' && `¡Llevas ${stats.cuts} ${stats.cuts === 1 ? 'corte' : 'cortes'} hoy!`}
                             {period === 'week' && `${stats.cuts} cortes esta semana`}
                             {period === 'month' && `${stats.cuts} cortes este mes`}
-                        </p>
-                        <p className="text-xs text-emerald-400/70 mt-1">
-                            Comisión acumulada: {formatCurrency(stats.commission)}
                         </p>
                     </div>
                 )}
