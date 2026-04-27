@@ -19,6 +19,10 @@ import {
   FileSpreadsheet,
   Loader2,
   Calendar,
+  Wallet,
+  Pencil,
+  Check as CheckIcon,
+  AlertTriangle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -56,16 +60,23 @@ import {
   type CajaDailySummary,
   type CajaCSVRow,
 } from '@/lib/actions/caja'
+import {
+  fetchShiftClosesForCaja,
+  setBranchOpeningCash,
+  updateShiftCloseOpeningCash,
+  type ShiftCloseRow,
+} from '@/lib/actions/shift'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
-interface BranchRow { id: string; name: string }
+interface BranchRow { id: string; name: string; default_opening_cash?: number }
 interface BarberRow { id: string; full_name: string; branch_id: string | null }
 interface AccountRow { id: string; name: string; branch_id: string; is_salary_account?: boolean }
 
 interface CajaClientProps {
   initialTickets: CajaTicket[]
   initialSummary: CajaDailySummary
+  initialShiftCloses: ShiftCloseRow[]
   initialDate: string
   branches: BranchRow[]
   barbers: BarberRow[]
@@ -110,13 +121,16 @@ function safeFilePart(s: string) {
 export function CajaClient({
   initialTickets,
   initialSummary,
+  initialShiftCloses,
   initialDate,
-  branches,
+  branches: initialBranches,
   barbers,
   accounts,
 }: CajaClientProps) {
+  const [branches, setBranches] = useState<BranchRow[]>(initialBranches)
   const [tickets, setTickets] = useState<CajaTicket[]>(initialTickets)
   const [summary, setSummary] = useState<CajaDailySummary>(initialSummary)
+  const [shiftCloses, setShiftCloses] = useState<ShiftCloseRow[]>(initialShiftCloses)
   const [date, setDate] = useState(initialDate)
   const [loading, setLoading] = useState(false)
 
@@ -149,12 +163,14 @@ export function CajaClient({
     const d = newDate ?? date
     setLoading(true)
     try {
-      const [ticketRes, summaryRes] = await Promise.all([
+      const [ticketRes, summaryRes, closesRes] = await Promise.all([
         fetchCajaTickets({ branchId: selectedBranchId, date: d }),
         fetchCajaSummary({ branchId: selectedBranchId, date: d }),
+        fetchShiftClosesForCaja({ branchId: selectedBranchId, date: d }),
       ])
       if (ticketRes.data) setTickets(ticketRes.data)
       if (summaryRes.data) setSummary(summaryRes.data)
+      if (closesRes.data) setShiftCloses(closesRes.data)
     } finally {
       setLoading(false)
     }
@@ -370,6 +386,24 @@ export function CajaClient({
 
         {/* ── Efectivo por barbero (solo sin filtros) ── */}
         {!hasActiveFilters && <BarberCashBreakdown tickets={tickets} barbers={filteredBarbers} />}
+
+        {/* ── Cierres de barberos del día ── */}
+        <ShiftClosesSection
+          closes={shiftCloses}
+          branches={branches}
+          selectedBranchId={selectedBranchId}
+          onBranchOpeningCashUpdated={(branchId, amount) => {
+            setBranches(prev => prev.map(b => b.id === branchId ? { ...b, default_opening_cash: amount } : b))
+          }}
+          onShiftOpeningCashUpdated={(closeId, amount) => {
+            setShiftCloses(prev => prev.map(c => {
+              if (c.id !== closeId) return c
+              const newExpected = amount + c.cashTotal + c.tipsCash
+              const newDiff = c.cashCounted === null ? null : c.cashCounted - newExpected
+              return { ...c, openingCash: amount, cashExpected: newExpected, cashDiff: newDiff }
+            }))
+          }}
+        />
 
         {/* ── Lista de tickets ── */}
         <div className="space-y-1.5">
@@ -883,4 +917,278 @@ function triggerDownload(blob: Blob, filename: string) {
   a.download = filename
   a.click()
   URL.revokeObjectURL(url)
+}
+
+// ─── Cierres de barberos del día ──────────────────────────────────────────────
+
+function ShiftClosesSection({
+  closes,
+  branches,
+  selectedBranchId,
+  onBranchOpeningCashUpdated,
+  onShiftOpeningCashUpdated,
+}: {
+  closes: ShiftCloseRow[]
+  branches: BranchRow[]
+  selectedBranchId: string | null
+  onBranchOpeningCashUpdated: (branchId: string, amount: number) => void
+  onShiftOpeningCashUpdated: (shiftCloseId: string, amount: number) => void
+}) {
+  // Mostrar el editor del default sólo cuando hay una sucursal seleccionada
+  const branch = useMemo(() => {
+    if (!selectedBranchId) return null
+    return branches.find(b => b.id === selectedBranchId) ?? null
+  }, [branches, selectedBranchId])
+
+  return (
+    <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/60 p-3 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <Wallet className="size-4 text-amber-400" />
+          Cierres de barberos
+          <span className="text-xs font-normal text-muted-foreground">({closes.length})</span>
+        </h3>
+        {branch && (
+          <BranchOpeningCashEditor
+            branch={branch}
+            onSaved={(amount) => onBranchOpeningCashUpdated(branch.id, amount)}
+          />
+        )}
+      </div>
+
+      {closes.length === 0 ? (
+        <p className="py-4 text-center text-xs text-muted-foreground">
+          Ningún barbero cerró caja todavía.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {closes.map(c => (
+            <ShiftCloseRowItem
+              key={c.id}
+              close={c}
+              showBranch={!selectedBranchId}
+              onOpeningCashSaved={(amount) => onShiftOpeningCashUpdated(c.id, amount)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BranchOpeningCashEditor({
+  branch,
+  onSaved,
+}: {
+  branch: BranchRow
+  onSaved: (amount: number) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const startEdit = () => {
+    setValue(String(branch.default_opening_cash ?? 0))
+    setEditing(true)
+  }
+
+  const handleSave = async () => {
+    const n = Number(value.replace(/[^0-9.-]/g, ''))
+    if (!Number.isFinite(n) || n < 0) {
+      toast.error('Monto inválido')
+      return
+    }
+    setSaving(true)
+    const res = await setBranchOpeningCash(branch.id, n)
+    setSaving(false)
+    if ('error' in res) {
+      toast.error(res.error)
+      return
+    }
+    onSaved(n)
+    setEditing(false)
+    toast.success('Vuelto inicial actualizado')
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={startEdit}
+        className="inline-flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/40 px-2 py-1 text-[11px] text-zinc-300 transition-colors hover:border-amber-500/40 hover:text-amber-300"
+      >
+        <span className="text-muted-foreground">Vuelto inicial · {branch.name}:</span>
+        <span className="font-semibold tabular-nums">{formatCurrency(branch.default_opening_cash ?? 0)}</span>
+        <Pencil className="size-3 opacity-70" />
+      </button>
+    )
+  }
+
+  return (
+    <div className="inline-flex items-center gap-1.5">
+      <span className="text-[11px] text-muted-foreground">Vuelto inicial:</span>
+      <Input
+        type="text"
+        inputMode="numeric"
+        value={value}
+        onChange={(e) => setValue(e.target.value.replace(/[^0-9]/g, ''))}
+        className="h-7 w-24 text-xs tabular-nums"
+        autoFocus
+      />
+      <Button size="sm" className="h-7 px-2 text-xs" onClick={handleSave} disabled={saving}>
+        {saving ? <Loader2 className="size-3 animate-spin" /> : <CheckIcon className="size-3" />}
+      </Button>
+      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setEditing(false)} disabled={saving}>
+        <X className="size-3" />
+      </Button>
+    </div>
+  )
+}
+
+function ShiftCloseRowItem({
+  close,
+  showBranch,
+  onOpeningCashSaved,
+}: {
+  close: ShiftCloseRow
+  showBranch: boolean
+  onOpeningCashSaved: (amount: number) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [editingOpening, setEditingOpening] = useState(false)
+  const [openingValue, setOpeningValue] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const startEditOpening = () => {
+    setOpeningValue(String(close.openingCash))
+    setEditingOpening(true)
+  }
+
+  const handleSaveOpening = async () => {
+    const n = Number(openingValue.replace(/[^0-9.-]/g, ''))
+    if (!Number.isFinite(n) || n < 0) { toast.error('Monto inválido'); return }
+    setSaving(true)
+    const res = await updateShiftCloseOpeningCash(close.id, n)
+    setSaving(false)
+    if ('error' in res) { toast.error(res.error); return }
+    onOpeningCashSaved(n)
+    setEditingOpening(false)
+    toast.success('Actualizado')
+  }
+
+  const counted = close.cashCounted
+  const diff = close.cashDiff
+  const diffClass = diff === null ? '' : diff === 0 ? 'text-emerald-400' : diff > 0 ? 'text-amber-400' : 'text-red-400'
+
+  return (
+    <div className="rounded-lg border border-zinc-800/80 bg-zinc-950/40 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-zinc-900/40 transition-colors"
+      >
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-zinc-800">
+          {expanded ? <ChevronDown className="size-4 text-zinc-400" /> : <ChevronRight className="size-4 text-zinc-400" />}
+        </div>
+        <div className="flex-1 min-w-0 grid grid-cols-[1fr_auto_auto] items-center gap-x-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-zinc-100 truncate">{close.staffName}</p>
+            <p className="text-[11px] text-muted-foreground truncate">
+              {showBranch && <>{close.branchName} · </>}
+              {close.totalCuts} corte{close.totalCuts === 1 ? '' : 's'}
+              {' · '}
+              {new Date(close.closedAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] text-muted-foreground leading-none">Esperado</p>
+            <p className="text-sm font-bold tabular-nums">{formatCurrency(close.cashExpected)}</p>
+          </div>
+          <div className="text-right min-w-[90px]">
+            <p className="text-[10px] text-muted-foreground leading-none">
+              {counted === null ? 'Sin contar' : 'Diferencia'}
+            </p>
+            <p className={`text-sm font-bold tabular-nums ${diffClass}`}>
+              {counted === null ? '—' : diff === 0 ? '✓' : diff! > 0 ? `+${formatCurrency(diff!)}` : formatCurrency(diff!)}
+            </p>
+          </div>
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-zinc-800/60 bg-zinc-950/60 px-4 py-3 space-y-2 text-xs">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground flex items-center gap-1">
+                <Wallet className="size-3" />Vuelto inicial
+              </span>
+              {editingOpening ? (
+                <span className="inline-flex items-center gap-1">
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    value={openingValue}
+                    onChange={(e) => setOpeningValue(e.target.value.replace(/[^0-9]/g, ''))}
+                    className="h-6 w-20 text-xs tabular-nums"
+                    autoFocus
+                  />
+                  <Button size="sm" className="h-6 px-1.5" onClick={handleSaveOpening} disabled={saving}>
+                    {saving ? <Loader2 className="size-3 animate-spin" /> : <CheckIcon className="size-3" />}
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-6 px-1.5" onClick={() => setEditingOpening(false)} disabled={saving}>
+                    <X className="size-3" />
+                  </Button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={startEditOpening}
+                  className="inline-flex items-center gap-1 font-medium tabular-nums hover:text-amber-400 transition-colors"
+                >
+                  {formatCurrency(close.openingCash)}
+                  <Pencil className="size-2.5 opacity-50" />
+                </button>
+              )}
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground flex items-center gap-1">
+                <Banknote className="size-3" />Cobros efectivo
+              </span>
+              <span className="font-medium tabular-nums">{formatCurrency(close.cashTotal)}</span>
+            </div>
+            {close.tipsCash > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Propinas efectivo</span>
+                <span className="font-medium tabular-nums">{formatCurrency(close.tipsCash)}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Esperado</span>
+              <span className="font-bold tabular-nums">{formatCurrency(close.cashExpected)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Contado</span>
+              <span className="font-medium tabular-nums">
+                {counted === null ? <span className="text-muted-foreground italic">no informado</span> : formatCurrency(counted)}
+              </span>
+            </div>
+            {counted !== null && diff !== null && diff !== 0 && (
+              <div className="col-span-2 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-amber-400">
+                <AlertTriangle className="size-3.5 shrink-0" />
+                <span>
+                  {diff > 0 ? `Sobra ${formatCurrency(diff)}` : `Falta ${formatCurrency(Math.abs(diff))}`}
+                </span>
+              </div>
+            )}
+          </div>
+          {close.notes && (
+            <div className="rounded-md border border-zinc-800 bg-zinc-900/60 p-2">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Nota del barbero</p>
+              <p className="mt-0.5 text-zinc-300">{close.notes}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }

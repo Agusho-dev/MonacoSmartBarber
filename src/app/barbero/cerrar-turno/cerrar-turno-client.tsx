@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { ArrowLeft, Banknote, Heart, Check, Scissors, PiggyBank } from 'lucide-react'
+import { ArrowLeft, Banknote, Heart, Check, Scissors, PiggyBank, Wallet, LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatCurrency } from '@/lib/format'
@@ -125,6 +125,24 @@ export function CerrarTurnoClient({
 
         {/* ─── Detalle del efectivo ─── */}
         <section className="rounded-2xl border bg-card p-5">
+          {summary.opening_cash > 0 && (
+            <>
+              <div className="flex items-center gap-4">
+                <div className="flex size-12 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                  <Wallet className="size-6" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                    Vuelto inicial
+                  </p>
+                  <p className="text-xl font-black tabular-nums tracking-tight">
+                    {formatCurrency(summary.opening_cash)}
+                  </p>
+                </div>
+              </div>
+              <div className="my-3 border-t border-dashed" />
+            </>
+          )}
           <div className="flex items-center gap-4">
             <div className="flex size-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
               <Banknote className="size-6" />
@@ -223,6 +241,17 @@ export function CerrarTurnoClient({
             className="mt-2 w-full resize-none rounded-lg border bg-transparent p-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </section>
+
+        {/* ─── Aviso clock-out ─── */}
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-700 dark:text-amber-400">
+          <LogOut className="mt-0.5 size-5 shrink-0" />
+          <div className="text-sm">
+            <p className="font-bold">Al cerrar también marcamos tu salida</p>
+            <p className="mt-0.5 text-xs opacity-90">
+              Si después querés volver a trabajar, marcá entrada de nuevo en el check-in.
+            </p>
+          </div>
+        </div>
 
         {/* ─── CTA ─── */}
         <div className="pt-2">

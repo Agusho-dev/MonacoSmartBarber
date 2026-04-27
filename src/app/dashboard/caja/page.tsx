@@ -5,6 +5,7 @@ import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { redirect } from 'next/navigation'
 import { getLocalDateStr } from '@/lib/time-utils'
 import { fetchCajaTickets, fetchCajaSummary } from '@/lib/actions/caja'
+import { fetchShiftClosesForCaja } from '@/lib/actions/shift'
 import { CajaClient } from './caja-client'
 
 export const dynamic = 'force-dynamic'
@@ -24,16 +25,18 @@ export default async function CajaPage() {
   const [
     { data: tickets },
     { data: summary },
+    { data: shiftCloses },
     { data: branches },
     { data: barbers },
     { data: accounts },
   ] = await Promise.all([
     fetchCajaTickets({ branchId: null, date: today }),
     fetchCajaSummary({ branchId: null, date: today }),
+    fetchShiftClosesForCaja({ branchId: null, date: today }),
     branchIds.length > 0
       ? supabase
           .from('branches')
-          .select('id, name')
+          .select('id, name, default_opening_cash')
           .eq('organization_id', orgId)
           .in('id', branchIds)
           .eq('is_active', true)
@@ -63,6 +66,7 @@ export default async function CajaPage() {
     <CajaClient
       initialTickets={tickets}
       initialSummary={summary}
+      initialShiftCloses={shiftCloses}
       initialDate={today}
       branches={branches ?? []}
       barbers={barbers ?? []}
