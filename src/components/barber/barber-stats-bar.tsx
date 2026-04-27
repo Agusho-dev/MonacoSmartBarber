@@ -1,13 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Scissors, Sparkles, Timer, TrendingUp } from 'lucide-react'
-import { formatCurrency } from '@/lib/format'
+import { Scissors, Timer, TrendingUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface BarberStatsBarProps {
   servicesCount: number
-  revenue: number
   /** Duración promedio de corte en minutos (opcional). */
   avgMinutes?: number | null
   /** Ranking del barbero (ej. "1 de 4"). Opcional. */
@@ -21,13 +19,11 @@ interface BarberStatsBarProps {
  */
 export function BarberStatsBar({
   servicesCount,
-  revenue,
   avgMinutes,
   ranking,
   className,
 }: BarberStatsBarProps) {
   const cuts = useCountUp(servicesCount, 500)
-  const money = useCountUp(revenue, 650)
 
   return (
     <div
@@ -39,9 +35,6 @@ export function BarberStatsBar({
     >
       <StatChip icon={Scissors} label="Cortes">
         <span className="tabular-nums">{Math.round(cuts)}</span>
-      </StatChip>
-      <StatChip icon={Sparkles} label="Facturado">
-        <span className="tabular-nums">{formatCurrency(Math.round(money))}</span>
       </StatChip>
       {avgMinutes != null && avgMinutes > 0 && (
         <StatChip icon={Timer} label="Prom">

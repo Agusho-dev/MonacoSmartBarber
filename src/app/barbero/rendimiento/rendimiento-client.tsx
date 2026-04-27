@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { TrendingUp, Scissors, DollarSign, Percent } from 'lucide-react'
+import { TrendingUp, Scissors, Percent } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const PERIODS = [
@@ -42,13 +42,6 @@ export function RendimientoClient({ session, dayStats, weekStats, monthStats }: 
             icon: Scissors,
             color: 'text-blue-400',
             bg: 'bg-blue-500/10',
-        },
-        {
-            label: 'Facturación',
-            value: formatCurrency(stats.revenue),
-            icon: DollarSign,
-            color: 'text-emerald-400',
-            bg: 'bg-emerald-500/10',
         },
         {
             label: 'Comisión',

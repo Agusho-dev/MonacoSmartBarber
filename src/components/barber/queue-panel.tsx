@@ -68,7 +68,6 @@ import { ClientProfileSheet } from './client-profile-sheet'
 import { ActiveClientCard, ActiveBreakCard } from './active-client-card'
 import { NextClientAlert } from './next-client-alert'
 import { BarberStatsBar } from './barber-stats-bar'
-import { formatCurrency } from '@/lib/format'
 import { primeAudioContext } from '@/lib/barber-feedback'
 import {
   Dialog,
@@ -938,7 +937,7 @@ export function QueuePanel({
         </p>
         {dayStats.servicesCount > 0 && (
           <p className="mt-3 text-[11px] font-semibold text-muted-foreground">
-            Hoy: {dayStats.servicesCount} corte{dayStats.servicesCount === 1 ? '' : 's'} · {formatCurrency(dayStats.revenue)}
+            Hoy: {dayStats.servicesCount} corte{dayStats.servicesCount === 1 ? '' : 's'}
           </p>
         )}
       </div>
@@ -971,10 +970,7 @@ export function QueuePanel({
 
         {/* Stats del día — visible entre el nombre y los controles */}
         <div className="hidden md:block mx-4 flex-1">
-          <BarberStatsBar
-            servicesCount={dayStats.servicesCount}
-            revenue={dayStats.revenue}
-          />
+          <BarberStatsBar servicesCount={dayStats.servicesCount} />
         </div>
 
         {/* Desktop: all buttons inline */}
@@ -1117,11 +1113,10 @@ export function QueuePanel({
         {/* ── MOBILE: unified layout ── */}
         <div className="flex flex-1 flex-col overflow-hidden sm:hidden bg-background">
           {/* Stats compactos mobile */}
-          {(dayStats.servicesCount > 0 || dayStats.revenue > 0) && (
+          {dayStats.servicesCount > 0 && (
             <div className="border-b bg-card/80 px-3 py-2">
               <BarberStatsBar
                 servicesCount={dayStats.servicesCount}
-                revenue={dayStats.revenue}
                 className="justify-center"
               />
             </div>

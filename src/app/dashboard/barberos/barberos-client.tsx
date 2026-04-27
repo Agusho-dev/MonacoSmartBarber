@@ -31,7 +31,9 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -574,42 +576,44 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, canHideS
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="grid gap-2">
-                <Label>Rol base</Label>
-                <Select
-                  value={form.role}
-                  onValueChange={(v) => setForm({ ...form, role: v as UserRole })}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="barber">Barbero</SelectItem>
-                    <SelectItem value="receptionist">Recepcionista</SelectItem>
-                    <SelectItem value="admin">Administrador</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
             <div className="grid gap-2">
-              <Label>Rol personalizado</Label>
+              <Label>Rol</Label>
               <Select
-                value={form.role_id || 'none'}
-                onValueChange={(v) => setForm({ ...form, role_id: v === 'none' ? '' : v })}
+                value={form.role_id ? `custom:${form.role_id}` : `sys:${form.role}`}
+                onValueChange={(v) => {
+                  if (v.startsWith('sys:')) {
+                    setForm({ ...form, role: v.slice(4) as UserRole, role_id: '' })
+                  } else if (v.startsWith('custom:')) {
+                    setForm({ ...form, role_id: v.slice(7) })
+                  }
+                }}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Sin rol" />
+                  <SelectValue placeholder="Elegí un rol" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Sin rol personalizado</SelectItem>
-                  {roles.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.name}
-                    </SelectItem>
-                  ))}
+                  <SelectGroup>
+                    <SelectLabel>Roles del sistema</SelectLabel>
+                    <SelectItem value="sys:barber">Barbero</SelectItem>
+                    <SelectItem value="sys:receptionist">Recepcionista</SelectItem>
+                    <SelectItem value="sys:admin">Administrador</SelectItem>
+                  </SelectGroup>
+                  {roles.length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel>Roles personalizados</SelectLabel>
+                      {roles.map((r) => (
+                        <SelectItem key={r.id} value={`custom:${r.id}`}>
+                          {r.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                Los roles personalizados se gestionan en{' '}
+                <span className="font-medium">Equipo → Roles</span>.
+              </p>
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="grid gap-2">

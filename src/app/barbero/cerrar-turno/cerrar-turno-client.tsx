@@ -77,7 +77,7 @@ export function CerrarTurnoClient({
   }
 
   if (justClosed) {
-    return <ClosedCelebration barberName={barberName} cuts={summary.cuts} revenue={summary.revenue} onLogout={logoutBarber} onKeepWorking={() => router.push('/barbero/fila')} />
+    return <ClosedCelebration barberName={barberName} cuts={summary.cuts} onLogout={logoutBarber} onKeepWorking={() => router.push('/barbero/fila')} />
   }
 
   return (
@@ -284,13 +284,11 @@ function StatTile({
 function ClosedCelebration({
   barberName,
   cuts,
-  revenue,
   onLogout,
   onKeepWorking,
 }: {
   barberName: string
   cuts: number
-  revenue: number
   onLogout: () => void | Promise<void>
   onKeepWorking: () => void
 }) {
@@ -323,15 +321,10 @@ function ClosedCelebration({
           Tu turno quedó cerrado.
         </p>
 
-        <div className="mt-8 flex items-center justify-center gap-6 rounded-3xl border bg-card px-6 py-5">
-          <div>
+        <div className="mt-8 flex items-center justify-center rounded-3xl border bg-card px-6 py-5">
+          <div className="text-center">
             <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Cortes</p>
-            <p className="mt-0.5 text-3xl font-black tabular-nums">{cuts}</p>
-          </div>
-          <div className="h-12 w-px bg-border" aria-hidden />
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Facturado</p>
-            <p className="mt-0.5 text-3xl font-black tabular-nums">{formatCurrency(revenue)}</p>
+            <p className="mt-0.5 text-4xl font-black tabular-nums">{cuts}</p>
           </div>
         </div>
 
