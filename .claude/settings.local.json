@@ -68,7 +68,20 @@
       "WebSearch",
       "WebFetch(domain:ayuda.agendapro.com)",
       "WebFetch(domain:agendapro.com)",
-      "Bash(npx --no tsc --noEmit)"
+      "Bash(npx --no tsc --noEmit)",
+      "mcp__supabase-msb__get_advisors",
+      "mcp__supabase-msb__list_extensions",
+      "mcp__supabase-msb__execute_sql",
+      "mcp__supabase-msb__list_migrations",
+      "mcp__supabase-msb__list_tables",
+      "Bash(jq -r '.[0].text | fromjson | .result.lints[] | \"[\\\\\\(.level\\)] \\\\\\(.name\\) :: \\\\\\(.metadata.name // \"-\"\\) :: \\\\\\(.detail | gsub\\(\"\\\\\\\\\\\\\\\\`\"; \"`\"\\) | .[0:180]\\)\"' /Users/ignaciobaldovino/.claude/projects/-Users-ignaciobaldovino-MSB-FULL-MonacoSmartBarber/7245cb96-96e9-4fce-9de7-3759630883a5/tool-results/mcp-supabase-msb-get_advisors-1777344406128.txt)",
+      "Bash(sort -k2 -rn)",
+      "mcp__supabase-msb__list_edge_functions",
+      "Bash(jq *)",
+      "mcp__supabase-msb__get_logs",
+      "mcp__supabase-msb__apply_migration",
+      "mcp__supabase-msb__deploy_edge_function",
+      "Bash(python3 -c \"import sys, json; print\\(json.dumps\\([{'name': 'index.ts', 'content': sys.stdin.read\\(\\)}]\\)\\)\")"
     ]
   },
   "enabledMcpjsonServers": [

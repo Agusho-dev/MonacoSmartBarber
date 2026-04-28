@@ -8,6 +8,9 @@
  *   - Usos posteriores: signInWithPassword usando el mismo device_secret.
  *   - La biometría (Face ID / Touch ID) actúa como gate LOCAL en el dispositivo.
  *
+ * Migración Ola 3 perf audit: error checks completos en cada operación DB.
+ * Patrón obligatorio (CLAUDE.md): chequear error de cada .insert()/.update()/.select().
+ *
  * Deploy: supabase functions deploy client-auth --no-verify-jwt
  */
 
@@ -25,9 +28,9 @@ interface AuthRequest {
   phone:         string
   device_id:     string
   device_secret: string
-  name?:         string   // solo en registro inicial
-  org_id?:       string   // organization_id explícito
-  branch_id?:    string   // alternativa: resolver org desde la sucursal
+  name?:         string
+  org_id?:       string
+  branch_id?:    string
 }
 
 interface AuthResponse {
@@ -37,53 +40,40 @@ interface AuthResponse {
   is_new_client: boolean
 }
 
+function jsonError(status: number, message: string, code?: string): Response {
+  return new Response(
+    JSON.stringify({ error: message, ...(code ? { code } : {}) }),
+    { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
 Deno.serve(async (req) => {
-  // Preflight CORS
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
-
   if (req.method !== 'POST') {
-    return new Response(
-      JSON.stringify({ error: 'Método no permitido' }),
-      { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonError(405, 'Método no permitido')
   }
 
   try {
     const body: AuthRequest = await req.json()
     const { phone, device_id, device_secret, name, org_id, branch_id } = body
 
-    // Validaciones básicas
     if (!phone || !device_id || !device_secret) {
-      return new Response(
-        JSON.stringify({ error: 'phone, device_id y device_secret son requeridos' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonError(400, 'phone, device_id y device_secret son requeridos')
     }
 
     if (!org_id && !branch_id) {
-      return new Response(
-        JSON.stringify({ error: 'org_id o branch_id es requerido para identificar la organización' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonError(400, 'org_id o branch_id es requerido para identificar la organización')
     }
 
-    // Normalizar teléfono (quitar espacios y caracteres no numéricos excepto +)
     const normalizedPhone = phone.replace(/[^\d+]/g, '')
     if (normalizedPhone.length < 8) {
-      return new Response(
-        JSON.stringify({ error: 'Número de teléfono inválido' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonError(400, 'Número de teléfono inválido')
     }
 
-    // device_secret mínimo 32 chars (SHA256 hex = 64 chars)
     if (device_secret.length < 32) {
-      return new Response(
-        JSON.stringify({ error: 'device_secret inseguro' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonError(400, 'device_secret inseguro')
     }
 
     const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
@@ -91,47 +81,54 @@ Deno.serve(async (req) => {
     })
 
     const email = `${normalizedPhone}@monaco.internal`
+    const logCtx = `phone=${normalizedPhone}`
 
     // Resolver organization_id desde org_id directo o desde branch_id
     let organizationId: string | null = org_id || null
     if (!organizationId && branch_id) {
-      const { data: branchData } = await adminClient
+      const { data: branchData, error: branchErr } = await adminClient
         .from('branches')
         .select('organization_id')
         .eq('id', branch_id)
         .maybeSingle()
+      if (branchErr) {
+        console.error(`[client-auth] branches lookup error ${logCtx} branch_id=${branch_id}:`, branchErr.message)
+        return jsonError(500, 'Error consultando branches', 'BRANCH_LOOKUP_FAILED')
+      }
       organizationId = branchData?.organization_id ?? null
     }
 
     if (!organizationId) {
-      return new Response(
-        JSON.stringify({ error: 'No se pudo resolver la organización' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonError(400, 'No se pudo resolver la organización')
     }
 
     // Verificar que la organización existe y está activa
-    const { data: orgData } = await adminClient
+    const { data: orgData, error: orgErr } = await adminClient
       .from('organizations')
       .select('id')
       .eq('id', organizationId)
       .eq('is_active', true)
       .maybeSingle()
+    if (orgErr) {
+      console.error(`[client-auth] organizations lookup error ${logCtx} org=${organizationId}:`, orgErr.message)
+      return jsonError(500, 'Error consultando organización', 'ORG_LOOKUP_FAILED')
+    }
 
     if (!orgData) {
-      return new Response(
-        JSON.stringify({ error: 'Organización no encontrada o inactiva' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return jsonError(404, 'Organización no encontrada o inactiva')
     }
 
     // 1. Buscar cliente existente por teléfono dentro de la organización
-    const { data: existingClient } = await adminClient
+    const { data: existingClient, error: clientErr } = await adminClient
       .from('clients')
       .select('id, auth_user_id, name')
       .eq('phone', normalizedPhone)
       .eq('organization_id', organizationId)
       .maybeSingle()
+    if (clientErr) {
+      console.error(`[client-auth] clients lookup error ${logCtx} org=${organizationId}:`, clientErr.message)
+      return jsonError(500, 'Error consultando cliente', 'CLIENT_LOOKUP_FAILED')
+    }
 
     let authUserId: string
     let clientId: string
@@ -139,7 +136,6 @@ Deno.serve(async (req) => {
 
     if (existingClient?.auth_user_id) {
       // --- CLIENTE EXISTENTE CON CUENTA AUTH ---
-      // Intentar login con device_secret
       const signInResult = await adminClient.auth.signInWithPassword({
         email,
         password: device_secret,
@@ -148,45 +144,38 @@ Deno.serve(async (req) => {
       let signInData = signInResult.data
 
       if (signInError || !signInData?.session) {
-        // device_secret no coincide → dispositivo nuevo o reinstalación
-        // Auto-resetear password para permitir login desde nuevo dispositivo
+        // Auto-resetear password (dispositivo nuevo o reinstalación)
         const { error: updateError } = await adminClient.auth.admin.updateUserById(
           existingClient.auth_user_id,
           { password: device_secret }
         )
-
         if (updateError) {
-          console.error('[client-auth] Error updating password:', updateError)
-          return new Response(
-            JSON.stringify({ error: 'Error actualizando credenciales', code: 'UPDATE_FAILED' }),
-            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
+          console.error(`[client-auth] reset password error ${logCtx}:`, updateError.message)
+          return jsonError(500, 'Error actualizando credenciales', 'UPDATE_FAILED')
         }
 
-        // Reintentar login con la nueva password
         const { data: retryData, error: retryError } = await adminClient.auth.signInWithPassword({
           email,
           password: device_secret,
         })
-
         if (retryError || !retryData?.session) {
-          return new Response(
-            JSON.stringify({ error: 'Autenticación fallida tras actualización', code: 'RETRY_FAILED' }),
-            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
+          console.error(`[client-auth] retry signin failed ${logCtx}:`, retryError?.message)
+          return jsonError(401, 'Autenticación fallida tras actualización', 'RETRY_FAILED')
         }
-
         signInData = retryData
       }
 
       authUserId = signInData.session!.user.id
       clientId = existingClient.id
 
-      // Actualizar last_login_at
-      await adminClient
+      // Actualizar last_login_at (no fatal si falla)
+      const { error: lastLoginErr } = await adminClient
         .from('clients')
         .update({ last_login_at: new Date().toISOString() })
         .eq('id', clientId)
+      if (lastLoginErr) {
+        console.error(`[client-auth] last_login_at update error ${logCtx} client=${clientId}:`, lastLoginErr.message)
+      }
 
       return new Response(
         JSON.stringify({
@@ -200,48 +189,50 @@ Deno.serve(async (req) => {
     }
 
     // --- CLIENTE SIN CUENTA AUTH (o cliente nuevo) ---
-
-    // Crear usuario en Supabase Auth con organization_id en app_metadata
     const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
       email,
       password: device_secret,
-      email_confirm: true,  // auto-confirmar sin email
+      email_confirm: true,
       app_metadata: { organization_id: organizationId },
     })
 
     if (createError) {
-      // Si ya existe el email en auth (race condition o reinstalación)
-      // intentar login directo
+      // Race condition o reinstalación: ya existe el email
       if (createError.message.includes('already been registered')) {
         const { data: retrySignIn, error: retryError } = await adminClient.auth.signInWithPassword({
           email,
           password: device_secret,
         })
         if (retryError || !retrySignIn.session) {
-          return new Response(
-            JSON.stringify({ error: 'Cuenta existente con credencial diferente.', code: 'AUTH_CONFLICT' }),
-            { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
+          console.error(`[client-auth] race signin failed ${logCtx}:`, retryError?.message)
+          return jsonError(409, 'Cuenta existente con credencial diferente.', 'AUTH_CONFLICT')
         }
         authUserId = retrySignIn.session.user.id
 
-        // Buscar cliente y vincularlo si aún no está vinculado (scoped por org)
-        const { data: unlinkedClient } = await adminClient
+        const { data: unlinkedClient, error: unlinkedErr } = await adminClient
           .from('clients')
           .select('id')
           .eq('phone', normalizedPhone)
           .eq('organization_id', organizationId)
           .maybeSingle()
+        if (unlinkedErr) {
+          console.error(`[client-auth] unlinked lookup error ${logCtx}:`, unlinkedErr.message)
+          return jsonError(500, 'Error consultando cliente', 'CLIENT_LOOKUP_FAILED')
+        }
 
         if (unlinkedClient) {
-          await adminClient
+          const { error: linkErr } = await adminClient
             .from('clients')
             .update({ auth_user_id: authUserId, last_login_at: new Date().toISOString() })
             .eq('id', unlinkedClient.id)
+          if (linkErr) {
+            console.error(`[client-auth] link existing client error ${logCtx} client=${unlinkedClient.id}:`, linkErr.message)
+            return jsonError(500, 'Error vinculando cuenta', 'LINK_FAILED')
+          }
           clientId = unlinkedClient.id
         } else {
-          // Crear cliente si no existe — asignar organization_id
-          const { data: newClient } = await adminClient
+          // Cliente nuevo en esta org
+          const { data: newClient, error: insertErr } = await adminClient
             .from('clients')
             .insert({
               phone: normalizedPhone,
@@ -251,14 +242,22 @@ Deno.serve(async (req) => {
             })
             .select('id')
             .single()
-          clientId = newClient!.id
+          if (insertErr || !newClient) {
+            console.error(`[client-auth] insert client (race path) error ${logCtx}:`, insertErr?.message)
+            return jsonError(500, 'Error creando cliente', 'CLIENT_INSERT_FAILED')
+          }
+          clientId = newClient.id
           isNewClient = true
         }
 
-        // Asegurar que app_metadata tenga organization_id
-        await adminClient.auth.admin.updateUserById(authUserId, {
+        // Asegurar app_metadata correcto
+        const { error: metaErr } = await adminClient.auth.admin.updateUserById(authUserId, {
           app_metadata: { organization_id: organizationId },
         })
+        if (metaErr) {
+          console.error(`[client-auth] app_metadata update error ${logCtx} auth=${authUserId}:`, metaErr.message)
+          // No fatal — el cliente puede operar y el metadata se reasigna en próximo login
+        }
 
         return new Response(
           JSON.stringify({
@@ -271,6 +270,7 @@ Deno.serve(async (req) => {
         )
       }
 
+      console.error(`[client-auth] createUser unhandled error ${logCtx}:`, createError.message)
       throw createError
     }
 
@@ -278,17 +278,24 @@ Deno.serve(async (req) => {
 
     // Crear o actualizar cliente vinculando auth_user_id
     if (existingClient) {
-      // Cliente existente sin auth → vincularlo
-      await adminClient
+      const { error: linkErr } = await adminClient
         .from('clients')
         .update({
           auth_user_id: authUserId,
           last_login_at: new Date().toISOString()
         })
         .eq('id', existingClient.id)
+      if (linkErr) {
+        console.error(`[client-auth] link client error ${logCtx} client=${existingClient.id}:`, linkErr.message)
+        // Rollback: borrar el auth user creado
+        const { error: rollbackErr } = await adminClient.auth.admin.deleteUser(authUserId)
+        if (rollbackErr) {
+          console.error(`[client-auth] ROLLBACK FAILED ${logCtx} auth=${authUserId}:`, rollbackErr.message)
+        }
+        return jsonError(500, 'Error vinculando cliente', 'LINK_FAILED')
+      }
       clientId = existingClient.id
     } else {
-      // Cliente completamente nuevo — asignar organization_id
       const { data: newClientData, error: clientError } = await adminClient
         .from('clients')
         .insert({
@@ -301,9 +308,13 @@ Deno.serve(async (req) => {
         .single()
 
       if (clientError || !newClientData) {
+        console.error(`[client-auth] insert new client error ${logCtx}:`, clientError?.message)
         // Rollback: eliminar usuario auth creado
-        await adminClient.auth.admin.deleteUser(authUserId)
-        throw clientError || new Error('No se pudo crear el cliente')
+        const { error: rollbackErr } = await adminClient.auth.admin.deleteUser(authUserId)
+        if (rollbackErr) {
+          console.error(`[client-auth] ROLLBACK FAILED ${logCtx} auth=${authUserId}:`, rollbackErr.message)
+        }
+        return jsonError(500, 'Error creando cliente', 'CLIENT_INSERT_FAILED')
       }
 
       clientId = newClientData.id
@@ -317,7 +328,8 @@ Deno.serve(async (req) => {
     })
 
     if (sessionError || !sessionData.session) {
-      throw sessionError || new Error('No se pudo obtener sesión')
+      console.error(`[client-auth] post-create signin error ${logCtx}:`, sessionError?.message)
+      return jsonError(500, 'No se pudo obtener sesión tras registro', 'SIGNIN_AFTER_CREATE_FAILED')
     }
 
     return new Response(
@@ -330,11 +342,8 @@ Deno.serve(async (req) => {
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 
-  } catch (err) {
-    console.error('[client-auth] Error:', err)
-    return new Response(
-      JSON.stringify({ error: 'Error interno del servidor' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+  } catch (err: any) {
+    console.error('[client-auth] unhandled error:', err?.message ?? err)
+    return jsonError(500, 'Error interno del servidor')
   }
 })

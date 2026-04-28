@@ -75,7 +75,7 @@ interface MensajeriaContextValue {
   setIgConfig: React.Dispatch<React.SetStateAction<OrgInstagramConfig | null>>
   aiConfig: OrgAiConfig | null
   setAiConfig: React.Dispatch<React.SetStateAction<OrgAiConfig | null>>
-  clients: Pick<Client, 'id' | 'name' | 'phone'>[]
+  // clients removido del contexto: los dialogs usan searchClients() on-demand
   appSettings: ReviewAutoSettings | null
   branches: { id: string; name: string }[]
 
@@ -135,7 +135,6 @@ export function MensajeriaProvider({
   children,
   initialConversations,
   scheduledMessages: initialScheduled,
-  clients,
   waConfig: initialWaConfig,
   igConfig: initialIgConfig,
   aiConfig: initialAiConfig,
@@ -146,7 +145,7 @@ export function MensajeriaProvider({
   children: React.ReactNode
   initialConversations: ConversationWithRelations[]
   scheduledMessages: ScheduledWithRelations[]
-  clients: Pick<Client, 'id' | 'name' | 'phone'>[]
+  // clients removido: los dialogs usan searchClients() on-demand
   waConfig: OrgWhatsAppConfig | null
   igConfig: OrgInstagramConfig | null
   aiConfig: OrgAiConfig | null
@@ -656,7 +655,7 @@ export function MensajeriaProvider({
     waConfig, setWaConfig,
     igConfig, setIgConfig,
     aiConfig, setAiConfig,
-    clients, appSettings, branches,
+    appSettings, branches,
     waTemplates, setWaTemplates,
     showTemplateDialog, setShowTemplateDialog,
     templateTarget, setTemplateTarget,

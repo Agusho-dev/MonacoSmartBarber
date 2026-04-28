@@ -15,30 +15,62 @@ export default async function DashboardLayout({
   children: React.ReactNode
 }) {
   const supabase = await createClient()
+  const cookieStore = await cookies()
 
-  const {
-    data: { user: authUser },
-    error: authError,
-  } = await supabase.auth.getUser()
+  // Auth + orgId resolveado en paralelo. getCurrentOrgId() está cacheado y
+  // reusará el mismo auth.getUser() que ejecutamos acá (vía getCachedAuthUser).
+  const [authResult, orgId] = await Promise.all([
+    supabase.auth.getUser(),
+    getCurrentOrgId(),
+  ])
+
+  const { data: { user: authUser }, error: authError } = authResult
 
   if (authError || !authUser) {
     redirect('/login')
   }
 
-  const orgId = await getCurrentOrgId()
   if (!orgId) {
     redirect('/login')
   }
 
   const adminClient = createAdminClient()
+  const isImpersonating = cookieStore.get('platform_impersonation')?.value === '1'
 
-  // Guard: si la org aún no completó onboarding, forzar al wizard
-  const { data: orgRow } = await adminClient
-    .from('organizations')
-    .select('settings, subscription_status')
-    .eq('id', orgId)
-    .maybeSingle()
+  // Bloque paralelo principal: todas las queries que dependen sólo de (orgId, authUser.id)
+  // se disparan al mismo tiempo. Antes eran ~6 roundtrips secuenciales.
+  const [
+    { data: orgRow },
+    { data: staff },
+    { data: staffOrgs },
+    { data: memberOrgs },
+    fullEntitlements,
+  ] = await Promise.all([
+    adminClient
+      .from('organizations')
+      .select('settings, subscription_status, logo_url, name')
+      .eq('id', orgId)
+      .maybeSingle(),
+    supabase
+      .from('staff')
+      .select('full_name, email, role, role_id, organization_id')
+      .eq('auth_user_id', authUser.id)
+      .eq('organization_id', orgId)
+      .eq('is_active', true)
+      .maybeSingle(),
+    adminClient
+      .from('staff')
+      .select('organization_id, organizations(id, name, slug, logo_url)')
+      .eq('auth_user_id', authUser.id)
+      .eq('is_active', true),
+    adminClient
+      .from('organization_members')
+      .select('organization_id, organizations(id, name, slug, logo_url)')
+      .eq('user_id', authUser.id),
+    getEntitlements(orgId),
+  ])
 
+  // Guards de la org (ahora con la data ya en memoria)
   if (orgRow?.subscription_status === 'suspended' || orgRow?.subscription_status === 'cancelled') {
     redirect('/login?reason=inactive')
   }
@@ -48,18 +80,9 @@ export default async function DashboardLayout({
     redirect('/onboarding')
   }
 
-  // Find staff profile for CURRENT org
-  const { data: staff, error: staffError } = await supabase
-    .from('staff')
-    .select('full_name, email, role, role_id, organization_id')
-    .eq('auth_user_id', authUser.id)
-    .eq('organization_id', orgId)
-    .eq('is_active', true)
-    .maybeSingle()
-
-  // If not staff, maybe a global owner member?
+  // Si no es staff de la org actual, intentar fallback a organization_members.
+  // Esto SÍ es secuencial porque sólo lo necesitamos cuando staff es null.
   let userProfile = staff
-  
   if (!userProfile) {
     const { data: member } = await adminClient
       .from('organization_members')
@@ -67,14 +90,14 @@ export default async function DashboardLayout({
       .eq('user_id', authUser.id)
       .eq('organization_id', orgId)
       .maybeSingle()
-      
+
     if (member) {
       userProfile = {
         full_name: authUser.user_metadata?.full_name || authUser.email || 'Admin',
         email: authUser.email,
         role: member.role,
         role_id: null,
-        organization_id: orgId
+        organization_id: orgId,
       }
     }
   }
@@ -84,13 +107,6 @@ export default async function DashboardLayout({
     redirect('/login')
   }
 
-  // Obtain all organizations the user has access to
-  const [{ data: staffOrgs }, { data: memberOrgs }, { data: currentOrg }] = await Promise.all([
-    adminClient.from('staff').select('organization_id, organizations(id, name, slug, logo_url)').eq('auth_user_id', authUser.id).eq('is_active', true),
-    adminClient.from('organization_members').select('organization_id, organizations(id, name, slug, logo_url)').eq('user_id', authUser.id),
-    adminClient.from('organizations').select('logo_url').eq('id', orgId).single(),
-  ])
-
   type OrgJoin = { organization_id: string; organizations: { id: string; name: string; slug: string; logo_url: string | null } | null }
   const activeOrgsMap = new Map<string, { id: string; name: string; slug: string; logo_url: string | null }>()
   ;(staffOrgs as OrgJoin[] | null)?.forEach((s) => {
@@ -99,41 +115,39 @@ export default async function DashboardLayout({
   ;(memberOrgs as OrgJoin[] | null)?.forEach((m) => {
     if (m.organizations) activeOrgsMap.set(m.organization_id, m.organizations)
   })
-  
+
   const userOrganizations = Array.from(activeOrgsMap.values())
 
   const isOwnerOrAdmin = ['owner', 'admin'].includes(userProfile.role)
-  let userPermissions: Record<string, boolean> = {}
 
-  if (isOwnerOrAdmin) {
-    userPermissions = { 'dashboard.access': true } 
-  }
-
-  let roleData = null
+  // Roles + branch scope: pueden ir en paralelo si hay role_id, y sólo necesitamos
+  // role_branch_scope cuando NO es owner/admin.
+  let roleData: { permissions: Record<string, boolean> | null } | null = null
   let allowedBranchIds: string[] | null = null
-  
+
   if (userProfile.role_id) {
-    const { data: role } = await supabase
-      .from('roles')
-      .select('permissions')
-      .eq('id', userProfile.role_id)
-      .single()
-    roleData = role
+    const [roleRes, scopeRes] = await Promise.all([
+      supabase
+        .from('roles')
+        .select('permissions')
+        .eq('id', userProfile.role_id)
+        .single(),
+      isOwnerOrAdmin
+        ? Promise.resolve({ data: null as { branch_id: string }[] | null })
+        : supabase
+            .from('role_branch_scope')
+            .select('branch_id')
+            .eq('role_id', userProfile.role_id),
+    ])
 
-    if (!isOwnerOrAdmin) {
-      const { data: scopeRows } = await supabase
-        .from('role_branch_scope')
-        .select('branch_id')
-        .eq('role_id', userProfile.role_id)
-
-      if (scopeRows && scopeRows.length > 0) {
-        allowedBranchIds = scopeRows.map((s) => s.branch_id)
-      }
+    roleData = roleRes.data
+    if (!isOwnerOrAdmin && scopeRes.data && scopeRes.data.length > 0) {
+      allowedBranchIds = scopeRes.data.map((s) => s.branch_id)
     }
   }
 
   const { getEffectivePermissions } = await import('@/lib/permissions')
-  userPermissions = getEffectivePermissions(
+  const userPermissions = getEffectivePermissions(
     roleData?.permissions as Record<string, boolean> | undefined,
     isOwnerOrAdmin
   )
@@ -142,18 +156,13 @@ export default async function DashboardLayout({
     redirect('/login')
   }
 
-  // Banner de impersonation si el user es platform admin impersonando
-  const cookieStore = await cookies()
-  const isImpersonating = cookieStore.get('platform_impersonation')?.value === '1'
-  const { data: activeOrgRow } = isImpersonating
-    ? await adminClient.from('organizations').select('name').eq('id', orgId).maybeSingle()
-    : { data: null as { name: string } | null }
+  // Banner de impersonation: el `name` ya viene del fetch principal de orgRow,
+  // así que no hace falta una query extra.
+  const activeOrgName = isImpersonating ? (orgRow?.name ?? null) : null
 
-  // Resolver entitlements de la org (cacheado por request). Si todavía no hay
+  // fullEntitlements ya vino del bloque paralelo de arriba. Si todavía no hay
   // suscripción (instalación vieja, pre-migración 108 de backfill), entitlements
   // será null y el sidebar trata todo como desbloqueado.
-  const fullEntitlements = await getEntitlements(orgId)
-
   const entitlements: EntitlementsSnapshot | null = fullEntitlements ? {
     orgId: fullEntitlements.orgId,
     planId: fullEntitlements.plan.id,
@@ -179,8 +188,8 @@ export default async function DashboardLayout({
 
   return (
     <>
-      {isImpersonating && activeOrgRow?.name && (
-        <ImpersonationBanner orgName={activeOrgRow.name} />
+      {isImpersonating && activeOrgName && (
+        <ImpersonationBanner orgName={activeOrgName} />
       )}
       <DashboardShell
         user={{ full_name: userProfile.full_name, email: userProfile.email, role: userProfile.role }}
@@ -188,7 +197,7 @@ export default async function DashboardLayout({
         allowedBranchIds={allowedBranchIds}
         organizationId={userProfile.organization_id}
         availableOrganizations={userOrganizations}
-        orgLogoUrl={currentOrg?.logo_url ?? null}
+        orgLogoUrl={orgRow?.logo_url ?? null}
         entitlements={entitlements}
         visibleModulesMeta={visibleModulesMeta}
       >

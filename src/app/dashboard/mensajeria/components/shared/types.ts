@@ -44,7 +44,7 @@ export interface MensajeriaProps {
   initialConversations: ConversationWithRelations[]
   channels: SocialChannel[]
   scheduledMessages: ScheduledWithRelations[]
-  clients: Pick<Client, 'id' | 'name' | 'phone'>[]
+  // clients removido: los dialogs NewChat y Schedule usan searchClients() on-demand
   waConfig: OrgWhatsAppConfig | null
   igConfig: OrgInstagramConfig | null
   aiConfig: OrgAiConfig | null

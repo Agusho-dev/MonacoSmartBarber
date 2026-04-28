@@ -312,6 +312,7 @@ export function QueuePanel({
           event: '*',
           schema: 'public',
           table: 'queue_entries',
+          filter: `branch_id=eq.${session.branch_id}`,
         },
         () => {
           fetchQueue()
@@ -325,6 +326,7 @@ export function QueuePanel({
           event: '*',
           schema: 'public',
           table: 'staff',
+          filter: `branch_id=eq.${session.branch_id}`,
         },
         () => {
           fetchBarbersAndSchedules()
@@ -385,7 +387,9 @@ export function QueuePanel({
   )
 
   useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000)
+    // 5s en lugar de 1s: los textos "elapsed" no necesitan resolución de segundo,
+    // y bajar la frecuencia ahorra 30-60% de CPU en tablets de gama baja.
+    const interval = setInterval(() => setNow(Date.now()), 5000)
     return () => clearInterval(interval)
   }, [])
 

@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
-import { getAppointmentsForDate, getAppointmentSettings } from '@/lib/actions/appointments'
+import { getAppointmentsForDateMultiBranch, getAppointmentSettings } from '@/lib/actions/appointments'
 import { redirect } from 'next/navigation'
 import { FilaClient } from './fila-client'
 import { FilaTabsWrapper } from './fila-tabs-wrapper'
@@ -66,10 +66,12 @@ export default async function FilaAdminPage() {
     getAppointmentSettings(orgId),
   ])
 
-  // Cargar turnos del día para todas las sucursales
-  const appointmentPromises = (branches ?? []).map(b => getAppointmentsForDate(b.id, today))
-  const appointmentArrays = await Promise.all(appointmentPromises)
-  const allAppointments = appointmentArrays.flat()
+  // Cargar turnos del día para todas las sucursales en una sola query
+  // (en lugar de N queries con assertBranchAccess interno cada una).
+  const allAppointments = await getAppointmentsForDateMultiBranch(
+    (branches ?? []).map(b => b.id),
+    today
+  )
 
   return (
     <FilaTabsWrapper

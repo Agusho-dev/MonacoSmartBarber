@@ -80,7 +80,6 @@ export function MensajeriaClient(props: MensajeriaProps) {
     <MensajeriaProvider
       initialConversations={props.initialConversations}
       scheduledMessages={props.scheduledMessages}
-      clients={props.clients}
       waConfig={props.waConfig}
       igConfig={props.igConfig}
       aiConfig={props.aiConfig}

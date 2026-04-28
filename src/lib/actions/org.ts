@@ -3,13 +3,15 @@
 import { cache } from 'react'
 import { createAdminClient } from '@/lib/supabase/server'
 import { isValidUUID } from '@/lib/validation'
+import { getCachedAuthUser } from '@/lib/auth-cache'
 
 /**
  * Obtiene el organization_id del usuario autenticado.
  * Busca en staff (dashboard) y luego en organization_members.
  * Usado por server actions que necesitan filtrar por organizacion.
+ * Cacheado por request con react.cache para deduplicar lookups por authUserId.
  */
-export async function getOrganizationId(authUserId: string): Promise<string | null> {
+export const getOrganizationId = cache(async function getOrganizationId(authUserId: string): Promise<string | null> {
   const supabase = createAdminClient()
 
   // Primero buscar en staff (caso mas comun: dashboard/barber panel)
@@ -32,7 +34,7 @@ export async function getOrganizationId(authUserId: string): Promise<string | nu
     .maybeSingle()
 
   return member?.organization_id ?? null
-}
+})
 
 /**
  * Valida que un branch_id pertenece a la organizacion del usuario actual.
@@ -276,12 +278,10 @@ export const getCurrentOrgId = cache(async function getCurrentOrgId(): Promise<s
     } catch { /* cookie invalida */ }
   }
 
-  // 2. Supabase Auth (usuarios del dashboard)
+  // 2. Supabase Auth (usuarios del dashboard) — usa cache request-scope para no
+  // duplicar la roundtrip de auth.getUser() entre layout y este helper.
   try {
-    const { createClient } = await import('@/lib/supabase/server')
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-
+    const user = await getCachedAuthUser()
     if (user) {
       const activeOrg = cookieStore.get('active_organization')?.value
       if (isValidUUID(activeOrg)) return activeOrg!

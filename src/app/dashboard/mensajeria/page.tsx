@@ -1,7 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
-import { fetchAll } from '@/lib/supabase/fetch-all'
 import { MensajeriaClient } from './mensajeria-client'
 
 export const dynamic = 'force-dynamic'
@@ -34,7 +33,6 @@ export default async function MensajeriaPage() {
     { data: conversations },
     { data: channels },
     { data: scheduled },
-    clients,
     { data: waConfig },
     { data: igConfig },
     { data: aiConfig },
@@ -61,6 +59,7 @@ export default async function MensajeriaPage() {
           .eq('is_active', true)
           .order('platform')
       : Promise.resolve({ data: [] }),
+    // scheduled_messages: solo status relevantes, sin fetchAll
     channelIds.length > 0
       ? supabase
           .from('scheduled_messages')
@@ -74,15 +73,10 @@ export default async function MensajeriaPage() {
           .in('channel_id', channelIds)
           .in('status', ['pending', 'sent', 'failed'])
           .order('scheduled_for', { ascending: true })
+          .limit(100)
       : Promise.resolve({ data: [] }),
-    fetchAll((from, to) =>
-      supabase
-        .from('clients')
-        .select('id, name, phone')
-        .eq('organization_id', orgId ?? '')
-        .order('name')
-        .range(from, to)
-    ),
+    // clients removido del initial load: NewChatDialog y ScheduleDialog
+    // usan searchClients() on-demand para evitar traer 10k+ clientes en cada carga.
     orgId
       ? supabase
           .from('organization_whatsapp_config')
@@ -149,7 +143,6 @@ export default async function MensajeriaPage() {
       initialConversations={conversationsWithPreview}
       channels={channels ?? []}
       scheduledMessages={scheduled ?? []}
-      clients={clients}
       waConfig={waConfig ?? null}
       igConfig={igConfig ?? null}
       aiConfig={aiConfig ?? null}

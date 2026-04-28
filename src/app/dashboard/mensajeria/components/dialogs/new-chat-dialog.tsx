@@ -1,25 +1,36 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { Search, Check, Pencil, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Avatar } from '../shared/avatar'
 import { useMensajeria } from '../shared/mensajeria-context'
+import { searchClients } from '@/lib/actions/clients'
 
 export function NewChatDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const { clients, isConfigured, isStarting, handleStartConversation } = useMensajeria()
+  const { isConfigured, isStarting, handleStartConversation } = useMensajeria()
   const [newChatClientId, setNewChatClientId] = useState('')
   const [newChatSearch, setNewChatSearch] = useState('')
+  const [filteredClients, setFilteredClients] = useState<{ id: string; name: string; phone: string }[]>([])
+  const [searching, setSearching] = useState(false)
 
-  const filteredClients = useMemo(() => {
-    if (!newChatSearch) return clients.slice(0, 20)
-    const s = newChatSearch.toLowerCase()
-    return clients.filter(c =>
-      c.name.toLowerCase().includes(s) || (c.phone || '').toLowerCase().includes(s)
-    ).slice(0, 20)
-  }, [clients, newChatSearch])
+  // Buscar clientes on-demand cuando el usuario escribe (mínimo 2 caracteres)
+  useEffect(() => {
+    if (!open) return
+    if (!newChatSearch || newChatSearch.trim().length < 2) {
+      setFilteredClients([])
+      return
+    }
+    setSearching(true)
+    const timer = setTimeout(async () => {
+      const result = await searchClients(newChatSearch)
+      setFilteredClients(result.data ?? [])
+      setSearching(false)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [newChatSearch, open])
 
   const handleStart = () => {
     handleStartConversation(newChatClientId)
@@ -40,10 +51,14 @@ export function NewChatDialog({ open, onOpenChange }: { open: boolean; onOpenCha
           <div className="relative">
             <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input className="w-full rounded-lg bg-muted pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-green-500/40"
-              placeholder="Buscar cliente..." value={newChatSearch} onChange={(e) => setNewChatSearch(e.target.value)} />
+              placeholder="Escribí al menos 2 caracteres..." value={newChatSearch} onChange={(e) => setNewChatSearch(e.target.value)} />
           </div>
           <ScrollArea className="h-64 rounded-lg bg-muted">
-            {filteredClients.length === 0 ? (
+            {searching ? (
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm py-8">Buscando...</div>
+            ) : newChatSearch.trim().length < 2 ? (
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm py-8">Escribí el nombre o teléfono</div>
+            ) : filteredClients.length === 0 ? (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm py-8">Sin resultados</div>
             ) : (
               <div>

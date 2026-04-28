@@ -1,5 +1,14 @@
-// Procesa mensajes programados pendientes vía Meta Cloud API
-// Ejecutado por pg_cron cada 1 minuto o llamado manualmente
+// Procesa mensajes programados pendientes vía Meta Cloud API o microservicio Baileys.
+// Ejecutado por pg_cron cada 1 minuto.
+//
+// CAMBIOS Migración 119/120/121/122 (Ola 3 perf audit):
+// 1. Atomic claim vía claim_pending_messages() RPC: incrementa attempts y marca processing,
+//    FOR UPDATE SKIP LOCKED evita double-send entre cron runs solapados.
+// 2. Retry con backoff exponencial para errores transitorios (5xx, timeout, network).
+// 3. last_error_kind = 'transient' | 'permanent' permite distinguir fallos retriable de definitivos.
+// 4. Housekeeping (auto_close_inactive_conversations, expire_stale_workflow_executions) se movió
+//    al pg_cron job 'workflow-housekeeping-5min' (corre cada 5 min en lugar de cada 1).
+// 5. Patron obligatorio CLAUDE.md: chequear error de cada .insert()/.update().
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -10,6 +19,7 @@ const supabase = createClient(
 
 const META_API_VERSION = 'v22.0'
 const BATCH_SIZE = 50
+const MAX_ATTEMPTS = 3
 
 Deno.serve(async (req: Request) => {
   const authHeader = req.headers.get('Authorization')
@@ -18,96 +28,95 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // Housekeeping previo: cerrar conversaciones inactivas y expirar workflows colgados
-    try {
-      const [{ data: closed }, { data: expired }] = await Promise.all([
-        supabase.rpc('auto_close_inactive_conversations'),
-        supabase.rpc('expire_stale_workflow_executions'),
-      ])
-      console.log('[housekeeping]', { closed, expired })
-    } catch (hkErr) {
-      console.error('[housekeeping] error:', hkErr)
-    }
-
     const waApiKey = Deno.env.get('WA_API_KEY')
 
-    const { data: pendingMessages, error } = await supabase
-      .from('scheduled_messages')
-      .select('id, phone, content, client_id, channel_id, template_name, template_language, template_params, workflow_id, workflow_trigger_data, broadcast_id, organization_id')
-      .eq('status', 'pending')
-      .lte('scheduled_for', new Date().toISOString())
-      .limit(BATCH_SIZE)
+    // Atomic claim: incrementa attempts, marca processing, devuelve el lote.
+    // Otros cron runs concurrentes ven status=processing y skipean (FOR UPDATE SKIP LOCKED).
+    const { data: pendingMessages, error: claimErr } = await supabase
+      .rpc('claim_pending_messages', { p_batch_size: BATCH_SIZE })
 
-    if (error) throw error
+    if (claimErr) {
+      console.error('[scheduled] claim_pending_messages RPC error:', claimErr.message)
+      throw claimErr
+    }
 
-    // Cache de configuración por org_id
+    if (!pendingMessages || pendingMessages.length === 0) {
+      return new Response(
+        JSON.stringify({ processed: 0, results: [] }),
+        { headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Cache de configuración por org_id (evita N×lookups)
     const orgSettingsCache = new Map<string, { wa_api_url: string | null }>()
     const orgChannelCache = new Map<string, { id: string }[]>()
     const orgConfigCache = new Map<string, { whatsapp_access_token: string; whatsapp_phone_id: string } | null>()
-
-    // Contadores de broadcast para actualizar al final
     const broadcastCounters = new Map<string, { sent: number; failed: number }>()
+    const results: Array<{ id: string; sent: boolean; error: string | null; retry: boolean }> = []
 
-    const results: Array<{ id: string; sent: boolean; error: string | null }> = []
-
-    for (const msg of (pendingMessages ?? [])) {
+    for (const msg of pendingMessages) {
       let sent = false
       let errorMsg: string | null = null
+      let httpStatus: number | undefined
 
-      // Resolver organization_id (preferimos la columna directa agregada en migración 105)
+      // Resolver organization_id (preferimos la columna directa)
       let orgId: string | null = (msg as any).organization_id ?? null
 
       if (!orgId && msg.channel_id) {
-        const { data: channelData } = await supabase
+        const { data: channelData, error: chErr } = await supabase
           .from('social_channels')
           .select('organization_id, branch_id')
           .eq('id', msg.channel_id)
           .maybeSingle()
+        if (chErr) console.error('[scheduled] social_channels lookup error msg_id=' + msg.id + ':', chErr.message)
         orgId = channelData?.organization_id ?? null
         if (!orgId && channelData?.branch_id) {
-          const { data: branchData } = await supabase
+          const { data: branchData, error: brErr } = await supabase
             .from('branches')
             .select('organization_id')
             .eq('id', channelData.branch_id)
             .maybeSingle()
+          if (brErr) console.error('[scheduled] branches lookup error msg_id=' + msg.id + ':', brErr.message)
           orgId = branchData?.organization_id ?? null
         }
       }
 
       if (!orgId && msg.client_id) {
-        const { data: clientData } = await supabase
+        const { data: clientData, error: clErr } = await supabase
           .from('clients')
           .select('organization_id')
           .eq('id', msg.client_id)
           .maybeSingle()
+        if (clErr) console.error('[scheduled] clients lookup error msg_id=' + msg.id + ':', clErr.message)
         orgId = clientData?.organization_id ?? null
       }
 
       if (!orgId) {
+        // Permanente: no se puede resolver org. No tiene sentido reintentar.
         errorMsg = 'No se pudo resolver la organización del mensaje programado'
-        await supabase
-          .from('scheduled_messages')
-          .update({ status: 'failed', error_message: errorMsg })
-          .eq('id', msg.id)
-        results.push({ id: msg.id, sent: false, error: errorMsg })
+        await persistResult(msg, false, errorMsg, false /* willRetry */, 'permanent')
+        results.push({ id: msg.id, sent: false, error: errorMsg, retry: false })
         trackBroadcast(broadcastCounters, msg.broadcast_id, false)
         continue
       }
 
       // Obtener config del microservicio WA (con cache)
       if (!orgSettingsCache.has(orgId)) {
-        const { data: settings } = await supabase
+        const { data: settings, error: setErr } = await supabase
           .from('app_settings')
           .select('wa_api_url')
           .eq('organization_id', orgId)
           .maybeSingle()
+        if (setErr) console.error('[scheduled] app_settings error org=' + orgId + ':', setErr.message)
         orgSettingsCache.set(orgId, { wa_api_url: (settings as any)?.wa_api_url ?? null })
       }
       const waApiUrl = orgSettingsCache.get(orgId)!.wa_api_url
 
       if (waApiUrl && waApiKey && msg.phone) {
-        // Envío vía microservicio WA (Baileys)
+        // Envío vía microservicio Baileys
         try {
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 15000)
           const res = await fetch(`${waApiUrl}/send`, {
             method: 'POST',
             headers: {
@@ -115,7 +124,10 @@ Deno.serve(async (req: Request) => {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({ phone: msg.phone, message: msg.content }),
+            signal: controller.signal,
           })
+          clearTimeout(timeout)
+          httpStatus = res.status
           const result = await res.json()
           if (res.ok && !result.error) {
             sent = true
@@ -123,17 +135,20 @@ Deno.serve(async (req: Request) => {
             errorMsg = result.error || `Error HTTP ${res.status} del microservicio`
           }
         } catch (e: any) {
-          errorMsg = `Error de conexión: ${e.message}`
+          errorMsg = e.name === 'AbortError'
+            ? 'Timeout al contactar microservicio WA (15s)'
+            : `Error de conexión: ${e.message}`
         }
       } else {
         // Envío vía Meta Cloud API
         if (!orgConfigCache.has(orgId)) {
-          const { data: waConfig } = await supabase
+          const { data: waConfig, error: cfgErr } = await supabase
             .from('organization_whatsapp_config')
             .select('whatsapp_access_token, whatsapp_phone_id')
             .eq('organization_id', orgId)
             .eq('is_active', true)
             .maybeSingle()
+          if (cfgErr) console.error('[scheduled] organization_whatsapp_config error org=' + orgId + ':', cfgErr.message)
           orgConfigCache.set(orgId, waConfig ?? null)
         }
         const waConfig = orgConfigCache.get(orgId)
@@ -144,16 +159,10 @@ Deno.serve(async (req: Request) => {
           errorMsg = 'Falta teléfono en el mensaje programado'
         } else {
           const phone = normalizePhone(msg.phone)
-
           const isTemplate = !!msg.template_name
           const payload = isTemplate
             ? buildTemplatePayload(phone, msg.template_name, msg.template_language, msg.template_params)
-            : {
-                messaging_product: 'whatsapp',
-                to: phone,
-                type: 'text',
-                text: { body: msg.content },
-              }
+            : { messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: msg.content } }
 
           const controller = new AbortController()
           const timeout = setTimeout(() => controller.abort(), 15000)
@@ -172,6 +181,7 @@ Deno.serve(async (req: Request) => {
               }
             )
             clearTimeout(timeout)
+            httpStatus = res.status
 
             const result = await res.json()
             if (res.ok && result.messages?.[0]?.id) {
@@ -193,26 +203,21 @@ Deno.serve(async (req: Request) => {
         try {
           await recordInConversation(msg, orgId, orgChannelCache)
         } catch (recErr: any) {
-          // No bloquea el envío ya hecho, pero queda visible para diagnosticar
           console.error('[recordInConversation] error msg_id=' + msg.id + ':', recErr?.message ?? recErr)
         }
       }
 
-      // Actualizar estado del scheduled_message
-      await supabase
-        .from('scheduled_messages')
-        .update({
-          status: sent ? 'sent' : 'failed',
-          sent_at: sent ? new Date().toISOString() : null,
-          error_message: errorMsg,
-        })
-        .eq('id', msg.id)
+      // Decidir si reintentar o marcar como definitivo
+      const isTransient = !sent && classifyError(errorMsg, httpStatus) === 'transient'
+      const willRetry = isTransient && (msg.attempts ?? 1) < MAX_ATTEMPTS
+      const finalKind: 'transient' | 'permanent' | null = sent ? null : (isTransient ? 'transient' : 'permanent')
 
+      await persistResult(msg, sent, errorMsg, willRetry, finalKind)
       trackBroadcast(broadcastCounters, msg.broadcast_id, sent)
-      results.push({ id: msg.id, sent, error: errorMsg })
+      results.push({ id: msg.id, sent, error: errorMsg, retry: willRetry })
     }
 
-    // Actualizar contadores de broadcasts procesados
+    // Actualizar contadores de broadcasts (con error checks)
     await updateBroadcastCounters(broadcastCounters)
 
     return new Response(
@@ -220,12 +225,85 @@ Deno.serve(async (req: Request) => {
       { headers: { 'Content-Type': 'application/json' } }
     )
   } catch (error: any) {
+    console.error('[scheduled] unhandled error:', error?.message ?? error)
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }
 })
+
+// Persiste el resultado del envío. Si willRetry, re-agenda con backoff y vuelve a pending.
+async function persistResult(
+  msg: any,
+  sent: boolean,
+  errorMsg: string | null,
+  willRetry: boolean,
+  errorKind: 'transient' | 'permanent' | null
+): Promise<void> {
+  let updateData: Record<string, any>
+
+  if (sent) {
+    updateData = {
+      status: 'sent',
+      sent_at: new Date().toISOString(),
+      error_message: null,
+      last_error_kind: null,
+    }
+  } else if (willRetry) {
+    // Backoff exponencial: 5min, 15min, 45min
+    const attempts = msg.attempts ?? 1
+    const minutes = Math.pow(3, attempts - 1) * 5
+    updateData = {
+      status: 'pending',
+      sent_at: null,
+      error_message: errorMsg,
+      last_error_kind: errorKind,
+      scheduled_for: new Date(Date.now() + minutes * 60 * 1000).toISOString(),
+    }
+  } else {
+    updateData = {
+      status: 'failed',
+      sent_at: null,
+      error_message: errorMsg,
+      last_error_kind: errorKind,
+    }
+  }
+
+  const { error: updErr } = await supabase
+    .from('scheduled_messages')
+    .update(updateData)
+    .eq('id', msg.id)
+
+  if (updErr) {
+    console.error('[scheduled] persistResult update error msg_id=' + msg.id + ' status=' + updateData.status + ':', updErr.message)
+  }
+}
+
+// Clasifica un error como retriable o no.
+// Transient: 5xx HTTP, timeouts, network errors, rate limits (429).
+// Permanent: 4xx HTTP (excepto 429), template missing, config missing, validation.
+function classifyError(errorMsg: string | null, httpStatus?: number): 'transient' | 'permanent' {
+  if (!errorMsg) return 'permanent'
+  const lower = errorMsg.toLowerCase()
+
+  if (httpStatus !== undefined) {
+    if (httpStatus >= 500 && httpStatus < 600) return 'transient'
+    if (httpStatus === 429) return 'transient'
+    if (httpStatus >= 400 && httpStatus < 500) return 'permanent'
+  }
+
+  if (lower.includes('timeout')) return 'transient'
+  if (lower.includes('error de conexión') || lower.includes('econn') || lower.includes('network')) return 'transient'
+  if (lower.includes('rate limit')) return 'transient'
+
+  // Errores típicamente permanentes
+  if (lower.includes('132001') || lower.includes('template')) return 'permanent'
+  if (lower.includes('config') || lower.includes('no encontrada') || lower.includes('falta')) return 'permanent'
+
+  // Default: si no podemos categorizar, asumimos permanente (no re-spamear al cliente)
+  return 'permanent'
+}
 
 // Normaliza un teléfono argentino al formato internacional de Meta
 function normalizePhone(raw: string): string {
@@ -259,7 +337,6 @@ function buildTemplatePayload(
     },
   }
 
-  // Si hay template_params, convertirlos al formato de Meta Cloud API components
   if (templateParams && Array.isArray(templateParams) && templateParams.length > 0) {
     payload.template.components = templateParams.map((comp: any) => ({
       type: comp.type,
@@ -277,12 +354,8 @@ function buildTemplatePayload(
 }
 
 // Registra el mensaje enviado en la tabla de conversaciones para que aparezca en el inbox.
-// Cada operación verifica errores y los loguea: si una falla silenciosa rompe el flujo
-// (como pasó con la migración 103 dejando social_channels.branch_id NULL), aparece en logs.
 async function recordInConversation(msg: any, orgId: string, orgChannelCache: Map<string, { id: string }[]>) {
   if (!orgChannelCache.has(orgId)) {
-    // Org-scope desde migración 103: filtramos por organization_id directo.
-    // Esto cubre tanto canales org-wide (branch_id=NULL) como legacy por sucursal.
     const { data: channels, error: chErr } = await supabase
       .from('social_channels')
       .select('id')
@@ -290,7 +363,7 @@ async function recordInConversation(msg: any, orgId: string, orgChannelCache: Ma
       .eq('is_active', true)
       .eq('organization_id', orgId)
     if (chErr) {
-      console.error('[recordInConversation] social_channels lookup error:', chErr.message)
+      console.error('[recordInConversation] social_channels lookup error org=' + orgId + ':', chErr.message)
     }
     orgChannelCache.set(orgId, channels ?? [])
   }
@@ -334,7 +407,7 @@ async function recordInConversation(msg: any, orgId: string, orgChannelCache: Ma
       .select('id')
       .single()
     if (convInsErr) {
-      console.error('[recordInConversation] conversations.insert error:', convInsErr.message)
+      console.error('[recordInConversation] conversations.insert error msg_id=' + msg.id + ':', convInsErr.message)
     }
     convId = newConv?.id ?? null
   }
@@ -356,17 +429,15 @@ async function recordInConversation(msg: any, orgId: string, orgChannelCache: Ma
     console.error('[recordInConversation] messages.insert error msg_id=' + msg.id + ':', msgInsErr.message)
   }
 
-  // El trigger trg_conversation_on_message_insert ya actualiza last_message_at,
-  // pero lo hacemos explícito por idempotencia ante triggers ausentes.
   const { error: convUpdErr } = await supabase
     .from('conversations')
     .update({ last_message_at: new Date().toISOString() })
     .eq('id', convId)
   if (convUpdErr) {
-    console.error('[recordInConversation] conversations.update error:', convUpdErr.message)
+    console.error('[recordInConversation] conversations.update error conv=' + convId + ':', convUpdErr.message)
   }
 
-  // Workflow execution
+  // Workflow execution (con waiting_since correcto desde migración 119+)
   if (msg.workflow_id && msg.workflow_trigger_data) {
     const triggerData = msg.workflow_trigger_data as Record<string, any>
     const nextNodeId = triggerData.next_node_id as string | null
@@ -381,7 +452,7 @@ async function recordInConversation(msg: any, orgId: string, orgChannelCache: Ma
       .eq('conversation_id', convId)
       .in('status', ['active', 'waiting_reply'])
     if (cancelErr) {
-      console.error('[Workflow] cancel previas error:', cancelErr.message)
+      console.error('[Workflow] cancel previas error conv=' + convId + ':', cancelErr.message)
     }
 
     const currentNodeId = nextNodeId ?? firstActionNodeId
@@ -396,12 +467,15 @@ async function recordInConversation(msg: any, orgId: string, orgChannelCache: Ma
         status: execStatus,
         context: { client_name: clientName, client_first_name: firstName },
         triggered_by: 'post_service',
+        // waiting_since es indispensable para que expire_stale_workflow_executions() pueda procesarlo.
+        // Sin esto, las executions quedan stuck para siempre y rompen overlap_policy='skip_if_active'.
+        waiting_since: execStatus === 'waiting_reply' ? new Date().toISOString() : null,
         completed_at: execStatus === 'completed' ? new Date().toISOString() : null,
       })
       .select('id')
       .single()
     if (execErr) {
-      console.error('[Workflow] insert execution error:', execErr.message)
+      console.error('[Workflow] insert execution error msg_id=' + msg.id + ':', execErr.message)
       return
     }
 
@@ -428,7 +502,6 @@ async function recordInConversation(msg: any, orgId: string, orgChannelCache: Ma
   }
 }
 
-// Acumula contadores por broadcast_id
 function trackBroadcast(counters: Map<string, { sent: number; failed: number }>, broadcastId: string | null, sent: boolean) {
   if (!broadcastId) return
   const existing = counters.get(broadcastId) ?? { sent: 0, failed: 0 }
@@ -437,16 +510,18 @@ function trackBroadcast(counters: Map<string, { sent: number; failed: number }>,
   counters.set(broadcastId, existing)
 }
 
-// Actualiza contadores de broadcasts y marca como completado si corresponde
 async function updateBroadcastCounters(counters: Map<string, { sent: number; failed: number }>) {
   for (const [broadcastId, counts] of counters) {
-    // Incrementar contadores atómicamente
-    const { data: broadcast } = await supabase
+    const { data: broadcast, error: bcErr } = await supabase
       .from('broadcasts')
       .select('audience_count, sent_count, failed_count')
       .eq('id', broadcastId)
       .single()
 
+    if (bcErr) {
+      console.error('[broadcasts] lookup error broadcast=' + broadcastId + ':', bcErr.message)
+      continue
+    }
     if (!broadcast) continue
 
     const newSent = (broadcast.sent_count ?? 0) + counts.sent
@@ -454,7 +529,7 @@ async function updateBroadcastCounters(counters: Map<string, { sent: number; fai
     const total = broadcast.audience_count ?? 0
     const allProcessed = (newSent + newFailed) >= total
 
-    await supabase
+    const { error: bcUpdErr } = await supabase
       .from('broadcasts')
       .update({
         sent_count: newSent,
@@ -463,43 +538,57 @@ async function updateBroadcastCounters(counters: Map<string, { sent: number; fai
         ...(allProcessed ? { status: 'sent', completed_at: new Date().toISOString() } : {}),
       })
       .eq('id', broadcastId)
+    if (bcUpdErr) {
+      console.error('[broadcasts] update error broadcast=' + broadcastId + ':', bcUpdErr.message)
+    }
 
-    // Actualizar estados individuales de broadcast_recipients
     if (counts.sent > 0) {
-      const { data: sentMsgs } = await supabase
+      const { data: sentMsgs, error: smErr } = await supabase
         .from('scheduled_messages')
         .select('client_id')
         .eq('broadcast_id', broadcastId)
         .eq('status', 'sent')
         .limit(counts.sent)
+      if (smErr) {
+        console.error('[broadcasts] sent_msgs lookup error broadcast=' + broadcastId + ':', smErr.message)
+      }
 
-      if (sentMsgs) {
+      if (sentMsgs && sentMsgs.length > 0) {
         const clientIds = sentMsgs.map(m => m.client_id)
-        await supabase
+        const { error: brUpdErr } = await supabase
           .from('broadcast_recipients')
           .update({ status: 'sent', sent_at: new Date().toISOString() })
           .eq('broadcast_id', broadcastId)
           .in('client_id', clientIds)
           .eq('status', 'pending')
+        if (brUpdErr) {
+          console.error('[broadcasts] recipients sent update error broadcast=' + broadcastId + ':', brUpdErr.message)
+        }
       }
     }
 
     if (counts.failed > 0) {
-      const { data: failedMsgs } = await supabase
+      const { data: failedMsgs, error: fmErr } = await supabase
         .from('scheduled_messages')
         .select('client_id, error_message')
         .eq('broadcast_id', broadcastId)
         .eq('status', 'failed')
         .limit(counts.failed)
+      if (fmErr) {
+        console.error('[broadcasts] failed_msgs lookup error broadcast=' + broadcastId + ':', fmErr.message)
+      }
 
-      if (failedMsgs) {
+      if (failedMsgs && failedMsgs.length > 0) {
         for (const fm of failedMsgs) {
-          await supabase
+          const { error: brUpdErr } = await supabase
             .from('broadcast_recipients')
             .update({ status: 'failed', error_message: fm.error_message })
             .eq('broadcast_id', broadcastId)
             .eq('client_id', fm.client_id)
             .eq('status', 'pending')
+          if (brUpdErr) {
+            console.error('[broadcasts] recipients failed update error broadcast=' + broadcastId + ' client=' + fm.client_id + ':', brUpdErr.message)
+          }
         }
       }
     }

@@ -262,14 +262,18 @@ export function TvClient({
      
     fetchSchedules()
 
+    // Filter por organization_id (multi-tenant): evita que un evento de otra org
+    // dispare re-fetch en este TV. Si orgId es null (caso edge), no filtramos.
+    const orgFilter = orgId ? `organization_id=eq.${orgId}` : undefined
     const channel = supabase
-      .channel('tv-queue')
+      .channel(`tv-queue-${orgId || 'default'}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'queue_entries',
+          ...(orgFilter ? { filter: orgFilter } : {}),
         },
         () => {
           fetchQueue()
@@ -282,6 +286,7 @@ export function TvClient({
           event: '*',
           schema: 'public',
           table: 'staff',
+          ...(orgFilter ? { filter: orgFilter } : {}),
         },
         () => fetchBarbers()
       )
@@ -291,6 +296,7 @@ export function TvClient({
           event: '*',
           schema: 'public',
           table: 'attendance_logs',
+          ...(orgFilter ? { filter: orgFilter } : {}),
         },
         () => fetchSchedules()
       )

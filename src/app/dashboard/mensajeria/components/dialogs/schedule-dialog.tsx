@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -8,10 +8,28 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { WhatsAppIcon } from '../shared/icons'
 import { useMensajeria } from '../shared/mensajeria-context'
+import { searchClients } from '@/lib/actions/clients'
 
 export function ScheduleDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const { clients, handleSchedule, isSending } = useMensajeria()
+  const { handleSchedule, isSending } = useMensajeria()
   const [data, setData] = useState({ clientId: '', content: '', scheduledFor: '' })
+  const [clientSearch, setClientSearch] = useState('')
+  const [clientResults, setClientResults] = useState<{ id: string; name: string; phone: string }[]>([])
+  const [selectedClientLabel, setSelectedClientLabel] = useState('')
+
+  // Buscar clientes on-demand mientras el usuario escribe
+  useEffect(() => {
+    if (!open) return
+    if (!clientSearch || clientSearch.trim().length < 2) {
+      setClientResults([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      const result = await searchClients(clientSearch)
+      setClientResults(result.data ?? [])
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [clientSearch, open])
 
   const handleSubmit = () => {
     handleSchedule(data)
@@ -28,11 +46,51 @@ export function ScheduleDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Cliente</Label>
-            <select className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-green-500/40"
-              value={data.clientId} onChange={e => setData(prev => ({ ...prev, clientId: e.target.value }))}>
-              <option value="" className="bg-muted">Seleccioná un cliente...</option>
-              {clients.map(c => <option key={c.id} value={c.id} className="bg-muted">{c.name} — {c.phone}</option>)}
-            </select>
+            {data.clientId ? (
+              <div className="flex items-center justify-between rounded-lg bg-muted px-3 py-2 text-sm">
+                <span className="text-foreground">{selectedClientLabel}</span>
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground hover:text-foreground ml-2"
+                  onClick={() => {
+                    setData(prev => ({ ...prev, clientId: '' }))
+                    setSelectedClientLabel('')
+                    setClientSearch('')
+                  }}
+                >
+                  Cambiar
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <input
+                  className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-green-500/40"
+                  placeholder="Buscar por nombre o teléfono..."
+                  value={clientSearch}
+                  onChange={e => setClientSearch(e.target.value)}
+                />
+                {clientResults.length > 0 && (
+                  <div className="rounded-lg border border-border bg-popover shadow-md overflow-hidden max-h-40 overflow-y-auto">
+                    {clientResults.map(c => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors text-left"
+                        onClick={() => {
+                          setData(prev => ({ ...prev, clientId: c.id }))
+                          setSelectedClientLabel(`${c.name} — ${c.phone}`)
+                          setClientResults([])
+                          setClientSearch('')
+                        }}
+                      >
+                        <span className="font-medium">{c.name}</span>
+                        <span className="text-muted-foreground">{c.phone}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Mensaje</Label>

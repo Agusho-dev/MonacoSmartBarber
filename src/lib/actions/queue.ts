@@ -314,18 +314,18 @@ export async function completeService(
     : Number(visit.commission_pct)
 
   if (allServiceIds.length > 0) {
-    // Fetch service prices and default commissions
-    const { data: activeServices } = await supabase
-      .from('services')
-      .select('id, price, default_commission_pct')
-      .in('id', allServiceIds)
-
-    // Fetch per-barber commission overrides for these services
-    const { data: barberOverrides } = await supabase
-      .from('staff_service_commissions')
-      .select('service_id, commission_pct')
-      .eq('staff_id', visit.barber_id)
-      .in('service_id', allServiceIds)
+    // Paralelizar: precios de servicios y overrides de comisión son independientes entre sí
+    const [{ data: activeServices }, { data: barberOverrides }] = await Promise.all([
+      supabase
+        .from('services')
+        .select('id, price, default_commission_pct')
+        .in('id', allServiceIds),
+      supabase
+        .from('staff_service_commissions')
+        .select('service_id, commission_pct')
+        .eq('staff_id', visit.barber_id)
+        .in('service_id', allServiceIds),
+    ])
 
     const overrideMap = new Map<string, number>()
     if (barberOverrides) {
@@ -545,21 +545,21 @@ export async function completeService(
           console.warn(`[PostService visit=${visit.id}] skip: cliente sin teléfono (client=${visit.client_id})`)
         }
         if (client?.phone) {
-          // Buscar reglas post_service activas para esta org
-          const { data: postServiceRules } = await supabase
-            .from('auto_reply_rules')
-            .select('*')
-            .eq('organization_id', visitOrgId)
-            .eq('trigger_type', 'post_service')
-            .eq('is_active', true)
-            .order('priority', { ascending: false })
-
-          // También verificar la config legacy de app_settings como fallback
-          const { data: settings } = await supabase
-            .from('app_settings')
-            .select('review_auto_send, review_delay_minutes, review_template_name')
-            .eq('organization_id', visitOrgId)
-            .maybeSingle()
+          // Paralelizar: reglas post_service y app_settings son independientes entre sí
+          const [{ data: postServiceRules }, { data: settings }] = await Promise.all([
+            supabase
+              .from('auto_reply_rules')
+              .select('*')
+              .eq('organization_id', visitOrgId)
+              .eq('trigger_type', 'post_service')
+              .eq('is_active', true)
+              .order('priority', { ascending: false }),
+            supabase
+              .from('app_settings')
+              .select('review_auto_send, review_delay_minutes, review_template_name')
+              .eq('organization_id', visitOrgId)
+              .maybeSingle(),
+          ])
 
           // Ejecutar reglas post_service (auto_reply_rules legacy)
           if (postServiceRules && postServiceRules.length > 0) {
@@ -599,46 +599,53 @@ export async function completeService(
             }
           }
 
-          // Buscar automation_workflows con trigger post_service
-          const { data: postServiceWorkflows, error: wfLookupErr } = await supabase
-            .from('automation_workflows')
-            .select('id, name, trigger_config, branch_id, overlap_policy, category')
-            .eq('organization_id', visitOrgId)
-            .eq('trigger_type', 'post_service')
-            .eq('is_active', true)
-            .order('priority', { ascending: false })
+          // Paralelizar: workflows y canales WA son independientes entre sí.
+          // orgChannels se resuelve aquí para que, si hay workflows, el convId
+          // ya esté disponible sin un RTT extra.
+          const phoneSuffix = (client.phone ?? '').replace(/\D/g, '').slice(-10)
+          const [
+            { data: postServiceWorkflows, error: wfLookupErr },
+            { data: orgChannels },
+          ] = await Promise.all([
+            supabase
+              .from('automation_workflows')
+              .select('id, name, trigger_config, branch_id, overlap_policy, category')
+              .eq('organization_id', visitOrgId)
+              .eq('trigger_type', 'post_service')
+              .eq('is_active', true)
+              .order('priority', { ascending: false }),
+            phoneSuffix
+              ? supabase
+                  .from('social_channels')
+                  .select('id')
+                  .eq('platform', 'whatsapp')
+                  .eq('is_active', true)
+                  .eq('organization_id', visitOrgId)
+              : Promise.resolve({ data: null, error: null }),
+          ])
 
           if (wfLookupErr) {
             console.error('[PostService:Workflow] lookup error visit=' + visit.id + ':', wfLookupErr.message)
           }
 
-          if (postServiceWorkflows && postServiceWorkflows.length > 0) {
-            // Resolver convId del cliente una sola vez para chequeos de overlap.
-            // Coincide con la lógica de process-scheduled-messages: lookup por sufijo
-            // de teléfono dentro de los canales WA activos de la org.
-            const phoneSuffix = (client.phone ?? '').replace(/\D/g, '').slice(-10)
-            let clientConvId: string | null = null
-            if (phoneSuffix) {
-              const { data: orgChannels } = await supabase
-                .from('social_channels')
+          // Resolver convId: depende de orgChannels (ya disponible)
+          let clientConvId: string | null = null
+          if (phoneSuffix) {
+            const channelIds = orgChannels?.map((c: { id: string }) => c.id) ?? []
+            if (channelIds.length > 0) {
+              const { data: convRow } = await supabase
+                .from('conversations')
                 .select('id')
-                .eq('platform', 'whatsapp')
-                .eq('is_active', true)
-                .eq('organization_id', visitOrgId)
-              const channelIds = orgChannels?.map((c: { id: string }) => c.id) ?? []
-              if (channelIds.length > 0) {
-                const { data: convRow } = await supabase
-                  .from('conversations')
-                  .select('id')
-                  .in('channel_id', channelIds)
-                  .ilike('platform_user_id', `%${phoneSuffix}`)
-                  .order('last_message_at', { ascending: false, nullsFirst: false })
-                  .limit(1)
-                  .maybeSingle()
-                clientConvId = convRow?.id ?? null
-              }
+                .in('channel_id', channelIds)
+                .ilike('platform_user_id', `%${phoneSuffix}`)
+                .order('last_message_at', { ascending: false, nullsFirst: false })
+                .limit(1)
+                .maybeSingle()
+              clientConvId = convRow?.id ?? null
             }
+          }
 
+          if (postServiceWorkflows && postServiceWorkflows.length > 0) {
             for (const wf of postServiceWorkflows) {
               const wfTag = `[PostService:Workflow wf=${wf.id} name="${wf.name}" visit=${visit.id}]`
               if (wf.branch_id && wf.branch_id !== visit.branch_id) {
@@ -831,18 +838,40 @@ export async function completeService(
     const tz = await getActiveTimezone()
     const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date())
 
+    // Paralelizar los lookups de los dos reportes: son independientes entre sí.
+    // Los UPDATE/INSERT posteriores se ejecutan en serie porque dependen de cada resultado.
+    const [
+      existingServiceReport,
+      existingProductReport,
+    ] = await Promise.all([
+      serviceCommissionAmount > 0
+        ? supabase
+            .from('salary_reports')
+            .select('id, amount')
+            .eq('staff_id', visit.barber_id)
+            .eq('branch_id', visit.branch_id)
+            .eq('type', 'commission')
+            .eq('report_date', todayStr)
+            .eq('status', 'pending')
+            .maybeSingle()
+            .then(r => r.data)
+        : Promise.resolve(null),
+      productCommissionAmount > 0
+        ? supabase
+            .from('salary_reports')
+            .select('id, amount')
+            .eq('staff_id', visit.barber_id)
+            .eq('branch_id', visit.branch_id)
+            .eq('type', 'product_commission')
+            .eq('report_date', todayStr)
+            .eq('status', 'pending')
+            .maybeSingle()
+            .then(r => r.data)
+        : Promise.resolve(null),
+    ])
+
     // 8a. Reporte de comisión por servicio
     if (serviceCommissionAmount > 0) {
-      const { data: existingServiceReport } = await supabase
-        .from('salary_reports')
-        .select('id, amount')
-        .eq('staff_id', visit.barber_id)
-        .eq('branch_id', visit.branch_id)
-        .eq('type', 'commission')
-        .eq('report_date', todayStr)
-        .eq('status', 'pending')
-        .maybeSingle()
-
       if (existingServiceReport) {
         await supabase
           .from('salary_reports')
@@ -864,16 +893,6 @@ export async function completeService(
 
     // 8b. Reporte de comisión por producto (separado)
     if (productCommissionAmount > 0) {
-      const { data: existingProductReport } = await supabase
-        .from('salary_reports')
-        .select('id, amount')
-        .eq('staff_id', visit.barber_id)
-        .eq('branch_id', visit.branch_id)
-        .eq('type', 'product_commission')
-        .eq('report_date', todayStr)
-        .eq('status', 'pending')
-        .maybeSingle()
-
       if (existingProductReport) {
         await supabase
           .from('salary_reports')
@@ -899,7 +918,7 @@ export async function completeService(
   revalidatePath('/barbero/fila')
   revalidatePath('/barbero/facturacion')
   revalidatePath('/barbero/rendimiento')
-  revalidatePath('/dashboard')
+  revalidatePath('/dashboard/fila')
   revalidatePath('/dashboard/finanzas')
   revalidatePath('/dashboard/estadisticas')
   return { success: true, visitId: visit.id, breakAutoStarted }

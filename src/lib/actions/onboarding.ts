@@ -85,7 +85,7 @@ export async function uploadOrgLogo(formData: FormData) {
   }
 
   revalidatePath('/dashboard/configuracion')
-  revalidatePath('/')
+  revalidatePath('/dashboard')
   return { success: true, url: publicUrl.publicUrl }
 }
 
@@ -110,7 +110,7 @@ export async function updateOrgName(name: string) {
   }
 
   revalidatePath('/dashboard/configuracion')
-  revalidatePath('/')
+  revalidatePath('/dashboard')
   return { success: true }
 }
 

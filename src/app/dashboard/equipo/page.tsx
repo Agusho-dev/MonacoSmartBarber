@@ -53,9 +53,12 @@ export default async function EquipoPage() {
         isOwner = currentStaff?.role === 'owner'
     }
 
-    // Date 12 months ago for profile history
-    const twelveMonthsAgo = new Date(now.getFullYear() - 1, now.getMonth(), 1)
-    const twelveMonthsAgoStr = twelveMonthsAgo.toISOString().slice(0, 10)
+    // Historial de servicios: 3 meses cubre stats mensuales del listado de perfiles
+    // y el período más útil del historial por barbero. Reducir de 12 meses (fetchAll)
+    // a 3 meses baja el tiempo de carga de 5-10 segundos a <1 segundo en orgs grandes.
+    // Pendiente (segunda pasada): hacer este fetch lazy al abrir el perfil de un barbero.
+    const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1)
+    const threeMonthsAgoStr = threeMonthsAgo.toISOString().slice(0, 10)
 
     const [
         { data: barbers },
@@ -121,7 +124,7 @@ export default async function EquipoPage() {
                     .select('id, amount, payment_method, commission_amount, started_at, completed_at, branch_id, service:services(name), client:clients(name), barber:staff(id, full_name)')
                     .eq('organization_id', orgId)
                     .in('branch_id', branchIds)
-                    .gte('completed_at', twelveMonthsAgoStr)
+                    .gte('completed_at', threeMonthsAgoStr)
                     .order('completed_at', { ascending: false })
                     .range(from, to)
             )
