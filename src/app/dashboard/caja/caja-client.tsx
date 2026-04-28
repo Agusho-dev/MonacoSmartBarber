@@ -672,7 +672,7 @@ function HeroRevenuePanel({
             </p>
           </div>
           <div className="flex items-baseline gap-3">
-            <h1 className="text-4xl xs:text-5xl md:text-6xl font-bold tabular-nums leading-none tracking-tight bg-gradient-to-br from-amber-100 via-amber-300 to-orange-500 bg-clip-text text-transparent break-words">
+            <h1 className="text-4xl min-[420px]:text-5xl md:text-6xl font-bold tabular-nums leading-none tracking-tight bg-gradient-to-br from-amber-100 via-amber-300 to-orange-500 bg-clip-text text-transparent break-words">
               {formatCurrency(animatedTotal)}
             </h1>
           </div>
@@ -825,29 +825,84 @@ function MetricsStrip({
     : summary.accounts.reduce((s, a) => s + a.total, 0)
   const accounts = hasActiveFilters ? filteredTotals.accounts : summary.accounts.map(a => ({ accountId: a.accountId, accountName: a.accountName, total: a.total }))
 
+  const items = [
+    {
+      key: 'cash',
+      token: PAYMENT_TOKENS.cash,
+      icon: <Banknote className="size-4" />,
+      label: 'Efectivo en caja',
+      amount: cash,
+      footnote: !hasActiveFilters && summary.cashExpenses > 0 ? `Egresos ${formatCurrency(summary.cashExpenses)}` : undefined,
+      accounts: undefined as { accountId: string; accountName: string; total: number }[] | undefined,
+    },
+    {
+      key: 'card',
+      token: PAYMENT_TOKENS.card,
+      icon: <CreditCard className="size-4" />,
+      label: 'Tarjeta',
+      amount: card,
+      footnote: undefined,
+      accounts: undefined,
+    },
+    {
+      key: 'transfer',
+      token: PAYMENT_TOKENS.transfer,
+      icon: <ArrowRightLeft className="size-4" />,
+      label: 'Transferencias',
+      amount: transfer,
+      footnote: undefined,
+      accounts,
+    },
+  ]
+
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
-      <MetricCard
-        token={PAYMENT_TOKENS.cash}
-        icon={<Banknote className="size-4" />}
-        label="Efectivo en caja"
-        amount={cash}
-        footnote={!hasActiveFilters && summary.cashExpenses > 0 ? `Egresos ${formatCurrency(summary.cashExpenses)}` : undefined}
-      />
-      <MetricCard
-        token={PAYMENT_TOKENS.card}
-        icon={<CreditCard className="size-4" />}
-        label="Tarjeta"
-        amount={card}
-      />
-      <MetricCard
-        token={PAYMENT_TOKENS.transfer}
-        icon={<ArrowRightLeft className="size-4" />}
-        label="Transferencias"
-        amount={transfer}
-        accounts={accounts}
-      />
-    </div>
+    <>
+      {/* Mobile — carrusel horizontal con snap */}
+      <div className="-mx-4 sm:hidden">
+        <div className="flex snap-x snap-mandatory items-stretch gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {items.map((it) => (
+            <div
+              key={it.key}
+              className="snap-start shrink-0 w-[78%] min-[420px]:w-[58%] first:ml-0 last:mr-1 flex"
+            >
+              <MetricCard
+                token={it.token}
+                icon={it.icon}
+                label={it.label}
+                amount={it.amount}
+                footnote={it.footnote}
+                accounts={it.accounts}
+              />
+            </div>
+          ))}
+        </div>
+        {/* Indicadores de paginación */}
+        <div className="mt-1 flex items-center justify-center gap-1.5">
+          {items.map((it) => (
+            <span
+              key={it.key}
+              className={`h-1 rounded-full transition-all ${it.amount > 0 ? `${it.token.bar} w-5` : 'w-1.5 bg-zinc-700'}`}
+              aria-hidden
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Tablet/desktop — grid */}
+      <div className="hidden gap-3 sm:grid sm:grid-cols-3">
+        {items.map(it => (
+          <MetricCard
+            key={it.key}
+            token={it.token}
+            icon={it.icon}
+            label={it.label}
+            amount={it.amount}
+            footnote={it.footnote}
+            accounts={it.accounts}
+          />
+        ))}
+      </div>
+    </>
   )
 }
 
@@ -868,33 +923,33 @@ function MetricCard({
 }) {
   const animated = useCountUp(amount)
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-white/[0.06] bg-zinc-900/40 p-3.5 sm:p-4 transition-colors hover:border-white/10">
+    <div className="group relative flex w-full flex-col overflow-hidden rounded-2xl border border-white/[0.06] bg-zinc-900/40 p-3.5 sm:p-4 transition-colors hover:border-white/10">
       {/* Soft accent on hover */}
       <div className={`pointer-events-none absolute -top-12 -right-12 size-32 rounded-full ${token.bgSoft} blur-2xl opacity-50 transition-opacity group-hover:opacity-80`} />
-      <div className="relative flex items-start justify-between">
-        <div className="space-y-1">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+      <div className="relative flex items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground truncate">{label}</p>
           <p className={`text-2xl font-bold tabular-nums leading-tight ${token.text}`}>
             {formatCurrency(animated)}
           </p>
           {footnote && (
-            <p className="text-[10px] text-rose-400/80">{footnote}</p>
+            <p className="text-[10px] text-rose-400/80 truncate">{footnote}</p>
           )}
         </div>
-        <div className={`flex size-8 items-center justify-center rounded-xl ${token.bgSoft} ${token.text} ring-1 ${token.ring}`}>
+        <div className={`flex size-8 shrink-0 items-center justify-center rounded-xl ${token.bgSoft} ${token.text} ring-1 ${token.ring}`}>
           {icon}
         </div>
       </div>
       {accounts && accounts.length > 0 && (
         <div className="relative mt-3 space-y-1 border-t border-white/[0.05] pt-2">
-          {accounts.slice(0, 3).map(a => (
-            <div key={a.accountId} className="flex items-center justify-between text-[11px]">
-              <span className="truncate text-muted-foreground">{a.accountName}</span>
-              <span className="tabular-nums text-zinc-300">{formatCurrency(a.total)}</span>
+          {accounts.slice(0, 2).map(a => (
+            <div key={a.accountId} className="flex items-center justify-between gap-2 text-[11px]">
+              <span className="min-w-0 truncate text-muted-foreground">{a.accountName}</span>
+              <span className="shrink-0 tabular-nums text-zinc-300">{formatCurrency(a.total)}</span>
             </div>
           ))}
-          {accounts.length > 3 && (
-            <p className="text-[10px] text-muted-foreground">+ {accounts.length - 3} más</p>
+          {accounts.length > 2 && (
+            <p className="text-[10px] text-muted-foreground">+ {accounts.length - 2} más</p>
           )}
         </div>
       )}
@@ -1204,15 +1259,15 @@ function PodiumRow({
     <div className="relative rounded-xl border border-white/[0.06] bg-zinc-950/40 overflow-hidden">
       {/* Progress bar background */}
       <div className={`absolute inset-y-0 left-0 bg-gradient-to-r ${config.bar}`} style={{ width: `${pct}%` }} />
-      <div className="relative flex items-center gap-2.5 px-3 py-2">
+      <div className="relative flex items-center gap-2 px-3 py-2 min-[420px]:gap-2.5">
         <div className={`flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br ${config.bg} ${config.text} font-bold text-xs ring-2 ${config.ring} shadow-lg`}>
           {config.icon}
         </div>
-        <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-zinc-800/80 text-[10px] font-bold text-zinc-300">
+        <div className="hidden min-[420px]:flex size-7 shrink-0 items-center justify-center rounded-full bg-zinc-800/80 text-[10px] font-bold text-zinc-300">
           {getInitials(name) || '?'}
         </div>
-        <span className="flex-1 truncate text-sm font-medium text-zinc-100">{name}</span>
-        <span className="text-sm font-bold tabular-nums text-emerald-300">{formatCurrency(cash)}</span>
+        <span className="flex-1 min-w-0 truncate text-sm font-medium text-zinc-100">{name}</span>
+        <span className="text-sm font-bold tabular-nums text-emerald-300 whitespace-nowrap">{formatCurrency(cash)}</span>
       </div>
     </div>
   )
@@ -1515,9 +1570,9 @@ function BranchOpeningCashEditor({
       <button
         type="button"
         onClick={startEdit}
-        className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-zinc-950/40 px-2.5 py-1 text-[11px] text-zinc-300 transition-colors hover:border-amber-500/30 hover:text-amber-300"
+        className="inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-2xl border border-white/[0.06] bg-zinc-950/40 px-2.5 py-1 text-[11px] text-zinc-300 transition-colors hover:border-amber-500/30 hover:text-amber-300"
       >
-        <span className="text-muted-foreground">Vuelto inicial · {branch.name}:</span>
+        <span className="text-muted-foreground truncate">Vuelto inicial · {branch.name}:</span>
         <span className="font-semibold tabular-nums">{formatCurrency(branch.default_opening_cash ?? 0)}</span>
         <Pencil className="size-3 opacity-70" />
       </button>
@@ -1611,15 +1666,15 @@ function ShiftCloseRowItem({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="text-right hidden xs:block">
+          <div className="text-right hidden min-[420px]:block">
             <p className="text-[10px] text-muted-foreground leading-none">Esperado</p>
             <p className="text-sm font-bold tabular-nums text-zinc-200">{formatCurrency(close.cashExpected)}</p>
           </div>
           <ChevronDown className={`size-4 shrink-0 text-zinc-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
         </div>
-        {/* Status pill — segunda fila en mobile, tercera columna inline en sm+ */}
-        <div className="col-span-2 col-start-2 flex items-center justify-between gap-2 xs:col-span-3 xs:col-start-1 xs:justify-end xs:border-t-0">
-          <span className="text-[10px] text-muted-foreground xs:hidden">
+        {/* Status pill — segunda fila en mobile chico (con esperado inline), inline en >=420px */}
+        <div className="col-span-2 col-start-2 flex items-center justify-between gap-2 min-[420px]:col-span-3 min-[420px]:col-start-1 min-[420px]:justify-end">
+          <span className="text-[10px] text-muted-foreground min-[420px]:hidden">
             Esperado <span className="font-bold tabular-nums text-zinc-200">{formatCurrency(close.cashExpected)}</span>
           </span>
           <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold tabular-nums ${status.cls}`}>
