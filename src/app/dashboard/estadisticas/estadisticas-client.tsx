@@ -61,9 +61,9 @@ import {
 } from 'lucide-react'
 
 const COLORS = {
-  primary: '#fbbf24',   // amber-400 — recaudación / brand
-  secondary: '#38bdf8', // sky-400 — cortes diarios
-  tertiary: '#a78bfa',  // violet-400 — terciarios
+  primary: 'var(--chart-2)',
+  secondary: 'var(--chart-3)',
+  tertiary: 'var(--chart-4)',
   grid: '#262626',
   axis: '#737373',
 }
@@ -74,13 +74,7 @@ const METHOD_LABELS: Record<string, string> = {
   transfer: 'Transferencia',
 }
 
-// Mapeo por método (coherente con el rediseño de caja: cash=emerald, card=sky, transfer=violet)
-const METHOD_COLORS_BY_KEY: Record<string, string> = {
-  cash: '#10b981',     // emerald-500
-  card: '#0ea5e9',     // sky-500
-  transfer: '#8b5cf6', // violet-500
-}
-const METHOD_COLORS_FALLBACK = ['#fbbf24', '#10b981', '#0ea5e9', '#8b5cf6']
+const METHOD_COLORS = ['var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)']
 
 
 interface Props {
@@ -429,10 +423,10 @@ function TrendsTab({ data }: { data: StatsData }) {
                   animationDuration={800}
                   activeBar={{ stroke: 'var(--foreground)', strokeWidth: 1, fillOpacity: 0.8 }}
                 >
-                  {methodData.map((m, i) => (
+                  {methodData.map((_, i) => (
                     <Cell
                       key={i}
-                      fill={METHOD_COLORS_BY_KEY[m.method] ?? METHOD_COLORS_FALLBACK[i % METHOD_COLORS_FALLBACK.length]}
+                      fill={METHOD_COLORS[i % METHOD_COLORS.length]}
                     />
                   ))}
                 </Bar>
