@@ -1,82 +1,24 @@
 import { Skeleton } from '@/components/ui/skeleton'
 
-// Skeleton global del dashboard: imita sidebar + panel principal con cards
-export default function DashboardLoading() {
+// Skeleton del root del dashboard. Esta ruta hace redirect server-side, pero
+// puede aparecer un instante mientras se resuelve. Mantenemos un placeholder
+// minimalista coherente con el shell del dashboard.
+export default function DashboardRootLoading() {
   return (
-    <div className="flex min-h-screen">
-      {/* Sidebar simulado */}
-      <div className="hidden w-64 shrink-0 border-r border-border bg-sidebar p-4 md:flex md:flex-col md:gap-3">
-        <Skeleton className="h-8 w-32" />
-        <Skeleton className="mt-4 h-4 w-full" />
-        <Skeleton className="h-4 w-5/6" />
-        <Skeleton className="h-4 w-4/6" />
-        <Skeleton className="h-4 w-5/6" />
-        <Skeleton className="h-4 w-3/6" />
-        <Skeleton className="h-4 w-5/6" />
-        <Skeleton className="h-4 w-4/6" />
+    <div className="flex h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-5rem)] flex-col">
+      <div className="shrink-0 border-b border-white/[0.06] bg-zinc-950/80 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
+          <Skeleton className="h-6 w-40 rounded-md" />
+          <Skeleton className="h-9 w-32 rounded-md" />
+        </div>
       </div>
-
-      {/* Panel principal */}
-      <div className="flex-1 space-y-6 p-6">
-        {/* Header de página */}
-        <div className="flex items-center justify-between">
-          <Skeleton className="h-8 w-48" />
-          <Skeleton className="h-9 w-36" />
-        </div>
-
-        {/* Fila de cards de métricas */}
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="rounded-xl border border-border bg-card p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <Skeleton className="h-3 w-24" />
-                <Skeleton className="h-4 w-4 rounded" />
-              </div>
-              <Skeleton className="h-8 w-20" />
-            </div>
-          ))}
-        </div>
-
-        {/* Fila de cards secundarias */}
-        <div className="grid gap-4 md:grid-cols-3">
-          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-10 w-32" />
-            <Skeleton className="h-3 w-full" />
-            <Skeleton className="h-3 w-4/5" />
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4 space-y-3 md:col-span-2">
-            <Skeleton className="h-4 w-36" />
-            <div className="grid grid-cols-3 gap-4 pt-2">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="space-y-2">
-                  <Skeleton className="h-9 w-9 rounded-lg" />
-                  <Skeleton className="h-3 w-full" />
-                  <Skeleton className="h-6 w-12" />
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Tabla / lista de actividad reciente */}
-        <div className="rounded-xl border border-border bg-card p-4 space-y-4">
-          <Skeleton className="h-5 w-40" />
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <Skeleton className="h-9 w-9 rounded-full" />
-                <div className="space-y-1.5">
-                  <Skeleton className="h-3 w-28" />
-                  <Skeleton className="h-3 w-40" />
-                </div>
-              </div>
-              <div className="space-y-1.5 text-right">
-                <Skeleton className="h-3 w-20" />
-                <Skeleton className="h-3 w-24" />
-              </div>
-            </div>
-          ))}
+      <div className="flex flex-1 items-center justify-center px-4">
+        <div className="flex items-center gap-3 rounded-full border border-white/[0.06] bg-zinc-900/40 px-4 py-2 text-xs text-muted-foreground">
+          <span className="relative flex size-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-60" />
+            <span className="relative inline-flex size-2 rounded-full bg-amber-400" />
+          </span>
+          Cargando dashboard...
         </div>
       </div>
     </div>
