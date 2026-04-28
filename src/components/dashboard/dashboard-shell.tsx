@@ -366,7 +366,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   const [swipeTargetItem, setSwipeTargetItem] = useState<NavItem | null>(null)
   const [, startTransition] = useTransition()
   const [pendingBreakCount, setPendingBreakCount] = useState(0)
-  const { selectedBranchId } = useBranchStore()
+  const selectedBranchId = useBranchStore(s => s.selectedBranchId)
   const supabase = useMemo(() => createClient(), [])
 
   // --- Estado de ordenamiento personalizado por usuario ---

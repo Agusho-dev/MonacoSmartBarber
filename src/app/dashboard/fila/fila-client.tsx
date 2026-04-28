@@ -789,7 +789,7 @@ function BarberRow({
 // ─── Componente Principal ───────────────────────────────────────────────────
 
 export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: FilaClientProps) {
-  const { selectedBranchId } = useBranchStore()
+  const selectedBranchId = useBranchStore(s => s.selectedBranchId)
   const [entries, setEntries] = useState<QueueEntry[]>(initialEntries)
   const [liveBarbers, setLiveBarbers] = useState<BarberRow[]>(barbers)
   const [actionLoading, setActionLoading] = useState<string | null>(null)

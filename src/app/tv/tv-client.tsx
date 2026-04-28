@@ -211,7 +211,8 @@ export function TvClient({
   orgName,
   orgLogoUrl,
 }: TvClientProps) {
-  const { selectedBranchId, setSelectedBranchId } = useBranchStore()
+  const selectedBranchId = useBranchStore(s => s.selectedBranchId)
+  const setSelectedBranchId = useBranchStore(s => s.setSelectedBranchId)
   const [entries, setEntries] = useState<QueueEntry[]>(initialEntries)
   const [liveBarbers, setLiveBarbers] = useState<BarberRow[]>(barbers)
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
@@ -337,8 +338,13 @@ export function TvClient({
     return notClocked
   }, [liveBarbers, latestAttendance])
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const assignmentTime = useMemo(() => Date.now(), [entries, liveBarbers, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
+  // Timestamp estable para la asignación dinámica: se actualiza via useEffect cuando cambian
+  // los datos subyacentes, sin suprimir lint.
+  const assignmentTimeRef = useRef<number>(Date.now())
+  useEffect(() => {
+    assignmentTimeRef.current = Date.now()
+  }, [entries, liveBarbers, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
+  const assignmentTime = assignmentTimeRef.current
 
   const dynamicEntries = useMemo(() => {
     const branchEntries = selectedBranchId ? entries.filter(e => e.branch_id === selectedBranchId) : entries

@@ -48,13 +48,18 @@ Deno.serve(async (req: Request) => {
     }
 
     // Cache de configuración por org_id (evita N×lookups)
+    // Las Maps son thread-safe en Deno (single-threaded async): la concurrencia es
+    // por interleaving de awaits, no por paralelismo real de hilos.
     const orgSettingsCache = new Map<string, { wa_api_url: string | null }>()
     const orgChannelCache = new Map<string, { id: string }[]>()
     const orgConfigCache = new Map<string, { whatsapp_access_token: string; whatsapp_phone_id: string } | null>()
     const broadcastCounters = new Map<string, { sent: number; failed: number }>()
     const results: Array<{ id: string; sent: boolean; error: string | null; retry: boolean }> = []
 
-    for (const msg of pendingMessages) {
+    // Procesa el batch con concurrencia limitada (8 mensajes en vuelo simultáneamente).
+    // Esto reduce el tiempo de procesamiento de un batch de 50 de ~50×RTT a ~7×RTT
+    // sin sobrecargar Meta Cloud API ni el microservicio Baileys.
+    await processWithConcurrency(pendingMessages, 8, async (msg) => {
       let sent = false
       let errorMsg: string | null = null
       let httpStatus: number | undefined
@@ -215,7 +220,7 @@ Deno.serve(async (req: Request) => {
       await persistResult(msg, sent, errorMsg, willRetry, finalKind)
       trackBroadcast(broadcastCounters, msg.broadcast_id, sent)
       results.push({ id: msg.id, sent, error: errorMsg, retry: willRetry })
-    }
+    }) // fin processWithConcurrency
 
     // Actualizar contadores de broadcasts (con error checks)
     await updateBroadcastCounters(broadcastCounters)
@@ -232,6 +237,25 @@ Deno.serve(async (req: Request) => {
     )
   }
 })
+
+// Procesa items con concurrencia limitada a `limit` tareas simultáneas.
+// En Deno (single-threaded async) esto es seguro: los Maps compartidos se acceden
+// de forma interleaved entre awaits, nunca en paralelo real.
+async function processWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<void>
+): Promise<void> {
+  const queue = [...items]
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (queue.length > 0) {
+        const item = queue.shift()
+        if (item !== undefined) await fn(item)
+      }
+    })
+  )
+}
 
 // Persiste el resultado del envío. Si willRetry, re-agenda con backoff y vuelve a pending.
 async function persistResult(

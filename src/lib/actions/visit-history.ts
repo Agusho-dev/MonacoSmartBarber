@@ -51,6 +51,7 @@ export interface ClientProfileVisit {
   service_name: string | null
   barber_name: string
   barber_id: string
+  branch_id: string
   photos: Array<{ id: string; storage_path: string; order_index: number }>
 }
 
@@ -71,7 +72,7 @@ export async function getClientProfile(
   const { data: visits } = await supabase
     .from('visits')
     .select(
-      'id, completed_at, amount, notes, tags, barber_id, barber:staff(full_name), service:services(name)'
+      'id, completed_at, amount, notes, tags, barber_id, branch_id, barber:staff(full_name), service:services(name)'
     )
     .eq('client_id', clientId)
     .order('completed_at', { ascending: false })
@@ -134,6 +135,7 @@ export async function getClientProfile(
         (v.barber as unknown as { full_name: string } | null)?.full_name ??
         '?',
       barber_id: v.barber_id,
+      branch_id: (v as unknown as { branch_id: string }).branch_id,
       photos: photoMap.get(v.id) ?? [],
     })),
     frequentBarber,
@@ -248,6 +250,144 @@ export async function createManualVisit(params: {
   revalidatePath('/dashboard/clientes')
 
   return { success: true, visitId: newVisit.id }
+}
+
+export interface ClientVisitPage {
+  visits: ClientProfileVisit[]
+  totalCount: number
+  hasMore: boolean
+}
+
+/**
+ * Carga paginada del historial de visitas de un cliente.
+ * Diseñada para lazy load desde el sheet de detalle — NO se llama en el
+ * initial fetch de la página de clientes.
+ */
+export async function getClientVisits(
+  clientId: string,
+  opts?: { limit?: number; offset?: number }
+): Promise<ClientVisitPage> {
+  const orgAccess = await requireOrgAccessToEntity('clients', clientId)
+  if (!orgAccess.ok) return { visits: [], totalCount: 0, hasMore: false }
+
+  const limit = opts?.limit ?? 50
+  const offset = opts?.offset ?? 0
+
+  const supabase = await createClient()
+
+  const { data: visits, error } = await supabase
+    .from('visits')
+    .select(
+      'id, completed_at, amount, notes, tags, barber_id, branch_id, barber:staff(full_name), service:services(name)'
+    )
+    .eq('client_id', clientId)
+    .order('completed_at', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  if (error) {
+    console.error('[getClientVisits] error fetching visits', error.message)
+    return { visits: [], totalCount: 0, hasMore: false }
+  }
+
+  const visitIds = (visits ?? []).map((v) => v.id)
+
+  let photos: Array<{
+    visit_id: string
+    id: string
+    storage_path: string
+    order_index: number
+  }> = []
+  if (visitIds.length > 0) {
+    const { data } = await supabase
+      .from('visit_photos')
+      .select('id, visit_id, storage_path, order_index')
+      .in('visit_id', visitIds)
+      .order('order_index')
+    photos = data ?? []
+  }
+
+  const photoMap = new Map<string, typeof photos>()
+  for (const p of photos) {
+    const arr = photoMap.get(p.visit_id) ?? []
+    arr.push(p)
+    photoMap.set(p.visit_id, arr)
+  }
+
+  const { count } = await supabase
+    .from('visits')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', clientId)
+
+  const totalCount = count ?? 0
+
+  return {
+    visits: (visits ?? []).map((v) => ({
+      id: v.id,
+      completed_at: v.completed_at,
+      amount: v.amount,
+      notes: v.notes,
+      tags: v.tags,
+      service_name:
+        (v.service as unknown as { name: string } | null)?.name ?? null,
+      barber_name:
+        (v.barber as unknown as { full_name: string } | null)?.full_name ?? '?',
+      barber_id: v.barber_id,
+      branch_id: (v as unknown as { branch_id: string }).branch_id,
+      photos: photoMap.get(v.id) ?? [],
+    })),
+    totalCount,
+    hasMore: offset + limit < totalCount,
+  }
+}
+
+export interface StaffServiceVisit {
+  id: string
+  amount: number
+  payment_method: string
+  commission_amount: number
+  started_at: string | null
+  completed_at: string
+  branch_id: string
+  service: { name: string } | null
+  client: { name: string } | null
+  barber: { id: string; full_name: string } | null
+}
+
+/**
+ * Historial de servicios de un barbero para lazy load en el perfil.
+ * Cubre monthsBack meses hacia atrás para soportar el selector de período
+ * del panel de detalle (máx. 12 meses).
+ */
+export async function getStaffServiceHistory(
+  staffId: string,
+  monthsBack: number = 3
+): Promise<{ visits: StaffServiceVisit[]; error?: string }> {
+  const orgAccess = await requireOrgAccessToEntity('staff', staffId)
+  if (!orgAccess.ok) return { visits: [], error: 'Acceso denegado' }
+
+  const from = new Date()
+  from.setMonth(from.getMonth() - (monthsBack - 1))
+  from.setDate(1)
+  from.setHours(0, 0, 0, 0)
+
+  const supabase = createAdminClient()
+
+  const { data, error } = await supabase
+    .from('visits')
+    .select(
+      'id, amount, payment_method, commission_amount, started_at, completed_at, branch_id, service:services(name), client:clients(name), barber:staff(id, full_name)'
+    )
+    .eq('barber_id', staffId)
+    .eq('organization_id', orgAccess.orgId)
+    .gte('completed_at', from.toISOString())
+    .order('completed_at', { ascending: false })
+
+  if (error) {
+    console.error('[getStaffServiceHistory] error', error.message)
+    return { visits: [], error: error.message }
+  }
+
+  return { visits: (data ?? []) as unknown as StaffServiceVisit[] }
 }
 
 export async function deleteVisit(

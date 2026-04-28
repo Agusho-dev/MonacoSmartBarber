@@ -397,8 +397,11 @@ export function QueuePanel({
   // cambian (entries, barbers, etc.), NO cada segundo. Esto garantiza que todos los
   // dispositivos que reciben el mismo evento Realtime calculen la misma asignación,
   // evitando que clientes aparezcan en la fila de barberos distintos por diferencias de reloj.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const assignmentTime = useMemo(() => Date.now(), [entries, allBarbers, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
+  const assignmentTimeRef = useRef<number>(Date.now())
+  useEffect(() => {
+    assignmentTimeRef.current = Date.now()
+  }, [entries, allBarbers, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
+  const assignmentTime = assignmentTimeRef.current
 
   const dynamicEntries = useMemo(() => {
     return assignDynamicBarbers(entries, allBarbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs)

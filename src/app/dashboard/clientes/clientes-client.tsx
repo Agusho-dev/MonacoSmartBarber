@@ -1,8 +1,8 @@
 'use client'
 
-import { useMemo, useState, useEffect, useCallback, useTransition } from 'react'
+import { useMemo, useState, useEffect, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Search, Eye, Star, Tag, Camera, Save, MessageCircle, MessagesSquare, Instagram, Plus, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { Search, Eye, Star, Tag, Camera, Save, MessageCircle, MessagesSquare, Instagram, Plus, ArrowUpDown, ArrowUp, ArrowDown, Loader2 } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
@@ -10,6 +10,8 @@ import { createClient } from '@/lib/supabase/client'
 import { updateClientNotes } from '@/lib/actions/clients'
 import { checkinClient } from '@/lib/actions/queue'
 import { createReviewRequest } from '@/lib/actions/reviews'
+import { getClientVisits } from '@/lib/actions/visit-history'
+import type { ClientProfileVisit } from '@/lib/actions/visit-history'
 import type { Client } from '@/lib/types/database'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -104,6 +106,13 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
   const [sortBy, setSortBy] = useState<'lastVisit' | 'totalVisits' | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [detailClient, setDetailClient] = useState<Client | null>(null)
+  // Historial lazy — se carga al abrir el sheet, no viene del prop inicial
+  const [lazyVisits, setLazyVisits] = useState<ClientProfileVisit[]>([])
+  const [lazyTotalCount, setLazyTotalCount] = useState(0)
+  const [lazyHasMore, setLazyHasMore] = useState(false)
+  const [lazyOffset, setLazyOffset] = useState(0)
+  const [isLoadingVisits, startLoadingVisits] = useTransition()
+  const [isLoadingMore, startLoadingMore] = useTransition()
   const [photos, setPhotos] = useState<PhotoRow[]>([])
   const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null)
   const [editableNotes, setEditableNotes] = useState('')
@@ -253,20 +262,12 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
     return list
   }, [clients, searchLower, segmentFilter, sortBy, sortDir, branchClientStats])
 
-  const clientVisitHistory = useMemo(
-    () =>
-      detailClient
-        ? branchVisits.filter((v) => v.client_id === detailClient.id)
-        : [],
-    [detailClient, branchVisits]
-  )
-
+  // frequentBarber derivado del historial lazy
   const frequentBarber = useMemo(() => {
-    if (!clientVisitHistory.length) return null
+    if (!lazyVisits.length) return null
     const counts = new Map<string, { name: string; count: number }>()
-    for (const v of clientVisitHistory) {
-      const name = v.barber?.full_name ?? '?'
-      const existing = counts.get(v.barber_id) || { name, count: 0 }
+    for (const v of lazyVisits) {
+      const existing = counts.get(v.barber_id) ?? { name: v.barber_name, count: 0 }
       existing.count++
       counts.set(v.barber_id, existing)
     }
@@ -275,36 +276,46 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
       if (!best || data.count > best.count) best = data
     }
     return best
-  }, [clientVisitHistory])
+  }, [lazyVisits])
 
-  const loadPhotos = useCallback(
-    async (visitIds: string[]) => {
-      if (!visitIds.length) {
-        setPhotos([])
-        return
-      }
-      const { data } = await supabase
-        .from('visit_photos')
-        .select('id, visit_id, storage_path, order_index')
-        .in('visit_id', visitIds)
-        .order('order_index')
-      setPhotos(data ?? [])
-    },
-    [supabase]
-  )
-
+  // Al abrir el sheet: reiniciar estado y disparar fetch lazy
   useEffect(() => {
-    if (detailClient) {
-      setEditableNotes(detailClient.notes ?? '')
-      setEditableInstagram(detailClient.instagram ?? '')
-      const ids = clientVisitHistory.map((v) => v.id)
-      loadPhotos(ids)
-    } else {
+    if (!detailClient) {
+      setLazyVisits([])
+      setLazyTotalCount(0)
+      setLazyHasMore(false)
+      setLazyOffset(0)
       setPhotos([])
       setEditableNotes('')
       setEditableInstagram('')
+      return
     }
-  }, [detailClient, clientVisitHistory, loadPhotos])
+    setEditableNotes(detailClient.notes ?? '')
+    setEditableInstagram(detailClient.instagram ?? '')
+    setLazyVisits([])
+    setLazyTotalCount(0)
+    setLazyHasMore(false)
+    setLazyOffset(0)
+    startLoadingVisits(async () => {
+      const result = await getClientVisits(detailClient.id, { limit: 50, offset: 0 })
+      setLazyVisits(result.visits)
+      setLazyTotalCount(result.totalCount)
+      setLazyHasMore(result.hasMore)
+      setLazyOffset(50)
+      const ids = result.visits.map((v) => v.id)
+      if (ids.length > 0) {
+        const { data } = await supabase
+          .from('visit_photos')
+          .select('id, visit_id, storage_path, order_index')
+          .in('visit_id', ids)
+          .order('order_index')
+        setPhotos(data ?? [])
+      } else {
+        setPhotos([])
+      }
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailClient?.id])
 
   const photosByVisit = useMemo(() => {
     const m = new Map<string, PhotoRow[]>()
@@ -567,7 +578,9 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
                     <div className="rounded-lg border bg-card/50 px-3 py-2.5 text-center">
                       <p className="text-xs text-muted-foreground">Visitas</p>
                       <p className="text-lg font-semibold tabular-nums">
-                        {stats?.totalVisits ?? 0}
+                        {isLoadingVisits
+                          ? (stats?.totalVisits ?? 0)
+                          : (lazyTotalCount || stats?.totalVisits || 0)}
                       </p>
                     </div>
                     <div className="rounded-lg border bg-card/50 px-3 py-2.5 text-center">
@@ -691,23 +704,33 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
                     </div>
                   </div>
 
-                  {/* Visit history */}
+                  {/* Historial de visitas — carga lazy al abrir el sheet */}
                   <div>
                     <div className="mb-3 flex items-center gap-2">
                       <h3 className="text-sm font-semibold">Historial de visitas</h3>
-                      <Badge variant="secondary" className="text-xs tabular-nums">
-                        {clientVisitHistory.length}
-                      </Badge>
+                      {isLoadingVisits ? (
+                        <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                      ) : (
+                        <Badge variant="secondary" className="text-xs tabular-nums">
+                          {lazyTotalCount > 0 ? lazyTotalCount : lazyVisits.length}
+                        </Badge>
+                      )}
                     </div>
                     <ScrollArea className="h-[320px]">
-                      {clientVisitHistory.length === 0 && (
+                      {isLoadingVisits && lazyVisits.length === 0 && (
+                        <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+                          <Loader2 className="mb-2 size-6 animate-spin opacity-50" />
+                          <p className="text-sm">Cargando historial...</p>
+                        </div>
+                      )}
+                      {!isLoadingVisits && lazyVisits.length === 0 && (
                         <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
                           <Camera className="mb-2 size-8 opacity-30" />
                           <p className="text-sm">Sin visitas registradas</p>
                         </div>
                       )}
                       <div className="space-y-2 pr-2">
-                        {clientVisitHistory.map((visit) => {
+                        {lazyVisits.map((visit) => {
                           const visitPhotos = photosByVisit.get(visit.id) ?? []
                           return (
                             <div
@@ -717,10 +740,10 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
                               <div className="flex items-center justify-between">
                                 <div>
                                   <p className="text-sm font-medium">
-                                    {visit.service?.name ?? 'Servicio'}
+                                    {visit.service_name ?? 'Servicio'}
                                   </p>
                                   <p className="text-xs text-muted-foreground">
-                                    {visit.barber?.full_name ?? 'Barbero'}{' '}
+                                    {visit.barber_name}{' '}
                                     &middot; {formatDateTime(visit.completed_at)}
                                   </p>
                                 </div>
@@ -737,7 +760,7 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
                                       setRequestingReview(visit.id)
                                       try {
                                         const res = await createReviewRequest(
-                                          visit.client_id,
+                                          detailClient!.id,
                                           visit.branch_id,
                                           visit.id,
                                           visit.barber_id
@@ -805,6 +828,45 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
                             </div>
                           )
                         })}
+
+                        {/* Paginación: ver más */}
+                        {lazyHasMore && (
+                          <button
+                            type="button"
+                            disabled={isLoadingMore}
+                            onClick={() => {
+                              if (!detailClient) return
+                              startLoadingMore(async () => {
+                                const result = await getClientVisits(detailClient.id, {
+                                  limit: 50,
+                                  offset: lazyOffset,
+                                })
+                                setLazyVisits((prev) => [...prev, ...result.visits])
+                                setLazyHasMore(result.hasMore)
+                                setLazyOffset((prev) => prev + 50)
+                                const newIds = result.visits.map((v) => v.id)
+                                if (newIds.length > 0) {
+                                  const { data } = await supabase
+                                    .from('visit_photos')
+                                    .select('id, visit_id, storage_path, order_index')
+                                    .in('visit_id', newIds)
+                                    .order('order_index')
+                                  setPhotos((prev) => [...prev, ...(data ?? [])])
+                                }
+                              })
+                            }}
+                            className="w-full rounded-lg border border-dashed py-2.5 text-xs text-muted-foreground transition-colors hover:border-border hover:text-foreground disabled:opacity-50"
+                          >
+                            {isLoadingMore ? (
+                              <span className="flex items-center justify-center gap-1.5">
+                                <Loader2 className="size-3 animate-spin" />
+                                Cargando...
+                              </span>
+                            ) : (
+                              `Ver más (${lazyTotalCount - lazyVisits.length} restantes)`
+                            )}
+                          </button>
+                        )}
                       </div>
                     </ScrollArea>
                   </div>

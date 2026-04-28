@@ -3,18 +3,19 @@
 import { useState, useTransition, useEffect, useCallback, useRef } from 'react'
 import { startOfMonth, endOfDay, format } from 'date-fns'
 import { es } from 'date-fns/locale'
-import {
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-} from 'recharts'
+import dynamic from 'next/dynamic'
+
+// recharts (~180KB) cargado de forma lazy — solo se descarga cuando estadisticas monta los gráficos
+const AreaChart = dynamic(() => import('recharts').then(m => m.AreaChart), { ssr: false })
+const Area = dynamic(() => import('recharts').then(m => m.Area), { ssr: false })
+const BarChart = dynamic(() => import('recharts').then(m => m.BarChart), { ssr: false })
+const Bar = dynamic(() => import('recharts').then(m => m.Bar), { ssr: false })
+const XAxis = dynamic(() => import('recharts').then(m => m.XAxis), { ssr: false })
+const YAxis = dynamic(() => import('recharts').then(m => m.YAxis), { ssr: false })
+const CartesianGrid = dynamic(() => import('recharts').then(m => m.CartesianGrid), { ssr: false })
+const Tooltip = dynamic(() => import('recharts').then(m => m.Tooltip), { ssr: false })
+const ResponsiveContainer = dynamic(() => import('recharts').then(m => m.ResponsiveContainer), { ssr: false })
+const Cell = dynamic(() => import('recharts').then(m => m.Cell), { ssr: false })
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { fetchStats, fetchWeekHeatmap, type StatsData, type HeatmapCell } from '@/lib/actions/stats'

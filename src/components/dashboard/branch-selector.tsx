@@ -24,7 +24,9 @@ interface Props {
 }
 
 export function BranchSelector({ branches, className, allowAll }: Props) {
-  const { selectedBranchId, setSelectedBranchId, allowedBranchIds } = useBranchStore()
+  const selectedBranchId = useBranchStore(s => s.selectedBranchId)
+  const setSelectedBranchId = useBranchStore(s => s.setSelectedBranchId)
+  const allowedBranchIds = useBranchStore(s => s.allowedBranchIds)
 
   const [isMounted, setIsMounted] = useState(false)
 

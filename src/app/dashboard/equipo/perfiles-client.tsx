@@ -57,15 +57,16 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion'
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts'
+import dynamic from 'next/dynamic'
+
+// recharts (~180KB) cargado de forma lazy — solo se descarga cuando el perfil de barbero abre la vista de stats
+const BarChart = dynamic(() => import('recharts').then(m => m.BarChart), { ssr: false })
+const Bar = dynamic(() => import('recharts').then(m => m.Bar), { ssr: false })
+const XAxis = dynamic(() => import('recharts').then(m => m.XAxis), { ssr: false })
+const YAxis = dynamic(() => import('recharts').then(m => m.YAxis), { ssr: false })
+const CartesianGrid = dynamic(() => import('recharts').then(m => m.CartesianGrid), { ssr: false })
+const Tooltip = dynamic(() => import('recharts').then(m => m.Tooltip), { ssr: false })
+const ResponsiveContainer = dynamic(() => import('recharts').then(m => m.ResponsiveContainer), { ssr: false })
 import { useBranchStore } from '@/stores/branch-store'
 import { DateRangePicker } from '@/components/dashboard/date-range-picker'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
@@ -73,6 +74,7 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { getPaymentBatchesGrouped, type GroupedBatchMonth, type SalaryReport, type SalaryPaymentBatch } from '@/lib/actions/salary'
 import { prepareStaffContact } from '@/lib/actions/staff-contact'
+import { getStaffServiceHistory } from '@/lib/actions/visit-history'
 import { exportPaymentReceiptPDF } from '@/lib/export'
 import type {
   Staff,
@@ -240,6 +242,10 @@ export function PerfilesClient({
   const [period, setPeriod] = useState<PeriodFilter>('month')
   const [search, setSearch] = useState('')
 
+  // Historial lazy del barbero seleccionado — se carga al seleccionar, no en el fetch inicial
+  const [lazyServiceHistory, setLazyServiceHistory] = useState<ServiceVisit[]>(serviceHistory)
+  const [isLoadingHistory, startLoadingHistory] = useTransition()
+
   const filteredBarbers = useMemo(() => {
     const byBranch = selectedBranchId
       ? barbers.filter((b) => b.branch_id === selectedBranchId)
@@ -280,6 +286,18 @@ export function PerfilesClient({
     salaryConfigs.forEach((sc) => map.set(sc.staff_id, sc))
     return map
   }, [salaryConfigs])
+
+  // Al seleccionar un barbero, cargar historial completo (12 meses) para el panel de detalle
+  useEffect(() => {
+    if (!selectedBarber) return
+    startLoadingHistory(async () => {
+      const result = await getStaffServiceHistory(selectedBarber.id, 12)
+      if (!result.error) {
+        setLazyServiceHistory(result.visits)
+      }
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBarber?.id])
 
   return (
     <div className="flex gap-4 h-auto lg:h-full">
@@ -400,7 +418,8 @@ export function PerfilesClient({
             barber={selectedBarber}
             roles={roles}
             todayStats={todayStatsMap.get(selectedBarber.id) ?? null}
-            serviceHistory={serviceHistory}
+            serviceHistory={lazyServiceHistory}
+            isLoadingHistory={isLoadingHistory}
             disciplinaryEvents={disciplinaryEvents}
             breakOvertimeHistory={breakOvertimeHistory}
             salaryConfig={salaryConfigMap.get(selectedBarber.id) ?? null}
@@ -440,6 +459,7 @@ function BarberDetailPanel({
   roles,
   todayStats,
   serviceHistory,
+  isLoadingHistory,
   disciplinaryEvents,
   breakOvertimeHistory,
   salaryConfig,
@@ -452,6 +472,7 @@ function BarberDetailPanel({
   roles: Role[]
   todayStats: { cuts: number; revenue: number } | null
   serviceHistory: ServiceVisit[]
+  isLoadingHistory: boolean
   disciplinaryEvents: DisciplinaryEventRow[]
   breakOvertimeHistory: BreakOvertimeRow[]
   salaryConfig: SalaryConfig | null
@@ -1143,6 +1164,9 @@ function BarberDetailPanel({
             <CardTitle className="text-base flex items-center gap-2">
               <TrendingUp className="size-4" />
               Actividad de cortes
+              {isLoadingHistory && (
+                <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+              )}
             </CardTitle>
             <Select value={period} onValueChange={(v) => setPeriod(v as PeriodFilter)}>
               <SelectTrigger className="w-36 h-8 text-xs">

@@ -1,21 +1,22 @@
 'use client'
 
 import { useState, useTransition, useEffect, useCallback, useMemo, useRef } from 'react'
-import {
-  ComposedChart,
-  Bar,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  LabelList,
-  ReferenceLine,
-} from 'recharts'
+import dynamic from 'next/dynamic'
+
+// recharts (~180KB) cargado de forma lazy — solo se descarga cuando finanzas monta los gráficos
+const ComposedChart = dynamic(() => import('recharts').then(m => m.ComposedChart), { ssr: false })
+const Bar = dynamic(() => import('recharts').then(m => m.Bar), { ssr: false })
+const Line = dynamic(() => import('recharts').then(m => m.Line), { ssr: false })
+const XAxis = dynamic(() => import('recharts').then(m => m.XAxis), { ssr: false })
+const YAxis = dynamic(() => import('recharts').then(m => m.YAxis), { ssr: false })
+const CartesianGrid = dynamic(() => import('recharts').then(m => m.CartesianGrid), { ssr: false })
+const Tooltip = dynamic(() => import('recharts').then(m => m.Tooltip), { ssr: false })
+const ResponsiveContainer = dynamic(() => import('recharts').then(m => m.ResponsiveContainer), { ssr: false })
+const PieChart = dynamic(() => import('recharts').then(m => m.PieChart), { ssr: false })
+const Pie = dynamic(() => import('recharts').then(m => m.Pie), { ssr: false })
+const Cell = dynamic(() => import('recharts').then(m => m.Cell), { ssr: false })
+const LabelList = dynamic(() => import('recharts').then(m => m.LabelList), { ssr: false })
+const ReferenceLine = dynamic(() => import('recharts').then(m => m.ReferenceLine), { ssr: false })
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import {
@@ -140,7 +141,7 @@ export function FinanzasClient({
   commissionSummary,
   orgSlug = 'barberos',
 }: Props) {
-  const { selectedBranchId } = useBranchStore()
+  const selectedBranchId = useBranchStore(s => s.selectedBranchId)
   const [data, setData] = useState(initialData)
   const [period, setPeriod] = useState('1')
   const [monthOffset, setMonthOffset] = useState(0) // 0 = mes actual, 1 = mes pasado, etc.
