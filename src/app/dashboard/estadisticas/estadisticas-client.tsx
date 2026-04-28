@@ -74,7 +74,11 @@ const METHOD_LABELS: Record<string, string> = {
   transfer: 'Transferencia',
 }
 
-const METHOD_COLORS = ['var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)']
+// Valores hex equivalentes a var(--chart-2/3/4) (oklch grises del theme).
+// Recharts pasa el fill directamente al SVG <rect> en <Cell>, y los SVG no
+// resuelven CSS variables del DOM cascade en todos los browsers para fill,
+// renderizando negro. Hex hardcoded resuelve el bug.
+const METHOD_COLORS = ['#a3a3a3', '#737373', '#525252']
 
 
 interface Props {
