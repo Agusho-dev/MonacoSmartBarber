@@ -63,15 +63,23 @@ export async function validateBranchAccess(branchId: string): Promise<string | n
  */
 export const getOrgBranchIds = cache(async function getOrgBranchIds(): Promise<string[]> {
   const orgId = await getCurrentOrgId()
-  if (!isValidUUID(orgId)) return []
+  if (!isValidUUID(orgId)) {
+    console.log('[debug-branch][getOrgBranchIds] sin orgId valido', { orgId })
+    return []
+  }
 
   const supabase = createAdminClient()
-  const { data: branches } = await supabase
+  const { data: branches, error } = await supabase
     .from('branches')
     .select('id')
     .eq('organization_id', orgId!)
 
-  return branches?.map(b => b.id) ?? []
+  if (error) {
+    console.error('[debug-branch][getOrgBranchIds] error consultando branches', { msg: error.message, orgId })
+  }
+  const ids = branches?.map(b => b.id) ?? []
+  console.log('[debug-branch][getOrgBranchIds] resultado', { orgId, count: ids.length })
+  return ids
 })
 
 import { cookies } from 'next/headers'
@@ -284,11 +292,17 @@ export const getCurrentOrgId = cache(async function getCurrentOrgId(): Promise<s
     const user = await getCachedAuthUser()
     if (user) {
       const activeOrg = cookieStore.get('active_organization')?.value
-      if (isValidUUID(activeOrg)) return activeOrg!
-      return getOrganizationId(user.id)
+      if (isValidUUID(activeOrg)) {
+        console.log('[debug-branch][getCurrentOrgId] orgId desde cookie active_organization', { orgId: activeOrg, userId: user.id })
+        return activeOrg!
+      }
+      const resolved = await getOrganizationId(user.id)
+      console.log('[debug-branch][getCurrentOrgId] orgId desde getOrganizationId', { orgId: resolved, userId: user.id })
+      return resolved
     }
-  } catch {
-    console.error('[getCurrentOrgId] Error al verificar Supabase Auth')
+    console.log('[debug-branch][getCurrentOrgId] sin user auth')
+  } catch (err) {
+    console.error('[getCurrentOrgId] Error al verificar Supabase Auth', err instanceof Error ? err.message : String(err))
   }
 
   return null

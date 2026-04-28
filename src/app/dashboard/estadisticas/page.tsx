@@ -29,6 +29,12 @@ export default async function EstadisticasPage() {
     supabase.from('organizations').select('name').eq('id', orgId).maybeSingle(),
   ])
 
+  console.log('[debug-branch][estadisticas/page] resumen', {
+    orgId,
+    branchIdsCount: branchIds.length,
+    branchesReturned: branches?.length ?? 0,
+  })
+
   return (
     <EstadisticasClient
       initialData={data}

@@ -18,6 +18,11 @@ export function BranchScopeProvider({ allowedBranchIds, organizationId, children
   const { setAllowedBranchIds, setSelectedBranchId, setOrganizationId, selectedBranchId } = useBranchStore()
 
   useEffect(() => {
+    console.log('[debug-branch][BranchScopeProvider] effect', {
+      organizationId,
+      allowedBranchIds,
+      allowedKind: allowedBranchIds === null ? 'null (full)' : `array(${allowedBranchIds.length})`,
+    })
     setOrganizationId(organizationId)
     setAllowedBranchIds(allowedBranchIds)
 

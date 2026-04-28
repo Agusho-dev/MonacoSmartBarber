@@ -35,11 +35,17 @@ export function BranchSelector({ branches, className, allowAll }: Props) {
 
   useEffect(() => {
     setIsMounted(true)
+    console.log('[debug-branch][BranchSelector] mount', {
+      branchesIn: branches.length,
+      allowedBranchIds,
+      visibleCount: visibleBranches.length,
+      allowAll,
+    })
     // Initialize branch in store if not set (skip when allowAll — null means "todas")
     if (!allowAll && !selectedBranchId && visibleBranches.length > 0) {
       setSelectedBranchId(visibleBranches[0].id)
     }
-  }, [allowAll, selectedBranchId, visibleBranches, setSelectedBranchId])
+  }, [allowAll, selectedBranchId, visibleBranches, setSelectedBranchId, branches.length, allowedBranchIds])
 
   if (!isMounted) {
     return (
@@ -48,7 +54,10 @@ export function BranchSelector({ branches, className, allowAll }: Props) {
   }
 
   // Hide selector if only 1 visible branch (or none) and allowAll is not set
-  if (!allowAll && visibleBranches.length <= 1) return null
+  if (!allowAll && visibleBranches.length <= 1) {
+    console.log('[debug-branch][BranchSelector] hidden', { branchesIn: branches.length, visibleCount: visibleBranches.length, allowedBranchIds })
+    return null
+  }
 
   const effectiveValue = allowAll
     ? (selectedBranchId ?? ALL_BRANCHES_VALUE)

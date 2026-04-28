@@ -54,44 +54,93 @@ export const getAllowedBranchIds = cache(async function getAllowedBranchIds(): P
   // 2) Dashboard (Supabase Auth)
   try {
     const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return [] // sin sesión → sin acceso
+    const { data: { user }, error: authErr } = await supabase.auth.getUser()
+    if (authErr || !user) {
+      console.error('[debug-branch][getAllowedBranchIds] sin user en sesion auth', { authErr: authErr?.message })
+      return [] // sin sesión → sin acceso
+    }
+
+    // Resolver org activa para scopear el lookup de staff. Sin esto, un usuario
+    // con staff_rows en multiples orgs causa que .maybeSingle() devuelva null
+    // (PGRST116 multiple rows), gatillando el camino de "no staff" → null
+    // (acceso total, OK), pero si una de las queries arroja error en una
+    // estructura distinta, el catch externo lo silencia y devuelve [] (deny all),
+    // que es el bug que rompe el filtro de sucursales para owners multi-org.
+    const orgId = await getCurrentOrgId()
 
     const adminClient = createAdminClient()
-    const { data: staffRow } = await adminClient
+
+    // Query scopeada por org cuando la conocemos; fallback a global si no.
+    let staffQuery = adminClient
       .from('staff')
-      .select('role, role_id')
+      .select('role, role_id, organization_id')
       .eq('auth_user_id', user.id)
       .eq('is_active', true)
-      .maybeSingle()
+
+    if (isValidUUID(orgId)) {
+      staffQuery = staffQuery.eq('organization_id', orgId!)
+    }
+
+    const { data: staffRows, error: staffErr } = await staffQuery.limit(1)
+    if (staffErr) {
+      console.error('[debug-branch][getAllowedBranchIds] error consultando staff', { msg: staffErr.message, userId: user.id, orgId })
+    }
+    const staffRow = staffRows?.[0] ?? null
 
     if (!staffRow) {
-      // Podría ser un organization_member (partner-like), no tiene scope de sucursal aún
+      // Sin staff row para esta org. Verificar organization_members antes de
+      // asumir "acceso total". Un owner que solo está en organization_members
+      // (no en staff) debe obtener null = full access. Otro usuario sin ningún
+      // vínculo a la org debe obtener [] = sin acceso.
+      if (isValidUUID(orgId)) {
+        const { data: member, error: memberErr } = await adminClient
+          .from('organization_members')
+          .select('role')
+          .eq('user_id', user.id)
+          .eq('organization_id', orgId!)
+          .maybeSingle()
+        if (memberErr) {
+          console.error('[debug-branch][getAllowedBranchIds] error consultando organization_members', { msg: memberErr.message, userId: user.id, orgId })
+        }
+        console.log('[debug-branch][getAllowedBranchIds] sin staffRow', { userId: user.id, orgId, member, decision: member ? 'null (full)' : '[] (deny)' })
+        return member ? null : []
+      }
+      // Sin orgId resoluble: mantener compat con comportamiento previo (null = full).
+      console.log('[debug-branch][getAllowedBranchIds] sin staffRow y sin orgId, fallback a null', { userId: user.id })
       return null
     }
 
     // Owners y admins tienen acceso total
     if (staffRow.role === 'owner' || staffRow.role === 'admin') {
+      console.log('[debug-branch][getAllowedBranchIds] owner/admin → null (full)', { userId: user.id, orgId, role: staffRow.role })
       return null
     }
 
     // Staff con rol custom: resolver scope
     if (staffRow.role_id) {
-      const { data: scopeRows } = await adminClient
+      const { data: scopeRows, error: scopeErr } = await adminClient
         .from('role_branch_scope')
         .select('branch_id')
         .eq('role_id', staffRow.role_id)
+      if (scopeErr) {
+        console.error('[debug-branch][getAllowedBranchIds] error consultando role_branch_scope', { msg: scopeErr.message, roleId: staffRow.role_id })
+      }
 
       if (scopeRows && scopeRows.length > 0) {
-        return scopeRows.map(r => r.branch_id)
+        const ids = scopeRows.map(r => r.branch_id)
+        console.log('[debug-branch][getAllowedBranchIds] role con scope', { userId: user.id, ids })
+        return ids
       }
       // Sin scope configurado en el rol: acceso total
+      console.log('[debug-branch][getAllowedBranchIds] role sin scope → null (full)', { userId: user.id, roleId: staffRow.role_id })
       return null
     }
 
     // Staff sin role_id (raro): acceso total por defecto
+    console.log('[debug-branch][getAllowedBranchIds] staff sin role_id → null (full)', { userId: user.id })
     return null
-  } catch {
+  } catch (err) {
+    console.error('[debug-branch][getAllowedBranchIds] excepcion no esperada', { err: err instanceof Error ? err.message : String(err) })
     return []
   }
 })
@@ -143,9 +192,14 @@ export const getScopedBranchIds = cache(async function getScopedBranchIds(): Pro
     getOrgBranchIds(),
     getAllowedBranchIds(),
   ])
-  if (allowed === null) return orgBranchIds
+  if (allowed === null) {
+    console.log('[debug-branch][getScopedBranchIds] allowed=null (full access)', { orgBranchIdsCount: orgBranchIds.length })
+    return orgBranchIds
+  }
   const allowedSet = new Set(allowed)
-  return orgBranchIds.filter(id => allowedSet.has(id))
+  const scoped = orgBranchIds.filter(id => allowedSet.has(id))
+  console.log('[debug-branch][getScopedBranchIds] interseccion', { orgBranchIdsCount: orgBranchIds.length, allowedCount: allowed.length, scopedCount: scoped.length })
+  return scoped
 })
 
 /**
