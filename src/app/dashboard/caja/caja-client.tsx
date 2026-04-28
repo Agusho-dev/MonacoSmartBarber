@@ -662,9 +662,9 @@ function HeroRevenuePanel({
       {/* Sparkline de fondo */}
       <Sparkline buckets={hourBuckets} />
 
-      <div className="relative grid gap-6 p-6 md:grid-cols-[1fr_auto] md:p-8">
+      <div className="relative grid gap-5 p-5 md:gap-6 md:grid-cols-[1fr_auto] md:p-8">
         {/* Lado izquierdo — Hero number */}
-        <div className="space-y-2">
+        <div className="min-w-0 space-y-2">
           <div className="flex items-center gap-2">
             <Sparkles className="size-3.5 text-amber-400/70" />
             <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-200/70">
@@ -672,24 +672,24 @@ function HeroRevenuePanel({
             </p>
           </div>
           <div className="flex items-baseline gap-3">
-            <h1 className="text-5xl md:text-6xl font-bold tabular-nums leading-none tracking-tight bg-gradient-to-br from-amber-100 via-amber-300 to-orange-500 bg-clip-text text-transparent">
+            <h1 className="text-4xl xs:text-5xl md:text-6xl font-bold tabular-nums leading-none tracking-tight bg-gradient-to-br from-amber-100 via-amber-300 to-orange-500 bg-clip-text text-transparent break-words">
               {formatCurrency(animatedTotal)}
             </h1>
           </div>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] sm:text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               <Receipt className="size-3.5" />
               {count} {count === 1 ? 'ticket' : 'tickets'}
             </span>
             <span className="size-1 rounded-full bg-zinc-700" />
-            <span className="inline-flex items-center gap-1">
+            <span className="inline-flex items-center gap-1 whitespace-nowrap">
               <TrendingUp className="size-3.5" />
               Promedio {formatCurrency(aov)}
             </span>
             {!hasActiveFilters && summary.cashExpenses > 0 && (
               <>
                 <span className="size-1 rounded-full bg-zinc-700" />
-                <span className="text-rose-400">
+                <span className="text-rose-400 whitespace-nowrap">
                   Egresos {formatCurrency(summary.cashExpenses)}
                 </span>
               </>
@@ -793,10 +793,10 @@ function PaymentCompositionBar({
         ))}
       </div>
       {/* Leyenda */}
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs">
+      <div className="grid grid-cols-1 gap-y-1.5 text-xs sm:flex sm:flex-wrap sm:items-center sm:gap-x-5">
         {segments.map(s => (
           <div key={s.key} className="flex items-center gap-1.5">
-            <span className={`inline-flex size-1.5 rounded-full ${s.token.bar}`} />
+            <span className={`inline-flex size-1.5 shrink-0 rounded-full ${s.token.bar}`} />
             <span className="text-muted-foreground">{s.label}</span>
             <span className={`font-semibold tabular-nums ${s.token.text}`}>{formatCurrency(s.amount)}</span>
             <span className="text-[10px] text-muted-foreground/70">{s.pct.toFixed(0)}%</span>
@@ -868,7 +868,7 @@ function MetricCard({
 }) {
   const animated = useCountUp(amount)
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-white/[0.06] bg-zinc-900/40 p-4 transition-colors hover:border-white/10">
+    <div className="group relative overflow-hidden rounded-2xl border border-white/[0.06] bg-zinc-900/40 p-3.5 sm:p-4 transition-colors hover:border-white/10">
       {/* Soft accent on hover */}
       <div className={`pointer-events-none absolute -top-12 -right-12 size-32 rounded-full ${token.bgSoft} blur-2xl opacity-50 transition-opacity group-hover:opacity-80`} />
       <div className="relative flex items-start justify-between">
@@ -1596,12 +1596,12 @@ function ShiftCloseRowItem({
       <button
         type="button"
         onClick={() => setExpanded(v => !v)}
-        className="flex w-full items-center gap-3 px-3 py-2.5 pl-4 text-left hover:bg-white/[0.02] transition-colors"
+        className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-2 px-3 py-2.5 pl-4 text-left hover:bg-white/[0.02] transition-colors"
       >
         <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-zinc-800/80 text-[10px] font-bold text-zinc-300">
           {getInitials(close.staffName) || '?'}
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0">
           <p className="text-sm font-medium text-zinc-100 truncate">{close.staffName}</p>
           <p className="text-[11px] text-muted-foreground truncate">
             {showBranch && <>{close.branchName} · </>}
@@ -1610,14 +1610,22 @@ function ShiftCloseRowItem({
             {new Date(close.closedAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
           </p>
         </div>
-        <div className="text-right">
-          <p className="text-[10px] text-muted-foreground leading-none">Esperado</p>
-          <p className="text-sm font-bold tabular-nums text-zinc-200">{formatCurrency(close.cashExpected)}</p>
+        <div className="flex items-center gap-2">
+          <div className="text-right hidden xs:block">
+            <p className="text-[10px] text-muted-foreground leading-none">Esperado</p>
+            <p className="text-sm font-bold tabular-nums text-zinc-200">{formatCurrency(close.cashExpected)}</p>
+          </div>
+          <ChevronDown className={`size-4 shrink-0 text-zinc-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
         </div>
-        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold tabular-nums ${status.cls}`}>
-          {status.label}
-        </span>
-        <ChevronDown className={`size-4 text-zinc-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        {/* Status pill — segunda fila en mobile, tercera columna inline en sm+ */}
+        <div className="col-span-2 col-start-2 flex items-center justify-between gap-2 xs:col-span-3 xs:col-start-1 xs:justify-end xs:border-t-0">
+          <span className="text-[10px] text-muted-foreground xs:hidden">
+            Esperado <span className="font-bold tabular-nums text-zinc-200">{formatCurrency(close.cashExpected)}</span>
+          </span>
+          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold tabular-nums ${status.cls}`}>
+            {status.label}
+          </span>
+        </div>
       </button>
 
       {expanded && (
