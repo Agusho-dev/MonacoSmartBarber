@@ -49,6 +49,12 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -523,7 +529,7 @@ export function AgendaClient({ settings, branches }: Props) {
         <KpiCard label="Manuales" value={kpis.manual} tone="muted" />
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[1fr_340px]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-h-0">
           {loading ? (
             <Card className="h-full">
@@ -569,20 +575,7 @@ export function AgendaClient({ settings, branches }: Props) {
 
         <aside className="min-h-0">
           <Card className="flex h-full flex-col">
-            {selected ? (
-              <AppointmentDetail
-                appointment={selected}
-                onClose={() => setSelectedId(null)}
-                onCheckIn={handleCheckIn}
-                onStart={handleStart}
-                onFinish={handleFinish}
-                onCancel={setConfirmCancel}
-                onNoShow={setConfirmNoShow}
-                onRegisterPayment={setPaymentAppt}
-                onConfirmPrepayment={setPrepayAppt}
-                isActing={isActing}
-              />
-            ) : viewMode === 'multi' ? (
+            {viewMode === 'multi' ? (
               <CardContent className="flex h-full flex-col items-center justify-center gap-2 py-10 text-center text-sm text-muted-foreground">
                 <Calendar className="size-8 opacity-40" />
                 <p>Seleccioná un turno para ver el detalle.</p>
@@ -634,6 +627,29 @@ export function AgendaClient({ settings, branches }: Props) {
           </Card>
         </aside>
       </div>
+
+      {/* Detalle del turno como Sheet (drawer overlay) — no comprime el grid */}
+      <Sheet open={!!selected} onOpenChange={(open) => !open && setSelectedId(null)}>
+        <SheetContent side="right" className="w-full sm:max-w-md flex flex-col gap-0 p-0">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Detalle del turno</SheetTitle>
+          </SheetHeader>
+          {selected && (
+            <AppointmentDetail
+              appointment={selected}
+              onClose={() => setSelectedId(null)}
+              onCheckIn={handleCheckIn}
+              onStart={handleStart}
+              onFinish={handleFinish}
+              onCancel={setConfirmCancel}
+              onNoShow={setConfirmNoShow}
+              onRegisterPayment={setPaymentAppt}
+              onConfirmPrepayment={setPrepayAppt}
+              isActing={isActing}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
 
       <AppointmentBookingDialog
         open={showBooking}
