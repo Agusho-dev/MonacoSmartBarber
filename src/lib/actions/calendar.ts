@@ -168,3 +168,65 @@ export async function getAllBarbersWithSchedules(branchId: string) {
     .order('full_name')
   return { data: data ?? [], error }
 }
+
+/**
+ * Copia el calendario semanal del barbero `sourceStaffId` a todos los demás
+ * barberos activos de la misma sucursal. Reemplaza por completo los horarios
+ * de cada destino (delete + insert) — las excepciones puntuales NO se tocan.
+ */
+export async function copyScheduleToAllInBranch(sourceStaffId: string) {
+  const branchId = await validateStaffOrgAccess(sourceStaffId)
+  if (!branchId) return { error: 'No autorizado' }
+
+  const supabase = createAdminClient()
+
+  const { data: sourceSchedules, error: srcErr } = await supabase
+    .from('staff_schedules')
+    .select('day_of_week, block_index, start_time, end_time, is_active')
+    .eq('staff_id', sourceStaffId)
+    .order('day_of_week')
+    .order('block_index')
+
+  if (srcErr) return { error: srcErr.message }
+
+  const { data: targets, error: tgtErr } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('branch_id', branchId)
+    .or('role.eq.barber,is_also_barber.eq.true')
+    .eq('is_active', true)
+    .neq('id', sourceStaffId)
+
+  if (tgtErr) return { error: tgtErr.message }
+  if (!targets || targets.length === 0) {
+    return { error: 'No hay otros barberos en esta sucursal' }
+  }
+
+  const targetIds = targets.map((t) => t.id)
+
+  const { error: delErr } = await supabase
+    .from('staff_schedules')
+    .delete()
+    .in('staff_id', targetIds)
+
+  if (delErr) return { error: delErr.message }
+
+  if (sourceSchedules && sourceSchedules.length > 0) {
+    const rows = targetIds.flatMap((staffId) =>
+      sourceSchedules.map((s) => ({
+        staff_id: staffId,
+        day_of_week: s.day_of_week,
+        block_index: s.block_index,
+        start_time: s.start_time,
+        end_time: s.end_time,
+        is_active: s.is_active,
+      }))
+    )
+    const { error: insErr } = await supabase.from('staff_schedules').insert(rows)
+    if (insErr) return { error: insErr.message }
+  }
+
+  revalidatePath('/dashboard/calendario')
+  revalidatePath('/dashboard/equipo')
+  return { success: true, count: targetIds.length }
+}
