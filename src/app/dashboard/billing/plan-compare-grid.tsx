@@ -2,6 +2,7 @@
 
 import { useTransition, useState } from 'react'
 import { Check, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -37,17 +38,22 @@ export function PlanCompareGrid({
     setError(null)
     setTargetId(planId)
     startTransition(async () => {
-      const res = await requestPlanChange(planId, 'monthly')
+      const res = await requestPlanChange(planId, 'monthly', 'plan_change')
       if ('error' in res) {
         setError(res.message)
+        toast.error(res.message)
         setTargetId(null)
         return
       }
-      if ('checkoutUrl' in res && res.checkoutUrl) {
+      if ('mode' in res && res.mode === 'gateway' && 'checkoutUrl' in res) {
         window.location.href = res.checkoutUrl
         return
       }
-      window.location.reload()
+      if ('mode' in res && res.mode === 'manual') {
+        toast.success(res.message)
+        window.location.reload()
+        return
+      }
     })
   }
 
@@ -101,9 +107,9 @@ export function PlanCompareGrid({
                 {isPending && targetId === p.id ? (
                   <><Loader2 className="mr-1 size-3 animate-spin" /> Procesando...</>
                 ) : direction === 'up' ? (
-                  'Actualizar'
+                  'Solicitar este plan'
                 ) : (
-                  'Bajar'
+                  'Cambiar a este plan'
                 )}
               </Button>
             )}

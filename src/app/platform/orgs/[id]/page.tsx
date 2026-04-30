@@ -3,10 +3,11 @@ import { notFound } from 'next/navigation'
 import { ArrowLeft, Building2, Users, UserCheck, Eye } from 'lucide-react'
 import { requirePlatformAdmin } from '@/lib/actions/platform'
 import { createAdminClient } from '@/lib/supabase/server'
-import { getOrgBilling, listPlans, listModules } from '@/lib/actions/platform-billing'
+import { getOrgBilling, listPlans, listModules, listManualPayments } from '@/lib/actions/platform-billing'
 import { KpiCard } from '@/components/platform/kpi-card'
 import { OrgPlatformDetailClient } from './detail-client'
 import { SubscriptionManager } from './subscription-manager'
+import { ManualPaymentsSection } from './manual-payments-section'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +23,7 @@ export default async function PlatformOrgDetail({ params }: { params: Promise<{ 
     .maybeSingle()
   if (!org) return notFound()
 
-  const [branchesRes, , , visitsRes, lastVisitRes, billing, plans, modules] = await Promise.all([
+  const [branchesRes, , , visitsRes, lastVisitRes, billing, plans, modules, payments] = await Promise.all([
     admin.from('branches').select('id, name, is_active, created_at').eq('organization_id', id).order('created_at'),
     admin.from('staff').select('id, full_name, role, is_active').eq('organization_id', id).eq('is_active', true),
     admin.from('clients').select('id', { count: 'exact', head: true }).eq('organization_id', id),
@@ -31,6 +32,7 @@ export default async function PlatformOrgDetail({ params }: { params: Promise<{ 
     getOrgBilling(id),
     listPlans(),
     listModules(),
+    listManualPayments(id, 100),
   ])
 
   return (
@@ -81,6 +83,22 @@ export default async function PlatformOrgDetail({ params }: { params: Promise<{ 
         billing={billing}
         plans={plans}
         modules={modules}
+      />
+
+      {/* Pagos manuales — historial + acciones (registrar, extender, past_due) */}
+      <ManualPaymentsSection
+        orgId={id}
+        orgName={org.name}
+        payments={payments}
+        plans={plans.map((p) => ({
+          id: p.id,
+          name: p.name,
+          price_ars_monthly: p.price_ars_monthly,
+          price_ars_yearly: p.price_ars_yearly,
+        }))}
+        currentPlanId={billing.subscription?.plan_id ?? null}
+        currentBillingCycle={(billing.subscription as { billing_cycle?: string } | null)?.billing_cycle ?? null}
+        currentPeriodEnd={billing.subscription?.current_period_end ?? null}
       />
 
       {/* Legacy billing editor existente (fields viejos sobre organizations) */}

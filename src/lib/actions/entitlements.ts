@@ -1,7 +1,7 @@
 'use server'
 
 import { cache } from 'react'
-import { createAdminClient } from '@/lib/supabase/server'
+import { createAdminClient, createClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { isValidUUID } from '@/lib/validation'
 import {
@@ -17,6 +17,26 @@ import {
   type UsageMetric,
   type EntitlementErrorResponse,
 } from '@/lib/billing/types'
+
+// ============================================================
+// Bypass para platform_admins (developers/QA): nunca son bloqueados
+// por features/límites/caps. Se cachea por request.
+// ============================================================
+
+const _isCallerPlatformAdmin = cache(async (): Promise<boolean> => {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return false
+    const admin = createAdminClient()
+    const { data } = await admin
+      .from('platform_admins')
+      .select('user_id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+    return !!data
+  } catch { return false }
+})
 
 // ============================================================
 // Traducción de errores SQL → EntitlementError
@@ -245,6 +265,7 @@ export async function hasFeature(featureKey: string, orgId?: string): Promise<bo
 }
 
 export async function requireFeature(featureKey: string): Promise<void> {
+  if (await _isCallerPlatformAdmin()) return
   const ent = await getCurrentEntitlements()
   if (!ent) {
     throw new EntitlementError('subscription_inactive', 'No hay suscripción activa')
@@ -271,6 +292,7 @@ function metricErrorMessage(metric: LimitMetric, limit: number): string {
 }
 
 export async function requireLimit(metric: LimitMetric, delta = 1): Promise<void> {
+  if (await _isCallerPlatformAdmin()) return
   const ent = await getCurrentEntitlements()
   if (!ent) throw new EntitlementError('subscription_inactive', 'No hay suscripción activa')
   if (!ent.isAccessAllowed) {
@@ -290,6 +312,7 @@ export async function requireLimit(metric: LimitMetric, delta = 1): Promise<void
 }
 
 export async function requireMonthlyCap(metric: MonthlyCapMetric, delta = 1): Promise<void> {
+  if (await _isCallerPlatformAdmin()) return
   const ent = await getCurrentEntitlements()
   if (!ent) throw new EntitlementError('subscription_inactive', 'No hay suscripción activa')
   const limit = ent.limits[metric]
