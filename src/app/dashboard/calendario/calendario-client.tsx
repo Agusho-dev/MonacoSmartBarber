@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useEffect } from 'react'
+import { useState, useTransition, useRef } from 'react'
 import { saveScheduleBlocks, deleteSchedule, upsertException, deleteException } from '@/lib/actions/calendar'
 import type { ScheduleBlock } from '@/lib/actions/calendar'
 import type { Branch, StaffSchedule, StaffScheduleException } from '@/lib/types/database'
@@ -42,10 +42,15 @@ export function CalendarioClient({ branches, barbers }: Props) {
   const effectiveBranchId = storeBranchId ?? branches[0]?.id ?? ''
   const [selectedBarberId, setSelectedBarberId] = useState<string | null>(null)
 
-  // Resetear barbero seleccionado cuando cambia la sucursal
-  useEffect(() => {
-    setSelectedBarberId(null)
-  }, [effectiveBranchId])
+  // Resetear barbero seleccionado cuando cambia la sucursal (sin useEffect → evita
+  // setState-in-effect lint y cascading renders).
+  const lastBranchRef = useRef(effectiveBranchId)
+  if (lastBranchRef.current !== effectiveBranchId) {
+    lastBranchRef.current = effectiveBranchId
+    if (selectedBarberId !== null) {
+      setSelectedBarberId(null)
+    }
+  }
   const [exceptionDialog, setExceptionDialog] = useState(false)
   const [exceptionForm, setExceptionForm] = useState({ date: '', is_absent: true, reason: '' })
   const [scheduleDialog, setScheduleDialog] = useState<{ dayOfWeek: number } | null>(null)

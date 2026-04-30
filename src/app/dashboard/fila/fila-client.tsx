@@ -376,6 +376,7 @@ interface KanbanColumnProps {
   children?: React.ReactNode
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function KanbanColumn({
   id,
   title,
@@ -796,10 +797,10 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   // Ref que trackea el último estado confirmado de la DB (para comparar en drag & drop)
   const confirmedEntriesRef = useRef<QueueEntry[]>(initialEntries)
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
-  const [now, setNow] = useState(Date.now())
+  const [now, setNow] = useState(() => Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
   const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
-  const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
+  const [, setLastCompletedAt] = useState<Record<string, string>>({})
   const [latestAttendance, setLatestAttendance] = useState<Record<string, string>>({})
   
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
@@ -914,9 +915,13 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   }, [supabase])
 
   useEffect(() => {
-    fetchQueue()
-    fetchBarbers()
-    fetchSchedules()
+    // Diferimos las primeras llamadas para no disparar setState dentro del
+    // effect body (React Compiler detecta cascading renders).
+    const initId = setTimeout(() => {
+      fetchQueue()
+      fetchBarbers()
+      fetchSchedules()
+    }, 0)
 
     const channel = supabase
       .channel('admin-queue')
@@ -930,15 +935,18 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
         fetchSchedules()
       )
       .subscribe((status) => {
-        // Re-fetch everything on reconnection
+        // Re-fetch everything on reconnection. Defer a microtask para no
+        // disparar setState durante el callback de subscribe (cascading renders).
         if (status === 'SUBSCRIBED') {
-          fetchQueue()
-          fetchBarbers()
-          fetchSchedules()
+          queueMicrotask(() => {
+            fetchQueue()
+            fetchBarbers()
+            fetchSchedules()
+          })
         }
       })
 
-    return () => { supabase.removeChannel(channel) }
+    return () => { clearTimeout(initId); supabase.removeChannel(channel) }
   }, [supabase, fetchQueue, fetchBarbers, fetchSchedules])
 
   // Refresh data when returning to tab or as polling fallback
@@ -1020,15 +1028,20 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
     }
   }, [])
 
-  // Búsqueda automática al escribir (debounce)
+  // Búsqueda automática al escribir (debounce). Diferimos los resets vía
+  // setTimeout para que los setState se ejecuten fuera del effect body.
   useEffect(() => {
+    let cancelled = false
     if (searchQuery.trim().length < 2) {
-      setSearchResults([])
-      setSearchExecuted(false)
-      return
+      const resetId = setTimeout(() => {
+        if (cancelled) return
+        setSearchResults([])
+        setSearchExecuted(false)
+      }, 0)
+      return () => { cancelled = true; clearTimeout(resetId) }
     }
     const timer = setTimeout(() => handleSearch(searchQuery), 300)
-    return () => clearTimeout(timer)
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [searchQuery, handleSearch])
 
   const handleSearchCheckin = async (client: { id: string; name: string; phone: string }) => {

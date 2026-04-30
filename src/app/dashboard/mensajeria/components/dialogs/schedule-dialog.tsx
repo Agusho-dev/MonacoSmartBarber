@@ -17,18 +17,23 @@ export function ScheduleDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [clientResults, setClientResults] = useState<{ id: string; name: string; phone: string }[]>([])
   const [selectedClientLabel, setSelectedClientLabel] = useState('')
 
-  // Buscar clientes on-demand mientras el usuario escribe
+  // Buscar clientes on-demand mientras el usuario escribe.
+  // Diferimos los setState con queueMicrotask para evitar cascading renders.
   useEffect(() => {
     if (!open) return
+    let cancelled = false
     if (!clientSearch || clientSearch.trim().length < 2) {
-      setClientResults([])
-      return
+      queueMicrotask(() => {
+        if (!cancelled) setClientResults([])
+      })
+      return () => { cancelled = true }
     }
     const timer = setTimeout(async () => {
       const result = await searchClients(clientSearch)
+      if (cancelled) return
       setClientResults(result.data ?? [])
     }, 300)
-    return () => clearTimeout(timer)
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [clientSearch, open])
 
   const handleSubmit = () => {

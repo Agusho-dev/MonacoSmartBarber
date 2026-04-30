@@ -154,7 +154,7 @@ export function RolesClient({ roles, branches }: RolesClientProps) {
         if (pickedTemplateId) setPickedTemplateId(null)
     }
 
-    function toggleAllInCategory(categoryKey: string, permissionKeys: string[]) {
+    function toggleAllInCategory(_categoryKey: string, permissionKeys: string[]) {
         const allEnabled = permissionKeys.every((k) => form.permissions[k])
         setForm((prev) => {
             const newPerms = { ...prev.permissions }

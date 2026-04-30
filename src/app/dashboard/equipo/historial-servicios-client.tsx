@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useSyncExternalStore } from 'react'
 import { Clock, Banknote, CreditCard, ArrowRightLeft, Search } from 'lucide-react'
 import {
     Select,
@@ -62,6 +62,9 @@ function formatDuration(minutes: number): string {
     return m > 0 ? `${h}h ${m}min` : `${h}h`
 }
 
+// SSR-safe mounted detector — evita setState-in-effect.
+const subscribeNoop = () => () => {}
+
 export function HistorialServiciosClient({
     visits,
     barbers,
@@ -69,18 +72,18 @@ export function HistorialServiciosClient({
     const { selectedBranchId } = useBranchStore()
     const [selectedBarberId, setSelectedBarberId] = useState<string>('all')
     const [searchQuery, setSearchQuery] = useState('')
-    const [isMounted, setIsMounted] = useState(false)
-
-    useEffect(() => {
-        setIsMounted(true)
-    }, [])
+    const isMounted = useSyncExternalStore(
+        subscribeNoop,
+        () => true,
+        () => false,
+    )
 
     const filtered = useMemo(() => {
         // Return unfiltered on server/first-render to match SSR
         if (!isMounted) return visits
 
         let result = selectedBranchId ? visits.filter((v) => v.branch_id === selectedBranchId) : visits
-        
+
         if (selectedBarberId !== 'all') {
             result = result.filter((v) => v.barber?.id === selectedBarberId)
         }
@@ -94,7 +97,7 @@ export function HistorialServiciosClient({
             )
         }
         return result
-    }, [visits, selectedBarberId, searchQuery])
+    }, [visits, selectedBarberId, searchQuery, isMounted, selectedBranchId])
 
     const grouped = useMemo(() => {
         const map = new Map<string, ServiceVisit[]>()

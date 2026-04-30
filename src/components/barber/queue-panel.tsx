@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
-import { attendNextClient, cancelQueueEntry, reassignBarber, pauseActiveService, resumeActiveService } from '@/lib/actions/queue'
+import { attendNextClient, cancelQueueEntry, pauseActiveService, resumeActiveService } from '@/lib/actions/queue'
 import { fetchBarberDayStats, fetchBranchAssignmentData } from '@/lib/actions/barber'
 import { logoutBarber } from '@/lib/actions/auth'
 import {
@@ -17,7 +17,8 @@ import {
 } from '@/lib/actions/break-requests'
 import type { QueueEntry, Staff, Client, BreakConfig, StaffSchedule } from '@/lib/types/database'
 import { assignDynamicBarbers } from '@/lib/barber-utils'
-import { AppointmentList } from '@/components/appointments/appointment-list'
+import { BarberTimeline } from '@/components/barber/barber-timeline'
+import { UpcomingAppointmentBanner } from '@/components/barber/upcoming-appointment-banner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -50,7 +51,6 @@ import {
   User,
   Scissors,
   LogOut,
-  Check,
   X,
   Gift,
   Coffee,
@@ -99,6 +99,8 @@ interface QueuePanelProps {
   breakConfigs?: BreakConfig[]
   appointments?: import('@/lib/types/database').Appointment[]
   noShowToleranceMinutes?: number
+  /** Modo de operación de la sucursal: afecta el layout del panel */
+  operationMode?: 'walk_in' | 'appointments' | 'hybrid'
 }
 
 interface BreakRequestRow {
@@ -118,7 +120,8 @@ export function QueuePanel({
   branchName,
   breakConfigs = [],
   appointments = [],
-  noShowToleranceMinutes = 15,
+  noShowToleranceMinutes: _noShowToleranceMinutes = 15,
+  operationMode = 'walk_in',
 }: QueuePanelProps) {
   const [entries, setEntries] = useState<QueueEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -132,7 +135,6 @@ export function QueuePanel({
   const [allBarbers, setAllBarbers] = useState<Staff[]>([])
   const [notClockedInBarbers, setNotClockedInBarbers] = useState<Set<string>>(new Set())
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
-  const [reassigningEntryId, setReassigningEntryId] = useState<string | null>(null)
   const [profileClient, setProfileClient] = useState<Client | null>(null)
   // Break request state
   const [breakDialogOpen, setBreakDialogOpen] = useState(false)
@@ -158,7 +160,7 @@ export function QueuePanel({
   const [hiddenLoading, setHiddenLoading] = useState(false)
 
   const [directSaleOpen, setDirectSaleOpen] = useState(false)
-  const [mobilePanelTab, setMobilePanelTab] = useState<'queue' | 'active'>('queue')
+  // (mobilePanelTab eliminado: no se usaba en el render)
 
   // Next client alert state
   const [nextClientAlertMinutes, setNextClientAlertMinutes] = useState(5)
@@ -579,6 +581,21 @@ export function QueuePanel({
     (e) => e.status === 'in_progress' && e.barber_id !== session.staff_id && !e.is_break
   )
 
+  // Turno próximo para el banner de conflicto (modo hybrid): dentro de los próximos 15 min
+  // y no está checked_in todavía.
+  const upcomingAppointmentForBanner = useMemo(() => {
+    if (operationMode !== 'hybrid') return null
+    const nowDate = new Date()
+    const nowMinutes = nowDate.getHours() * 60 + nowDate.getMinutes()
+    return appointments.find((a) => {
+      if (!['confirmed'].includes(a.status)) return false
+      const [h, m] = a.start_time.split(':').map(Number)
+      const apptMinutes = h * 60 + m
+      const diff = apptMinutes - nowMinutes
+      return diff >= 0 && diff <= 15
+    }) ?? null
+  }, [appointments, operationMode])
+
   async function handleStartService(entryId: string) {
     setActionLoading(entryId)
     const result = await attendNextClient(session.staff_id, session.branch_id, entryId)
@@ -597,20 +614,6 @@ export function QueuePanel({
     setActionLoading(entryId)
     const result = await cancelQueueEntry(entryId)
     if ('error' in result) toast.error(result.error)
-    await fetchQueue()
-    setActionLoading(null)
-  }
-
-  async function handleReassign(entryId: string, targetBarberId: string) {
-    setActionLoading(entryId)
-    const result = await reassignBarber(entryId, targetBarberId)
-    if ('error' in result) {
-      toast.error(result.error)
-    } else {
-      const target = otherBarbers.find((b) => b.id === targetBarberId)
-      toast.success(`Reasignado a ${target?.full_name ?? 'otro barbero'}`)
-      setReassigningEntryId(null)
-    }
     await fetchQueue()
     setActionLoading(null)
   }
@@ -769,8 +772,7 @@ export function QueuePanel({
       return null // Don't show other barbers' ghost breaks
     }
 
-    const isMyEntry = entry.barber_id === session.staff_id
-    const isReassigning = reassigningEntryId === entry.id
+    // (isMyEntry / isReassigning eliminados — no se usan en el render actual)
 
     return (
       <div key={entry.id} className="space-y-2">
@@ -1115,8 +1117,87 @@ export function QueuePanel({
         </div>
       </header>
 
+      {/* Banner de turno próximo — solo modo hybrid */}
+      {operationMode === 'hybrid' && upcomingAppointmentForBanner && (
+        <UpcomingAppointmentBanner
+          appointment={upcomingAppointmentForBanner}
+          staffId={session.staff_id}
+          branchId={session.branch_id}
+        />
+      )}
+
       <main className="flex flex-1 flex-col overflow-hidden sm:flex-row">
 
+        {/* ── MODO APPOINTMENTS: solo timeline, sin tab de cola ── */}
+        {operationMode === 'appointments' && (
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <BarberTimeline
+              session={session}
+              initialAppointments={appointments}
+            />
+          </div>
+        )}
+
+        {/* ── MODO HYBRID: timeline (60%) + cola walk-in (40%) ── */}
+        {operationMode === 'hybrid' && (
+          <>
+            {/* Timeline de turnos */}
+            <div className="flex flex-col overflow-hidden sm:flex-[3]">
+              <BarberTimeline
+                session={session}
+                initialAppointments={appointments}
+              />
+            </div>
+
+            {/* Cola walk-in lateral */}
+            <div className="flex flex-col overflow-hidden border-t sm:border-t-0 sm:border-l sm:flex-[2]">
+              <div className="shrink-0 border-b px-3 py-2 bg-card/60">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Cola walk-in
+                </p>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                <div className="space-y-2 p-3">
+                  {loading ? (
+                    Array.from({ length: 2 }).map((_, i) => (
+                      <div key={i} className="h-16 rounded-xl bg-muted animate-pulse" />
+                    ))
+                  ) : myWaitingEntries.length === 0 ? (
+                    renderEmptyQueue()
+                  ) : (
+                    myWaitingEntries.map((e) => renderQueueEntry(e, false))
+                  )}
+                  {!loading && renderInProgressOthers()}
+                </div>
+              </div>
+              {(myActiveEntry || myActiveBreak) && (
+                <div className="shrink-0 border-t p-3">
+                  {myActiveBreak ? (
+                    <ActiveBreakCard
+                      startedAt={myActiveBreak.started_at}
+                      durationMinutes={breakDurationMinutes}
+                      onComplete={handleCompleteBreak}
+                      actionLoading={actionLoading === myActiveBreak.id}
+                    />
+                  ) : myActiveEntry ? (
+                    <ActiveClientCard
+                      entry={myActiveEntry}
+                      variant="mobile"
+                      onComplete={() => setCompletingEntry(myActiveEntry)}
+                      onPause={handlePauseActive}
+                      onResume={handleResumeActive}
+                      actionLoading={actionLoading === myActiveEntry.id}
+                    />
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ── MODO WALK_IN: layout original sin cambios ── */}
+        {operationMode === 'walk_in' && (
+          <>
         {/* ── MOBILE: unified layout ── */}
         <div className="flex flex-1 flex-col overflow-hidden sm:hidden bg-background">
           {/* Stats compactos mobile */}
@@ -1188,15 +1269,12 @@ export function QueuePanel({
             </TabsContent>
             {appointments.length > 0 && (
               <TabsContent value="appointments" className="mt-0 flex-1 overflow-hidden bg-muted/10">
-                <ScrollArea className="h-full">
-                  <div className="p-3 pb-8">
-                    <AppointmentList
-                      appointments={appointments}
-                      staffId={session.staff_id}
-                      noShowToleranceMinutes={noShowToleranceMinutes}
-                    />
-                  </div>
-                </ScrollArea>
+                <div className="h-full overflow-hidden">
+                  <BarberTimeline
+                    session={session}
+                    initialAppointments={appointments}
+                  />
+                </div>
               </TabsContent>
             )}
           </Tabs>
@@ -1336,6 +1414,9 @@ export function QueuePanel({
             )}
           </div>
         </section>
+          </>
+        )}
+        {/* ── FIN MODO WALK_IN ── */}
       </main>
 
       {/* Next client waiting warning overlay */}

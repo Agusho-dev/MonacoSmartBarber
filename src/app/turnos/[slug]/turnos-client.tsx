@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
+import Image from 'next/image'
 import { Calendar as CalendarIcon, Clock, Scissors, User, MapPin, ChevronLeft, Check, Loader2, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -238,7 +239,14 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
       >
         <div className="px-6 pt-6 text-center">
           {org.logo_url ? (
-            <img src={org.logo_url} alt={org.name} className="mx-auto mb-2 h-12 w-12 rounded-full object-cover" />
+            <Image
+              src={org.logo_url}
+              alt={org.name}
+              width={48}
+              height={48}
+              unoptimized
+              className="mx-auto mb-2 h-12 w-12 rounded-full object-cover"
+            />
           ) : (
             <div
               className="mx-auto mb-2 h-12 w-12 rounded-full"
@@ -363,7 +371,7 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
                         }
                       >
                         {b.avatar_url ? (
-                          <img src={b.avatar_url} alt="" className="h-4 w-4 rounded-full object-cover" />
+                          <Image src={b.avatar_url} alt="" width={16} height={16} unoptimized className="h-4 w-4 rounded-full object-cover" />
                         ) : (
                           <User className="h-3 w-3" />
                         )}
@@ -452,7 +460,7 @@ export function TurnosClient({ org, branches, services, settings, initialBranchI
                             >
                               <div className="mb-2 flex items-center gap-2">
                                 {pubBarber?.avatar_url ? (
-                                  <img src={pubBarber.avatar_url} alt="" className="h-7 w-7 rounded-full object-cover" />
+                                  <Image src={pubBarber.avatar_url} alt="" width={28} height={28} unoptimized className="h-7 w-7 rounded-full object-cover" />
                                 ) : (
                                   <div
                                     className="flex h-7 w-7 items-center justify-center rounded-full"

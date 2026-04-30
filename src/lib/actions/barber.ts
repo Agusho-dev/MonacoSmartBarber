@@ -4,7 +4,7 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getCurrentOrgId } from './org'
 
-export async function toggleBarberStatus(staffId: string) {
+export async function toggleBarberStatus(_staffId: string) {
   return { error: 'El estado de los barberos ahora se gestiona mediante el sistema de descansos.' }
 }
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
+import Image from 'next/image'
 import {
   getClientProfile,
   type ClientProfileData,
@@ -22,11 +23,15 @@ export function ClientHistory({ clientId }: ClientHistoryProps) {
   const [expandedPhoto, setExpandedPhoto] = useState<string | null>(null)
 
   useEffect(() => {
-    setLoading(true)
+    let cancelled = false
+    // Diferimos los setState con queueMicrotask para evitar cascading renders.
+    queueMicrotask(() => { if (!cancelled) setLoading(true) })
     getClientProfile(clientId).then((data) => {
+      if (cancelled) return
       setProfile(data)
       setLoading(false)
     })
+    return () => { cancelled = true }
   }, [clientId])
 
   function getUrl(path: string) {
@@ -73,12 +78,15 @@ export function ClientHistory({ clientId }: ClientHistoryProps) {
                 </div>
                 <div className="flex gap-2 overflow-x-auto">
                   {visit.photos.map((photo) => (
-                    <img
+                    <Image
                       key={photo.id}
                       src={getUrl(photo.storage_path)}
                       alt="Corte"
+                      width={80}
+                      height={80}
                       className="size-20 rounded-md border object-cover cursor-pointer hover:opacity-80 transition-opacity"
                       onClick={() => setExpandedPhoto(getUrl(photo.storage_path))}
+                      unoptimized
                     />
                   ))}
                 </div>
@@ -92,10 +100,13 @@ export function ClientHistory({ clientId }: ClientHistoryProps) {
         <DialogContent className="max-w-3xl border-none bg-transparent p-0 shadow-none">
           <DialogTitle className="sr-only">Foto ampliada</DialogTitle>
           {expandedPhoto && (
-            <img
+            <Image
               src={expandedPhoto}
               alt="Corte ampliado"
+              width={1280}
+              height={1280}
               className="max-h-[85vh] w-full rounded-md object-contain"
+              unoptimized
             />
           )}
         </DialogContent>

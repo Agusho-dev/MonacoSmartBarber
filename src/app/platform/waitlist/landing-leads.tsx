@@ -14,7 +14,6 @@ import {
   Search,
   Store,
   UserRound,
-  X as XIcon,
   XCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'

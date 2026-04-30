@@ -81,7 +81,7 @@ export async function saveScheduleBlocks(
 }
 
 /** @deprecated Use saveScheduleBlocks instead */
-export async function upsertSchedule(staffId: string, dayOfWeek: number, startTime: string, endTime: string, isActive: boolean) {
+export async function upsertSchedule(staffId: string, dayOfWeek: number, startTime: string, endTime: string, _isActive: boolean) {
   return saveScheduleBlocks(staffId, dayOfWeek, [{ start_time: startTime, end_time: endTime }])
 }
 

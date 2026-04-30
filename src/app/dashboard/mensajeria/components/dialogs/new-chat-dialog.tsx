@@ -16,20 +16,27 @@ export function NewChatDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const [filteredClients, setFilteredClients] = useState<{ id: string; name: string; phone: string }[]>([])
   const [searching, setSearching] = useState(false)
 
-  // Buscar clientes on-demand cuando el usuario escribe (mínimo 2 caracteres)
+  // Buscar clientes on-demand cuando el usuario escribe (mínimo 2 caracteres).
+  // Diferimos los setState con queueMicrotask para evitar cascading renders.
   useEffect(() => {
     if (!open) return
+    let cancelled = false
     if (!newChatSearch || newChatSearch.trim().length < 2) {
-      setFilteredClients([])
-      return
+      queueMicrotask(() => {
+        if (!cancelled) setFilteredClients([])
+      })
+      return () => { cancelled = true }
     }
-    setSearching(true)
+    queueMicrotask(() => {
+      if (!cancelled) setSearching(true)
+    })
     const timer = setTimeout(async () => {
       const result = await searchClients(newChatSearch)
+      if (cancelled) return
       setFilteredClients(result.data ?? [])
       setSearching(false)
     }, 300)
-    return () => clearTimeout(timer)
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [newChatSearch, open])
 
   const handleStart = () => {

@@ -21,6 +21,49 @@ const META_API_VERSION = 'v22.0'
 const BATCH_SIZE = 50
 const MAX_ATTEMPTS = 3
 
+// Shape mínimo de un scheduled_message tal como lo devuelve claim_pending_messages()
+// y como lo consumimos en este archivo. No es exhaustivo: solo los campos que tocamos.
+interface TemplateParamComponent {
+  type: string
+  parameters?: TemplateParamItem[]
+}
+interface TemplateParamItem {
+  type: string
+  text?: string
+  image?: unknown
+  document?: unknown
+  video?: unknown
+}
+interface ScheduledMessage {
+  id: string
+  organization_id?: string | null
+  channel_id?: string | null
+  client_id?: string | null
+  phone?: string | null
+  content?: string | null
+  template_name?: string | null
+  template_language?: string | null
+  template_params?: TemplateParamComponent[] | null
+  workflow_id?: string | null
+  workflow_trigger_data?: Record<string, unknown> | null
+  broadcast_id?: string | null
+  attempts?: number | null
+}
+
+interface MetaTemplatePayload {
+  messaging_product: 'whatsapp'
+  to: string
+  type: 'template'
+  template: {
+    name: string
+    language: { code: string }
+    components?: Array<{
+      type: string
+      parameters: Array<Record<string, unknown>>
+    }>
+  }
+}
+
 Deno.serve(async (req: Request) => {
   const authHeader = req.headers.get('Authorization')
   if (authHeader !== `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`) {
@@ -59,13 +102,14 @@ Deno.serve(async (req: Request) => {
     // Procesa el batch con concurrencia limitada (8 mensajes en vuelo simultáneamente).
     // Esto reduce el tiempo de procesamiento de un batch de 50 de ~50×RTT a ~7×RTT
     // sin sobrecargar Meta Cloud API ni el microservicio Baileys.
-    await processWithConcurrency(pendingMessages, 8, async (msg) => {
+    const typedPending = pendingMessages as ScheduledMessage[]
+    await processWithConcurrency(typedPending, 8, async (msg) => {
       let sent = false
       let errorMsg: string | null = null
       let httpStatus: number | undefined
 
       // Resolver organization_id (preferimos la columna directa)
-      let orgId: string | null = (msg as any).organization_id ?? null
+      let orgId: string | null = msg.organization_id ?? null
 
       if (!orgId && msg.channel_id) {
         const { data: channelData, error: chErr } = await supabase
@@ -113,7 +157,8 @@ Deno.serve(async (req: Request) => {
           .eq('organization_id', orgId)
           .maybeSingle()
         if (setErr) console.error('[scheduled] app_settings error org=' + orgId + ':', setErr.message)
-        orgSettingsCache.set(orgId, { wa_api_url: (settings as any)?.wa_api_url ?? null })
+        const settingsRow = settings as { wa_api_url?: string | null } | null
+        orgSettingsCache.set(orgId, { wa_api_url: settingsRow?.wa_api_url ?? null })
       }
       const waApiUrl = orgSettingsCache.get(orgId)!.wa_api_url
 
@@ -139,10 +184,11 @@ Deno.serve(async (req: Request) => {
           } else {
             errorMsg = result.error || `Error HTTP ${res.status} del microservicio`
           }
-        } catch (e: any) {
-          errorMsg = e.name === 'AbortError'
+        } catch (e: unknown) {
+          const err = e as { name?: string; message?: string }
+          errorMsg = err.name === 'AbortError'
             ? 'Timeout al contactar microservicio WA (15s)'
-            : `Error de conexión: ${e.message}`
+            : `Error de conexión: ${err.message ?? String(e)}`
         }
       } else {
         // Envío vía Meta Cloud API
@@ -164,9 +210,8 @@ Deno.serve(async (req: Request) => {
           errorMsg = 'Falta teléfono en el mensaje programado'
         } else {
           const phone = normalizePhone(msg.phone)
-          const isTemplate = !!msg.template_name
-          const payload = isTemplate
-            ? buildTemplatePayload(phone, msg.template_name, msg.template_language, msg.template_params)
+          const payload = msg.template_name
+            ? buildTemplatePayload(phone, msg.template_name, msg.template_language ?? null, msg.template_params ?? null)
             : { messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: msg.content } }
 
           const controller = new AbortController()
@@ -194,11 +239,12 @@ Deno.serve(async (req: Request) => {
             } else {
               errorMsg = result.error?.message || `Error HTTP ${res.status}`
             }
-          } catch (e: any) {
+          } catch (e: unknown) {
             clearTimeout(timeout)
-            errorMsg = e.name === 'AbortError'
+            const err = e as { name?: string; message?: string }
+            errorMsg = err.name === 'AbortError'
               ? 'Timeout al contactar Meta API (15s)'
-              : `Error de conexión: ${e.message}`
+              : `Error de conexión: ${err.message ?? String(e)}`
           }
         }
       }
@@ -207,8 +253,9 @@ Deno.serve(async (req: Request) => {
       if (sent) {
         try {
           await recordInConversation(msg, orgId, orgChannelCache)
-        } catch (recErr: any) {
-          console.error('[recordInConversation] error msg_id=' + msg.id + ':', recErr?.message ?? recErr)
+        } catch (recErr: unknown) {
+          const message = recErr instanceof Error ? recErr.message : String(recErr)
+          console.error('[recordInConversation] error msg_id=' + msg.id + ':', message)
         }
       }
 
@@ -229,10 +276,11 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({ processed: results.length, results }),
       { headers: { 'Content-Type': 'application/json' } }
     )
-  } catch (error: any) {
-    console.error('[scheduled] unhandled error:', error?.message ?? error)
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[scheduled] unhandled error:', message)
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }
@@ -259,13 +307,13 @@ async function processWithConcurrency<T>(
 
 // Persiste el resultado del envío. Si willRetry, re-agenda con backoff y vuelve a pending.
 async function persistResult(
-  msg: any,
+  msg: ScheduledMessage,
   sent: boolean,
   errorMsg: string | null,
   willRetry: boolean,
   errorKind: 'transient' | 'permanent' | null
 ): Promise<void> {
-  let updateData: Record<string, any>
+  let updateData: Record<string, unknown>
 
   if (sent) {
     updateData = {
@@ -349,9 +397,9 @@ function buildTemplatePayload(
   phone: string,
   templateName: string,
   templateLanguage: string | null,
-  templateParams: any
-) {
-  const payload: any = {
+  templateParams: TemplateParamComponent[] | null | undefined,
+): MetaTemplatePayload {
+  const payload: MetaTemplatePayload = {
     messaging_product: 'whatsapp',
     to: phone,
     type: 'template',
@@ -362,14 +410,14 @@ function buildTemplatePayload(
   }
 
   if (templateParams && Array.isArray(templateParams) && templateParams.length > 0) {
-    payload.template.components = templateParams.map((comp: any) => ({
+    payload.template.components = templateParams.map((comp: TemplateParamComponent) => ({
       type: comp.type,
-      parameters: comp.parameters?.map((p: any) => {
+      parameters: comp.parameters?.map((p: TemplateParamItem) => {
         if (p.type === 'text') return { type: 'text', text: p.text || '' }
         if (p.type === 'image') return { type: 'image', image: p.image }
         if (p.type === 'document') return { type: 'document', document: p.document }
         if (p.type === 'video') return { type: 'video', video: p.video }
-        return p
+        return p as unknown as Record<string, unknown>
       }) ?? [],
     }))
   }
@@ -378,7 +426,7 @@ function buildTemplatePayload(
 }
 
 // Registra el mensaje enviado en la tabla de conversaciones para que aparezca en el inbox.
-async function recordInConversation(msg: any, orgId: string, orgChannelCache: Map<string, { id: string }[]>) {
+async function recordInConversation(msg: ScheduledMessage, orgId: string, orgChannelCache: Map<string, { id: string }[]>) {
   if (!orgChannelCache.has(orgId)) {
     const { data: channels, error: chErr } = await supabase
       .from('social_channels')
@@ -463,11 +511,11 @@ async function recordInConversation(msg: any, orgId: string, orgChannelCache: Ma
 
   // Workflow execution (con waiting_since correcto desde migración 119+)
   if (msg.workflow_id && msg.workflow_trigger_data) {
-    const triggerData = msg.workflow_trigger_data as Record<string, any>
-    const nextNodeId = triggerData.next_node_id as string | null
-    const entryNodeId = triggerData.entry_node_id as string | null
-    const firstActionNodeId = triggerData.first_action_node_id as string | null
-    const clientName = (triggerData.client_name as string) ?? ''
+    const triggerData = msg.workflow_trigger_data as Record<string, unknown>
+    const nextNodeId = (triggerData.next_node_id as string | null | undefined) ?? null
+    const entryNodeId = (triggerData.entry_node_id as string | null | undefined) ?? null
+    const firstActionNodeId = (triggerData.first_action_node_id as string | null | undefined) ?? null
+    const clientName = (triggerData.client_name as string | undefined) ?? ''
     const firstName = clientName.split(/\s+/)[0] ?? ''
 
     const { error: cancelErr } = await supabase

@@ -7,7 +7,17 @@ import { Textarea } from '@/components/ui/textarea'
 import { Star } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-export function ReviewClient({ reqInfo }: { reqInfo: any }) {
+interface ReviewRequestInfo {
+    id: string
+    status: string
+    branch: {
+        name: string | null
+        google_review_url: string | null
+    } | null
+    [key: string]: unknown
+}
+
+export function ReviewClient({ reqInfo }: { reqInfo: ReviewRequestInfo }) {
     const [rating, setRating] = useState(0)
     const [hoveredRating, setHoveredRating] = useState(0)
     const [comment, setComment] = useState('')
@@ -47,7 +57,7 @@ export function ReviewClient({ reqInfo }: { reqInfo: any }) {
 
         await submitReview(reqInfo.id, rating, category, comment || null, isGoogleRedirect)
 
-        if (isGoogleRedirect) {
+        if (isGoogleRedirect && reqInfo.branch?.google_review_url) {
             window.location.href = reqInfo.branch.google_review_url
         } else {
             setSubmitted(true)

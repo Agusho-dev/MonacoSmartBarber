@@ -342,8 +342,9 @@ Deno.serve(async (req) => {
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 
-  } catch (err: any) {
-    console.error('[client-auth] unhandled error:', err?.message ?? err)
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[client-auth] unhandled error:', message)
     return jsonError(500, 'Error interno del servidor')
   }
 })

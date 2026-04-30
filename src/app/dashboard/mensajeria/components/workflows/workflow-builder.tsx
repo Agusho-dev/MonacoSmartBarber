@@ -465,7 +465,6 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
   }
 
   const renderEdgePath = (source: { x: number; y: number }, target: { x: number; y: number }) => {
-    const midY = (source.y + target.y) / 2
     const controlOffset = Math.max(40, Math.abs(target.y - source.y) * 0.4)
     return `M ${source.x} ${source.y} C ${source.x} ${source.y + controlOffset}, ${target.x} ${target.y - controlOffset}, ${target.x} ${target.y}`
   }
@@ -982,29 +981,35 @@ function WorkflowSettingsDialog({
   )
   const [isSaving, startSaving] = useTransition()
 
-  // Sincronizar estado cuando se abre con un workflow diferente
+  // Sincronizar estado cuando cambia el workflow. Diferimos los setState con
+  // queueMicrotask para evitar cascading renders detectados por React Compiler.
   useEffect(() => {
-    setName(workflow.name)
-    setDescription(workflow.description ?? '')
-    setChannel(workflow.channels?.[0] ?? 'all')
-    setBranchId(workflow.branch_id ?? '')
-    setTriggerType(workflow.trigger_type)
-    setKeywords(((workflow.trigger_config?.keywords as string[]) ?? []).join(', '))
-    setMatchMode((workflow.trigger_config?.match_mode as string) ?? 'contains')
-    setTemplateName((workflow.trigger_config?.template_name as string) ?? '')
-    setDelayMinutes((workflow.trigger_config?.delay_minutes as number) ?? 15)
-    setDelayDays((workflow.trigger_config?.delay_days as number) ?? 7)
-    setReopenMode((workflow.trigger_config?.reopen_mode as string) ?? 'inactivity')
-    setMinHoursClient((workflow.trigger_config?.min_hours_since_client_msg as number) ?? 12)
-    setExcludeFirstContact((workflow.trigger_config?.exclude_first_ever_contact as boolean) ?? true)
-    setMessageReceivedState(parseMessageReceivedTriggerState(workflow.trigger_config as Record<string, unknown>))
+    queueMicrotask(() => {
+      setName(workflow.name)
+      setDescription(workflow.description ?? '')
+      setChannel(workflow.channels?.[0] ?? 'all')
+      setBranchId(workflow.branch_id ?? '')
+      setTriggerType(workflow.trigger_type)
+      setKeywords(((workflow.trigger_config?.keywords as string[]) ?? []).join(', '))
+      setMatchMode((workflow.trigger_config?.match_mode as string) ?? 'contains')
+      setTemplateName((workflow.trigger_config?.template_name as string) ?? '')
+      setDelayMinutes((workflow.trigger_config?.delay_minutes as number) ?? 15)
+      setDelayDays((workflow.trigger_config?.delay_days as number) ?? 7)
+      setReopenMode((workflow.trigger_config?.reopen_mode as string) ?? 'inactivity')
+      setMinHoursClient((workflow.trigger_config?.min_hours_since_client_msg as number) ?? 12)
+      setExcludeFirstContact((workflow.trigger_config?.exclude_first_ever_contact as boolean) ?? true)
+      setMessageReceivedState(parseMessageReceivedTriggerState(workflow.trigger_config as Record<string, unknown>))
+    })
   }, [workflow])
 
-  // Al elegir "Cualquier mensaje" en el selector, cargar la config guardada del workflow
+  // Al elegir "Cualquier mensaje" en el selector, cargar la config guardada del workflow.
   useEffect(() => {
     if (triggerType === 'message_received') {
-      setMessageReceivedState(parseMessageReceivedTriggerState(workflow.trigger_config as Record<string, unknown>))
+      queueMicrotask(() => {
+        setMessageReceivedState(parseMessageReceivedTriggerState(workflow.trigger_config as Record<string, unknown>))
+      })
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- workflow.trigger_config se lee al disparo
   }, [triggerType])
 
   const buildTriggerConfig = () => {

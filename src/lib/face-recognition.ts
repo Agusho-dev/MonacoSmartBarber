@@ -17,14 +17,18 @@ async function loadFaceApi(): Promise<FaceApiModule> {
   faceapi = await import('@vladmandic/face-api')
 
   // Try to set WebGL backend for better performance on mobile
+  interface TfBackend {
+    setBackend: (name: string) => Promise<boolean>
+    ready: () => Promise<void>
+  }
   try {
-    const tf = faceapi.tf as any
+    const tf = faceapi.tf as unknown as TfBackend
     await tf.setBackend('webgl')
     await tf.ready()
   } catch (e) {
     console.warn('WebGL backend not available, falling back', e)
     try {
-      const tf = faceapi.tf as any
+      const tf = faceapi.tf as unknown as TfBackend
       await tf.setBackend('wasm')
       await tf.ready()
     } catch (e2) {
@@ -103,7 +107,13 @@ export async function detectFace(
 
   // Extraer los 68 puntos de landmarks faciales
   const positions = detection.landmarks.positions
-  const landmarks: FaceLandmarkPoint[] = positions.map((p: any) => ({ x: p.x ?? p._x, y: p.y ?? p._y }))
+  const landmarks: FaceLandmarkPoint[] = positions.map((p) => {
+    const point = p as unknown as { x?: number; y?: number; _x?: number; _y?: number }
+    return {
+      x: point.x ?? point._x ?? 0,
+      y: point.y ?? point._y ?? 0,
+    }
+  })
 
   return {
     descriptor: detection.descriptor,
@@ -123,7 +133,7 @@ export async function matchFaceInDB(
   const descriptorArray = Array.from(descriptor)
   const rpcName = targetRole === 'staff' ? 'match_staff_face_descriptor' : 'match_face_descriptor'
 
-  const { data, error } = await supabase.rpc(rpcName as any, {
+  const { data, error } = await supabase.rpc(rpcName, {
     query_descriptor: JSON.stringify(descriptorArray),
     match_threshold: MATCH_THRESHOLD,
     max_results: 1,

@@ -174,7 +174,7 @@ export async function notifyNextWaitlistCandidate(ctx: NotifyContext) {
   const supabase = createAdminClient()
 
   // Buscar el primer candidato que matchea (FIFO por created_at)
-  let query = supabase
+  const query = supabase
     .from('appointment_waitlist')
     .select('id, client_id, service_id, barber_id, preferred_date_from, preferred_date_to, access_token, branch:branch_id(name)')
     .eq('organization_id', ctx.orgId)
@@ -240,7 +240,7 @@ export async function notifyNextWaitlistCandidate(ctx: NotifyContext) {
       .maybeSingle()
 
     const bookUrl = await absoluteUrl(`/turnos/espera/${match.access_token}`)
-    const branchName = (match.branch as any)?.name ?? ''
+    const branchName = (match.branch as { name?: string } | null)?.name ?? ''
 
     const row: Record<string, unknown> = {
       organization_id: ctx.orgId,

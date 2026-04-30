@@ -105,7 +105,7 @@ interface Props {
   onDelete: () => void
 }
 
-export function WorkflowNodeEditor({ node, workflow, onUpdateConfig, onUpdateLabel, onClose, onDelete }: Props) {
+export function WorkflowNodeEditor({ node, workflow: _workflow, onUpdateConfig, onUpdateLabel, onClose, onDelete }: Props) {
   const { tags } = useMensajeria()
   const config = node.config
 
@@ -449,6 +449,8 @@ function SendTemplateConfig({ config, onUpdateConfig }: { config: Record<string,
 
   useEffect(() => {
     if (waTemplates.length === 0) handleSyncTemplates()
+    // Sólo correr una vez al montar
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const approvedTemplates = waTemplates.filter(t => t.status === 'approved')
@@ -695,14 +697,20 @@ function TriggerConfig({
   const { waTemplates, handleSyncTemplates, syncingTemplates } = useMensajeria()
   const triggerType = (config.trigger_type as string) || 'message_received'
   const configRef = useRef(config)
-  configRef.current = config
+  // Sincronizar el ref vía useEffect para evitar mutar refs durante el render.
+  useEffect(() => {
+    configRef.current = config
+  }, [config])
 
   const keywordsJoined = ((config.keywords as string[]) ?? []).join(', ')
   const [keywordDraft, setKeywordDraft] = useState(keywordsJoined)
   const keywordDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    setKeywordDraft(((config.keywords as string[]) ?? []).join(', '))
+    queueMicrotask(() => {
+      setKeywordDraft(((config.keywords as string[]) ?? []).join(', '))
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- config se lee al disparo
   }, [nodeId])
 
   useEffect(() => () => {

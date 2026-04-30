@@ -10,7 +10,6 @@
 
 import 'dotenv/config'
 import { createClient } from '@supabase/supabase-js'
-import { randomUUID } from 'crypto'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -143,7 +142,7 @@ async function main() {
     staffId = staff?.id ?? null
 
     // ── 7. Trigger set_org_from_branch en visits ──
-    const { data: visit, error: vErr } = await admin
+    const { data: visit } = await admin
       .from('visits')
       .insert({ branch_id: branchId, client_id: clientId, barber_id: staffId, amount: 5000, commission_pct: 50, commission_amount: 2500, completed_at: new Date().toISOString() })
       .select('organization_id').single()

@@ -9,7 +9,7 @@ import { syncWhatsAppTemplates } from '@/lib/actions/whatsapp-meta'
 import { startConversation, updateConversationStatus, getClientVisits, scheduleMessageAuto } from '@/lib/actions/conversations'
 import { createConversationTag, deleteConversationTag, assignConversationTag, removeConversationTag, updateConversationTag, autoTagConversation } from '@/lib/actions/tags'
 import { toast } from 'sonner'
-import type { Message, ConversationTag, OrgWhatsAppConfig, OrgInstagramConfig, Client } from '@/lib/types/database'
+import type { Message, ConversationTag, OrgWhatsAppConfig, OrgInstagramConfig } from '@/lib/types/database'
 import type { OrgAiConfig } from '@/lib/actions/ai-config'
 import type { ConversationWithRelations, ScheduledWithRelations, ClientVisit, WaTemplate, ReviewAutoSettings, PlatformFilter } from './types'
 
@@ -525,7 +525,7 @@ export function MensajeriaProvider({
       const result = await syncWhatsAppTemplates()
       if (result.error) { toast.error(result.error); return }
       if (result.data) {
-        setWaTemplates(result.data.map((t, i) => ({ id: `tpl-${i}`, ...t })))
+        setWaTemplates(result.data.map((t, i) => ({ id: `tpl-${i}`, ...t })) as WaTemplate[])
         toast.success(`${result.data.length} template(s) sincronizado(s)`)
       }
     })

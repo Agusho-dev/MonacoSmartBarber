@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useState, useRef, useMemo } from 'react'
+import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
 import { completeService } from '@/lib/actions/queue'
 import { saveVisitDetails } from '@/lib/actions/visit-history'
 import { updateClientNotes } from '@/lib/actions/clients'
 import { compressToWebP, uploadVisitPhotos } from '@/lib/image-utils'
 import { QrPhotoButton } from '@/components/barber/qr-photo-button'
-import type { QueueEntry, Service, ServiceTag, PaymentMethod, PaymentAccount, Product } from '@/lib/types/database'
+import type { QueueEntry, Service, PaymentMethod, PaymentAccount, Product } from '@/lib/types/database'
 import {
   Dialog,
   DialogContent,
@@ -56,7 +57,6 @@ export function CompleteServiceDialog({
 
   const [services, setServices] = useState<Service[]>([])
   const [products, setProducts] = useState<Product[]>([])
-  const [tags, setTags] = useState<ServiceTag[]>([])
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([])
   const [step, setStep] = useState<1 | 2>(1)
   const [loading, setLoading] = useState(false)
@@ -429,6 +429,8 @@ export function CompleteServiceDialog({
                   <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
                     {photoPreviews.map((url, i) => (
                       <div key={i} className="group relative shrink-0">
+                        {/* Blob URL de URL.createObjectURL — Image no soporta blobs eficientemente */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={url}
                           alt={`Foto ${i + 1}`}
@@ -450,10 +452,13 @@ export function CompleteServiceDialog({
                   <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
                     {qrPhotoPreviews.map((url, i) => (
                       <div key={`qr-${i}`} className="group relative shrink-0">
-                        <img
+                        <Image
                           src={url}
                           alt={`QR Foto ${i + 1}`}
+                          width={80}
+                          height={80}
                           className="size-20 rounded-lg border border-emerald-500/30 object-cover"
+                          unoptimized
                         />
                         <button
                           type="button"

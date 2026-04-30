@@ -17,7 +17,8 @@ export function useVisibilityRefresh(
   pollingIntervalMs: number = 30_000
 ) {
   const onRefreshRef = useRef(onRefresh)
-  const lastRefreshRef = useRef(Date.now())
+  // Initialize lazily to avoid calling Date.now() during render.
+  const lastRefreshRef = useRef<number>(0)
 
   // Keep the ref updated without triggering re-renders
   useEffect(() => {
@@ -25,6 +26,10 @@ export function useVisibilityRefresh(
   }, [onRefresh])
 
   useEffect(() => {
+    // Initialize timestamp on mount (effect bodies are pure regarding render).
+    if (lastRefreshRef.current === 0) {
+      lastRefreshRef.current = Date.now()
+    }
     // ── Visibility API: refresh when returning to tab ──
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {

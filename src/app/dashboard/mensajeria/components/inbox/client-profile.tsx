@@ -13,7 +13,7 @@ export function ClientProfile() {
     activeConv, showProfile, setShowProfile,
     tags, clientVisits, loadingVisits,
     handleStatusChange, handleToggleTag,
-    taggingConv, isActing,
+    taggingConv,
   } = useMensajeria()
 
   if (!showProfile || !activeConv) return null

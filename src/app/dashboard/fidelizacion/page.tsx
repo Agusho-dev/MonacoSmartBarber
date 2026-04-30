@@ -40,7 +40,7 @@ export default async function FidelizacionPage() {
     <FidelizacionClient
       branches={branches || []}
       initialConfigs={configs || []}
-      topClients={(topClients as any) || []}
+      topClients={(topClients as Parameters<typeof FidelizacionClient>[0]['topClients']) || []}
     />
   )
 }

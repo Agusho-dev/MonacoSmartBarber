@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition, useMemo } from 'react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { Save, Loader2, CalendarClock, AlertCircle, MessageSquare, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -647,7 +648,7 @@ export function TurnosConfigClient({ settings, allStaff, branches, templates, ha
                           className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-muted/50 transition-colors"
                         >
                           {staff.avatar_url ? (
-                            <img src={staff.avatar_url} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" />
+                            <Image src={staff.avatar_url} alt="" width={28} height={28} className="h-7 w-7 shrink-0 rounded-full object-cover" unoptimized />
                           ) : (
                             <div className="h-7 w-7 shrink-0 rounded-full bg-muted" />
                           )}

@@ -107,7 +107,11 @@ export function formatCurrency(amount: number) {
 }
 
 // Extraer las variables ({{1}}, {{2}}, etc.) de los componentes de un template de Meta
-export function extractTemplateVariables(components: any[]): {
+interface MetaTemplateComponent {
+  type?: string
+  text?: string
+}
+export function extractTemplateVariables(components: MetaTemplateComponent[]): {
   header: string[]
   body: string[]
 } {

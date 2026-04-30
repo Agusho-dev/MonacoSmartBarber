@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import Image from "next/image"
 import { createClient } from "@/lib/supabase/client"
 import { loginWithPin } from "@/lib/actions/auth"
 import type { Branch, Staff } from "@/lib/types/database"
@@ -163,10 +164,14 @@ export default function BarberLoginPage() {
     <div className="flex min-h-dvh flex-col items-center justify-center p-4">
       <div className="mb-8 flex flex-col items-center gap-2">
         {orgInfo?.logo_url ? (
-          <img
+          <Image
             src={orgInfo.logo_url}
             alt={orgInfo.name}
+            width={48}
+            height={48}
             className="size-12 rounded-full object-cover"
+            priority
+            unoptimized
           />
         ) : (
           <div className="flex size-12 items-center justify-center rounded-full border border-muted-foreground/25">

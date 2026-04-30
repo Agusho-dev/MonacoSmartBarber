@@ -119,7 +119,7 @@ export function DisciplinaClient({
 }: Props) {
   const { selectedBranchId } = useBranchStore()
   const [overtimeFilter, setOvertimeFilter] = useState<OvertimeFilter>('week')
-  const [now, setNow] = useState(Date.now())
+  const [now, setNow] = useState(() => Date.now())
   const [ruleDialog, setRuleDialog] = useState(false)
   const [ruleForm, setRuleForm] = useState({
     id: '', event_type: 'absence' as DisciplinaryEventType,

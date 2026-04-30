@@ -5,7 +5,7 @@ const PAGE_SIZE = 1000
  * Pide de a 1000 filas y concatena hasta que no haya más.
  */
 export async function fetchAll<T>(
-  queryFn: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>
+  queryFn: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
 ): Promise<T[]> {
   const all: T[] = []
   let from = 0

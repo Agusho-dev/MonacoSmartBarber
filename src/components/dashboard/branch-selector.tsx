@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 import { useBranchStore } from '@/stores/branch-store'
 import {
   Select,
@@ -17,6 +17,9 @@ interface Branch {
 
 const ALL_BRANCHES_VALUE = '__all__'
 
+// SSR-safe mounted detector — evita setState-in-effect.
+const subscribeNoop = () => () => {}
+
 interface Props {
   branches: Branch[]
   className?: string
@@ -28,7 +31,11 @@ export function BranchSelector({ branches, className, allowAll }: Props) {
   const setSelectedBranchId = useBranchStore(s => s.setSelectedBranchId)
   const allowedBranchIds = useBranchStore(s => s.allowedBranchIds)
 
-  const [isMounted, setIsMounted] = useState(false)
+  const isMounted = useSyncExternalStore(
+    subscribeNoop,
+    () => true,
+    () => false,
+  )
 
   // Filter branches by allowed scope
   const visibleBranches = allowedBranchIds
@@ -36,7 +43,6 @@ export function BranchSelector({ branches, className, allowAll }: Props) {
     : branches
 
   useEffect(() => {
-    setIsMounted(true)
     console.log('[debug-branch][BranchSelector] mount', {
       branchesIn: branches.length,
       allowedBranchIds,

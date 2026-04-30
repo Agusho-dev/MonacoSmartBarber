@@ -59,8 +59,12 @@ export function ConfirmPrepaymentDialog({ open, onOpenChange, appointment, staff
     }).catch(() => setAccounts([]))
   }, [open, appointment.branch_id])
 
+  // Sincronizar `amount` cuando cambian los inputs derivados.
+  // Diferimos el setState con queueMicrotask para evitar cascading renders.
   useEffect(() => {
-    setAmount(String(defaultAmount || appointment.service?.price || 0))
+    queueMicrotask(() => {
+      setAmount(String(defaultAmount || appointment.service?.price || 0))
+    })
   }, [defaultAmount, appointment.service?.price])
 
   const needsAccount = method === 'transferencia' || method === 'mercadopago'

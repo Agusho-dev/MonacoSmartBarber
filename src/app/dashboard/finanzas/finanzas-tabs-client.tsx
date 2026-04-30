@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { DollarSign, Wallet, Banknote, Receipt, Building2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -71,16 +71,13 @@ export function FinanzasTabsClient({
         ? initialTabId
         : firstAvailableTab
 
-    const [activeTab, setActiveTab] = useState<TabId | null>(defaultTab || null)
-
-    // Force activeTab to be valid if permissions change or state is stale
-    useEffect(() => {
-        if (activeTab && visibleTabs.length > 0 && !visibleTabs.some(t => t.id === activeTab)) {
-            setActiveTab(visibleTabs[0].id)
-        } else if (!activeTab && visibleTabs.length > 0) {
-            setActiveTab(visibleTabs[0].id)
-        }
-    }, [activeTab, visibleTabs])
+    // activeTab calculado en cada render desde state interno + visibleTabs.
+    // Si la pestaña activa ya no está en visibleTabs, derivamos la primera disponible.
+    // Esto evita setState durante render y refs accedidos en render.
+    const [activeTabRaw, setActiveTab] = useState<TabId | null>(defaultTab || null)
+    const activeTab: TabId | null = activeTabRaw && visibleTabs.some(t => t.id === activeTabRaw)
+        ? activeTabRaw
+        : (visibleTabs.length > 0 ? visibleTabs[0].id : null)
 
     if (visibleTabs.length === 0) {
         return (

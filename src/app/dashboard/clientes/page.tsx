@@ -4,6 +4,29 @@ import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { ClientesClient } from './clientes-client'
 
+interface RawVisit {
+  id: string
+  client_id: string
+  branch_id: string
+  barber_id: string
+  amount: number
+  completed_at: string
+  notes: string | null
+  tags: string[] | null
+  service: { name: string } | { name: string }[] | null
+  barber: { full_name: string } | { full_name: string }[] | null
+}
+
+interface RawPointsRow {
+  client_id: string
+  points_balance: number
+}
+
+function pickRel<T>(rel: T | T[] | null | undefined): T | null {
+  if (!rel) return null
+  return Array.isArray(rel) ? (rel[0] ?? null) : rel
+}
+
 export default async function ClientesPage() {
   const supabase = createAdminClient()
   const orgId = await getCurrentOrgId()
@@ -63,11 +86,26 @@ export default async function ClientesPage() {
     supabase.from('organizations').select('name').eq('id', orgId).maybeSingle(),
   ])
 
+  const normalizedVisits = (visits as unknown as RawVisit[]).map((v) => ({
+    id: v.id,
+    client_id: v.client_id,
+    branch_id: v.branch_id,
+    barber_id: v.barber_id,
+    amount: v.amount,
+    completed_at: v.completed_at,
+    notes: v.notes,
+    tags: v.tags,
+    service: pickRel(v.service),
+    barber: pickRel(v.barber),
+  }))
+
+  const normalizedPoints = (points as unknown as RawPointsRow[])
+
   return (
     <ClientesClient
       clients={clients}
-      visits={visits as any}
-      points={points as any}
+      visits={normalizedVisits}
+      points={normalizedPoints}
       branches={orgBranches ?? []}
       orgName={orgRow?.name ?? 'BarberOS'}
     />

@@ -457,7 +457,7 @@ function EmptyProfileState() {
 function BarberDetailPanel({
   barber,
   roles,
-  todayStats,
+  todayStats: _todayStats,
   serviceHistory,
   isLoadingHistory,
   disciplinaryEvents,
@@ -575,8 +575,7 @@ function BarberDetailPanel({
     return { filterFrom: getFilterDate(period), filterTo: to }
   }, [period, customFrom, customTo])
 
-  // Alias para cálculos que solo miran el límite inferior
-  const filterDate = filterFrom
+  // (filterDate eliminado: ya no se usa porque los cálculos pasan filterFrom directo)
 
   // Visitas filtradas por barbero + período
   const visits = useMemo(
@@ -634,7 +633,7 @@ function BarberDetailPanel({
 
   const isFixedSalary = salaryConfig?.scheme === 'fixed'
   const displayIncome = isFixedSalary ? salaryConfig.base_amount : totalCommission
-  const incomeLabel = isFixedSalary ? 'Sueldo fijo' : 'Comisiones'
+  // incomeLabel eliminado: no se usaba en el render, solo era cálculo dead code.
 
   // KPIs del mes
   const monthRevenue = monthVisits.reduce((s, v) => s + v.amount, 0)
@@ -734,7 +733,6 @@ function BarberDetailPanel({
       .reduce<Map<string, { date: Date; count: number }>>((acc, v) => {
         const d = new Date(v.completed_at)
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-        const label = d.toLocaleDateString('es-AR', { month: 'short', year: '2-digit' })
         const existing = acc.get(key)
         if (existing) {
           existing.count++

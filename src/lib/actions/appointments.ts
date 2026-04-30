@@ -9,6 +9,21 @@ import { absoluteUrl } from '@/lib/app-url'
 import { isValidUUID } from '@/lib/validation'
 import type { Appointment, AppointmentSettings, AppointmentStaff, AppointmentStatus, AppointmentPaymentMethod } from '@/lib/types/database'
 
+// ─── Tipos de filas de relaciones inline ──────────────────────────────
+// Usadas para evitar `any` cuando Supabase devuelve relaciones embebidas.
+interface StaffRel {
+  id: string
+  full_name: string
+  branch_id: string | null
+  is_active: boolean
+  avatar_url: string | null
+}
+interface AppointmentStaffWithStaff {
+  staff_id: string
+  walkin_mode?: string | null
+  staff: StaffRel | null
+}
+
 // ─── Settings ───────────────────────────────────────────────────────
 
 /**
@@ -67,7 +82,12 @@ export async function updateAppointmentSettings(
     ? await existingQuery.eq('branch_id', branchId).maybeSingle()
     : await existingQuery.is('branch_id', null).maybeSingle()
 
-  const { organization_id: _, id: __, created_at: ___, updated_at: ____, branch_id: _____, ...safeUpdates } = updates as Record<string, unknown>
+  const updatesRaw = updates as Record<string, unknown>
+  const safeUpdates: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(updatesRaw)) {
+    if (k === 'organization_id' || k === 'id' || k === 'created_at' || k === 'updated_at' || k === 'branch_id') continue
+    safeUpdates[k] = v
+  }
 
   if (existing) {
     const { error } = await supabase
@@ -274,18 +294,18 @@ export async function getAvailableSlots(
 
   if (!appointmentStaff?.length) return { slots: [] }
 
-  const branchStaff = appointmentStaff.filter(
-    (as: any) => as.staff?.branch_id === branchId && as.staff?.is_active
+  const branchStaff = (appointmentStaff as unknown as AppointmentStaffWithStaff[]).filter(
+    (as) => as.staff?.branch_id === branchId && as.staff?.is_active
   )
 
   if (barberId) {
-    const found = branchStaff.find((s: any) => s.staff_id === barberId)
+    const found = branchStaff.find((s) => s.staff_id === barberId)
     if (!found) return { slots: [], error: 'Barbero no disponible para turnos' }
   }
 
   const staffIds = barberId
     ? [barberId]
-    : branchStaff.map((s: any) => s.staff_id)
+    : branchStaff.map((s) => s.staff_id)
 
   if (!staffIds.length) return { slots: [] }
 
@@ -345,8 +365,8 @@ export async function getAvailableSlots(
     const staffSchedules = schedules?.filter(s => s.staff_id === staffId) ?? []
     if (!staffSchedules.length) continue
 
-    const staffRecord = branchStaff.find((s: any) => s.staff_id === staffId)
-    const staffName = (staffRecord as any)?.staff?.full_name ?? ''
+    const staffRecord = branchStaff.find((s) => s.staff_id === staffId)
+    const staffName = staffRecord?.staff?.full_name ?? ''
     const staffAppointments = existingAppointments?.filter(a => a.barber_id === staffId) ?? []
 
     // Bloques aplicables a este barbero: de org (branch=null), de sucursal (branch=X, barber=null), o específicos
@@ -1027,7 +1047,7 @@ export async function rescheduleAppointment(input: RescheduleAppointmentInput) {
         phone: client.phone,
         clientName: client.name ?? '',
         serviceName,
-        branchName: (existing.branch as any)?.name ?? '',
+        branchName: (existing.branch as { name?: string } | null)?.name ?? '',
         dateFormatted,
         startTime: input.newStartTime,
         appointmentDateTime: new Date(`${input.newDate}T${input.newStartTime}:00`),
@@ -1669,12 +1689,12 @@ export async function getPublicBranchAppointmentStaff(branchId: string) {
     .eq('organization_id', branch.organization_id)
     .eq('is_active', true)
 
-  return (data ?? [])
-    .filter((as: any) => as.staff?.branch_id === branchId && as.staff?.is_active)
-    .map((as: any) => ({
-      id: as.staff.id,
-      full_name: as.staff.full_name,
-      avatar_url: as.staff.avatar_url as string | null,
+  return (data as unknown as AppointmentStaffWithStaff[] ?? [])
+    .filter((as) => as.staff?.branch_id === branchId && as.staff?.is_active)
+    .map((as) => ({
+      id: as.staff!.id,
+      full_name: as.staff!.full_name,
+      avatar_url: as.staff!.avatar_url,
     }))
 }
 
@@ -1693,12 +1713,12 @@ export async function getBranchAppointmentStaff(branchId: string) {
     .eq('organization_id', access.orgId)
     .eq('is_active', true)
 
-  return (data ?? [])
-    .filter((as: any) => as.staff?.branch_id === branchId && as.staff?.is_active)
-    .map((as: any) => ({
-      id: as.staff.id as string,
-      full_name: as.staff.full_name as string,
-      avatar_url: as.staff.avatar_url as string | null,
+  return (data as unknown as AppointmentStaffWithStaff[] ?? [])
+    .filter((as) => as.staff?.branch_id === branchId && as.staff?.is_active)
+    .map((as) => ({
+      id: as.staff!.id,
+      full_name: as.staff!.full_name,
+      avatar_url: as.staff!.avatar_url,
     }))
 }
 

@@ -24,7 +24,7 @@ export default async function AgendaPage() {
     branchIds.length > 0
       ? supabase
           .from('branches')
-          .select('id, name')
+          .select('id, name, operation_mode')
           .eq('organization_id', orgId)
           .in('id', branchIds)
           .eq('is_active', true)
@@ -32,10 +32,12 @@ export default async function AgendaPage() {
       : Promise.resolve({ data: [] }),
   ])
 
+  type BranchRow = { id: string; name: string; operation_mode?: 'walk_in' | 'appointments' | 'hybrid' | null }
+
   return (
     <AgendaClient
       settings={settings}
-      branches={branches ?? []}
+      branches={(branches ?? []) as BranchRow[]}
     />
   )
 }

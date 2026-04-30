@@ -150,7 +150,7 @@ export type DynamicQueueEntry = QueueEntry & { _is_dynamically_assigned?: boolea
 
 export function isBarberBlockedByShiftEnd(
   barber: Staff,
-  entries: QueueEntry[],
+  _entries: QueueEntry[],
   schedules: StaffSchedule[],
   currentTime: number,
   marginMinutes = 35
@@ -205,7 +205,7 @@ export function assignDynamicBarbers(
   dailyServiceCounts: Record<string, number> = {},
   lastCompletedAt: Record<string, string> = {},
   notClockedInIds: Set<string> = new Set(),
-  cooldownMs = 120_000
+  _cooldownMs = 120_000
 ): DynamicQueueEntry[] {
   const result: DynamicQueueEntry[] = []
 

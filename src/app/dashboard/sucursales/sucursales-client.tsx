@@ -61,7 +61,7 @@ export function SucursalesClient({ branches }: Props) {
   const [deletingBranch, setDeletingBranch] = useState<Branch | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [geocoding, setGeocoding] = useState(false)
-  const [geocodeStatus, setGeocodeStatus] = useState<'idle' | 'ok' | 'error'>('idle')
+  const [, setGeocodeStatus] = useState<'idle' | 'ok' | 'error'>('idle')
 
   async function geocodeAddress(address: string) {
     if (!address.trim()) {

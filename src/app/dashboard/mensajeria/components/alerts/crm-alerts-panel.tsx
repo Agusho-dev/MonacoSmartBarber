@@ -80,8 +80,15 @@ export function CrmAlertsPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =
   }, [])
 
   useEffect(() => {
-    loadAlerts()
-  }, [loadAlerts])
+    let cancelled = false
+    void (async () => {
+      const result = await getCrmAlerts()
+      if (cancelled) return
+      setAlerts(result.data as AlertWithConversation[])
+      setLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   // Realtime para nuevas alertas
   useEffect(() => {

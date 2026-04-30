@@ -129,7 +129,7 @@ export function EquipoClient({
         }
     }, [selectedBranchId, firstBranchId, setSelectedBranchId])
 
-    const effectiveBranchId = selectedBranchId ?? firstBranchId
+    // effectiveBranchId no se usa actualmente, dejo como referencia futura.
 
     // Forzar activeTab válido si cambian los permisos o el estado queda obsoleto
     useEffect(() => {

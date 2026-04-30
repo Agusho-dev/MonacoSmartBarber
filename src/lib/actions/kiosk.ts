@@ -86,7 +86,7 @@ export async function getCheckinData(branchId: string) {
       settings: settingsRes.data,
       monthlyVisits: monthlyVisitsRes.data ?? []
     }
-  } catch (err: any) {
-    return { error: err.message }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) }
   }
 }

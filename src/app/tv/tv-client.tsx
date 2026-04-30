@@ -82,7 +82,8 @@ function useAutoScroll(enabled: boolean, speed: number = 0.5) {
   // Detectar overflow
   useEffect(() => {
     if (!enabled) {
-      setNeedsScroll(false)
+      // Diferimos el setState para evitar cascading renders detectados por React Compiler.
+      queueMicrotask(() => setNeedsScroll(false))
       return
     }
     const container = containerRef.current
@@ -216,7 +217,7 @@ export function TvClient({
   const [entries, setEntries] = useState<QueueEntry[]>(initialEntries)
   const [liveBarbers, setLiveBarbers] = useState<BarberRow[]>(barbers)
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
-  const [now, setNow] = useState(() => Date.now())
+  const [, setNow] = useState(() => Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
   const [dynamicCooldownMs, setDynamicCooldownMs] = useState(120_000)
   const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
@@ -313,7 +314,7 @@ export function TvClient({
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, fetchQueue, fetchBarbers, fetchSchedules])
+  }, [supabase, fetchQueue, fetchBarbers, fetchSchedules, orgId])
 
   // Refresh data when returning to tab or as polling fallback
   useVisibilityRefresh(
@@ -432,7 +433,7 @@ export function TvClient({
             {entry.client?.name ?? 'Cliente'}
           </p>
           <div className="flex items-center gap-2">
-            {(entry as any)._is_dynamically_assigned ? (
+            {(entry as { _is_dynamically_assigned?: boolean })._is_dynamically_assigned ? (
               <p className={`text-emerald-400 ${ws.barberInfo} flex items-center`}>
                 <Zap className={ws.chevronSize} />
                 <span className="font-medium">Menor espera</span>

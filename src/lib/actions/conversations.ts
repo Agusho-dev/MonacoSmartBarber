@@ -27,7 +27,7 @@ export async function startConversation(clientId: string) {
     .select('id')
     .eq('organization_id', orgId)
 
-  const branchIds = branches?.map((b: any) => b.id) ?? []
+  const branchIds = (branches as { id: string }[] | null)?.map((b) => b.id) ?? []
   if (branchIds.length === 0) return { error: 'No hay sucursales configuradas' }
 
   const { data: channel } = await supabase
@@ -52,7 +52,7 @@ export async function startConversation(clientId: string) {
     .eq('platform', 'whatsapp')
     .eq('is_active', true)
 
-  const allChannelIds = allWaChannels?.map((c: any) => c.id) ?? [channel.id]
+  const allChannelIds = (allWaChannels as { id: string }[] | null)?.map((c) => c.id) ?? [channel.id]
 
   // Buscar conversación existente por sufijo de teléfono para evitar duplicados
   // por diferencia de formato (ej: 549xxx vs 54xxx)
@@ -159,7 +159,7 @@ export async function scheduleMessageAuto(data: {
     .select('id')
     .eq('organization_id', orgId)
 
-  const branchIds = branches?.map((b: any) => b.id) ?? []
+  const branchIds = (branches as { id: string }[] | null)?.map((b) => b.id) ?? []
 
   const { data: channel } = await supabase
     .from('social_channels')
