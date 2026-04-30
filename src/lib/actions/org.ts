@@ -186,13 +186,32 @@ export async function selectOrganizationBySlug(slug: string) {
 }
 
 /**
- * Obtiene la organización activa desde la cookie (para páginas públicas).
- * Prioridad: public_organization (kiosk/TV) > active_organization (dashboard).
+ * Obtiene la organización activa.
+ * Prioridad:
+ *   1. Sesión auth (admin/staff logueado) → su org (vía getCurrentOrgId).
+ *   2. public_organization (kiosk/TV) → cuando NO hay sesión.
+ *   3. active_organization (legacy) → último fallback.
+ *
+ * El orden importa: si un admin previamente visitó la landing pública de otra
+ * barbería (kiosk vía slug), `public_organization` queda seteada y pisaría
+ * la org del admin al volver a `/`. La sesión auth siempre gana.
  */
 export async function getActiveOrganization() {
   const cookieStore = await cookies()
-  const orgId = cookieStore.get('public_organization')?.value
-    ?? cookieStore.get('active_organization')?.value
+
+  let orgId: string | null = null
+
+  const user = await getCachedAuthUser().catch(() => null)
+  if (user) {
+    orgId = await getCurrentOrgId()
+  }
+
+  if (!orgId) {
+    orgId = cookieStore.get('public_organization')?.value
+      ?? cookieStore.get('active_organization')?.value
+      ?? null
+  }
+
   if (!orgId) return null
 
   const supabase = createAdminClient()
