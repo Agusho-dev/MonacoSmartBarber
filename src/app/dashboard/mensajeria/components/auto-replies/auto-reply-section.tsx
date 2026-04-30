@@ -98,8 +98,8 @@ export function AutoReplySection() {
       setFormResponseTemplateName(rule.response_template_name || '')
       setFormPlatform(rule.platform)
       setFormPriority(rule.priority)
-      setFormDelayMinutes((rule.trigger_config as any)?.delay_minutes ?? 10)
-      setFormDelayDays((rule.trigger_config as any)?.delay_days ?? 7)
+      setFormDelayMinutes((rule.trigger_config as { delay_minutes?: number } | null)?.delay_minutes ?? 10)
+      setFormDelayDays((rule.trigger_config as { delay_days?: number } | null)?.delay_days ?? 7)
       setFormTagClientId(rule.tag_client_id || '')
     } else {
       resetForm()
@@ -244,12 +244,12 @@ export function AutoReplySection() {
                     </span>
                     {rule.trigger_type === 'post_service' && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400">
-                        {(rule.trigger_config as any)?.delay_minutes ?? 10} min después
+                        {(rule.trigger_config as { delay_minutes?: number } | null)?.delay_minutes ?? 10} min después
                       </span>
                     )}
                     {rule.trigger_type === 'days_after_visit' && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">
-                        {(rule.trigger_config as any)?.delay_days ?? 7} días después
+                        {(rule.trigger_config as { delay_days?: number } | null)?.delay_days ?? 7} días después
                       </span>
                     )}
                     {rule.tag && (

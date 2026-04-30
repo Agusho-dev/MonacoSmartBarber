@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition, useRef } from 'react'
+import Image from 'next/image'
 import { toast } from 'sonner'
 import { updateAppSettings, updateBranchCheckinColor } from '@/lib/actions/settings'
 import { uploadOrgLogo, updateOrgName } from '@/lib/actions/onboarding'
@@ -132,10 +133,13 @@ function OrgBrandingCard({ org }: { org: OrgInfo | null }) {
             >
               {logoUrl ? (
                 <>
-                  <img
+                  <Image
                     src={logoUrl}
                     alt="Logo"
+                    width={80}
+                    height={80}
                     className="size-full rounded-full object-cover"
+                    unoptimized
                   />
                   <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
                     <ImagePlus className="size-5 text-white" />

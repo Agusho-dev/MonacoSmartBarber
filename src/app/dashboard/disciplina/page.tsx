@@ -20,7 +20,7 @@ export default async function DisciplinaPage() {
   startOfMonth.setDate(1)
   const fromDate = startOfMonth.toISOString().slice(0, 10)
 
-  const [{ data: branches }, { data: rules }, { data: staff }, { data: events }, { data: attendanceLogs }] = await Promise.all([
+  const [{ data: _branches }, { data: rules }, { data: staff }, { data: events }, { data: attendanceLogs }] = await Promise.all([
     branchIds.length > 0
       ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', branchIds).eq('is_active', true).order('name')
       : Promise.resolve({ data: [] }),

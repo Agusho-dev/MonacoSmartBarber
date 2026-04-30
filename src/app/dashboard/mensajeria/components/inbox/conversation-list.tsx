@@ -17,12 +17,11 @@ export function ConversationList({
   onOpenSettings: () => void
 }) {
   const {
-    conversations, activeConv, setActiveConv,
+    activeConv, setActiveConv,
     search, setSearch,
     platformFilter, setPlatformFilter,
     showMobileChat, setShowMobileChat,
     inboxTab, setInboxTab,
-    tags, tagFilter, setTagFilter,
     setShowProfile,
     isConfigured, isInstagramConfigured,
     filteredConversations,

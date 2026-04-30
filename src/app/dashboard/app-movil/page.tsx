@@ -34,7 +34,7 @@ export default async function AppMovilPage() {
       branches={branches || []}
       initialConfigs={configs || []}
       initialCatalog={catalog || []}
-      initialBillboard={(billboard as any) || []}
+      initialBillboard={(billboard as Parameters<typeof AppMovilClient>[0]['initialBillboard']) || []}
     />
   )
 }

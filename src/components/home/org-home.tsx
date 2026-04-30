@@ -1,3 +1,4 @@
+import Image from "next/image"
 import Link from "next/link"
 import { Scissors, Monitor, Users, BarChart3, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -14,10 +15,14 @@ export function OrgHomePage({ organization }: { organization: Organization }) {
     <div className="flex min-h-dvh flex-col items-center justify-center gap-12 p-8">
       <div className="flex flex-col items-center gap-4 text-center">
         {organization.logo_url ? (
-          <img
+          <Image
             src={organization.logo_url}
             alt={organization.name}
+            width={64}
+            height={64}
             className="size-16 rounded-full object-cover"
+            priority
+            unoptimized
           />
         ) : (
           <div className="flex size-16 items-center justify-center rounded-full border border-white/10 bg-white/5">

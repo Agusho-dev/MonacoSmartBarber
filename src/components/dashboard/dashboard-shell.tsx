@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition, useEffect, useMemo, useCallback, useRef } from 'react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import {
@@ -250,10 +251,13 @@ interface SidebarContentProps {
 function OrgLogo({ url }: { url: string | null }) {
   if (url) {
     return (
-      <img
+      <Image
         src={url}
         alt=""
+        width={32}
+        height={32}
         className="size-8 shrink-0 rounded-full object-cover"
+        unoptimized
       />
     )
   }

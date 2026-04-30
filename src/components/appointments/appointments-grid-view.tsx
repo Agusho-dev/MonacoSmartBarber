@@ -2,6 +2,7 @@
 
 import * as React from 'react'
 import { useMemo, useState, useRef, useEffect } from 'react'
+import Image from 'next/image'
 import {
   DndContext,
   PointerSensor,
@@ -404,7 +405,7 @@ export function AppointmentsGridView({
               className="sticky top-0 z-20 flex items-center gap-2 border-b border-r bg-background/95 px-2 py-2 backdrop-blur-sm"
             >
               {b.avatar_url ? (
-                <img src={b.avatar_url} alt="" className="h-6 w-6 rounded-full object-cover" />
+                <Image src={b.avatar_url} alt="" width={24} height={24} className="h-6 w-6 rounded-full object-cover" unoptimized />
               ) : (
                 <div className="h-6 w-6 rounded-full bg-muted" />
               )}

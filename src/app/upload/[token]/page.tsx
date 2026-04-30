@@ -210,6 +210,8 @@ function UploadClient({ token }: { token: string }) {
         <div className="flex gap-2 overflow-x-auto p-4 pb-2">
           {uploads.map((u, i) => (
             <div key={i} className="relative shrink-0">
+              {/* Blob URL de URL.createObjectURL — Image no soporta blobs eficientemente */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={u.url}
                 alt={`Foto ${i + 1}`}

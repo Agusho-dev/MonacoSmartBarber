@@ -68,9 +68,12 @@ export function DirectSaleDialog({
 
   useEffect(() => {
     if (!open) {
-      setSelectedProducts([])
-      setSelectedPayment(null)
-      setSelectedAccountId('')
+      // Diferimos los resets para evitar cascading renders.
+      queueMicrotask(() => {
+        setSelectedProducts([])
+        setSelectedPayment(null)
+        setSelectedAccountId('')
+      })
       return
     }
 

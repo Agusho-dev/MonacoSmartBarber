@@ -186,13 +186,26 @@ export async function getAiExecutionLogs(limit = 50): Promise<{ data: AiExecutio
 
   if (error) return { data: [], error: error.message }
 
-  const rows: AiExecutionLog[] = (data ?? []).map((row: any) => {
+  interface LogRowRel {
+    id: string
+    executed_at: string
+    status: string
+    output_data: Record<string, unknown> | null
+    error_message: string | null
+    execution: {
+      conversation: {
+        id: string
+        client: { name: string | null; phone: string | null } | null
+      } | null
+    } | null
+  }
+  const rows: AiExecutionLog[] = (data as unknown as LogRowRel[] ?? []).map((row) => {
     const out = (row.output_data ?? {}) as Record<string, unknown>
     const conv = row.execution?.conversation
     return {
       id: row.id,
       executed_at: row.executed_at,
-      status: row.status,
+      status: row.status as AiExecutionLog['status'],
       model: (out.model as string) ?? null,
       error_message: row.error_message ?? null,
       used_fallback: out.used_fallback === true,

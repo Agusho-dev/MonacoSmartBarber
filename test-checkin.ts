@@ -1,4 +1,5 @@
-import { createClient } from '@supabase/supabase-js'
+// Script de debug: verifica conversión de timezone Argentina ↔ DOW.
+// No hace check-in real; sólo log de timestamps.
 
 async function checkInTest() {
     const now = new Date()

@@ -140,10 +140,11 @@ export function FaceEnrollment({
     return () => { cancelled = true }
   }, [state])
 
-  // Auto-capture: when face is detected for 1.5s, trigger capture automatically
-  useEffect(() => {
-    handleCaptureRef.current = handleCapture
-  })
+  // Auto-capture: when face is detected for 1.5s, trigger capture automatically.
+  // Pattern de "latest ref": el effect no tiene deps; corre en cada render para
+  // mantener handleCaptureRef.current actualizado al último closure.
+  // eslint-disable-next-line react-hooks/immutability
+  useEffect(() => { handleCaptureRef.current = handleCapture })
 
   useEffect(() => {
     if (state === 'positioning' && faceDetected) {

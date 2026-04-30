@@ -25,13 +25,21 @@ export interface ClientVisit {
   barber?: { full_name: string } | null
 }
 
+export interface WaTemplateComponent {
+  type?: string
+  text?: string
+  buttons?: Array<{ text?: string; type?: string }>
+  format?: string
+  example?: Record<string, unknown>
+}
+
 export interface WaTemplate {
   id: string
   name: string
   language: string
   category: string
   status: string
-  components: any
+  components: WaTemplateComponent[]
 }
 
 export interface ReviewAutoSettings {

@@ -34,6 +34,8 @@ interface WorkflowNode {
   is_entry_point: boolean
 }
 
+// Type kept exported for future graph-traversal callers; suppress unused warning.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface WorkflowEdge {
   id: string
   source_node_id: string

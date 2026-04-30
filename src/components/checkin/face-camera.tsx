@@ -265,6 +265,9 @@ export function FaceCamera({
     } else {
       consecutiveMatchRef.current = null
       showMeshRef.current = false
+      // Auto-recursión via setTimeout: la referencia a runScanLoop se resuelve
+      // en runtime cuando el callback se ejecuta (no en declaración).
+      // eslint-disable-next-line react-hooks/immutability
       scanTimerRef.current = setTimeout(runScanLoop, SCAN_INTERVAL_MS)
     }
   }, [state, drawFaceOverlay, onMatch, onNoMatch, targetRole, orgId])

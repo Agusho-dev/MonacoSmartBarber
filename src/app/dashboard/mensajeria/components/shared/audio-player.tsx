@@ -1,3 +1,5 @@
+'use client'
+
 import { useState, useRef } from 'react'
 import { Play, Pause } from 'lucide-react'
 
@@ -17,7 +19,7 @@ export function AudioPlayer({ src, isOut }: AudioPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
-  const [isLoaded, setIsLoaded] = useState(false)
+  const [, setIsLoaded] = useState(false)
   const audioRef = useRef<HTMLAudioElement>(null)
 
   // Load duration when metadata is ready

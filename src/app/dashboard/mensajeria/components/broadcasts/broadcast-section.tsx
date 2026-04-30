@@ -587,7 +587,7 @@ export function BroadcastSection() {
                               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-400">{tpl.language}</span>
                               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400">{tpl.category}</span>
                             </div>
-                            {tpl.components?.map((comp: any, i: number) => (
+                            {tpl.components?.map((comp: { type?: string; text?: string }, i: number) => (
                               comp.type === 'BODY' && comp.text ? (
                                 <p key={i} className="text-[11px] text-muted-foreground mt-1.5 line-clamp-2">{comp.text}</p>
                               ) : null
@@ -628,7 +628,7 @@ export function BroadcastSection() {
                   {/* Preview del template */}
                   <div className="rounded-lg bg-card border p-4 space-y-3">
                     <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Vista previa del template</p>
-                    {selectedTpl.components?.map((comp: any, i: number) => {
+                    {selectedTpl.components?.map((comp: { type?: string; text?: string }, i: number) => {
                       if (comp.type === 'HEADER' && comp.text) {
                         return <p key={i} className="text-sm font-bold text-white">{comp.text}</p>
                       }

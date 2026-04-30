@@ -18,7 +18,7 @@ export default async function IncentivosPage() {
   const today = new Date()
   const defaultPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
 
-  const [{ data: branches }, { data: rules }, { data: barbers }, { data: achievements }] = await Promise.all([
+  const [{ data: _branches }, { data: rules }, { data: barbers }, { data: achievements }] = await Promise.all([
     branchIds.length > 0
       ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', branchIds).eq('is_active', true).order('name')
       : Promise.resolve({ data: [] }),
@@ -41,7 +41,7 @@ export default async function IncentivosPage() {
           branch_id: b.branch_id,
         }))
       }
-      achievements={(achievements ?? []) as any}
+      achievements={(achievements ?? []) as Parameters<typeof IncentivosClient>[0]['achievements']}
       defaultPeriod={defaultPeriod}
     />
   )

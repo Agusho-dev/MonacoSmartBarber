@@ -21,7 +21,7 @@ export default async function FilaPage() {
   const [{ data: branch }, { data: breakConfigs }, appointments, settings] = await Promise.all([
     supabase
       .from('branches')
-      .select('name')
+      .select('name, operation_mode')
       .eq('id', session.branch_id)
       .single(),
     supabase
@@ -34,6 +34,8 @@ export default async function FilaPage() {
     getAppointmentSettings(session.organization_id),
   ])
 
+  const operationMode = (branch?.operation_mode as 'walk_in' | 'appointments' | 'hybrid' | null) ?? 'walk_in'
+
   return (
     <QueuePanel
       session={session}
@@ -41,6 +43,7 @@ export default async function FilaPage() {
       breakConfigs={breakConfigs ?? []}
       appointments={appointments}
       noShowToleranceMinutes={settings?.no_show_tolerance_minutes ?? 15}
+      operationMode={operationMode}
     />
   )
 }

@@ -280,6 +280,8 @@ function DeepLinkHandler({ onSection }: { onSection: (s: CrmSection) => void }) 
         }
       }))
     })()
+    // tags es estable (viene del context), no necesita re-trigger
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeConv, pendingTag, setConversations])
 
   return null

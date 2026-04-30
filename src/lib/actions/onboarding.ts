@@ -399,6 +399,63 @@ export async function setOwnerIsBarber(isBarber: boolean) {
 }
 
 /**
+ * Setea el modo de operación de una sucursal durante el onboarding.
+ * También propaga `default_operation_mode` a la org si todavía es 'walk_in'
+ * (el default factory), para que próximas sucursales hereden la elección.
+ */
+export async function setOnboardingOperationMode(
+  branchId: string,
+  mode: 'walk_in' | 'appointments' | 'hybrid'
+) {
+  if (!branchId) return { success: false, error: 'ID de sucursal inválido' }
+  if (!['walk_in', 'appointments', 'hybrid'].includes(mode)) {
+    return { success: false, error: 'Modo inválido' }
+  }
+
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { success: false, error: 'Organización no encontrada' }
+
+  const supabase = createAdminClient()
+
+  const { data: branch } = await supabase
+    .from('branches')
+    .select('id, organization_id')
+    .eq('id', branchId)
+    .eq('organization_id', orgId)
+    .maybeSingle()
+
+  if (!branch) return { success: false, error: 'Sucursal no encontrada' }
+
+  const { error: updateErr } = await supabase
+    .from('branches')
+    .update({ operation_mode: mode })
+    .eq('id', branchId)
+
+  if (updateErr) {
+    console.error('[setOnboardingOperationMode] update error:', updateErr)
+    return { success: false, error: 'Error al guardar el modo de operación' }
+  }
+
+  // Propagar a org si sigue en 'walk_in' factory default
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('default_operation_mode')
+    .eq('id', orgId)
+    .maybeSingle()
+
+  if (org?.default_operation_mode === 'walk_in' && mode !== 'walk_in') {
+    await supabase
+      .from('organizations')
+      .update({ default_operation_mode: mode })
+      .eq('id', orgId)
+  }
+
+  await completeOnboardingStep(2)
+  revalidatePath('/onboarding')
+  return { success: true }
+}
+
+/**
  * Marca el onboarding como completado.
  */
 export async function completeOnboarding() {
@@ -419,7 +476,7 @@ export async function completeOnboarding() {
   const updatedSettings = {
     ...(org.settings as Record<string, unknown>),
     onboarding_completed: true,
-    onboarding_step: 4,
+    onboarding_step: 6,
   }
 
   const { error } = await supabase

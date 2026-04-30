@@ -564,7 +564,7 @@ export async function completeService(
           // Ejecutar reglas post_service (auto_reply_rules legacy)
           if (postServiceRules && postServiceRules.length > 0) {
             for (const rule of postServiceRules) {
-              const delayMinutes = (rule.trigger_config as any)?.delay_minutes ?? 10
+              const delayMinutes = (rule.trigger_config as { delay_minutes?: number } | null)?.delay_minutes ?? 10
               const scheduledFor = new Date()
               scheduledFor.setMinutes(scheduledFor.getMinutes() + delayMinutes)
 
@@ -681,7 +681,7 @@ export async function completeService(
                 }
               }
 
-              const delayMinutes = (wf.trigger_config as any)?.delay_minutes ?? 10
+              const delayMinutes = (wf.trigger_config as { delay_minutes?: number } | null)?.delay_minutes ?? 10
               const scheduledFor = new Date()
               scheduledFor.setMinutes(scheduledFor.getMinutes() + delayMinutes)
 
@@ -719,7 +719,7 @@ export async function completeService(
                 continue
               }
 
-              const firstEdge = edges.find((e: any) => e.source_node_id === entryNode.id)
+              const firstEdge = edges.find((e: { source_node_id: string; target_node_id: string }) => e.source_node_id === entryNode.id)
               if (!firstEdge) {
                 console.warn(`${wfTag} skip: entry_point ${entryNode.id} sin edge saliente`)
                 continue
@@ -1256,7 +1256,7 @@ export async function resumeActiveService(queueEntryId: string) {
   return { success: true }
 }
 
-export async function createBreakEntry(branchId: string, barberId: string, breakConfigName: string) {
+export async function createBreakEntry(branchId: string, barberId: string, _breakConfigName: string) {
   const supabase = createAdminClient()
 
   // Validar que la sucursal pertenece a la org activa

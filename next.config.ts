@@ -9,6 +9,18 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizePackageImports: ['lucide-react', 'date-fns', '@radix-ui/react-icons', 'recharts'],
   },
+  images: {
+    // Logos de organización + avatares de staff/clientes vienen del bucket
+    // público de Supabase. Necesario para que <Image> de next/image los acepte
+    // y aplique optimización + caching CDN.
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'gzsfoqpxvnwmvngfoqqk.supabase.co',
+        pathname: '/storage/v1/object/public/**',
+      },
+    ],
+  },
   async headers() {
     return [
       {

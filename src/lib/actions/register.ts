@@ -9,6 +9,7 @@ import { createAdminClient, createClient } from '@/lib/supabase/server'
 /**
  * Convierte un nombre de organización en un slug URL-safe.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- helper futuro
 function generateSlug(name: string): string {
   return name
     .normalize('NFD')

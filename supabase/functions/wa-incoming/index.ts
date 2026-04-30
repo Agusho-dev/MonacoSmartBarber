@@ -148,6 +148,8 @@ Deno.serve(async (req: Request) => {
       )
     }
 
+    const clientRow = client as { id?: string; name?: string } | null
+
     if (existingConv) {
       convId = existingConv.id
       const { error: convUpdErr } = await supabase
@@ -155,9 +157,9 @@ Deno.serve(async (req: Request) => {
         .update({
           unread_count: (existingConv.unread_count || 0) + 1,
           last_message_at: new Date().toISOString(),
-          client_id: (client as any)?.id ?? null,
+          client_id: clientRow?.id ?? null,
           can_reply_until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-          platform_user_name: (client as any)?.name ?? pushName ?? existingConv.platform_user_name ?? phone,
+          platform_user_name: clientRow?.name ?? pushName ?? existingConv.platform_user_name ?? phone,
           // Normalizar al formato que llega para evitar futuros desmatches
           ...(existingConv.platform_user_id !== phoneClean ? { platform_user_id: phoneClean } : {}),
         })
@@ -171,9 +173,9 @@ Deno.serve(async (req: Request) => {
         .from('conversations')
         .insert({
           channel_id: waChannel.id,
-          client_id: (client as any)?.id ?? null,
+          client_id: clientRow?.id ?? null,
           platform_user_id: phoneClean,
-          platform_user_name: (client as any)?.name ?? pushName ?? phone,
+          platform_user_name: clientRow?.name ?? pushName ?? phone,
           status: 'open',
           unread_count: 1,
           last_message_at: new Date().toISOString(),
@@ -218,10 +220,11 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({ success: true }),
       { headers: { 'Content-Type': 'application/json' } }
     )
-  } catch (error: any) {
-    console.error('[wa-incoming] unhandled error:', error?.message ?? error)
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[wa-incoming] unhandled error:', message)
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }

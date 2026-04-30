@@ -15,6 +15,7 @@ import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { toast } from 'sonner'
 import { saveOrgWhatsAppConfig } from '@/lib/actions/whatsapp-meta'
 import { saveOrgInstagramConfig } from '@/lib/actions/instagram-meta'
+import type { OrgWhatsAppConfig, OrgInstagramConfig } from '@/lib/types/database'
 import { saveOrgAiConfig } from '@/lib/actions/ai-config'
 import { WhatsAppIcon } from '../shared/icons'
 import { TAG_COLORS } from '../shared/helpers'
@@ -77,11 +78,11 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
       toast.error('Completá los tres campos'); return
     }
     startSavingConfig(async () => {
-      const result = await saveOrgWhatsAppConfig(configForm as any)
+      const result = await saveOrgWhatsAppConfig(configForm)
       if (result.error) { toast.error(result.error) }
       else {
         toast.success('Configuración guardada — el canal WhatsApp fue creado automáticamente')
-        if (result.data) setWaConfig(result.data as any)
+        if (result.data) setWaConfig(result.data as OrgWhatsAppConfig)
       }
     })
   }
@@ -91,11 +92,11 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
       toast.error('Completá el Page ID y el Access Token'); return
     }
     startSavingIgConfig(async () => {
-      const result = await saveOrgInstagramConfig(igConfigForm as any)
+      const result = await saveOrgInstagramConfig(igConfigForm)
       if (result.error) { toast.error(result.error) }
       else {
         toast.success('Instagram conectado — el canal fue creado automáticamente')
-        if (result.data) setIgConfig(result.data as any)
+        if (result.data) setIgConfig(result.data as OrgInstagramConfig)
       }
     })
   }

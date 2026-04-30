@@ -1,16 +1,24 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useSyncExternalStore } from 'react'
 import { Maximize, Minimize } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
+// Subscribe-once helper to know if the component is mounted on the client.
+// Using useSyncExternalStore avoids setState-inside-effect lint errors.
+function subscribeNoop() {
+    return () => {}
+}
+
 export function FullscreenButton() {
     const [isFullscreen, setIsFullscreen] = useState(false)
-    const [mounted, setMounted] = useState(false)
+    const mounted = useSyncExternalStore(
+        subscribeNoop,
+        () => true, // client snapshot
+        () => false, // server snapshot
+    )
 
     useEffect(() => {
-        setMounted(true)
-
         const handleFullscreenChange = () => {
             setIsFullscreen(!!document.fullscreenElement)
         }

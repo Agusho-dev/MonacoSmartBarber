@@ -72,15 +72,15 @@ export function GestionarClient({ appointment, token }: { appointment: Appointme
           <div className="space-y-3 rounded-lg bg-muted p-4 text-sm">
             <div className="flex items-center gap-2">
               <MapPin className="h-4 w-4 text-muted-foreground" />
-              <span>{(appointment.branch as any)?.name}</span>
+              <span>{(appointment.branch as { name?: string } | null)?.name}</span>
             </div>
             <div className="flex items-center gap-2">
               <Scissors className="h-4 w-4 text-muted-foreground" />
-              <span>{(appointment.service as any)?.name}</span>
+              <span>{(appointment.service as { name?: string } | null)?.name}</span>
             </div>
             <div className="flex items-center gap-2">
               <User className="h-4 w-4 text-muted-foreground" />
-              <span>{(appointment.barber as any)?.full_name ?? 'Por asignar'}</span>
+              <span>{(appointment.barber as { full_name?: string } | null)?.full_name ?? 'Por asignar'}</span>
             </div>
             <div className="flex items-center gap-2">
               <Calendar className="h-4 w-4 text-muted-foreground" />

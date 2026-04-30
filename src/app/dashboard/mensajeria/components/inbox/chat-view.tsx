@@ -453,8 +453,8 @@ export function ChatView({
         onOpenChange={setShowBooking}
         branches={branches}
         services={appointmentServices}
-        clientName={activeConv ? (activeConv as any).platform_user_name : null}
-        clientPhone={activeConv ? (activeConv as any).platform_user_id : null}
+        clientName={activeConv ? activeConv.platform_user_name : null}
+        clientPhone={activeConv ? activeConv.platform_user_id : null}
       />
     </div>
   )
@@ -583,14 +583,20 @@ function MediaBubble({ msg, isOut }: { msg: Message; isOut: boolean }) {
   )
 }
 
+interface TemplateComponent {
+  type: 'HEADER' | 'BODY' | 'FOOTER' | 'BUTTONS' | string
+  text?: string
+  buttons?: Array<{ text?: string; type?: string }>
+}
+
 function TemplateBubble({ msg, isOut, templates }: { msg: Message; isOut: boolean; templates: WaTemplate[] }) {
   const tpl = templates.find(t => t.name === msg.template_name)
-  const components = tpl?.components as any[] | undefined
+  const components = tpl?.components as TemplateComponent[] | undefined
 
-  const header = components?.find((c: any) => c.type === 'HEADER')
-  const body = components?.find((c: any) => c.type === 'BODY')
-  const footer = components?.find((c: any) => c.type === 'FOOTER')
-  const buttons = components?.find((c: any) => c.type === 'BUTTONS')
+  const header = components?.find((c) => c.type === 'HEADER')
+  const body = components?.find((c) => c.type === 'BODY')
+  const footer = components?.find((c) => c.type === 'FOOTER')
+  const buttons = components?.find((c) => c.type === 'BUTTONS')
 
   if (!components) {
     return (
@@ -638,20 +644,25 @@ function TemplateBubble({ msg, isOut, templates }: { msg: Message; isOut: boolea
       </div>
 
       {buttons?.buttons && buttons.buttons.length > 0 && (
-        <div className={`border-t ${isOut ? 'border-green-600/50' : 'border-border'}`}>
-          {(buttons.buttons as any[]).map((btn: any, i: number) => (
-            <div key={i}
-              className={`flex items-center justify-center gap-1.5 py-2 text-[13px] font-medium ${
-                isOut
-                  ? `text-sky-200 ${i < buttons.buttons.length - 1 ? 'border-b border-green-600/50' : ''}`
-                  : `text-sky-400 ${i < buttons.buttons.length - 1 ? 'border-b border-border' : ''}`
-              }`}
-            >
-              {btn.type === 'URL' && <ExternalLink className="size-3" />}
-              {btn.text}
+        (() => {
+          const btnList = buttons.buttons!
+          return (
+            <div className={`border-t ${isOut ? 'border-green-600/50' : 'border-border'}`}>
+              {btnList.map((btn, i) => (
+                <div key={i}
+                  className={`flex items-center justify-center gap-1.5 py-2 text-[13px] font-medium ${
+                    isOut
+                      ? `text-sky-200 ${i < btnList.length - 1 ? 'border-b border-green-600/50' : ''}`
+                      : `text-sky-400 ${i < btnList.length - 1 ? 'border-b border-border' : ''}`
+                  }`}
+                >
+                  {btn.type === 'URL' && <ExternalLink className="size-3" />}
+                  {btn.text}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )
+        })()
       )}
     </div>
   )

@@ -98,7 +98,7 @@ export async function sendMessage(
 
   if (!conv) return { error: 'Conversación no encontrada' }
 
-  const platform = (conv.channel as any)?.platform as string | undefined
+  const platform = (conv.channel as { platform?: string } | null)?.platform
 
   if (platform === 'whatsapp') {
     const { sendMetaWhatsAppMessage } = await import('./whatsapp-meta')
@@ -134,7 +134,7 @@ export async function sendTemplateToConversation(
 
   if (!conv) return { error: 'Conversación no encontrada' }
 
-  const platform = (conv.channel as any)?.platform as string | undefined
+  const platform = (conv.channel as { platform?: string } | null)?.platform
   if (platform !== 'whatsapp') return { error: 'Templates solo disponibles para WhatsApp' }
 
   const { sendMetaWhatsAppTemplate } = await import('./whatsapp-meta')

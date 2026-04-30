@@ -81,21 +81,53 @@ export async function GET(req: NextRequest) {
   return new NextResponse(challenge, { status: 200 })
 }
 
+type IgAttachment = {
+  type?: string
+  payload?: { url?: string }
+}
+type IgMessagingEvent = {
+  sender?: { id?: string }
+  recipient?: { id?: string }
+  timestamp?: number | string
+  read?: unknown
+  delivery?: unknown
+  message?: {
+    mid?: string
+    text?: string
+    is_echo?: boolean
+    quick_reply?: { payload?: string }
+    attachments?: IgAttachment[]
+  }
+}
+type IgChange = {
+  field?: string
+  value?: unknown
+}
+type IgEntry = {
+  id?: string
+  messaging?: IgMessagingEvent[]
+  changes?: IgChange[]
+}
+type IgWebhookBody = {
+  object?: string
+  entry?: IgEntry[]
+}
+
 // POST: Meta envía mensajes entrantes de Instagram DM
 export async function POST(req: NextRequest) {
   const rawBody = await req.text()
-  let body: any
+  let body: IgWebhookBody
   try {
-    body = JSON.parse(rawBody)
+    body = JSON.parse(rawBody) as IgWebhookBody
   } catch {
     return new NextResponse('Bad Request', { status: 400 })
   }
 
   // Log diagnóstico: qué envía Meta (sin datos sensibles)
   console.log('[IG Webhook] object:', body.object, 'entries:', body.entry?.length ?? 0,
-    'entry_ids:', body.entry?.map((e: any) => e.id),
-    'has_messaging:', body.entry?.map((e: any) => (e.messaging?.length ?? 0)),
-    'has_changes:', body.entry?.map((e: any) => (e.changes?.length ?? 0)))
+    'entry_ids:', body.entry?.map((e) => e.id),
+    'has_messaging:', body.entry?.map((e) => (e.messaging?.length ?? 0)),
+    'has_changes:', body.entry?.map((e) => (e.changes?.length ?? 0)))
 
   // Aceptar tanto 'instagram' como 'page' — Meta puede enviar cualquiera
   // dependiendo de la configuración del webhook
@@ -108,6 +140,7 @@ export async function POST(req: NextRequest) {
   const signature = req.headers.get('x-hub-signature-256')
 
   for (const entry of body.entry ?? []) {
+    if (!entry.id) continue
     const entryId: string = entry.id
 
     // Buscar org por cualquier ID que Meta envíe como entry.id
@@ -181,20 +214,20 @@ export async function POST(req: NextRequest) {
     if (!igChannel) continue
 
     // Normalizar eventos: Instagram puede enviar entry.messaging o entry.changes
-    const messagingEvents: any[] = []
+    const messagingEvents: IgMessagingEvent[] = []
 
     // Formato estándar: entry.messaging (array de eventos)
-    if (entry.messaging?.length > 0) {
-      messagingEvents.push(...entry.messaging)
+    if ((entry.messaging?.length ?? 0) > 0) {
+      messagingEvents.push(...(entry.messaging ?? []))
     }
 
     // Formato alternativo: entry.changes (usado en algunas suscripciones)
-    if (entry.changes?.length > 0) {
-      for (const change of entry.changes) {
+    if ((entry.changes?.length ?? 0) > 0) {
+      for (const change of entry.changes ?? []) {
         if (change.field === 'messaging' || change.field === 'messages') {
-          const val = change.value
+          const val = change.value as IgMessagingEvent | IgMessagingEvent[] | undefined
           // changes.value puede ser un evento individual o contener un array
-          if (val?.sender && val?.message) {
+          if (val && !Array.isArray(val) && val.sender && val.message) {
             messagingEvents.push(val)
           } else if (Array.isArray(val)) {
             messagingEvents.push(...val)
@@ -205,16 +238,16 @@ export async function POST(req: NextRequest) {
 
     if (messagingEvents.length === 0) {
       console.warn('[IG Webhook] Sin eventos de mensajería en entry. Keys:', Object.keys(entry),
-        'changes:', JSON.stringify(entry.changes?.map((c: any) => ({ field: c.field, valueKeys: Object.keys(c.value ?? {}) }))))
+        'changes:', JSON.stringify(entry.changes?.map((c) => ({ field: c.field, valueKeys: Object.keys((c.value ?? {}) as Record<string, unknown>) }))))
     }
 
     for (const messaging of messagingEvents) {
       // ── Leer receipts: marcar conversación como leída ──
       if (messaging.read) {
-        const readSenderId: string = messaging.sender?.id
+        const readSenderId = messaging.sender?.id
         // Si quien leyó es la página (business), resetear unread
         if (readSenderId === entryId) {
-          const readRecipient: string = messaging.recipient?.id
+          const readRecipient = messaging.recipient?.id
           if (readRecipient) {
             await supabase
               .from('conversations')
@@ -229,9 +262,9 @@ export async function POST(req: NextRequest) {
       // Ignorar delivery receipts
       if (messaging.delivery) continue
 
-      const senderId: string = messaging.sender?.id
-      const recipientId: string = messaging.recipient?.id
-      const platformMsgId: string = messaging.message?.mid
+      const senderId = messaging.sender?.id
+      const recipientId = messaging.recipient?.id
+      const platformMsgId = messaging.message?.mid
       const rawTimestamp = messaging.timestamp
       const text: string = messaging.message?.text ?? ''
       const isEcho = !!messaging.message?.is_echo
@@ -254,7 +287,11 @@ export async function POST(req: NextRequest) {
 
       // Para echo: el "from" es el recipient (la persona a quien le respondimos)
       // Para inbound: el "from" es el sender (el usuario que nos escribió)
-      const from = isEcho ? recipientId : (senderId === entryId ? recipientId : senderId)
+      const from: string | undefined = isEcho ? recipientId : (senderId === entryId ? recipientId : senderId)
+      if (!from) {
+        console.warn('[IG Webhook] Mensaje sin from resoluble, ignorando')
+        continue
+      }
 
       // Deduplicación ANTES de crear/actualizar conversación
       const { data: existingMsg } = await supabase
@@ -364,7 +401,7 @@ export async function POST(req: NextRequest) {
           contentType = 'audio'
         } else if (attachment.type === 'file') {
           contentType = 'document'
-        } else if (['fallback', 'share'].includes(attachment.type)) {
+        } else if (attachment.type && ['fallback', 'share'].includes(attachment.type)) {
            // Meta also sends share or fallback types sometimes.
            contentType = 'text'
            caption = caption ? `[Adjunto: ${attachment.type}]\n${caption}` : `[Adjunto: ${attachment.type}]`

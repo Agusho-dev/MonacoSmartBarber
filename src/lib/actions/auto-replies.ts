@@ -55,7 +55,7 @@ export async function createAutoReplyRule(input: {
     return { error: 'Las palabras clave son requeridas para reglas por keyword' }
   }
   if (triggerType === 'days_after_visit') {
-    const days = (input.triggerConfig as any)?.delay_days
+    const days = (input.triggerConfig as { delay_days?: number } | undefined)?.delay_days
     if (!days || days < 1) return { error: 'Debe indicar los días de espera (mínimo 1)' }
   }
 

@@ -18,6 +18,53 @@ type WaWebhookContact = {
   name?: string
 }
 
+/** Meta WhatsApp Cloud API webhook payload — value.messages[] item.
+ *  Subset de campos que usamos. Todos opcionales porque el tipo varía por message.type. */
+type WaIncomingMessage = {
+  type: string
+  from: string
+  id: string
+  timestamp: string
+  text?: { body?: string }
+  image?: { id?: string; caption?: string; mime_type?: string }
+  video?: { id?: string; caption?: string; mime_type?: string }
+  audio?: { id?: string; mime_type?: string }
+  document?: { id?: string; caption?: string; filename?: string; mime_type?: string }
+  sticker?: { id?: string; mime_type?: string }
+  reaction?: { emoji?: string; message_id?: string }
+  location?: { latitude?: number; longitude?: number; name?: string; address?: string }
+  contacts?: unknown[]
+  interactive?: {
+    type?: 'button_reply' | 'list_reply'
+    button_reply?: { id: string; title: string }
+    list_reply?: { id: string; title: string; description?: string }
+  }
+  button?: { payload?: string; text?: string }
+  context?: { id?: string; from?: string }
+}
+
+type WaWebhookValue = {
+  metadata?: { phone_number_id?: string; display_phone_number?: string }
+  messages?: WaIncomingMessage[]
+  statuses?: Array<{ id: string; status: string; timestamp: string; recipient_id?: string }>
+  contacts?: unknown
+}
+
+type WaWebhookChange = {
+  field: string
+  value: WaWebhookValue
+}
+
+type WaWebhookEntry = {
+  id?: string
+  changes?: WaWebhookChange[]
+}
+
+type WaWebhookBody = {
+  object?: string
+  entry?: WaWebhookEntry[]
+}
+
 function normalizeWaDigits(raw: string | undefined | null): string {
   if (!raw) return ''
   const beforeAt = String(raw).split('@')[0] ?? ''
@@ -258,9 +305,9 @@ export async function POST(req: NextRequest) {
   const supabase = getSupabase()
 
   // DEBUG: Loguear todo request que llegue al webhook
-  let body: any
+  let body: WaWebhookBody
   try {
-    body = JSON.parse(rawBody)
+    body = JSON.parse(rawBody) as WaWebhookBody
   } catch {
     await supabase.from('webhook_debug_log').insert({
       endpoint: 'whatsapp', method: 'POST',
@@ -282,7 +329,7 @@ export async function POST(req: NextRequest) {
       messages_count: msgs.length,
       statuses_count: body.entry?.[0]?.changes?.[0]?.value?.statuses?.length ?? 0,
       // DEBUG temporal: capturamos los mensajes crudos para diagnosticar botones
-      messages_raw: msgs.map((m: any) => ({
+      messages_raw: msgs.map((m: Record<string, unknown>) => ({
         type: m.type,
         text: m.text,
         button: m.button,
@@ -302,7 +349,7 @@ export async function POST(req: NextRequest) {
     for (const change of entry.changes ?? []) {
       if (change.field !== 'messages') continue
       const value = change.value
-      const phoneNumberId: string = value.metadata?.phone_number_id
+      const phoneNumberId = value.metadata?.phone_number_id
 
       if (!phoneNumberId) continue
 

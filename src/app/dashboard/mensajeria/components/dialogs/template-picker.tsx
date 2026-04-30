@@ -63,7 +63,7 @@ export function TemplatePicker() {
                           {tpl.category}
                         </span>
                       </div>
-                      {tpl.components?.map((comp: any, i: number) => (
+                      {tpl.components?.map((comp: { type?: string; text?: string }, i: number) => (
                         comp.type === 'BODY' && comp.text ? (
                           <p key={i} className="text-[11px] text-muted-foreground mt-1.5 line-clamp-3">{comp.text}</p>
                         ) : null

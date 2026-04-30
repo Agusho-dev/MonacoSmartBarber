@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   upsertBreakConfig,
@@ -66,13 +66,22 @@ function BreakRequestCard({ request }: { request: BreakRequestRow }) {
   const isPending = request.status === 'pending'
   const isApproved = request.status === 'approved'
 
-  const timeSince = (() => {
-    const diff = Date.now() - new Date(request.requested_at).getTime()
+  // Tick para refrescar el contador "hace X min" sin llamar Date.now() en render.
+  const [now, setNow] = useState<number | null>(null)
+  useEffect(() => {
+    // Defer el primer setNow a microtask para no disparar setState durante effect body.
+    queueMicrotask(() => setNow(Date.now()))
+    const id = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(id)
+  }, [])
+  const timeSince = useMemo(() => {
+    if (now === null) return ''
+    const diff = now - new Date(request.requested_at).getTime()
     const mins = Math.floor(diff / 60000)
     if (mins < 1) return 'hace un momento'
     if (mins < 60) return `hace ${mins} min`
     return `hace ${Math.floor(mins / 60)}h ${mins % 60}min`
-  })()
+  }, [now, request.requested_at])
 
   function handleApprove() {
     const cuts = parseInt(cutsInput, 10)

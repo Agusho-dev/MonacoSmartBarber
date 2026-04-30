@@ -107,9 +107,13 @@ export function CatalogFormDialog({
     const [form, setForm] = useState<FormState>(() => buildInitialForm(expense, defaultBranchId))
     const [isPending, startTransition] = useTransition()
 
+    // Reseteamos el form cuando se abre con un expense distinto.
+    // Diferimos el setState con queueMicrotask para evitar cascading renders.
     useEffect(() => {
         if (open) {
-            setForm(buildInitialForm(expense, defaultBranchId))
+            queueMicrotask(() => {
+                setForm(buildInitialForm(expense, defaultBranchId))
+            })
         }
     }, [open, expense, defaultBranchId])
 

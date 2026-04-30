@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState, useEffect, useTransition } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { Search, Eye, Star, Tag, Camera, Save, MessageCircle, MessagesSquare, Instagram, Plus, ArrowUpDown, ArrowUp, ArrowDown, Loader2 } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
@@ -62,6 +63,8 @@ interface PhotoRow {
 
 type Segment = 'nuevo' | 'regular' | 'vip' | 'en_riesgo' | 'perdido'
 
+const THIRTY_DAYS_MS = 30 * 86400000
+
 const segmentConfig: Record<Segment, { label: string; className: string }> = {
   nuevo: {
     label: 'Nuevo',
@@ -121,7 +124,6 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
   const [requestingReview, setRequestingReview] = useState<string | null>(null)
 
   const now = Date.now()
-  const thirtyDaysMs = 30 * 86400000
 
   const pointsMap = useMemo(() => {
     const m = new Map<string, number>()
@@ -154,7 +156,7 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
         lastVisitDate: null,
       }
       existing.totalVisits++
-      if (now - new Date(v.completed_at).getTime() <= thirtyDaysMs) {
+      if (now - new Date(v.completed_at).getTime() <= THIRTY_DAYS_MS) {
         existing.last30Visits++
       }
       if (!existing.lastVisitDate || v.completed_at > existing.lastVisitDate) {
@@ -184,7 +186,7 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
         lastVisitDate: null,
       }
       existing.totalVisits++
-      if (now - new Date(v.completed_at).getTime() <= thirtyDaysMs) {
+      if (now - new Date(v.completed_at).getTime() <= THIRTY_DAYS_MS) {
         existing.last30Visits++
       }
       if (!existing.lastVisitDate || v.completed_at > existing.lastVisitDate) {
@@ -260,6 +262,8 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
     }
 
     return list
+    // getSegment usa globalClientStats que ya está en deps via branchClientStats; selectedBranchId también
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clients, searchLower, segmentFilter, sortBy, sortDir, branchClientStats])
 
   // frequentBarber derivado del historial lazy
@@ -815,10 +819,13 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
                                         onClick={() => setEnlargedPhoto(url)}
                                         className="shrink-0"
                                       >
-                                        <img
+                                        <Image
                                           src={url}
                                           alt="Corte"
+                                          width={80}
+                                          height={80}
                                           className="size-20 rounded-md border object-cover transition-opacity hover:opacity-80"
+                                          unoptimized
                                         />
                                       </button>
                                     )
@@ -884,10 +891,13 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
       >
         <DialogContent className="max-w-lg p-2">
           {enlargedPhoto && (
-            <img
+            <Image
               src={enlargedPhoto}
               alt="Foto ampliada"
-              className="w-full rounded-lg"
+              width={1024}
+              height={1024}
+              className="h-auto w-full rounded-lg"
+              unoptimized
             />
           )}
         </DialogContent>

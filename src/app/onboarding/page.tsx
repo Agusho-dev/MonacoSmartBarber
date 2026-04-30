@@ -10,10 +10,14 @@ import {
   completeOnboarding,
   completeOnboardingStep,
   deleteOnboardingStaff,
+  setOnboardingOperationMode,
   setOwnerIsBarber,
   uploadOrgLogo,
   updateOrgI18n,
 } from "@/lib/actions/onboarding"
+import { OperationModeStep } from "@/components/onboarding/operation-mode-step"
+import type { BranchOperationMode } from "@/lib/actions/turnos-mode"
+import { setCheckinPin } from "@/lib/actions/checkin-pin"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
@@ -35,6 +39,8 @@ import {
   Store,
   CheckCircle2,
   Trash2,
+  Sparkles,
+  Lock,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -75,6 +81,7 @@ const STEPS = [
   { label: "Inicio",    Icon: Rocket,       tagline: "Tu barberia,\ntu operacion." },
   { label: "Branding",  Icon: Palette,       tagline: "Tu identidad\nes tu marca." },
   { label: "Sucursal",  Icon: Store,         tagline: "Donde sucede\nla magia." },
+  { label: "Operación", Icon: Sparkles,      tagline: "¿Cómo trabajan\ncada día?" },
   { label: "Servicios", Icon: Scissors,      tagline: "Lo que ofreces\nal mundo." },
   { label: "Equipo",    Icon: Users,         tagline: "Las personas\ndetras del arte." },
   { label: "Listo",     Icon: CheckCircle2,  tagline: "Todo\nconfigurado." },
@@ -161,6 +168,8 @@ function LogoUploader({
       />
 
       {preview ? (
+        // Blob URL de URL.createObjectURL — Image no soporta blobs eficientemente
+        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={preview}
           alt="Logo preview"
@@ -368,6 +377,12 @@ export default function OnboardingPage() {
   const [ownerIsBarber, setOwnerIsBarberState] = useState(false)
   const [removingStaffId, setRemovingStaffId] = useState<string | null>(null)
 
+  const [operationMode, setOperationMode] = useState<BranchOperationMode | null>(null)
+
+  // PIN del kiosk Check-in (opcional). Si queda vacío, el kiosk arranca sin
+  // PIN y el admin puede activarlo después desde /dashboard/configuracion.
+  const [checkinPin, setCheckinPinValue] = useState("")
+
   // i18n step 0
   const [i18nCountry, setI18nCountry]   = useState("AR")
   const [i18nCurrency, setI18nCurrency] = useState("ARS")
@@ -435,6 +450,10 @@ export default function OnboardingPage() {
 
   async function handleCreateBranch() {
     if (!branchName.trim()) { setError("El nombre es obligatorio"); return }
+    if (checkinPin && !/^\d{4,8}$/.test(checkinPin)) {
+      setError("El PIN del Check-in debe tener entre 4 y 8 dígitos.")
+      return
+    }
     setIsPending(true); setError(null)
     const fd = new FormData()
     fd.set("name", branchName)
@@ -446,6 +465,13 @@ export default function OnboardingPage() {
     const result = await createOnboardingBranch(fd)
     if (result.success && result.data) {
       setCreatedBranch({ id: result.data.id, name: result.data.name })
+      // Setear PIN del kiosk si el admin lo cargó (best-effort, no bloquea flujo)
+      if (checkinPin) {
+        const pinRes = await setCheckinPin(checkinPin)
+        if ('error' in pinRes) {
+          console.warn('[onboarding] setCheckinPin failed:', pinRes.error)
+        }
+      }
       goTo(3)
     } else {
       setError(typeof result.error === "string" ? result.error : "Error al crear la sucursal")
@@ -453,8 +479,38 @@ export default function OnboardingPage() {
     setIsPending(false)
   }
 
+  async function handleOperationModeNext(mode: BranchOperationMode) {
+    if (!createdBranch) { setError("Falta la sucursal"); return }
+    setIsPending(true); setError(null)
+    const result = await setOnboardingOperationMode(createdBranch.id, mode)
+    if (!result.success) {
+      setError(result.error ?? "Error al guardar el modo de operación")
+      setIsPending(false)
+      return
+    }
+    setOperationMode(mode)
+    goTo(4)
+    setIsPending(false)
+  }
+
   async function handleServicesNext() {
     setIsPending(true); setError(null)
+
+    // Si la sucursal opera con turnos, duration_minutes es obligatorio
+    if (operationMode && operationMode !== "walk_in") {
+      const sinDuracion = Object.entries(selectedServices).filter(([name, p]) => {
+        if (!p || Number(p) <= 0) return false
+        const cat = SERVICIOS_CATALOGO.find((s) => s.name === name)
+        return !cat?.duration
+      })
+      const customSinDuracion = customName && customPrice && !customDuration
+      if (sinDuracion.length > 0 || customSinDuracion) {
+        setError("Esta sucursal trabaja con turnos: cada servicio necesita duración en minutos.")
+        setIsPending(false)
+        return
+      }
+    }
+
     const toCreate = Object.entries(selectedServices).filter(([, p]) => p && Number(p) > 0)
     for (const [name, price] of toCreate) {
       const catalogItem = SERVICIOS_CATALOGO.find((s) => s.name === name)
@@ -477,8 +533,8 @@ export default function OnboardingPage() {
       }
     }
     setCreatedServices((p) => [...p, ...toCreate.map(([name, price]) => ({ id: name, name, price: Number(price) }))])
-    await completeOnboardingStep(3)
-    goTo(4)
+    await completeOnboardingStep(4)
+    goTo(5)
     setIsPending(false)
   }
 
@@ -521,8 +577,8 @@ export default function OnboardingPage() {
       setIsPending(false)
       return
     }
-    await completeOnboardingStep(4)
-    goTo(5)
+    await completeOnboardingStep(5)
+    goTo(6)
     setIsPending(false)
   }
 
@@ -733,15 +789,54 @@ export default function OnboardingPage() {
                       ))}
                     </div>
                   </Field>
+
+                  {/* ── PIN del Check-in (opcional) ────────────────────────── */}
+                  <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Lock className="size-3.5 text-white/50" />
+                      <Label className="text-xs font-medium text-white/60">
+                        PIN del Check-in (opcional)
+                      </Label>
+                    </div>
+                    <Input
+                      value={checkinPin}
+                      onChange={(e) =>
+                        setCheckinPinValue(e.target.value.replace(/\D/g, "").slice(0, 8))
+                      }
+                      placeholder="Ej: 1234"
+                      inputMode="numeric"
+                      maxLength={8}
+                      className="bg-white/5 border-white/10 placeholder:text-white/20 h-9 rounded-lg text-sm"
+                    />
+                    <p className="text-[11px] text-white/30 leading-snug">
+                      Un PIN de 4–8 dígitos bloquea el acceso al kiosk de Check-in para que sólo
+                      personal autorizado lo abra. Podés cambiarlo o eliminarlo después desde Configuración.
+                    </p>
+                  </div>
                 </div>
                 <NavButtons onBack={() => goTo(1)} onNext={handleCreateBranch} isPending={isPending} onSkip={() => { completeOnboardingStep(2); goTo(3) }} />
               </div>
             )}
 
-            {/* ── STEP 3: SERVICIOS ─────────────────────────────────────── */}
+            {/* ── STEP 3: OPERACIÓN (modo walk_in / appointments / hybrid) ───── */}
             {currentStep === 3 && (
+              <OperationModeStep
+                initialMode={operationMode ?? undefined}
+                onBack={() => goTo(2)}
+                onSubmit={handleOperationModeNext}
+                isPending={isPending}
+              />
+            )}
+
+            {/* ── STEP 4: SERVICIOS ─────────────────────────────────────── */}
+            {currentStep === 4 && (
               <div className="space-y-4">
                 <StepHeader title="Que servicios ofreces?" subtitle="Selecciona y defini el precio" />
+                {operationMode && operationMode !== "walk_in" && (
+                  <div className="rounded-xl border border-[oklch(0.78_0.12_85/0.25)] bg-[oklch(0.78_0.12_85/0.05)] px-3 py-2 text-xs text-white/70">
+                    Esta sucursal trabaja con turnos: cada servicio necesita una duración para poder reservarse online.
+                  </div>
+                )}
                 {error && <ErrorAlert message={error} />}
 
                 <div className="grid grid-cols-2 gap-2 max-h-[38vh] overflow-y-auto pr-1">
@@ -797,12 +892,12 @@ export default function OnboardingPage() {
                   </div>
                 </div>
 
-                <NavButtons onBack={() => goTo(2)} onNext={handleServicesNext} isPending={isPending} onSkip={() => { completeOnboardingStep(3); goTo(4) }} />
+                <NavButtons onBack={() => goTo(3)} onNext={handleServicesNext} isPending={isPending} onSkip={() => { completeOnboardingStep(4); goTo(5) }} />
               </div>
             )}
 
-            {/* ── STEP 4: EQUIPO ────────────────────────────────────────── */}
-            {currentStep === 4 && (
+            {/* ── STEP 5: EQUIPO ────────────────────────────────────────── */}
+            {currentStep === 5 && (
               <div className="space-y-5">
                 <StepHeader title="Agrega a tu equipo" subtitle="Los barberos usan PIN para iniciar sesion" />
                 {error && <ErrorAlert message={error} />}
@@ -853,12 +948,12 @@ export default function OnboardingPage() {
                   </div>
                 )}
 
-                <NavButtons onBack={() => goTo(3)} onNext={handleTeamNext} isPending={isPending} nextLabel="Finalizar" onSkip={handleTeamNext} />
+                <NavButtons onBack={() => goTo(4)} onNext={handleTeamNext} isPending={isPending} nextLabel="Finalizar" onSkip={handleTeamNext} />
               </div>
             )}
 
-            {/* ── STEP 5: COMPLETADO ────────────────────────────────────── */}
-            {currentStep === 5 && (
+            {/* ── STEP 6: COMPLETADO ────────────────────────────────────── */}
+            {currentStep === 6 && (
               <div className="relative text-center space-y-6">
                 <Confetti />
                 <div className="flex justify-center animate-scale-in">

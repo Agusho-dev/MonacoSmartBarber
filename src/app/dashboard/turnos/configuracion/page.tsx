@@ -6,6 +6,7 @@ import { getAppointmentSettings, getAppointmentStaff } from '@/lib/actions/appoi
 import { listTemplatesForPicker } from '@/lib/actions/messaging'
 import { createAdminClient } from '@/lib/supabase/server'
 import { TurnosConfigClient } from './turnos-config-client'
+import { OperationModeCard } from '@/components/dashboard/operation-mode-card'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,7 +37,7 @@ export default async function TurnosConfigPage() {
     branchIds.length > 0
       ? supabase
           .from('branches')
-          .select('id, name')
+          .select('id, name, operation_mode')
           .eq('organization_id', orgId)
           .in('id', branchIds)
           .eq('is_active', true)
@@ -48,19 +49,29 @@ export default async function TurnosConfigPage() {
   const staffMap = new Map(appointmentStaff.map(s => [s.staff_id, s]))
 
   return (
-    <TurnosConfigClient
-      settings={settings}
-      allStaff={(allStaff ?? []).map(s => {
-        const cfg = staffMap.get(s.id)
-        return {
-          ...s,
-          enabledForAppointments: !!cfg,
-          walkinMode: cfg?.walkin_mode ?? 'both',
-        }
-      })}
-      branches={branches ?? []}
-      templates={templatesResult.data}
-      hasWhatsAppChannel={templatesResult.hasChannel}
-    />
+    <div className="space-y-6">
+      <OperationModeCard
+        branches={(branches ?? []).map((b) => ({
+          id: b.id,
+          name: b.name,
+          operation_mode: (b as { operation_mode?: 'walk_in' | 'appointments' | 'hybrid' | null }).operation_mode ?? 'walk_in',
+        }))}
+      />
+
+      <TurnosConfigClient
+        settings={settings}
+        allStaff={(allStaff ?? []).map(s => {
+          const cfg = staffMap.get(s.id)
+          return {
+            ...s,
+            enabledForAppointments: !!cfg,
+            walkinMode: cfg?.walkin_mode ?? 'both',
+          }
+        })}
+        branches={(branches ?? []).map((b) => ({ id: b.id, name: b.name }))}
+        templates={templatesResult.data}
+        hasWhatsAppChannel={templatesResult.hasChannel}
+      />
+    </div>
   )
 }

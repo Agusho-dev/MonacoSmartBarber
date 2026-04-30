@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useState, useCallback, useMemo, useTransition } from 'react'
+import Link from 'next/link'
 import {
   Building2, Calendar, CalendarClock, CalendarPlus, ChevronLeft, ChevronRight,
-  DollarSign, Loader2, Phone, Scissors, User, X, Layers,
+  DollarSign, Loader2, Phone, Scissors, Settings, User, X, Layers,
 } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
 import {
@@ -67,7 +68,11 @@ import type {
   QueueEntry,
 } from '@/lib/types/database'
 
-interface Branch { id: string; name: string }
+interface Branch {
+  id: string
+  name: string
+  operation_mode?: 'walk_in' | 'appointments' | 'hybrid' | null
+}
 
 interface Props {
   settings: AppointmentSettings | null
@@ -399,6 +404,33 @@ export function AgendaClient({ settings, branches }: Props) {
     }
     toast.success('Duración actualizada')
     refreshAppointments()
+  }
+
+  // Sucursal seleccionada en modo walk_in — mostrar CTA para cambiar de modo
+  const selectedBranchData = visibleBranches.find(b => b.id === resolvedBranchId)
+  const isWalkInBranch = selectedBranchData?.operation_mode === 'walk_in'
+  if (isWalkInBranch) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center gap-4 py-14 text-center">
+          <CalendarClock className="size-12 text-muted-foreground" />
+          <div className="space-y-1">
+            <p className="text-base font-semibold">Esta sucursal trabaja sin turno</p>
+            <p className="text-sm text-muted-foreground">
+              El modo actual es <strong>walk-in</strong>. Para habilitar la agenda tenés que
+              cambiar el modo de operación de la sucursal.
+            </p>
+          </div>
+          <Link
+            href="/dashboard/turnos/configuracion"
+            className="inline-flex items-center gap-2 rounded-md border border-primary px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+          >
+            <Settings className="size-4" />
+            Cambiar a modo turnos →
+          </Link>
+        </CardContent>
+      </Card>
+    )
   }
 
   if (!settings?.is_enabled) {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Receipt, List } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useBranchStore } from '@/stores/branch-store'
@@ -46,13 +46,17 @@ export function GastosFijosHubClient({
     canManage,
 }: GastosFijosHubClientProps) {
     const { selectedBranchId } = useBranchStore()
-    const [sub, setSub] = useState<SubTab>('pagos')
-
-    // Persistir sub-tab en localStorage para que sobreviva al cambio de tab padre
-    useEffect(() => {
-        const saved = localStorage.getItem('gastos-fijos:sub') as SubTab | null
-        if (saved && SUB_TABS.some((t) => t.id === saved)) setSub(saved)
-    }, [])
+    // Lazy initializer para leer de localStorage solo en el cliente sin tocar render.
+    const [sub, setSub] = useState<SubTab>(() => {
+        if (typeof window === 'undefined') return 'pagos'
+        try {
+            const saved = window.localStorage.getItem('gastos-fijos:sub') as SubTab | null
+            if (saved && SUB_TABS.some((t) => t.id === saved)) return saved
+        } catch {
+            /* storage not available */
+        }
+        return 'pagos'
+    })
 
     function switchSub(s: SubTab) {
         setSub(s)

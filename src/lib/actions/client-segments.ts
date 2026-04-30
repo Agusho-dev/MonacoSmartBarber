@@ -107,21 +107,30 @@ async function fetchAllRows<T>(
   return all
 }
 
+// Tipo Supabase query builder mínimo (lo necesitamos para el extraFilters callback).
+type SupabaseQueryLike = {
+  in: (column: string, values: unknown[]) => SupabaseQueryLike
+  not: (column: string, op: string, value: unknown) => SupabaseQueryLike
+  eq: (column: string, value: unknown) => SupabaseQueryLike
+  gte: (column: string, value: unknown) => SupabaseQueryLike
+  lte: (column: string, value: unknown) => SupabaseQueryLike
+}
+
 async function batchIn<T>(
   supabase: ReturnType<typeof createAdminClient>,
   table: string,
   selectCols: string,
   inColumn: string,
   inValues: string[],
-  extraFilters?: (q: any) => any
+  extraFilters?: (q: SupabaseQueryLike) => SupabaseQueryLike
 ): Promise<T[]> {
   const BATCH = 500
   const all: T[] = []
   for (let i = 0; i < inValues.length; i += BATCH) {
     const chunk = inValues.slice(i, i + BATCH)
-    let q = supabase.from(table).select(selectCols).in(inColumn, chunk)
+    let q = supabase.from(table).select(selectCols).in(inColumn, chunk) as unknown as SupabaseQueryLike
     if (extraFilters) q = extraFilters(q)
-    const { data } = await q
+    const { data } = await (q as unknown as PromiseLike<{ data: T[] | null }>)
     if (data) all.push(...(data as T[]))
   }
   return all
@@ -149,13 +158,13 @@ async function getFilteredClients(orgId: string, filters: AudienceFilters): Prom
   // Obtener visitas en lotes para evitar límites de URL y filas
   const visits = await batchIn<{ client_id: string; completed_at: string }>(
     supabase, 'visits', 'client_id, completed_at', 'client_id', clientIds,
-    (q: any) => q.not('completed_at', 'is', null)
+    (q) => q.not('completed_at', 'is', null)
   )
 
   // Obtener último mensaje por cliente (via conversations) en lotes
   const conversations = await batchIn<{ client_id: string; last_message_at: string }>(
     supabase, 'conversations', 'client_id, last_message_at', 'client_id', clientIds,
-    (q: any) => q.not('last_message_at', 'is', null)
+    (q) => q.not('last_message_at', 'is', null)
   )
 
   // Agregar datos de visitas
@@ -206,7 +215,7 @@ async function getFilteredClients(orgId: string, filters: AudienceFilters): Prom
   if (filters.branchIds && filters.branchIds.length > 0) {
     const branchVisits = await batchIn<{ client_id: string }>(
       supabase, 'visits', 'client_id', 'client_id', clientIds,
-      (q: any) => q.in('branch_id', filters.branchIds!).not('completed_at', 'is', null)
+      (q) => q.in('branch_id', filters.branchIds!).not('completed_at', 'is', null)
     )
     const visitedSet = new Set(branchVisits.map(v => v.client_id))
     enriched = enriched.filter(c => visitedSet.has(c.id))

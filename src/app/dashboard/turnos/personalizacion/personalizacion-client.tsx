@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import Image from 'next/image'
 import { Save, Loader2, Palette, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -163,10 +164,13 @@ export function PersonalizacionClient({ settings, org }: Props) {
               <div className="px-6 pb-8 pt-6 text-center" style={{ color: safeText }}>
                 {/* Logo */}
                 {org.logo_url ? (
-                  <img
+                  <Image
                     src={org.logo_url}
                     alt=""
+                    width={64}
+                    height={64}
                     className="mx-auto mb-4 h-16 w-16 rounded-full object-cover shadow-md"
+                    unoptimized
                   />
                 ) : (
                   <div

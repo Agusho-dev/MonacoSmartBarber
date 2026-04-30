@@ -345,6 +345,7 @@ export async function updateBillingProfile(
   return { ok: true }
 }
 
-// (Marker para compatibilidad: 'use server' files sólo exportan async fns.)
+// (Types and classes live in @/lib/billing/types — 'use server' files
+//  can only export async functions.)
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function _typeMarker(): Promise<EntitlementErrorResponse | null> { return null }
