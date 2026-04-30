@@ -11,6 +11,7 @@ import {
   MailQuestion,
   TrendingDown,
   Receipt,
+  Wallet,
   History,
   Shield,
   Menu,
@@ -28,11 +29,12 @@ type NavItem = {
 const NAV: NavItem[] = [
   { href: '/platform/dashboard', label: 'Dashboard', icon: LayoutDashboard, section: 'General' },
   { href: '/platform/organizations', label: 'Organizaciones', icon: Building2, section: 'General' },
+  { href: '/platform/billing-requests', label: 'Cobros pendientes', icon: Wallet, section: 'Cobros' },
+  { href: '/platform/billing-events', label: 'Eventos de pago', icon: Receipt, section: 'Cobros' },
   { href: '/platform/plans', label: 'Planes', icon: Sparkles, section: 'Catálogo comercial' },
   { href: '/platform/modules', label: 'Módulos', icon: Package, section: 'Catálogo comercial' },
   { href: '/platform/waitlist', label: 'Waitlist', icon: MailQuestion, section: 'Catálogo comercial' },
   { href: '/platform/usage', label: 'Uso y denials', icon: TrendingDown, section: 'Insights' },
-  { href: '/platform/billing-events', label: 'Eventos de pago', icon: Receipt, section: 'Insights' },
   { href: '/platform/actions', label: 'Audit log', icon: History, section: 'Insights' },
 ]
 

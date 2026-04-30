@@ -7,11 +7,14 @@ import {
   Sparkles,
   ArrowRight,
   Crown,
+  Wallet,
+  RefreshCw,
 } from 'lucide-react'
 import {
   getPlatformMetrics,
   listTopDeniedFeatures,
   getTrialsExpiringSoon,
+  getManualBillingMetrics,
 } from '@/lib/actions/platform-billing'
 import { listRecentPlatformActions } from '@/lib/actions/platform'
 import { PageHeader } from '@/components/platform/page-header'
@@ -24,12 +27,18 @@ function formatArs(amount: number): string {
 }
 
 export default async function PlatformDashboard() {
-  const [metrics, denied, trials, recentActions] = await Promise.all([
+  const [metrics, denied, trials, recentActions, manual] = await Promise.all([
     getPlatformMetrics(),
     listTopDeniedFeatures(30, 8),
     getTrialsExpiringSoon(7),
     listRecentPlatformActions(8),
+    getManualBillingMetrics(),
   ])
+  const monthRevenueArs = manual.revenue_this_month_ars_cents / 100
+  const lastMonthRevenueArs = manual.revenue_last_month_ars_cents / 100
+  const revenueDelta = lastMonthRevenueArs > 0
+    ? Math.round(((monthRevenueArs - lastMonthRevenueArs) / lastMonthRevenueArs) * 100)
+    : null
 
   return (
     <div className="space-y-8">
@@ -41,11 +50,57 @@ export default async function PlatformDashboard() {
       {/* KPIs principales */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <KpiCard
-          label="MRR"
+          label="Cobrado este mes"
+          value={`AR$ ${formatArs(monthRevenueArs)}`}
+          accent="emerald"
+          icon={Wallet}
+          hint={revenueDelta !== null
+            ? `${revenueDelta >= 0 ? '+' : ''}${revenueDelta}% vs mes pasado`
+            : 'Sin pagos el mes pasado'}
+        />
+        <KpiCard
+          label="MRR (catálogo)"
           value={`AR$ ${formatArs(metrics.mrr_ars)}`}
           accent="emerald"
           icon={TrendingUp}
-          hint="Recurrente mensual facturable"
+          hint="Suma de planes activos"
+        />
+        <KpiCard
+          label="Cobros pendientes"
+          value={manual.pending_requests_count.toString()}
+          accent={manual.pending_requests_count > 0 ? 'amber' : 'zinc'}
+          icon={Wallet}
+          hint="Solicitudes sin contactar"
+        />
+        <KpiCard
+          label="Renovaciones (14d)"
+          value={manual.upcoming_renewals.length.toString()}
+          accent="indigo"
+          icon={RefreshCw}
+          hint={`${metrics.active_orgs} orgs activas · ${metrics.grandfathered_orgs} grandfathered`}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <KpiCard
+          label="En trial"
+          value={metrics.trial_orgs.toString()}
+          accent="amber"
+          icon={Clock}
+          hint="Activas sin pago aún"
+        />
+        <KpiCard
+          label="Past due"
+          value={manual.past_due_list.length.toString()}
+          accent={manual.past_due_list.length > 0 ? 'rose' : 'zinc'}
+          icon={AlertTriangle}
+          hint="Con gracia activa"
+        />
+        <KpiCard
+          label="Orgs activas"
+          value={metrics.active_orgs.toString()}
+          accent="indigo"
+          icon={Building2}
         />
         <KpiCard
           label="ARR proyectado"
@@ -54,20 +109,76 @@ export default async function PlatformDashboard() {
           icon={TrendingUp}
           hint="MRR × 12"
         />
-        <KpiCard
-          label="Orgs activas"
-          value={metrics.active_orgs.toString()}
-          accent="indigo"
-          icon={Building2}
-          hint={`${metrics.grandfathered_orgs} grandfathered`}
-        />
-        <KpiCard
-          label="En trial"
-          value={metrics.trial_orgs.toString()}
-          accent="amber"
-          icon={Clock}
-          hint="Activas sin pago aún"
-        />
+      </div>
+
+      {/* Cobros próximos */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <section className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              <RefreshCw className="size-4 text-indigo-400" />
+              Renovaciones en 14 días
+            </h2>
+            <Link href="/platform/billing-requests" className="text-xs text-indigo-400 hover:text-indigo-300">
+              Ver cobros →
+            </Link>
+          </div>
+          {manual.upcoming_renewals.length === 0 ? (
+            <p className="text-xs text-zinc-500">No hay renovaciones próximas.</p>
+          ) : (
+            <div className="space-y-1">
+              {manual.upcoming_renewals.slice(0, 8).map((r) => (
+                <Link
+                  key={r.subscription_id}
+                  href={`/platform/orgs/${r.organization_id}`}
+                  className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-zinc-800/50"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">{r.org_name}</div>
+                    <div className="text-[10px] text-zinc-500">
+                      Plan {r.plan_id} · {r.billing_email ?? 'sin email'}
+                    </div>
+                  </div>
+                  <span className={`ml-2 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                    r.days_until_renewal <= 3 ? 'bg-rose-500/15 text-rose-300' : 'bg-amber-500/15 text-amber-300'
+                  }`}>
+                    en {r.days_until_renewal}d
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              <AlertTriangle className="size-4 text-rose-400" />
+              Past due (gracia activa)
+            </h2>
+          </div>
+          {manual.past_due_list.length === 0 ? (
+            <p className="text-xs text-zinc-500">Ninguna org en past_due.</p>
+          ) : (
+            <div className="space-y-1">
+              {manual.past_due_list.slice(0, 8).map((r) => (
+                <Link
+                  key={r.subscription_id}
+                  href={`/platform/orgs/${r.organization_id}`}
+                  className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-zinc-800/50"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">{r.org_name}</div>
+                    <div className="text-[10px] text-zinc-500">Plan {r.plan_id}</div>
+                  </div>
+                  <span className="ml-2 shrink-0 rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-medium text-rose-300">
+                    {r.days_grace_left ?? 0}d gracia
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">

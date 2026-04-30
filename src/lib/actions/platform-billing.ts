@@ -460,3 +460,484 @@ export async function getTrialsExpiringSoon(days = 7) {
     .order('trial_ends_at', { ascending: true })
   return data ?? []
 }
+
+// ============================================================
+// MANUAL BILLING — Subscription requests
+// ============================================================
+
+export type SubscriptionRequestStatus = 'pending' | 'contacted' | 'paid' | 'cancelled'
+
+export interface SubscriptionRequestRow {
+  id: string
+  organization_id: string
+  org_name: string
+  org_slug: string
+  requested_plan_id: string
+  plan_name: string
+  plan_price_ars_monthly: number
+  plan_price_ars_yearly: number
+  requested_billing_cycle: 'monthly' | 'yearly'
+  request_kind: 'plan_change' | 'renewal' | 'module_addon'
+  module_id: string | null
+  status: SubscriptionRequestStatus
+  notes: string | null
+  contact_log: Array<{ at: string; by: string | null; channel: string; note: string }>
+  requested_by: string | null
+  requested_by_email: string | null
+  contacted_at: string | null
+  resolved_at: string | null
+  cancellation_reason: string | null
+  current_plan_id: string | null
+  current_status: string | null
+  billing_email: string | null
+  billing_whatsapp: string | null
+  created_at: string
+  updated_at: string
+  days_pending: number
+}
+
+export async function listSubscriptionRequests(filters?: {
+  status?: SubscriptionRequestStatus | 'all'
+  kind?: 'plan_change' | 'renewal' | 'module_addon' | 'all'
+}): Promise<SubscriptionRequestRow[]> {
+  await requirePlatformAdmin()
+  const admin = createAdminClient()
+
+  let q = admin
+    .from('subscription_requests')
+    .select(`
+      id, organization_id, requested_plan_id, requested_billing_cycle,
+      request_kind, module_id, status, notes, contact_log,
+      requested_by, contacted_at, resolved_at, cancellation_reason,
+      created_at, updated_at,
+      organizations:organization_id ( name, slug ),
+      plans:requested_plan_id ( name, price_ars_monthly, price_ars_yearly )
+    `)
+    .order('created_at', { ascending: false })
+
+  if (filters?.status && filters.status !== 'all') q = q.eq('status', filters.status)
+  if (filters?.kind && filters.kind !== 'all') q = q.eq('request_kind', filters.kind)
+
+  const { data, error } = await q
+  if (error) {
+    console.error('[listSubscriptionRequests]', error)
+    return []
+  }
+
+  // Enriquecer con datos de la sub actual y del usuario que pidió
+  const orgIds = Array.from(new Set((data ?? []).map((r) => r.organization_id)))
+  const userIds = Array.from(new Set(
+    (data ?? []).map((r) => r.requested_by).filter((x): x is string => !!x),
+  ))
+
+  const [subsRes, usersRes] = await Promise.all([
+    orgIds.length
+      ? admin.from('organization_subscriptions')
+          .select('organization_id, plan_id, status, billing_email, billing_whatsapp')
+          .in('organization_id', orgIds)
+      : Promise.resolve({ data: [] as Array<{ organization_id: string; plan_id: string; status: string; billing_email: string | null; billing_whatsapp: string | null }> }),
+    userIds.length
+      ? admin.auth.admin.listUsers({ page: 1, perPage: 200 })
+      : Promise.resolve({ data: { users: [] } }),
+  ])
+
+  const subMap = new Map<string, { plan_id: string; status: string; billing_email: string | null; billing_whatsapp: string | null }>()
+  for (const s of subsRes.data ?? []) {
+    subMap.set(s.organization_id, {
+      plan_id: s.plan_id,
+      status: s.status,
+      billing_email: s.billing_email,
+      billing_whatsapp: s.billing_whatsapp,
+    })
+  }
+
+  const userMap = new Map<string, string>()
+  const userList = (usersRes.data as { users?: Array<{ id: string; email?: string }> }).users ?? []
+  for (const u of userList) {
+    if (u.email) userMap.set(u.id, u.email)
+  }
+
+  return (data ?? []).map((r) => {
+    const org = (r as Record<string, unknown>).organizations as { name?: string; slug?: string } | null
+    const plan = (r as Record<string, unknown>).plans as {
+      name?: string; price_ars_monthly?: number; price_ars_yearly?: number
+    } | null
+    const sub = subMap.get(r.organization_id)
+    const ageMs = Date.now() - new Date(r.created_at).getTime()
+    return {
+      id: r.id,
+      organization_id: r.organization_id,
+      org_name: org?.name ?? '—',
+      org_slug: org?.slug ?? '',
+      requested_plan_id: r.requested_plan_id,
+      plan_name: plan?.name ?? r.requested_plan_id,
+      plan_price_ars_monthly: plan?.price_ars_monthly ?? 0,
+      plan_price_ars_yearly: plan?.price_ars_yearly ?? 0,
+      requested_billing_cycle: r.requested_billing_cycle as 'monthly' | 'yearly',
+      request_kind: r.request_kind as 'plan_change' | 'renewal' | 'module_addon',
+      module_id: r.module_id,
+      status: r.status as SubscriptionRequestStatus,
+      notes: r.notes,
+      contact_log: (r.contact_log as SubscriptionRequestRow['contact_log']) ?? [],
+      requested_by: r.requested_by,
+      requested_by_email: r.requested_by ? (userMap.get(r.requested_by) ?? null) : null,
+      contacted_at: r.contacted_at,
+      resolved_at: r.resolved_at,
+      cancellation_reason: r.cancellation_reason,
+      current_plan_id: sub?.plan_id ?? null,
+      current_status: sub?.status ?? null,
+      billing_email: sub?.billing_email ?? null,
+      billing_whatsapp: sub?.billing_whatsapp ?? null,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      days_pending: Math.floor(ageMs / (24 * 60 * 60 * 1000)),
+    }
+  })
+}
+
+export async function markRequestContacted(
+  requestId: string,
+  channel: 'whatsapp' | 'email' | 'llamada' | 'otro',
+  note: string,
+): Promise<{ ok: true } | { error: string }> {
+  const pa = await requirePlatformAdmin()
+  const admin = createAdminClient()
+
+  const { data: existing, error: getErr } = await admin
+    .from('subscription_requests')
+    .select('contact_log, status, organization_id')
+    .eq('id', requestId)
+    .maybeSingle()
+
+  if (getErr || !existing) return { error: getErr?.message ?? 'Request no encontrada' }
+
+  const log = Array.isArray(existing.contact_log) ? existing.contact_log : []
+  log.push({
+    at: new Date().toISOString(),
+    by: pa.user_id,
+    channel,
+    note,
+  })
+
+  const { error } = await admin
+    .from('subscription_requests')
+    .update({
+      contact_log: log,
+      status: existing.status === 'pending' ? 'contacted' : existing.status,
+      contacted_at: existing.status === 'pending' ? new Date().toISOString() : undefined,
+      contacted_by: pa.user_id,
+    })
+    .eq('id', requestId)
+
+  if (error) return { error: error.message }
+
+  await admin.from('platform_admin_actions').insert({
+    admin_user_id: pa.user_id,
+    action: 'subscription_request.contacted',
+    target_org_id: existing.organization_id,
+    payload: { request_id: requestId, channel, note },
+  })
+
+  revalidatePath('/platform/billing-requests')
+  revalidatePath(`/platform/orgs/${existing.organization_id}`)
+  return { ok: true }
+}
+
+export async function cancelSubscriptionRequest(
+  requestId: string,
+  reason: string,
+): Promise<{ ok: true } | { error: string }> {
+  const pa = await requirePlatformAdmin()
+  const admin = createAdminClient()
+
+  const { data: existing } = await admin
+    .from('subscription_requests')
+    .select('organization_id, status')
+    .eq('id', requestId)
+    .maybeSingle()
+
+  if (!existing) return { error: 'Request no encontrada' }
+  if (existing.status === 'paid') return { error: 'No se puede cancelar una request ya pagada' }
+
+  const { error } = await admin
+    .from('subscription_requests')
+    .update({
+      status: 'cancelled',
+      cancellation_reason: reason,
+      resolved_at: new Date().toISOString(),
+      resolved_by: pa.user_id,
+    })
+    .eq('id', requestId)
+
+  if (error) return { error: error.message }
+
+  await admin.from('platform_admin_actions').insert({
+    admin_user_id: pa.user_id,
+    action: 'subscription_request.cancelled',
+    target_org_id: existing.organization_id,
+    payload: { request_id: requestId, reason },
+  })
+
+  revalidatePath('/platform/billing-requests')
+  return { ok: true }
+}
+
+// ============================================================
+// MANUAL BILLING — Registrar pago
+// ============================================================
+
+export interface RecordManualPaymentInput {
+  organization_id: string
+  request_id?: string | null
+  plan_id: string
+  billing_cycle: 'monthly' | 'yearly'
+  amount_ars: number             // en centavos (consistente con plans)
+  payment_method: 'transferencia' | 'efectivo' | 'mp_link' | 'usdt' | 'otro'
+  reference?: string | null
+  receipt_url?: string | null
+  period_months: number          // cuántos meses cubre este pago (1, 3, 6, 12...)
+  starts_at?: string | null      // ISO; si null, comienza ahora o al final del período actual
+  notes?: string | null
+}
+
+export async function recordManualPayment(
+  input: RecordManualPaymentInput,
+): Promise<{ ok: true; payment_id: string; period_end: string } | { error: string }> {
+  const pa = await requirePlatformAdmin()
+  if (pa.role === 'support') return { error: 'Sin permiso (rol support)' }
+  const admin = createAdminClient()
+
+  if (input.period_months <= 0) return { error: 'period_months debe ser mayor a 0' }
+  if (input.amount_ars < 0) return { error: 'amount_ars no puede ser negativo' }
+
+  // Resolver period_start: por defecto, max(now, current_period_end del sub)
+  const { data: sub } = await admin
+    .from('organization_subscriptions')
+    .select('current_period_end, status')
+    .eq('organization_id', input.organization_id)
+    .maybeSingle()
+
+  const now = new Date()
+  const baseStart = input.starts_at
+    ? new Date(input.starts_at)
+    : (sub?.current_period_end && new Date(sub.current_period_end) > now
+        ? new Date(sub.current_period_end)
+        : now)
+
+  const periodEnd = new Date(baseStart)
+  periodEnd.setMonth(periodEnd.getMonth() + input.period_months)
+
+  const { data: payment, error } = await admin
+    .from('manual_payments')
+    .insert({
+      organization_id: input.organization_id,
+      request_id: input.request_id ?? null,
+      plan_id: input.plan_id,
+      billing_cycle: input.billing_cycle,
+      amount_ars: input.amount_ars,
+      currency: 'ARS',
+      payment_method: input.payment_method,
+      reference: input.reference ?? null,
+      receipt_url: input.receipt_url ?? null,
+      period_start: baseStart.toISOString(),
+      period_end: periodEnd.toISOString(),
+      recorded_by: pa.user_id,
+      notes: input.notes ?? null,
+    })
+    .select('id, period_end')
+    .single()
+
+  if (error || !payment) return { error: error?.message ?? 'Falló el INSERT' }
+
+  await admin.from('platform_admin_actions').insert({
+    admin_user_id: pa.user_id,
+    action: 'manual_payment.recorded',
+    target_org_id: input.organization_id,
+    payload: {
+      payment_id: payment.id,
+      plan_id: input.plan_id,
+      amount_ars: input.amount_ars,
+      method: input.payment_method,
+      period_months: input.period_months,
+    },
+  })
+
+  // Email de confirmación al cliente (fire-and-forget)
+  try {
+    const [orgRes, subRes, planRes] = await Promise.all([
+      admin.from('organizations').select('name').eq('id', input.organization_id).maybeSingle(),
+      admin.from('organization_subscriptions').select('billing_email').eq('organization_id', input.organization_id).maybeSingle(),
+      admin.from('plans').select('name').eq('id', input.plan_id).maybeSingle(),
+    ])
+    const billingEmail = subRes.data?.billing_email
+    if (billingEmail) {
+      const { sendPaymentRecordedEmail } = await import('@/lib/email/send')
+      void sendPaymentRecordedEmail({
+        orgName: orgRes.data?.name ?? 'tu organización',
+        ownerEmail: billingEmail,
+        planName: planRes.data?.name ?? input.plan_id,
+        amountArs: input.amount_ars,
+        periodStart: baseStart.toISOString(),
+        periodEnd: payment.period_end,
+        method: input.payment_method,
+        reference: input.reference ?? null,
+      })
+    }
+  } catch (e) {
+    console.error('[recordManualPayment] email skipped:', e)
+  }
+
+  revalidatePath('/platform/billing-requests')
+  revalidatePath('/platform/dashboard')
+  revalidatePath(`/platform/orgs/${input.organization_id}`)
+  return { ok: true, payment_id: payment.id, period_end: payment.period_end }
+}
+
+export async function listManualPayments(orgId: string, limit = 50) {
+  await requirePlatformAdmin()
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('manual_payments')
+    .select('id, plan_id, billing_cycle, amount_ars, currency, payment_method, reference, receipt_url, period_start, period_end, recorded_by, notes, created_at')
+    .eq('organization_id', orgId)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  return data ?? []
+}
+
+export async function listManualPaymentsForOrg(orgId: string) {
+  // Variante para uso del cliente final (RLS already filters)
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('manual_payments')
+    .select('id, plan_id, billing_cycle, amount_ars, currency, payment_method, reference, receipt_url, period_start, period_end, notes, created_at')
+    .eq('organization_id', orgId)
+    .order('created_at', { ascending: false })
+  return data ?? []
+}
+
+export async function extendSubscriptionPeriod(
+  orgId: string,
+  days: number,
+  reason: string,
+): Promise<{ ok: true } | { error: string }> {
+  const pa = await requirePlatformAdmin()
+  if (pa.role === 'support') return { error: 'Sin permiso (rol support)' }
+  const admin = createAdminClient()
+
+  if (days <= 0 || days > 365) return { error: 'Días fuera de rango (1-365)' }
+
+  const { data: sub } = await admin
+    .from('organization_subscriptions')
+    .select('id, current_period_end')
+    .eq('organization_id', orgId)
+    .maybeSingle()
+
+  if (!sub) return { error: 'No existe suscripción' }
+
+  const base = sub.current_period_end ? new Date(sub.current_period_end) : new Date()
+  const newEnd = new Date(base.getTime() + days * 24 * 60 * 60 * 1000)
+
+  const { error } = await admin
+    .from('organization_subscriptions')
+    .update({
+      current_period_end: newEnd.toISOString(),
+      next_renewal_reminder_at: new Date(newEnd.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+      status: 'active',
+      grace_period_ends_at: null,
+    })
+    .eq('id', sub.id)
+
+  if (error) return { error: error.message }
+
+  await admin.from('platform_admin_actions').insert({
+    admin_user_id: pa.user_id,
+    action: 'subscription.extended',
+    target_org_id: orgId,
+    payload: { days, reason, new_period_end: newEnd.toISOString() },
+  })
+
+  revalidatePath(`/platform/orgs/${orgId}`)
+  revalidatePath('/platform/dashboard')
+  return { ok: true }
+}
+
+export async function setSubscriptionPastDue(
+  orgId: string,
+  graceDays = 5,
+): Promise<{ ok: true } | { error: string }> {
+  const pa = await requirePlatformAdmin()
+  const admin = createAdminClient()
+  const graceEnd = new Date(Date.now() + graceDays * 24 * 60 * 60 * 1000).toISOString()
+
+  const { error } = await admin
+    .from('organization_subscriptions')
+    .update({
+      status: 'past_due',
+      grace_period_ends_at: graceEnd,
+    })
+    .eq('organization_id', orgId)
+
+  if (error) return { error: error.message }
+
+  await admin.from('platform_admin_actions').insert({
+    admin_user_id: pa.user_id,
+    action: 'subscription.set_past_due',
+    target_org_id: orgId,
+    payload: { grace_period_ends_at: graceEnd },
+  })
+
+  revalidatePath(`/platform/orgs/${orgId}`)
+  return { ok: true }
+}
+
+// ============================================================
+// MANUAL BILLING — KPIs
+// ============================================================
+
+export async function getManualBillingMetrics() {
+  await requirePlatformAdmin()
+  const admin = createAdminClient()
+
+  const startOfMonth = new Date()
+  startOfMonth.setDate(1)
+  startOfMonth.setHours(0, 0, 0, 0)
+
+  const startOfLastMonth = new Date(startOfMonth)
+  startOfLastMonth.setMonth(startOfLastMonth.getMonth() - 1)
+
+  const [thisMonthRes, lastMonthRes, pendingRes, in14Res, pastDueRes] = await Promise.all([
+    admin.from('manual_payments')
+      .select('amount_ars')
+      .gte('created_at', startOfMonth.toISOString()),
+    admin.from('manual_payments')
+      .select('amount_ars')
+      .gte('created_at', startOfLastMonth.toISOString())
+      .lt('created_at', startOfMonth.toISOString()),
+    admin.from('subscription_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending'),
+    admin.from('v_subscription_renewals_due')
+      .select('subscription_id, organization_id, org_name, slug, plan_id, current_period_end, days_until_renewal, billing_email, billing_whatsapp')
+      .lte('days_until_renewal', 14)
+      .eq('status', 'active')
+      .order('days_until_renewal', { ascending: true })
+      .limit(50),
+    admin.from('v_subscription_renewals_due')
+      .select('subscription_id, organization_id, org_name, slug, plan_id, grace_period_ends_at, days_grace_left, billing_email, billing_whatsapp')
+      .eq('status', 'past_due')
+      .order('days_grace_left', { ascending: true })
+      .limit(50),
+  ])
+
+  const sum = (rows: Array<{ amount_ars: number }> | null) =>
+    (rows ?? []).reduce((acc, r) => acc + (r.amount_ars ?? 0), 0)
+
+  return {
+    revenue_this_month_ars_cents: sum(thisMonthRes.data),
+    revenue_last_month_ars_cents: sum(lastMonthRes.data),
+    pending_requests_count: pendingRes.count ?? 0,
+    upcoming_renewals: in14Res.data ?? [],
+    past_due_list: pastDueRes.data ?? [],
+  }
+}

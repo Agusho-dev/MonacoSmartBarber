@@ -81,7 +81,9 @@
       "mcp__supabase-msb__get_logs",
       "mcp__supabase-msb__apply_migration",
       "mcp__supabase-msb__deploy_edge_function",
-      "Bash(python3 -c \"import sys, json; print\\(json.dumps\\([{'name': 'index.ts', 'content': sys.stdin.read\\(\\)}]\\)\\)\")"
+      "Bash(python3 -c \"import sys, json; print\\(json.dumps\\([{'name': 'index.ts', 'content': sys.stdin.read\\(\\)}]\\)\\)\")",
+      "Bash(npx tsx *)",
+      "Bash(echo \"EXIT=$?\")"
     ]
   },
   "enabledMcpjsonServers": [

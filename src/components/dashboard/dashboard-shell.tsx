@@ -70,7 +70,7 @@ import { UpgradePromptDialog } from '@/components/billing/upgrade-prompt-dialog'
 import { ComingSoonDialog } from '@/components/billing/coming-soon-dialog'
 import { TrialBanner } from '@/components/billing/trial-banner'
 import { Badge } from '@/components/ui/badge'
-import { Lock, Clock as ClockIcon } from 'lucide-react'
+import { Lock, Clock as ClockIcon, CreditCard } from 'lucide-react'
 import { NAV_FEATURE_MAP } from '@/lib/billing/nav-feature-map'
 
 const navItems = [
@@ -838,6 +838,19 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
                   </p>
                 )}
               </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href="/dashboard/account">
+                  <Lock className="size-4" />
+                  Mi cuenta
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/dashboard/billing">
+                  <CreditCard className="size-4" />
+                  Facturación
+                </Link>
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout}>
                 <LogOut className="size-4" />

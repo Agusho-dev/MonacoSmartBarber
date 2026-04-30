@@ -43,7 +43,7 @@ INSERT INTO public.plans (
  'Start',
  'Para barberías que están arrancando',
  2990000, 29900000, 2500, 25000,
- 14,
+ 3,
  jsonb_build_object(
    'queue.enabled', true,
    'kiosk.enabled', true,
@@ -72,7 +72,7 @@ INSERT INTO public.plans (
  'Pro',
  'La solución completa para crecer',
  6990000, 69900000, 6000, 60000,
- 14,
+ 3,
  jsonb_build_object(
    'queue.enabled', true,
    'kiosk.enabled', true,
@@ -118,7 +118,7 @@ INSERT INTO public.plans (
  'Enterprise',
  'Para cadenas y franquicias',
  13990000, 139900000, 12500, 125000,
- 14,
+ 3,
  jsonb_build_object(
    'queue.enabled', true,
    'kiosk.enabled', true,

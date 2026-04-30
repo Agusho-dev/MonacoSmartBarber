@@ -205,24 +205,44 @@ export async function registerOrganization(formData: FormData) {
     }
 
     // 7c. Crear suscripción en trial. La org arranca con acceso Pro durante
-    // 14 días. Al expirar, el cron /api/cron/expire-trials la baja a 'free'.
-    const trialDays = 14
-    const trialEndsAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000)
+    // 3 días. Al expirar el trial, /api/cron/expire-trials la mueve a past_due
+    // (5 días de gracia para coordinar pago manual con el equipo) y luego a 'free'.
+    const TRIAL_DAYS = 3
+    const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000)
+    // Recordatorio: 1 día antes del trial_ends_at (notify-renewals lo dispara)
+    const trialReminderAt = new Date(trialEndsAt.getTime() - 24 * 60 * 60 * 1000)
     const { error: subError } = await supabase
       .from('organization_subscriptions')
       .insert({
         organization_id: org.id,
         plan_id: 'pro',
         status: 'trialing',
+        provider: 'manual',
         billing_cycle: 'monthly',
         currency: 'ARS',
+        billing_email: email,
         trial_ends_at: trialEndsAt.toISOString(),
         current_period_start: new Date().toISOString(),
         current_period_end: trialEndsAt.toISOString(),
+        next_renewal_reminder_at: trialReminderAt.toISOString(),
       })
     if (subError) {
       console.error('[registerOrganization] Error al crear suscripción trial:', subError)
-      throw new Error('Error al activar el trial de 14 días.')
+      throw new Error('Error al activar el trial de 3 días.')
+    }
+
+    // 7d. Email de bienvenida (fire-and-forget — no bloquea el registro)
+    try {
+      const { sendWelcomeEmail } = await import('@/lib/email/send')
+      void sendWelcomeEmail({
+        orgName,
+        ownerEmail: email,
+        ownerName,
+        trialDays: TRIAL_DAYS,
+        trialEndsAt: trialEndsAt.toISOString(),
+      })
+    } catch (e) {
+      console.error('[registerOrganization] welcome email skipped:', e)
     }
 
     // 8. Iniciar sesión automáticamente con el usuario recién registrado
