@@ -111,10 +111,25 @@ export function FaceCamera({
     mountedRef.current = true
     let cancelled = false
 
+    // Timeout de seguridad: si los modelos tardan > 20s, asumir falla
+    // (red caída, CSP bloqueando, WebGL/WASM no disponible en este browser).
+    const safetyTimer = setTimeout(() => {
+      if (!cancelled && !areModelsLoaded()) {
+        console.error('[face-camera] timeout cargando modelos de reconocimiento')
+        setState('error')
+      }
+    }, 20_000)
+
     const boot = async () => {
-      await initFaceModels()
-      if (cancelled) return
-      await startCamera()
+      try {
+        await initFaceModels()
+        if (cancelled) return
+        await startCamera()
+      } catch (err) {
+        if (cancelled) return
+        console.error('[face-camera] error inicializando reconocimiento facial', err)
+        setState('error')
+      }
     }
 
     boot()
@@ -122,6 +137,7 @@ export function FaceCamera({
     return () => {
       cancelled = true
       mountedRef.current = false
+      clearTimeout(safetyTimer)
       stopCamera()
     }
   }, [startCamera, stopCamera])
