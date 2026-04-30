@@ -177,9 +177,12 @@ export function QueuePanel({
   const canHideSelf = session.role === 'admin' || session.role === 'owner' || session.permissions?.['queue.hide_self'] === true
 
   const fetchQueue = useCallback(async () => {
+    // Query liviano: eliminamos visits(count) — era un correlated subquery por cliente
+    // que generaba 177k calls/día según pg_stat_statements. El conteo ya vive en
+    // clients.total_visits y en la vista client_loyalty_state.total_visits.
     const { data } = await supabase
       .from('queue_entries')
-      .select('*, client:clients(*, loyalty:client_loyalty_state(total_visits), visits(count)), barber:staff(*), service:services(*)')
+      .select('*, client:clients(id, name, phone, loyalty:client_loyalty_state(total_visits)), barber:staff(id, full_name, avatar_url), service:services(id, name, duration_minutes, price)')
       .eq('branch_id', session.branch_id)
       .in('status', ['waiting', 'in_progress'])
       .order('position')
@@ -308,6 +311,7 @@ export function QueuePanel({
 
     const channel = supabase
       .channel(`barber-queue-${session.branch_id}-${session.staff_id}`)
+      // queue_entries → solo refresca cola + stats, NO barbers/schedules (son datos estables)
       .on(
         'postgres_changes',
         {
@@ -319,9 +323,9 @@ export function QueuePanel({
         () => {
           fetchQueue()
           refreshStats()
-          fetchBarbersAndSchedules()
         }
       )
+      // staff → solo refresca barberos + estado de visibilidad propio
       .on(
         'postgres_changes',
         {
@@ -335,31 +339,23 @@ export function QueuePanel({
           fetchHiddenStatus()
         }
       )
+      // break_requests filtrado por branch_id para evitar stampede multi-sucursal
+      // (attendance_logs fue removido de supabase_realtime publication — listener eliminado)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'break_requests',
+          filter: `branch_id=eq.${session.branch_id}`,
         },
         () => {
           fetchBreakRequestStatus()
           fetchPendingBreakRequests()
         }
       )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'attendance_logs',
-        },
-        () => {
-          fetchBarbersAndSchedules()
-        }
-      )
       .subscribe((status) => {
-        // Re-fetch everything on reconnection
+        // Re-fetch todo al reconectar el WebSocket
         if (status === 'SUBSCRIBED') {
           fetchQueue()
           refreshStats()
@@ -375,16 +371,15 @@ export function QueuePanel({
     }
   }, [supabase, session.branch_id, session.staff_id, fetchQueue, refreshStats, fetchBarbersAndSchedules, fetchBreakRequestStatus, fetchPendingBreakRequests, fetchHiddenStatus])
 
-  // Refresh data when returning to tab or as polling fallback (critical for low-end tablets)
+  // Al volver al tab o en el polling fallback, refrescamos solo la cola y las stats.
+  // Los datos de barberos/schedules cambian con poca frecuencia y se refrescan
+  // cuando el WebSocket reconecta (evento SUBSCRIBED). Esto reduce el burst de queries
+  // cuando múltiples tablets reconectan simultáneamente.
   useVisibilityRefresh(
     useCallback(() => {
       fetchQueue()
       refreshStats()
-      fetchBarbersAndSchedules()
-      fetchBreakRequestStatus()
-      fetchPendingBreakRequests()
-      fetchHiddenStatus()
-    }, [fetchQueue, refreshStats, fetchBarbersAndSchedules, fetchBreakRequestStatus, fetchPendingBreakRequests, fetchHiddenStatus]),
+    }, [fetchQueue, refreshStats]),
     30_000
   )
 
@@ -796,9 +791,12 @@ export function QueuePanel({
                       </Badge>
                     )
                   }
-                  const realVisits = entry.client?.visits?.[0]?.count ?? 0
-                  const loyaltyVisits = entry.client?.loyalty?.[0]?.total_visits ?? 0
-                  if (Math.max(realVisits, loyaltyVisits) === 0) {
+                  // Usamos total_visits del cliente directamente (desnormalizado en clients)
+                  // o lo tomamos de la vista loyalty si está disponible. Ya no existe visits(count).
+                  const totalVisits = entry.client?.total_visits
+                    ?? entry.client?.loyalty?.[0]?.total_visits
+                    ?? 0
+                  if (totalVisits === 0) {
                     return (
                       <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-emerald-500/15 text-emerald-500 border-emerald-500/30">
                         Primer Corte

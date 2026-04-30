@@ -412,20 +412,10 @@ export function CheckinWalkIn() {
           if (!cancelled) loadBarberData(branchId)
         }
       )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'attendance_logs',
-          filter: `branch_id=eq.${branchId}`,
-        },
-        () => {
-          if (!cancelled) loadBarberData(branchId)
-        }
-      )
       .subscribe((status) => {
-        // Re-fetch everything on reconnection
+        // Re-fetch everything on reconnection. attendance_logs salió del
+        // publication realtime (mig 124) por carga; el clock-in/out se
+        // re-evalúa al reconectar el WS y al recargar el kiosk.
         if (status === 'SUBSCRIBED' && !cancelled) {
           loadBarberData(branchId)
         }

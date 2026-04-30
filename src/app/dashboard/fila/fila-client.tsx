@@ -835,9 +835,11 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   // ── Fetches (Omitido para brevedad en review, la lógica es la misma) ───────
 
   const fetchQueue = useCallback(async () => {
+    // Query liviano: solo los campos que el kanban efectivamente renderiza.
+    // Evitamos clients(*) y staff(*) que traen columnas no usadas.
     const { data } = await supabase
       .from('queue_entries')
-      .select('*, client:clients(*), barber:staff(*)')
+      .select('*, client:clients(id, name, phone), barber:staff(id, full_name, avatar_url)')
       .in('status', ['waiting', 'in_progress'])
       .order('position')
     if (data) {
@@ -928,14 +930,15 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'queue_entries' }, () =>
         fetchQueue()
       )
+      // staff → refresca lista de barberos y sus estados
       .on('postgres_changes', { event: '*', schema: 'public', table: 'staff' }, () =>
         fetchBarbers()
       )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_logs' }, () =>
-        fetchSchedules()
-      )
+      // NOTA: el listener de attendance_logs fue eliminado porque esa tabla fue
+      // removida de la supabase_realtime publication. Los horarios/asistencia se
+      // refrescan al reconectar el WebSocket (evento SUBSCRIBED) y vía polling de 30s.
       .subscribe((status) => {
-        // Re-fetch everything on reconnection. Defer a microtask para no
+        // Re-fetch todo al reconectar. Defer a microtask para no
         // disparar setState durante el callback de subscribe (cascading renders).
         if (status === 'SUBSCRIBED') {
           queueMicrotask(() => {
