@@ -74,13 +74,20 @@ export async function initFaceModels(): Promise<void> {
   if (modelsLoading) return modelsLoading
 
   modelsLoading = (async () => {
-    const api = await loadFaceApi()
-    await Promise.all([
-      api.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-      api.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-      api.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-    ])
-    modelsLoaded = true
+    try {
+      const api = await loadFaceApi()
+      await Promise.all([
+        api.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        api.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        api.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+      ])
+      modelsLoaded = true
+    } catch (err) {
+      // Resetear el flag para permitir reintentos en próxima llamada,
+      // sino la promise rejected queda cacheada para siempre.
+      modelsLoading = null
+      throw err
+    }
   })()
 
   return modelsLoading

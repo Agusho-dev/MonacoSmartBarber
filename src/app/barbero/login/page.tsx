@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Scissors, ArrowLeft, Delete, Loader2, ScanFace, LogIn } from "lucide-react"
+import { Scissors, ArrowLeft, Delete, Loader2, ScanFace, LogIn, LogOut } from "lucide-react"
 
 type Step = "branch" | "barber" | "pin"
 type LoginBlock = null | "needs_face_registration" | "needs_clock_in"
@@ -205,9 +205,17 @@ export default function BarberLoginPage() {
             {loadingBranches ? (
               <Skeleton className="h-9 w-full" />
             ) : branches.length === 0 ? (
-              <p className="text-center text-sm text-muted-foreground">
-                No hay sucursales disponibles
-              </p>
+              <div className="flex flex-col items-center gap-3">
+                <p className="text-center text-sm text-muted-foreground">
+                  No hay sucursales disponibles
+                </p>
+                <form action="/api/clear-org" method="POST">
+                  <Button variant="outline" size="sm" type="submit" className="gap-1.5">
+                    <LogOut className="size-3.5" />
+                    Cambiar barbería
+                  </Button>
+                </form>
+              </div>
             ) : (
               <Select onValueChange={handleBranchSelect}>
                 <SelectTrigger className="w-full">
