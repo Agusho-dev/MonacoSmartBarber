@@ -2,16 +2,18 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { Sparkles, X, Clock } from 'lucide-react'
+import { Sparkles, X, Clock, PartyPopper } from 'lucide-react'
 import { useEntitlements } from './entitlements-provider'
 import { cn } from '@/lib/utils'
 
+type BannerTone = 'success' | 'info' | 'danger'
+
 type BannerState =
-  | { kind: 'trial-ending'; label: string; urgent: true; dismissable: false }
-  | { kind: 'trial-soon'; label: string; urgent: true; dismissable: false }
-  | { kind: 'trial-normal'; label: string; urgent: false; dismissable: true }
-  | { kind: 'past-due'; label: string; urgent: true; dismissable: false }
-  | { kind: 'cancelling'; label: string; urgent: false; dismissable: true }
+  | { kind: 'trial-ending'; label: string; tone: BannerTone; dismissable: false }
+  | { kind: 'trial-soon'; label: string; tone: BannerTone; dismissable: false }
+  | { kind: 'trial-normal'; label: string; tone: BannerTone; dismissable: true }
+  | { kind: 'past-due'; label: string; tone: BannerTone; dismissable: false }
+  | { kind: 'cancelling'; label: string; tone: BannerTone; dismissable: true }
   | null
 
 /**
@@ -33,15 +35,15 @@ export function TrialBanner() {
       if (ent.status === 'trialing' && ent.trialEndsAt) {
         const ends = new Date(ent.trialEndsAt).getTime()
         const diffDays = Math.ceil((ends - now) / (1000 * 60 * 60 * 24))
-        if (diffDays <= 0) return { kind: 'trial-ending', label: 'Tu trial termina hoy. Cargá tu medio de pago para no perder acceso.', urgent: true, dismissable: false }
-        if (diffDays <= 3) return { kind: 'trial-soon', label: `Te quedan ${diffDays} días de trial. Cargá tu medio de pago para continuar.`, urgent: true, dismissable: false }
-        return { kind: 'trial-normal', label: `Estás probando el plan ${ent.planName}. Quedan ${diffDays} días gratis.`, urgent: false, dismissable: true }
+        if (diffDays <= 0) return { kind: 'trial-ending', label: '¡Bienvenido a StudiOS! Tu trial termina hoy — cargá tu medio de pago para seguir disfrutando.', tone: 'success', dismissable: false }
+        if (diffDays <= 3) return { kind: 'trial-soon', label: `¡Bienvenido a StudiOS! Te quedan ${diffDays} días de trial gratis.`, tone: 'success', dismissable: false }
+        return { kind: 'trial-normal', label: `¡Bienvenido a StudiOS! Estás probando el plan ${ent.planName} — quedan ${diffDays} días gratis.`, tone: 'success', dismissable: true }
       }
       if (ent.status === 'past_due') {
-        return { kind: 'past-due', label: 'Hay un pago pendiente. Actualizá tu método de pago antes de que perdamos acceso.', urgent: true, dismissable: false }
+        return { kind: 'past-due', label: 'Hay un pago pendiente. Actualizá tu método de pago antes de que perdamos acceso.', tone: 'danger', dismissable: false }
       }
       if (ent.status === 'cancelled' && ent.cancelAtPeriodEnd) {
-        return { kind: 'cancelling', label: 'Tu suscripción se cancela al final del período actual. Podés reactivarla cuando quieras.', urgent: false, dismissable: true }
+        return { kind: 'cancelling', label: 'Tu suscripción se cancela al final del período actual. Podés reactivarla cuando quieras.', tone: 'info', dismissable: true }
       }
       return null
     }
@@ -53,27 +55,35 @@ export function TrialBanner() {
 
   if (!state || (dismissed && state.dismissable)) return null
 
+  const toneClasses =
+    state.tone === 'danger'
+      ? 'bg-destructive text-destructive-foreground'
+      : state.tone === 'success'
+        ? 'bg-emerald-600 text-white'
+        : 'bg-primary/10 text-foreground'
+
+  const Icon =
+    state.tone === 'danger' ? Clock : state.tone === 'success' ? PartyPopper : Sparkles
+
   return (
     <div
       className={cn(
         'sticky top-0 z-40 flex items-center justify-center gap-3 px-4 py-2 text-sm',
-        state.urgent
-          ? 'bg-destructive text-destructive-foreground'
-          : 'bg-primary/10 text-foreground',
+        toneClasses,
       )}
     >
-      {state.urgent ? <Clock className="size-4 shrink-0" /> : <Sparkles className="size-4 shrink-0" />}
-      <span className="flex-1 text-center">{state.label}</span>
+      <Icon className="size-4 shrink-0" />
+      <span className="flex-1 text-center font-medium">{state.label}</span>
       <Link
         href="/dashboard/billing"
-        className="rounded-md bg-background/10 px-3 py-1 font-medium hover:bg-background/20"
+        className="rounded-md bg-white/15 px-3 py-1 font-medium hover:bg-white/25"
       >
         Gestionar plan
       </Link>
       {state.dismissable && (
         <button
           onClick={() => setDismissed(true)}
-          className="rounded-md p-1 hover:bg-background/10"
+          className="rounded-md p-1 hover:bg-white/15"
           aria-label="Cerrar banner"
         >
           <X className="size-4" />
