@@ -791,11 +791,10 @@ export function QueuePanel({
                       </Badge>
                     )
                   }
-                  // Usamos total_visits del cliente directamente (desnormalizado en clients)
-                  // o lo tomamos de la vista loyalty si está disponible. Ya no existe visits(count).
-                  const totalVisits = entry.client?.total_visits
-                    ?? entry.client?.loyalty?.[0]?.total_visits
-                    ?? 0
+                  // total_visits viene de la tabla client_loyalty_state (mantenida por
+                  // trigger). Reemplaza a visits(count) que era un correlated subquery
+                  // por cliente y representaba ~33% del tiempo de DB (mig 124).
+                  const totalVisits = entry.client?.loyalty?.[0]?.total_visits ?? 0
                   if (totalVisits === 0) {
                     return (
                       <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-emerald-500/15 text-emerald-500 border-emerald-500/30">
