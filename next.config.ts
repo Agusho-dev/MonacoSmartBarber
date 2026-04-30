@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  basePath: '/app',
+
   /* config options here */
   reactCompiler: true,
   // Tree-shake imports de paquetes grandes que se usan parcialmente.
