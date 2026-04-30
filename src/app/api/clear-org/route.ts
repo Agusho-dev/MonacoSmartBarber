@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 export async function POST(request: NextRequest) {
   const cookieStore = await cookies()
   cookieStore.delete('active_organization')
+  cookieStore.delete('public_organization')
 
   const url = new URL('/', request.url)
   return NextResponse.redirect(url, 303)
