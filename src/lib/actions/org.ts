@@ -86,27 +86,28 @@ import { cookies } from 'next/headers'
 
 /**
  * Retorna las sucursales activas filtradas por la organización activa.
- * Si hay cookie active_organization, filtra por esa org.
- * Si se pasa orgId explícito, usa ese.
+ * Prioridad de resolución de org: arg explícito > public_organization > active_organization.
  * Usado por páginas públicas (kiosk, login barbero, TV).
+ *
+ * Si no hay org resuelta, devuelve [] en vez de listar branches de todas las orgs
+ * (evita data leak entre tenants).
  */
 export async function getPublicBranches(orgId?: string) {
   const cookieStore = await cookies()
-  const activeOrgId = orgId || cookieStore.get('active_organization')?.value
+  const activeOrgId = orgId
+    ?? cookieStore.get('public_organization')?.value
+    ?? cookieStore.get('active_organization')?.value
+
+  if (!activeOrgId) return []
 
   const supabase = createAdminClient()
-
-  let query = supabase
+  const { data } = await supabase
     .from('branches')
     .select('*, organizations(name, logo_url)')
     .eq('is_active', true)
+    .eq('organization_id', activeOrgId)
     .order('name')
 
-  if (activeOrgId) {
-    query = query.eq('organization_id', activeOrgId)
-  }
-
-  const { data } = await query
   return data ?? []
 }
 
