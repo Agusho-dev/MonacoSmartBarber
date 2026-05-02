@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import { revalidatePath } from 'next/cache'
 import { getMonthBoundsStr, getLocalNow } from '@/lib/time-utils'
 import { getActiveTimezone } from '@/lib/i18n'
@@ -153,12 +154,26 @@ export async function fetchFinancialData(
   const branchFilter = <T extends { eq: (col: string, val: string) => T; in: (col: string, vals: string[]) => T }>(q: T, col = 'branch_id') =>
     branchId ? q.eq(col, branchId) : q.in(col, orgBranchIds)
 
-  let vq = supabase
-    .from('visits')
-    .select('amount, commission_amount, completed_at, branch_id, service_id, queue_entry_id, barber_id')
-    .gte('completed_at', startDateStr)
-    .lte('completed_at', endDateStr)
-  vq = branchFilter(vq)
+  // visits puede superar el cap default de PostgREST (1000 filas) en rangos largos
+  // o sucursales con alto volumen → paginar con range() para drenar todas las filas.
+  const visitsPromise = fetchAll<{
+    amount: number
+    commission_amount: number
+    completed_at: string
+    branch_id: string
+    service_id: string | null
+    queue_entry_id: string | null
+    barber_id: string | null
+  }>((from, to) => {
+    let q = supabase
+      .from('visits')
+      .select('amount, commission_amount, completed_at, branch_id, service_id, queue_entry_id, barber_id')
+      .gte('completed_at', startDateStr)
+      .lte('completed_at', endDateStr)
+      .order('completed_at')
+    q = branchFilter(q)
+    return q.range(from, to)
+  })
 
   let fq = supabase
     .from('fixed_expenses')
@@ -201,12 +216,12 @@ export async function fetchFinancialData(
   sq = branchFilter(sq)
 
   const [
-    { data: visits },
+    visits,
     { data: allFixedExpenses },
     { data: fixedExpensePayments },
     { data: variableExpenses },
     { data: salaryReports },
-  ] = await Promise.all([vq, fq, fpq, eq, sq])
+  ] = await Promise.all([visitsPromise, fq, fpq, eq, sq])
 
   // Gastos fijos REALES pagados por mes (desde fixed_expense_periods.status='paid').
   // Agrupado por YYYY-MM del paid_at (fecha local ya viene en esa forma).

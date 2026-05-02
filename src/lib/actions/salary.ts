@@ -1,6 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/server'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import { revalidatePath } from 'next/cache'
 import type { SalaryScheme } from '@/lib/types/database'
 import { validateBranchAccess, getCurrentOrgId } from './org'
@@ -343,13 +344,23 @@ export async function generateCommissionReportsInRange(
   const { start: rangeStart } = getDayBounds(startDate, tz)
   const { end: rangeEnd } = getDayBounds(endDate, tz)
 
-  const { data: visits, error: visitsError } = await supabase
-    .from('visits')
-    .select('commission_amount, completed_at')
-    .eq('barber_id', staffId)
-    .eq('branch_id', branchId)
-    .gte('completed_at', rangeStart)
-    .lt('completed_at', rangeEnd)
+  // Paginar: en rangos largos (ej. anuales) un solo barbero puede superar
+  // las 1000 visitas y truncar el cálculo de comisiones.
+  let visitsError: unknown = null
+  const visits = await fetchAll<{ commission_amount: number; completed_at: string }>((from, to) => {
+    return supabase
+      .from('visits')
+      .select('commission_amount, completed_at')
+      .eq('barber_id', staffId)
+      .eq('branch_id', branchId)
+      .gte('completed_at', rangeStart)
+      .lt('completed_at', rangeEnd)
+      .order('completed_at')
+      .range(from, to)
+  }).catch((err) => {
+    visitsError = err
+    return [] as { commission_amount: number; completed_at: string }[]
+  })
 
   if (visitsError) {
     console.error('Error al obtener visitas para comisión:', visitsError)
@@ -359,7 +370,7 @@ export async function generateCommissionReportsInRange(
   // Agrupar comisiones por fecha local (TZ de la org)
   const dateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz })
   const commissionsByDate = new Map<string, number>()
-  for (const v of visits ?? []) {
+  for (const v of visits) {
     if (!v.completed_at) continue
     const amount = Number(v.commission_amount ?? 0)
     if (amount <= 0) continue

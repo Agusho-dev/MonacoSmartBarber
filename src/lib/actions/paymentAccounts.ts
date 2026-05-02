@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import { revalidatePath } from 'next/cache'
 import { getLocalDateStr, getLocalDayBounds } from '@/lib/time-utils'
 import { validateBranchAccess } from './org'
@@ -236,40 +237,69 @@ export async function getAllAccountBalanceTotals(branchId?: string | null) {
     accountsQuery = accountsQuery.in('branch_id', orgBranchIds)
   }
 
-  // Preparar query de cash en paralelo con la de cuentas
-  let cashVisitsQuery = supabase
-    .from('visits')
-    .select('amount')
-    .eq('payment_method', 'cash')
-  if (branchId) cashVisitsQuery = cashVisitsQuery.eq('branch_id', branchId)
+  // Cash balance histórico: estas queries acumulan filas indefinidamente (no
+  // hay filtro temporal). Sin paginación, una vez que la org supera 1000
+  // visitas en efectivo el saldo de caja queda truncado y mal calculado para
+  // siempre. Paginar con range() drena todas las filas vía PostgREST.
+  const cashVisitsPromise = fetchAll<{ amount: number }>((from, to) => {
+    let q = supabase
+      .from('visits')
+      .select('amount')
+      .eq('payment_method', 'cash')
+      .order('completed_at')
+      .range(from, to)
+    if (branchId) q = q.eq('branch_id', branchId)
+    return q
+  })
 
-  let cashExpensesQuery = supabase
-    .from('expense_tickets')
-    .select('amount')
-    .is('payment_account_id', null)
-  if (branchId) cashExpensesQuery = cashExpensesQuery.eq('branch_id', branchId)
+  const cashExpensesPromise = fetchAll<{ amount: number }>((from, to) => {
+    let q = supabase
+      .from('expense_tickets')
+      .select('amount')
+      .is('payment_account_id', null)
+      .order('expense_date')
+      .range(from, to)
+    if (branchId) q = q.eq('branch_id', branchId)
+    return q
+  })
 
   // Fetch cuentas + cash en paralelo
-  const [{ data: accounts }, { data: cashVisits }, { data: cashExpenses }] = await Promise.all([
+  const [{ data: accounts }, cashVisits, cashExpenses] = await Promise.all([
     accountsQuery,
-    cashVisitsQuery,
-    cashExpensesQuery,
+    cashVisitsPromise,
+    cashExpensesPromise,
   ])
 
   const accountIds = accounts?.map(a => a.id) || []
 
-  // Transfers + expenses de cuentas en paralelo
-  const [{ data: allTransfers }, { data: allExpenses }] = await Promise.all([
+  // Transfers + expenses de cuentas en paralelo (también sin filtro temporal:
+  // mismo riesgo de truncado a 1000 cuando crece el historial).
+  type AccountAmountRow = { payment_account_id: string; amount: number }
+  const [allTransfers, allExpenses] = await Promise.all([
     accountIds.length > 0
-      ? supabase.from('transfer_logs').select('payment_account_id, amount').in('payment_account_id', accountIds)
-      : Promise.resolve({ data: [] as { payment_account_id: string; amount: number }[] }),
+      ? fetchAll<AccountAmountRow>((from, to) =>
+          supabase
+            .from('transfer_logs')
+            .select('payment_account_id, amount')
+            .in('payment_account_id', accountIds)
+            .order('created_at')
+            .range(from, to)
+        )
+      : Promise.resolve([] as AccountAmountRow[]),
     accountIds.length > 0
-      ? supabase.from('expense_tickets').select('payment_account_id, amount').in('payment_account_id', accountIds)
-      : Promise.resolve({ data: [] as { payment_account_id: string; amount: number }[] }),
+      ? fetchAll<AccountAmountRow>((from, to) =>
+          supabase
+            .from('expense_tickets')
+            .select('payment_account_id, amount')
+            .in('payment_account_id', accountIds)
+            .order('expense_date')
+            .range(from, to)
+        )
+      : Promise.resolve([] as AccountAmountRow[]),
   ])
 
-  const cashIncome = (cashVisits ?? []).reduce((s, v) => s + Number(v.amount), 0)
-  const cashTotalExpenses = (cashExpenses ?? []).reduce((s, e) => s + Number(e.amount), 0)
+  const cashIncome = cashVisits.reduce((s, v) => s + Number(v.amount), 0)
+  const cashTotalExpenses = cashExpenses.reduce((s, e) => s + Number(e.amount), 0)
 
   const balances = (accounts || []).map(acc => {
     const income = (allTransfers ?? [])
