@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Power, ChevronDown, ChevronUp, Percent, Trash2, Sparkles, Package, ShoppingCart } from 'lucide-react'
+import { Plus, Pencil, Power, ChevronDown, ChevronUp, Percent, Trash2, Sparkles, Package, ShoppingCart, Store, User } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { formatCurrency } from '@/lib/format'
@@ -109,8 +109,13 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
   // ── Sell state ──
   const [sellDialogOpen, setSellDialogOpen] = useState(false)
   const [sellingProduct, setSellingProduct] = useState<Product | null>(null)
-  const [sellForm, setSellForm] = useState<{ barber_id: string; quantity: string; payment_method: 'cash' | 'transfer' | 'card' }>({
-    barber_id: '', quantity: '1', payment_method: 'cash',
+  const [sellForm, setSellForm] = useState<{
+    seller_type: 'barber' | 'house'
+    barber_id: string
+    quantity: string
+    payment_method: 'cash' | 'transfer' | 'card'
+  }>({
+    seller_type: 'barber', barber_id: '', quantity: '1', payment_method: 'cash',
   })
   const [selling, setSelling] = useState(false)
 
@@ -272,7 +277,7 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
 
   function openSell(product: Product) {
     setSellingProduct(product)
-    setSellForm({ barber_id: '', quantity: '1', payment_method: 'cash' })
+    setSellForm({ seller_type: 'barber', barber_id: '', quantity: '1', payment_method: 'cash' })
     setSellDialogOpen(true)
   }
 
@@ -280,13 +285,19 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
     ? barbers.filter(b => !sellingProduct.branch_id || b.branch_id === sellingProduct.branch_id)
     : []
 
+  const isHouseSale = sellForm.seller_type === 'house'
+  const canSubmitSell = !!sellingProduct
+    && Number(sellForm.quantity) >= 1
+    && (isHouseSale || !!sellForm.barber_id)
+
   async function handleSell() {
-    if (!sellingProduct || !sellForm.barber_id) return
+    if (!sellingProduct) return
+    if (!isHouseSale && !sellForm.barber_id) return
     setSelling(true)
     const qty = Number(sellForm.quantity) || 1
     const result = await sellProductFromDashboard({
       product_id: sellingProduct.id,
-      barber_id: sellForm.barber_id,
+      barber_id: isHouseSale ? null : sellForm.barber_id,
       branch_id: sellingProduct.branch_id || branches[0]?.id || '',
       quantity: qty,
       payment_method: sellForm.payment_method,
@@ -586,7 +597,13 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
                       <TableCell className="whitespace-nowrap">
                         {format(new Date(s.sold_at), "d 'de' MMMM, HH:mm", { locale: es })}
                       </TableCell>
-                      <TableCell className="font-medium">{s.barber?.full_name}</TableCell>
+                      <TableCell className="font-medium">
+                        {s.barber?.full_name ?? (
+                          <span className="inline-flex items-center gap-1 text-muted-foreground">
+                            <Store className="h-3.5 w-3.5" /> Barbería
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell>{s.product?.name}</TableCell>
                       <TableCell className="text-center">{s.quantity}</TableCell>
                       <TableCell>
@@ -616,7 +633,9 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <p className="font-medium truncate">{s.product?.name}</p>
-                      <p className="text-xs text-muted-foreground">{s.barber?.full_name}</p>
+                      <p className="text-xs text-muted-foreground inline-flex items-center gap-1">
+                        {s.barber?.full_name ?? (<><Store className="h-3 w-3" /> Barbería</>)}
+                      </p>
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="font-semibold text-emerald-600 dark:text-emerald-400">{formatCurrency(s.unit_price * s.quantity)}</p>
@@ -844,14 +863,47 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-2">
-              <Label>Barbero *</Label>
-              <Select value={sellForm.barber_id} onValueChange={(v) => setSellForm({ ...sellForm, barber_id: v })}>
-                <SelectTrigger><SelectValue placeholder="Seleccionar barbero" /></SelectTrigger>
-                <SelectContent>
-                  {sellableBarbers.map(b => (<SelectItem key={b.id} value={b.id}>{b.full_name}</SelectItem>))}
-                </SelectContent>
-              </Select>
+              <Label>¿Quién hace la venta?</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSellForm({ ...sellForm, seller_type: 'barber' })}
+                  className={`flex flex-col items-center gap-1 rounded-md border p-3 text-xs transition-colors ${
+                    sellForm.seller_type === 'barber'
+                      ? 'border-primary bg-primary/10 text-foreground'
+                      : 'border-border text-muted-foreground hover:bg-muted/40'
+                  }`}
+                >
+                  <User className="h-4 w-4" />
+                  <span className="font-medium">Barbero</span>
+                  <span className="text-[10px] opacity-70">Comisión al barbero</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSellForm({ ...sellForm, seller_type: 'house', barber_id: '' })}
+                  className={`flex flex-col items-center gap-1 rounded-md border p-3 text-xs transition-colors ${
+                    sellForm.seller_type === 'house'
+                      ? 'border-primary bg-primary/10 text-foreground'
+                      : 'border-border text-muted-foreground hover:bg-muted/40'
+                  }`}
+                >
+                  <Store className="h-4 w-4" />
+                  <span className="font-medium">Barbería</span>
+                  <span className="text-[10px] opacity-70">Ingreso para la casa</span>
+                </button>
+              </div>
             </div>
+            {!isHouseSale && (
+              <div className="grid gap-2">
+                <Label>Barbero *</Label>
+                <Select value={sellForm.barber_id} onValueChange={(v) => setSellForm({ ...sellForm, barber_id: v })}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar barbero" /></SelectTrigger>
+                  <SelectContent>
+                    {sellableBarbers.map(b => (<SelectItem key={b.id} value={b.id}>{b.full_name}</SelectItem>))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Cantidad</Label>
@@ -875,16 +927,23 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
                   <span className="text-muted-foreground">Total venta</span>
                   <span className="font-semibold">{formatCurrency(sellingProduct.sale_price * (Number(sellForm.quantity) || 1))}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Comisión barbero</span>
-                  <span className="text-blue-500">{formatCurrency(sellingProduct.barber_commission * (Number(sellForm.quantity) || 1))}</span>
-                </div>
+                {isHouseSale ? (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Ingreso barbería</span>
+                    <span className="text-emerald-500">{formatCurrency(sellingProduct.sale_price * (Number(sellForm.quantity) || 1))}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Comisión barbero</span>
+                    <span className="text-blue-500">{formatCurrency(sellingProduct.barber_commission * (Number(sellForm.quantity) || 1))}</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSellDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSell} disabled={selling || !sellForm.barber_id || Number(sellForm.quantity) < 1}>
+            <Button onClick={handleSell} disabled={selling || !canSubmitSell}>
               {selling ? 'Registrando...' : 'Confirmar venta'}
             </Button>
           </DialogFooter>

@@ -7,6 +7,7 @@ export function buildBarberAvgMinutes(
 
   for (const v of visits) {
     if (!v.started_at || !v.completed_at) continue
+    if (!v.barber_id) continue
     const mins =
       (new Date(v.completed_at).getTime() - new Date(v.started_at).getTime()) /
       60_000

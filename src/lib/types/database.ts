@@ -258,7 +258,8 @@ export interface ProductSale {
   id: string
   visit_id: string | null
   product_id: string
-  barber_id: string
+  /** NULL = venta de la barbería (sin comisión a barbero). */
+  barber_id: string | null
   branch_id: string
   quantity: number
   unit_price: number
@@ -266,7 +267,7 @@ export interface ProductSale {
   payment_method: 'cash' | 'transfer' | 'card'
   sold_at: string
   product?: Product
-  barber?: Staff
+  barber?: Staff | null
 }
 
 export interface QueueEntry {
@@ -302,7 +303,8 @@ export interface Visit {
   id: string
   branch_id: string
   client_id: string
-  barber_id: string
+  /** NULL = visita fantasma de venta de la barbería (sin barbero). */
+  barber_id: string | null
   service_id: string | null
   extra_services: string[] | null
   queue_entry_id: string | null
