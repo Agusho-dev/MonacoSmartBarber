@@ -1135,7 +1135,9 @@ export function CheckinWalkIn() {
       <GlassRing key={barber.id} halo={false}>
         <button
           onClick={() => onSelect(barber.id)}
-          disabled={submitting}
+          disabled={submitting || isOnBreak}
+          aria-disabled={isOnBreak || undefined}
+          aria-label={isOnBreak ? `${barber.full_name} (en descanso, no disponible)` : barber.full_name}
           className={cn(
             'group relative w-full overflow-hidden rounded-2xl border p-4 md:p-5 text-left transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2',
             isLightBg
@@ -1236,9 +1238,18 @@ export function CheckinWalkIn() {
   }
 
   const renderBarberList = (onSelect: (barberId: string) => void, showExpand = true) => {
+    // Barberos disponibles para SELECCIONAR: fichados, no bloqueados por fin de
+    // turno y NO en descanso. Los en descanso se muestran en su propia sección
+    // (deshabilitados) para que el cliente entienda por qué su barbero no aparece.
     const availableBarbers = barbers.filter(b =>
       !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now, shiftEndMargin) &&
-      !notClockedInBarbers.has(b.id)
+      !notClockedInBarbers.has(b.id) &&
+      !barbersOnBreak.has(b.id)
+    )
+    const onBreakBarbers = barbers.filter(b =>
+      !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now, shiftEndMargin) &&
+      !notClockedInBarbers.has(b.id) &&
+      barbersOnBreak.has(b.id)
     )
     const notArrivedBarbers = barbers.filter(b =>
       !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now, shiftEndMargin) &&
@@ -1376,6 +1387,23 @@ export function CheckinWalkIn() {
                   onSelect(id);
                 }, showExpand))}
               </div>
+
+              {onBreakBarbers.length > 0 && (
+                <>
+                  <div className={cn('w-full h-px my-6', isLightBg ? 'bg-zinc-200' : 'bg-white/8')} />
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className={cn('h-px flex-1', isLightBg ? 'bg-zinc-200' : 'bg-white/10')} />
+                    <h4 className={cn('text-xs font-bold uppercase tracking-widest shrink-0', isLightBg ? 'text-zinc-400' : 'text-white/40')}>En descanso</h4>
+                    <div className={cn('h-px flex-1', isLightBg ? 'bg-zinc-200' : 'bg-white/10')} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 md:gap-4 pb-4">
+                    {onBreakBarbers.map((barber) => renderBarberCard(barber, () => {
+                      // No-op: la card está deshabilitada por isOnBreak.
+                      // El handler se mantiene por la firma del prop.
+                    }, showExpand))}
+                  </div>
+                </>
+              )}
 
               {notArrivedBarbers.length > 0 && (
                 <>
