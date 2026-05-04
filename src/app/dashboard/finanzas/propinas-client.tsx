@@ -116,8 +116,15 @@ export function PropinasClient({
   orgName,
 }: PropinasClientProps) {
   const router = useRouter()
-  const { selectedBranchId } = useBranchStore()
+  const { selectedBranchId, setSelectedBranchId } = useBranchStore()
   const [isPending, startTransition] = useTransition()
+
+  // Inicializa sucursal en el store si no está seteada
+  useEffect(() => {
+    if (selectedBranchId === undefined && branches.length > 0) {
+      // no-op: dejamos null = "todas las sucursales"
+    }
+  }, [selectedBranchId, branches])
 
   const [summary, setSummary] = useState<TipsOrgSummary>(initialSummary)
   const [trend] = useState<TipsMonthlyPoint[]>(initialTrend)
@@ -337,6 +344,30 @@ export function PropinasClient({
 
   return (
     <div className="space-y-6">
+      {/* ── Filtro de sucursal ──────────────────────────────────────────── */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Building2 className="size-4 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Mostrando propinas de:</span>
+        </div>
+        <Select
+          value={selectedBranchId ?? '__all__'}
+          onValueChange={(v) => setSelectedBranchId(v === '__all__' ? null : v)}
+        >
+          <SelectTrigger className="w-56 h-9 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">Todas las sucursales</SelectItem>
+            {branches.map((b) => (
+              <SelectItem key={b.id} value={b.id}>
+                {b.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       {/* ── Banner principal: estado + acciones ──────────────────────────── */}
       <div className="relative overflow-hidden rounded-2xl border border-amber-500/20 bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-transparent p-5 lg:p-6">
         <div className="absolute -right-8 -top-8 size-40 rounded-full bg-amber-500/10 blur-3xl pointer-events-none" />

@@ -149,6 +149,28 @@ export function getLoadColor(totalLoad: number): string {
 
 export type DynamicQueueEntry = QueueEntry & { _is_dynamically_assigned?: boolean }
 
+/**
+ * Devuelve los IDs de barberos con un descanso activo
+ * (ghost row con `is_break=true` y `status='in_progress'`).
+ *
+ * Esta es la única fuente de verdad de "en descanso" en el cliente: el campo
+ * `staff.status` no se mantiene actualizado (su enum es de un solo valor
+ * `available`). El descanso real vive en `queue_entries`.
+ *
+ * Importante: un ghost en `waiting` NO cuenta — significa "descanso aprobado
+ * pero encolado N cortes adelante", durante el cual el barbero todavía recibe
+ * clientes (con `cuts_before_break > 0`).
+ */
+export function getBarbersOnBreakIds(entries: QueueEntry[]): Set<string> {
+  const onBreak = new Set<string>()
+  for (const e of entries) {
+    if (e.is_break && e.status === 'in_progress' && e.barber_id) {
+      onBreak.add(e.barber_id)
+    }
+  }
+  return onBreak
+}
+
 export function isBarberBlockedByShiftEnd(
   barber: Staff,
   _entries: QueueEntry[],
@@ -212,6 +234,7 @@ export function assignDynamicBarbers(
 
   const barberLoad = new Map<string, number>()
   const barberAttending = new Set<string>()
+  const barbersOnBreak = new Set<string>()
   const unassigned: QueueEntry[] = []
 
   for (const entry of entries) {
@@ -219,12 +242,20 @@ export function assignDynamicBarbers(
       unassigned.push(entry)
     } else {
       result.push(entry)
-      if (entry.barber_id && !entry.is_break) {
+      if (entry.barber_id) {
+        // Los breaks (waiting o in_progress) suman a la carga del barbero
+        // para que el round-robin no lo prefiera por "tener load=0".
+        // Esto cubre tanto el caso "descanso activo" (también excluido de
+        // eligibleBarbers más abajo) como el "descanso encolado en N cortes"
+        // donde el barbero aún recibe clientes pero con prioridad menor.
         if (entry.status === 'waiting' || entry.status === 'in_progress') {
           barberLoad.set(entry.barber_id, (barberLoad.get(entry.barber_id) || 0) + 1)
         }
         if (entry.status === 'in_progress') {
           barberAttending.add(entry.barber_id)
+          if (entry.is_break) {
+            barbersOnBreak.add(entry.barber_id)
+          }
         }
       }
     }
@@ -242,7 +273,8 @@ export function assignDynamicBarbers(
     const eligibleBarbers = barbers.filter(b =>
       !b.hidden_from_checkin &&
       !isBarberBlockedByShiftEnd(b, result, schedules, currentTime, marginMinutes) &&
-      !notClockedInIds.has(b.id)
+      !notClockedInIds.has(b.id) &&
+      !barbersOnBreak.has(b.id)
     )
 
     const sortByLoad = (list: Staff[]) => {
