@@ -239,8 +239,17 @@ export async function getTipsMonthlyTrend(branchId?: string | null): Promise<Tip
   return Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month))
 }
 
+export interface TipReportWithAccount extends TipReport {
+  account_id: string | null
+  account_name: string | null
+  account_alias: string | null
+  account_is_active: boolean | null
+}
+
 /**
  * Detalle día-a-día de propinas pendientes de un barbero (drill-down).
+ * Cada item incluye la cuenta de cobro a la que entró el dinero (visits.payment_account_id),
+ * incluso si la cuenta está dada de baja — para que el dueño sepa de dónde sacar para pagar.
  */
 export async function getBarberTipsDetail(staffId: string, branchId: string) {
   const orgId = await validateBranchAccess(branchId)
@@ -254,9 +263,9 @@ export async function getBarberTipsDetail(staffId: string, branchId: string) {
     .maybeSingle()
   if (!staffRow || staffRow.organization_id !== orgId) return { error: 'No autorizado' }
 
-  const { data, error } = await supabase
+  const { data: reports, error } = await supabase
     .from('salary_reports')
-    .select('id, amount, notes, report_date, status, tip_payment_method, source_visit_id, created_at')
+    .select('id, staff_id, branch_id, amount, notes, report_date, status, batch_id, tip_payment_method, source_visit_id, created_at')
     .eq('type', 'tip')
     .eq('staff_id', staffId)
     .eq('branch_id', branchId)
@@ -267,7 +276,39 @@ export async function getBarberTipsDetail(staffId: string, branchId: string) {
     console.error('[getBarberTipsDetail]', error.message)
     return { error: 'Error al traer las propinas del barbero.' }
   }
-  return { data: (data ?? []) as TipReport[] }
+
+  if (!reports || reports.length === 0) return { data: [] as TipReportWithAccount[] }
+
+  // Resolver payment_account_id desde la visita asociada (puede estar inactiva)
+  const visitIds = reports.map((r) => r.source_visit_id).filter(Boolean) as string[]
+  const accountByVisit = new Map<string, { id: string; name: string; alias: string | null; is_active: boolean }>()
+
+  if (visitIds.length > 0) {
+    const { data: visits } = await supabase
+      .from('visits')
+      .select('id, payment_account_id, account:payment_accounts(id, name, alias_or_cbu, is_active)')
+      .in('id', visitIds)
+
+    for (const v of (visits ?? [])) {
+      const acc = v.account as unknown as { id: string; name: string; alias_or_cbu: string | null; is_active: boolean } | null
+      if (acc) {
+        accountByVisit.set(v.id, { id: acc.id, name: acc.name, alias: acc.alias_or_cbu, is_active: acc.is_active })
+      }
+    }
+  }
+
+  const enriched: TipReportWithAccount[] = reports.map((r) => {
+    const acc = r.source_visit_id ? accountByVisit.get(r.source_visit_id) : null
+    return {
+      ...(r as TipReport),
+      account_id: acc?.id ?? null,
+      account_name: acc?.name ?? null,
+      account_alias: acc?.alias ?? null,
+      account_is_active: acc?.is_active ?? null,
+    }
+  })
+
+  return { data: enriched }
 }
 
 // ─── Mutaciones ───────────────────────────────────────────────────────────────

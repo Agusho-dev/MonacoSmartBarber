@@ -922,6 +922,10 @@ interface ExpandedDetailItem {
   status: 'pending' | 'paid'
   tip_payment_method: 'cash' | 'card' | 'transfer' | null
   notes: string | null
+  account_id: string | null
+  account_name: string | null
+  account_alias: string | null
+  account_is_active: boolean | null
 }
 
 function ExpandedBarberDetail({ bucket }: { bucket: BarberTipBucket }) {
@@ -934,7 +938,7 @@ function ExpandedBarberDetail({ bucket }: { bucket: BarberTipBucket }) {
     let mounted = true
     getBarberTipsDetail(bucket.staff_id, bucket.branch_id).then((r) => {
       if (!mounted) return
-      const items = 'data' in r && r.data ? r.data : []
+      const items = 'data' in r && r.data ? (r.data as ExpandedDetailItem[]) : []
       setState({ loading: false, items })
     })
     return () => { mounted = false }
@@ -962,10 +966,11 @@ function ExpandedBarberDetail({ bucket }: { bucket: BarberTipBucket }) {
   return (
     <div className="bg-muted/20 border-t border-border">
       <div className="grid grid-cols-12 px-4 py-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium border-b border-border">
-        <span className="col-span-3">Fecha</span>
-        <span className="col-span-3">Método</span>
-        <span className="col-span-3">Estado</span>
-        <span className="col-span-3 text-right">Monto</span>
+        <span className="col-span-2">Fecha</span>
+        <span className="col-span-2">Método</span>
+        <span className="col-span-4">Cuenta donde entró</span>
+        <span className="col-span-2">Estado</span>
+        <span className="col-span-2 text-right">Monto</span>
       </div>
       <div className="max-h-72 overflow-y-auto">
         {items.map((item) => (
@@ -976,14 +981,43 @@ function ExpandedBarberDetail({ bucket }: { bucket: BarberTipBucket }) {
               item.status === 'paid' && 'opacity-60'
             )}
           >
-            <span className="col-span-3 text-muted-foreground">
+            <span className="col-span-2 text-muted-foreground">
               {formatLongDate(item.report_date)}
             </span>
-            <span className="col-span-3 flex items-center gap-1.5">
+            <span className="col-span-2 flex items-center gap-1.5">
               <MethodIcon method={item.tip_payment_method ?? 'other'} className="size-3 text-muted-foreground" />
               <span className="text-muted-foreground">{methodLabel(item.tip_payment_method ?? 'other')}</span>
             </span>
-            <span className="col-span-3">
+            <span className="col-span-4 min-w-0">
+              {item.account_name ? (
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <Wallet className={cn(
+                    'size-3 shrink-0',
+                    item.account_is_active ? 'text-cyan-500' : 'text-muted-foreground/50'
+                  )} />
+                  <span className="truncate">
+                    <span className={cn(
+                      item.account_is_active ? 'text-foreground' : 'text-muted-foreground line-through decoration-dotted'
+                    )}>
+                      {item.account_name}
+                    </span>
+                    {item.account_alias && (
+                      <span className="text-muted-foreground/70 ml-1">· {item.account_alias}</span>
+                    )}
+                  </span>
+                  {item.account_is_active === false && (
+                    <Badge variant="outline" className="bg-muted/40 text-muted-foreground border-border text-[9px] px-1.5 py-0 h-4 shrink-0">
+                      inactiva
+                    </Badge>
+                  )}
+                </span>
+              ) : item.tip_payment_method === 'cash' ? (
+                <span className="text-muted-foreground/60 italic">Sin cuenta · efectivo</span>
+              ) : (
+                <span className="text-muted-foreground/40">—</span>
+              )}
+            </span>
+            <span className="col-span-2">
               {item.status === 'pending' ? (
                 <Badge variant="outline" className="bg-amber-500/10 text-amber-500 border-amber-500/20 text-[10px]">
                   Pendiente
@@ -994,7 +1028,7 @@ function ExpandedBarberDetail({ bucket }: { bucket: BarberTipBucket }) {
                 </Badge>
               )}
             </span>
-            <span className="col-span-3 text-right font-medium tabular-nums">
+            <span className="col-span-2 text-right font-medium tabular-nums">
               {formatCurrency(item.amount)}
             </span>
           </div>
