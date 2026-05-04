@@ -14,6 +14,7 @@ import {
   approveBreak as approveBreakAction,
   rejectBreak as rejectBreakAction,
   getPendingBreakRequests,
+  startPendingBreakIfReady,
 } from '@/lib/actions/break-requests'
 import type { QueueEntry, Staff, Client, BreakConfig, StaffSchedule } from '@/lib/types/database'
 import { assignDynamicBarbers } from '@/lib/barber-utils'
@@ -439,6 +440,54 @@ export function QueuePanel({
 
   // Real waiting clients for this barber (non-break)
   const myRealWaitingEntries = myWaitingEntries.filter(e => !e.is_break)
+
+  // ── Auto-start de ghost de descanso "listo" (rescate de limbos) ──
+  // Si el barbero tiene un ghost waiting y no hay nada que lo tape (ni corte
+  // activo, ni clientes asignados con priority menor), arrancarlo automátic.
+  // Cubre el caso "supervisor aprobó descanso DESPUÉS de que el barbero
+  // terminara su último corte": antes el ghost quedaba waiting forever porque
+  // completeService paso 6 ya había pasado. La server action es idempotente y
+  // segura ante races (partial UNIQUE de mig 127 garantiza un solo ganador).
+  const myPendingGhost = useMemo(
+    () => entries.find(
+      (e) => e.barber_id === session.staff_id && e.status === 'waiting' && e.is_break
+    ),
+    [entries, session.staff_id]
+  )
+  const ghostBlockedByAssigned = useMemo(() => {
+    if (!myPendingGhost) return false
+    const ghostTs = new Date(myPendingGhost.priority_order).getTime()
+    return entries.some(
+      (e) =>
+        e.barber_id === session.staff_id &&
+        e.status === 'waiting' &&
+        !e.is_break &&
+        new Date(e.priority_order).getTime() < ghostTs
+    )
+  }, [entries, myPendingGhost, session.staff_id])
+  const autoStartingGhostRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!myPendingGhost) return
+    if (myActiveBreak) return
+    if (myActiveEntry) return
+    if (ghostBlockedByAssigned) return
+    if (autoStartingGhostRef.current === myPendingGhost.id) return
+    autoStartingGhostRef.current = myPendingGhost.id
+    startPendingBreakIfReady(session.staff_id, session.branch_id)
+      .then((res) => {
+        if ('error' in res && res.error) {
+          console.error('[auto-start break]', res.error)
+        }
+        // Liberar el ref independientemente del resultado para permitir
+        // reintentos en próximos ciclos si algo salió mal.
+        autoStartingGhostRef.current = null
+        fetchQueue()
+      })
+      .catch((err) => {
+        console.error('[auto-start break] excepción', err)
+        autoStartingGhostRef.current = null
+      })
+  }, [myPendingGhost, myActiveBreak, myActiveEntry, ghostBlockedByAssigned, session.staff_id, session.branch_id, fetchQueue])
 
   // ── Next client alert logic ──
   // Track when barber becomes idle with clients waiting

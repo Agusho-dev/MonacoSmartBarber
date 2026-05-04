@@ -7,4 +7,5 @@ export {
   completeBreakRequest,
   getPendingBreakRequests,
   getBarberActiveBreakRequest,
+  startPendingBreakIfReady,
 } from './breaks'
