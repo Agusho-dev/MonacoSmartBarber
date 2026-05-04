@@ -20,15 +20,9 @@ interface TipSelectorProps {
   serviceMethod: PaymentMethod | null
 }
 
-/** Chips con montos predefinidos. 0 = sin propina. */
-function calcQuickAmounts(base: number): number[] {
-  if (base <= 0) return [500, 1000, 2000]
-  const pct10 = Math.round(base * 0.10 / 100) * 100
-  const pct15 = Math.round(base * 0.15 / 100) * 100
-  const pct20 = Math.round(base * 0.20 / 100) * 100
-  const raw = [pct10, pct15, pct20].filter(v => v >= 100)
-  // Deduplicar + ordenar
-  return Array.from(new Set(raw)).sort((a, b) => a - b)
+/** Chips con montos redondos predefinidos. Siempre 1000 / 2000 / 3000. */
+function calcQuickAmounts(_base: number): number[] {
+  return [1000, 2000, 3000]
 }
 
 const TIP_METHOD_OPTIONS: { value: PaymentMethod; label: string; icon: LucideIcon }[] = [
