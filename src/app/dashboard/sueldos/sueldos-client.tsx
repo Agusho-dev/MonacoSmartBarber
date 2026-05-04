@@ -120,6 +120,10 @@ const TYPE_BADGE: Record<
     label: 'Comisión producto',
     className: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
   },
+  tip: {
+    label: 'Propina',
+    className: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  },
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

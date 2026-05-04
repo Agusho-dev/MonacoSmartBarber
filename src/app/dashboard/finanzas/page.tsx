@@ -4,6 +4,7 @@ import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { redirect } from 'next/navigation'
 import { fetchFinancialData } from '@/lib/actions/finances'
 import { getCommissionSummary } from '@/lib/actions/salary'
+import { getOrgTipsSummary, getTipsMonthlyTrend, getTipsCoverageRange } from '@/lib/actions/tips'
 import {
   getFixedExpensesCatalog,
   getFixedExpensePeriods,
@@ -72,6 +73,9 @@ export default async function FinanzasPage() {
     fixedExpensePeriods,
     fixedExpenseSummary,
     commissionSummary,
+    tipsSummary,
+    tipsTrend,
+    tipsRange,
     { data: branches },
     { data: accounts },
     { data: barbersRaw },
@@ -84,6 +88,9 @@ export default async function FinanzasPage() {
     getFixedExpensePeriods({ year: currentYear, month: currentMonth, status: 'all' }),
     getFixedExpensePeriodsSummary(currentYear, currentMonth),
     getCommissionSummary(),
+    getOrgTipsSummary(),
+    getTipsMonthlyTrend(),
+    getTipsCoverageRange(),
     branchIds.length > 0
       ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', branchIds).eq('is_active', true).order('name')
       : Promise.resolve({ data: [] }),
@@ -104,7 +111,7 @@ export default async function FinanzasPage() {
     branchIds.length > 0
       ? supabase.from('expense_tickets').select('*, created_by_staff:created_by(full_name), payment_account:payment_accounts(name, alias_or_cbu)').in('branch_id', branchIds).order('expense_date', { ascending: false }).limit(100)
       : Promise.resolve({ data: [] }),
-    admin.from('organizations').select('slug').eq('id', orgId).maybeSingle(),
+    admin.from('organizations').select('slug, name').eq('id', orgId).maybeSingle(),
   ])
 
   // Mergear salary_configs con barbers manualmente (evita problemas con el embedded select de PostgREST)
@@ -148,6 +155,10 @@ export default async function FinanzasPage() {
       commissionSummary={commissionSummary}
       permissions={userPermissions}
       orgSlug={orgRow?.slug ?? 'barberos'}
+      tipsSummary={tipsSummary}
+      tipsTrend={tipsTrend}
+      tipsRange={tipsRange}
+      orgName={orgRow?.name ?? 'BarberOS'}
     />
   )
 }

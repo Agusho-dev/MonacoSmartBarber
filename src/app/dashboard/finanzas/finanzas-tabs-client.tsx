@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { DollarSign, Wallet, Banknote, Receipt, Building2 } from 'lucide-react'
+import { DollarSign, Wallet, Banknote, Receipt, Building2, HandCoins } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FinanzasClient } from './finanzas-client'
 import type { CommissionSummaryData } from './finanzas-client'
@@ -10,13 +10,16 @@ import { CuentasClient } from '../cuentas/cuentas-client'
 import { SueldosClient } from '../sueldos/sueldos-client'
 import { EgresosClient } from './egresos-client'
 import { GastosFijosHubClient } from './gastos-fijos-hub-client'
+import { PropinasClient } from './propinas-client'
 import type { FixedExpense, FixedExpensePeriod } from '@/lib/types/database'
 import type { PeriodSummary } from '@/lib/actions/fixed-expenses'
+import type { TipsOrgSummary, TipsMonthlyPoint } from '@/lib/actions/tips'
 
 const TABS = [
     { id: 'resumen', label: 'Resumen', icon: DollarSign, permission: 'finances.view_summary' },
     { id: 'cuentas', label: 'Cuentas de cobro', icon: Wallet, permission: 'finances.view_accounts' },
     { id: 'sueldos', label: 'Sueldos', icon: Banknote, permission: 'salary.view' },
+    { id: 'propinas', label: 'Propinas', icon: HandCoins, permission: 'salary.view' },
     { id: 'egresos', label: 'Egresos', icon: Receipt, permission: 'finances.view_expenses' },
     { id: 'gastos-fijos', label: 'Gastos fijos', icon: Building2, permission: 'finances.view_fixed' },
 ] as const
@@ -40,6 +43,10 @@ interface FinanzasTabsClientProps {
     commissionSummary: CommissionSummaryData
     permissions: Record<string, boolean>
     orgSlug?: string
+    tipsSummary: TipsOrgSummary
+    tipsTrend: TipsMonthlyPoint[]
+    tipsRange: { first: string | null; last: string | null }
+    orgName: string
 }
 
 export function FinanzasTabsClient({
@@ -59,6 +66,10 @@ export function FinanzasTabsClient({
     commissionSummary,
     permissions,
     orgSlug,
+    tipsSummary,
+    tipsTrend,
+    tipsRange,
+    orgName,
 }: FinanzasTabsClientProps) {
     const canManageFixed = !!permissions['finances.manage_fixed']
     const searchParams = useSearchParams()
@@ -141,6 +152,16 @@ export function FinanzasTabsClient({
                         paymentAccounts={paymentAccounts}
                     />
                 </div>
+                {activeTab === 'propinas' && (
+                    <PropinasClient
+                        initialSummary={tipsSummary}
+                        initialTrend={tipsTrend}
+                        initialRange={tipsRange}
+                        branches={branches}
+                        paymentAccounts={paymentAccounts}
+                        orgName={orgName}
+                    />
+                )}
                 {activeTab === 'egresos' && (
                     <EgresosClient
                         expenseTickets={expenseTickets}

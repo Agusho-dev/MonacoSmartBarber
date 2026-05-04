@@ -8,7 +8,7 @@ import { validateBranchAccess, getCurrentOrgId } from './org'
 import { getActiveTimezone } from '@/lib/i18n'
 
 // Tipos locales para las nuevas tablas (migración 037/044)
-export type SalaryReportType = 'commission' | 'base_salary' | 'bonus' | 'advance' | 'hybrid_deficit' | 'product_commission'
+export type SalaryReportType = 'commission' | 'base_salary' | 'bonus' | 'advance' | 'hybrid_deficit' | 'product_commission' | 'tip'
 export type SalaryReportStatus = 'pending' | 'paid'
 
 export interface SalaryReport {
