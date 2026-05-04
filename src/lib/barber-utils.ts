@@ -235,6 +235,13 @@ export function assignDynamicBarbers(
   const barberLoad = new Map<string, number>()
   const barberAttending = new Set<string>()
   const barbersOnBreak = new Set<string>()
+  // Para cada barbero, la priority_order del descanso pendiente más viejo
+  // (si tiene ghost waiting). Si el ghost tiene priority menor que un cliente
+  // candidato, ese barbero NO debería recibir ese cliente — su ghost va primero.
+  const barberPendingBreakPriority = new Map<string, number>()
+  // Para cada barbero, la priority_order del cliente asignado más viejo waiting.
+  // Sirve para saber si su ghost ya está "vencido" (sin clientes asignados antes).
+  const barberOldestAssignedPriority = new Map<string, number>()
   const unassigned: QueueEntry[] = []
 
   for (const entry of entries) {
@@ -257,7 +264,32 @@ export function assignDynamicBarbers(
             barbersOnBreak.add(entry.barber_id)
           }
         }
+        if (entry.status === 'waiting') {
+          const ts = new Date(entry.priority_order).getTime()
+          if (entry.is_break) {
+            const prev = barberPendingBreakPriority.get(entry.barber_id)
+            if (prev === undefined || ts < prev) {
+              barberPendingBreakPriority.set(entry.barber_id, ts)
+            }
+          } else {
+            const prev = barberOldestAssignedPriority.get(entry.barber_id)
+            if (prev === undefined || ts < prev) {
+              barberOldestAssignedPriority.set(entry.barber_id, ts)
+            }
+          }
+        }
       }
+    }
+  }
+
+  // Barberos cuyo descanso pendiente debería arrancar antes de tomar dinámicos:
+  // tienen ghost waiting y NO tienen clientes asignados específicamente con
+  // priority menor. Si no hay nada que los "tape", el ghost es lo siguiente.
+  const barbersWithBreakReady = new Set<string>()
+  for (const [barberId, breakTs] of barberPendingBreakPriority) {
+    const oldestAssigned = barberOldestAssignedPriority.get(barberId)
+    if (oldestAssigned === undefined || oldestAssigned >= breakTs) {
+      barbersWithBreakReady.add(barberId)
     }
   }
 
@@ -274,7 +306,8 @@ export function assignDynamicBarbers(
       !b.hidden_from_checkin &&
       !isBarberBlockedByShiftEnd(b, result, schedules, currentTime, marginMinutes) &&
       !notClockedInIds.has(b.id) &&
-      !barbersOnBreak.has(b.id)
+      !barbersOnBreak.has(b.id) &&
+      !barbersWithBreakReady.has(b.id)
     )
 
     const sortByLoad = (list: Staff[]) => {

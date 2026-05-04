@@ -423,10 +423,15 @@ export function QueuePanel({
         e.status === 'waiting' &&
         e.barber_id === session.staff_id
     )
+    // Orden cronológico estricto por priority_order. NO empujamos los breaks
+    // al final: un break con cuts_before_break=0 tiene priority_order menor
+    // que los clientes que llegaron después y debe verse PRIMERO. Si dos
+    // entradas tienen el mismo priority_order, desempatamos por position.
     .sort((a, b) => {
-      if (a.is_break !== b.is_break) return a.is_break ? 1 : -1
-      if (a.is_break && b.is_break) return a.position - b.position
-      return new Date(a.priority_order).getTime() - new Date(b.priority_order).getTime()
+      const pa = new Date(a.priority_order).getTime()
+      const pb = new Date(b.priority_order).getTime()
+      if (pa !== pb) return pa - pb
+      return a.position - b.position
     })
 
   // "Fila general": ALL waiting clients
