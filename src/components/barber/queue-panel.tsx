@@ -197,6 +197,17 @@ export function QueuePanel({
     setDayStats(stats)
   }, [session.staff_id, session.branch_id])
 
+  // Refresca SOLO los inputs del sort dinámico (dailyServiceCounts y lastCompletedAt).
+  // Llamado en cada evento Realtime de queue_entries para que los paneles converjan
+  // al mismo "barbero más justo" tras completar un servicio en otro tablet. Sin esto,
+  // assignDynamicBarbers en cada tablet rankea con datos stale y un mismo dinámico
+  // puede aparecer en "Mi fila" de varios barberos.
+  const fetchAssignmentData = useCallback(async () => {
+    const data = await fetchBranchAssignmentData(session.branch_id)
+    setDailyServiceCounts(data.dailyServiceCounts ?? {})
+    setLastCompletedAt(data.lastCompletedAt ?? {})
+  }, [session.branch_id])
+
   const fetchBarbersAndSchedules = useCallback(async () => {
     const [barbersRes, schedRes, settingsRes, attendanceRes, assignmentData] = await Promise.all([
       supabase
@@ -324,6 +335,9 @@ export function QueuePanel({
         () => {
           fetchQueue()
           refreshStats()
+          // Re-fetch counts/last_completed para que el sort dinámico converja entre tablets
+          // (un completed en otro panel cambia los inputs del ranking).
+          fetchAssignmentData()
         }
       )
       // staff → solo refresca barberos + estado de visibilidad propio
@@ -370,7 +384,7 @@ export function QueuePanel({
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, session.branch_id, session.staff_id, fetchQueue, refreshStats, fetchBarbersAndSchedules, fetchBreakRequestStatus, fetchPendingBreakRequests, fetchHiddenStatus])
+  }, [supabase, session.branch_id, session.staff_id, fetchQueue, refreshStats, fetchAssignmentData, fetchBarbersAndSchedules, fetchBreakRequestStatus, fetchPendingBreakRequests, fetchHiddenStatus])
 
   // Al volver al tab o en el polling fallback, refrescamos solo la cola y las stats.
   // Los datos de barberos/schedules cambian con poca frecuencia y se refrescan
