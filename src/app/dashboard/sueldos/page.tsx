@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   title: 'Sueldos | BarberOS',
 }
 
-export interface BarberWithConfig {
+export interface StaffWithConfig {
   id: string
   full_name: string
   commission_pct: number
@@ -25,7 +25,10 @@ export default async function SueldosPage() {
   const supabase = createAdminClient()
   const scopedBranchIds = await getScopedBranchIds()
 
-  const [{ data: branches }, { data: barbersRaw }, { data: salaryConfigsRaw }, { data: paymentAccounts }] = await Promise.all([
+  // Sueldos aplica a todo el personal activo (barberos, encargados, recepción, etc.),
+  // no sólo a quienes toman cortes. El filtro por rol vivía acá y dejaba afuera roles
+  // como receptionist que también cobran sueldo.
+  const [{ data: branches }, { data: staffRaw }, { data: salaryConfigsRaw }, { data: paymentAccounts }] = await Promise.all([
     scopedBranchIds.length > 0
       ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', scopedBranchIds).eq('is_active', true).order('name')
       : Promise.resolve({ data: [] }),
@@ -35,7 +38,6 @@ export default async function SueldosPage() {
           .select('id, full_name, commission_pct, branch_id')
           .eq('organization_id', orgId)
           .in('branch_id', scopedBranchIds)
-          .or('role.eq.barber,is_also_barber.eq.true')
           .eq('is_active', true)
           .order('full_name')
       : Promise.resolve({ data: [] }),
@@ -53,9 +55,9 @@ export default async function SueldosPage() {
   ])
 
   const configsByStaffId = new Map((salaryConfigsRaw ?? []).map((c) => [c.staff_id, c]))
-  const barbers: BarberWithConfig[] = (barbersRaw ?? []).map((b) => {
-    const cfg = configsByStaffId.get(b.id)
-    return { ...b, salary_configs: cfg ? [cfg] : [] }
+  const staffMembers: StaffWithConfig[] = (staffRaw ?? []).map((s) => {
+    const cfg = configsByStaffId.get(s.id)
+    return { ...s, salary_configs: cfg ? [cfg] : [] }
   })
 
   // Filtrar cuentas a la org (solo las que pertenecen a branches de esta org)
@@ -65,7 +67,7 @@ export default async function SueldosPage() {
   return (
     <SueldosClient
       branches={branches ?? []}
-      barbers={barbers}
+      staffMembers={staffMembers}
       paymentAccounts={orgPaymentAccounts}
     />
   )

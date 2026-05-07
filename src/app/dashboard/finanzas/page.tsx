@@ -14,7 +14,7 @@ import { getLocalDateStr, getLocalNow } from '@/lib/time-utils'
 import { getActiveTimezone } from '@/lib/i18n'
 import { FinanzasTabsClient } from './finanzas-tabs-client'
 import type { Metadata } from 'next'
-import type { BarberWithConfig } from '../sueldos/page'
+import type { StaffWithConfig } from '../sueldos/page'
 
 export const metadata: Metadata = {
   title: 'Finanzas | BarberOS',
@@ -78,7 +78,7 @@ export default async function FinanzasPage() {
     tipsRange,
     { data: branches },
     { data: accounts },
-    { data: barbersRaw },
+    { data: staffRaw },
     { data: salaryConfigsRaw },
     { data: expenseTickets },
     { data: orgRow },
@@ -97,13 +97,15 @@ export default async function FinanzasPage() {
     branchIds.length > 0
       ? supabase.from('payment_accounts').select('*, branch:branches(name)').in('branch_id', branchIds).order('name')
       : Promise.resolve({ data: [] }),
+    // Sueldos aplica a todo el personal activo (barberos, encargados, recepción, etc.),
+    // no sólo a quienes toman cortes. Antes filtrábamos por role=barber y eso dejaba
+    // afuera a recepción/encargados que también cobran.
     branchIds.length > 0
       ? admin
           .from('staff')
           .select('id, full_name, commission_pct, branch_id')
           .eq('organization_id', orgId)
           .in('branch_id', branchIds)
-          .or('role.eq.barber,is_also_barber.eq.true')
           .eq('is_active', true)
           .order('full_name')
       : Promise.resolve({ data: [] }),
@@ -114,11 +116,11 @@ export default async function FinanzasPage() {
     admin.from('organizations').select('slug, name').eq('id', orgId).maybeSingle(),
   ])
 
-  // Mergear salary_configs con barbers manualmente (evita problemas con el embedded select de PostgREST)
+  // Mergear salary_configs con staff manualmente (evita problemas con el embedded select de PostgREST)
   const configsByStaffId = new Map((salaryConfigsRaw ?? []).map((c) => [c.staff_id, c]))
-  const barbers: BarberWithConfig[] = (barbersRaw ?? []).map((b) => {
-    const cfg = configsByStaffId.get(b.id)
-    return { ...b, salary_configs: cfg ? [cfg] : [] }
+  const staffMembers: StaffWithConfig[] = (staffRaw ?? []).map((s) => {
+    const cfg = configsByStaffId.get(s.id)
+    return { ...s, salary_configs: cfg ? [cfg] : [] }
   })
 
   // Cuentas simplificadas para SueldosClient (incluye is_salary_account)
@@ -142,7 +144,7 @@ export default async function FinanzasPage() {
       initialData={financialData}
       branches={branches ?? []}
       accounts={accounts ?? []}
-      barbers={barbers}
+      staffMembers={staffMembers}
       paymentAccounts={paymentAccountsForSalary}
       expenseTickets={expenseTickets ?? []}
       fixedExpenses={fixedExpensesCatalog}

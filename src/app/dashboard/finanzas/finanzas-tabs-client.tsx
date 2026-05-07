@@ -30,7 +30,7 @@ interface FinanzasTabsClientProps {
     initialData: Parameters<typeof FinanzasClient>[0]['initialData']
     branches: Parameters<typeof FinanzasClient>[0]['branches']
     accounts: Parameters<typeof CuentasClient>[0]['accounts']
-    barbers: Parameters<typeof SueldosClient>[0]['barbers']
+    staffMembers: Parameters<typeof SueldosClient>[0]['staffMembers']
     paymentAccounts: Parameters<typeof SueldosClient>[0]['paymentAccounts']
     expenseTickets: Parameters<typeof EgresosClient>[0]['expenseTickets']
     fixedExpenses: FixedExpense[]
@@ -53,7 +53,7 @@ export function FinanzasTabsClient({
     initialData,
     branches,
     accounts,
-    barbers,
+    staffMembers,
     paymentAccounts,
     expenseTickets,
     fixedExpenses,
@@ -148,7 +148,7 @@ export function FinanzasTabsClient({
                 <div className={activeTab !== 'sueldos' ? 'hidden' : ''}>
                     <SueldosClient
                         branches={branches}
-                        barbers={barbers}
+                        staffMembers={staffMembers}
                         paymentAccounts={paymentAccounts}
                     />
                 </div>
