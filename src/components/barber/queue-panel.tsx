@@ -131,6 +131,9 @@ export function QueuePanel({
   const [now, setNow] = useState(Date.now())
   const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
   const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
+  // (mig 130) id del barbero "más justo" según el server. Se usa para ocultar
+  // dinámicas locales cuando server discrepa con el sort local.
+  const [fairBarberId, setFairBarberId] = useState<string | null>(null)
   const [dayStats, setDayStats] = useState({ servicesCount: 0, revenue: 0 })
   const [otherBarbers, setOtherBarbers] = useState<Staff[]>([])
   const [allBarbers, setAllBarbers] = useState<Staff[]>([])
@@ -206,6 +209,7 @@ export function QueuePanel({
     const data = await fetchBranchAssignmentData(session.branch_id)
     setDailyServiceCounts(data.dailyServiceCounts ?? {})
     setLastCompletedAt(data.lastCompletedAt ?? {})
+    setFairBarberId(data.fairBarberId ?? null)
   }, [session.branch_id])
 
   const fetchBarbersAndSchedules = useCallback(async () => {
@@ -278,6 +282,7 @@ export function QueuePanel({
 
     setDailyServiceCounts(assignmentData.dailyServiceCounts ?? {})
     setLastCompletedAt(assignmentData.lastCompletedAt ?? {})
+    setFairBarberId(assignmentData.fairBarberId ?? null)
   }, [supabase, session.branch_id, session.staff_id])
 
   const fetchBreakRequestStatus = useCallback(async () => {
@@ -431,13 +436,15 @@ export function QueuePanel({
   // "Mi fila": only entries assigned to this barber (by DB or by assignDynamicBarbers).
   // Nunca mostramos entries con barber_id=null aquí para evitar que el mismo cliente
   // aparezca en la fila de múltiples barberos simultáneamente.
-  // La asignación real ocurre en el servidor via attendNextClient(), esto es solo visualización.
+  // (mig 130) Si la asignación es DINÁMICA local (_is_dynamically_assigned) y el server
+  // dice que otro barbero es el más justo, ocultamos la entry. Eso garantiza que el
+  // mismo cliente no aparezca a varios barberos por desincronización local.
   const myWaitingEntries = dynamicEntries
-    .filter(
-      (e) =>
-        e.status === 'waiting' &&
-        e.barber_id === session.staff_id
-    )
+    .filter((e) => {
+      if (e.status !== 'waiting' || e.barber_id !== session.staff_id) return false
+      if (e._is_dynamically_assigned && fairBarberId && fairBarberId !== session.staff_id) return false
+      return true
+    })
     // Orden cronológico estricto por priority_order. NO empujamos los breaks
     // al final: un break con cuts_before_break=0 tiene priority_order menor
     // que los clientes que llegaron después y debe verse PRIMERO. Si dos
@@ -661,15 +668,26 @@ export function QueuePanel({
 
   async function handleStartService(entryId: string) {
     setActionLoading(entryId)
+    // Si la entry visible era una asignación dinámica local, el NULL del server
+    // significa que el fairness gate (mig 129) eligió a otro barbero como "más justo".
+    // Mostramos un toast específico en ese caso para no confundir al barbero con
+    // el genérico "no hay clientes en espera".
+    const wasDynamicAssignment = dynamicEntries.find(e => e.id === entryId)?._is_dynamically_assigned ?? false
     const result = await attendNextClient(session.staff_id, session.branch_id, entryId)
     if ('error' in result) {
       toast.error(result.error)
     } else if (!result.entryId) {
-      toast.info('No hay clientes en espera')
+      toast.info(wasDynamicAssignment ? 'Otro barbero atenderá a este cliente' : 'No hay clientes en espera')
     } else if (result.entryId !== entryId) {
       toast.info('El cliente fue tomado por otro barbero. Se asignó el siguiente.')
     }
     await fetchQueue()
+    // Forzar refetch de assignment data: si recibimos NULL por fairness, los
+    // counts/last_completed pueden estar stale. Re-sincroniza para que el sort
+    // local converja al ganador del server.
+    if (!('error' in result) && !result.entryId) {
+      fetchAssignmentData()
+    }
     setActionLoading(null)
   }
 
