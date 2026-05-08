@@ -1,19 +1,21 @@
 /**
- * Página de check-in del kiosk (server component).
+ * Página de check-in del kiosk (server component, multi-tenant).
  *
- * Lee el operation_mode de la sucursal desde Supabase y delega
- * el renderizado al ModeRouter (client component) que selecciona
- * el sub-flujo correcto:
+ * Resolución de org (orden estricto):
+ *   1. Si hay ?branch= en la URL → resuelve org dueña de ese branch.
+ *   2. Si no, intenta resolver via cookie pública (public_organization).
+ *   3. Si no hay org → redirect a `/` (tenant selector).
  *
- *   walk_in       → CheckinWalkIn (flujo original, sin cambios visuales)
- *   appointments  → AppointmentLookupFlow
- *   hybrid        → HybridRouter
+ * Una vez resuelta la org, aplica el PIN gate si la org lo requiere.
  *
- * Si no hay branchId en la URL o el branch no existe, el CheckinWalkIn
- * maneja la selección de sucursal como siempre lo hizo.
+ * Render según contexto:
+ *   - Sin branch resuelto → CheckinWalkIn (selecciona branch, filtrado por org).
+ *   - Con branch + walk_in → CheckinWalkIn.
+ *   - Con branch + appointments/hybrid → ModeRouter.
  */
 
 import { Suspense } from 'react'
+import { redirect } from 'next/navigation'
 import { ModeRouter } from '@/components/checkin/mode-router'
 import { CheckinWalkIn } from '@/app/(tablet)/checkin/checkin-walk-in'
 import { PinGate } from '@/components/checkin/pin-gate'
@@ -24,19 +26,85 @@ import {
   hasValidCheckinSessionForOrg,
   orgRequiresCheckinPin,
 } from '@/lib/actions/checkin-pin'
+import { getActiveOrganization } from '@/lib/actions/org'
 
 interface CheckinPageProps {
   searchParams: Promise<{ branch?: string }>
 }
 
+type ResolvedOrg = { slug: string; name: string; logo_url: string | null }
+type ResolvedBranch = {
+  id: string
+  operation_mode: BranchOperationMode | null
+  checkin_bg_color: string | null
+} | null
+
 export default async function CheckinPage({ searchParams }: CheckinPageProps) {
   const params = await searchParams
-  const branchId = params.branch
+  const branchId = params.branch && isValidUUID(params.branch) ? params.branch : null
 
-  // Sin branchId en la URL → el CheckinWalkIn maneja la selección internamente.
-  // (El PIN gate se aplica recién cuando hay una org/branch identificable; sin
-  // branch no podemos saber a qué org pedirle el PIN.)
-  if (!branchId || !isValidUUID(branchId)) {
+  // ─── 1. Resolver org (vía branch URL o cookie) ────────────────────────────
+  let org: ResolvedOrg | null = null
+  let branch: ResolvedBranch = null
+
+  if (branchId) {
+    const supabase = createAdminClient()
+    const { data } = await supabase
+      .from('branches')
+      .select(`
+        id,
+        operation_mode,
+        checkin_bg_color,
+        organization_id,
+        organizations!inner ( slug, name, logo_url )
+      `)
+      .eq('id', branchId)
+      .eq('is_active', true)
+      .maybeSingle()
+
+    if (data) {
+      branch = {
+        id: data.id,
+        operation_mode: data.operation_mode as BranchOperationMode | null,
+        checkin_bg_color: data.checkin_bg_color as string | null,
+      }
+      const orgRel = data.organizations as ResolvedOrg | ResolvedOrg[] | null | undefined
+      org = Array.isArray(orgRel) ? (orgRel[0] ?? null) : (orgRel ?? null)
+    }
+  }
+
+  if (!org) {
+    const activeOrg = await getActiveOrganization()
+    if (activeOrg) {
+      org = { slug: activeOrg.slug, name: activeOrg.name, logo_url: activeOrg.logo_url }
+    }
+  }
+
+  // Multi-tenant strict: sin org no podemos servir el kiosk.
+  if (!org) {
+    redirect('/')
+  }
+
+  // ─── 2. PIN gate ──────────────────────────────────────────────────────────
+  const requiresPin = await orgRequiresCheckinPin(org.slug)
+  if (requiresPin) {
+    const ok = await hasValidCheckinSessionForOrg(org.slug)
+    if (!ok) {
+      return (
+        <PinGate
+          orgSlug={org.slug}
+          orgName={org.name}
+          orgLogoUrl={org.logo_url}
+        >
+          <div />
+        </PinGate>
+      )
+    }
+  }
+
+  // ─── 3. Render según contexto ─────────────────────────────────────────────
+  // Sin branch específico → CheckinWalkIn maneja la selección (filtrada por org).
+  if (!branch) {
     return (
       <Suspense>
         <CheckinWalkIn />
@@ -44,52 +112,7 @@ export default async function CheckinPage({ searchParams }: CheckinPageProps) {
     )
   }
 
-  // Leer branch + datos de la org dueña (operación pública: sin auth)
-  const supabase = createAdminClient()
-  const { data: branch } = await supabase
-    .from('branches')
-    .select(`
-      id,
-      operation_mode,
-      checkin_bg_color,
-      organization_id,
-      organizations!inner ( slug, name, logo_url )
-    `)
-    .eq('id', branchId)
-    .eq('is_active', true)
-    .maybeSingle()
-
-  // ─── PIN gate (aplica a TODOS los modos: walk_in, appointments, hybrid) ───
-  // Supabase devuelve embedded relations como array (incluso con !inner). Tomamos
-  // el primero por seguridad y lo casteamos al shape mínimo que necesitamos.
-  const orgRel = branch?.organizations as
-    | { slug: string; name: string; logo_url: string | null }
-    | { slug: string; name: string; logo_url: string | null }[]
-    | null
-    | undefined
-  const org = Array.isArray(orgRel) ? (orgRel[0] ?? null) : (orgRel ?? null)
-
-  if (org) {
-    const requiresPin = await orgRequiresCheckinPin(org.slug)
-    if (requiresPin) {
-      const ok = await hasValidCheckinSessionForOrg(org.slug)
-      if (!ok) {
-        return (
-          <PinGate
-            orgSlug={org.slug}
-            orgName={org.name}
-            orgLogoUrl={org.logo_url}
-          >
-            {/* placeholder; el reload tras validar muestra el contenido real */}
-            <div />
-          </PinGate>
-        )
-      }
-    }
-  }
-
-  // ─── Render normal según modo ─────────────────────────────────────────────
-  const operationMode = ((branch?.operation_mode as BranchOperationMode) ?? 'walk_in')
+  const operationMode = (branch.operation_mode ?? 'walk_in') as BranchOperationMode
 
   if (operationMode === 'walk_in') {
     return (
@@ -99,13 +122,13 @@ export default async function CheckinPage({ searchParams }: CheckinPageProps) {
     )
   }
 
-  const bgColor = branch?.checkin_bg_color ?? '#27272a'
+  const bgColor = branch.checkin_bg_color ?? '#27272a'
   const isLightBg = isLightBackground(bgColor)
 
   return (
     <Suspense>
       <ModeRouter
-        branchId={branchId}
+        branchId={branch.id}
         operationMode={operationMode}
         isLightBg={isLightBg}
       />

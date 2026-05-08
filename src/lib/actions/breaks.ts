@@ -225,15 +225,33 @@ export async function approveBreak(requestId: string, cutsBeforeBreak: number) {
 
     const ghost = await calculateGhostPosition(supabase, req.staff_id, req.branch_id, cutsBeforeBreak)
 
-    const { data: currentService } = await supabase
-        .from('queue_entries')
-        .select('id')
-        .eq('barber_id', req.staff_id)
-        .eq('status', 'in_progress')
-        .eq('is_break', false)
-        .maybeSingle()
+    // ── Decidir si arrancar el ghost INMEDIATAMENTE ──────────────────────────
+    // El ghost arranca si: no hay corte activo del barbero Y no hay clientes
+    // ESPECÍFICAMENTE asignados a él con priority_order menor que el ghost.
+    // Esto cubre todos los casos de "barbero libre y nada lo tapa", incluyendo
+    // cuts_before_break > 0 sin clientes asignados (antes quedaba en limbo).
+    // Los clientes dinámicos (barber_id IS NULL) NO bloquean: van al pool.
+    const [{ data: currentService }, { data: blockingAssigned }] = await Promise.all([
+        supabase
+            .from('queue_entries')
+            .select('id')
+            .eq('barber_id', req.staff_id)
+            .eq('status', 'in_progress')
+            .eq('is_break', false)
+            .maybeSingle(),
+        supabase
+            .from('queue_entries')
+            .select('id')
+            .eq('barber_id', req.staff_id)
+            .eq('branch_id', req.branch_id)
+            .eq('status', 'waiting')
+            .eq('is_break', false)
+            .lt('priority_order', ghost.priorityOrder)
+            .limit(1),
+    ])
 
-    const shouldStartImmediately = cutsBeforeBreak === 0 && !currentService
+    const hasBlockingAssigned = (blockingAssigned?.length ?? 0) > 0
+    const shouldStartImmediately = !currentService && !hasBlockingAssigned
     const nowTs = new Date().toISOString()
 
     const { error: insertErr } = await supabase.from('queue_entries').insert({
@@ -432,6 +450,92 @@ export async function getBarberActiveBreakRequest(staffId: string) {
         .maybeSingle()
 
     return { data, error }
+}
+
+/**
+ * Detecta y arranca un ghost de descanso `waiting` que está listo para iniciar
+ * (sin corte activo del barbero y sin clientes asignados con priority menor).
+ *
+ * Cubre el caso "ghost en limbo": el descanso se aprobó después de que el
+ * barbero terminara su último corte (o con cuts_before_break > 0 sin clientes
+ * asignados), por lo que `completeService` paso 6 nunca se disparó. La UI lo
+ * llama desde un useEffect que se activa cuando detecta la condición.
+ *
+ * Idempotente y atómica: si dos clientes lo llaman a la vez, solo uno gana
+ * por la WHERE clause `status='waiting'`. El partial UNIQUE de mig 127
+ * garantiza que no haya doble in_progress aunque haya race con otro path.
+ */
+export async function startPendingBreakIfReady(staffId: string, branchId: string) {
+    const supabase = createAdminClient()
+
+    const orgAccess = await validateBranchAccess(branchId)
+    if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+
+    // Buscar el ghost waiting más viejo del barbero
+    const { data: ghost } = await supabase
+        .from('queue_entries')
+        .select('id, priority_order')
+        .eq('barber_id', staffId)
+        .eq('branch_id', branchId)
+        .eq('is_break', true)
+        .eq('status', 'waiting')
+        .order('priority_order', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+
+    if (!ghost) return { success: true, started: false, reason: 'no_pending_break' }
+
+    // Verificar que no esté tapado por: corte activo o cliente asignado con priority menor
+    const [{ data: activeService }, { data: blockingAssigned }] = await Promise.all([
+        supabase
+            .from('queue_entries')
+            .select('id')
+            .eq('barber_id', staffId)
+            .eq('branch_id', branchId)
+            .eq('status', 'in_progress')
+            .eq('is_break', false)
+            .maybeSingle(),
+        supabase
+            .from('queue_entries')
+            .select('id')
+            .eq('barber_id', staffId)
+            .eq('branch_id', branchId)
+            .eq('status', 'waiting')
+            .eq('is_break', false)
+            .lt('priority_order', ghost.priority_order)
+            .limit(1),
+    ])
+
+    if (activeService) return { success: true, started: false, reason: 'active_service' }
+    if (blockingAssigned && blockingAssigned.length > 0) {
+        return { success: true, started: false, reason: 'blocked_by_assigned' }
+    }
+
+    const { error: startErr, data: updated } = await supabase
+        .from('queue_entries')
+        .update({
+            status: 'in_progress',
+            started_at: new Date().toISOString(),
+        })
+        .eq('id', ghost.id)
+        .eq('status', 'waiting')
+        .select('id')
+        .maybeSingle()
+
+    if (startErr) {
+        // Si fue 23505 (partial UNIQUE de mig 127), significa que otro path ya
+        // arrancó algo — devolvemos started=false sin error. Cualquier otro
+        // error sí lo propagamos.
+        const code = (startErr as { code?: string }).code
+        if (code === '23505') return { success: true, started: false, reason: 'race_lost' }
+        return { error: startErr.message }
+    }
+
+    if (!updated) return { success: true, started: false, reason: 'race_lost' }
+
+    revalidatePath('/barbero/fila')
+    revalidatePath('/dashboard/fila')
+    return { success: true, started: true }
 }
 
 // ─── Descansos programados ──────────────────────────────────────────────────

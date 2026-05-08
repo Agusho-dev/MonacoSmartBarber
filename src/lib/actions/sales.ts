@@ -20,7 +20,7 @@ export interface ProductSaleResult {
   salesRecords: {
     visit_id: string
     product_id: string
-    barber_id: string
+    barber_id: string | null
     branch_id: string
     quantity: number
     unit_price: number
@@ -32,11 +32,13 @@ export interface ProductSaleResult {
  * Procesa la venta de productos: calcula montos, comisiones, descuenta stock
  * e inserta los registros en product_sales.
  * Usada tanto desde completeService (queue.ts) como desde directProductSale.
+ *
+ * `barberId = null` indica venta de la barbería (sin comisión a barbero).
  */
 export async function processProductSales(
   supabase: SupabaseClient,
   visitId: string,
-  barberId: string,
+  barberId: string | null,
   branchId: string,
   productsToSell: ProductSaleItem[]
 ): Promise<ProductSaleResult | { error: string }> {
@@ -64,7 +66,7 @@ export async function processProductSales(
 
     const qty = p.quantity
     const price = Number(dbp.sale_price)
-    const comm = Number(dbp.barber_commission)
+    const comm = barberId === null ? 0 : Number(dbp.barber_commission)
 
     totalAmount += price * qty
     totalCommission += comm * qty
@@ -102,7 +104,7 @@ export async function processProductSales(
 
 export async function directProductSale(
   branchId: string,
-  barberId: string,
+  barberId: string | null,
   paymentMethod: 'cash' | 'card' | 'transfer',
   productsToSell: ProductSaleItem[],
   paymentAccountId?: string | null
@@ -113,14 +115,16 @@ export async function directProductSale(
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { error: 'No autorizado' }
 
-  // Validar que el barbero pertenece al branch y la org
-  const { data: staffRow } = await supabase
-    .from('staff')
-    .select('id')
-    .eq('id', barberId)
-    .eq('branch_id', branchId)
-    .maybeSingle()
-  if (!staffRow) return { error: 'El barbero no pertenece a esta sucursal' }
+  // Si es venta de la barbería, barberId es null y no validamos staff.
+  if (barberId !== null) {
+    const { data: staffRow } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('id', barberId)
+      .eq('branch_id', branchId)
+      .maybeSingle()
+    if (!staffRow) return { error: 'El barbero no pertenece a esta sucursal' }
+  }
 
   if (!productsToSell || productsToSell.length === 0) {
     return { error: 'No se seleccionaron productos' }
@@ -147,7 +151,9 @@ export async function directProductSale(
     const dbp = dbProducts.find((x: { id: string }) => x.id === p.id)
     if (!dbp) continue
     preAmount += Number(dbp.sale_price) * p.quantity
-    preCommission += Number(dbp.barber_commission) * p.quantity
+    if (barberId !== null) {
+      preCommission += Number(dbp.barber_commission) * p.quantity
+    }
   }
 
   if (preAmount === 0) {
@@ -187,8 +193,9 @@ export async function directProductSale(
     await recordTransfer(visit.id, paymentAccountId, preAmount, branchId)
   }
 
-  // Actualizar o crear salary_report de comisión por producto
-  if (preCommission > 0) {
+  // Actualizar o crear salary_report de comisión por producto.
+  // Solo aplica cuando hay barbero asignado (no en ventas de la barbería).
+  if (barberId !== null && preCommission > 0) {
     const tz = await getActiveTimezone()
     const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date())
 

@@ -14,6 +14,7 @@ import {
   approveBreak as approveBreakAction,
   rejectBreak as rejectBreakAction,
   getPendingBreakRequests,
+  startPendingBreakIfReady,
 } from '@/lib/actions/break-requests'
 import type { QueueEntry, Staff, Client, BreakConfig, StaffSchedule } from '@/lib/types/database'
 import { assignDynamicBarbers } from '@/lib/barber-utils'
@@ -130,6 +131,9 @@ export function QueuePanel({
   const [now, setNow] = useState(Date.now())
   const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
   const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
+  // (mig 130) id del barbero "más justo" según el server. Se usa para ocultar
+  // dinámicas locales cuando server discrepa con el sort local.
+  const [fairBarberId, setFairBarberId] = useState<string | null>(null)
   const [dayStats, setDayStats] = useState({ servicesCount: 0, revenue: 0 })
   const [otherBarbers, setOtherBarbers] = useState<Staff[]>([])
   const [allBarbers, setAllBarbers] = useState<Staff[]>([])
@@ -177,9 +181,12 @@ export function QueuePanel({
   const canHideSelf = session.role === 'admin' || session.role === 'owner' || session.permissions?.['queue.hide_self'] === true
 
   const fetchQueue = useCallback(async () => {
+    // Query liviano: eliminamos visits(count) — era un correlated subquery por cliente
+    // que generaba 177k calls/día según pg_stat_statements. El conteo ya vive en
+    // clients.total_visits y en la vista client_loyalty_state.total_visits.
     const { data } = await supabase
       .from('queue_entries')
-      .select('*, client:clients(*, loyalty:client_loyalty_state(total_visits), visits(count)), barber:staff(*), service:services(*)')
+      .select('*, client:clients(id, name, phone, loyalty:client_loyalty_state(total_visits)), barber:staff(id, full_name, avatar_url), service:services(id, name, duration_minutes, price)')
       .eq('branch_id', session.branch_id)
       .in('status', ['waiting', 'in_progress'])
       .order('position')
@@ -192,6 +199,18 @@ export function QueuePanel({
     const stats = await fetchBarberDayStats(session.staff_id, session.branch_id)
     setDayStats(stats)
   }, [session.staff_id, session.branch_id])
+
+  // Refresca SOLO los inputs del sort dinámico (dailyServiceCounts y lastCompletedAt).
+  // Llamado en cada evento Realtime de queue_entries para que los paneles converjan
+  // al mismo "barbero más justo" tras completar un servicio en otro tablet. Sin esto,
+  // assignDynamicBarbers en cada tablet rankea con datos stale y un mismo dinámico
+  // puede aparecer en "Mi fila" de varios barberos.
+  const fetchAssignmentData = useCallback(async () => {
+    const data = await fetchBranchAssignmentData(session.branch_id)
+    setDailyServiceCounts(data.dailyServiceCounts ?? {})
+    setLastCompletedAt(data.lastCompletedAt ?? {})
+    setFairBarberId(data.fairBarberId ?? null)
+  }, [session.branch_id])
 
   const fetchBarbersAndSchedules = useCallback(async () => {
     const [barbersRes, schedRes, settingsRes, attendanceRes, assignmentData] = await Promise.all([
@@ -263,6 +282,7 @@ export function QueuePanel({
 
     setDailyServiceCounts(assignmentData.dailyServiceCounts ?? {})
     setLastCompletedAt(assignmentData.lastCompletedAt ?? {})
+    setFairBarberId(assignmentData.fairBarberId ?? null)
   }, [supabase, session.branch_id, session.staff_id])
 
   const fetchBreakRequestStatus = useCallback(async () => {
@@ -308,6 +328,7 @@ export function QueuePanel({
 
     const channel = supabase
       .channel(`barber-queue-${session.branch_id}-${session.staff_id}`)
+      // queue_entries → solo refresca cola + stats, NO barbers/schedules (son datos estables)
       .on(
         'postgres_changes',
         {
@@ -319,9 +340,12 @@ export function QueuePanel({
         () => {
           fetchQueue()
           refreshStats()
-          fetchBarbersAndSchedules()
+          // Re-fetch counts/last_completed para que el sort dinámico converja entre tablets
+          // (un completed en otro panel cambia los inputs del ranking).
+          fetchAssignmentData()
         }
       )
+      // staff → solo refresca barberos + estado de visibilidad propio
       .on(
         'postgres_changes',
         {
@@ -335,31 +359,23 @@ export function QueuePanel({
           fetchHiddenStatus()
         }
       )
+      // break_requests filtrado por branch_id para evitar stampede multi-sucursal
+      // (attendance_logs fue removido de supabase_realtime publication — listener eliminado)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'break_requests',
+          filter: `branch_id=eq.${session.branch_id}`,
         },
         () => {
           fetchBreakRequestStatus()
           fetchPendingBreakRequests()
         }
       )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'attendance_logs',
-        },
-        () => {
-          fetchBarbersAndSchedules()
-        }
-      )
       .subscribe((status) => {
-        // Re-fetch everything on reconnection
+        // Re-fetch todo al reconectar el WebSocket
         if (status === 'SUBSCRIBED') {
           fetchQueue()
           refreshStats()
@@ -373,18 +389,17 @@ export function QueuePanel({
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, session.branch_id, session.staff_id, fetchQueue, refreshStats, fetchBarbersAndSchedules, fetchBreakRequestStatus, fetchPendingBreakRequests, fetchHiddenStatus])
+  }, [supabase, session.branch_id, session.staff_id, fetchQueue, refreshStats, fetchAssignmentData, fetchBarbersAndSchedules, fetchBreakRequestStatus, fetchPendingBreakRequests, fetchHiddenStatus])
 
-  // Refresh data when returning to tab or as polling fallback (critical for low-end tablets)
+  // Al volver al tab o en el polling fallback, refrescamos solo la cola y las stats.
+  // Los datos de barberos/schedules cambian con poca frecuencia y se refrescan
+  // cuando el WebSocket reconecta (evento SUBSCRIBED). Esto reduce el burst de queries
+  // cuando múltiples tablets reconectan simultáneamente.
   useVisibilityRefresh(
     useCallback(() => {
       fetchQueue()
       refreshStats()
-      fetchBarbersAndSchedules()
-      fetchBreakRequestStatus()
-      fetchPendingBreakRequests()
-      fetchHiddenStatus()
-    }, [fetchQueue, refreshStats, fetchBarbersAndSchedules, fetchBreakRequestStatus, fetchPendingBreakRequests, fetchHiddenStatus]),
+    }, [fetchQueue, refreshStats]),
     30_000
   )
 
@@ -421,17 +436,24 @@ export function QueuePanel({
   // "Mi fila": only entries assigned to this barber (by DB or by assignDynamicBarbers).
   // Nunca mostramos entries con barber_id=null aquí para evitar que el mismo cliente
   // aparezca en la fila de múltiples barberos simultáneamente.
-  // La asignación real ocurre en el servidor via attendNextClient(), esto es solo visualización.
+  // (mig 130) Si la asignación es DINÁMICA local (_is_dynamically_assigned) y el server
+  // dice que otro barbero es el más justo, ocultamos la entry. Eso garantiza que el
+  // mismo cliente no aparezca a varios barberos por desincronización local.
   const myWaitingEntries = dynamicEntries
-    .filter(
-      (e) =>
-        e.status === 'waiting' &&
-        e.barber_id === session.staff_id
-    )
+    .filter((e) => {
+      if (e.status !== 'waiting' || e.barber_id !== session.staff_id) return false
+      if (e._is_dynamically_assigned && fairBarberId && fairBarberId !== session.staff_id) return false
+      return true
+    })
+    // Orden cronológico estricto por priority_order. NO empujamos los breaks
+    // al final: un break con cuts_before_break=0 tiene priority_order menor
+    // que los clientes que llegaron después y debe verse PRIMERO. Si dos
+    // entradas tienen el mismo priority_order, desempatamos por position.
     .sort((a, b) => {
-      if (a.is_break !== b.is_break) return a.is_break ? 1 : -1
-      if (a.is_break && b.is_break) return a.position - b.position
-      return new Date(a.priority_order).getTime() - new Date(b.priority_order).getTime()
+      const pa = new Date(a.priority_order).getTime()
+      const pb = new Date(b.priority_order).getTime()
+      if (pa !== pb) return pa - pb
+      return a.position - b.position
     })
 
   // "Fila general": ALL waiting clients
@@ -439,6 +461,54 @@ export function QueuePanel({
 
   // Real waiting clients for this barber (non-break)
   const myRealWaitingEntries = myWaitingEntries.filter(e => !e.is_break)
+
+  // ── Auto-start de ghost de descanso "listo" (rescate de limbos) ──
+  // Si el barbero tiene un ghost waiting y no hay nada que lo tape (ni corte
+  // activo, ni clientes asignados con priority menor), arrancarlo automátic.
+  // Cubre el caso "supervisor aprobó descanso DESPUÉS de que el barbero
+  // terminara su último corte": antes el ghost quedaba waiting forever porque
+  // completeService paso 6 ya había pasado. La server action es idempotente y
+  // segura ante races (partial UNIQUE de mig 127 garantiza un solo ganador).
+  const myPendingGhost = useMemo(
+    () => entries.find(
+      (e) => e.barber_id === session.staff_id && e.status === 'waiting' && e.is_break
+    ),
+    [entries, session.staff_id]
+  )
+  const ghostBlockedByAssigned = useMemo(() => {
+    if (!myPendingGhost) return false
+    const ghostTs = new Date(myPendingGhost.priority_order).getTime()
+    return entries.some(
+      (e) =>
+        e.barber_id === session.staff_id &&
+        e.status === 'waiting' &&
+        !e.is_break &&
+        new Date(e.priority_order).getTime() < ghostTs
+    )
+  }, [entries, myPendingGhost, session.staff_id])
+  const autoStartingGhostRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!myPendingGhost) return
+    if (myActiveBreak) return
+    if (myActiveEntry) return
+    if (ghostBlockedByAssigned) return
+    if (autoStartingGhostRef.current === myPendingGhost.id) return
+    autoStartingGhostRef.current = myPendingGhost.id
+    startPendingBreakIfReady(session.staff_id, session.branch_id)
+      .then((res) => {
+        if ('error' in res && res.error) {
+          console.error('[auto-start break]', res.error)
+        }
+        // Liberar el ref independientemente del resultado para permitir
+        // reintentos en próximos ciclos si algo salió mal.
+        autoStartingGhostRef.current = null
+        fetchQueue()
+      })
+      .catch((err) => {
+        console.error('[auto-start break] excepción', err)
+        autoStartingGhostRef.current = null
+      })
+  }, [myPendingGhost, myActiveBreak, myActiveEntry, ghostBlockedByAssigned, session.staff_id, session.branch_id, fetchQueue])
 
   // ── Next client alert logic ──
   // Track when barber becomes idle with clients waiting
@@ -598,15 +668,26 @@ export function QueuePanel({
 
   async function handleStartService(entryId: string) {
     setActionLoading(entryId)
+    // Si la entry visible era una asignación dinámica local, el NULL del server
+    // significa que el fairness gate (mig 129) eligió a otro barbero como "más justo".
+    // Mostramos un toast específico en ese caso para no confundir al barbero con
+    // el genérico "no hay clientes en espera".
+    const wasDynamicAssignment = dynamicEntries.find(e => e.id === entryId)?._is_dynamically_assigned ?? false
     const result = await attendNextClient(session.staff_id, session.branch_id, entryId)
     if ('error' in result) {
       toast.error(result.error)
     } else if (!result.entryId) {
-      toast.info('No hay clientes en espera')
+      toast.info(wasDynamicAssignment ? 'Otro barbero atenderá a este cliente' : 'No hay clientes en espera')
     } else if (result.entryId !== entryId) {
       toast.info('El cliente fue tomado por otro barbero. Se asignó el siguiente.')
     }
     await fetchQueue()
+    // Forzar refetch de assignment data: si recibimos NULL por fairness, los
+    // counts/last_completed pueden estar stale. Re-sincroniza para que el sort
+    // local converja al ganador del server.
+    if (!('error' in result) && !result.entryId) {
+      fetchAssignmentData()
+    }
     setActionLoading(null)
   }
 
@@ -796,9 +877,11 @@ export function QueuePanel({
                       </Badge>
                     )
                   }
-                  const realVisits = entry.client?.visits?.[0]?.count ?? 0
-                  const loyaltyVisits = entry.client?.loyalty?.[0]?.total_visits ?? 0
-                  if (Math.max(realVisits, loyaltyVisits) === 0) {
+                  // total_visits viene de la tabla client_loyalty_state (mantenida por
+                  // trigger). Reemplaza a visits(count) que era un correlated subquery
+                  // por cliente y representaba ~33% del tiempo de DB (mig 124).
+                  const totalVisits = entry.client?.loyalty?.[0]?.total_visits ?? 0
+                  if (totalVisits === 0) {
                     return (
                       <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-emerald-500/15 text-emerald-500 border-emerald-500/30">
                         Primer Corte

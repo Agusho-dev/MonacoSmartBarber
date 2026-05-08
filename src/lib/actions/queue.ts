@@ -188,6 +188,52 @@ export async function attendNextClient(barberId: string, branchId: string, prefe
   }
 
   if (!entryId) {
+    // El RPC retorna NULL en varios casos legítimos. Uno de ellos: el barbero
+    // tiene un ghost de descanso `waiting` listo para iniciar (Guard 0b de
+    // mig 128). En ese caso debemos auto-arrancar el ghost en el mismo round
+    // trip; si no lo hacemos, el barbero queda libre, la UI le muestra "no hay
+    // clientes" y no inicia su descanso hasta que vuelva a interactuar.
+    const { data: pendingGhost } = await supabase
+      .from('queue_entries')
+      .select('id, priority_order')
+      .eq('barber_id', barberId)
+      .eq('branch_id', branchId)
+      .eq('is_break', true)
+      .eq('status', 'waiting')
+      .order('priority_order', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+
+    if (pendingGhost) {
+      // ¿Hay clientes asignados a este barbero antes del ghost? Si no, arranca.
+      const { data: blocking } = await supabase
+        .from('queue_entries')
+        .select('id')
+        .eq('barber_id', barberId)
+        .eq('branch_id', branchId)
+        .eq('status', 'waiting')
+        .eq('is_break', false)
+        .lt('priority_order', pendingGhost.priority_order)
+        .limit(1)
+
+      if (!blocking || blocking.length === 0) {
+        const { error: ghostStartError } = await supabase
+          .from('queue_entries')
+          .update({
+            status: 'in_progress',
+            started_at: new Date().toISOString(),
+          })
+          .eq('id', pendingGhost.id)
+          .eq('status', 'waiting')
+
+        if (!ghostStartError) {
+          revalidatePath('/barbero/fila')
+          revalidatePath('/dashboard/fila')
+          return { success: true, entryId: null, breakStarted: true }
+        }
+      }
+    }
+
     return { success: true, entryId: null }
   }
 
@@ -477,7 +523,13 @@ export async function completeService(
   if (nextGhosts && nextGhosts.length > 0) {
     const nextGhost = nextGhosts[0]
 
-    // Check if there are any real waiting clients BEFORE the ghost
+    // Auto-start condition: el ghost arranca si NO hay clientes ESPECÍFICAMENTE
+    // asignados a este barbero antes de él. Los clientes dinámicos
+    // (barber_id IS NULL) NO bloquean el descanso porque pueden ser tomados
+    // por cualquier otro barbero disponible — no son "obligación" de este
+    // barbero. El cuts_before_break que aprobó el supervisor ya está reflejado
+    // en la position del ghost; respetarlo significa atender lo asignado y
+    // dejar los dinámicos para el resto del equipo.
     const { data: realWaitingBeforeBreak } = await supabase
       .from('queue_entries')
       .select('id')
@@ -488,22 +540,7 @@ export async function completeService(
       .lt('position', nextGhost.position)
       .limit(1)
 
-    // Also check unassigned waiting clients BEFORE the ghost
-    const { data: unassignedWaitingBeforeBreak } = await supabase
-      .from('queue_entries')
-      .select('id')
-      .eq('branch_id', visit.branch_id)
-      .eq('status', 'waiting')
-      .eq('is_break', false)
-      .is('barber_id', null)
-      .lt('position', nextGhost.position)
-      .limit(1)
-
-    // Auto-start only if there are no clients waiting BEFORE the break ghost
-    const hasRealClientsBefore = (realWaitingBeforeBreak && realWaitingBeforeBreak.length > 0) ||
-      (unassignedWaitingBeforeBreak && unassignedWaitingBeforeBreak.length > 0)
-
-    if (!hasRealClientsBefore) {
+    if (!realWaitingBeforeBreak || realWaitingBeforeBreak.length === 0) {
       await supabase
         .from('queue_entries')
         .update({

@@ -205,7 +205,7 @@ export async function getProductSales(branchId?: string, startDate?: string, end
  */
 export async function sellProductFromDashboard(data: {
     product_id: string
-    barber_id: string
+    barber_id: string | null
     branch_id: string
     quantity: number
     payment_method: 'cash' | 'transfer' | 'card'

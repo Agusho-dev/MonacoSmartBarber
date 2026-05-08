@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useRef } from 'react'
-import { saveScheduleBlocks, deleteSchedule, upsertException, deleteException } from '@/lib/actions/calendar'
+import { saveScheduleBlocks, deleteSchedule, upsertException, deleteException, copyScheduleToAllInBranch } from '@/lib/actions/calendar'
 import type { ScheduleBlock } from '@/lib/actions/calendar'
 import type { Branch, StaffSchedule, StaffScheduleException } from '@/lib/types/database'
 import { useBranchStore } from '@/stores/branch-store'
@@ -15,9 +15,10 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Plus, X, AlertTriangle, Trash2 } from 'lucide-react'
+import { Plus, X, AlertTriangle, Trash2, Copy, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -55,6 +56,8 @@ export function CalendarioClient({ branches, barbers }: Props) {
   const [exceptionForm, setExceptionForm] = useState({ date: '', is_absent: true, reason: '' })
   const [scheduleDialog, setScheduleDialog] = useState<{ dayOfWeek: number } | null>(null)
   const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlock[]>([])
+  const [copyDialog, setCopyDialog] = useState(false)
+  const [copying, setCopying] = useState(false)
   const [, startTransition] = useTransition()
 
   const branchBarbers = barbers.filter((b) => b.branch_id === effectiveBranchId)
@@ -158,12 +161,27 @@ export function CalendarioClient({ branches, barbers }: Props) {
     })
   }
 
+  async function handleCopyToAll() {
+    if (!selectedBarber || copying) return
+    setCopying(true)
+    const r = await copyScheduleToAllInBranch(selectedBarber.id)
+    setCopying(false)
+    if (r.error) {
+      toast.error(r.error)
+    } else {
+      toast.success(`Horario aplicado a ${r.count ?? 0} barbero${(r.count ?? 0) === 1 ? '' : 's'}`)
+      setCopyDialog(false)
+    }
+  }
+
+  const otherBarbers = branchBarbers.filter((b) => b.id !== selectedBarber?.id)
+
   function formatDaySchedule(schedules: StaffSchedule[]): string {
     return schedules.map((s) => `${s.start_time} – ${s.end_time}`).join('  ·  ')
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-12">
       <div>
         <h1 className="text-2xl font-bold">Calendario laboral</h1>
         <p className="text-sm text-muted-foreground mt-1">
@@ -201,9 +219,22 @@ export function CalendarioClient({ branches, barbers }: Props) {
         {selectedBarber && (
           <div className="lg:col-span-3 space-y-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                Horario semanal — {selectedBarber.full_name}
-              </p>
+              <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Horario semanal — {selectedBarber.full_name}
+                </p>
+                {otherBarbers.length > 0 && (selectedBarber.staff_schedules?.length ?? 0) > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setCopyDialog(true)}
+                  >
+                    <Copy className="size-3.5" />
+                    Aplicar a todos
+                  </Button>
+                )}
+              </div>
               <div className="divide-y rounded-xl border bg-card">
                 {[1, 2, 3, 4, 5, 6, 0].map((day) => {
                   const daySchedules = getSchedulesForDay(day)
@@ -362,6 +393,41 @@ export function CalendarioClient({ branches, barbers }: Props) {
               <Button type="submit">Guardar horario</Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Copy schedule to all barbers dialog */}
+      <Dialog open={copyDialog} onOpenChange={(o) => !copying && setCopyDialog(o)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Aplicar horario a todos los barberos</DialogTitle>
+            <DialogDescription>
+              {selectedBarber && (
+                <>
+                  Vas a copiar el horario semanal de <span className="font-medium text-foreground">{selectedBarber.full_name}</span> a:
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="my-2 max-h-48 overflow-y-auto rounded-lg border bg-muted/30 divide-y">
+            {otherBarbers.map((b) => (
+              <li key={b.id} className="px-3 py-2 text-sm">
+                {b.full_name}
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-muted-foreground">
+            Esto reemplaza el horario semanal actual de esos barberos. Las excepciones puntuales no se modifican.
+          </p>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={copying} onClick={() => setCopyDialog(false)}>
+              Cancelar
+            </Button>
+            <Button type="button" onClick={handleCopyToAll} disabled={copying}>
+              {copying && <Loader2 className="size-4 mr-1.5 animate-spin" />}
+              Aplicar a {otherBarbers.length} barbero{otherBarbers.length === 1 ? '' : 's'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

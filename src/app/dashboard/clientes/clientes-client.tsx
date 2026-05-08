@@ -454,7 +454,7 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
                   <TableCell>
                     {displayStats?.lastVisitDate
                       ? formatDate(displayStats.lastVisitDate)
-                      : <span className="text-xs italic text-muted-foreground/60">Se retiró antes del servicio</span>}
+                      : <span className="text-xs italic text-muted-foreground/60">Sin visitas recientes</span>}
                   </TableCell>
                   <TableCell className="hidden lg:table-cell">
                     <Badge variant="outline" className={segCfg.className}>

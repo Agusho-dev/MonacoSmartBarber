@@ -1,6 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/server'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { getActiveTimezone } from '@/lib/i18n'
 import { getLocalDateStr, getDayBounds, getMonthBoundsStr } from '@/lib/time-utils'
@@ -79,17 +80,10 @@ export async function getDashboardOverview(): Promise<DashboardOverviewData | nu
     }
   }
 
-  // Paso 2: queries paralelas que dependen de branchIds u orgId
-  const [
-    { data: todayVisits },
-    { data: recentVisits },
-    { count: newClientsCount },
-    { data: waConfig },
-    { data: rewardsConfig },
-    { count: customRolesCount },
-  ] = await Promise.all([
-    // Visitas de hoy — solo campos escalares para calcular métricas
-    supabase
+  // Visitas de hoy paginado — orgs grandes con muchas branches pueden superar
+  // el cap default de PostgREST (1000 filas) en un solo día.
+  const todayVisitsPromise = fetchAll<{ amount: number | null }>((from, to) => {
+    return supabase
       .from('visits')
       .select(
         'id, branch_id, client_id, barber_id, service_id, payment_method, amount, commission_amount, commission_pct, extra_services, queue_entry_id, payment_account_id, notes, tags, started_at, completed_at, created_at'
@@ -97,7 +91,20 @@ export async function getDashboardOverview(): Promise<DashboardOverviewData | nu
       .in('branch_id', branchIds)
       .gte('completed_at', todayFrom)
       .lte('completed_at', todayTo)
-      .order('completed_at', { ascending: false }),
+      .order('completed_at', { ascending: false })
+      .range(from, to)
+  })
+
+  // Paso 2: queries paralelas que dependen de branchIds u orgId
+  const [
+    todayVisits,
+    { data: recentVisits },
+    { count: newClientsCount },
+    { data: waConfig },
+    { data: rewardsConfig },
+    { count: customRolesCount },
+  ] = await Promise.all([
+    todayVisitsPromise,
 
     // Últimas 10 visitas — con relaciones para mostrar en la lista
     supabase
@@ -141,12 +148,12 @@ export async function getDashboardOverview(): Promise<DashboardOverviewData | nu
       .eq('is_system', false),
   ])
 
-  const todayRevenue = (todayVisits ?? []).reduce((sum, v) => sum + (v.amount ?? 0), 0)
+  const todayRevenue = todayVisits.reduce((sum, v) => sum + (v.amount ?? 0), 0)
 
   return {
     branches: (branches ?? []) as Pick<Branch, 'id' | 'name'>[],
     organization: org ?? null,
-    todayVisits: (todayVisits ?? []) as unknown as Visit[],
+    todayVisits: todayVisits as unknown as Visit[],
     todayRevenue,
     newClientsThisMonth: newClientsCount ?? 0,
     recentVisits: (recentVisits ?? []) as unknown as Visit[],

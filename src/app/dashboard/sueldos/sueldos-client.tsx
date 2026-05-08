@@ -15,7 +15,7 @@ import {
 import type { SalaryReport, SalaryPaymentBatch, GroupedBatchMonth } from '@/lib/actions/salary'
 import { formatCurrency } from '@/lib/format'
 import type { Branch, SalaryConfig, SalaryScheme } from '@/lib/types/database'
-import type { BarberWithConfig } from './page'
+import type { StaffWithConfig } from './page'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -75,7 +75,7 @@ interface SalaryAccountOption {
 
 interface Props {
   branches: Branch[]
-  barbers: BarberWithConfig[]
+  staffMembers: StaffWithConfig[]
   paymentAccounts: SalaryAccountOption[]
 }
 
@@ -120,6 +120,10 @@ const TYPE_BADGE: Record<
     label: 'Comisión producto',
     className: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
   },
+  tip: {
+    label: 'Propina',
+    className: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  },
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -151,7 +155,7 @@ function formatBatchDate(dateStr: string) {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
+export function SueldosClient({ branches, staffMembers, paymentAccounts }: Props) {
   const router = useRouter()
   const { selectedBranchId: storeBranchId, setSelectedBranchId: setStoreBranchId } =
     useBranchStore()
@@ -165,17 +169,17 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
 
   const selectedBranchId = storeBranchId ?? (branches[0]?.id ?? '')
 
-  // Barberos de la sucursal seleccionada
-  const branchBarbers = barbers.filter((b) => b.branch_id === selectedBranchId)
+  // Personal de la sucursal seleccionada
+  const branchStaff = staffMembers.filter((s) => s.branch_id === selectedBranchId)
 
-  // Barbero activo en el sidebar
-  const [activeBarberId, setActiveBarberId] = useState<string | null>(null)
-  const activeBarber = branchBarbers.find((b) => b.id === activeBarberId) ?? branchBarbers[0] ?? null
+  // Persona activa en el sidebar
+  const [activeStaffId, setActiveStaffId] = useState<string | null>(null)
+  const activeStaff = branchStaff.find((b) => b.id === activeStaffId) ?? branchStaff[0] ?? null
 
   // Override local de salary configs (para reflejar cambios sin esperar router.refresh)
   const [localSalaryConfigs, setLocalSalaryConfigs] = useState<Record<string, SalaryConfig>>({})
 
-  // Datos cargados por server action al seleccionar barbero
+  // Datos cargados por server action al seleccionar persona
   const [reports, setReports] = useState<SalaryReport[]>([])
   const [groupedHistory, setGroupedHistory] = useState<GroupedBatchMonth[]>([])
   const [loadingData, setLoadingData] = useState(false)
@@ -227,17 +231,17 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
   const [payMethod, setPayMethod] = useState<'cash' | 'transfer' | 'card' | 'other'>('cash')
   const [payAccountId, setPayAccountId] = useState<string>('')
 
-  // ─── Carga de datos por barbero ────────────────────────────────────────────
+  // ─── Carga de datos por persona ────────────────────────────────────────────
 
-  const loadBarberData = useCallback(
-    async (barberId: string) => {
-      if (!barberId || !selectedBranchId) return
+  const loadStaffData = useCallback(
+    async (staffId: string) => {
+      if (!staffId || !selectedBranchId) return
       setLoadingData(true)
       setSelectedIds(new Set())
       try {
         const [reportsRes, groupedRes] = await Promise.all([
-          getSalaryReports(barberId, selectedBranchId),
-          getPaymentBatchesGrouped(barberId, selectedBranchId),
+          getSalaryReports(staffId, selectedBranchId),
+          getPaymentBatchesGrouped(staffId, selectedBranchId),
         ])
         setReports(reportsRes.error ? [] : (reportsRes.data ?? []))
         setGroupedHistory(groupedRes.data ?? [])
@@ -248,23 +252,23 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
     [selectedBranchId]
   )
 
-  // Carga datos al cambiar de barbero activo o de sucursal
+  // Carga datos al cambiar de persona activa o de sucursal
   useEffect(() => {
-    const targetId = activeBarberId ?? branchBarbers[0]?.id
-    if (targetId) loadBarberData(targetId)
-  }, [activeBarberId, selectedBranchId]) // eslint-disable-line react-hooks/exhaustive-deps
+    const targetId = activeStaffId ?? branchStaff[0]?.id
+    if (targetId) loadStaffData(targetId)
+  }, [activeStaffId, selectedBranchId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cuando cambia la sucursal, resetea el barbero activo
+  // Cuando cambia la sucursal, resetea la persona activa
   useEffect(() => {
-    setActiveBarberId(null)
+    setActiveStaffId(null)
     setReports([])
     setGroupedHistory([])
     setSelectedIds(new Set())
   }, [selectedBranchId])
 
-  // ─── Totales pendientes por barbero (para sidebar) ─────────────────────────
-  // Se recalcula localmente en base a los reportes ya cargados para el barbero activo.
-  // Para los demás barberos no tenemos los totales (se cargan on-demand).
+  // ─── Totales pendientes por persona (para sidebar) ─────────────────────────
+  // Se recalcula localmente en base a los reportes ya cargados para la persona activa.
+  // Para los demás miembros no tenemos los totales (se cargan on-demand).
   const pendingTotal = reports.reduce((acc, r) => acc + r.amount, 0)
 
   // ─── Checkboxes ───────────────────────────────────────────────────────────
@@ -294,10 +298,10 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
     batch: SalaryPaymentBatch,
     batchReports: SalaryReport[]
   ) {
-    if (!currentBarber) return
+    if (!currentStaff) return
     try {
       await exportPaymentReceiptPDF({
-        barberName: currentBarber.full_name,
+        barberName: currentStaff.full_name,
         batchDate: batch.paid_at,
         totalAmount: batch.total_amount,
         notes: batch.notes,
@@ -318,25 +322,25 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
   // ─── Acciones ─────────────────────────────────────────────────────────────
 
   function openConfig() {
-    if (!activeBarber) return
-    const cfg: SalaryConfig | undefined = localSalaryConfigs[activeBarber.id] ?? activeBarber.salary_configs?.[0]
+    if (!activeStaff) return
+    const cfg: SalaryConfig | undefined = localSalaryConfigs[activeStaff.id] ?? activeStaff.salary_configs?.[0]
     setConfigForm({
       scheme: (cfg?.scheme ?? 'fixed') as SalaryScheme,
       base_amount: String(cfg?.base_amount ?? 0),
-      commission_pct: String(cfg?.commission_pct ?? activeBarber.commission_pct ?? 0),
+      commission_pct: String(cfg?.commission_pct ?? activeStaff.commission_pct ?? 0),
     })
     setConfigOpen(true)
   }
 
   function handleSaveConfig(e: React.FormEvent) {
     e.preventDefault()
-    if (!activeBarber) return
+    if (!activeStaff) return
     const scheme = configForm.scheme
     const baseAmount = parseFloat(configForm.base_amount)
     const commissionPct = parseFloat(configForm.commission_pct)
     startTransition(async () => {
       const r = await upsertSalaryConfig(
-        activeBarber.id,
+        activeStaff.id,
         scheme,
         baseAmount,
         commissionPct
@@ -345,12 +349,12 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
         toast.error(r.error)
       } else {
         // Actualizar estado local inmediatamente sin esperar router.refresh
-        const existingConfig = localSalaryConfigs[activeBarber.id] ?? activeBarber.salary_configs?.[0]
+        const existingConfig = localSalaryConfigs[activeStaff.id] ?? activeStaff.salary_configs?.[0]
         setLocalSalaryConfigs((prev) => ({
           ...prev,
-          [activeBarber.id]: {
+          [activeStaff.id]: {
             id: existingConfig?.id ?? '',
-            staff_id: activeBarber.id,
+            staff_id: activeStaff.id,
             scheme,
             base_amount: baseAmount,
             commission_pct: commissionPct,
@@ -366,11 +370,11 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
   }
 
   function handleGenerateFixedSalary() {
-    if (!activeBarber || !selectedBranchId) return
+    if (!activeStaff || !selectedBranchId) return
     setFixedSalaryError(null)
     startTransition(async () => {
       const r = await generateBaseSalaryReport(
-        activeBarber.id,
+        activeStaff.id,
         selectedBranchId,
         fixedSalaryPeriod.start,
         fixedSalaryPeriod.end
@@ -380,17 +384,17 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
       } else {
         toast.success('Sueldo fijo registrado como pendiente')
         setFixedSalaryDialogOpen(false)
-        await loadBarberData(activeBarber.id)
+        await loadStaffData(activeStaff.id)
       }
     })
   }
 
   function handleGenerateCommission() {
-    if (!activeBarber || !selectedBranchId) return
+    if (!activeStaff || !selectedBranchId) return
     setCommissionError(null)
     startTransition(async () => {
       const r = await generateCommissionReportsInRange(
-        activeBarber.id,
+        activeStaff.id,
         selectedBranchId,
         commissionRange.start,
         commissionRange.end
@@ -406,14 +410,14 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
         toast.success(skipped > 0 ? `${msg} (${skipped} día${skipped === 1 ? '' : 's'} ya tenía${skipped === 1 ? '' : 'n'} reporte)` : msg)
         setCommissionDialogOpen(false)
         setCommissionRange({ start: firstOfMonthIso(), end: todayIso() })
-        await loadBarberData(activeBarber.id)
+        await loadStaffData(activeStaff.id)
       }
     })
   }
 
   function handleCreateBonus(e: React.FormEvent) {
     e.preventDefault()
-    if (!activeBarber || !selectedBranchId) return
+    if (!activeStaff || !selectedBranchId) return
     const amount = parseFloat(bonusForm.amount)
     if (!amount || amount <= 0) {
       toast.error('El monto debe ser mayor a cero')
@@ -421,7 +425,7 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
     }
     startTransition(async () => {
       const r = await createManualSalaryReport(
-        activeBarber.id,
+        activeStaff.id,
         selectedBranchId,
         bonusForm.type,
         amount,
@@ -436,7 +440,7 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
         )
         setBonusDialogOpen(false)
         setBonusForm({ type: 'bonus', amount: '', notes: '', date: todayIso() })
-        await loadBarberData(activeBarber.id)
+        await loadStaffData(activeStaff.id)
       }
     })
   }
@@ -448,24 +452,24 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
         toast.error(r.error)
       } else {
         toast.success('Reporte eliminado')
-        if (activeBarber) await loadBarberData(activeBarber.id)
+        if (activeStaff) await loadStaffData(activeStaff.id)
       }
     })
   }
 
   function handlePay() {
-    if (!activeBarber || !selectedBranchId || selectedIds.size === 0) return
+    if (!activeStaff || !selectedBranchId || selectedIds.size === 0) return
     // Capturar reportes seleccionados antes de la transición
     const selectedReports: ReceiptReport[] = reports
       .filter((r) => selectedIds.has(r.id))
       .map((r) => ({ id: r.id, type: r.type, amount: r.amount, report_date: r.report_date, notes: r.notes }))
     const currentNotes = payNotes || null
-    const barberName = activeBarber.full_name
+    const barberName = activeStaff.full_name
 
     startTransition(async () => {
       const r = await paySelectedReports(
         Array.from(selectedIds),
-        activeBarber.id,
+        activeStaff.id,
         selectedBranchId,
         payNotes || undefined,
         payMethod,
@@ -493,16 +497,16 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
           console.error('Error al generar recibo PDF:', err)
           toast.error('El pago se registró pero hubo un error al generar el recibo')
         }
-        await loadBarberData(activeBarber.id)
+        await loadStaffData(activeStaff.id)
       }
     })
   }
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
-  const currentBarber = activeBarber
+  const currentStaff = activeStaff
   const currentConfig: SalaryConfig | undefined =
-    (currentBarber ? localSalaryConfigs[currentBarber.id] : undefined) ?? currentBarber?.salary_configs?.[0]
+    (currentStaff ? localSalaryConfigs[currentStaff.id] : undefined) ?? currentStaff?.salary_configs?.[0]
 
   return (
     <div className="flex flex-col h-full gap-0 -m-3 lg:-m-0">
@@ -526,31 +530,31 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
       {/* Layout de dos columnas */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
 
-        {/* ── Sidebar de barberos ─────────────────────────────────────────── */}
+        {/* ── Sidebar de personal ─────────────────────────────────────────── */}
         <aside className={cn(
           'w-full lg:w-60 shrink-0 border-r border-border flex flex-col overflow-hidden',
-          activeBarberId ? 'hidden lg:flex' : 'flex'
+          activeStaffId ? 'hidden lg:flex' : 'flex'
         )}>
           <div className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider border-b border-border">
-            Barberos
+            Personal
           </div>
-          {branchBarbers.length === 0 ? (
+          {branchStaff.length === 0 ? (
             <div className="p-4 text-sm text-muted-foreground text-center mt-4">
-              Sin barberos en esta sucursal
+              Sin personal en esta sucursal
             </div>
           ) : (
             <ScrollArea className="flex-1">
               <div className="py-1">
-                {branchBarbers.map((barber) => {
+                {branchStaff.map((member) => {
                   const isActive =
-                    currentBarber?.id === barber.id ||
-                    (!activeBarberId && barber.id === branchBarbers[0]?.id)
-                  const cfg: SalaryConfig | undefined = localSalaryConfigs[barber.id] ?? barber.salary_configs?.[0]
+                    currentStaff?.id === member.id ||
+                    (!activeStaffId && member.id === branchStaff[0]?.id)
+                  const cfg: SalaryConfig | undefined = localSalaryConfigs[member.id] ?? member.salary_configs?.[0]
 
                   return (
                     <button
-                      key={barber.id}
-                      onClick={() => setActiveBarberId(barber.id)}
+                      key={member.id}
+                      onClick={() => setActiveStaffId(member.id)}
                       className={cn(
                         'w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors relative',
                         'hover:bg-accent/50',
@@ -563,7 +567,7 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
                       )}
                       {/* Avatar inicial */}
                       <div className="size-8 rounded-full bg-muted flex items-center justify-center text-xs font-semibold shrink-0">
-                        {barber.full_name.charAt(0).toUpperCase()}
+                        {member.full_name.charAt(0).toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p
@@ -572,7 +576,7 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
                             isActive ? 'text-foreground' : 'text-muted-foreground'
                           )}
                         >
-                          {barber.full_name}
+                          {member.full_name}
                         </p>
                         {cfg && (
                           <p className="text-xs text-muted-foreground truncate">
@@ -580,7 +584,7 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
                           </p>
                         )}
                       </div>
-                      {/* Badge total pendiente (solo barbero activo) */}
+                      {/* Badge total pendiente (solo persona activa) */}
                       {isActive && pendingTotal !== 0 && (
                         <Badge
                           variant="secondary"
@@ -600,30 +604,30 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
         {/* ── Panel principal ──────────────────────────────────────────────── */}
         <main className={cn(
           'flex-1 flex flex-col min-w-0 overflow-hidden',
-          activeBarberId ? 'flex' : 'hidden lg:flex'
+          activeStaffId ? 'flex' : 'hidden lg:flex'
         )}>
-          {!currentBarber ? (
+          {!currentStaff ? (
             <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
-              Seleccioná una sucursal con barberos
+              Seleccioná una sucursal con personal
             </div>
           ) : (
             <>
-              {/* Header del barbero */}
+              {/* Header de la persona */}
               <div className="flex items-center justify-between px-4 lg:px-6 py-3 lg:py-4 border-b border-border shrink-0">
                 <div className="flex items-center gap-3">
                   <Button
                     variant="ghost"
                     size="icon"
                     className="lg:hidden size-8 -ml-1"
-                    onClick={() => setActiveBarberId(null)}
+                    onClick={() => setActiveStaffId(null)}
                   >
                     <ChevronLeft className="size-4" />
                   </Button>
                   <div className="size-9 rounded-full bg-muted flex items-center justify-center text-sm font-semibold">
-                    {currentBarber.full_name.charAt(0).toUpperCase()}
+                    {currentStaff.full_name.charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <p className="font-semibold text-sm">{currentBarber.full_name}</p>
+                    <p className="font-semibold text-sm">{currentStaff.full_name}</p>
                     {currentConfig ? (
                       <Badge
                         variant="outline"
@@ -1016,10 +1020,10 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Esquema salarial — {currentBarber?.full_name}
+              Esquema salarial — {currentStaff?.full_name}
             </DialogTitle>
             <DialogDescription>
-              Configurá cómo se calcula el sueldo de este barbero.
+              Configurá cómo se calcula el sueldo de esta persona.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSaveConfig} className="space-y-5">
@@ -1103,7 +1107,7 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
           <DialogHeader>
             <DialogTitle>Registrar sueldo fijo</DialogTitle>
             <DialogDescription>
-              Genera un reporte de sueldo base de {formatCurrency(currentConfig?.base_amount ?? 0)} para {currentBarber?.full_name}.
+              Genera un reporte de sueldo base de {formatCurrency(currentConfig?.base_amount ?? 0)} para {currentStaff?.full_name}.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -1183,7 +1187,7 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
           <DialogHeader>
             <DialogTitle>Generar comisiones</DialogTitle>
             <DialogDescription>
-              Generá los reportes de comisión de {currentBarber?.full_name} para un rango de fechas. Se crea un reporte por cada día con comisiones dentro del rango.
+              Generá los reportes de comisión de {currentStaff?.full_name} para un rango de fechas. Se crea un reporte por cada día con comisiones dentro del rango.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -1254,7 +1258,7 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
           <DialogHeader>
             <DialogTitle>Nuevo Bono / Adelanto</DialogTitle>
             <DialogDescription>
-              Registrá un bono (suma) o adelanto (descuento) para {currentBarber?.full_name}.
+              Registrá un bono (suma) o adelanto (descuento) para {currentStaff?.full_name}.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreateBonus} className="space-y-4">
@@ -1354,7 +1358,7 @@ export function SueldosClient({ branches, barbers, paymentAccounts }: Props) {
             <DialogTitle>Confirmar pago</DialogTitle>
             <DialogDescription>
               Vas a registrar el pago de {selectedIds.size} reporte
-              {selectedIds.size !== 1 ? 's' : ''} para {currentBarber?.full_name}.
+              {selectedIds.size !== 1 ? 's' : ''} para {currentStaff?.full_name}.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">

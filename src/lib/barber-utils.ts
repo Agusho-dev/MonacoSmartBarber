@@ -7,6 +7,7 @@ export function buildBarberAvgMinutes(
 
   for (const v of visits) {
     if (!v.started_at || !v.completed_at) continue
+    if (!v.barber_id) continue
     const mins =
       (new Date(v.completed_at).getTime() - new Date(v.started_at).getTime()) /
       60_000
@@ -173,6 +174,28 @@ export function getLoadColor(totalLoad: number): string {
 
 export type DynamicQueueEntry = QueueEntry & { _is_dynamically_assigned?: boolean }
 
+/**
+ * Devuelve los IDs de barberos con un descanso activo
+ * (ghost row con `is_break=true` y `status='in_progress'`).
+ *
+ * Esta es la única fuente de verdad de "en descanso" en el cliente: el campo
+ * `staff.status` no se mantiene actualizado (su enum es de un solo valor
+ * `available`). El descanso real vive en `queue_entries`.
+ *
+ * Importante: un ghost en `waiting` NO cuenta — significa "descanso aprobado
+ * pero encolado N cortes adelante", durante el cual el barbero todavía recibe
+ * clientes (con `cuts_before_break > 0`).
+ */
+export function getBarbersOnBreakIds(entries: QueueEntry[]): Set<string> {
+  const onBreak = new Set<string>()
+  for (const e of entries) {
+    if (e.is_break && e.status === 'in_progress' && e.barber_id) {
+      onBreak.add(e.barber_id)
+    }
+  }
+  return onBreak
+}
+
 export function isBarberBlockedByShiftEnd(
   barber: Staff,
   _entries: QueueEntry[],
@@ -282,6 +305,19 @@ export function assignDynamicBarbers(
   barberAvgMinutes: Record<string, number> = {}
 ): DynamicQueueEntry[] {
   const result: DynamicQueueEntry[] = []
+
+  const barbersOnBreak = new Set<string>()
+  // Para cada barbero, la priority_order del descanso pendiente más viejo
+  // (si tiene ghost waiting). Si el ghost tiene priority menor que un cliente
+  // candidato, ese barbero NO debería recibir ese cliente — su ghost va primero.
+  const barberPendingBreakPriority = new Map<string, number>()
+  // Para cada barbero, la priority_order del cliente asignado más viejo waiting.
+  // Sirve para saber si su ghost ya está "vencido" (sin clientes asignados antes).
+  const barberOldestAssignedPriority = new Map<string, number>()
+  // Cantidad de breaks encolados (waiting) por barbero. Sumamos `avg` por cada uno
+  // al ETA del barbero en `etaOverrides`, así un break encolado en N cortes penaliza
+  // la carga aparente del barbero igual que un cliente real.
+  const barberPendingBreakCount = new Map<string, number>()
   const unassigned: QueueEntry[] = []
 
   for (const entry of entries) {
@@ -289,15 +325,54 @@ export function assignDynamicBarbers(
       unassigned.push(entry)
     } else {
       result.push(entry)
+      if (entry.barber_id) {
+        if (entry.status === 'in_progress' && entry.is_break) {
+          barbersOnBreak.add(entry.barber_id)
+        }
+        if (entry.status === 'waiting') {
+          const ts = new Date(entry.priority_order).getTime()
+          if (entry.is_break) {
+            const prev = barberPendingBreakPriority.get(entry.barber_id)
+            if (prev === undefined || ts < prev) {
+              barberPendingBreakPriority.set(entry.barber_id, ts)
+            }
+            barberPendingBreakCount.set(
+              entry.barber_id,
+              (barberPendingBreakCount.get(entry.barber_id) ?? 0) + 1
+            )
+          } else {
+            const prev = barberOldestAssignedPriority.get(entry.barber_id)
+            if (prev === undefined || ts < prev) {
+              barberOldestAssignedPriority.set(entry.barber_id, ts)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Barberos cuyo descanso pendiente debería arrancar antes de tomar dinámicos:
+  // tienen ghost waiting y NO tienen clientes asignados específicamente con
+  // priority menor. Si no hay nada que los "tape", el ghost es lo siguiente.
+  const barbersWithBreakReady = new Set<string>()
+  for (const [barberId, breakTs] of barberPendingBreakPriority) {
+    const oldestAssigned = barberOldestAssignedPriority.get(barberId)
+    if (oldestAssigned === undefined || oldestAssigned >= breakTs) {
+      barbersWithBreakReady.add(barberId)
     }
   }
 
   // ETA inicial por barbero según las entries reales (sin las pre-asignaciones
   // que vamos a hacer). Cada vez que pre-asignamos un dinámico, sumamos `avg` al ETA
   // del elegido para que el siguiente unassigned vea la carga incrementada.
+  // Los breaks encolados (waiting) suman `avg` por cada uno para que un barbero con
+  // descanso pendiente no se vea más libre que sus pares.
   const etaOverrides = new Map<string, number>()
   for (const b of barbers) {
-    etaOverrides.set(b.id, computeBarberEtaMinutes(b, entries, barberAvgMinutes, currentTime))
+    const baseEta = computeBarberEtaMinutes(b, entries, barberAvgMinutes, currentTime)
+    const avg = barberAvgMinutes[b.id] ?? barberAvgMinutes.__fallback ?? 25
+    const breakPenalty = (barberPendingBreakCount.get(b.id) ?? 0) * avg
+    etaOverrides.set(b.id, baseEta + breakPenalty)
   }
 
   unassigned.sort((a, b) => a.position - b.position)
@@ -306,7 +381,9 @@ export function assignDynamicBarbers(
     const eligibleBarbers = barbers.filter(b =>
       !b.hidden_from_checkin &&
       !isBarberBlockedByShiftEnd(b, result, schedules, currentTime, marginMinutes) &&
-      !notClockedInIds.has(b.id)
+      !notClockedInIds.has(b.id) &&
+      !barbersOnBreak.has(b.id) &&
+      !barbersWithBreakReady.has(b.id)
     )
 
     // Sin barberos elegibles (sin fichaje, ocultos, bloqueados por fin de turno, etc.),

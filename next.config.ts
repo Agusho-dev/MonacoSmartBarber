@@ -1,7 +1,13 @@
 import type { NextConfig } from "next";
+import path from "node:path";
 
 const nextConfig: NextConfig = {
-
+  // Fijar el workspace root explícitamente: hay un package-lock.json huérfano
+  // en el directorio padre (MSB_FULL/) que hacía que Turbopack inferiera mal
+  // el root y rompiera la resolución de tailwindcss.
+  turbopack: {
+    root: path.resolve(__dirname),
+  },
 
   /* config options here */
   reactCompiler: true,

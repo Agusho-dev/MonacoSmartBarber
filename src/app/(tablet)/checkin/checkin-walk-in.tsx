@@ -49,6 +49,7 @@ import {
   mobileStatusLabels,
   pickBestBarber,
   formatWaitTime,
+  getBarbersOnBreakIds,
 } from '@/lib/barber-utils'
 import { FaceCamera } from '@/components/checkin/face-camera'
 import { FaceEnrollment } from '@/components/checkin/face-enrollment'
@@ -413,20 +414,10 @@ export function CheckinWalkIn() {
           if (!cancelled) loadBarberData(branchId)
         }
       )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'attendance_logs',
-          filter: `branch_id=eq.${branchId}`,
-        },
-        () => {
-          if (!cancelled) loadBarberData(branchId)
-        }
-      )
       .subscribe((status) => {
-        // Re-fetch everything on reconnection
+        // Re-fetch everything on reconnection. attendance_logs salió del
+        // publication realtime (mig 124) por carga; el clock-in/out se
+        // re-evalúa al reconectar el WS y al recargar el kiosk.
         if (status === 'SUBSCRIBED' && !cancelled) {
           loadBarberData(branchId)
         }
@@ -631,14 +622,21 @@ export function CheckinWalkIn() {
     return assignDynamicBarbers(queueEntries, barbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs, barberAvgMinutes)
   }, [queueEntries, barbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs, barberAvgMinutes])
 
-
+  // Barberos con descanso activo (ghost is_break=true && status='in_progress').
+  // Estos quedan visibles en el kiosk como "En descanso" pero NO son seleccionables
+  // ni elegibles para "Menor espera" ni para asignación dinámica.
+  const barbersOnBreak = useMemo(
+    () => getBarbersOnBreakIds(queueEntries),
+    [queueEntries]
+  )
 
   // Barbero "Menor espera" del CTA: ranking unificado con `assignDynamicBarbers`
   // (ETA → cortes hoy → último corte → id), filtrando barberos no aptos.
   const minWaitBarber = useMemo(() => {
     const active = barbers.filter(b =>
       !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now, shiftEndMargin) &&
-      !notClockedInBarbers.has(b.id)
+      !notClockedInBarbers.has(b.id) &&
+      !barbersOnBreak.has(b.id)
     )
     return pickBestBarber(active, {
       entries: queueEntries,
@@ -647,12 +645,19 @@ export function CheckinWalkIn() {
       dailyServiceCounts,
       lastCompletedAt,
     })
-  }, [barbers, queueEntries, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers, dailyServiceCounts, lastCompletedAt])
+  }, [barbers, queueEntries, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers, barbersOnBreak, dailyServiceCounts, lastCompletedAt])
 
   // Barberos activos para cálculo de posición optimista
+  // Excluye barberos en descanso para que el ETA del cliente no asuma capacidad
+  // que no existe (no van a tomar dinámicos hasta que terminen el descanso).
   const activeBarberCount = useMemo(() => {
-    return barbers.filter(b => b.is_active && !b.hidden_from_checkin && !notClockedInBarbers.has(b.id)).length
-  }, [barbers, notClockedInBarbers])
+    return barbers.filter(b =>
+      b.is_active &&
+      !b.hidden_from_checkin &&
+      !notClockedInBarbers.has(b.id) &&
+      !barbersOnBreak.has(b.id)
+    ).length
+  }, [barbers, notClockedInBarbers, barbersOnBreak])
 
   // Posición optimista del cliente en la fila (considerando paralelismo)
   const effectiveAhead = useMemo(() => {
@@ -663,18 +668,24 @@ export function CheckinWalkIn() {
   // Nivel de disponibilidad global (1-4) usado por el CTA "Menor espera".
   // La vista por barbero usa directamente la lógica del mobile
   // (getMobileBarberStatus + ETA + fila) en lugar de este nivel agregado.
+  // Los barberos en descanso quedan fuera del cálculo: no aportan capacidad
+  // disponible y no deben hacer ver "espera baja" cuando en realidad nadie
+  // puede atender.
   const globalAvailability = useMemo((): 1 | 2 | 3 | 4 => {
-    const activeBarbersList = barbers.filter(b => !notClockedInBarbers.has(b.id))
+    const activeBarbersList = barbers.filter(b =>
+      !notClockedInBarbers.has(b.id) &&
+      !barbersOnBreak.has(b.id)
+    )
     const availableCount = activeBarbersList.filter(b =>
       getBarberStats(b, dynamicEntries, barberAvgMinutes).status === 'available'
     ).length
-    const totalWaiting = dynamicEntries.filter(e => e.status === 'waiting').length
+    const totalWaiting = dynamicEntries.filter(e => e.status === 'waiting' && !e.is_break).length
 
     if (availableCount >= 1) return 1
     if (totalWaiting === 0) return 2
     if (activeBarbersList.length === 0 || totalWaiting < 2 * activeBarbersList.length) return 3
     return 4
-  }, [barbers, notClockedInBarbers, dynamicEntries, barberAvgMinutes])
+  }, [barbers, notClockedInBarbers, barbersOnBreak, dynamicEntries, barberAvgMinutes])
 
   // ── Face ID handlers ──
 
@@ -1059,19 +1070,27 @@ export function CheckinWalkIn() {
     _showExpand = true
   ) => {
     const isNotClockedIn = notClockedInBarbers.has(barber.id)
+    const isOnBreak = barbersOnBreak.has(barber.id)
     const stats = getBarberStats(barber, dynamicEntries, barberAvgMinutes, now)
-    const mobileStatus = getMobileBarberStatus(barber, stats.attending)
+    // Override de status: si tiene un ghost de descanso activo, mostrar 'descanso'
+    // independientemente de lo que diga staff.status (cuyo enum no se mantiene).
+    // La fuente de verdad es queue_entries (mig 127).
+    const mobileStatus = isOnBreak
+      ? 'descanso'
+      : getMobileBarberStatus(barber, stats.attending)
     const palette = mobileStatusColors[mobileStatus]
     const statusLabel = mobileStatusLabels[mobileStatus]
 
     // Ring color alineado con el estado
     const ringColor = isNotClockedIn
       ? 'ring-orange-500/60'
-      : mobileStatus === 'disponible'
-        ? 'ring-emerald-500/60'
-        : mobileStatus === 'ocupado'
-          ? 'ring-amber-500/60'
-          : 'ring-zinc-500/60'
+      : isOnBreak
+        ? 'ring-zinc-500/60'
+        : mobileStatus === 'disponible'
+          ? 'ring-emerald-500/60'
+          : mobileStatus === 'ocupado'
+            ? 'ring-amber-500/60'
+            : 'ring-zinc-500/60'
 
     // Línea de subtítulo: igual al mobile
     //   - ocupado: "~X min de espera" si hay fila, si no 'Atendiendo ahora'
@@ -1079,13 +1098,15 @@ export function CheckinWalkIn() {
     //   - descanso: 'En descanso'
     const subtitle = isNotClockedIn
       ? null
-      : mobileStatus === 'ocupado'
-        ? stats.eta > 0
-          ? `Espera ${formatWaitTime(stats.eta)}`
-          : 'Atendiendo ahora'
-        : mobileStatus === 'descanso'
-          ? 'En descanso'
-          : 'Libre ahora'
+      : isOnBreak
+        ? 'En descanso'
+        : mobileStatus === 'ocupado'
+          ? stats.eta > 0
+            ? `Espera ${formatWaitTime(stats.eta)}`
+            : 'Atendiendo ahora'
+          : mobileStatus === 'descanso'
+            ? 'En descanso'
+            : 'Libre ahora'
 
     // Queue "tijeras" — max 5 visibles + contador
     const queueAhead = stats.waiting
@@ -1096,7 +1117,9 @@ export function CheckinWalkIn() {
       <GlassRing key={barber.id} halo={false}>
         <button
           onClick={() => onSelect(barber.id)}
-          disabled={submitting}
+          disabled={submitting || isOnBreak}
+          aria-disabled={isOnBreak || undefined}
+          aria-label={isOnBreak ? `${barber.full_name} (en descanso, no disponible)` : barber.full_name}
           className={cn(
             'group relative w-full overflow-hidden rounded-2xl border p-4 md:p-5 text-left transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2',
             isLightBg
@@ -1197,9 +1220,18 @@ export function CheckinWalkIn() {
   }
 
   const renderBarberList = (onSelect: (barberId: string) => void, showExpand = true) => {
+    // Barberos disponibles para SELECCIONAR: fichados, no bloqueados por fin de
+    // turno y NO en descanso. Los en descanso se muestran en su propia sección
+    // (deshabilitados) para que el cliente entienda por qué su barbero no aparece.
     const availableBarbers = barbers.filter(b =>
       !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now, shiftEndMargin) &&
-      !notClockedInBarbers.has(b.id)
+      !notClockedInBarbers.has(b.id) &&
+      !barbersOnBreak.has(b.id)
+    )
+    const onBreakBarbers = barbers.filter(b =>
+      !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now, shiftEndMargin) &&
+      !notClockedInBarbers.has(b.id) &&
+      barbersOnBreak.has(b.id)
     )
     const notArrivedBarbers = barbers.filter(b =>
       !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now, shiftEndMargin) &&
@@ -1337,6 +1369,23 @@ export function CheckinWalkIn() {
                   onSelect(id);
                 }, showExpand))}
               </div>
+
+              {onBreakBarbers.length > 0 && (
+                <>
+                  <div className={cn('w-full h-px my-6', isLightBg ? 'bg-zinc-200' : 'bg-white/8')} />
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className={cn('h-px flex-1', isLightBg ? 'bg-zinc-200' : 'bg-white/10')} />
+                    <h4 className={cn('text-xs font-bold uppercase tracking-widest shrink-0', isLightBg ? 'text-zinc-400' : 'text-white/40')}>En descanso</h4>
+                    <div className={cn('h-px flex-1', isLightBg ? 'bg-zinc-200' : 'bg-white/10')} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 md:gap-4 pb-4">
+                    {onBreakBarbers.map((barber) => renderBarberCard(barber, () => {
+                      // No-op: la card está deshabilitada por isOnBreak.
+                      // El handler se mantiene por la firma del prop.
+                    }, showExpand))}
+                  </div>
+                </>
+              )}
 
               {notArrivedBarbers.length > 0 && (
                 <>

@@ -63,6 +63,8 @@ const REPORT_TYPE_LABELS: Record<string, string> = {
   bonus: 'Bono',
   advance: 'Adelanto',
   hybrid_deficit: 'Déficit híbrido',
+  product_commission: 'Comisión producto',
+  tip: 'Propina',
 }
 
 export interface ReceiptReport {
