@@ -861,7 +861,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
     const dayStart = new Date()
     dayStart.setHours(0, 0, 0, 0)
 
-    const [schedRes, settingsRes, monthlyVisitsRes, lastVisitsRes, attendanceRes] =
+    const [schedRes, settingsRes, todayVisitsRes, lastVisitsRes, attendanceRes] =
       await Promise.all([
         supabase
           .from('staff_schedules')
@@ -893,9 +893,9 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
         .shift_end_margin_minutes
       if (typeof margin === 'number' && margin >= 0) setShiftEndMargin(margin)
     }
-    if (monthlyVisitsRes?.data) {
+    if (todayVisitsRes?.data) {
       const counts: Record<string, number> = {}
-      for (const v of monthlyVisitsRes.data as { barber_id: string }[])
+      for (const v of todayVisitsRes.data as { barber_id: string }[])
         counts[v.barber_id] = (counts[v.barber_id] || 0) + 1
       setDailyServiceCounts(counts)
     }

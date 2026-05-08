@@ -350,7 +350,7 @@ export function TvClient({
   const dynamicEntries = useMemo(() => {
     const branchEntries = selectedBranchId ? entries.filter(e => e.branch_id === selectedBranchId) : entries
     const branchBarbers = selectedBranchId ? liveBarbers.filter(b => b.branch_id === selectedBranchId) : liveBarbers
-    return assignDynamicBarbers(branchEntries, branchBarbers as unknown as Staff[], schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs)
+    return assignDynamicBarbers(branchEntries, branchBarbers as unknown as Staff[], schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs, {})
   }, [entries, liveBarbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, selectedBranchId, dynamicCooldownMs])
 
   const waitingEntries = useMemo(

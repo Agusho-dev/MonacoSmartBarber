@@ -406,7 +406,7 @@ export function QueuePanel({
   const assignmentTime = assignmentTimeRef.current
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(entries, allBarbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs)
+    return assignDynamicBarbers(entries, allBarbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs, {})
   }, [entries, allBarbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs])
 
   // My active break (ghost entry that is in_progress)

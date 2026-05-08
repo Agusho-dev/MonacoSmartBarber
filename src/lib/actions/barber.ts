@@ -306,7 +306,7 @@ export async function fetchBarberDayStats(staffId: string, branchId: string) {
 
 export async function fetchBranchAssignmentData(branchId: string) {
   const orgId = await getCurrentOrgId()
-  if (!orgId) return { dailyServiceCounts: {}, lastServiceAt: {} }
+  if (!orgId) return { dailyServiceCounts: {}, lastCompletedAt: {} }
 
   const supabase = createAdminClient()
 
@@ -317,7 +317,7 @@ export async function fetchBranchAssignmentData(branchId: string) {
     .eq('id', branchId)
     .eq('organization_id', orgId)
     .maybeSingle()
-  if (!branchCheck) return { dailyServiceCounts: {}, lastServiceAt: {} }
+  if (!branchCheck) return { dailyServiceCounts: {}, lastCompletedAt: {} }
 
   const dayStart = new Date()
   dayStart.setHours(0, 0, 0, 0)
