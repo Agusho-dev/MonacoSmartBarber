@@ -47,7 +47,6 @@ import {
   getMobileBarberStatus,
   mobileStatusColors,
   mobileStatusLabels,
-  formatWaitTime,
   getBarbersOnBreakIds,
 } from '@/lib/barber-utils'
 import { FaceCamera } from '@/components/checkin/face-camera'
@@ -1110,18 +1109,12 @@ export function CheckinWalkIn() {
             ? 'ring-amber-500/60'
             : 'ring-zinc-500/60'
 
-    // Línea de subtítulo: igual al mobile
-    //   - ocupado: "~X min de espera" si hay fila, si no 'Atendiendo ahora'
-    //   - disponible: 'Libre ahora'
-    //   - descanso: 'En descanso'
     const subtitle = isNotClockedIn
       ? null
       : isOnBreak
         ? 'En descanso'
         : mobileStatus === 'ocupado'
-          ? stats.eta > 0
-            ? `Espera ${formatWaitTime(stats.eta)}`
-            : 'Atendiendo ahora'
+          ? 'Atendiendo ahora'
           : mobileStatus === 'descanso'
             ? 'En descanso'
             : 'Libre ahora'
