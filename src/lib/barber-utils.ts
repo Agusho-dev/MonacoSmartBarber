@@ -36,22 +36,47 @@ export interface BarberStats {
   status: BarberStatus
 }
 
+// ETA en minutos hasta que el barbero pueda atender al próximo cliente nuevo:
+//   waiting_count * avg + remaining_current
+// donde remaining_current descuenta el tiempo ya transcurrido del servicio in_progress.
+export function computeBarberEtaMinutes(
+  barber: Staff,
+  entries: QueueEntry[],
+  avgMap: Record<string, number>,
+  now: number
+): number {
+  const avg = avgMap[barber.id] ?? avgMap.__fallback ?? 25
+  let waiting = 0
+  let inProgress: QueueEntry | undefined
+  for (const e of entries) {
+    if (e.barber_id !== barber.id || e.is_break) continue
+    if (e.status === 'waiting') waiting++
+    else if (e.status === 'in_progress') inProgress = e
+  }
+  let remaining = 0
+  if (inProgress) {
+    const startedAt = inProgress.started_at ? new Date(inProgress.started_at).getTime() : null
+    const elapsedMin = startedAt ? Math.max(0, (now - startedAt) / 60_000) : 0
+    remaining = Math.max(0, avg - elapsedMin)
+  }
+  return waiting * avg + remaining
+}
+
 export function getBarberStats(
   barber: Staff,
   entries: QueueEntry[],
-  avgMap: Record<string, number>
+  avgMap: Record<string, number>,
+  now: number = Date.now()
 ): BarberStats {
   const avg = avgMap[barber.id] ?? avgMap.__fallback ?? 25
   const waiting = entries.filter(
-    (e) => e.barber_id === barber.id && e.status === 'waiting'
+    (e) => e.barber_id === barber.id && e.status === 'waiting' && !e.is_break
   ).length
   const attending = entries.some(
-    (e) => e.barber_id === barber.id && e.status === 'in_progress'
+    (e) => e.barber_id === barber.id && e.status === 'in_progress' && !e.is_break
   )
   const totalLoad = waiting + (attending ? 1 : 0)
-  const eta = Math.round(totalLoad * avg)
-
-  // Paused status was removed
+  const eta = Math.round(computeBarberEtaMinutes(barber, entries, avgMap, now))
 
   let status: BarberStatus
   if (attending) {
@@ -219,6 +244,54 @@ export function isBarberBlockedByShiftEnd(
   return true
 }
 
+// Contexto necesario para rankear barberos al asignar un cliente dinámico.
+// `etaOverrides` permite mantener un ETA mutable cuando se pre-asignan varios
+// dinámicos en cadena (cada asignación suma `avg` al barbero elegido).
+export interface BarberRankingContext {
+  entries: QueueEntry[]
+  avgMap: Record<string, number>
+  now: number
+  dailyServiceCounts: Record<string, number>
+  lastCompletedAt: Record<string, string>
+  etaOverrides?: Map<string, number>
+}
+
+// Orden de prioridad (todos ASC):
+//   1. ETA hasta atender al próximo (libre = 0; ocupado = max(0, avg-elapsed) + waiting*avg)
+//   2. Cortes hechos hoy (menos primero)
+//   3. Timestamp del último corte ('' < ISO, así quien no atendió hoy gana)
+//   4. ID (orden estable)
+export function compareBarbersForDynamic(
+  a: Staff,
+  b: Staff,
+  ctx: BarberRankingContext
+): number {
+  const etaA = ctx.etaOverrides?.get(a.id) ?? computeBarberEtaMinutes(a, ctx.entries, ctx.avgMap, ctx.now)
+  const etaB = ctx.etaOverrides?.get(b.id) ?? computeBarberEtaMinutes(b, ctx.entries, ctx.avgMap, ctx.now)
+  if (etaA !== etaB) return etaA - etaB
+
+  const countA = ctx.dailyServiceCounts[a.id] || 0
+  const countB = ctx.dailyServiceCounts[b.id] || 0
+  if (countA !== countB) return countA - countB
+
+  const lastA = ctx.lastCompletedAt[a.id] || ''
+  const lastB = ctx.lastCompletedAt[b.id] || ''
+  if (lastA !== lastB) return lastA.localeCompare(lastB)
+
+  return a.id.localeCompare(b.id)
+}
+
+export function pickBestBarber(candidates: Staff[], ctx: BarberRankingContext): Staff | null {
+  if (candidates.length === 0) return null
+  let best = candidates[0]
+  for (let i = 1; i < candidates.length; i++) {
+    if (compareBarbersForDynamic(candidates[i], best, ctx) < 0) {
+      best = candidates[i]
+    }
+  }
+  return best
+}
+
 export function assignDynamicBarbers(
   entries: QueueEntry[],
   barbers: Staff[],
@@ -228,12 +301,11 @@ export function assignDynamicBarbers(
   dailyServiceCounts: Record<string, number> = {},
   lastCompletedAt: Record<string, string> = {},
   notClockedInIds: Set<string> = new Set(),
-  _cooldownMs = 120_000
+  _cooldownMs = 120_000,
+  barberAvgMinutes: Record<string, number> = {}
 ): DynamicQueueEntry[] {
   const result: DynamicQueueEntry[] = []
 
-  const barberLoad = new Map<string, number>()
-  const barberAttending = new Set<string>()
   const barbersOnBreak = new Set<string>()
   // Para cada barbero, la priority_order del descanso pendiente más viejo
   // (si tiene ghost waiting). Si el ghost tiene priority menor que un cliente
@@ -242,6 +314,10 @@ export function assignDynamicBarbers(
   // Para cada barbero, la priority_order del cliente asignado más viejo waiting.
   // Sirve para saber si su ghost ya está "vencido" (sin clientes asignados antes).
   const barberOldestAssignedPriority = new Map<string, number>()
+  // Cantidad de breaks encolados (waiting) por barbero. Sumamos `avg` por cada uno
+  // al ETA del barbero en `etaOverrides`, así un break encolado en N cortes penaliza
+  // la carga aparente del barbero igual que un cliente real.
+  const barberPendingBreakCount = new Map<string, number>()
   const unassigned: QueueEntry[] = []
 
   for (const entry of entries) {
@@ -250,19 +326,8 @@ export function assignDynamicBarbers(
     } else {
       result.push(entry)
       if (entry.barber_id) {
-        // Los breaks (waiting o in_progress) suman a la carga del barbero
-        // para que el round-robin no lo prefiera por "tener load=0".
-        // Esto cubre tanto el caso "descanso activo" (también excluido de
-        // eligibleBarbers más abajo) como el "descanso encolado en N cortes"
-        // donde el barbero aún recibe clientes pero con prioridad menor.
-        if (entry.status === 'waiting' || entry.status === 'in_progress') {
-          barberLoad.set(entry.barber_id, (barberLoad.get(entry.barber_id) || 0) + 1)
-        }
-        if (entry.status === 'in_progress') {
-          barberAttending.add(entry.barber_id)
-          if (entry.is_break) {
-            barbersOnBreak.add(entry.barber_id)
-          }
+        if (entry.status === 'in_progress' && entry.is_break) {
+          barbersOnBreak.add(entry.barber_id)
         }
         if (entry.status === 'waiting') {
           const ts = new Date(entry.priority_order).getTime()
@@ -271,6 +336,10 @@ export function assignDynamicBarbers(
             if (prev === undefined || ts < prev) {
               barberPendingBreakPriority.set(entry.barber_id, ts)
             }
+            barberPendingBreakCount.set(
+              entry.barber_id,
+              (barberPendingBreakCount.get(entry.barber_id) ?? 0) + 1
+            )
           } else {
             const prev = barberOldestAssignedPriority.get(entry.barber_id)
             if (prev === undefined || ts < prev) {
@@ -293,10 +362,17 @@ export function assignDynamicBarbers(
     }
   }
 
+  // ETA inicial por barbero según las entries reales (sin las pre-asignaciones
+  // que vamos a hacer). Cada vez que pre-asignamos un dinámico, sumamos `avg` al ETA
+  // del elegido para que el siguiente unassigned vea la carga incrementada.
+  // Los breaks encolados (waiting) suman `avg` por cada uno para que un barbero con
+  // descanso pendiente no se vea más libre que sus pares.
+  const etaOverrides = new Map<string, number>()
   for (const b of barbers) {
-    if (!barberLoad.has(b.id)) {
-      barberLoad.set(b.id, 0)
-    }
+    const baseEta = computeBarberEtaMinutes(b, entries, barberAvgMinutes, currentTime)
+    const avg = barberAvgMinutes[b.id] ?? barberAvgMinutes.__fallback ?? 25
+    const breakPenalty = (barberPendingBreakCount.get(b.id) ?? 0) * avg
+    etaOverrides.set(b.id, baseEta + breakPenalty)
   }
 
   unassigned.sort((a, b) => a.position - b.position)
@@ -310,43 +386,28 @@ export function assignDynamicBarbers(
       !barbersWithBreakReady.has(b.id)
     )
 
-    const sortByLoad = (list: Staff[]) => {
-      list.sort((a, b) => {
-        const loadA = barberLoad.get(a.id) || 0
-        const loadB = barberLoad.get(b.id) || 0
-        if (loadA !== loadB) return loadA - loadB
-
-        // At same load, prefer free barbers (can serve immediately) over busy ones.
-        // This ensures the first FIFO client goes to the barber who just became available
-        // rather than being queued behind a busy barber's current client.
-        const busyA = barberAttending.has(a.id) ? 1 : 0
-        const busyB = barberAttending.has(b.id) ? 1 : 0
-        if (busyA !== busyB) return busyA - busyB
-
-        const lastA = lastCompletedAt[a.id] || ''
-        const lastB = lastCompletedAt[b.id] || ''
-        if (lastA !== lastB) return lastA.localeCompare(lastB)
-
-        const countA = dailyServiceCounts[a.id] || 0
-        const countB = dailyServiceCounts[b.id] || 0
-        if (countA !== countB) return countA - countB
-
-        return a.id.localeCompare(b.id)
-      })
-      return list
-    }
-
-    // Si no hay ningún barbero elegible (sin fichaje, ocultos, bloqueados por fin de turno, etc.),
-    // el cliente queda sin asignación dinámica. Antes se hacía fallback a *todos* los barberos,
-    // lo que ignoraba el clock-in y mostraba pre-asignaciones incorrectas.
+    // Sin barberos elegibles (sin fichaje, ocultos, bloqueados por fin de turno, etc.),
+    // el cliente queda sin pre-asignación. Antes se hacía fallback a *todos*, lo que
+    // ignoraba el clock-in y mostraba pre-asignaciones incorrectas.
     if (eligibleBarbers.length === 0) {
       result.push(u)
       continue
     }
 
-    const candidates = sortByLoad(eligibleBarbers)
+    const ctx: BarberRankingContext = {
+      entries,
+      avgMap: barberAvgMinutes,
+      now: currentTime,
+      dailyServiceCounts,
+      lastCompletedAt,
+      etaOverrides,
+    }
 
-    const selectedBarber = candidates[0]
+    const selectedBarber = pickBestBarber(eligibleBarbers, ctx)
+    if (!selectedBarber) {
+      result.push(u)
+      continue
+    }
 
     result.push({
       ...u,
@@ -355,11 +416,12 @@ export function assignDynamicBarbers(
       _is_dynamically_assigned: true
     })
 
-    barberLoad.set(selectedBarber.id, (barberLoad.get(selectedBarber.id) || 0) + 1)
+    const avg = barberAvgMinutes[selectedBarber.id] ?? barberAvgMinutes.__fallback ?? 25
+    etaOverrides.set(selectedBarber.id, (etaOverrides.get(selectedBarber.id) ?? 0) + avg)
   }
 
-  // Sort by position so that a "cualquiera" client with an earlier turn number always
-  // appears before a later-arriving assigned client, regardless of assignment order.
+  // Orden por position para que un dinámico con turno más temprano siempre aparezca
+  // antes que un asignado de turno posterior, sin importar el orden de pre-asignación.
   return result.sort((a, b) => a.position - b.position)
 }
 

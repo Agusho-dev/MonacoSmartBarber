@@ -47,6 +47,7 @@ import {
   getMobileBarberStatus,
   mobileStatusColors,
   mobileStatusLabels,
+  pickBestBarber,
   getBarbersOnBreakIds,
 } from '@/lib/barber-utils'
 import { FaceCamera } from '@/components/checkin/face-camera'
@@ -349,9 +350,9 @@ export function CheckinWalkIn() {
         setSchedules(res.schedules as StaffSchedule[])
       }
 
-      if (res.monthlyVisits) {
+      if (res.todayVisits) {
         const counts: Record<string, number> = {}
-        for (const v of res.monthlyVisits as { barber_id: string }[]) {
+        for (const v of res.todayVisits as { barber_id: string }[]) {
           counts[v.barber_id] = (counts[v.barber_id] || 0) + 1
         }
         setDailyServiceCounts(counts)
@@ -617,8 +618,8 @@ export function CheckinWalkIn() {
   const assignmentTime = useMemo(() => Date.now(), [queueEntries, barbers, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(queueEntries, barbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs)
-  }, [queueEntries, barbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs])
+    return assignDynamicBarbers(queueEntries, barbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs, barberAvgMinutes)
+  }, [queueEntries, barbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs, barberAvgMinutes])
 
   // Barberos con descanso activo (ghost is_break=true && status='in_progress').
   // Estos quedan visibles en el kiosk como "En descanso" pero NO son seleccionables
@@ -628,41 +629,22 @@ export function CheckinWalkIn() {
     [queueEntries]
   )
 
+  // Barbero "Menor espera" del CTA: ranking unificado con `assignDynamicBarbers`
+  // (ETA → cortes hoy → último corte → id), filtrando barberos no aptos.
   const minWaitBarber = useMemo(() => {
     const active = barbers.filter(b =>
       !isBarberBlockedByShiftEnd(b, dynamicEntries, schedules, now, shiftEndMargin) &&
       !notClockedInBarbers.has(b.id) &&
       !barbersOnBreak.has(b.id)
     )
-    if (active.length === 0) return null
-    let best = active[0]
-    let bestLoad = getBarberStats(active[0], dynamicEntries, barberAvgMinutes).totalLoad
-    for (let i = 1; i < active.length; i++) {
-      const load = getBarberStats(active[i], dynamicEntries, barberAvgMinutes).totalLoad
-      if (load < bestLoad) {
-        bestLoad = load
-        best = active[i]
-      } else if (load === bestLoad) {
-        const countI = dailyServiceCounts[active[i].id] || 0
-        const countBest = dailyServiceCounts[best.id] || 0
-        if (countI < countBest) {
-          best = active[i]
-          bestLoad = load
-        } else if (countI === countBest) {
-          const lastI = lastCompletedAt[active[i].id] || ''
-          const lastBest = lastCompletedAt[best.id] || ''
-          if (lastI < lastBest) {
-            best = active[i]
-            bestLoad = load
-          } else if (lastI === lastBest && active[i].id < best.id) {
-            best = active[i]
-            bestLoad = load
-          }
-        }
-      }
-    }
-    return best
-  }, [barbers, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers, barbersOnBreak, dailyServiceCounts, lastCompletedAt])
+    return pickBestBarber(active, {
+      entries: queueEntries,
+      avgMap: barberAvgMinutes,
+      now,
+      dailyServiceCounts,
+      lastCompletedAt,
+    })
+  }, [barbers, queueEntries, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers, barbersOnBreak, dailyServiceCounts, lastCompletedAt])
 
   // Barberos activos para cálculo de posición optimista
   // Excluye barberos en descanso para que el ETA del cliente no asuma capacidad
@@ -1088,7 +1070,7 @@ export function CheckinWalkIn() {
   ) => {
     const isNotClockedIn = notClockedInBarbers.has(barber.id)
     const isOnBreak = barbersOnBreak.has(barber.id)
-    const stats = getBarberStats(barber, dynamicEntries, barberAvgMinutes)
+    const stats = getBarberStats(barber, dynamicEntries, barberAvgMinutes, now)
     // Override de status: si tiene un ghost de descanso activo, mostrar 'descanso'
     // independientemente de lo que diga staff.status (cuyo enum no se mantiene).
     // La fuente de verdad es queue_entries (mig 127).

@@ -84,7 +84,7 @@ export async function refreshTvSchedules(branchIds: string[], orgId: string) {
   const dayStart = new Date()
   dayStart.setHours(0, 0, 0, 0)
 
-  const [schedRes, settingsRes, monthlyVisitsRes, lastVisitsRes, attendanceRes] = await Promise.all([
+  const [schedRes, settingsRes, todayVisitsRes, lastVisitsRes, attendanceRes] = await Promise.all([
     supabase
       .from('staff_schedules')
       .select('*')
@@ -117,8 +117,8 @@ export async function refreshTvSchedules(branchIds: string[], orgId: string) {
   ])
 
   const dailyServiceCounts: Record<string, number> = {}
-  if (monthlyVisitsRes?.data) {
-    for (const v of monthlyVisitsRes.data as { barber_id: string }[]) {
+  if (todayVisitsRes?.data) {
+    for (const v of todayVisitsRes.data as { barber_id: string }[]) {
       dailyServiceCounts[v.barber_id] = (dailyServiceCounts[v.barber_id] || 0) + 1
     }
   }

@@ -22,7 +22,7 @@ export async function getCheckinData(branchId: string) {
   dayStart.setHours(0, 0, 0, 0)
 
   try {
-    const [staffRes, queueRes, visitsRes, availableRes, openRes, attendanceRes, servicesRes, schedulesRes, settingsRes, monthlyVisitsRes] = await Promise.all([
+    const [staffRes, queueRes, visitsRes, availableRes, openRes, attendanceRes, servicesRes, schedulesRes, settingsRes, todayVisitsRes] = await Promise.all([
       supabase
         .from('staff')
         .select('*')
@@ -84,7 +84,7 @@ export async function getCheckinData(branchId: string) {
       services: servicesRes.data ?? [],
       schedules: schedulesRes.data ?? [],
       settings: settingsRes.data,
-      monthlyVisits: monthlyVisitsRes.data ?? []
+      todayVisits: todayVisitsRes.data ?? []
     }
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) }
