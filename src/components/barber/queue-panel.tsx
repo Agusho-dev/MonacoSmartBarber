@@ -1517,39 +1517,12 @@ export function QueuePanel({
         entry={completingEntry}
         branchId={session.branch_id}
         onClose={() => setCompletingEntry(null)}
-        onCompleted={async (next) => {
-          // (mig 131) Push-on-complete: el server ya hizo el claim atómico del
-          // siguiente entry y lo dejó en in_progress. Update optimista para
-          // eliminar el flicker entre "corte completado" y "próximo activo".
-          // Realtime reconcilia cualquier divergencia.
-          if (next && next.barber_id === session.staff_id) {
-            setEntries((prev) => {
-              const filtered = prev.filter(
-                (e) => e.id !== completingEntry?.id && e.id !== next.id,
-              )
-              const placeholder: QueueEntry = {
-                id: next.id,
-                branch_id: session.branch_id,
-                client_id: next.client_id,
-                barber_id: next.barber_id,
-                service_id: next.service_id,
-                status: 'in_progress',
-                position: 0,
-                priority_order: new Date().toISOString(),
-                checked_in_at: new Date().toISOString(),
-                started_at: new Date().toISOString(),
-                completed_at: null,
-                is_break: false,
-                is_dynamic: false,
-                is_appointment: false,
-                appointment_id: null,
-                paused_at: null,
-                paused_duration_seconds: 0,
-                reward_claimed: false,
-              } as unknown as QueueEntry
-              return [...filtered, placeholder]
-            })
-          }
+        onCompleted={async () => {
+          // Refresh estándar tras finalizar. El siguiente cliente queda en
+          // "Mi fila" como waiting (sin fairness gate gracias a mig 131) y
+          // arranca cuando el barbero toca "Atender" — NO se autoarranca el
+          // cronómetro porque eso requiere que el cliente esté físicamente
+          // en la silla (incidente Fabrizio/Santino vela, 2026-05-09).
           await fetchQueue()
           await refreshStats()
         }}

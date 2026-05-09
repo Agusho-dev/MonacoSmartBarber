@@ -1,9 +1,11 @@
 # Fila Dinámica — Documentación del Sistema
 
-> **Versión**: post-mig 131 (push-on-complete activo)
+> **Versión**: post-mig 131 + rollback parcial del 2026-05-09 (auto-start de clientes desactivado)
 > **Última actualización**: 2026-05-09
 > **Owners**: equipo de plataforma
 > **Alcance**: queue de walk-ins (no incluye sistema de turnos/appointments — ese tema está en su propia documentación)
+>
+> ⚠️ **Importante**: el push-on-complete que arrancaba el cronómetro automáticamente fue revertido el 2026-05-09 tras el incidente Fabrizio/Santino vela. Ver §13.
 
 Este documento describe el funcionamiento end-to-end de la fila dinámica: modelo de datos, flujos, RPCs, componentes de UI, reglas de negocio, concurrencia y configuración. La sección final (§14) contiene el plan de cambios para Phase 2.
 
@@ -219,7 +221,7 @@ Panel ve el response:
   └─ Si null: toast "No hay clientes en espera"
 ```
 
-### 5.4 Push-on-complete (mig 131, modelo nuevo)
+### 5.4 Auto-start de descanso al completar (sin push-on-complete de clientes)
 
 **Disparador**: el barbero finaliza un corte y cobra.
 
@@ -233,26 +235,25 @@ completeService (queue.ts:259)
   ├─ Step 1b: si appointment_id → marca appointment como completed
   ├─ Step 2-4: calcula amount, comisiones, products, prepayments → UPDATE visit
   ├─ Step 5:  reward redemption (si aplica)
-  ├─ Step 6:  PUSH-ON-COMPLETE — RPC claim_next_for_barber
-  │           ├─ El RPC decide: ghost listo, asignado, o dinámico FIFO
-  │           ├─ Marca status='in_progress' atómicamente
-  │           └─ Retorna (entry_id, is_break, was_dynamic) o vacío
-  ├─ Step 6.5: si claim retornó un entry no-break → SELECT campos mínimos
+  ├─ Step 6:  AUTO-START DEL GHOST DE DESCANSO si está listo
+  │           (el descanso ya fue solicitado y aprobado, no requiere
+  │            presencia física del cliente. Los CLIENTES siempre se
+  │            inician con tap manual desde "Atender").
   ├─ Step 7:  post-service automation (workflows WhatsApp, scheduled_messages)
   ├─ Step 8:  salary_reports (comisiones del día)
-  └─ return { success, visitId, breakAutoStarted, next: { id, client_id, service_id, barber_id } | null }
+  └─ return { success, visitId, breakAutoStarted }
 
-Dialog: pasa result.next a onCompleted callback
-
-QueuePanel.onCompleted(next)
-  ├─ Si next && next.barber_id === self:
-  │    ├─ setEntries optimistic: filtra el completado, agrega placeholder con next
-  │    └─ (elimina flicker entre "cobré" y "siguiente activo")
-  ├─ fetchQueue → reconcilia con datos reales
+QueuePanel.onCompleted()
+  ├─ fetchQueue → carga el siguiente cliente como WAITING en Mi fila
   └─ refreshStats → actualiza contador y revenue del día
+
+Barbero ve "Mi fila" actualizada con el siguiente cliente como waiting.
+Cuando el cliente está físicamente en la silla → tap "Atender" → arranca cronómetro.
 ```
 
-**Resultado**: el barbero ve **el siguiente cliente activo** sin tap manual. Reduce 30-90s de idle por corte.
+**Resultado**: el barbero ve el siguiente cliente listado, pero **el cronómetro NO arranca solo**. El barbero confirma con tap cuando el cliente está sentado. Esto preserva la integridad de las métricas de duración y respeta el flujo natural de la barbería.
+
+**Por qué NO arrancamos el cronómetro automáticamente**: en una barbería real hay un gap humano (30s-2min) entre cobrar y arrancar el siguiente corte: limpiar la silla, llamar al cliente, esperar que llegue. Si el cronómetro arranca antes, las métricas se distorsionan y los clientes que no estaban presentes generan "cortes fantasma" que el supervisor tiene que cancelar.
 
 ### 5.5 Cancelación
 
@@ -487,8 +488,9 @@ Todos aplicados server-side en `claim_next_for_barber`. La UI puede replicarlos 
 | 128 | 2026-05-04 | assign_next_client respeta pending break (Guard 0b) | activo |
 | 129 | 2026-05-07 | fairness gate (Guard 0c) — **causó el bug del 9-may** | revertido por 131 |
 | 130 | 2026-05-07 | get_fair_barber wrapper público | viva pero sin enforcing |
-| **131** | **2026-05-09** | **push-on-complete + revert fairness gate** | **activo** |
+| **131** | **2026-05-09** | **revert fairness gate (Guard 0c) + RPC `claim_next_for_barber`** | **activo** |
 | 131b | 2026-05-09 | fix `#variable_conflict use_column` en claim_next_for_barber | activo |
+| (rollback TS) | 2026-05-09 | Auto-start de clientes en completeService **revertido** tras incidente. RPC `claim_next_for_barber` solo se usa desde tap manual de "Atender". | activo |
 
 ---
 
@@ -496,8 +498,33 @@ Todos aplicados server-side en `claim_next_for_barber`. La UI puede replicarlos 
 
 ### Resuelto en mig 131
 - ✅ Bug "dinámico invisible cuando rankings divergen" — eliminado por reverter fairness gate.
-- ✅ Idle time entre cortes de 30-90s — eliminado por push-on-complete.
 - ✅ Doble cómputo de fair_barber (cliente + server) — eliminado el cliente, server queda como utility.
+- ⚠️ **Idle time entre cortes**: el push-on-complete que iba a resolverlo fue **revertido** tras el incidente Fabrizio/Santino vela (ver abajo). Phase 2 lo aborda con un modelo distinto (next-suggestion sin auto-start).
+
+### Incidente 2026-05-09 22:14 — Fabrizio/Santino vela: cortes fantasma por auto-start prematuro
+
+**Síntoma reportado**: "se inició un corte solo en el panel de Fabrizio".
+
+**Línea de tiempo verificada en DB**:
+1. 21:47:59 — Fabrizio start con Diego Ortiz (priority 21:47:16).
+2. 21:50:04 — Santino vela hace check-in, asignado específicamente a Fabrizio.
+3. 22:13:59 — Fabrizio completa Diego Ortiz.
+4. **22:14:00.17** — Santino vela `started_at` se setea automáticamente (~1.1s después).
+5. (entre 22:14 y 22:16) — encargado cancela Santino vela porque el cliente no está físicamente presente.
+6. 22:16:28 — Fabrizio inicia Tobias González (tap manual, OK).
+
+**Causa raíz**: el push-on-complete (mig 131 paso 6 de `completeService`) llamaba a `claim_next_for_barber`, que arrancaba el cronómetro automáticamente. Asumía que el siguiente cliente estaba físicamente en la silla en el momento exacto en que el corte anterior terminaba — falso en barbería real, donde hay un gap humano (limpieza de silla, llamar al cliente, esperar que llegue).
+
+**Fix aplicado mismo día**:
+- Revertido el llamado a `claim_next_for_barber` desde `completeService`.
+- Restaurada la lógica original: `completeService` solo auto-arranca el ghost de descanso (que no requiere presencia de cliente).
+- `claim_next_for_barber` sobrevive como RPC pero solo se invoca desde `attendNextClient` (tap manual).
+- UI cliente: removido el optimistic update que asumía un `next` viniendo del server.
+
+**Lecciones**:
+- Las decisiones que cambian el momento de capture de un timestamp (started_at) deben coordinarse con el flujo humano del usuario, no solo con la integridad de datos.
+- "Push-on-complete" funciona en modelos digitales puros (e.g., colas de procesamiento de jobs), no en flujos físico-digitales mixtos como una barbería.
+- El benchmark de "30-90s de idle ahorrado" no compensa el costo de "métricas de duración corruptas + clientes fantasma + supervisor manual canceling".
 
 ### Aún pendiente (Phase 2)
 - ⚠ **Pre-asignación local visual sigue siendo naïve**: usa ETA con `avg = 25min` global, no por barbero/servicio.
@@ -516,6 +543,8 @@ Todos aplicados server-side en `claim_next_for_barber`. La UI puede replicarlos 
 ## 14. Plan Phase 2 — Cambios planeados
 
 > **Objetivo medible**: reducir P50 de wait_time de ~6 min a ~3-4 min, y P95 de ~25 min a ~12-15 min, sin sacrificar fairness inter-barbero.
+>
+> **Cambio de enfoque tras incidente 2026-05-09**: el modelo "push-on-complete con auto-start" fue descartado. En su lugar, Phase 2 implementa **"highlighted next-suggestion"**: el server pre-elige el siguiente cliente y lo destaca visualmente, pero **el barbero arranca el corte con tap manual cuando el cliente está físicamente presente**.
 
 ### 14.1 Predicción de duración por (barbero, servicio, cliente)
 

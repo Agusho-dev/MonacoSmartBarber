@@ -458,40 +458,57 @@ export async function completeService(
     }
   }
 
-  // 6. PUSH-ON-COMPLETE (mig 131): claim atómico + arranque del siguiente.
-  //    El RPC decide entre ghost de descanso listo, cliente asignado o dinámico
-  //    (FIFO global). Reemplaza el manual "Atender" del barbero — el siguiente
-  //    cliente queda en in_progress automáticamente. Sin fairness gate.
+  // 6. Auto-start SOLO del ghost de descanso si está listo.
   //
-  //    Si el RPC no encuentra nada elegible (pool vacío, modo appointments_only,
-  //    turno inminente, etc.), retorna 0 filas y el barbero queda libre.
+  //    Rollback intencional del push-on-complete (estaba en mig 131): arrancar
+  //    automáticamente el siguiente CLIENTE rompía el flujo natural de barbería
+  //    — el cronómetro disparaba aunque el cliente no estuviera todavía en la
+  //    silla, generando "cortes fantasma" que el supervisor tenía que cancelar
+  //    (incidente Fabrizio/Santino vela, 2026-05-09 22:14).
+  //
+  //    El descanso SÍ debe arrancar automáticamente: el barbero ya lo solicitó
+  //    y aprobó, no requiere presencia física del cliente. El siguiente cliente
+  //    se inicia con tap manual de "Atender" cuando físicamente está sentado.
+  //
+  //    Política: el ghost arranca si NO hay clientes ASIGNADOS específicamente
+  //    a este barbero antes de él (priority menor). Los dinámicos no bloquean.
   let breakAutoStarted = false
-  let nextEntry:
-    | { id: string; client_id: string | null; service_id: string | null; barber_id: string | null }
-    | null = null
 
-  const { data: claimRows, error: claimError } = await supabase.rpc('claim_next_for_barber', {
-    p_barber_id: visit.barber_id,
-    p_branch_id: visit.branch_id,
-    p_preferred_entry_id: null,
-  })
+  const { data: nextGhosts } = await supabase
+    .from('queue_entries')
+    .select('id, priority_order')
+    .eq('barber_id', visit.barber_id)
+    .eq('branch_id', visit.branch_id)
+    .eq('status', 'waiting')
+    .eq('is_break', true)
+    .order('priority_order', { ascending: true })
+    .limit(1)
 
-  if (claimError) {
-    console.error(`[completeService:auto-claim visit=${visit.id}]`, claimError.message)
-  } else {
-    const claim = (claimRows as Array<{ entry_id: string; is_break: boolean; was_dynamic: boolean }> | null)?.[0]
-    if (claim) {
-      breakAutoStarted = claim.is_break
-      if (!claim.is_break) {
-        // Lookup mínimo para devolver al cliente la entry recién arrancada.
-        // El panel hace fetchQueue() vía Realtime para el dataset completo;
-        // este lookup sirve solo para el render optimista (sin flicker).
-        const { data: entryRow } = await supabase
-          .from('queue_entries')
-          .select('id, client_id, service_id, barber_id')
-          .eq('id', claim.entry_id)
-          .maybeSingle()
-        nextEntry = entryRow ?? null
+  if (nextGhosts && nextGhosts.length > 0) {
+    const nextGhost = nextGhosts[0]
+
+    const { data: realWaitingBeforeBreak } = await supabase
+      .from('queue_entries')
+      .select('id')
+      .eq('barber_id', visit.barber_id)
+      .eq('branch_id', visit.branch_id)
+      .eq('status', 'waiting')
+      .eq('is_break', false)
+      .lt('priority_order', nextGhost.priority_order)
+      .limit(1)
+
+    if (!realWaitingBeforeBreak || realWaitingBeforeBreak.length === 0) {
+      const { error: ghostStartError } = await supabase
+        .from('queue_entries')
+        .update({
+          status: 'in_progress',
+          started_at: new Date().toISOString(),
+        })
+        .eq('id', nextGhost.id)
+        .eq('status', 'waiting')
+
+      if (!ghostStartError) {
+        breakAutoStarted = true
       }
     }
   }
@@ -902,7 +919,7 @@ export async function completeService(
   revalidatePath('/dashboard/fila')
   revalidatePath('/dashboard/finanzas')
   revalidatePath('/dashboard/estadisticas')
-  return { success: true, visitId: visit.id, breakAutoStarted, next: nextEntry }
+  return { success: true, visitId: visit.id, breakAutoStarted }
 }
 
 export async function cancelQueueEntry(queueEntryId: string) {
