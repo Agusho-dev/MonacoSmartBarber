@@ -131,9 +131,9 @@ export function QueuePanel({
   const [now, setNow] = useState(Date.now())
   const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
   const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
-  // (mig 130) id del barbero "más justo" según el server. Se usa para ocultar
-  // dinámicas locales cuando server discrepa con el sort local.
-  const [fairBarberId, setFairBarberId] = useState<string | null>(null)
+  // (mig 131) `fairBarberId` removido: el filter que ocultaba dinámicas dejó
+  // un limbo cuando el ranking local difería del server. Ahora la atomicidad
+  // se garantiza con FOR UPDATE SKIP LOCKED en `claim_next_for_barber`.
   const [dayStats, setDayStats] = useState({ servicesCount: 0, revenue: 0 })
   const [otherBarbers, setOtherBarbers] = useState<Staff[]>([])
   const [allBarbers, setAllBarbers] = useState<Staff[]>([])
@@ -209,7 +209,6 @@ export function QueuePanel({
     const data = await fetchBranchAssignmentData(session.branch_id)
     setDailyServiceCounts(data.dailyServiceCounts ?? {})
     setLastCompletedAt(data.lastCompletedAt ?? {})
-    setFairBarberId(data.fairBarberId ?? null)
   }, [session.branch_id])
 
   const fetchBarbersAndSchedules = useCallback(async () => {
@@ -282,7 +281,6 @@ export function QueuePanel({
 
     setDailyServiceCounts(assignmentData.dailyServiceCounts ?? {})
     setLastCompletedAt(assignmentData.lastCompletedAt ?? {})
-    setFairBarberId(assignmentData.fairBarberId ?? null)
   }, [supabase, session.branch_id, session.staff_id])
 
   const fetchBreakRequestStatus = useCallback(async () => {
@@ -436,13 +434,17 @@ export function QueuePanel({
   // "Mi fila": only entries assigned to this barber (by DB or by assignDynamicBarbers).
   // Nunca mostramos entries con barber_id=null aquí para evitar que el mismo cliente
   // aparezca en la fila de múltiples barberos simultáneamente.
-  // (mig 130) Si la asignación es DINÁMICA local (_is_dynamically_assigned) y el server
-  // dice que otro barbero es el más justo, ocultamos la entry. Eso garantiza que el
-  // mismo cliente no aparezca a varios barberos por desincronización local.
+  //
+  // (mig 131) Removido el filtro `_is_dynamically_assigned && fairBarberId !== self`:
+  // el fairness gate server-side fue eliminado porque generaba un limbo donde el
+  // cliente dinámico desaparecía de TODAS las "Mi fila" cuando el ranking cliente
+  // y server divergían (ETA vs load count). La atomicidad ya la garantiza
+  // FOR UPDATE SKIP LOCKED en `claim_next_for_barber`. Si dos paneles muestran
+  // el mismo dinámico simultáneamente, el primer tap gana — el segundo recibe
+  // un toast informativo y se asigna el siguiente.
   const myWaitingEntries = dynamicEntries
     .filter((e) => {
       if (e.status !== 'waiting' || e.barber_id !== session.staff_id) return false
-      if (e._is_dynamically_assigned && fairBarberId && fairBarberId !== session.staff_id) return false
       return true
     })
     // Orden cronológico estricto por priority_order. NO empujamos los breaks
@@ -1515,7 +1517,42 @@ export function QueuePanel({
         entry={completingEntry}
         branchId={session.branch_id}
         onClose={() => setCompletingEntry(null)}
-        onCompleted={fetchQueue}
+        onCompleted={async (next) => {
+          // (mig 131) Push-on-complete: el server ya hizo el claim atómico del
+          // siguiente entry y lo dejó en in_progress. Update optimista para
+          // eliminar el flicker entre "corte completado" y "próximo activo".
+          // Realtime reconcilia cualquier divergencia.
+          if (next && next.barber_id === session.staff_id) {
+            setEntries((prev) => {
+              const filtered = prev.filter(
+                (e) => e.id !== completingEntry?.id && e.id !== next.id,
+              )
+              const placeholder: QueueEntry = {
+                id: next.id,
+                branch_id: session.branch_id,
+                client_id: next.client_id,
+                barber_id: next.barber_id,
+                service_id: next.service_id,
+                status: 'in_progress',
+                position: 0,
+                priority_order: new Date().toISOString(),
+                checked_in_at: new Date().toISOString(),
+                started_at: new Date().toISOString(),
+                completed_at: null,
+                is_break: false,
+                is_dynamic: false,
+                is_appointment: false,
+                appointment_id: null,
+                paused_at: null,
+                paused_duration_seconds: 0,
+                reward_claimed: false,
+              } as unknown as QueueEntry
+              return [...filtered, placeholder]
+            })
+          }
+          await fetchQueue()
+          await refreshStats()
+        }}
       />
 
       <DirectSaleDialog

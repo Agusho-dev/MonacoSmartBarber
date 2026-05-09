@@ -306,7 +306,7 @@ export async function fetchBarberDayStats(staffId: string, branchId: string) {
 
 export async function fetchBranchAssignmentData(branchId: string) {
   const orgId = await getCurrentOrgId()
-  if (!orgId) return { dailyServiceCounts: {}, lastCompletedAt: {}, fairBarberId: null as string | null }
+  if (!orgId) return { dailyServiceCounts: {}, lastCompletedAt: {} }
 
   const supabase = createAdminClient()
 
@@ -317,15 +317,15 @@ export async function fetchBranchAssignmentData(branchId: string) {
     .eq('id', branchId)
     .eq('organization_id', orgId)
     .maybeSingle()
-  if (!branchCheck) return { dailyServiceCounts: {}, lastCompletedAt: {}, fairBarberId: null as string | null }
+  if (!branchCheck) return { dailyServiceCounts: {}, lastCompletedAt: {} }
 
   const dayStart = new Date()
   dayStart.setHours(0, 0, 0, 0)
 
-  // fairBarberId (mig 130): id del barbero "más justo" elegible AHORA según el server.
-  // El cliente lo usa para ocultar dinámicas en "Mi fila" cuando server diga que otro
-  // es el más justo, evitando que un mismo cliente aparezca a múltiples barberos.
-  const [dailyRes, lastRes, fairRes] = await Promise.all([
+  // (mig 131) `fairBarberId` removido del response: el fairness gate fue
+  // eliminado en favor de FOR UPDATE SKIP LOCKED dentro de claim_next_for_barber.
+  // Ya no hace falta el RPC `get_fair_barber` desde el cliente.
+  const [dailyRes, lastRes] = await Promise.all([
     supabase
       .from('visits')
       .select('barber_id')
@@ -339,7 +339,6 @@ export async function fetchBranchAssignmentData(branchId: string) {
       .not('barber_id', 'is', null)
       .order('completed_at', { ascending: false })
       .limit(200),
-    supabase.rpc('get_fair_barber', { p_branch_id: branchId }),
   ])
 
   const dailyServiceCounts: Record<string, number> = {}
@@ -357,7 +356,6 @@ export async function fetchBranchAssignmentData(branchId: string) {
   return {
     dailyServiceCounts,
     lastCompletedAt,
-    fairBarberId: (fairRes.data as string | null) ?? null,
   }
 }
 

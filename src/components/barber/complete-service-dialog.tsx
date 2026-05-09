@@ -40,11 +40,25 @@ import { AliasCopyHero } from './alias-copy-hero'
 import { PaymentMethodButtons, type PaymentOptionValue } from './payment-method-buttons'
 import { TipSelector } from './tip-selector'
 
+/**
+ * (mig 131) `next` es el entry recién arrancado por `claim_next_for_barber`
+ * en el mismo round trip que `completeService`. Sirve para que el panel haga
+ * un update optimista y elimine el flicker entre "corte cobrado" y "próximo
+ * activo". Es null si no hay nada elegible (pool vacío, descanso activo,
+ * turno inminente, etc.).
+ */
+type NextEntryHint = {
+  id: string
+  client_id: string | null
+  service_id: string | null
+  barber_id: string | null
+} | null
+
 interface CompleteServiceDialogProps {
   entry: QueueEntry | null
   branchId: string
   onClose: () => void
-  onCompleted?: () => void
+  onCompleted?: (next?: NextEntryHint) => void
 }
 
 export function CompleteServiceDialog({
@@ -229,7 +243,7 @@ export function CompleteServiceDialog({
         await updateClientNotes(entry.client_id, clientNotes.trim(), '')
       }
 
-      onCompleted?.()
+      onCompleted?.(result.next ?? null)
     } catch {
       toast.error('Error al finalizar el servicio')
     }
