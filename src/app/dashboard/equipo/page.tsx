@@ -3,6 +3,8 @@ import { getCurrentOrgId } from '@/lib/actions/org'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { redirect } from 'next/navigation'
 import { fetchAll } from '@/lib/supabase/fetch-all'
+import { getActiveTimezone } from '@/lib/i18n'
+import { getLocalDayBounds } from '@/lib/time-utils'
 import { EquipoClient } from './equipo-client'
 import type { Metadata } from 'next'
 import type { Role } from '@/lib/types/database'
@@ -19,10 +21,14 @@ export default async function EquipoPage() {
     const supabase = await createClient()
 
     const now = new Date()
-    const todayStr = now.toISOString().slice(0, 10)
-    const tomorrowStr = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-        .toISOString()
-        .slice(0, 10)
+
+    // Bounds del "hoy" en TZ de la org (no UTC). El bug previo usaba
+    // `now.toISOString().slice(0,10)` que es UTC-based: cuando el server corre
+    // en UTC y la hora local cruza la medianoche UTC (ej: 21:04 ART = 00:04
+    // UTC del día siguiente), `todayStr` apuntaba al día siguiente y la query
+    // dejaba a todos los cortes del día reportando 0.
+    const tz = await getActiveTimezone()
+    const { start: todayStart, end: todayEnd } = getLocalDayBounds(tz)
 
     const startOfMonth = new Date()
     startOfMonth.setDate(1)
@@ -85,7 +91,7 @@ export default async function EquipoPage() {
             ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', branchIds).eq('is_active', true).order('name')
             : Promise.resolve({ data: [] }),
         branchIds.length > 0
-            ? supabase.from('visits').select('barber_id, amount').in('branch_id', branchIds).gte('completed_at', todayStr).lt('completed_at', tomorrowStr)
+            ? supabase.from('visits').select('barber_id, amount').in('branch_id', branchIds).gte('completed_at', todayStart).lte('completed_at', todayEnd)
             : Promise.resolve({ data: [] }),
         branchIds.length > 0
             ? supabase.from('break_configs').select('*').in('branch_id', branchIds).order('name')
