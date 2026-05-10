@@ -670,23 +670,18 @@ export function QueuePanel({
 
   async function handleStartService(entryId: string) {
     setActionLoading(entryId)
-    // Si la entry visible era una asignación dinámica local, el NULL del server
-    // significa que el fairness gate (mig 129) eligió a otro barbero como "más justo".
-    // Mostramos un toast específico en ese caso para no confundir al barbero con
-    // el genérico "no hay clientes en espera".
-    const wasDynamicAssignment = dynamicEntries.find(e => e.id === entryId)?._is_dynamically_assigned ?? false
     const result = await attendNextClient(session.staff_id, session.branch_id, entryId)
     if ('error' in result) {
       toast.error(result.error)
     } else if (!result.entryId) {
-      toast.info(wasDynamicAssignment ? 'Otro barbero atenderá a este cliente' : 'No hay clientes en espera')
+      // Después de mig 131 (sin fairness gate) los casos de NULL son: cliente
+      // ya tomado por otra tablet, descanso pendiente bloqueando, turno
+      // inminente, o pool vacío. Todos comparten el mismo mensaje neutro.
+      toast.info('El cliente ya no está disponible')
     } else if (result.entryId !== entryId) {
       toast.info('El cliente fue tomado por otro barbero. Se asignó el siguiente.')
     }
     await fetchQueue()
-    // Forzar refetch de assignment data: si recibimos NULL por fairness, los
-    // counts/last_completed pueden estar stale. Re-sincroniza para que el sort
-    // local converja al ganador del server.
     if (!('error' in result) && !result.entryId) {
       fetchAssignmentData()
     }
@@ -822,9 +817,13 @@ export function QueuePanel({
   }
 
   function renderGhostBreakEntry(entry: QueueEntry) {
-    // Count real waiting clients before this ghost for this barber
+    // Count real waiting clients ahead of this ghost for this barber.
+    // Usamos `priority_order` (FIFO real del backend), no `position` (UI-mutable
+    // por drag&drop) — sino el contador queda desincronizado tras un reorder.
+    const ghostPriorityTs = new Date(entry.priority_order).getTime()
     const myRealWaiting = entries.filter(
-      e => e.status === 'waiting' && !e.is_break && e.barber_id === session.staff_id && e.position < entry.position
+      e => e.status === 'waiting' && !e.is_break && e.barber_id === session.staff_id
+        && new Date(e.priority_order).getTime() < ghostPriorityTs,
     ).length
 
     return (

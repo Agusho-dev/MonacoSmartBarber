@@ -800,7 +800,6 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   const [now, setNow] = useState(() => Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
   const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
-  const [, setLastCompletedAt] = useState<Record<string, string>>({})
   const [latestAttendance, setLatestAttendance] = useState<Record<string, string>>({})
   
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
@@ -860,32 +859,40 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
   }, [supabase])
 
   const fetchSchedules = useCallback(async () => {
-    const dayStart = new Date()
-    dayStart.setHours(0, 0, 0, 0)
+    // Bounds del día en TZ de la org (no UTC). El bug previo usaba
+    // `new Date().setHours(0,0,0,0)` y `new Date().getDay()`: ambos basados
+    // en runtime TZ del server (UTC en Vercel). Pasada la medianoche UTC el
+    // dailyServiceCounts quedaba en 0 y el day_of_week saltaba un día.
+    const tz = await (await import('@/lib/i18n')).getActiveTimezone()
+    const { getLocalDayBounds } = await import('@/lib/time-utils')
+    const { start: dayStartISO, end: dayEndISO } = getLocalDayBounds(tz)
+    const localDow = new Date(
+      new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date()),
+    ).getDay()
 
-    const [schedRes, settingsRes, todayVisitsRes, lastVisitsRes, attendanceRes] =
+    const [schedRes, settingsRes, todayVisitsRes, attendanceRes] =
       await Promise.all([
         supabase
           .from('staff_schedules')
           .select('*')
-          .eq('day_of_week', new Date().getDay())
+          .eq('day_of_week', localDow)
           .eq('is_active', true),
         supabase.from('app_settings').select('shift_end_margin_minutes').maybeSingle(),
         supabase
           .from('visits')
           .select('barber_id')
-          .gte('completed_at', dayStart.toISOString())
+          .gte('completed_at', dayStartISO)
+          .lte('completed_at', dayEndISO)
           .not('barber_id', 'is', null),
-        supabase
-          .from('visits')
-          .select('barber_id, completed_at')
-          .not('barber_id', 'is', null)
-          .order('completed_at', { ascending: false })
-          .limit(200),
+        // (mig 131 / audit-2026-05-09): query `lastVisits` removida porque alimentaba
+        // un state `lastCompletedAt` que nadie leía (el fairness gate del cliente
+        // que lo usaba se eliminó). Se conserva el cálculo en queue-panel.tsx donde
+        // sí se usa.
         supabase
           .from('attendance_logs')
           .select('staff_id, action_type')
-          .gte('recorded_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
+          .gte('recorded_at', dayStartISO)
+          .lte('recorded_at', dayEndISO)
           .order('recorded_at', { ascending: false }),
       ])
 
@@ -900,12 +907,6 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
       for (const v of todayVisitsRes.data as { barber_id: string }[])
         counts[v.barber_id] = (counts[v.barber_id] || 0) + 1
       setDailyServiceCounts(counts)
-    }
-    if (lastVisitsRes?.data) {
-      const lastMap: Record<string, string> = {}
-      for (const v of lastVisitsRes.data as { barber_id: string; completed_at: string }[])
-        if (!lastMap[v.barber_id]) lastMap[v.barber_id] = v.completed_at
-      setLastCompletedAt(lastMap)
     }
     if (attendanceRes.data) {
       const latest: Record<string, string> = {}
