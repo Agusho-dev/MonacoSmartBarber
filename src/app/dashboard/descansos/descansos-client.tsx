@@ -9,7 +9,7 @@ import {
 import {
   approveBreak,
   rejectBreak,
-} from '@/lib/actions/break-requests'
+} from '@/lib/actions/breaks'
 import type { BreakConfig } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

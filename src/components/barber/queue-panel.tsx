@@ -15,7 +15,7 @@ import {
   rejectBreak as rejectBreakAction,
   getPendingBreakRequests,
   startPendingBreakIfReady,
-} from '@/lib/actions/break-requests'
+} from '@/lib/actions/breaks'
 import type { QueueEntry, Staff, Client, BreakConfig, StaffSchedule } from '@/lib/types/database'
 import { assignDynamicBarbers } from '@/lib/barber-utils'
 import { BarberTimeline } from '@/components/barber/barber-timeline'
