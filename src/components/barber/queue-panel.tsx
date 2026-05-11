@@ -131,9 +131,9 @@ export function QueuePanel({
   const [now, setNow] = useState(Date.now())
   const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
   const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
-  // (mig 130) id del barbero "más justo" según el server. Se usa para ocultar
-  // dinámicas locales cuando server discrepa con el sort local.
-  const [fairBarberId, setFairBarberId] = useState<string | null>(null)
+  // (mig 131) `fairBarberId` removido: el filter que ocultaba dinámicas dejó
+  // un limbo cuando el ranking local difería del server. Ahora la atomicidad
+  // se garantiza con FOR UPDATE SKIP LOCKED en `claim_next_for_barber`.
   const [dayStats, setDayStats] = useState({ servicesCount: 0, revenue: 0 })
   const [otherBarbers, setOtherBarbers] = useState<Staff[]>([])
   const [allBarbers, setAllBarbers] = useState<Staff[]>([])
@@ -209,7 +209,6 @@ export function QueuePanel({
     const data = await fetchBranchAssignmentData(session.branch_id)
     setDailyServiceCounts(data.dailyServiceCounts ?? {})
     setLastCompletedAt(data.lastCompletedAt ?? {})
-    setFairBarberId(data.fairBarberId ?? null)
   }, [session.branch_id])
 
   const fetchBarbersAndSchedules = useCallback(async () => {
@@ -282,7 +281,6 @@ export function QueuePanel({
 
     setDailyServiceCounts(assignmentData.dailyServiceCounts ?? {})
     setLastCompletedAt(assignmentData.lastCompletedAt ?? {})
-    setFairBarberId(assignmentData.fairBarberId ?? null)
   }, [supabase, session.branch_id, session.staff_id])
 
   const fetchBreakRequestStatus = useCallback(async () => {
@@ -436,13 +434,17 @@ export function QueuePanel({
   // "Mi fila": only entries assigned to this barber (by DB or by assignDynamicBarbers).
   // Nunca mostramos entries con barber_id=null aquí para evitar que el mismo cliente
   // aparezca en la fila de múltiples barberos simultáneamente.
-  // (mig 130) Si la asignación es DINÁMICA local (_is_dynamically_assigned) y el server
-  // dice que otro barbero es el más justo, ocultamos la entry. Eso garantiza que el
-  // mismo cliente no aparezca a varios barberos por desincronización local.
+  //
+  // (mig 131) Removido el filtro `_is_dynamically_assigned && fairBarberId !== self`:
+  // el fairness gate server-side fue eliminado porque generaba un limbo donde el
+  // cliente dinámico desaparecía de TODAS las "Mi fila" cuando el ranking cliente
+  // y server divergían (ETA vs load count). La atomicidad ya la garantiza
+  // FOR UPDATE SKIP LOCKED en `claim_next_for_barber`. Si dos paneles muestran
+  // el mismo dinámico simultáneamente, el primer tap gana — el segundo recibe
+  // un toast informativo y se asigna el siguiente.
   const myWaitingEntries = dynamicEntries
     .filter((e) => {
       if (e.status !== 'waiting' || e.barber_id !== session.staff_id) return false
-      if (e._is_dynamically_assigned && fairBarberId && fairBarberId !== session.staff_id) return false
       return true
     })
     // Orden cronológico estricto por priority_order. NO empujamos los breaks
@@ -668,23 +670,18 @@ export function QueuePanel({
 
   async function handleStartService(entryId: string) {
     setActionLoading(entryId)
-    // Si la entry visible era una asignación dinámica local, el NULL del server
-    // significa que el fairness gate (mig 129) eligió a otro barbero como "más justo".
-    // Mostramos un toast específico en ese caso para no confundir al barbero con
-    // el genérico "no hay clientes en espera".
-    const wasDynamicAssignment = dynamicEntries.find(e => e.id === entryId)?._is_dynamically_assigned ?? false
     const result = await attendNextClient(session.staff_id, session.branch_id, entryId)
     if ('error' in result) {
       toast.error(result.error)
     } else if (!result.entryId) {
-      toast.info(wasDynamicAssignment ? 'Otro barbero atenderá a este cliente' : 'No hay clientes en espera')
+      // Después de mig 131 (sin fairness gate) los casos de NULL son: cliente
+      // ya tomado por otra tablet, descanso pendiente bloqueando, turno
+      // inminente, o pool vacío. Todos comparten el mismo mensaje neutro.
+      toast.info('El cliente ya no está disponible')
     } else if (result.entryId !== entryId) {
       toast.info('El cliente fue tomado por otro barbero. Se asignó el siguiente.')
     }
     await fetchQueue()
-    // Forzar refetch de assignment data: si recibimos NULL por fairness, los
-    // counts/last_completed pueden estar stale. Re-sincroniza para que el sort
-    // local converja al ganador del server.
     if (!('error' in result) && !result.entryId) {
       fetchAssignmentData()
     }
@@ -820,9 +817,13 @@ export function QueuePanel({
   }
 
   function renderGhostBreakEntry(entry: QueueEntry) {
-    // Count real waiting clients before this ghost for this barber
+    // Count real waiting clients ahead of this ghost for this barber.
+    // Usamos `priority_order` (FIFO real del backend), no `position` (UI-mutable
+    // por drag&drop) — sino el contador queda desincronizado tras un reorder.
+    const ghostPriorityTs = new Date(entry.priority_order).getTime()
     const myRealWaiting = entries.filter(
-      e => e.status === 'waiting' && !e.is_break && e.barber_id === session.staff_id && e.position < entry.position
+      e => e.status === 'waiting' && !e.is_break && e.barber_id === session.staff_id
+        && new Date(e.priority_order).getTime() < ghostPriorityTs,
     ).length
 
     return (
@@ -1515,7 +1516,15 @@ export function QueuePanel({
         entry={completingEntry}
         branchId={session.branch_id}
         onClose={() => setCompletingEntry(null)}
-        onCompleted={fetchQueue}
+        onCompleted={async () => {
+          // Refresh estándar tras finalizar. El siguiente cliente queda en
+          // "Mi fila" como waiting (sin fairness gate gracias a mig 131) y
+          // arranca cuando el barbero toca "Atender" — NO se autoarranca el
+          // cronómetro porque eso requiere que el cliente esté físicamente
+          // en la silla (incidente Fabrizio/Santino vela, 2026-05-09).
+          await fetchQueue()
+          await refreshStats()
+        }}
       />
 
       <DirectSaleDialog
