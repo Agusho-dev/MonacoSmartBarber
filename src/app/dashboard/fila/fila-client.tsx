@@ -83,6 +83,7 @@ interface FilaClientProps {
   barbers: BarberRow[]
   branches: BranchRow[]
   breakConfigs: BreakConfig[]
+  timezone: string
 }
 
 type ColumnId = string // 'breaks', 'dynamic', or barber.id
@@ -789,7 +790,7 @@ function BarberRow({
 
 // ─── Componente Principal ───────────────────────────────────────────────────
 
-export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: FilaClientProps) {
+export function FilaClient({ initialEntries, barbers, branches, breakConfigs, timezone }: FilaClientProps) {
   const selectedBranchId = useBranchStore(s => s.selectedBranchId)
   const [entries, setEntries] = useState<QueueEntry[]>(initialEntries)
   const [liveBarbers, setLiveBarbers] = useState<BarberRow[]>(barbers)
@@ -863,11 +864,10 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
     // `new Date().setHours(0,0,0,0)` y `new Date().getDay()`: ambos basados
     // en runtime TZ del server (UTC en Vercel). Pasada la medianoche UTC el
     // dailyServiceCounts quedaba en 0 y el day_of_week saltaba un día.
-    const tz = await (await import('@/lib/i18n')).getActiveTimezone()
     const { getLocalDayBounds } = await import('@/lib/time-utils')
-    const { start: dayStartISO, end: dayEndISO } = getLocalDayBounds(tz)
+    const { start: dayStartISO, end: dayEndISO } = getLocalDayBounds(timezone)
     const localDow = new Date(
-      new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date()),
+      new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date()),
     ).getDay()
 
     const [schedRes, settingsRes, todayVisitsRes, attendanceRes] =
@@ -915,7 +915,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs }: 
       })
       setLatestAttendance(latest)
     }
-  }, [supabase])
+  }, [supabase, timezone])
 
   useEffect(() => {
     // Diferimos las primeras llamadas para no disparar setState dentro del

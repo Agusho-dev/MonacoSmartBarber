@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { getAppointmentsForDateMultiBranch, getAppointmentSettings } from '@/lib/actions/appointments'
+import { getActiveTimezone } from '@/lib/i18n'
 import { redirect } from 'next/navigation'
 import { FilaClient } from './fila-client'
 import { FilaTabsWrapper } from './fila-tabs-wrapper'
@@ -17,6 +18,7 @@ export default async function FilaAdminPage() {
   const orgId = await getCurrentOrgId()
   if (!orgId) redirect('/login')
   const branchIds = await getScopedBranchIds()
+  const timezone = await getActiveTimezone()
 
   const supabase = createAdminClient()
 
@@ -83,6 +85,7 @@ export default async function FilaAdminPage() {
         barbers={barbers ?? []}
         branches={branches ?? []}
         breakConfigs={breakConfigs ?? []}
+        timezone={timezone}
       />
     </FilaTabsWrapper>
   )
