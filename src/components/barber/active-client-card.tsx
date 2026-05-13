@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState, type CSSProperties } from 'react'
+import { useCallback, useMemo, type CSSProperties } from 'react'
 import { cn } from '@/lib/utils'
 import { useTimerStage, useCrossesThreshold, type TimerStage } from '@/hooks/use-timer-stage'
 import { LiveTimerText } from './live-timer-text'
@@ -11,7 +11,6 @@ import { Card, CardContent } from '@/components/ui/card'
 import {
   Check,
   Pause,
-  Play,
   User,
   Gift,
   Instagram,
@@ -33,10 +32,6 @@ interface ActiveClientCardProps {
   entry: QueueEntry
   /** Handler de "Finalizar servicio" — abre el dialog de cobro. */
   onComplete: () => void
-  /** Handler de "Pausar". Si no se pasa, no se muestra el botón. */
-  onPause?: () => void | Promise<void>
-  /** Handler de "Reanudar". */
-  onResume?: () => void | Promise<void>
   /** Variante visual: desktop (panel lateral) o mobile (sticky footer). */
   variant?: 'desktop' | 'mobile'
   /** Disabled global del botón principal (loading state). */
@@ -63,13 +58,9 @@ const STAGE_STYLE: Record<TimerStage, { bg: string; fg: string; glow: string }> 
 export function ActiveClientCard({
   entry,
   onComplete,
-  onPause,
-  onResume,
   variant = 'desktop',
   actionLoading,
 }: ActiveClientCardProps) {
-  const [pausing, setPausing] = useState(false)
-
   const handleStageChange = useCallback((next: TimerStage, prev: TimerStage) => {
     // Sólo haptics silenciosos durante el corte: nada de sonido para no
     // interrumpir la experiencia del cliente.
@@ -112,19 +103,6 @@ export function ActiveClientCard({
   const clientName = entry.client?.name ?? 'Cliente'
   const serviceName = entry.service?.name ?? 'Servicio'
   const servicePrice = entry.service?.price ?? 0
-
-  const handlePause = async () => {
-    if (!onPause) return
-    setPausing(true)
-    vibrate(10)
-    try { await onPause() } finally { setPausing(false) }
-  }
-  const handleResume = async () => {
-    if (!onResume) return
-    setPausing(true)
-    vibrate(10)
-    try { await onResume() } finally { setPausing(false) }
-  }
 
   if (variant === 'mobile') {
     return (
@@ -205,30 +183,6 @@ export function ActiveClientCard({
             </Accordion>
 
             <div className="mt-3 flex gap-2">
-              {onPause && !isPaused && (
-                <Button
-                  variant="ghost"
-                  size="lg"
-                  onClick={handlePause}
-                  disabled={pausing}
-                  className="h-14 px-4 bg-black/10 hover:bg-black/15 text-current border-0"
-                  aria-label="Pausar corte"
-                >
-                  <Pause className="size-5" />
-                </Button>
-              )}
-              {onResume && isPaused && (
-                <Button
-                  variant="ghost"
-                  size="lg"
-                  onClick={handleResume}
-                  disabled={pausing}
-                  className="h-14 px-4 bg-black/10 hover:bg-black/15 text-current border-0"
-                  aria-label="Reanudar corte"
-                >
-                  <Play className="size-5" />
-                </Button>
-              )}
               <Button
                 size="lg"
                 onClick={onComplete}
@@ -321,30 +275,6 @@ export function ActiveClientCard({
         )}
 
         <div className="mt-7 flex flex-wrap gap-3">
-          {onPause && !isPaused && (
-            <Button
-              variant="ghost"
-              size="lg"
-              onClick={handlePause}
-              disabled={pausing}
-              className="h-16 min-w-[120px] bg-black/10 hover:bg-black/15 text-current border-0 text-base font-semibold"
-            >
-              <Pause className="mr-2 size-5" />
-              Pausar
-            </Button>
-          )}
-          {onResume && isPaused && (
-            <Button
-              variant="ghost"
-              size="lg"
-              onClick={handleResume}
-              disabled={pausing}
-              className="h-16 min-w-[120px] bg-black/10 hover:bg-black/15 text-current border-0 text-base font-semibold"
-            >
-              <Play className="mr-2 size-5" />
-              Reanudar
-            </Button>
-          )}
           <Button
             size="lg"
             onClick={onComplete}

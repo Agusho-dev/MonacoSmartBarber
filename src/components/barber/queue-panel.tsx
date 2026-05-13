@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
-import { attendNextClient, cancelQueueEntry, pauseActiveService, resumeActiveService } from '@/lib/actions/queue'
+import { attendNextClient, cancelQueueEntry } from '@/lib/actions/queue'
 import { fetchBarberDayStats, fetchBranchAssignmentData } from '@/lib/actions/barber'
 import { logoutBarber } from '@/lib/actions/auth'
 import {
@@ -726,28 +726,6 @@ export function QueuePanel({
     setActionLoading(null)
   }
 
-  async function handlePauseActive() {
-    if (!myActiveEntry) return
-    const result = await pauseActiveService(myActiveEntry.id)
-    if ('error' in result && result.error) {
-      toast.error(result.error)
-    } else {
-      toast.success('Corte en pausa')
-    }
-    await fetchQueue()
-  }
-
-  async function handleResumeActive() {
-    if (!myActiveEntry) return
-    const result = await resumeActiveService(myActiveEntry.id)
-    if ('error' in result && result.error) {
-      toast.error(result.error)
-    } else {
-      toast.success('Corte reanudado')
-    }
-    await fetchQueue()
-  }
-
   async function handleApproveOtherBreak(requestId: string) {
     const cuts = parseInt(approveCutsInputs[requestId] || '0', 10)
     if (isNaN(cuts) || cuts < 0) { toast.error('Número de cortes inválido'); return }
@@ -1268,8 +1246,6 @@ export function QueuePanel({
                       entry={myActiveEntry}
                       variant="mobile"
                       onComplete={() => setCompletingEntry(myActiveEntry)}
-                      onPause={handlePauseActive}
-                      onResume={handleResumeActive}
                       actionLoading={actionLoading === myActiveEntry.id}
                     />
                   ) : null}
@@ -1379,8 +1355,6 @@ export function QueuePanel({
                     entry={myActiveEntry}
                     variant="mobile"
                     onComplete={() => setCompletingEntry(myActiveEntry)}
-                    onPause={handlePauseActive}
-                    onResume={handleResumeActive}
                     actionLoading={actionLoading === myActiveEntry.id}
                   />
                 ) : null}
@@ -1481,8 +1455,6 @@ export function QueuePanel({
                 entry={myActiveEntry}
                 variant="desktop"
                 onComplete={() => setCompletingEntry(myActiveEntry)}
-                onPause={handlePauseActive}
-                onResume={handleResumeActive}
                 actionLoading={actionLoading === myActiveEntry.id}
               />
             ) : (
