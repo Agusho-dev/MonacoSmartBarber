@@ -79,6 +79,7 @@ interface PaymentAccountOption {
 interface VisitHistory {
   id: string
   amount: number
+  started_at: string | null
   completed_at: string
   payment_method: string
   payment_account_id: string | null
@@ -89,6 +90,24 @@ interface VisitHistory {
   client: { name: string; phone: string } | null
   service: { name: string } | null
   payment_account: PaymentAccountOption | null
+}
+
+// Calcula la duración real de una visita en minutos. Devuelve null si no es
+// realista (sin started_at, datos invertidos, o fuera de [0.1, 240] min).
+function visitDurationMinutes(v: { started_at: string | null; completed_at: string }): number | null {
+  if (!v.started_at) return null
+  const start = new Date(v.started_at).getTime()
+  const end = new Date(v.completed_at).getTime()
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null
+  const diff = (end - start) / 60_000
+  if (diff < 0.1 || diff > 240) return null
+  return diff
+}
+
+function formatDurationCell(minutes: number | null): { text: string; muted: boolean } {
+  if (minutes === null) return { text: '—', muted: true }
+  if (minutes < 1) return { text: '<1 min', muted: false }
+  return { text: `${Math.round(minutes)} min`, muted: false }
 }
 
 interface DayGroup {
@@ -179,6 +198,7 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
         .select(`
           id,
           amount,
+          started_at,
           completed_at,
           payment_method,
           payment_account_id,
@@ -523,6 +543,7 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
                   <TableHead>Cliente</TableHead>
                   <TableHead>Barbero</TableHead>
                   <TableHead>Servicio</TableHead>
+                  <TableHead className="text-right">Duración</TableHead>
                   <TableHead>Sucursal</TableHead>
                   <TableHead>Método / Alias</TableHead>
                   <TableHead className="text-right">Monto</TableHead>
@@ -531,13 +552,13 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
               <TableBody>
                 {loading && visits.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="h-24 text-center">
+                    <TableCell colSpan={9} className="h-24 text-center">
                       Cargando historial...
                     </TableCell>
                   </TableRow>
                 ) : visits.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">
                       No se encontraron servicios con esos filtros
                     </TableCell>
                   </TableRow>
@@ -548,7 +569,7 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
                     return (
                       <Fragment key={group.dateKey}>
                         <TableRow className="bg-white hover:bg-white">
-                          <TableCell colSpan={8} className="py-2.5">
+                          <TableCell colSpan={9} className="py-2.5">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                               <span className="font-semibold text-black">{dayStr}</span>
                               <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-sm text-neutral-600">
@@ -601,6 +622,14 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
                               </TableCell>
                               <TableCell>{visit.barber?.full_name}</TableCell>
                               <TableCell>{visit.service?.name || '—'}</TableCell>
+                              {(() => {
+                                const dur = formatDurationCell(visitDurationMinutes(visit))
+                                return (
+                                  <TableCell className={`text-right tabular-nums ${dur.muted ? 'text-muted-foreground' : ''}`}>
+                                    {dur.text}
+                                  </TableCell>
+                                )
+                              })()}
                               <TableCell>{visit.branch?.name}</TableCell>
                               <TableCell>
                                 <div className="flex flex-col gap-0.5">
@@ -647,22 +676,41 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
               <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
                 {/* Info de solo lectura */}
                 <div className="rounded-lg border bg-muted/20 divide-y text-sm">
-                  {[
-                    { label: 'Cliente', value: editingVisit.client?.name || 'Consumidor Final' },
-                    { label: 'Barbero', value: editingVisit.barber?.full_name },
-                    { label: 'Servicio', value: editingVisit.service?.name || '—' },
-                    { label: 'Sucursal', value: editingVisit.branch?.name },
-                    {
-                      label: 'Fecha',
-                      value: new Date(editingVisit.completed_at).toLocaleString('es-AR', {
-                        day: '2-digit', month: '2-digit', year: 'numeric',
-                        hour: '2-digit', minute: '2-digit',
-                      }),
-                    },
-                  ].map(({ label, value }) => (
+                  {(() => {
+                    const minutes = visitDurationMinutes(editingVisit)
+                    const startTime = editingVisit.started_at
+                      ? new Date(editingVisit.started_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+                      : null
+                    const endTime = new Date(editingVisit.completed_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+
+                    const durationLabel = minutes === null
+                      ? 'Sin registro'
+                      : minutes < 1
+                        ? `<1 min${startTime ? ` · ${startTime} → ${endTime}` : ''}`
+                        : `${Math.round(minutes)} min · ${startTime} → ${endTime}`
+
+                    return [
+                      { label: 'Cliente', value: editingVisit.client?.name || 'Consumidor Final' },
+                      { label: 'Barbero', value: editingVisit.barber?.full_name },
+                      { label: 'Servicio', value: editingVisit.service?.name || '—' },
+                      { label: 'Sucursal', value: editingVisit.branch?.name },
+                      {
+                        label: 'Fecha',
+                        value: new Date(editingVisit.completed_at).toLocaleString('es-AR', {
+                          day: '2-digit', month: '2-digit', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
+                        }),
+                      },
+                      {
+                        label: 'Duración',
+                        value: durationLabel,
+                        muted: minutes === null,
+                      },
+                    ]
+                  })().map(({ label, value, muted }) => (
                     <div key={label} className="grid grid-cols-[110px_1fr] items-start gap-2 px-4 py-2.5">
                       <span className="text-muted-foreground shrink-0">{label}</span>
-                      <span className="font-medium text-right break-words">{value}</span>
+                      <span className={`text-right break-words ${muted ? 'text-muted-foreground' : 'font-medium'}`}>{value}</span>
                     </div>
                   ))}
                 </div>
