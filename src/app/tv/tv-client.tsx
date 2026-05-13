@@ -433,24 +433,39 @@ export function TvClient({
             {entry.client?.name ?? 'Cliente'}
           </p>
           <div className="flex items-center gap-2">
-            {(entry as { _is_dynamically_assigned?: boolean })._is_dynamically_assigned ? (
-              <p className={`text-emerald-400 ${ws.barberInfo} flex items-center`}>
-                <Zap className={ws.chevronSize} />
-                <span className="font-medium">Menor espera</span>
-                <ChevronRight className={ws.chevronSize} />
-                <span className="font-medium text-zinc-300">{entry.barber?.full_name}</span>
-              </p>
-            ) : entry.is_dynamic && !entry.barber_id ? (
-              <p className={`text-emerald-400/70 ${ws.barberInfo} flex items-center`}>
-                <Zap className={ws.chevronSize} />
-                <span className="font-medium">Menor espera</span>
-              </p>
-            ) : entry.barber_id && entry.barber ? (
-              <p className={`text-zinc-500 ${ws.barberInfo} flex items-center`}>
-                <ChevronRight className={ws.chevronSize} />
-                <span>Se corta con <span className="font-medium text-zinc-300">{entry.barber.full_name}</span></span>
-              </p>
-            ) : null}
+            {(() => {
+              // Predicción client-side (assignDynamicBarbers) cuando entry.barber_id es NULL.
+              const isClientPredicted = (entry as { _is_dynamically_assigned?: boolean })._is_dynamically_assigned
+              // Predicción server-side (mig 132/133): is_dynamic=true con barber_id ya seteado.
+              const isServerPredicted = entry.is_dynamic && entry.barber
+              if (isClientPredicted || isServerPredicted) {
+                return (
+                  <p className={`text-emerald-400 ${ws.barberInfo} flex items-center`}>
+                    <Zap className={ws.chevronSize} />
+                    <span className="font-medium">Menor espera</span>
+                    <ChevronRight className={ws.chevronSize} />
+                    <span className="font-medium text-zinc-300">{entry.barber?.full_name}</span>
+                  </p>
+                )
+              }
+              if (entry.is_dynamic) {
+                return (
+                  <p className={`text-emerald-400/70 ${ws.barberInfo} flex items-center`}>
+                    <Zap className={ws.chevronSize} />
+                    <span className="font-medium">Menor espera</span>
+                  </p>
+                )
+              }
+              if (entry.barber_id && entry.barber) {
+                return (
+                  <p className={`text-zinc-500 ${ws.barberInfo} flex items-center`}>
+                    <ChevronRight className={ws.chevronSize} />
+                    <span>Se corta con <span className="font-medium text-zinc-300">{entry.barber.full_name}</span></span>
+                  </p>
+                )
+              }
+              return null
+            })()}
             {aheadLabel && (
               <span className="text-zinc-500 text-xs lg:text-sm 2xl:text-base">· {aheadLabel}</span>
             )}

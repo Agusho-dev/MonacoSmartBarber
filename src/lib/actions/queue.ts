@@ -29,7 +29,7 @@ export async function checkinClient(formData: FormData) {
   // Operación pública del kiosko: verificar que la sucursal exista y obtener su organización
   const { data: branchResult } = await supabase
     .from('branches')
-    .select('id, organization_id')
+    .select('id, organization_id, timezone')
     .eq('id', branchId)
     .eq('is_active', true)
     .single()
@@ -84,15 +84,21 @@ export async function checkinClient(formData: FormData) {
     p_branch_id: branchId,
   })
 
-  // (mig 132) Cuando el cliente elige "Menor espera" (barberId=null), el
-  // server pre-asigna el barbero óptimo via assign_dynamic_barber así todas
-  // las tablets ven el mismo barbero predicho desde DB (fuente de verdad
-  // única). Si el RPC devuelve NULL (no hay elegibles), caemos al
-  // comportamiento previo (barber_id=null, prediccion local en cliente).
+  // (mig 132 + fix 2026-05-13) Pre-asignación server-side para que todas las
+  // tablets vean el mismo barbero predicho. Usamos compute_fair_barber (mig
+  // 129) en vez de assign_dynamic_barber porque el ranking de compute_fair
+  // incluye `load` (cantidad de clientes ya asignados al barbero) — crítico
+  // en barbería llena, donde el barbero con menos cortes hoy puede ya tener
+  // 5 clientes en cola y no sería justo cargarle más. Si el RPC devuelve
+  // NULL (todos bloqueados por shift_end / appointment_protected / etc),
+  // caemos a barber_id=null y la predicción client-side de assignDynamicBarbers
+  // hace de fallback.
   let assignedBarberId = barberId
   if (!barberId) {
-    const { data: predicted } = await supabase.rpc('assign_dynamic_barber', {
+    const branchTz = branchResult.timezone || 'America/Argentina/Buenos_Aires'
+    const { data: predicted } = await supabase.rpc('compute_fair_barber', {
       p_branch_id: branchId,
+      p_branch_tz: branchTz,
     })
     if (predicted) assignedBarberId = predicted as string
   }
@@ -1019,7 +1025,7 @@ export async function checkinClientByFace(
   // Operación pública del kiosko: verificar que la sucursal exista y obtener su organización
   const { data: branchCheck } = await supabase
     .from('branches')
-    .select('id, organization_id')
+    .select('id, organization_id, timezone')
     .eq('id', branchId)
     .eq('is_active', true)
     .maybeSingle()
@@ -1054,11 +1060,14 @@ export async function checkinClientByFace(
     p_branch_id: branchId,
   })
 
-  // (mig 132) Pre-asignación server-side para flujo Face ID — ver checkinClient.
+  // (mig 132 + fix 2026-05-13) Pre-asignación server-side para flujo Face ID.
+  // Ver checkinClient para el razonamiento de compute_fair_barber vs assign_dynamic_barber.
   let assignedBarberIdFace = barberId
   if (!barberId) {
-    const { data: predicted } = await supabase.rpc('assign_dynamic_barber', {
+    const branchTz = branchCheck.timezone || 'America/Argentina/Buenos_Aires'
+    const { data: predicted } = await supabase.rpc('compute_fair_barber', {
       p_branch_id: branchId,
+      p_branch_tz: branchTz,
     })
     if (predicted) assignedBarberIdFace = predicted as string
   }

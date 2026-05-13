@@ -199,6 +199,12 @@ function QueueCard({
                 {getBranchName(entry.branch_id)}
               </span>
             )}
+            {entry.is_dynamic && entry.barber?.full_name && (
+              <span className="shrink-0 inline-flex items-center gap-0.5 rounded bg-yellow-500/10 px-1.5 py-px text-[10px] text-yellow-400 truncate max-w-[90px]">
+                <Zap className="size-2.5 shrink-0" />
+                <span className="truncate">{entry.barber.full_name.split(' ')[0]}</span>
+              </span>
+            )}
             <span className="flex shrink-0 items-center gap-1 ml-auto min-w-0">
               <Clock className="size-3 shrink-0" />
               <span className="truncate">{formatElapsed(entry.checked_in_at)}</span>
@@ -1102,6 +1108,11 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
 
   const getEntryColumnId = useCallback((entry: QueueEntry): ColumnId => {
     if (entry.status === 'in_progress') return entry.barber_id ?? '__dynamic__'
+    // Dinámicos siempre van a la columna Dinámicos, aunque tengan barber_id
+    // predicho por compute_fair_barber al check-in (mig 132/133). El barber_id
+    // es info visual (chip en la card), no destino de columna — la entry
+    // sigue siendo reclamable por cualquier barbero via claim_next_for_barber.
+    if (entry.is_dynamic) return '__dynamic__'
     if (entry.barber_id) return entry.barber_id
     return '__dynamic__'
   }, [])
