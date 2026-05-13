@@ -84,16 +84,33 @@ export async function checkinClient(formData: FormData) {
     p_branch_id: branchId,
   })
 
+  // (mig 132) Cuando el cliente elige "Menor espera" (barberId=null), el
+  // server pre-asigna el barbero óptimo via assign_dynamic_barber así todas
+  // las tablets ven el mismo barbero predicho desde DB (fuente de verdad
+  // única). Si el RPC devuelve NULL (no hay elegibles), caemos al
+  // comportamiento previo (barber_id=null, prediccion local en cliente).
+  let assignedBarberId = barberId
+  if (!barberId) {
+    const { data: predicted } = await supabase.rpc('assign_dynamic_barber', {
+      p_branch_id: branchId,
+    })
+    if (predicted) assignedBarberId = predicted as string
+  }
+
   const now = new Date().toISOString()
   const { data: queueEntry, error: queueError } = await supabase
     .from('queue_entries')
     .insert({
       branch_id: branchId,
       client_id: clientId,
-      barber_id: barberId,
+      barber_id: assignedBarberId,
       service_id: serviceId,
       position: position ?? 1,
       status: 'waiting',
+      // is_dynamic refleja la intención del cliente, no si quedó asignado:
+      // !barberId = el cliente eligió "Menor espera" → siempre dinámico.
+      // assignedBarberId puede estar seteado por el RPC y aún así la entry
+      // es dinámica (cualquiera puede reclamarla via claim_next_for_barber).
       is_dynamic: !barberId,
       priority_order: now,
     })
@@ -1037,13 +1054,22 @@ export async function checkinClientByFace(
     p_branch_id: branchId,
   })
 
+  // (mig 132) Pre-asignación server-side para flujo Face ID — ver checkinClient.
+  let assignedBarberIdFace = barberId
+  if (!barberId) {
+    const { data: predicted } = await supabase.rpc('assign_dynamic_barber', {
+      p_branch_id: branchId,
+    })
+    if (predicted) assignedBarberIdFace = predicted as string
+  }
+
   const nowFace = new Date().toISOString()
   const { data: queueEntry, error: queueError } = await supabase
     .from('queue_entries')
     .insert({
       branch_id: branchId,
       client_id: clientId,
-      barber_id: barberId,
+      barber_id: assignedBarberIdFace,
       service_id: serviceId,
       position: position ?? 1,
       status: 'waiting',
