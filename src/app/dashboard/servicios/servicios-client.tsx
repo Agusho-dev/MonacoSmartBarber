@@ -2,11 +2,12 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Power, ChevronDown, ChevronUp, Percent, Trash2, Sparkles, Package, ShoppingCart, Store, User } from 'lucide-react'
+import { Plus, Pencil, Power, ChevronDown, ChevronUp, Percent, Trash2, Sparkles, Package, ShoppingCart, Store, User, Clock } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { formatCurrency } from '@/lib/format'
 import { HistorialServicios } from './historial-servicios'
+import { ServiceTimingsDialog } from './service-timings-dialog'
 import { upsertService, toggleService, deleteService } from '@/lib/actions/services'
 import { upsertProduct, toggleProduct, deleteProduct, sellProductFromDashboard } from '@/lib/actions/products'
 import type { Service, Branch, ServiceAvailability, BookingMode, StaffServiceCommission, Product, ProductSale } from '@/lib/types/database'
@@ -97,6 +98,7 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
   const [svcDeleteOpen, setSvcDeleteOpen] = useState(false)
   const [deletingService, setDeletingService] = useState<ServiceWithBranch | null>(null)
   const [svcDeleting, setSvcDeleting] = useState(false)
+  const [timingsService, setTimingsService] = useState<ServiceWithBranch | null>(null)
 
   // ── Product state ──
   const [prodDialogOpen, setProdDialogOpen] = useState(false)
@@ -399,13 +401,16 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="icon-xs" onClick={() => openEditService(service)}>
+                        <Button variant="ghost" size="icon-xs" onClick={() => setTimingsService(service)} title="Ver tiempos reales">
+                          <Clock className="size-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon-xs" onClick={() => openEditService(service)} title="Editar">
                           <Pencil className="size-3" />
                         </Button>
-                        <Button variant="ghost" size="icon-xs" onClick={() => handleToggleService(service)}>
+                        <Button variant="ghost" size="icon-xs" onClick={() => handleToggleService(service)} title={service.is_active ? 'Desactivar' : 'Activar'}>
                           <Power className="size-3" />
                         </Button>
-                        <Button variant="ghost" size="icon-xs" onClick={() => openDeleteService(service)} className="text-destructive hover:text-destructive">
+                        <Button variant="ghost" size="icon-xs" onClick={() => openDeleteService(service)} className="text-destructive hover:text-destructive" title="Eliminar">
                           <Trash2 className="size-3" />
                         </Button>
                       </div>
@@ -434,6 +439,7 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
                     <Badge variant={service.is_active ? 'default' : 'secondary'} className="text-[10px]">
                       {service.is_active ? 'Activo' : 'Inactivo'}
                     </Badge>
+                    <Button variant="ghost" size="icon-xs" onClick={() => setTimingsService(service)} title="Tiempos reales"><Clock className="size-3" /></Button>
                     <Button variant="ghost" size="icon-xs" onClick={() => openEditService(service)}><Pencil className="size-3" /></Button>
                     <Button variant="ghost" size="icon-xs" onClick={() => handleToggleService(service)}><Power className="size-3" /></Button>
                     <Button variant="ghost" size="icon-xs" onClick={() => openDeleteService(service)} className="text-destructive hover:text-destructive"><Trash2 className="size-3" /></Button>
@@ -949,6 +955,12 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ServiceTimingsDialog
+        serviceId={timingsService?.id ?? null}
+        serviceName={timingsService?.name}
+        onOpenChange={(open) => { if (!open) setTimingsService(null) }}
+      />
     </div>
   )
 }
