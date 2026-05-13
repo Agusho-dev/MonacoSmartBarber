@@ -321,7 +321,20 @@ export function assignDynamicBarbers(
   const unassigned: QueueEntry[] = []
 
   for (const entry of entries) {
-    if (entry.status === 'waiting' && !entry.barber_id) {
+    // Una entrada va a `unassigned` (re-evaluación dinámica del barbero) si:
+    //   (a) no tiene barber_id (check-in dinámico legacy, pre-mig 132), o
+    //   (b) tiene is_dynamic=true (mig 132 pre-asigna barber_id pero el cliente
+    //       eligió "menor espera" — el predicho puede quedar obsoleto si otro
+    //       barbero se libera primero. Re-evaluamos en cada render para que
+    //       aparezca al barbero efectivamente más justo del momento).
+    // Excluimos breaks (is_break=true) — esos son ghosts del propio barbero,
+    // no entries de cliente.
+    const isDynamicCandidate =
+      entry.status === 'waiting' &&
+      !entry.is_break &&
+      (entry.is_dynamic || !entry.barber_id)
+
+    if (isDynamicCandidate) {
       unassigned.push(entry)
     } else {
       result.push(entry)
