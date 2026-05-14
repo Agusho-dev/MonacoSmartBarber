@@ -1108,10 +1108,12 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
 
   const getEntryColumnId = useCallback((entry: QueueEntry): ColumnId => {
     if (entry.status === 'in_progress') return entry.barber_id ?? '__dynamic__'
-    // Dinámicos siempre van a la columna Dinámicos, aunque tengan barber_id
-    // predicho por compute_fair_barber al check-in (mig 132/133). El barber_id
-    // es info visual (chip en la card), no destino de columna — la entry
-    // sigue siendo reclamable por cualquier barbero via claim_next_for_barber.
+    // Dinámicos siempre van a la columna Dinámicos para visibilidad operativa,
+    // aunque tengan barber_id predicho por compute_fair_barber al check-in.
+    // (mig 133) La pre-asignación es sticky mientras el barbero pre-asignado
+    // esté presente: claim_next_for_barber NO permite que otro barbero la robe
+    // si el original está clocked-in, no en break y no en shift_end. Si el
+    // pre-asignado se desconecta, la entry vuelve a ser claimable por cualquiera.
     if (entry.is_dynamic) return '__dynamic__'
     if (entry.barber_id) return entry.barber_id
     return '__dynamic__'
