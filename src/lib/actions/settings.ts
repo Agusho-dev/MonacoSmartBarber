@@ -34,7 +34,6 @@ export async function updateAppSettings(formData: FormData) {
     business_days: businessDays,
     shift_end_margin_minutes: Number(formData.get('shift_end_margin_minutes') || 35),
     next_client_alert_minutes: Number(formData.get('next_client_alert_minutes') || 5),
-    dynamic_cooldown_seconds: Number(formData.get('dynamic_cooldown_seconds') || 60),
     checkin_bg_color: checkinBgColor,
   }
 

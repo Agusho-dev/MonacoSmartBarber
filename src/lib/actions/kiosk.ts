@@ -63,7 +63,7 @@ export async function getCheckinData(branchId: string) {
         .eq('is_active', true),
       supabase
         .from('app_settings')
-        .select('shift_end_margin_minutes, dynamic_cooldown_seconds')
+        .select('shift_end_margin_minutes')
         .eq('organization_id', branchCheck.organization_id)
         .maybeSingle(),
       supabase

@@ -29,7 +29,7 @@ export async function checkinClient(formData: FormData) {
   // Operación pública del kiosko: verificar que la sucursal exista y obtener su organización
   const { data: branchResult } = await supabase
     .from('branches')
-    .select('id, organization_id, timezone')
+    .select('id, organization_id')
     .eq('id', branchId)
     .eq('is_active', true)
     .single()
@@ -84,39 +84,23 @@ export async function checkinClient(formData: FormData) {
     p_branch_id: branchId,
   })
 
-  // (mig 132 + fix 2026-05-13) Pre-asignación server-side para que todas las
-  // tablets vean el mismo barbero predicho. Usamos compute_fair_barber (mig
-  // 129) en vez de assign_dynamic_barber porque el ranking de compute_fair
-  // incluye `load` (cantidad de clientes ya asignados al barbero) — crítico
-  // en barbería llena, donde el barbero con menos cortes hoy puede ya tener
-  // 5 clientes en cola y no sería justo cargarle más. Si el RPC devuelve
-  // NULL (todos bloqueados por shift_end / appointment_protected / etc),
-  // caemos a barber_id=null y la predicción client-side de assignDynamicBarbers
-  // hace de fallback.
-  let assignedBarberId = barberId
-  if (!barberId) {
-    const branchTz = branchResult.timezone || 'America/Argentina/Buenos_Aires'
-    const { data: predicted } = await supabase.rpc('compute_fair_barber', {
-      p_branch_id: branchId,
-      p_branch_tz: branchTz,
-    })
-    if (predicted) assignedBarberId = predicted as string
-  }
-
+  // Modelo pool (mig 134): si el cliente eligió "Menor espera", la entry
+  // entra con barber_id = NULL y vive en el pool compartido — la reclama el
+  // primer barbero libre vía claim_next_for_barber (FIFO por priority_order,
+  // sin binding sticky). La pre-asignación visual la hace el cliente
+  // (assignDynamicBarbers) y es solo un hint informativo, no vincula nada.
   const now = new Date().toISOString()
   const { data: queueEntry, error: queueError } = await supabase
     .from('queue_entries')
     .insert({
       branch_id: branchId,
       client_id: clientId,
-      barber_id: assignedBarberId,
+      // null = dinámico de pool ("Menor espera"); seteado = barbero específico
+      barber_id: barberId,
       service_id: serviceId,
       position: position ?? 1,
       status: 'waiting',
-      // is_dynamic refleja la intención del cliente, no si quedó asignado:
-      // !barberId = el cliente eligió "Menor espera" → siempre dinámico.
-      // assignedBarberId puede estar seteado por el RPC y aún así la entry
-      // es dinámica (cualquiera puede reclamarla via claim_next_for_barber).
+      // !barberId = eligió "Menor espera" → dinámico de pool
       is_dynamic: !barberId,
       priority_order: now,
     })
@@ -183,13 +167,14 @@ export async function startService(queueEntryId: string, barberId: string) {
 
 /**
  * Asigna atómicamente el próximo cliente al barbero e inicia el servicio.
- * Usa el RPC `claim_next_for_barber` (mig 131): un único round trip que
- * decide entre ghost de descanso listo, cliente asignado o dinámico (FIFO
- * global), y deja el entry en `in_progress` con `started_at = NOW()`.
+ * Usa el RPC `claim_next_for_barber` (mig 131, modelo pool desde mig 134):
+ * un único round trip que decide entre ghost de descanso listo, cliente
+ * específico mío o dinámico de pool (FIFO global por priority_order), y deja
+ * el entry en `in_progress` con `started_at = NOW()`.
  *
- * Reemplaza el ciclo previo (assign_next_client + UPDATE TS-side + fallback
- * de ghost manual). La atomicidad la garantiza FOR UPDATE SKIP LOCKED en
- * Postgres — sin fairness gate cliente↔server (eliminado en mig 131).
+ * Pool NO bloqueante: cualquier barbero libre puede reclamar cualquier
+ * dinámico — sin binding sticky ni fairness gate. La atomicidad la garantiza
+ * FOR UPDATE SKIP LOCKED en Postgres.
  */
 export async function attendNextClient(barberId: string, branchId: string, preferredEntryId?: string) {
   if (!isValidUUID(barberId) || !isValidUUID(branchId)) {
@@ -1025,7 +1010,7 @@ export async function checkinClientByFace(
   // Operación pública del kiosko: verificar que la sucursal exista y obtener su organización
   const { data: branchCheck } = await supabase
     .from('branches')
-    .select('id, organization_id, timezone')
+    .select('id, organization_id')
     .eq('id', branchId)
     .eq('is_active', true)
     .maybeSingle()
@@ -1060,25 +1045,14 @@ export async function checkinClientByFace(
     p_branch_id: branchId,
   })
 
-  // (mig 132 + fix 2026-05-13) Pre-asignación server-side para flujo Face ID.
-  // Ver checkinClient para el razonamiento de compute_fair_barber vs assign_dynamic_barber.
-  let assignedBarberIdFace = barberId
-  if (!barberId) {
-    const branchTz = branchCheck.timezone || 'America/Argentina/Buenos_Aires'
-    const { data: predicted } = await supabase.rpc('compute_fair_barber', {
-      p_branch_id: branchId,
-      p_branch_tz: branchTz,
-    })
-    if (predicted) assignedBarberIdFace = predicted as string
-  }
-
+  // Modelo pool (mig 134): dinámico entra con barber_id = NULL. Ver checkinClient.
   const nowFace = new Date().toISOString()
   const { data: queueEntry, error: queueError } = await supabase
     .from('queue_entries')
     .insert({
       branch_id: branchId,
       client_id: clientId,
-      barber_id: assignedBarberIdFace,
+      barber_id: barberId,
       service_id: serviceId,
       position: position ?? 1,
       status: 'waiting',

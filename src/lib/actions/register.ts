@@ -187,7 +187,6 @@ export async function registerOrganization(formData: FormData) {
         business_days: [1, 2, 3, 4, 5, 6],
         shift_end_margin_minutes: 35,
         next_client_alert_minutes: 5,
-        dynamic_cooldown_seconds: 60,
         review_auto_send: false,
         review_delay_minutes: 30,
         checkin_bg_color: '#3f3f46',

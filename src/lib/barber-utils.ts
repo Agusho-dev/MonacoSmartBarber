@@ -301,7 +301,6 @@ export function assignDynamicBarbers(
   dailyServiceCounts: Record<string, number> = {},
   lastCompletedAt: Record<string, string> = {},
   notClockedInIds: Set<string> = new Set(),
-  _cooldownMs = 120_000,
   barberAvgMinutes: Record<string, number> = {}
 ): DynamicQueueEntry[] {
   const result: DynamicQueueEntry[] = []
@@ -320,50 +319,17 @@ export function assignDynamicBarbers(
   const barberPendingBreakCount = new Map<string, number>()
   const unassigned: QueueEntry[] = []
 
-  // Pre-cómputo: para mig 133 (sticky-while-present) necesitamos saber si el
-  // barbero pre-asignado por el server está localmente "presente". Si lo está,
-  // RESPETAMOS la pre-asignación (no re-evaluamos). Si no, la entry se trata
-  // como verdaderamente dinámica y se rerankea.
-  const barbersBlockedByShiftEnd = new Set<string>()
-  for (const b of barbers) {
-    if (isBarberBlockedByShiftEnd(b, entries, schedules, currentTime, marginMinutes)) {
-      barbersBlockedByShiftEnd.add(b.id)
-    }
-  }
-  // Construir on-break primero recorriendo entries (se completa abajo, pero
-  // necesitamos un set parcial antes del loop principal — los barberos en break
-  // tienen un ghost is_break=true con status=in_progress que ya está en `entries`).
-  const onBreakPreScan = new Set<string>()
-  for (const e of entries) {
-    if (e.barber_id && e.status === 'in_progress' && e.is_break) {
-      onBreakPreScan.add(e.barber_id)
-    }
-  }
-  const isPreAssignedBarberPresent = (barberId: string | null | undefined): boolean => {
-    if (!barberId) return false
-    if (notClockedInIds.has(barberId)) return false
-    if (onBreakPreScan.has(barberId)) return false
-    if (barbersBlockedByShiftEnd.has(barberId)) return false
-    const b = barbers.find(x => x.id === barberId)
-    if (!b) return false
-    if (b.hidden_from_checkin) return false
-    return true
-  }
-
   for (const entry of entries) {
-    // Una entrada va a `unassigned` (re-evaluación dinámica del barbero) si:
-    //   (a) no tiene barber_id (check-in dinámico legacy, pre-mig 132), o
-    //   (b) tiene is_dynamic=true Y su barbero pre-asignado NO está localmente
-    //       presente (mig 133 sticky-while-present). Si el pre-asignado sigue
-    //       disponible, respetamos la decisión del server (compute_fair_barber)
-    //       y la entry queda en la fila de ESE barbero — alineado con el filtro
-    //       WHERE de claim_next_for_barber, que no permite robar entries sticky.
+    // Modelo pool (mig 134): un dinámico vive con barber_id = NULL. La
+    // pre-asignación visual la decide este cliente localmente (más abajo) y
+    // es solo un hint informativo — el claim real en el server es pool FIFO
+    // no bloqueante, así que no importa si dos tablets muestran hints
+    // distintos (SKIP LOCKED resuelve el empate, ver claim_next_for_barber).
     // Excluimos breaks (is_break=true) — esos son ghosts del propio barbero.
-    const preAssignedAvailable = isPreAssignedBarberPresent(entry.barber_id)
     const isDynamicCandidate =
       entry.status === 'waiting' &&
       !entry.is_break &&
-      (!entry.barber_id || (entry.is_dynamic && !preAssignedAvailable))
+      !entry.barber_id
 
     if (isDynamicCandidate) {
       unassigned.push(entry)

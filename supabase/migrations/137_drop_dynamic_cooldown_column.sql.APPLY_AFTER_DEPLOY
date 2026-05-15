@@ -1,0 +1,23 @@
+-- 137_drop_dynamic_cooldown_column.sql
+-- ---------------------------------------------------------------------------
+-- ⚠️  NO APLICAR HASTA QUE EL DASHBOARD ESTÉ REDEPLOYADO CON ESTE COMMIT.
+--
+-- `app_settings.dynamic_cooldown_seconds` era una feature inerte: se guardaba,
+-- se configuraba en la UI de Configuración y se plumbeaba por 6 archivos, pero
+-- el cooldown nunca tuvo efecto (el parámetro llegaba a assignDynamicBarbers
+-- como `_cooldownMs` con prefijo `_`, sin uso). Todo ese código se eliminó en
+-- este commit (settings.ts, register.ts, tv.ts, kiosk.ts, queue-panel.tsx,
+-- checkin-walk-in.tsx, tv-client.tsx, configuracion-client.tsx, database.ts,
+-- barber-utils.ts).
+--
+-- Por qué está separada y gateada: `updateAppSettings` (settings.ts) y el seed
+-- de `register.ts` ESCRIBÍAN esta columna con un objeto explícito. Si se dropea
+-- la columna mientras el código viejo sigue desplegado, "Guardar configuración"
+-- y el alta de organizaciones fallarían (PostgREST: column does not exist).
+-- Una vez que ESTE commit esté en producción, ningún código lee ni escribe la
+-- columna y este DROP es 100% seguro e idempotente.
+--
+-- Aplicar con:  supabase db push   (o apply_migration) DESPUÉS del deploy.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE public.app_settings DROP COLUMN IF EXISTS dynamic_cooldown_seconds;

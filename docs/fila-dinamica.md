@@ -1,32 +1,56 @@
 # Fila Dinámica — Documentación del Sistema
 
-> **Versión**: post-mig 131 + rollback parcial del 2026-05-09 (auto-start de clientes desactivado)
-> **Última actualización**: 2026-05-09
+> **Versión**: pool no bloqueante (mig 134/135/136 — 2026-05-15)
+> **Última actualización**: 2026-05-15
 > **Owners**: equipo de plataforma
-> **Alcance**: queue de walk-ins (no incluye sistema de turnos/appointments — ese tema está en su propia documentación)
+> **Alcance**: queue de walk-ins (no incluye turnos/appointments — doc aparte)
 >
-> ⚠️ **Importante**: el push-on-complete que arrancaba el cronómetro automáticamente fue revertido el 2026-05-09 tras el incidente Fabrizio/Santino vela. Ver §13.
+> ✅ **Modelo actual**: los clientes dinámicos viven en un **pool compartido no
+> bloqueante**. La asignación ocurre **cuando un barbero se libera** (no en el
+> check-in). Esto resolvió la violación estructural del invariante "si hay
+> dinámicos, ningún barbero desocupado" — ver §13 y la evidencia Monte Carlo
+> en [`docs/sim/`](sim/).
+>
+> ⚠️ **Historia**: mig 132/133 (13–14 may) introdujeron pre-asignación
+> server-side + binding *sticky-while-present*. Una auditoría + simulación
+> Monte Carlo (43.200 turnos) probó que dejaba barberos ociosos con clientes
+> dinámicos esperando 20–71 min/turno en 71–98 % de los turnos. **Revertido
+> por mig 134**. No re-introducir binding en tiempo de check-in (§14).
 
-Este documento describe el funcionamiento end-to-end de la fila dinámica: modelo de datos, flujos, RPCs, componentes de UI, reglas de negocio, concurrencia y configuración. La sección final (§14) contiene el plan de cambios para Phase 2.
+Este documento describe el funcionamiento end-to-end de la fila dinámica:
+modelo de datos, flujos, RPCs, componentes de UI, reglas de negocio,
+concurrencia y configuración. §13 contiene el estado conocido y la evidencia
+del rediseño; §14 el plan de optimización Phase 2.
 
 ---
 
 ## 1. Resumen ejecutivo
 
-La fila dinámica es el sistema que asigna **clientes walk-in** a **barberos** en una sucursal, en tiempo real. Cada cliente puede llegar:
+La fila dinámica asigna **clientes walk-in** a **barberos** en una sucursal, en
+tiempo real. Cada cliente llega:
 
-- **Específico**: en el check-in elige un barbero concreto. El entry se inserta con `barber_id = ese barbero`.
-- **Dinámico**: en el check-in elige "cualquiera". El entry se inserta con `barber_id = NULL` y vive en un pool compartido.
+- **Específico**: en el check-in elige un barbero concreto. Entry con
+  `barber_id = ese barbero`, `is_dynamic = false`. Solo ese barbero lo atiende.
+- **Dinámico** ("Menor espera"): elige "cualquiera". Entry con
+  `barber_id = NULL`, `is_dynamic = true`. Vive en un **pool compartido**.
 
-El sistema decide a quién va cada cliente en tres momentos:
+Momentos de decisión:
 
-1. **Al check-in** — solo se fija si es específico o dinámico; no se "asigna" todavía si es dinámico.
-2. **Visualización en panel barbero** — cada panel rankea localmente quién debería ver el dinámico (pre-asignación visual no vinculante).
-3. **Al iniciar el corte** — claim atómico server-side, único que mueve `barber_id` real. Dos paths:
-   - **Push-on-complete (mig 131)**: cuando un barbero finaliza un corte, el server claim automáticamente el siguiente entry — sin tap manual.
-   - **Manual ("Atender")**: el barbero toca el botón en su panel; el server hace el claim atómico.
+1. **Al check-in** — solo se fija específico vs dinámico. El dinámico **no se
+   asigna a nadie**: entra al pool con `barber_id = NULL`.
+2. **Visualización en panel/kiosk/TV** — cada cliente rankea localmente un
+   barbero "probable" para el dinámico (ETA). Es un **hint visual, no vincula
+   nada**: dos tablets pueden mostrar hints distintos sin consecuencias.
+3. **Al iniciar el corte (claim atómico server-side)** — único momento que
+   mueve `barber_id` real. Solo vía **tap manual** del barbero ("Atender") →
+   `claim_next_for_barber`. Un barbero libre reclama el más viejo entre *sus
+   específicos* y *el pool dinámico* (FIFO por `priority_order`). **Cualquier**
+   barbero libre puede tomar **cualquier** dinámico: pool no bloqueante.
 
-La **atomicidad** la garantiza `FOR UPDATE SKIP LOCKED` de Postgres + un partial UNIQUE index (mig 127) que prohíbe que un barbero tenga dos `in_progress` simultáneos.
+La **atomicidad** la garantiza `FOR UPDATE SKIP LOCKED` + el partial UNIQUE
+index `idx_queue_one_in_progress_per_barber` (mig 127, un solo `in_progress`
+por barbero). **No hay fairness gate** y **no hay push-on-complete** (ver §5.4 y
+§13 — decisiones intencionales con su porqué).
 
 ---
 
@@ -34,15 +58,20 @@ La **atomicidad** la garantiza `FOR UPDATE SKIP LOCKED` de Postgres + un partial
 
 | Término | Definición |
 |---|---|
-| **entry** | fila de `queue_entries`, representa "alguien en la fila" o un descanso. |
-| **dinámico** | entry con `barber_id = NULL`. Vive en el pool, lo claim quien termine primero. |
-| **específico** | entry con `barber_id = X`. Solo X puede atenderlo (o admin lo reasigna). |
-| **ghost de descanso** | entry con `is_break = true`. Marca el descanso del barbero como un "cliente" que respeta el orden FIFO. |
-| **claim atómico** | la transacción que mueve un entry de `waiting → in_progress` y le setea `barber_id` + `started_at`. |
-| **fairness gate** | filtro server-side (mig 129) que bloqueaba el claim si el caller no era "el más justo". **Eliminado en mig 131.** |
-| **push-on-complete** | modelo en el que el server reclama el siguiente entry automáticamente cuando un barbero finaliza. |
-| **Mi fila** | la sección del panel barbero que muestra solo los entries asignados a ese barbero (incluye pre-asignaciones locales de dinámicos). |
-| **Fila general** | vista admin del dashboard `/dashboard/fila` con todos los entries de todas las sucursales del scope. |
+| **entry** | fila de `queue_entries`: alguien en la fila o un descanso. |
+| **dinámico** | entry con `is_dynamic = true` y `barber_id = NULL`. Pool compartido; lo reclama el primer barbero libre. |
+| **específico** | entry con `is_dynamic = false` y `barber_id = X`. Solo X lo atiende (o admin lo reasigna). |
+| **pool** | conjunto de dinámicos `waiting` de la sucursal, no asignados, ordenados por `priority_order`. |
+| **ghost de descanso** | entry con `is_break = true`. El descanso del barbero, respeta el orden FIFO de su fila personal. |
+| **claim atómico** | la transacción (`claim_next_for_barber`) que mueve un entry `waiting → in_progress`, setea `barber_id`, `started_at`, `is_dynamic = false`. |
+| **hint visual** | la pre-asignación local de `assignDynamicBarbers` (cliente). Informativa; el server no la respeta ni la necesita. |
+| **Mi fila** | sección del panel barbero: específicos asignados a ese barbero (+ los dinámicos que su hint local le sugiere mostrar). |
+| **Fila general** | vista admin `/dashboard/fila`, todos los entries del scope. |
+
+> **Histórico (ya no aplican)**: *fairness gate* (mig 129, revertido mig 131),
+> *pre-asignación server-side* (mig 132, revertida mig 134),
+> *sticky-while-present* (mig 133, revertido mig 134). Se documentan en §13
+> solo como lección.
 
 ---
 
@@ -53,28 +82,31 @@ La **atomicidad** la garantiza `FOR UPDATE SKIP LOCKED` de Postgres + un partial
 | Columna | Tipo | Descripción |
 |---|---|---|
 | `id` | UUID | PK |
-| `branch_id` | UUID | sucursal donde vive el entry |
+| `branch_id` | UUID | sucursal del entry |
 | `client_id` | UUID nullable | NULL para ghost de descanso |
-| `barber_id` | UUID nullable | NULL = dinámico (en pool) |
-| `service_id` | UUID nullable | servicio elegido al check-in (si lo hubo) |
-| `appointment_id` | UUID nullable | si proviene de un turno reservado |
-| `position` | INTEGER | orden visual del drag&drop, NO ordena el claim |
-| `priority_order` | TIMESTAMPTZ | **el verdadero orden FIFO**. Default = `now()` al insert |
+| `barber_id` | UUID nullable | **NULL = dinámico de pool**; seteado = específico (o ya reclamado) |
+| `service_id` | UUID nullable | servicio elegido al check-in |
+| `appointment_id` | UUID nullable | si proviene de un turno |
+| `position` | INTEGER | orden visual del drag&drop; **NO** ordena el claim |
+| `priority_order` | TIMESTAMPTZ | **el verdadero orden FIFO**. Default `now()` al insert |
 | `status` | TEXT | `waiting` \| `in_progress` \| `completed` \| `cancelled` |
-| `is_dynamic` | BOOLEAN | atajo de `barber_id IS NULL` (denormalizado) |
+| `is_dynamic` | BOOLEAN | `true` = el cliente eligió "Menor espera" (intención). Al reclamarse pasa a `false` |
 | `is_break` | BOOLEAN | `true` para ghost de descanso |
 | `is_appointment` | BOOLEAN | `true` si viene de un turno (no compite con walk-ins) |
 | `checked_in_at` | TIMESTAMPTZ | cuándo entró a la fila |
 | `started_at` | TIMESTAMPTZ | cuándo empezó el corte |
 | `completed_at` | TIMESTAMPTZ | cuándo finalizó |
-| `paused_at` | TIMESTAMPTZ | si está pausado |
-| `paused_duration_seconds` | INTEGER | acumulado de pausas previas |
+| `paused_at` / `paused_duration_seconds` | TIMESTAMPTZ / INT | pausa del corte |
 | `reward_claimed` | BOOLEAN | el cliente quiere canjear puntos |
+
+> **Invariante de datos (mig 134)**: un dinámico `waiting` tiene
+> `barber_id = NULL`. La mig 134 normalizó las filas en vuelo que el check-in
+> de mig 132/133 había pre-asignado. El check-in ya no pre-asigna (§5.1).
 
 ### 3.2 Índices y restricciones críticos
 
 ```
--- Mig 127: defensa estructural — un solo in_progress por barbero
+-- Mig 127: un solo in_progress por barbero (defensa estructural)
 CREATE UNIQUE INDEX idx_queue_one_in_progress_per_barber
   ON queue_entries (barber_id)
   WHERE status = 'in_progress' AND barber_id IS NOT NULL;
@@ -83,56 +115,42 @@ CREATE UNIQUE INDEX idx_queue_one_in_progress_per_barber
 CREATE INDEX idx_queue_active_break_per_barber
   ON queue_entries (barber_id, branch_id)
   WHERE is_break = true AND status = 'in_progress';
+
+-- Scan del pool/FIFO en claim_next_for_barber
+CREATE INDEX idx_queue_waiting_for_assignment
+  ON queue_entries (branch_id, status, is_break, priority_order)
+  WHERE status = 'waiting' AND is_break = false;
 ```
 
 ### 3.3 Tablas relacionadas
 
 | Tabla | Para qué |
 |---|---|
-| `branches` | sucursal: `timezone`, `organization_id`, `operation_mode` |
-| `staff` | barberos: `is_active`, `hidden_from_checkin`, `role`, `is_also_barber` |
+| `branches` | `timezone`, `organization_id`, `operation_mode` |
+| `staff` | `is_active`, `hidden_from_checkin`, `role`, `is_also_barber` |
 | `staff_schedules` | bloques horarios por día de la semana |
-| `attendance_logs` | clock_in / clock_out por barbero |
-| `appointment_staff` | `walkin_mode` (si está en `appointments_only`, no toma walk-ins) |
+| `attendance_logs` | clock_in / clock_out |
+| `appointment_staff` | `walkin_mode` (`appointments_only` → no toma walk-ins) |
 | `appointment_settings` | `buffer_minutes` para ventana de protección por turno |
 | `appointments` | turnos confirmados que protegen la ventana del barbero |
-| `app_settings` | `shift_end_margin_minutes`, `next_client_alert_minutes`, `dynamic_cooldown_seconds` |
-| `visits` | registro post-corte, creado por trigger al pasar status → completed |
-| `break_requests` | ciclo de aprobación de descansos (genera el ghost en `queue_entries`) |
+| `app_settings` | `shift_end_margin_minutes`, `next_client_alert_minutes` |
+| `visits` | registro post-corte (trigger al pasar a `completed`) |
+| `break_requests` | ciclo de aprobación de descansos (genera el ghost) |
 
 ---
 
 ## 4. Estados de un entry
 
 ```
-                         ┌─────────────┐
-                         │  (insert)   │
-                         └──────┬──────┘
-                                │
-                                ▼
-                         ┌─────────────┐
-       ┌─────────────────│  waiting    │──────────────┐
-       │  cancelQueueEntry           claim_next_for_  │
-       │                              barber          │
-       ▼                                              ▼
-┌─────────────┐                                ┌─────────────┐
-│  cancelled  │                                │ in_progress │
-└─────────────┘                                └──────┬──────┘
-                                                      │
-                                       completeService│
-                                                      │
-                                                      ▼
-                                                ┌─────────────┐
-                                                │  completed  │
-                                                └─────────────┘
+(insert) → waiting ──claim_next_for_barber / startService──▶ in_progress ──completeService──▶ completed
+                └────────── cancelQueueEntry / deactivateBarber ──────────▶ cancelled
 ```
 
-Transiciones permitidas (lo que no se permite produce 23505 o errores de aplicación):
-
-- `waiting → in_progress` solo vía `claim_next_for_barber` o `startService` (admin).
-- `in_progress → completed` solo vía `completeService` (que dispara trigger → crea visit).
-- `* → cancelled` vía `cancelQueueEntry` o `deactivateBarber` (cancela ghosts del barbero).
-- **No se permite** revertir `completed → in_progress` (las visitas históricas no deben ocupar slots vivos).
+- `waiting → in_progress`: solo `claim_next_for_barber` (tap "Atender") o
+  `startService` (admin override).
+- `in_progress → completed`: solo `completeService` (dispara trigger → visit).
+- `* → cancelled`: `cancelQueueEntry` o `deactivateBarber` (cancela ghosts).
+- **No** se revierte `completed → in_progress`.
 
 ---
 
@@ -140,596 +158,383 @@ Transiciones permitidas (lo que no se permite produce 23505 o errores de aplicac
 
 ### 5.1 Check-in (kiosk `/(tablet)/checkin`)
 
-**Server action**: `checkinClient` ([`src/lib/actions/queue.ts:10`](../src/lib/actions/queue.ts))
+**Server action**: `checkinClient` ([`src/lib/actions/queue.ts`](../src/lib/actions/queue.ts))
 
 ```
-Cliente toca "Check-in" en kiosk
+Cliente toca "Check-in"
   ├─ Rate limit: 20 check-ins / branch / 60s
-  ├─ Lookup branches.organization_id (validación de sucursal activa)
+  ├─ Lookup branches.organization_id (sucursal activa)
   ├─ find-or-create cliente por (phone, organization_id)
-  ├─ Si ya está en queue activa → return alreadyInQueue
+  ├─ Si ya está en queue activa → alreadyInQueue
   ├─ next_queue_position(branch) → siguiente position
   └─ INSERT queue_entries:
-      ├─ barber_id = NULL si "cualquiera" (dinámico)
+      ├─ barber_id = barberId  (NULL si eligió "Menor espera")
+      ├─ is_dynamic = !barberId
       ├─ priority_order = NOW()
-      ├─ is_dynamic = !barber_id
       └─ status = 'waiting'
 ```
 
-Variantes:
-- `checkinClientByFace` — mismo flujo pero el cliente se identifica por reconocimiento facial.
-- Reintroducción: si la unique constraint `(client_id, branch_id, status_active)` choca, devuelve la entry existente sin error.
+**No hay pre-asignación server-side.** El dinámico entra al pool con
+`barber_id = NULL`. (`checkinClientByFace` = mismo flujo con match facial.)
+Reintroducción: si choca la unique `(client_id, branch_id, status_active)`
+devuelve la entry existente sin error.
 
-### 5.2 Visualización en panel barbero
+### 5.2 Visualización (panel barbero / kiosk / TV)
 
-**Componente**: `QueuePanel` ([`src/components/barber/queue-panel.tsx`](../src/components/barber/queue-panel.tsx))
+`assignDynamicBarbers` ([`src/lib/barber-utils.ts`](../src/lib/barber-utils.ts))
+rankea localmente, por ETA, un barbero "probable" para cada dinámico
+(`barber_id = NULL`). Sirve para que "Mi fila" muestre algo y para el ETA del
+kiosk/TV.
 
-```
-fetchQueue (Realtime + visibility refresh)
-  └─ SELECT queue_entries
-       WHERE branch_id = mi_sucursal AND status IN ('waiting', 'in_progress')
-       (sin loyalty count para evitar N+1)
+> **Es un hint, no vincula.** El claim real (server) es pool FIFO no
+> bloqueante. Si dos tablets rankean distinto y muestran el mismo dinámico en
+> "Mi fila" de dos barberos, no pasa nada: el primero que toca "Atender" lo
+> reclama; el otro recibe vacío y un toast. `SKIP LOCKED` resuelve el empate.
 
-assignDynamicBarbers (cliente local, barber-utils.ts:295)
-  ├─ Para cada entry dinámica (waiting + barber_id IS NULL):
-  │    ├─ Filtra barberos elegibles localmente
-  │    └─ Asigna localmente al "más justo" (criterio ETA)
-  └─ Marca con _is_dynamically_assigned = true
-
-myWaitingEntries
-  └─ Filter: e.barber_id === self
-       (Pre-mig 131 había un filtro extra `_is_dynamically_assigned && fairBarberId !== self`
-        que causaba el limbo. Removido.)
-
-Render:
-  - Active client card (si hay in_progress no-break)
-  - Active break card (si hay in_progress break)
-  - Mi fila (waiting asignados o pre-asignados localmente)
-  - Fila general (todos los waiting de la sucursal, vista de awareness)
-```
-
-**Realtime**: el panel suscribe a `queue_entries`, `staff` y `break_requests` filtrados por `branch_id`. Cada evento dispara `fetchQueue + refreshStats + fetchAssignmentData` — refresh full, no incremental.
+**Realtime**: el panel suscribe `queue_entries`, `staff`, `break_requests`
+filtrados por `branch_id`; cada evento dispara refresh
+(`fetchQueue + refreshStats + fetchAssignmentData`).
 
 ### 5.3 Atender un cliente (manual)
 
-**Disparador**: el barbero tap el botón ▶ sobre un entry waiting de "Mi fila".
+**Disparador**: el barbero tap ▶ sobre un entry de "Mi fila" (o el botón
+"Atender siguiente").
 
-**Server action**: `attendNextClient` ([`src/lib/actions/queue.ts:159`](../src/lib/actions/queue.ts))
-
-```
-Panel.handleStartService(entryId)
-  └─ attendNextClient(barber, branch, preferredEntryId = entryId)
-       └─ RPC claim_next_for_barber(barber, branch, preferredEntryId)
-              ├─ Guard 0a: ¿barbero en descanso activo? → return vacío
-              ├─ Guard 0b: ¿ghost listo? → start break, return (entry, is_break=true)
-              ├─ ¿walkin_mode = appointments_only? → return vacío
-              ├─ ¿turno inminente dentro de 55min? → return vacío
-              ├─ Path preferred:
-              │    SELECT preferredEntryId FOR UPDATE SKIP LOCKED
-              │    Si encuentra: UPDATE → in_progress, started_at = NOW
-              │                  return (entry, is_break=false, was_dynamic=...)
-              └─ Fallback FIFO:
-                  SELECT oldest waiting (mío o dinámico) FOR UPDATE SKIP LOCKED
-                  UPDATE → in_progress
-                  return (entry, ...)
-       └─ revalidatePath /barbero/fila + /dashboard/fila
-       └─ return { success, entryId, breakStarted?, wasDynamic? }
-
-Panel ve el response:
-  ├─ Si entryId: el cliente activo aparece automáticamente vía Realtime
-  ├─ Si breakStarted: la break card aparece automáticamente
-  └─ Si null: toast "No hay clientes en espera"
-```
-
-### 5.4 Auto-start de descanso al completar (sin push-on-complete de clientes)
-
-**Disparador**: el barbero finaliza un corte y cobra.
+**Server action**: `attendNextClient` → RPC `claim_next_for_barber`
 
 ```
-Panel: tap "Finalizar" → CompleteServiceDialog abre
-Dialog: cobra → completeService(entryId, payment, ...)
+attendNextClient(barber, branch, preferredEntryId?)
+  └─ claim_next_for_barber(barber, branch, preferredEntryId)
+       ├─ Guard 0a: ¿descanso activo del barbero? → vacío
+       ├─ Guard 0b: ¿ghost listo (sin específicos antes)? → arranca ghost
+       ├─ ¿walkin_mode = appointments_only? → vacío
+       ├─ ¿turno inminente (≤ 45+buffer min)? → vacío
+       ├─ Path preferred: el entry tocado, si es waiting y
+       │    (barber_id = yo  OR  barber_id IS NULL  OR  is_dynamic = true)
+       │    y no está detrás de un ghost pendiente → claim
+       └─ Fallback FIFO: el más viejo waiting con la misma elegibilidad
+            (mis específicos + pool dinámico) → claim
+  └─ revalidatePath /barbero/fila + /dashboard/fila
+```
 
-completeService (queue.ts:259)
-  ├─ Step 1:  UPDATE entry → completed, completed_at = NOW
-  │             (trigger crea visits row con amount=0 placeholder)
-  ├─ Step 1b: si appointment_id → marca appointment como completed
-  ├─ Step 2-4: calcula amount, comisiones, products, prepayments → UPDATE visit
-  ├─ Step 5:  reward redemption (si aplica)
-  ├─ Step 6:  AUTO-START DEL GHOST DE DESCANSO si está listo
-  │           (el descanso ya fue solicitado y aprobado, no requiere
-  │            presencia física del cliente. Los CLIENTES siempre se
-  │            inician con tap manual desde "Atender").
-  ├─ Step 7:  post-service automation (workflows WhatsApp, scheduled_messages)
-  ├─ Step 8:  salary_reports (comisiones del día)
+`claim` = `UPDATE → in_progress, started_at = NOW(), barber_id = yo,
+is_dynamic = false`. Devuelve 0 ó 1 fila. Vacío = "nada elegible ahora".
+
+### 5.4 Completar un corte (sin push-on-complete de clientes)
+
+```
+Panel: "Finalizar" → CompleteServiceDialog (cobro) → completeService(entryId, ...)
+  ├─ Step 1: UPDATE entry → completed (trigger crea visit placeholder)
+  ├─ Step 1b: si appointment_id → marca appointment completed
+  ├─ Step 2-6: amount, comisiones, productos, prepagos, reward
+  ├─ Step 6: AUTO-START SOLO del ghost de descanso si está listo
+  │          (el descanso ya fue aprobado, no requiere presencia física)
+  ├─ Step 7-8: automatización post-servicio, salary_reports
   └─ return { success, visitId, breakAutoStarted }
 
-QueuePanel.onCompleted()
-  ├─ fetchQueue → carga el siguiente cliente como WAITING en Mi fila
-  └─ refreshStats → actualiza contador y revenue del día
-
-Barbero ve "Mi fila" actualizada con el siguiente cliente como waiting.
-Cuando el cliente está físicamente en la silla → tap "Atender" → arranca cronómetro.
+QueuePanel.onCompleted() → fetchQueue + refreshStats
+El siguiente cliente queda WAITING en "Mi fila"/pool. Arranca con tap "Atender"
+cuando el cliente está físicamente sentado.
 ```
 
-**Resultado**: el barbero ve el siguiente cliente listado, pero **el cronómetro NO arranca solo**. El barbero confirma con tap cuando el cliente está sentado. Esto preserva la integridad de las métricas de duración y respeta el flujo natural de la barbería.
+**Por qué NO push-on-complete de clientes**: en barbería real hay un gap humano
+(30 s–2 min) entre cobrar y arrancar el próximo (limpiar silla, llamar al
+cliente). Arrancar el cronómetro automáticamente generaba "cortes fantasma"
+(incidente Fabrizio/Santino vela, §13). El descanso **sí** auto-arranca porque
+no necesita presencia del cliente.
 
-**Por qué NO arrancamos el cronómetro automáticamente**: en una barbería real hay un gap humano (30s-2min) entre cobrar y arrancar el siguiente corte: limpiar la silla, llamar al cliente, esperar que llegue. Si el cronómetro arranca antes, las métricas se distorsionan y los clientes que no estaban presentes generan "cortes fantasma" que el supervisor tiene que cancelar.
+> El Monte Carlo (§13) probó que el push-on-complete **no** era lo que rompía el
+> invariante (políticas A≈B); el problema era el binding sticky. Por eso el fix
+> fue el pool (mig 134), no reintroducir push-on-complete.
 
-### 5.5 Cancelación
+### 5.5 Cancelación / 5.6 Reasignación / 5.7 Descansos
 
-`cancelQueueEntry(id)` — UPDATE → status='cancelled'. No dispara claim del siguiente.
-
-### 5.6 Reasignación
-
-- `reassignBarber(entryId, newBarberId)` — admin desde dashboard, drag&drop.
-- `reassignMyBarber(entryId, newBarberId)` — kiosk, cliente cambia de barbero.
-- `updateQueueOrder(updates[])` — admin reordena vía drag&drop, RPC `batch_update_queue_entries`.
-
-### 5.7 Descansos (ghost rows)
-
-Cuando un descanso se aprueba (`break_requests` con status='approved'), se inserta un ghost row en `queue_entries`:
-
-```
-ghost = {
-  is_break: true,
-  barber_id: <barbero>,
-  client_id: NULL,
-  status: 'waiting',
-  priority_order: NOW + cuts_before_break * avg_cut_minutes
-                  // (la posición efectiva en su fila personal)
-}
-```
-
-El ghost compite con clientes asignados al mismo barbero por `priority_order`. Cuando el barbero termina su corte:
-- Si hay clientes asignados con priority menor → toman precedencia.
-- Si no → el ghost arranca (status='in_progress' → barbero en descanso).
-
-Un ghost en `in_progress` bloquea al barbero (Guard 0a en `claim_next_for_barber`).
+- `cancelQueueEntry(id)` → `status='cancelled'`. No dispara claim.
+- `reassignBarber` (admin), `reassignMyBarber` (kiosk),
+  `updateQueueOrder` (drag&drop, RPC `batch_update_queue_entries`).
+- Descanso aprobado → ghost row (`is_break=true`, `status='waiting'`,
+  `priority_order = NOW + cuts_before_break * avg`). Compite con los
+  específicos de ese barbero por `priority_order`. Ghost `in_progress` bloquea
+  al barbero (Guard 0a).
 
 ---
 
 ## 6. RPCs y server actions
 
-### 6.1 `claim_next_for_barber` — PRIMARIO (mig 131)
+### 6.1 `claim_next_for_barber` — ÚNICO PRIMARIO (pool, mig 134)
 
-**Firma**:
 ```sql
 claim_next_for_barber(
-  p_barber_id UUID,
-  p_branch_id UUID,
-  p_preferred_entry_id UUID DEFAULT NULL
+  p_barber_id UUID, p_branch_id UUID, p_preferred_entry_id UUID DEFAULT NULL
 ) RETURNS TABLE(entry_id UUID, is_break BOOLEAN, was_dynamic BOOLEAN)
 ```
 
-**Comportamiento**: claim atómico + arranque del próximo entry. Decide entre ghost de descanso listo, cliente asignado o dinámico FIFO. **Sin fairness gate** — la atomicidad la garantiza `FOR UPDATE SKIP LOCKED`.
+`SECURITY DEFINER`, `SET search_path = public, pg_temp`,
+`#variable_conflict use_column`.
 
-**Guards aplicados (en orden)**:
-1. Si barbero en descanso activo → vacío.
-2. Si ghost waiting "listo" (sin clientes asignados con priority menor) → arranca el ghost.
-3. Si `walkin_mode = 'appointments_only'` → vacío.
-4. Si turno inminente dentro de `45 + buffer_minutes` → vacío.
-5. Path preferred (si `p_preferred_entry_id` viene): claim ese entry si existe waiting.
-6. Fallback FIFO: claim oldest waiting (mío o dinámico) excluyendo ones con priority ≥ ghost priority.
+**Predicado de elegibilidad** (preferred y fallback):
+`barber_id = p_barber_id OR barber_id IS NULL OR is_dynamic = true`
+— mi específico, dinámico de pool, o dinámico legacy con `barber_id` viejo.
+**Pool no bloqueante**: sin `is_barber_present_now`, sin fairness gate.
 
-**Returns**: 0 ó 1 fila. Vacío significa "nada elegible para este barbero ahora".
+**Guards (en orden)**: 0a descanso activo · 0b ghost listo (sin específicos
+antes) → arranca ghost · `walkin_mode='appointments_only'` · turno inminente
+(`45 + buffer_minutes`) · `(checked_in_at AT TIME ZONE branch_tz)::DATE = hoy`
+· nunca detrás de un ghost pendiente (`priority_order < ghost`).
 
-**Llamado desde**: `completeService` (push-on-complete) y `attendNextClient` (manual).
+Atomicidad: `FOR UPDATE SKIP LOCKED`. Llamado **solo** desde
+`attendNextClient` (tap manual). Sin callers en `completeService`.
 
-### 6.2 `assign_next_client` — LEGACY (sin fairness gate, mig 131)
+### 6.2 `next_queue_position` (mig 135 — branch-tz)
 
-**Firma**:
 ```sql
-assign_next_client(p_barber_id UUID, p_branch_id UUID, p_preferred_entry_id UUID) RETURNS UUID
+next_queue_position(p_branch_id UUID) RETURNS INTEGER
 ```
+`MAX(position)+1` de las entries `waiting/in_progress` del día **local de la
+sucursal** (`(checked_in_at AT TIME ZONE branches.timezone)::DATE`). Antes
+comparaba contra `CURRENT_DATE` (UTC) y reseteaba la posición a 1 cada noche en
+Argentina. `position` es solo UI; el claim ordena por `priority_order`.
 
-**Comportamiento**: equivalente a `claim_next_for_barber` pero **solo hace el claim** (no setea status='in_progress'). Mantenida por compatibilidad. **No quedan callers en código TS** después del refactor de mig 131; sobrevive solo como defensa por si quedó algún path olvidado.
+### 6.3 Funciones eliminadas (mig 136)
 
-**Plan**: dropearla en una mig de limpieza posterior si confirmamos que no hay callers.
-
-### 6.3 `compute_fair_barber` y `get_fair_barber` — UTILIDADES (mig 129/130, sin enforcing)
-
-**Firma**:
-```sql
-compute_fair_barber(p_branch_id UUID, p_branch_tz TEXT) RETURNS UUID
-get_fair_barber(p_branch_id UUID) RETURNS UUID  -- wrapper que resuelve TZ
-```
-
-**Estado actual**: vivas pero **sin uso enforcing** en el path crítico. `claim_next_for_barber` no las llama. `assign_next_client` tampoco después de mig 131. Pueden seguir siendo útiles para Phase 2 (hints de UI, ETA proyectado en el pool).
+`assign_next_client`, `assign_dynamic_barber`, `compute_fair_barber`,
+`get_fair_barber`, `is_barber_present_now` — **dropeadas**. Eran soporte del
+modelo pre-asignación/sticky/fairness, sin callers tras mig 134. No
+re-crearlas: ver §14 para la dirección correcta (scoring en el claim, no
+pre-asignación).
 
 ### 6.4 Server actions principales (`src/lib/actions/queue.ts`)
 
 | Function | Llamada por | Hace |
 |---|---|---|
-| `checkinClient(formData)` | kiosk | inserta entry waiting |
-| `checkinClientByFace(...)` | kiosk con face match | idem |
+| `checkinClient` / `checkinClientByFace` | kiosk | inserta waiting (dinámico = `barber_id NULL`) |
 | `startService(entryId, barberId)` | dashboard fila | UPDATE → in_progress (admin override) |
-| `attendNextClient(barberId, branchId, preferredEntryId?)` | barber panel | RPC claim_next_for_barber |
-| `completeService(entryId, payment, ...)` | barber panel | finaliza + push-on-complete |
-| `cancelQueueEntry(id)` | barber/dashboard | cancela |
-| `reassignBarber(id, newBarberId)` | dashboard | reasigna |
-| `reassignMyBarber(id, newBarberId)` | kiosk | reasigna desde cliente |
-| `updateQueueOrder(updates)` | dashboard | drag&drop reorder |
-| `pauseActiveService(id)` | barber panel | pausa el corte |
-| `resumeActiveService(id)` | barber panel | reanuda |
-| `createBreakEntry(branchId, barberId, name)` | barber panel | crea ghost de descanso |
+| `attendNextClient(barberId, branchId, preferredEntryId?)` | barber panel | RPC `claim_next_for_barber` |
+| `completeService(entryId, payment, ...)` | barber panel | finaliza + auto-start de ghost |
+| `cancelQueueEntry` / `reassignBarber` / `reassignMyBarber` / `updateQueueOrder` | — | gestión |
+| `pauseActiveService` / `resumeActiveService` | barber panel | pausa/reanuda |
+| `createBreakEntry` | barber panel | crea ghost de descanso |
 
 ---
 
 ## 7. UI y componentes
 
-### 7.1 Panel barbero (`/barbero/fila`)
-
-**Stack**: server component → cookie auth → `QueuePanel` (client).
-
-**Componentes**:
-- `QueuePanel` — orchestrator, suscribe Realtime
-- `ActiveClientCard` / `ActiveBreakCard` — current in_progress
-- `BarberTimeline` — ETA y proyección
-- `NextClientAlert` — alerta sonora si idle > N min con clientes esperando
-- `CompleteServiceDialog` — modal de cobro (2 pasos: detalles + payment)
-- `BarberStatsBar` — cortes hoy + revenue
-
-### 7.2 Dashboard (`/dashboard/fila`)
-
-**Componente**: `FilaClient` — kanban horizontal (columnas: breaks, dynamic pool, una por barbero).
-
-**Capacidades admin**:
-- drag&drop entre columnas (reasigna barbero)
-- arrastrar template de descanso a un barbero (crea ghost)
-- iniciar corte manualmente (botón ▶)
-- finalizar corte (mismo `CompleteServiceDialog`)
-- cancelar entry
-
-### 7.3 TV display (`/tv`)
-
-Vista pública read-only. Muestra colas activas, ETAs, ranking de barberos. Refresca por Realtime.
-
-### 7.4 Check-in kiosk (`/(tablet)/checkin`)
-
-Multi-paso: branch → service → cliente identificación → barbero (o "cualquiera") → confirm.
+- **Panel barbero `/barbero/fila`**: `QueuePanel` (orchestrator, Realtime),
+  `ActiveClientCard`/`ActiveBreakCard`, `BarberTimeline`, `NextClientAlert`
+  (alerta sonora si idle > `next_client_alert_minutes`),
+  `CompleteServiceDialog`, `BarberStatsBar`.
+- **Dashboard `/dashboard/fila`**: `FilaClient` kanban (breaks, pool dinámico,
+  una columna por barbero); drag&drop reasigna; ▶ inicia; finaliza; cancela.
+- **TV `/tv`**: read-only, colas/ETAs/ranking, Realtime.
+- **Kiosk `/(tablet)/checkin`**: branch → service → identificación → barbero o
+  "Menor espera" → confirm.
 
 ---
 
 ## 8. Reglas de negocio (guards)
 
-Todos aplicados server-side en `claim_next_for_barber`. La UI puede replicarlos para preview pero la decisión final es server.
+Todos server-side en `claim_next_for_barber`. La UI puede previewizarlos pero
+la decisión final es del server.
 
 | # | Guard | Causa |
 |---|---|---|
-| 0a | Descanso activo (`is_break=true && in_progress`) | el barbero está en pausa, no recibe nada |
-| 0b | Ghost listo + sin clientes asignados antes | el descanso DEBE arrancar primero |
-| 1 | `walkin_mode = 'appointments_only'` | el barbero solo atiende turnos reservados |
-| 2 | Turno inminente dentro de `45 + buffer` min | proteger el turno reservado |
-| 3 | Entry con priority ≥ ghost priority | ghost waiting siempre gana al claim |
+| 0a | Descanso activo (`is_break=true && in_progress`) | barbero en pausa |
+| 0b | Ghost listo sin específicos antes | el descanso arranca primero |
+| 1 | `walkin_mode='appointments_only'` | barbero solo turnos |
+| 2 | Turno inminente (`45 + buffer`) | proteger la reserva |
+| 3 | `priority_order ≥ ghost pendiente` | el ghost gana |
 
-**Sutiles, no son guards estrictos pero afectan**:
-- `is_appointment = true` queda fuera del pool walk-in (vienen del flujo de turnos).
-- `(checked_in_at AT TIME ZONE branch_tz)::DATE = today_local` — solo entries del día actual local. Entries de ayer no se asignan.
+Sutiles: `is_appointment=true` fuera del pool walk-in; solo entries del **día
+local** de la sucursal.
 
 ---
 
 ## 9. Concurrencia y atomicidad
 
-### 9.1 Garantías
-
-- **Solo un barbero gana**: `FOR UPDATE SKIP LOCKED` en el SELECT que precede al UPDATE → si dos transacciones intentan el mismo entry, una lo lockea, la otra salta al siguiente.
-- **Un solo `in_progress` por barbero**: partial UNIQUE `idx_queue_one_in_progress_per_barber` (mig 127). Si por error dos UPDATEs intentan dejar dos in_progress al mismo barbero → 23505 unique_violation. La aplicación maneja el error. Defensa estructural.
-- **Trigger crea visit** al pasar a `completed`: idempotente, una vez por entry.
-
-### 9.2 Race conditions cubiertas
+- **Solo un barbero gana**: `FOR UPDATE SKIP LOCKED` en el SELECT previo al
+  UPDATE.
+- **Un solo `in_progress` por barbero**: partial UNIQUE
+  `idx_queue_one_in_progress_per_barber` (23505 si se viola; defensa
+  estructural).
+- **Trigger crea visit** al pasar a `completed` (idempotente).
 
 | Escenario | Resolución |
 |---|---|
-| 2 barberos finalizan al mismo tiempo y ambos quieren el mismo dinámico | SKIP LOCKED elige uno; el otro recibe vacío y retorna toast informativo. |
-| Barbero A toca "Atender" mientras B termina y dispara push-on-complete | Las dos transacciones compiten por el lock; gana una, la otra recibe vacío. |
-| Cliente se da de baja mientras un barbero hace claim sobre él | El UPDATE incluye `AND status = 'waiting'` — si ya cambió, 0 rows affected y el RPC retorna vacío. |
-| Doble click en "Finalizar" | El UPDATE de `completeService` filtra por `status = 'in_progress'`. Segunda llamada falla silenciosa. |
+| 2 barberos quieren el mismo dinámico | SKIP LOCKED elige uno; el otro recibe vacío + toast. |
+| Cliente se da de baja durante el claim | `AND status='waiting'` → 0 rows, RPC vacío. |
+| Doble "Finalizar" | `completeService` filtra `status='in_progress'`. |
+| Dos tablets con hint divergente | Inocuo: el claim es pool, no respeta el hint. |
 
-### 9.3 Race conditions NO cubiertas (deuda técnica conocida)
-
-- **Realtime delay**: si el panel A no recibió el evento de "B tomó el cliente" antes de mostrar la UI, A puede tener stale state. El claim atómico server-side filtra correctamente, pero la UX puede mostrar un toast tardío. Aceptable.
+**Deuda conocida**: Realtime delay puede mostrar un toast tardío "ya lo tomó
+otro". El claim server filtra bien; la UX es aceptable.
 
 ---
 
 ## 10. Configuración
 
-### 10.1 `app_settings` (org-scope)
+### `app_settings` (org-scope)
 
 | Campo | Default | Uso |
 |---|---|---|
-| `shift_end_margin_minutes` | 35 | margen para bloquear barbero al fin de turno (cliente lo aplica en pre-asignación; servidor NO lo aplica en `claim_next_for_barber`) |
-| `next_client_alert_minutes` | 5 | tras cuántos min idle el panel barbero suena alerta |
-| `dynamic_cooldown_seconds` | 120 | unused actualmente (`_cooldownMs` con prefijo `_`) |
+| `shift_end_margin_minutes` | 35 | margen de fin de turno (lo aplica el hint cliente; el server no lo aplica en el claim) |
+| `next_client_alert_minutes` | 5 | min idle antes de la alerta sonora del panel |
 
-### 10.2 `appointment_settings` (org/branch-scope)
+> `dynamic_cooldown_seconds` fue **eliminado** (era inerte: configurable pero
+> sin efecto). Código removido en el commit de mig 134; el `DROP COLUMN` está
+> en `137_drop_dynamic_cooldown_column.sql.APPLY_AFTER_DEPLOY` (gateado, ver
+> §12).
+
+### `appointment_settings`
 
 | Campo | Default | Uso |
 |---|---|---|
-| `buffer_minutes` | 10 | sumado a `45` (avg corte) para la ventana de protección por turno inminente |
+| `buffer_minutes` | 10 | sumado a 45 (avg) para la ventana de protección por turno |
 
-### 10.3 `staff` flags
+### `staff` flags
 
-- `is_active` — soft-delete del barbero
-- `hidden_from_checkin` — el kiosk no lo lista (pero sigue elegible si aparece en otros paths)
-- `role IN ('barber', ...)` o `is_also_barber = true` — solo estos pueden tomar walk-ins
-- `walkin_mode` (en `appointment_staff`) — si es `'appointments_only'` no toma walk-ins
+`is_active` (soft-delete) · `hidden_from_checkin` (no listado en kiosk) ·
+`role IN ('barber',…) OR is_also_barber=true` (puede tomar walk-ins) ·
+`appointment_staff.walkin_mode='appointments_only'` (no toma walk-ins).
 
 ---
 
 ## 11. Realtime sync
 
-**Suscripciones del panel barbero** (filtradas por `branch_id`):
-
-| Tabla | Reacción |
-|---|---|
-| `queue_entries` | `fetchQueue + refreshStats + fetchAssignmentData` |
-| `staff` | `fetchBarbersAndSchedules + fetchHiddenStatus` |
-| `break_requests` | `fetchBreakRequestStatus + fetchPendingBreakRequests` |
-
-**Tablas excluidas de la publication** `supabase_realtime` (mig 124, post-incidente DB saturada):
-- `attendance_logs` — alta tasa de UPDATE, fanout cross-branch
-- `break_requests` — antes incluida sin filtro, ahora filtrada por branch en el subscribe
-
-**Visibility refresh**: cuando el panel vuelve al foreground, hace `fetchQueue + refreshStats` cada 30s como fallback si Realtime falla.
+Suscripciones del panel (filtradas por `branch_id`): `queue_entries`,
+`staff`, `break_requests` → refresh. `attendance_logs` y `break_requests` (sin
+filtro) **excluidas** del publication (mig 124, incidente DB saturada). El
+panel hace visibility-refresh cada 30 s como fallback.
 
 ---
 
-## 12. Cronología de migraciones
+## 12. Cronología de migraciones (fila)
 
 | Mig | Fecha | Cambio | Estado |
 |---|---|---|---|
-| 119 | 2026-04-15 | sistema de turnos: `branches.operation_mode`, EXCLUSION GiST, RPCs core | activo |
-| 120 | — | `staff_schedules.branch_id` nullable, exception_type | activo |
-| 121 | — | cron mark_no_show_overdue | activo |
-| 123 | 2026-04-30 | índices de emergencia post-incidente DB | activo |
-| 124 | 2026-04-30 | realtime publication cleanup | activo |
-| 125 | 2026-05-01 | loyalty skip anonymous visits | activo |
-| 127 | 2026-05-04 | block_break_barbers_from_queue: Guard 0a + partial UNIQUE | activo |
-| 128 | 2026-05-04 | assign_next_client respeta pending break (Guard 0b) | activo |
-| 129 | 2026-05-07 | fairness gate (Guard 0c) — **causó el bug del 9-may** | revertido por 131 |
-| 130 | 2026-05-07 | get_fair_barber wrapper público | viva pero sin enforcing |
-| **131** | **2026-05-09** | **revert fairness gate (Guard 0c) + RPC `claim_next_for_barber`** | **activo** |
-| 131b | 2026-05-09 | fix `#variable_conflict use_column` en claim_next_for_barber | activo |
-| (rollback TS) | 2026-05-09 | Auto-start de clientes en completeService **revertido** tras incidente. RPC `claim_next_for_barber` solo se usa desde tap manual de "Atender". | activo |
+| 127 | 2026-05-04 | Guard 0a + partial UNIQUE 1-in_progress | activo |
+| 128 | 2026-05-04 | claim respeta pending break (Guard 0b) | activo |
+| 129 | 2026-05-07 | fairness gate | revertido por 131 |
+| 130 | 2026-05-07 | get_fair_barber wrapper | dropeado mig 136 |
+| 131 | 2026-05-09 | revert fairness gate + RPC `claim_next_for_barber` | activo (base) |
+| 131b | 2026-05-09 | fix `#variable_conflict` | activo |
+| 132 | 2026-05-13 | `assign_dynamic_barber` + pre-asignación server en check-in | **revertido por 134** |
+| 133 | 2026-05-14 | sticky-while-present | **revertido por 134** |
+| **134** | **2026-05-15** | **pool no bloqueante** en `claim_next_for_barber` + normalización de filas en vuelo | **activo** |
+| **135** | **2026-05-15** | `next_queue_position` branch-tz + `search_path` | **activo** |
+| **136** | **2026-05-15** | drop de funciones muertas (assign_next_client, assign_dynamic_barber, compute_fair_barber, get_fair_barber, is_barber_present_now) | **activo** |
+| 137 | (gated) | `DROP COLUMN app_settings.dynamic_cooldown_seconds` | **pendiente — aplicar tras el redeploy** (`.APPLY_AFTER_DEPLOY`) |
 
 ---
 
-## 13. Estado conocido y deuda técnica
+## 13. Estado conocido, evidencia y deuda
 
-### Resuelto en mig 131
-- ✅ Bug "dinámico invisible cuando rankings divergen" — eliminado por reverter fairness gate.
-- ✅ Doble cómputo de fair_barber (cliente + server) — eliminado el cliente, server queda como utility.
-- ⚠️ **Idle time entre cortes**: el push-on-complete que iba a resolverlo fue **revertido** tras el incidente Fabrizio/Santino vela (ver abajo). Phase 2 lo aborda con un modelo distinto (next-suggestion sin auto-start).
+### Resuelto en mig 134 (con evidencia Monte Carlo)
 
-### Incidente 2026-05-09 22:14 — Fabrizio/Santino vela: cortes fantasma por auto-start prematuro
+Simulador de eventos discretos en [`docs/sim/fila_montecarlo.py`](sim/fila_montecarlo.py)
+(resultados crudos en [`docs/sim/results.json`](sim/results.json)), calibrado
+con `visits` reales (n=4999: media 35,1 min, sd 13,6, p50 33,5). Grilla:
+barberos {3,5,7,10} × carga {0,8/1,0/1,15} × % dinámico {25/50/80} ×
+popularidad {uniforme, zipf} × 5 políticas × 120 reps = **43.200 turnos**.
 
-**Síntoma reportado**: "se inició un corte solo en el panel de Fabrizio".
+Políticas: **A** binding sticky actual · **B** binding con push+tap instantáneo
+· **C** pool no bloqueante (mig 134) · **D** pool + WSJF · **E** pool con
+fairness-gate bloqueante.
 
-**Línea de tiempo verificada en DB**:
-1. 21:47:59 — Fabrizio start con Diego Ortiz (priority 21:47:16).
-2. 21:50:04 — Santino vela hace check-in, asignado específicamente a Fabrizio.
-3. 22:13:59 — Fabrizio completa Diego Ortiz.
-4. **22:14:00.17** — Santino vela `started_at` se setea automáticamente (~1.1s después).
-5. (entre 22:14 y 22:16) — encargado cancela Santino vela porque el cliente no está físicamente presente.
-6. 22:16:28 — Fabrizio inicia Tobias González (tap manual, OK).
+Hallazgos:
 
-**Causa raíz**: el push-on-complete (mig 131 paso 6 de `completeService`) llamaba a `claim_next_for_barber`, que arrancaba el cronómetro automáticamente. Asumía que el siguiente cliente estaba físicamente en la silla en el momento exacto en que el corte anterior terminaba — falso en barbería real, donde hay un gap humano (limpieza de silla, llamar al cliente, esperar que llegue).
+- ✅ **Invariante "si hay dinámicos, ningún barbero desocupado"**: A violaba
+  20–71 min/turno (71–98 % de los turnos; peor celda 121 min/turno). **B ≈ A**
+  → el problema NO era el push-on-complete revertido, era el **binding
+  sticky**. **C = D = 0,00**. El pool lo elimina de raíz.
+- ✅ **Utilización**: pool +~2 pp (≈ 0,2 barbero recuperado con 10 sillas).
+- ✅ **Espera P50**: pool ~10 min menor que el binding; WSJF (D) −40 %.
+- ⚠️ **Equidad de cortes**: el binding tenía CV menor *porque pre-asignaba para
+  igualar*, pero a costa del invariante; bajo carga real esa equidad se
+  degradaba igual (CV 0,34 en zipf saturado). Con pool la equidad es excelente
+  (Jain ~0,92–0,98); la diferencia residual es **elección legítima del cliente
+  por el barbero popular**, no un defecto del scheduler.
+- ⚠️ **Política E (fairness gate bloqueante) reprodujo numéricamente el
+  incidente de mig 129**: retener trabajo a un barbero "adelantado" reintroduce
+  el starvation (peor que A). **Lección dura: la equidad nunca se impone
+  reteniendo trabajo de un barbero libre.**
 
-**Fix aplicado mismo día**:
-- Revertido el llamado a `claim_next_for_barber` desde `completeService`.
-- Restaurada la lógica original: `completeService` solo auto-arranca el ghost de descanso (que no requiere presencia de cliente).
-- `claim_next_for_barber` sobrevive como RPC pero solo se invoca desde `attendNextClient` (tap manual).
-- UI cliente: removido el optimistic update que asumía un `next` viniendo del server.
+### Incidente 2026-05-09 — Fabrizio/Santino vela (cortes fantasma)
 
-**Lecciones**:
-- Las decisiones que cambian el momento de capture de un timestamp (started_at) deben coordinarse con el flujo humano del usuario, no solo con la integridad de datos.
-- "Push-on-complete" funciona en modelos digitales puros (e.g., colas de procesamiento de jobs), no en flujos físico-digitales mixtos como una barbería.
-- El benchmark de "30-90s de idle ahorrado" no compensa el costo de "métricas de duración corruptas + clientes fantasma + supervisor manual canceling".
+El push-on-complete (mig 131) arrancaba el cronómetro del siguiente cliente
+automáticamente, asumiéndolo en la silla — falso en barbería real (gap humano).
+Revertido. Lección: cambiar el momento de captura de `started_at` debe
+coordinarse con el flujo físico, no solo con la integridad de datos. El Monte
+Carlo confirmó además que el push-on-complete era irrelevante para el
+invariante: el fix correcto era el pool, no el push.
 
-### Aún pendiente (Phase 2)
-- ⚠ **Pre-asignación local visual sigue siendo naïve**: usa ETA con `avg = 25min` global, no por barbero/servicio.
-- ⚠ **FIFO estricto**: si llega cliente "corte simple 15min" y otro "color+corte 90min" en orden inverso, FIFO procesa el largo primero, degradando P50 del cliente corto.
-- ⚠ **`shift_end_margin_minutes` ciego al servicio**: bloquea al barbero por tiempo absoluto, no por duración estimada del cliente.
-- ⚠ **Sin contrato compartido entre cliente y server** (si re-introducimos algún ranking, hay que blindarlo con tests).
-- ⚠ **`compute_fair_barber` y `get_fair_barber` sobreviven sin uso real** — deuda de limpieza.
+### Pendiente (Phase 2 — §14)
 
-### Otras deudas más pequeñas
-- `dynamic_cooldown_seconds` está en config y se lee, pero el `_cooldownMs` en `assignDynamicBarbers` tiene prefijo `_` (unused). Decidir o aplicar.
-- `assignmentTimeRef` se rebumba a `Date.now()` localmente; dos paneles pueden tener `now` ligeramente distintos. No genera bugs visibles (los ETAs solo difieren en sub-segundo) pero es una asimetría.
-- `priority_order` se puede manipular con drag&drop desde `/dashboard/fila`. Se ha visto en prod entries con priority de horas atrás aunque su `checked_in_at` es reciente — efecto secundario de reorderings. No es bug, pero confunde el debug.
+- Predicción de duración por (barbero, servicio, cliente) — hoy avg global.
+- WSJF acotado por aging en el pool (P50 −40 % en sim) — **como score en el
+  claim, nunca como gate bloqueante**.
+- `shift_end` consciente del servicio.
+- Hint cliente↔server con tests de snapshot.
+
+### Deudas menores
+
+- `position` se puede manipular con drag&drop; el claim usa `priority_order`,
+  así que es solo cosmético pero confunde el debug.
+- `assignmentTimeRef` se rebumba a `Date.now()` local; dos paneles pueden tener
+  `now` sub-segundo distintos. Inocuo (el claim es server).
 
 ---
 
-## 14. Plan Phase 2 — Cambios planeados
+## 14. Plan Phase 2 — Optimización (sobre el pool, no contra él)
 
-> **Objetivo medible**: reducir P50 de wait_time de ~6 min a ~3-4 min, y P95 de ~25 min a ~12-15 min, sin sacrificar fairness inter-barbero.
+> **Objetivo medible**: P50 wait ~6→3-4 min, P95 ~25→12-15 min, sin perder el
+> invariante (ya garantizado por el pool) ni la equidad.
 >
-> **Cambio de enfoque tras incidente 2026-05-09**: el modelo "push-on-complete con auto-start" fue descartado. En su lugar, Phase 2 implementa **"highlighted next-suggestion"**: el server pre-elige el siguiente cliente y lo destaca visualmente, pero **el barbero arranca el corte con tap manual cuando el cliente está físicamente presente**.
+> **Principio rector (lección mig 129/134)**: la asignación ocurre **cuando el
+> barbero se libera**, sobre el **pool**. Cualquier fairness/optimización es un
+> **término de score en `claim_next_for_barber`**, nunca un gate que bloquee a
+> un barbero libre ni una pre-asignación en el check-in.
 
-### 14.1 Predicción de duración por (barbero, servicio, cliente)
+### 14.1 `predicted_duration_minutes` (MV `barber_service_duration_stats`)
 
-**Problema**: hoy `avg = 25min` global. Esto distorsiona ETA y bloquea barberos sin contexto.
+Mediana por (cliente,barbero,servicio) → (barbero,servicio) → (servicio) →
+`services.duration_minutes` → 25. Refresh horario vía pg_cron. Usado por: ETA
+de kiosk/TV/panel, scoring del claim (§14.2), shift_end consciente (§14.3).
 
-**Solución**: vista materializada `barber_service_duration_stats` con cascada:
+### 14.2 WSJF acotado por aging en el claim del pool
 
-```sql
-CREATE MATERIALIZED VIEW barber_service_duration_stats AS
-SELECT
-  branch_id,
-  barber_id,
-  service_id,
-  PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_min) AS median_duration_min,
-  COUNT(*) AS sample_size,
-  MAX(completed_at) AS last_sample_at
-FROM (
-  SELECT branch_id, barber_id, service_id,
-         EXTRACT(EPOCH FROM (completed_at - started_at)) / 60 AS duration_min,
-         completed_at
-  FROM visits
-  WHERE started_at IS NOT NULL
-    AND completed_at IS NOT NULL
-    AND completed_at >= NOW() - INTERVAL '90 days'
-    AND EXTRACT(EPOCH FROM (completed_at - started_at)) / 60 BETWEEN 5 AND 180
-) v
-GROUP BY 1, 2, 3
-HAVING COUNT(*) >= 3;
-```
-
-Refresh: cada hora vía pg_cron.
-
-**Función de lookup**:
-```sql
-predicted_duration_minutes(branch_id, barber_id, service_id, client_id) RETURNS INTEGER
--- Cascada:
---   1. Mediana de últimas 5 visitas de (cliente, barbero, servicio)
---   2. Mediana de últimas 10 visitas de (barbero, servicio)
---   3. Mediana de últimas 20 visitas de (servicio)
---   4. services.duration_minutes
---   5. Fallback 25 min
-```
-
-**Donde se usa**: ETA del cliente en kiosk/TV, ETA del panel barbero, scoring de claim (§14.3), decisión de shift_end (§14.4).
-
-### 14.2 Pool dedicado para dinámicos en panel barbero
-
-**Problema**: hoy "Mi fila" mezcla pre-asignaciones locales de dinámicos con asignados reales. Si dos paneles disagree localmente, el dinámico aparece dos veces.
-
-**Solución**: separar visualmente.
+Cuando `claim_next_for_barber` elige del pool dinámico, en vez de FIFO puro:
 
 ```
-Panel barbero — layout propuesto:
-
-┌──────────────────────────────────────────┐
-│ Active client / break                    │
-└──────────────────────────────────────────┘
-
-┌─ MI FILA (asignados específicos) ────────┐
-│  • Juan        ETA 25min                 │
-│  • Pedro       ETA 50min                 │
-└──────────────────────────────────────────┘
-
-┌─ POOL DINÁMICO (compartido)──────────────┐
-│  • Mariano     esperando 32min  [Tomar] │ ← cualquier barbero puede tap
-│  • Franco      esperando 8min   [Tomar] │
-└──────────────────────────────────────────┘
+score = aging(entry) - duration_penalty(entry, barber)
+aging: waited>30 → 1000 ; waited>15 → 100 ; else waited
+duration_penalty = predicted_duration_minutes(...)
+ORDER BY score DESC LIMIT 1   -- aging garantiza nadie espera >30 min
 ```
 
-**Comportamiento**:
-- "Mi fila" muestra **solo entries con `barber_id === self`**. Sin pre-asignación visual de dinámicos.
-- "Pool" muestra **todos los dinámicos** del branch, con tiempo de espera y un botón "Tomar".
-- "Tomar" llama a `claim_next_for_barber(self, branch, entryId)` — atómico.
-- Al finalizar un corte (push-on-complete), el server claim de Mi fila primero (si hay), si no del Pool por FIFO.
+Es un cambio **localizado y aditivo** dentro del SELECT del fallback FIFO. No
+toca el check-in ni introduce binding. Sim (política D): P50 −40 %, P95
+acotado.
 
-**Beneficio adicional**: el cliente ve cuánto lleva esperando cada uno → motivación social para tomar dinámicos.
+### 14.3 `shift_end` consciente del servicio
 
-### 14.3 WSJF (Weighted Shortest Job First) en el pool
+En el claim, descartar un entry para un barbero solo si
+`shift_remaining < predicted_duration(servicio) + margin` (no por tiempo
+absoluto ciego al servicio).
 
-**Problema**: FIFO puro castiga clientes con servicios cortos cuando llega un servicio largo antes.
+### 14.4 Test de snapshot del claim
 
-**Solución**: scoring híbrido en `claim_next_for_barber` cuando elige del pool dinámico.
+`src/lib/queue-ranking/` con fixtures que insertan estado en una branch
+efímera, llaman al RPC y comparan el `entry_id` ganador contra una impl TS de
+referencia. Cubrir: empate exacto, un solo elegible, pool vacío, ghost ready,
+turno inminente, ruido multi-sucursal.
 
-```sql
-score(entry, barber) =
-    aging_factor(entry)        -- urgencia por tiempo de espera
-  - duration_penalty(entry, barber)  -- favorece servicios cortos
-  + fifo_bias(entry)           -- empate FIFO
-
-aging_factor(entry):
-  CASE
-    WHEN waited_min > 30 THEN 1000  -- nadie debe esperar >30min
-    WHEN waited_min > 15 THEN 100   -- urgencia moderada
-    ELSE waited_min
-  END
-
-duration_penalty(entry, barber):
-  predicted_duration_minutes(branch, barber, entry.service_id, entry.client_id)
-
-fifo_bias(entry):
-  EXTRACT(EPOCH FROM (NOW() - entry.priority_order)) / 1000  -- desempate, peso bajo
-```
-
-**Selección**: `ORDER BY score DESC LIMIT 1`.
-
-**Garantía**: ningún cliente espera más de 30min mientras hay barbero disponible (aging dispara al tope).
-
-### 14.4 `shift_end` consciente del servicio
-
-**Problema**: `is_barber_blocked_by_shift_end` bloquea barberos por tiempo absoluto. Un barbero a 19min del fin de turno con un cliente de 15min disponible → se descarta.
-
-**Solución**: en `claim_next_for_barber`, evaluar elegibilidad por barbero+servicio:
-
-```sql
-shift_end_eligible(barber, branch, predicted_duration):
-  shift_remaining_min := minutes_until_last_block_end(barber, branch)
-  margin_min := app_settings.shift_end_margin_minutes
-  RETURN shift_remaining_min >= predicted_duration + margin_min
-```
-
-Aplicado a cada entry candidato:
-- Si `shift_remaining < predicted_duration(servicio) + margin` → ese barbero no toma este entry específico (pero puede tomar otros más cortos).
-- Si `shift_remaining < margin_min mínimo absoluto (e.g. 5min)` → no toma nada.
-
-### 14.5 Test compartido cliente↔server
-
-**Problema**: si Phase 2 reintroduce algún ranking client-side (e.g., para previewizar el WSJF), divergencias silenciosas pueden volver a romper la UX.
-
-**Solución**: fixture compartido + tests ejecutables.
-
-```
-src/lib/queue-ranking/
-├── ranking.test.ts        ← tests con fixtures
-├── ranking.ts             ← TS impl que wrappea el RPC
-└── fixtures/
-    └── snapshot-N.json    ← estados completos (entries, barbers, schedules, ...)
-```
-
-Cada fixture genera un snapshot determinístico:
-- Inserta data en una branch de Supabase efímera
-- Llama al RPC server
-- Llama a la función TS local
-- Compara: deben dar el mismo `entry_id` ganador
-
-Snapshots cubren:
-- Empate exacto (load=load, busy=busy, last=last)
-- Solo un elegible
-- Pool vacío
-- Ghost ready
-- Turno inminente
-- Multi-sucursal noise
-
-### 14.6 Limpieza
-
-- **Drop `compute_fair_barber` y `get_fair_barber`** después de Phase 2 si `pg_stat_user_functions` muestra 0 calls/semana.
-- **Drop `assign_next_client`** si el grep en codebase no encuentra callers.
-- **Eliminar `_cooldownMs` y `dynamic_cooldown_seconds`** si decidimos que no aporta.
-
-### 14.7 Migraciones planeadas
+### 14.5 Migraciones planeadas
 
 | Mig | Cambio |
 |---|---|
-| 132 | `barber_service_duration_stats` MV + función `predicted_duration_minutes` + cron refresh |
-| 133 | `claim_next_for_barber` v2 con WSJF + service-aware shift_end |
-| 134 | UI: pool dedicado + remover pre-asignación local de dinámicos |
-| 135 | Test fixtures + CI integration |
-| 136 | Drop de utilities legacy (compute_fair_barber, get_fair_barber, assign_next_client) |
-
-### 14.8 Métricas de éxito
-
-Antes de Phase 2, capturar baseline (1 semana):
-
-```sql
--- P50 / P95 wait_time = started_at - checked_in_at por entry
--- idle_time_per_barber = sum(gaps entre completed_at y siguiente started_at)
--- claim_failure_rate = % de attendNextClient que retornan vacío en presencia de dinámicos
-```
-
-Goal post-Phase 2:
-- P50 wait_time: -50%
-- P95 wait_time: -40%
-- Idle time per barber per shift: -70%
-- Claim failure rate: ~0%
-
-Capturar las métricas en una vista nueva `queue_metrics_daily` y comparar pre/post.
+| 138 | `barber_service_duration_stats` MV + `predicted_duration_minutes` + cron |
+| 139 | `claim_next_for_barber` v2: WSJF aditivo + shift_end consciente |
+| 140 | Test fixtures + CI |
 
 ---
 
@@ -737,19 +542,21 @@ Capturar las métricas en una vista nueva `queue_metrics_daily` y comparar pre/p
 
 | Decisión | Por qué |
 |---|---|
-| FIFO por `priority_order` y no `position` | `position` es UI-only, se reordena con drag&drop. `priority_order` es estable y semántico (timestamp del check-in). |
-| Push-on-complete como modelo dominante | Elimina dead time post-corte y el bug de "dinámico invisible". El claim atómico server-side es suficiente para fairness. |
-| Sin fairness gate en `claim_next_for_barber` | El gate trade-off de mig 129 fue "evitar duplicación visual a costa de hacer invisible cuando rankings divergen". El precio era inaceptable. La duplicación visual transitoria se resuelve naturalmente con SKIP LOCKED + toast. |
-| `is_break` ghost en lugar de un campo en staff | Mantiene FIFO global respetando los `cuts_before_break` aprobados. Permite que el descanso "compita" con clientes asignados. |
-| `claim_next_for_barber` usa `#variable_conflict use_column` | Resuelve la ambigüedad entre OUT param `is_break` y columna `queue_entries.is_break` sin renombrar todo. |
-| Auto-refresh por Realtime full vs incremental | Simplicidad. Bajo volumen actual (~50 entries/día/branch) es soportable. Si crece, considerar diff updates. |
+| Pool no bloqueante (asignar al liberarse, no al check-in) | Único modelo que cumple el invariante; probado con Monte Carlo (43.200 turnos). El binding en arrival + sticky es el antipatrón clásico (idle server + waiting customer). |
+| FIFO por `priority_order` (no `position`) | `position` es UI, se reordena con drag&drop; `priority_order` es estable y semántico. |
+| Sin fairness gate | Un gate que retiene trabajo a un barbero libre reintroduce starvation (mig 129; reproducido por la política E del sim). La equidad va como score aditivo (§14.2), nunca como bloqueo. |
+| Sin push-on-complete de clientes | Gap humano real → cortes fantasma (incidente Fabrizio). El sim probó que el push no afectaba el invariante; el fix era el pool. El descanso sí auto-arranca (no requiere presencia). |
+| Hint visual cliente, claim server | El hint puede divergir entre tablets sin daño; `SKIP LOCKED` + toast resuelven el empate. Simplicidad > consistencia de hint. |
+| `is_break` ghost en vez de flag en staff | Mantiene FIFO global respetando `cuts_before_break`. |
 
 ## Apéndice B — Referencias rápidas
 
-- Migración 131 (active fix): [`supabase/migrations/131_push_on_complete_root_fix.sql`](../supabase/migrations/131_push_on_complete_root_fix.sql)
+- Migración 134 (fix pool): [`supabase/migrations/134_decouple_dynamic_pool.sql`](../supabase/migrations/134_decouple_dynamic_pool.sql)
+- Migración 135 (tz): [`supabase/migrations/135_next_queue_position_branch_tz.sql`](../supabase/migrations/135_next_queue_position_branch_tz.sql)
+- Migración 136 (limpieza): [`supabase/migrations/136_drop_dead_queue_functions.sql`](../supabase/migrations/136_drop_dead_queue_functions.sql)
+- Migración 137 (gateada): `supabase/migrations/137_drop_dynamic_cooldown_column.sql.APPLY_AFTER_DEPLOY`
 - Server actions: [`src/lib/actions/queue.ts`](../src/lib/actions/queue.ts)
 - Panel barbero: [`src/components/barber/queue-panel.tsx`](../src/components/barber/queue-panel.tsx)
-- Dashboard fila: [`src/app/dashboard/fila/fila-client.tsx`](../src/app/dashboard/fila/fila-client.tsx)
-- Utilidades de ranking client-side: [`src/lib/barber-utils.ts`](../src/lib/barber-utils.ts)
-- Diálogo de cobro: [`src/components/barber/complete-service-dialog.tsx`](../src/components/barber/complete-service-dialog.tsx)
-- Incidente del 30-abr-2026 (saturación DB, contexto del por qué de mig 124): [`docs/incidentes/2026-04-30_db-saturada-polling-realtime.md`](incidentes/2026-04-30_db-saturada-polling-realtime.md)
+- Hint client-side: [`src/lib/barber-utils.ts`](../src/lib/barber-utils.ts)
+- Evidencia Monte Carlo: [`docs/sim/fila_montecarlo.py`](sim/fila_montecarlo.py) · [`docs/sim/results.json`](sim/results.json)
+- Incidente 30-abr-2026 (DB saturada, contexto mig 124): [`docs/incidentes/2026-04-30_db-saturada-polling-realtime.md`](incidentes/2026-04-30_db-saturada-polling-realtime.md)

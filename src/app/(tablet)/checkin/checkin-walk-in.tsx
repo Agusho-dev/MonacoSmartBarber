@@ -135,7 +135,6 @@ export function CheckinWalkIn() {
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [now, setNow] = useState(Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
-  const [dynamicCooldownMs, setDynamicCooldownMs] = useState(120_000)
   const [notClockedInBarbers, setNotClockedInBarbers] = useState<Set<string>>(new Set())
   const [barberNextArrival, setBarberNextArrival] = useState<Record<string, string>>({})
 
@@ -259,12 +258,9 @@ export function CheckinWalkIn() {
       }
 
       if (res.settings) {
-        const sd = res.settings as { shift_end_margin_minutes?: number; dynamic_cooldown_seconds?: number }
+        const sd = res.settings as { shift_end_margin_minutes?: number }
         if (typeof sd.shift_end_margin_minutes === 'number' && sd.shift_end_margin_minutes >= 0) {
           setShiftEndMargin(sd.shift_end_margin_minutes)
-        }
-        if (typeof sd.dynamic_cooldown_seconds === 'number' && sd.dynamic_cooldown_seconds >= 0) {
-          setDynamicCooldownMs(sd.dynamic_cooldown_seconds * 1000)
         }
       }
 
@@ -618,8 +614,8 @@ export function CheckinWalkIn() {
   const assignmentTime = useMemo(() => Date.now(), [queueEntries, barbers, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(queueEntries, barbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs, barberAvgMinutes)
-  }, [queueEntries, barbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs, barberAvgMinutes])
+    return assignDynamicBarbers(queueEntries, barbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, barberAvgMinutes)
+  }, [queueEntries, barbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, barberAvgMinutes])
 
   // Barberos con descanso activo (ghost is_break=true && status='in_progress').
   // Estos quedan visibles en el kiosk como "En descanso" pero NO son seleccionables

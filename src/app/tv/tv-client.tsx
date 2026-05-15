@@ -219,7 +219,6 @@ export function TvClient({
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [, setNow] = useState(() => Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
-  const [dynamicCooldownMs, setDynamicCooldownMs] = useState(120_000)
   const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
   const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
   const [latestAttendance, setLatestAttendance] = useState<Record<string, string>>({})
@@ -250,7 +249,6 @@ export function TvClient({
     const result = await refreshTvSchedules(orgBranchIds, orgId || '')
     setSchedules(result.schedules as StaffSchedule[])
     if (result.shiftEndMargin >= 0) setShiftEndMargin(result.shiftEndMargin)
-    if (result.dynamicCooldownSeconds >= 0) setDynamicCooldownMs(result.dynamicCooldownSeconds * 1000)
     setDailyServiceCounts(result.dailyServiceCounts)
     setLastCompletedAt(result.lastCompletedAt)
     setLatestAttendance(result.latestAttendance)
@@ -350,8 +348,8 @@ export function TvClient({
   const dynamicEntries = useMemo(() => {
     const branchEntries = selectedBranchId ? entries.filter(e => e.branch_id === selectedBranchId) : entries
     const branchBarbers = selectedBranchId ? liveBarbers.filter(b => b.branch_id === selectedBranchId) : liveBarbers
-    return assignDynamicBarbers(branchEntries, branchBarbers as unknown as Staff[], schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, dynamicCooldownMs, {})
-  }, [entries, liveBarbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, selectedBranchId, dynamicCooldownMs])
+    return assignDynamicBarbers(branchEntries, branchBarbers as unknown as Staff[], schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, {})
+  }, [entries, liveBarbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, selectedBranchId])
 
   const waitingEntries = useMemo(
     () => dynamicEntries.filter((e) => e.status === 'waiting'),

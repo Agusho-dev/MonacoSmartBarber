@@ -74,7 +74,6 @@ export async function refreshTvSchedules(branchIds: string[], orgId: string) {
   if (!branchIds.length) return {
     schedules: [],
     shiftEndMargin: 35,
-    dynamicCooldownSeconds: 60,
     dailyServiceCounts: {} as Record<string, number>,
     lastCompletedAt: {} as Record<string, string>,
     latestAttendance: {} as Record<string, string>,
@@ -92,7 +91,7 @@ export async function refreshTvSchedules(branchIds: string[], orgId: string) {
       .eq('is_active', true),
     supabase
       .from('app_settings')
-      .select('shift_end_margin_minutes, dynamic_cooldown_seconds')
+      .select('shift_end_margin_minutes')
       .eq('organization_id', orgId)
       .maybeSingle(),
     supabase
@@ -141,12 +140,11 @@ export async function refreshTvSchedules(branchIds: string[], orgId: string) {
     })
   }
 
-  const settings = settingsRes.data as { shift_end_margin_minutes?: number; dynamic_cooldown_seconds?: number } | null
+  const settings = settingsRes.data as { shift_end_margin_minutes?: number } | null
 
   return {
     schedules: schedRes.data ?? [],
     shiftEndMargin: typeof settings?.shift_end_margin_minutes === 'number' ? settings.shift_end_margin_minutes : 35,
-    dynamicCooldownSeconds: typeof settings?.dynamic_cooldown_seconds === 'number' ? settings.dynamic_cooldown_seconds : 60,
     dailyServiceCounts,
     lastCompletedAt,
     latestAttendance,

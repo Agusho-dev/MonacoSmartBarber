@@ -322,9 +322,9 @@ export async function fetchBranchAssignmentData(branchId: string) {
   const dayStart = new Date()
   dayStart.setHours(0, 0, 0, 0)
 
-  // (mig 131) `fairBarberId` removido del response: el fairness gate fue
-  // eliminado en favor de FOR UPDATE SKIP LOCKED dentro de claim_next_for_barber.
-  // Ya no hace falta el RPC `get_fair_barber` desde el cliente.
+  // (mig 131/134) `fairBarberId` removido del response: sin fairness gate, el
+  // claim es pool FIFO no bloqueante con FOR UPDATE SKIP LOCKED dentro de
+  // claim_next_for_barber. get_fair_barber fue dropeado en mig 136.
   const [dailyRes, lastRes] = await Promise.all([
     supabase
       .from('visits')
