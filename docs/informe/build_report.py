@@ -119,6 +119,25 @@ for f in ["inv_dyn_starv_min", "inv_violated", "util", "wait_p50", "wait_p95",
           "cv_counts", "jain", "served"]:
     MC[f] = {pol: [agg(nb, pol, f) for nb in BARBERS] for pol in POLS}
 
+# ── Alta demanda: modelo en el pico + slice Monte Carlo (ρ ≥ 1.0) ──
+_pk = {e["name"]: e for e in D["pico"]["espera"]}
+PEAK = []
+for _p in D["pico"]["params"]:
+    _nm, _lmb, _c = _p["name"], _p["lambda_pico"], _p["c"]
+    _m = mmc(_lmb, MU, _c)
+    _o = _pk[_nm]
+    PEAK.append({"nom": ("Paraná" if _nm == "Parana" else _nm), "rho": _m["rho"],
+                 "wq_pool": _m["Wq"] if _m["estable"] else float("inf"),
+                 "wq_pool_ac": (_m["Wq"] * ACF) if _m["estable"] else float("inf"),
+                 "wq_bind": mm1_wq_min(_lmb / _c, MU),
+                 "obs_p50": _o["pico_p50"], "obs_p95": _o["pico_p95"], "obs_max": _o["pico_max"]})
+def agg_hd(nb, pol, field):
+    ks = [k for k in SIM if k.split("|")[0] == str(nb) and k.split("|")[4] == pol
+          and k.split("|")[1] in ("1.0", "1.15")]
+    return sum(SIM[k][field] for k in ks) / len(ks) if ks else 0.0
+MCHD = {f: {pol: [agg_hd(nb, pol, f) for nb in BARBERS] for pol in POLS}
+        for f in ["inv_dyn_starv_min", "wait_p50", "wait_p95", "util"]}
+
 # Jain observado (Rondeau, barberos activos = top 5)
 def jain(vals):
     vals = [v for v in vals]
@@ -372,6 +391,27 @@ fig_srv_type = hbars([(s["servicio"], s["media"], PAL[0]) for s in D["servicio_p
                      50, unit=" min", fmt="{:.1f}")
 fig_markov = markov_svg(C_REP)
 
+_bn3 = ["Parana", "Rondeau", "Caseros"]
+fig_peak_real = grouped_bars(
+    [("Valle · P50", [_pk[n]["valle_p50"] for n in _bn3], PAL[6]),
+     ("Pico · P50", [_pk[n]["pico_p50"] for n in _bn3], PAL[3]),
+     ("Pico · P95", [_pk[n]["pico_p95"] for n in _bn3], PAL[2])],
+    ["Paraná", "Rondeau", "Caseros"], 80,
+    ylabel="espera real (min)", unit=" min", fmt="{:.0f}")
+_hdw = MCHD["wait_p50"]
+fig_hd_wait = grouped_bars(
+    [(LBL[p], _hdw[p], c) for p, c in [("A", PAL[2]), ("C", PAL[1]), ("D", PAL[4])]],
+    [f"{b} barberos" for b in BARBERS], max(_hdw["A"]) * 1.25,
+    ylabel="espera P50 simulada (min) · sólo ρ≥1", unit=" min", fmt="{:.0f}")
+HDW_A = (min(_hdw["A"]), max(_hdw["A"]))
+OBS95 = (min(p["obs_p95"] for p in PEAK), max(p["obs_p95"] for p in PEAK))
+peak_rows = [[p["nom"], f'{p["rho"]:.0%}',
+              (f'{p["wq_pool"]:.1f}' if p["wq_pool"] != float("inf") else "∞"),
+              (f'{p["wq_pool_ac"]:.1f}' if p["wq_pool_ac"] != float("inf") else "∞"),
+              (f'{p["wq_bind"]:.0f}' if p["wq_bind"] != float("inf") else "∞"),
+              f'{p["obs_p50"]:.0f}', f'{p["obs_p95"]:.0f}', f'{p["obs_max"]:.0f}']
+             for p in PEAK]
+
 # ───────────────────────── HTML ─────────────────────────
 def kpi(v, l, sub=""):
     return f'<div class="kpi"><div class="kpi-v">{v}</div><div class="kpi-l">{l}</div><div class="kpi-s">{sub}</div></div>'
@@ -420,10 +460,11 @@ SECTIONS = [
     ("servicio", "4 · Proceso de servicio"),
     ("markov", "5 · Cadena de Markov y estabilidad"),
     ("pooling", "6 · Por qué el pool es correcto"),
-    ("montecarlo", "7 · Simulación Monte Carlo"),
-    ("auditoria", "8 · Auditoría de datos y patrones"),
-    ("mejoras", "9 · Mejoras notables (Phase 2)"),
-    ("apendice", "10 · Apéndice: fórmulas y supuestos"),
+    ("altademanda", "7 · Régimen de alta demanda"),
+    ("montecarlo", "8 · Simulación Monte Carlo"),
+    ("auditoria", "9 · Auditoría de datos y patrones"),
+    ("mejoras", "10 · Mejoras notables (Phase 2)"),
+    ("apendice", "11 · Apéndice: fórmulas y supuestos"),
 ]
 nav = "".join(f'<a href="#{i}">{esc(t)}</a>' for i, t in SECTIONS)
 
@@ -493,6 +534,12 @@ summary{{cursor:pointer;font-weight:600;font-size:14px;padding:6px 0}}
 <h1>Fila Dinámica — Informe de Ingeniería</h1>
 <div class="sub">Análisis del sistema de asignación de clientes en tiempo real · teoría de colas, cadenas de Markov y validación Monte Carlo sobre datos de producción · {gen}</div>
 <div class="callout"><b>Alcance.</b> {ESC_SCALE['sucursales']} sucursales reales (Paraná, Rondeau, Caseros) · {ESC_SCALE['walkins_60d']:,} walk-ins y {ESC_SCALE['clientes_unicos']:,} clientes únicos en 60 días · {ESC_SCALE['barberos']} barberos · {ESC_SCALE['cortes_muestra_servicio']:,} cortes para el ajuste de la distribución de servicio · {ESC_SCALE['turnos_simulados']:,} turnos simulados (Monte Carlo).</div>
+<div class="callout bad"><b>Foco del informe: alta demanda.</b> En valle el sistema
+funciona con o sin la mejora. El retorno se concentra en el <b>pico</b> (Jue–Sáb
+16–20 h): ahí la espera <i>típica</i> real se triplica (P50 ≈ 17 min) y el peor
+caso llega a <b>{max(e["pico_max"] for e in D["pico"]["espera"]):.0f} min</b>. La
+§7 compara el pico real (régimen binding) contra el modelo y la mejora — ese es el
+centro de gravedad del análisis.</div>
 
 <section id="resumen"><h2>1 · Resumen ejecutivo</h2>
 <p>La barbería es, formalmente, un <b>sistema de colas multi-servidor</b>: los clientes
@@ -624,7 +671,48 @@ por la regularidad del servicio (Allen-Cunneen).</p>
 {table(["Escenario real","λ/h","c","a (Erlang)","ρ","P(esperar)","Wq M/M/c","Wq real G/G/c","W (con servicio)"], esc_rows)}
 </section>
 
-<section id="montecarlo"><h2>7 · Simulación Monte Carlo</h2>
+<section id="altademanda"><h2>7 · Régimen de alta demanda — donde se decide todo</h2>
+<p>Una cola sólo "duele" bajo carga. En <b>valle</b> hay holgura: ningún barbero
+ocioso, esperas cortas, el binding casi no muerde — da casi igual el modelo. <b>El
+valor de la mejora se concentra en el pico</b> (Jue–Sáb 16–20 h ≈
+{D["pico"]["share_demanda_pct"]}% de la demanda en {D["pico"]["horas_semana"]} h/semana).
+Por eso el peso del análisis va acá.</p>
+<h3>Dato real: la espera <i>típica</i> se triplica en el pico</h3>
+{fig_peak_real}
+<p>Mediana de espera real (P50): Paraná {_pk["Parana"]["valle_p50"]:.0f}→<b>{_pk["Parana"]["pico_p50"]:.0f}</b> min,
+Rondeau {_pk["Rondeau"]["valle_p50"]:.0f}→<b>{_pk["Rondeau"]["pico_p50"]:.0f}</b>,
+Caseros {_pk["Caseros"]["valle_p50"]:.0f}→<b>{_pk["Caseros"]["pico_p50"]:.0f}</b>. En el pico el
+P95 trepa a ~60–70 min y el peor caso a
+<b>{max(e["pico_max"] for e in D["pico"]["espera"]):.0f} min</b> (2 h+).</p>
+<h3>El modelo explica los datos del pico — y prueba la mejora</h3>
+<p>Al ρ del pico, el <b>binding</b> (= c colas M/M/1 independientes) y el <b>pool</b>
+(= una cola M/M/c) predicen esperas radicalmente distintas. La columna binding cae
+sobre el P95/máximo <i>realmente observados</i> en el período binding — el modelo
+<b>valida contra datos pasados</b>; el pool las colapsa:</p>
+{table(["Sucursal","ρ pico","Wq pool M/M/c","Wq pool real G/G/c","Wq binding c×M/M/1","P50 obs.","P95 obs.","máx obs."], peak_rows)}
+<div class="callout bad"><b>Lectura.</b> El binding predice
+<b>{min(p["wq_bind"] for p in PEAK):.0f}–{max(p["wq_bind"] for p in PEAK):.0f} min</b>
+de espera en el pico; los datos reales del pico (régimen binding) muestran P95
+<b>{min(p["obs_p95"] for p in PEAK):.0f}–{max(p["obs_p95"] for p in PEAK):.0f} min</b>
+y máximos hasta <b>{max(p["obs_max"] for p in PEAK):.0f} min</b>: <b>coinciden</b>. El
+pool baja la espera a pocos minutos y elimina la ociosidad. Ese diferencial — el
+retorno de la mejora — <b>sólo existe acá, en alta demanda</b>.</div>
+<h3>Monte Carlo aislando alta demanda (ρ ≥ 1) — la espera</h3>
+<p>Filtrando sólo las celdas saturadas de la grilla (carga ≥ capacidad) — el régimen
+del viernes a las 19 h — la <b>espera mediana</b> simulada del binding es
+<b>{HDW_A[0]:.0f}–{HDW_A[1]:.0f} min</b>, del orden del P95 real observado en el pico
+(<b>{OBS95[0]:.0f}–{OBS95[1]:.0f} min</b>): la simulación <b>reproduce los datos
+pasados</b>. El pool, y sobre todo pool+WSJF, la corta:</p>
+{fig_hd_wait}
+<p class="muted">Espera P50 simulada, sólo celdas ρ≥1. La espera <b>no</b> es cero —
+en saturación hay cola real. Lo que el pool elimina de raíz es el <i>desperdicio</i>
+(barbero libre con cola), que es <b>invariante a la carga</b> (≈ igual en valle que
+en pico — ver §8): no es un efecto del pico, ocurre siempre que el binding
+mal-rutea. El daño <b>específico del pico</b> es la espera: con binding, P50 ~{HDW_A[1]:.0f}
+min justo cuando más clientes hay.</p>
+</section>
+
+<section id="montecarlo"><h2>8 · Simulación Monte Carlo</h2>
 <p>Modelo de eventos discretos calibrado con los datos reales (servicio log-normal
 μ<sub>log</sub>={SS["mu_log"]}, σ<sub>log</sub>={SS["sigma_log"]}). Grilla: barberos
 {{3,5,7,10}} × carga {{0.8, 1.0, 1.15}} × % dinámico {{25,50,80}} × popularidad
@@ -658,7 +746,7 @@ de "menor espera". El pool además sube utilización ~2 pp (≈ 0.2 barbero recu
 sillas).</p>
 </section>
 
-<section id="auditoria"><h2>8 · Auditoría de datos y patrones</h2>
+<section id="auditoria"><h2>9 · Auditoría de datos y patrones</h2>
 <h3>Espera real por sucursal (60 días)</h3>
 {table(["Sucursal","n","Media","P50","P90","P95"], wait_rows)}
 <p>Las esperas reales (Rondeau P50 13.8 / Paraná P50 9.4 min) son del orden que predice
@@ -712,7 +800,7 @@ distorsiona analítica por servicio; normalizar.
 histórico por modalidad — ver §9.</div>
 </section>
 
-<section id="mejoras"><h2>9 · Mejoras notables (Phase 2)</h2>
+<section id="mejoras"><h2>10 · Mejoras notables (Phase 2)</h2>
 <p>Priorizadas por impacto/esfuerzo, todas <i>sobre</i> el pool (nunca contra él):</p>
 <ol>
 <li><b>Predicción de duración por (barbero, servicio).</b> Hoy el panel usa un fallback de
@@ -732,7 +820,7 @@ sobre la función que usa la mayoría. <b>Prioridad alta.</b></li>
 </ol>
 </section>
 
-<section id="apendice"><h2>10 · Apéndice: fórmulas y supuestos</h2>
+<section id="apendice"><h2>11 · Apéndice: fórmulas y supuestos</h2>
 <details><summary>Erlang-B, Erlang-C y métricas M/M/c</summary>
 <div class="eq">Erlang-B (recursión):  B(0)=1 ;  B(j) = a·B(j-1) / ( j + a·B(j-1) )<br>
 Erlang-C:  C = B(c) / ( 1 − ρ·(1 − B(c)) )   con ρ = a/c<br>

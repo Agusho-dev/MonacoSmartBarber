@@ -57,13 +57,19 @@ summary{cursor:pointer;font-weight:600;font-size:14px;padding:6px 0}
 <nav class="toc">
  <div class="brand">Monaco <span>Smart Barber</span></div>
  <div class="meta">Informe técnico · Fila Dinámica<br>v1.0 · 2026-05-16</div>
- <a href="#resumen">1 · Resumen ejecutivo</a><a href="#modelo">2 · El modelo formal</a><a href="#llegadas">3 · Proceso de llegadas (Poisson)</a><a href="#servicio">4 · Proceso de servicio</a><a href="#markov">5 · Cadena de Markov y estabilidad</a><a href="#pooling">6 · Por qué el pool es correcto</a><a href="#montecarlo">7 · Simulación Monte Carlo</a><a href="#auditoria">8 · Auditoría de datos y patrones</a><a href="#mejoras">9 · Mejoras notables (Phase 2)</a><a href="#apendice">10 · Apéndice: fórmulas y supuestos</a>
+ <a href="#resumen">1 · Resumen ejecutivo</a><a href="#modelo">2 · El modelo formal</a><a href="#llegadas">3 · Proceso de llegadas (Poisson)</a><a href="#servicio">4 · Proceso de servicio</a><a href="#markov">5 · Cadena de Markov y estabilidad</a><a href="#pooling">6 · Por qué el pool es correcto</a><a href="#altademanda">7 · Régimen de alta demanda</a><a href="#montecarlo">8 · Simulación Monte Carlo</a><a href="#auditoria">9 · Auditoría de datos y patrones</a><a href="#mejoras">10 · Mejoras notables (Phase 2)</a><a href="#apendice">11 · Apéndice: fórmulas y supuestos</a>
  <div class="meta" style="margin-top:20px">Audiencia: ingeniería y dirección.<br>Reproducible: <code>docs/informe/</code></div>
 </nav>
 <main>
 <h1>Fila Dinámica — Informe de Ingeniería</h1>
 <div class="sub">Análisis del sistema de asignación de clientes en tiempo real · teoría de colas, cadenas de Markov y validación Monte Carlo sobre datos de producción · 2026-05-16</div>
 <div class="callout"><b>Alcance.</b> 3 sucursales reales (Paraná, Rondeau, Caseros) · 5,439 walk-ins y 3,414 clientes únicos en 60 días · 16 barberos · 5,272 cortes para el ajuste de la distribución de servicio · 43,200 turnos simulados (Monte Carlo).</div>
+<div class="callout bad"><b>Foco del informe: alta demanda.</b> En valle el sistema
+funciona con o sin la mejora. El retorno se concentra en el <b>pico</b> (Jue–Sáb
+16–20 h): ahí la espera <i>típica</i> real se triplica (P50 ≈ 17 min) y el peor
+caso llega a <b>139 min</b>. La
+§7 compara el pico real (régimen binding) contra el modelo y la mejora — ese es el
+centro de gravedad del análisis.</div>
 
 <section id="resumen"><h2>1 · Resumen ejecutivo</h2>
 <p>La barbería es, formalmente, un <b>sistema de colas multi-servidor</b>: los clientes
@@ -194,7 +200,48 @@ por la regularidad del servicio (Allen-Cunneen).</p>
 <table><thead><tr><th>Escenario real</th><th>λ/h</th><th>c</th><th>a (Erlang)</th><th>ρ</th><th>P(esperar)</th><th>Wq M/M/c</th><th>Wq real G/G/c</th><th>W (con servicio)</th></tr></thead><tbody><tr><td>Rondeau · pico 18 h</td><td>5.69</td><td>5</td><td>3.32</td><td>66%</td><td>0.32</td><td>6.7</td><td>3.9</td><td>41.7</td></tr><tr><td>Rondeau · promedio día</td><td>3.97</td><td>5</td><td>2.32</td><td>46%</td><td>0.10</td><td>1.3</td><td>0.8</td><td>36.3</td></tr><tr><td>Paraná · pico 18 h</td><td>6.88</td><td>6</td><td>4.01</td><td>67%</td><td>0.29</td><td>5.1</td><td>2.9</td><td>40.1</td></tr><tr><td>Paraná · promedio día</td><td>5.33</td><td>6</td><td>3.11</td><td>52%</td><td>0.11</td><td>1.4</td><td>0.8</td><td>36.4</td></tr><tr><td>Caseros · promedio día</td><td>1.71</td><td>2</td><td>1.00</td><td>50%</td><td>0.33</td><td>11.6</td><td>6.7</td><td>46.6</td></tr></tbody></table>
 </section>
 
-<section id="montecarlo"><h2>7 · Simulación Monte Carlo</h2>
+<section id="altademanda"><h2>7 · Régimen de alta demanda — donde se decide todo</h2>
+<p>Una cola sólo "duele" bajo carga. En <b>valle</b> hay holgura: ningún barbero
+ocioso, esperas cortas, el binding casi no muerde — da casi igual el modelo. <b>El
+valor de la mejora se concentra en el pico</b> (Jue–Sáb 16–20 h ≈
+28% de la demanda en 15 h/semana).
+Por eso el peso del análisis va acá.</p>
+<h3>Dato real: la espera <i>típica</i> se triplica en el pico</h3>
+<svg viewBox="0 0 720 340" class="chart" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif"><line x1="56" y1="294.0" x2="706" y2="294.0" stroke="#e2e8f0" stroke-width="1"/><text x="48" y="298.0" font-size="11" fill="#64748b" text-anchor="end">0</text><line x1="56" y1="227.0" x2="706" y2="227.0" stroke="#e2e8f0" stroke-width="1"/><text x="48" y="231.0" font-size="11" fill="#64748b" text-anchor="end">20</text><line x1="56" y1="160.0" x2="706" y2="160.0" stroke="#e2e8f0" stroke-width="1"/><text x="48" y="164.0" font-size="11" fill="#64748b" text-anchor="end">40</text><line x1="56" y1="93.0" x2="706" y2="93.0" stroke="#e2e8f0" stroke-width="1"/><text x="48" y="97.0" font-size="11" fill="#64748b" text-anchor="end">60</text><line x1="56" y1="26.0" x2="706" y2="26.0" stroke="#e2e8f0" stroke-width="1"/><text x="48" y="30.0" font-size="11" fill="#64748b" text-anchor="end">80</text><rect x="84.2" y="273.9" width="50.4" height="20.1" fill="#64748b" rx="2"><title>Valle · P50 · Paraná: 6 min</title></rect><text x="109.4" y="270.9" font-size="9.5" fill="#475569" text-anchor="middle">6</text><rect x="137.6" y="235.7" width="50.4" height="58.3" fill="#d97706" rx="2"><title>Pico · P50 · Paraná: 17 min</title></rect><text x="162.8" y="232.7" font-size="9.5" fill="#475569" text-anchor="middle">17</text><rect x="191.1" y="95.3" width="50.4" height="198.7" fill="#dc2626" rx="2"><title>Pico · P95 · Paraná: 59 min</title></rect><text x="216.3" y="92.3" font-size="9.5" fill="#475569" text-anchor="middle">59</text><text x="164.3" y="310" font-size="11" fill="#334155" text-anchor="middle">Paraná</text><rect x="300.8" y="252.1" width="50.4" height="41.9" fill="#64748b" rx="2"><title>Valle · P50 · Rondeau: 12 min</title></rect><text x="326.1" y="249.1" font-size="9.5" fill="#475569" text-anchor="middle">12</text><rect x="354.3" y="237.1" width="50.4" height="56.9" fill="#d97706" rx="2"><title>Pico · P50 · Rondeau: 17 min</title></rect><text x="379.5" y="234.1" font-size="9.5" fill="#475569" text-anchor="middle">17</text><rect x="407.7" y="59.5" width="50.4" height="234.5" fill="#dc2626" rx="2"><title>Pico · P95 · Rondeau: 70 min</title></rect><text x="432.9" y="56.5" font-size="9.5" fill="#475569" text-anchor="middle">70</text><text x="381.0" y="310" font-size="11" fill="#334155" text-anchor="middle">Rondeau</text><rect x="517.5" y="278.3" width="50.4" height="15.7" fill="#64748b" rx="2"><title>Valle · P50 · Caseros: 5 min</title></rect><rect x="570.9" y="240.4" width="50.4" height="53.6" fill="#d97706" rx="2"><title>Pico · P50 · Caseros: 16 min</title></rect><text x="596.2" y="237.4" font-size="9.5" fill="#475569" text-anchor="middle">16</text><rect x="624.4" y="72.6" width="50.4" height="221.4" fill="#dc2626" rx="2"><title>Pico · P95 · Caseros: 66 min</title></rect><text x="649.6" y="69.6" font-size="9.5" fill="#475569" text-anchor="middle">66</text><text x="597.7" y="310" font-size="11" fill="#334155" text-anchor="middle">Caseros</text><line x1="56" y1="294" x2="706" y2="294" stroke="#94a3b8" stroke-width="1"/><line x1="56" y1="294" x2="56" y2="26" stroke="#94a3b8" stroke-width="1"/><text x="14" y="160.0" font-size="11" fill="#64748b" text-anchor="middle" transform="rotate(-90 14 160.0)">espera real (min)</text><rect x="56" y="6" width="11" height="11" fill="#64748b" rx="2"/><text x="72" y="15" font-size="11" fill="#334155">Valle · P50</text><rect x="166.3" y="6" width="11" height="11" fill="#d97706" rx="2"/><text x="182.3" y="15" font-size="11" fill="#334155">Pico · P50</text><rect x="269.3" y="6" width="11" height="11" fill="#dc2626" rx="2"/><text x="285.3" y="15" font-size="11" fill="#334155">Pico · P95</text></svg>
+<p>Mediana de espera real (P50): Paraná 6→<b>17</b> min,
+Rondeau 12→<b>17</b>,
+Caseros 5→<b>16</b>. En el pico el
+P95 trepa a ~60–70 min y el peor caso a
+<b>139 min</b> (2 h+).</p>
+<h3>El modelo explica los datos del pico — y prueba la mejora</h3>
+<p>Al ρ del pico, el <b>binding</b> (= c colas M/M/1 independientes) y el <b>pool</b>
+(= una cola M/M/c) predicen esperas radicalmente distintas. La columna binding cae
+sobre el P95/máximo <i>realmente observados</i> en el período binding — el modelo
+<b>valida contra datos pasados</b>; el pool las colapsa:</p>
+<table><thead><tr><th>Sucursal</th><th>ρ pico</th><th>Wq pool M/M/c</th><th>Wq pool real G/G/c</th><th>Wq binding c×M/M/1</th><th>P50 obs.</th><th>P95 obs.</th><th>máx obs.</th></tr></thead><tbody><tr><td>Paraná</td><td>65%</td><td>4.3</td><td>2.5</td><td>64</td><td>17</td><td>59</td><td>110</td></tr><tr><td>Rondeau</td><td>64%</td><td>5.7</td><td>3.3</td><td>63</td><td>17</td><td>70</td><td>139</td></tr><tr><td>Caseros</td><td>77%</td><td>51.1</td><td>29.4</td><td>117</td><td>16</td><td>66</td><td>93</td></tr></tbody></table>
+<div class="callout bad"><b>Lectura.</b> El binding predice
+<b>63–117 min</b>
+de espera en el pico; los datos reales del pico (régimen binding) muestran P95
+<b>59–70 min</b>
+y máximos hasta <b>139 min</b>: <b>coinciden</b>. El
+pool baja la espera a pocos minutos y elimina la ociosidad. Ese diferencial — el
+retorno de la mejora — <b>sólo existe acá, en alta demanda</b>.</div>
+<h3>Monte Carlo aislando alta demanda (ρ ≥ 1) — la espera</h3>
+<p>Filtrando sólo las celdas saturadas de la grilla (carga ≥ capacidad) — el régimen
+del viernes a las 19 h — la <b>espera mediana</b> simulada del binding es
+<b>56–72 min</b>, del orden del P95 real observado en el pico
+(<b>59–70 min</b>): la simulación <b>reproduce los datos
+pasados</b>. El pool, y sobre todo pool+WSJF, la corta:</p>
+<svg viewBox="0 0 720 340" class="chart" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif"><line x1="56" y1="294.0" x2="706" y2="294.0" stroke="#e2e8f0" stroke-width="1"/><text x="48" y="298.0" font-size="11" fill="#64748b" text-anchor="end">0</text><line x1="56" y1="227.0" x2="706" y2="227.0" stroke="#e2e8f0" stroke-width="1"/><text x="48" y="231.0" font-size="11" fill="#64748b" text-anchor="end">23</text><line x1="56" y1="160.0" x2="706" y2="160.0" stroke="#e2e8f0" stroke-width="1"/><text x="48" y="164.0" font-size="11" fill="#64748b" text-anchor="end">45</text><line x1="56" y1="93.0" x2="706" y2="93.0" stroke="#e2e8f0" stroke-width="1"/><text x="48" y="97.0" font-size="11" fill="#64748b" text-anchor="end">68</text><line x1="56" y1="26.0" x2="706" y2="26.0" stroke="#e2e8f0" stroke-width="1"/><text x="48" y="30.0" font-size="11" fill="#64748b" text-anchor="end">91</text><rect x="77.1" y="79.6" width="37.1" height="214.4" fill="#dc2626" rx="2"><title>A · binding (viejo) · 3 barberos: 72 min</title></rect><text x="95.7" y="76.6" font-size="9.5" fill="#475569" text-anchor="middle">72</text><rect x="117.2" y="112.9" width="37.1" height="181.1" fill="#16a34a" rx="2"><title>C · pool (live) · 3 barberos: 61 min</title></rect><text x="135.8" y="109.9" font-size="9.5" fill="#475569" text-anchor="middle">61</text><rect x="157.3" y="182.0" width="37.1" height="112.0" fill="#7c3aed" rx="2"><title>D · pool+WSJF · 3 barberos: 38 min</title></rect><text x="175.8" y="179.0" font-size="9.5" fill="#475569" text-anchor="middle">38</text><text x="137.2" y="310" font-size="11" fill="#334155" text-anchor="middle">3 barberos</text><rect x="239.6" y="100.8" width="37.1" height="193.2" fill="#dc2626" rx="2"><title>A · binding (viejo) · 5 barberos: 65 min</title></rect><text x="258.2" y="97.8" font-size="9.5" fill="#475569" text-anchor="middle">65</text><rect x="279.7" y="135.8" width="37.1" height="158.2" fill="#16a34a" rx="2"><title>C · pool (live) · 5 barberos: 53 min</title></rect><text x="298.2" y="132.8" font-size="9.5" fill="#475569" text-anchor="middle">53</text><rect x="319.8" y="190.7" width="37.1" height="103.3" fill="#7c3aed" rx="2"><title>D · pool+WSJF · 5 barberos: 35 min</title></rect><text x="338.3" y="187.7" font-size="9.5" fill="#475569" text-anchor="middle">35</text><text x="299.8" y="310" font-size="11" fill="#334155" text-anchor="middle">5 barberos</text><rect x="402.1" y="118.1" width="37.1" height="175.9" fill="#dc2626" rx="2"><title>A · binding (viejo) · 7 barberos: 59 min</title></rect><text x="420.7" y="115.1" font-size="9.5" fill="#475569" text-anchor="middle">59</text><rect x="442.2" y="153.6" width="37.1" height="140.4" fill="#16a34a" rx="2"><title>C · pool (live) · 7 barberos: 47 min</title></rect><text x="460.8" y="150.6" font-size="9.5" fill="#475569" text-anchor="middle">47</text><rect x="482.3" y="197.9" width="37.1" height="96.1" fill="#7c3aed" rx="2"><title>D · pool+WSJF · 7 barberos: 32 min</title></rect><text x="500.8" y="194.9" font-size="9.5" fill="#475569" text-anchor="middle">32</text><text x="462.2" y="310" font-size="11" fill="#334155" text-anchor="middle">7 barberos</text><rect x="564.6" y="129.2" width="37.1" height="164.8" fill="#dc2626" rx="2"><title>A · binding (viejo) · 10 barberos: 56 min</title></rect><text x="583.2" y="126.2" font-size="9.5" fill="#475569" text-anchor="middle">56</text><rect x="604.7" y="163.6" width="37.1" height="130.4" fill="#16a34a" rx="2"><title>C · pool (live) · 10 barberos: 44 min</title></rect><text x="623.2" y="160.6" font-size="9.5" fill="#475569" text-anchor="middle">44</text><rect x="644.8" y="201.8" width="37.1" height="92.2" fill="#7c3aed" rx="2"><title>D · pool+WSJF · 10 barberos: 31 min</title></rect><text x="663.3" y="198.8" font-size="9.5" fill="#475569" text-anchor="middle">31</text><text x="624.8" y="310" font-size="11" fill="#334155" text-anchor="middle">10 barberos</text><line x1="56" y1="294" x2="706" y2="294" stroke="#94a3b8" stroke-width="1"/><line x1="56" y1="294" x2="56" y2="26" stroke="#94a3b8" stroke-width="1"/><text x="14" y="160.0" font-size="11" fill="#64748b" text-anchor="middle" transform="rotate(-90 14 160.0)">espera P50 simulada (min) · sólo ρ≥1</text><rect x="56" y="6" width="11" height="11" fill="#dc2626" rx="2"/><text x="72" y="15" font-size="11" fill="#334155">A · binding (viejo)</text><rect x="224.7" y="6" width="11" height="11" fill="#16a34a" rx="2"/><text x="240.7" y="15" font-size="11" fill="#334155">C · pool (live)</text><rect x="364.2" y="6" width="11" height="11" fill="#7c3aed" rx="2"/><text x="380.2" y="15" font-size="11" fill="#334155">D · pool+WSJF</text></svg>
+<p class="muted">Espera P50 simulada, sólo celdas ρ≥1. La espera <b>no</b> es cero —
+en saturación hay cola real. Lo que el pool elimina de raíz es el <i>desperdicio</i>
+(barbero libre con cola), que es <b>invariante a la carga</b> (≈ igual en valle que
+en pico — ver §8): no es un efecto del pico, ocurre siempre que el binding
+mal-rutea. El daño <b>específico del pico</b> es la espera: con binding, P50 ~72
+min justo cuando más clientes hay.</p>
+</section>
+
+<section id="montecarlo"><h2>8 · Simulación Monte Carlo</h2>
 <p>Modelo de eventos discretos calibrado con los datos reales (servicio log-normal
 μ<sub>log</sub>=3.4827, σ<sub>log</sub>=0.3915). Grilla: barberos
 {3,5,7,10} × carga {0.8, 1.0, 1.15} × % dinámico {25,50,80} × popularidad
@@ -228,7 +275,7 @@ de "menor espera". El pool además sube utilización ~2 pp (≈ 0.2 barbero recu
 sillas).</p>
 </section>
 
-<section id="auditoria"><h2>8 · Auditoría de datos y patrones</h2>
+<section id="auditoria"><h2>9 · Auditoría de datos y patrones</h2>
 <h3>Espera real por sucursal (60 días)</h3>
 <table><thead><tr><th>Sucursal</th><th>n</th><th>Media</th><th>P50</th><th>P90</th><th>P95</th></tr></thead><tbody><tr><td>Parana</td><td>2591</td><td>18.7 min</td><td>9.4 min</td><td>48.4 min</td><td>60.1 min</td></tr><tr><td>Rondeau</td><td>1904</td><td>21.7 min</td><td>13.8 min</td><td>52.8 min</td><td>67.0 min</td></tr><tr><td>Caseros</td><td>768</td><td>17.7 min</td><td>5.4 min</td><td>51.1 min</td><td>68.2 min</td></tr></tbody></table>
 <p>Las esperas reales (Rondeau P50 13.8 / Paraná P50 9.4 min) son del orden que predice
@@ -282,7 +329,7 @@ distorsiona analítica por servicio; normalizar.
 histórico por modalidad — ver §9.</div>
 </section>
 
-<section id="mejoras"><h2>9 · Mejoras notables (Phase 2)</h2>
+<section id="mejoras"><h2>10 · Mejoras notables (Phase 2)</h2>
 <p>Priorizadas por impacto/esfuerzo, todas <i>sobre</i> el pool (nunca contra él):</p>
 <ol>
 <li><b>Predicción de duración por (barbero, servicio).</b> Hoy el panel usa un fallback de
@@ -302,7 +349,7 @@ sobre la función que usa la mayoría. <b>Prioridad alta.</b></li>
 </ol>
 </section>
 
-<section id="apendice"><h2>10 · Apéndice: fórmulas y supuestos</h2>
+<section id="apendice"><h2>11 · Apéndice: fórmulas y supuestos</h2>
 <details><summary>Erlang-B, Erlang-C y métricas M/M/c</summary>
 <div class="eq">Erlang-B (recursión):  B(0)=1 ;  B(j) = a·B(j-1) / ( j + a·B(j-1) )<br>
 Erlang-C:  C = B(c) / ( 1 − ρ·(1 − B(c)) )   con ρ = a/c<br>

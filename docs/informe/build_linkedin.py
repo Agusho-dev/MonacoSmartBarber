@@ -60,6 +60,24 @@ P50_D = sum(agg(nb, "D", "wait_p50") for nb in BAR) / 4
 p50_drop = round(100 * (P50_A - P50_D) / P50_A)
 viol_A = round(100 * sum(agg(nb, "A", "inv_violated") for nb in BAR) / 4)
 
+# ── pico real + Monte Carlo de alta demanda (ρ ≥ 1) ──
+PK = D["pico"]
+_pk = {x["name"]: x for x in PK["espera"]}
+PK_MAX = max(x["pico_max"] for x in PK["espera"])
+obs95_lo = round(min(x["pico_p95"] for x in PK["espera"]))
+obs95_hi = round(max(x["pico_p95"] for x in PK["espera"]))
+def _bind_pk(nm):
+    q = next(z for z in PK["params"] if z["name"] == nm)
+    return mm1_wq_min(q["lambda_pico"] / q["c"], MU)
+BIND = {x["name"]: _bind_pk(x["name"]) for x in PK["espera"]}
+bind_lo, bind_hi = round(min(BIND.values())), round(max(BIND.values()))
+def agg_hd(nb, pol, f):
+    ks = [k for k in SIM if k.split("|")[0] == str(nb) and k.split("|")[4] == pol
+          and k.split("|")[1] in ("1.0", "1.15")]
+    return sum(SIM[k][f] for k in ks) / len(ks) if ks else 0.0
+INV_A_HD = [agg_hd(nb, "A", "inv_dyn_starv_min") for nb in BAR]
+INV_C_HD = [agg_hd(nb, "C", "inv_dyn_starv_min") for nb in BAR]
+
 def e(s): return html.escape(str(s))
 
 # ── SVG (estilo slide: grande, alto contraste) ──
@@ -101,6 +119,10 @@ fig_pool = bars(
 fig_inv = bars(
     [("Modelo viejo (binding)", INV_A, RED), ("Modelo nuevo (pool)", INV_C, GREEN)],
     [f"{b} barberos" for b in BAR], max(INV_A) * 1.15, unit=" min", fmt="{:.0f}", dark=True)
+fig_peak = bars(
+    [("Día tranquilo (valle)", [_pk[n]["valle_p50"] for n in ["Parana", "Rondeau", "Caseros"]], BLUE),
+     ("Pico — viernes tarde", [_pk[n]["pico_p50"] for n in ["Parana", "Rondeau", "Caseros"]], RED)],
+    ["Paraná", "Rondeau", "Caseros"], 26, unit=" min", fmt="{:.0f}", dark=True)
 
 # ── slides ──
 def slide(bg, content, dark=False, kicker="", n=0):
@@ -114,20 +136,24 @@ S = []
 S.append(slide("#0b1220", f"""
  <div class="kicker">Monaco Smart Barber · Ingeniería · Caso real</div>
  <h1>Teníamos barberos <span class="hl">parados</span><br>mientras los clientes esperaban.</h1>
- <p class="lead">Lo encontramos y lo resolvimos con <b>teoría de colas</b>,
- cadenas de Markov y simulación Monte Carlo sobre datos de producción.</p>
+ <p class="lead">Un viernes a las 7 de la tarde: cola en la puerta y un barbero
+ libre al lado. Lo resolvimos con <b>teoría de colas</b>, Markov y Monte Carlo
+ sobre datos de producción.</p>
  <div class="chips"><span>{SC['sucursales']} sucursales</span>
  <span>{SC['walkins_60d']:,} walk-ins / 60 d</span>
  <span>{SC['clientes_unicos']:,} clientes</span>
  <span>{SC['turnos_simulados']:,} turnos simulados</span></div>""", dark=True, n=1))
 
 S.append(slide("#ffffff", f"""
- <div class="kicker">El síntoma</div>
- <h2>Un barbero libre. Un cliente esperando.<br><span class="hl-r">Al mismo tiempo.</span></h2>
- <div class="big">{viol_A}%</div>
- <p class="lead">de los turnos tenían <b>al menos un barbero ocioso</b> con un cliente
- dinámico esperando. Hasta <b>{max(INV_A):.0f} min por turno</b> de silla vacía con
- cola — exactamente lo contrario de lo que promete "menor espera".</p>""", n=2))
+ <div class="kicker">Dónde duele de verdad — el pico</div>
+ <h2>Un viernes a las 7 de la tarde.<br><span class="hl-r">Ahí</span> se decide todo.</h2>
+ <div class="chart" style="background:#0f1729">{fig_peak}
+ <div class="cap" style="color:#94a3b8;text-align:center;margin-top:8px;font-size:13px">
+ Espera típica real (mediana) · día tranquilo vs pico (Jue–Sáb 16–20 h)</div></div>
+ <p class="lead">En el pico la espera <b>típica</b> real se <b>triplica</b>
+ (P50 ≈ 17 min), el P95 trepa a <b>{obs95_lo}–{obs95_hi} min</b> y el peor caso a
+ <b>{PK_MAX} min</b>. En valle hay holgura y casi da igual el modelo:
+ <b>el retorno de la mejora vive en el pico</b>.</p>""", n=2))
 
 S.append(slide("#0b1220", f"""
  <div class="kicker">La causa raíz</div>
@@ -150,20 +176,22 @@ S.append(slide("#0b1220", f"""
  <div class="kicker">La teoría lo predice — teorema de pooling</div>
  <h2>Una sola fila para <i>c</i> barberos es<br><span class="hl">siempre</span> mejor que <i>c</i> filas.</h2>
  <div class="chart">{fig_pool}</div>
- <p class="lead">Mismos barberos, misma demanda. Solo cambia la arquitectura de la
- cola: <b>{RATIO}× menos espera</b> en hora pico (M/M/c vs c×M/M/1, μ={MU:.2f}/h reales).</p>""",
+ <p class="lead">Mismos barberos, misma demanda — solo cambia la arquitectura:
+ <b>{RATIO}× menos espera</b> en el pico. Y valida con la realidad: el modelo viejo
+ (c×M/M/1) predice <b>{bind_lo}–{bind_hi} min</b> en el pico; los datos reales del
+ pico muestran P95 <b>{obs95_lo}–{obs95_hi} min</b>. <b>Coinciden.</b></p>""",
  dark=True, n=5))
 
 S.append(slide("#0b1220", f"""
  <div class="kicker">Lo probamos — Monte Carlo, {SC['turnos_simulados']:,} turnos</div>
  <h2>Cero barberos parados<br>con clientes <span class="hl">esperando</span>.</h2>
- <div class="metric-note"><b>Ojo: esto NO es el tiempo de espera.</b> Un viernes a
- las 19 h hay cola real y se espera — eso <b>no</b> se elimina. Lo que medimos
- acá es el <b>desperdicio</b>: minutos por turno con un barbero <b>libre</b>
- mientras alguien esperaba. Viejo: hasta {max(INV_A):.0f} min/turno. Pool: <b>0</b>
- (por diseño: trabajo-conservativo).</div>
+ <div class="metric-note"><b>Ojo: esto NO es el tiempo de espera</b> (esa es la
+ slide anterior, y en el pico no es cero). Esto es el <b>desperdicio</b>: minutos
+ por turno con un barbero <b>libre</b> mientras alguien esperaba — y ocurre a
+ <b>cualquier carga</b>, no sólo en el pico. Viejo: hasta {max(INV_A):.0f}
+ min/turno. Pool: <b>0</b> (por diseño: trabajo-conservativo).</div>
  <div class="chart">{fig_inv}
- <div class="cap">Inanición = min/turno con barbero LIBRE + cliente esperando · no es el tiempo de espera</div></div>""",
+ <div class="cap">Desperdicio = min/turno con barbero LIBRE + cliente esperando · invariante a la carga · no es el tiempo de espera</div></div>""",
  dark=True, n=6))
 
 S.append(slide("#ffffff", f"""

@@ -39,6 +39,22 @@
     {"name": "Rondeau", "n": 1904, "wait_mean": 21.7, "p50": 13.8, "p90": 52.8, "p95": 67.0},
     {"name": "Caseros", "n": 768, "wait_mean": 17.7, "p50": 5.4, "p90": 51.1, "p95": 68.2}
   ],
+  "pico": {
+    "ventana": "Jue–Sáb 16–20 h",
+    "horas_semana": 15,
+    "share_demanda_pct": 28,
+    "nota": "El histórico de espera es mayormente régimen viejo (binding, pre-mig-134): es la huella real del modelo anterior en alta demanda.",
+    "espera": [
+      {"name": "Parana",  "valle_p50": 6.0,  "valle_p95": 60.8, "pico_p50": 17.4, "pico_p95": 59.3, "pico_media": 21.9, "pico_max": 110, "pico_n": 716},
+      {"name": "Rondeau", "valle_p50": 12.5, "valle_p95": 64.8, "pico_p50": 17.0, "pico_p95": 70.0, "pico_media": 23.9, "pico_max": 139, "pico_n": 621},
+      {"name": "Caseros", "valle_p50": 4.7,  "valle_p95": 69.8, "pico_p50": 16.0, "pico_p95": 66.1, "pico_media": 21.9, "pico_max": 93,  "pico_n": 114}
+    ],
+    "params": [
+      {"name": "Parana",  "lambda_pico": 6.66, "c": 6},
+      {"name": "Rondeau", "lambda_pico": 5.51, "c": 5},
+      {"name": "Caseros", "lambda_pico": 2.64, "c": 2}
+    ]
+  },
   "patrones_por_sucursal": [
     {"name": "Parana", "total": 2667, "dias_op": 50, "entries_dia": 53.3, "pct_cancelado": 3.1, "pct_completado": 96.8, "barberos_dia": 5.8},
     {"name": "Rondeau", "total": 1984, "dias_op": 50, "entries_dia": 39.7, "pct_cancelado": 4.5, "pct_completado": 95.3, "barberos_dia": 4.9},
