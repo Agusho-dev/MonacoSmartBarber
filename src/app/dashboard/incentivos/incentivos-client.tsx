@@ -314,7 +314,7 @@ export function IncentivosClient({ rules, barbers, achievements, defaultPeriod }
               </div>
               <div>
                 <Label>Premio ($ ARS)</Label>
-                <Input type="number" min="0" step="1000" className="mt-1.5" value={form.reward_amount} onChange={(e) => setForm((f) => ({ ...f, reward_amount: e.target.value }))} required />
+                <Input type="number" min="0" step="any" className="mt-1.5" value={form.reward_amount} onChange={(e) => setForm((f) => ({ ...f, reward_amount: e.target.value }))} required />
               </div>
             </div>
             <DialogFooter>

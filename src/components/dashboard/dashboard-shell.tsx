@@ -85,7 +85,7 @@ const navItems = [
   { href: '/dashboard/app-movil', label: 'APP Móvil', icon: Smartphone, requiredPermissions: ['rewards.view'] },
   { href: '/dashboard/convenios', label: 'Convenios', icon: Handshake, requiredPermissions: ['agreements.view'] },
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3, requiredPermissions: ['stats.view'] },
-  { href: '/dashboard/caja', label: 'Caja', icon: Receipt, requiredPermissions: ['finances.view_summary'] },
+  { href: '/dashboard/caja', label: 'Caja', icon: Receipt, requiredPermissions: ['caja.view'] },
   { href: '/dashboard/finanzas', label: 'Finanzas', icon: DollarSign, requiredPermissions: ['finances.view', 'salary.view'] },
   { href: '/dashboard/configuracion', label: 'Configuración', icon: Settings, requiredPermissions: ['settings.view'] },
 ]

@@ -1,7 +1,8 @@
 import type { Metadata } from 'next'
-import { createAdminClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
+import { getEffectivePermissions } from '@/lib/permissions'
 import { redirect } from 'next/navigation'
 import { getLocalDateStr } from '@/lib/time-utils'
 import { fetchCajaTickets, fetchCajaSummary } from '@/lib/actions/caja'
@@ -17,6 +18,32 @@ export const metadata: Metadata = {
 export default async function CajaPage() {
   const orgId = await getCurrentOrgId()
   if (!orgId) redirect('/login')
+
+  // Guard de permiso: requiere caja.view (owner/admin lo tienen siempre).
+  const authClient = await createClient()
+  const { data: { user: authUser } } = await authClient.auth.getUser()
+  let isOwnerOrAdmin = false
+  let rolePerms: Record<string, boolean> | null = null
+  if (authUser) {
+    const { data: currentStaff } = await authClient
+      .from('staff')
+      .select('role, role_id')
+      .eq('auth_user_id', authUser.id)
+      .eq('is_active', true)
+      .single()
+    isOwnerOrAdmin = ['owner', 'admin'].includes(currentStaff?.role || '')
+    if (currentStaff?.role_id) {
+      const { data: role } = await authClient
+        .from('roles')
+        .select('permissions')
+        .eq('id', currentStaff.role_id)
+        .single()
+      rolePerms = (role?.permissions as Record<string, boolean> | null) ?? null
+    }
+  }
+  const userPermissions = getEffectivePermissions(rolePerms ?? undefined, isOwnerOrAdmin)
+  if (!userPermissions['caja.view']) redirect('/dashboard')
+
   const branchIds = await getScopedBranchIds()
 
   const supabase = createAdminClient()
@@ -71,6 +98,7 @@ export default async function CajaPage() {
       branches={branches ?? []}
       barbers={barbers ?? []}
       accounts={accounts ?? []}
+      canExport={userPermissions['caja.export'] === true}
     />
   )
 }

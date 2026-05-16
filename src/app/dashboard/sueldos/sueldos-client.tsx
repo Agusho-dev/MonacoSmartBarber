@@ -1056,7 +1056,7 @@ export function SueldosClient({ branches, staffMembers, paymentAccounts }: Props
                 <Input
                   type="number"
                   min="0"
-                  step="1000"
+                  step="any"
                   className="mt-1.5"
                   value={configForm.base_amount}
                   onChange={(e) =>
@@ -1072,7 +1072,7 @@ export function SueldosClient({ branches, staffMembers, paymentAccounts }: Props
                   type="number"
                   min="0"
                   max="100"
-                  step="0.5"
+                  step="any"
                   className="mt-1.5"
                   value={configForm.commission_pct}
                   onChange={(e) =>
@@ -1295,7 +1295,7 @@ export function SueldosClient({ branches, staffMembers, paymentAccounts }: Props
                 id="bonus-amount"
                 type="number"
                 min="1"
-                step="100"
+                step="any"
                 placeholder="10000"
                 className="mt-1.5"
                 value={bonusForm.amount}

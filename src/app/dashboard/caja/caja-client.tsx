@@ -87,6 +87,7 @@ interface CajaClientProps {
   branches: BranchRow[]
   barbers: BarberRow[]
   accounts: AccountRow[]
+  canExport: boolean
 }
 
 // "all" | "cash" | "card" | "salary_accounts" | `acct:<accountId>`
@@ -220,6 +221,7 @@ export function CajaClient({
   branches: initialBranches,
   barbers,
   accounts,
+  canExport,
 }: CajaClientProps) {
   const [branches, setBranches] = useState<BranchRow[]>(initialBranches)
   const [tickets, setTickets] = useState<CajaTicket[]>(initialTickets)
@@ -372,6 +374,7 @@ export function CajaClient({
         barberFilterLabel={barberFilterLabel}
         paymentFilterLabel={paymentFilterLabel}
         onExport={() => setShowExport(true)}
+        canExport={canExport}
         loading={loading}
       />
 
@@ -436,16 +439,18 @@ export function CajaClient({
       </div>
 
       {/* ── Dialog de exportacion ── */}
-      <ExportDialog
-        open={showExport}
-        onOpenChange={setShowExport}
-        currentDate={date}
-        branchId={selectedBranchId}
-        barbers={filteredBarbers}
-        filterBarber={filterBarber}
-        filterPayment={filterPayment}
-        accounts={accounts}
-      />
+      {canExport && (
+        <ExportDialog
+          open={showExport}
+          onOpenChange={setShowExport}
+          currentDate={date}
+          branchId={selectedBranchId}
+          barbers={filteredBarbers}
+          filterBarber={filterBarber}
+          filterPayment={filterPayment}
+          accounts={accounts}
+        />
+      )}
     </div>
   )
 }
@@ -467,6 +472,7 @@ function CajaHeader({
   barberFilterLabel,
   paymentFilterLabel,
   onExport,
+  canExport,
   loading,
 }: {
   date: string
@@ -483,6 +489,7 @@ function CajaHeader({
   barberFilterLabel: string | null
   paymentFilterLabel: string | null
   onExport: () => void
+  canExport: boolean
   loading: boolean
 }) {
   return (
@@ -600,17 +607,19 @@ function CajaHeader({
             </span>
           )}
 
-          <div className="ml-auto">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 h-8 text-xs border-white/10 bg-white/[0.03] hover:bg-amber-500/10 hover:border-amber-500/30 hover:text-amber-300 transition-colors"
-              onClick={onExport}
-            >
-              <Download className="size-3.5" />
-              Exportar
-            </Button>
-          </div>
+          {canExport && (
+            <div className="ml-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 h-8 text-xs border-white/10 bg-white/[0.03] hover:bg-amber-500/10 hover:border-amber-500/30 hover:text-amber-300 transition-colors"
+                onClick={onExport}
+              >
+                <Download className="size-3.5" />
+                Exportar
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </div>

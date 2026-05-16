@@ -58,6 +58,13 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
             'finances.manage_accounts': 'Gestionar cuentas de pago',
         },
     },
+    caja: {
+        label: 'Caja',
+        permissions: {
+            'caja.view': 'Ver caja diaria (tickets, totales por método, cierres)',
+            'caja.export': 'Exportar reportes de caja (CSV/ZIP)',
+        },
+    },
     salary: {
         label: 'Sueldos',
         permissions: {
@@ -185,6 +192,9 @@ export const PERMISSION_DESCRIPTIONS: Record<string, string> = {
     'finances.view_accounts': 'Permite ver las cuentas de cobro (efectivo, transferencia, etc.).',
     'finances.create_expense': 'Permite registrar nuevos gastos e ingresos en el sistema.',
     'finances.manage_accounts': 'Permite crear, editar y eliminar cuentas y métodos de pago.',
+
+    'caja.view': 'Permite ver la caja del día: tickets cobrados, totales por método de pago y cierres de barberos.',
+    'caja.export': 'Permite exportar los reportes de caja a CSV o ZIP (por barbero o por período).',
 
     'salary.view': 'Permite ver los sueldos configurados para cada miembro del equipo.',
     'salary.view_commissions': 'Permite ver el detalle de comisiones generadas por atención.',
