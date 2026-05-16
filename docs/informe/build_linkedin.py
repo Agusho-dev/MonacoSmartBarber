@@ -6,7 +6,7 @@ Salida: linkedin-fila-dinamica.html  (deck interactivo, scroll-snap + teclado)
 El PDF (1 slide = 1 página, 16:9) se genera con Chrome headless (ver README).
 Sin PII: solo agregados. Python puro (stdlib). Reusa data.json + ../sim/results.json.
 """
-import json, math, os, html
+import json, math, os, html, base64
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 D = json.load(open(os.path.join(HERE, "data.json")))
@@ -14,6 +14,9 @@ try:
     SIM = json.load(open(os.path.join(HERE, "..", "sim", "results.json")))
 except Exception:
     SIM = {}
+_lp = os.path.join(HERE, "assets", "studios-logo.png")
+LOGO = ("data:image/png;base64," + base64.b64encode(open(_lp, "rb").read()).decode()
+        if os.path.exists(_lp) else "")
 
 # ── teoría (mínimo necesario) ──
 def erlang_b(c, a):
@@ -137,15 +140,16 @@ def slide(bg, content, dark=False, kicker="", n=0):
     k = f'<div class="kicker">{e(kicker)}</div>' if kicker else ""
     return (f'<section class="{cls}" style="background:{bg}">'
             f'<div class="inner">{k}{content}</div>'
-            f'<div class="pg">{n:02d} · Monaco Smart Barber · Ingeniería</div></section>')
+            f'<div class="pg">{n:02d} · studiOS</div></section>')
 
 S = []
 S.append(slide("#0b1220", f"""
- <div class="kicker">Monaco Smart Barber · Ingeniería · Caso real</div>
+ <div class="logobox" style="margin-bottom:18px"><img class="logo logo-lg" src="{LOGO}" alt="studiOS"></div>
+ <div class="kicker">studiOS · Caso de ingeniería</div>
  <h1>Teníamos barberos <span class="hl">parados</span><br>mientras los clientes esperaban.</h1>
  <p class="lead">Un viernes a las 7 de la tarde: cola en la puerta y un barbero
  libre al lado. Lo resolvimos con <b>teoría de colas</b>, Markov y Monte Carlo
- sobre datos de producción.</p>
+ sobre datos reales del sistema <b>Monaco Smart Barber</b>.</p>
  <div class="chips"><span>{SC['sucursales']} sucursales</span>
  <span>{SC['walkins_60d']:,} walk-ins / 60 d</span>
  <span>{SC['clientes_unicos']:,} clientes</span>
@@ -239,11 +243,13 @@ S.append(slide("#0b1220", f"""
  </ol>""", dark=True, n=9))
 
 S.append(slide("#0b1220", f"""
- <div class="kicker">Monaco Smart Barber</div>
- <h1>Construimos software de gestión<br>para barberías con <span class="hl">esta</span> vara.</h1>
+ <div class="kicker">studiOS</div>
+ <h1>Así construimos software:<br><span class="hl">ingeniería</span>, no slides.</h1>
  <p class="lead">Teoría de colas (M/G/c, Erlang), cadenas de Markov, Ley de Little
- y Monte Carlo — aplicados a un problema real de operación, no a una slide.</p>
- <p class="sign">— Equipo de Plataforma · {D['_meta']['generado']}</p>""", dark=True, n=10))
+ y Monte Carlo — aplicados a un problema real de operación de
+ <b>Monaco Smart Barber</b>, el producto que construimos en studiOS.</p>
+ <div class="logobox" style="margin-top:24px"><img class="logo" src="{LOGO}" alt="studiOS"></div>
+ <p class="sign">Ignacio Baldovino · Co-fundador de studiOS · {D['_meta']['generado']}</p>""", dark=True, n=10))
 
 NSL = len(S)
 dots = "".join(f'<button data-i="{i}" aria-label="slide {i+1}"></button>' for i in range(NSL))
@@ -300,7 +306,10 @@ h2{{font-size:clamp(22px,3.3vw,40px);line-height:1.1;letter-spacing:-.02em;font-
  width:24px;height:24px;background:#3b82f6;color:#fff;border-radius:7px;font-size:13px;
  font-weight:800;display:flex;align-items:center;justify-content:center}}
 .lessons{{counter-reset:li}}
-.sign{{margin-top:34px;font-size:15px;color:#64748b;font-weight:600}}
+.sign{{margin-top:20px;font-size:15px;color:#94a3b8;font-weight:600}}
+.logobox{{background:#f1f5f9;border-radius:14px;padding:13px 22px;display:inline-block;line-height:0}}
+.logo{{height:40px;display:block}}
+.logo-lg{{height:58px}}
 .pg{{position:absolute;bottom:22px;left:0;right:0;text-align:center;font-size:12px;
  color:#64748b;letter-spacing:.04em}}
 .slide:not(.dark) .pg{{color:#94a3b8}}
