@@ -635,6 +635,11 @@ push instantáneo · <b>C</b> pool no bloqueante (modelo live, mig 134) · <b>D<
 WSJF · <b>E</b> pool con gate de equidad.</p>
 <h3>El invariante duro: ningún barbero ocioso con un dinámico esperando</h3>
 {mc_inv}
+<p class="muted"><b>Aclaración.</b> Esta métrica <b>no es el tiempo de espera</b>
+(que no es cero — en un pico hay cola real; ver §8, P50/P95 por sucursal). Es el
+<b>desperdicio</b>: minutos/turno con un barbero <i>libre</i> mientras un cliente
+espera. El pool da 0 por construcción (trabajo-conservativo): un servidor ocioso
+con trabajo elegible es imposible.</p>
 <div class="callout bad"><b>A ≈ B.</b> Quitar el "push-on-complete" casi no cambia nada
 (la barra A ≈ B): el problema <b>no</b> era el push, era el <b>binding</b>. <b>C = D =
 0.00</b>: el pool lo elimina de raíz. <b>E</b> (gate de equidad bloqueante) <i>reintrodujo</i>

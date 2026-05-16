@@ -156,23 +156,28 @@ S.append(slide("#0b1220", f"""
 
 S.append(slide("#0b1220", f"""
  <div class="kicker">Lo probamos — Monte Carlo, {SC['turnos_simulados']:,} turnos</div>
- <h2>Simulamos miles de escenarios.<br>El resultado no deja lugar a dudas.</h2>
- <div class="chart">{fig_inv}</div>
- <p class="lead">Minutos por turno con un barbero ocioso y un cliente esperando.
- Modelo nuevo (pool): <b>0.00</b> — el problema desaparece de raíz, y escala.</p>""",
+ <h2>Cero barberos parados<br>con clientes <span class="hl">esperando</span>.</h2>
+ <div class="metric-note"><b>Ojo: esto NO es el tiempo de espera.</b> Un viernes a
+ las 19 h hay cola real y se espera — eso <b>no</b> se elimina. Lo que medimos
+ acá es el <b>desperdicio</b>: minutos por turno con un barbero <b>libre</b>
+ mientras alguien esperaba. Viejo: hasta {max(INV_A):.0f} min/turno. Pool: <b>0</b>
+ (por diseño: trabajo-conservativo).</div>
+ <div class="chart">{fig_inv}
+ <div class="cap">Inanición = min/turno con barbero LIBRE + cliente esperando · no es el tiempo de espera</div></div>""",
  dark=True, n=6))
 
 S.append(slide("#ffffff", f"""
  <div class="kicker">El impacto</div>
  <h2>Mejor para el cliente <span class="hl">y</span> para el negocio.</h2>
  <div class="kpis">
- <div class="k"><div class="kv">0.00</div><div class="kl">min de inanición<br><small>antes: 20–71 / turno</small></div></div>
- <div class="k"><div class="kv">−{p50_drop}%</div><div class="kl">espera P50<br><small>con priorización WSJF</small></div></div>
+ <div class="k"><div class="kv">0.00</div><div class="kl">min de desperdicio<br><small>barbero libre + cola · antes 20–71</small></div></div>
+ <div class="k"><div class="kv">−{p50_drop}%</div><div class="kl">tiempo de espera P50<br><small>baja — no llega a cero</small></div></div>
  <div class="k"><div class="kv">+2 pp</div><div class="kl">utilización<br><small>≈ 0.2 barbero/10 sillas</small></div></div>
  <div class="k"><div class="kv">0.96–1.00</div><div class="kl">equidad (Jain)<br><small>carga pareja entre barberos</small></div></div>
  </div>
- <p class="lead">Y no es solo simulación: validado contra los datos reales con
- <b>Erlang-C</b> y la aproximación <b>Allen-Cunneen</b> (G/G/c).</p>""", n=7))
+ <p class="lead">La espera <b>baja</b> —no se elimina: en un pico sigue habiendo
+ cola y se espera—, pero deja de haber <b>sillas vacías con gente esperando</b>.
+ Validado además contra datos reales con <b>Erlang-C</b> y <b>Allen-Cunneen</b> (G/G/c).</p>""", n=7))
 
 S.append(slide("#0b1220", f"""
  <div class="kicker">4 lecciones de ingeniería</div>
@@ -230,7 +235,12 @@ h2{{font-size:clamp(28px,4.4vw,50px);line-height:1.1;letter-spacing:-.02em;font-
 .card small{{display:block;font-weight:500;opacity:.75;margin-top:6px;font-size:14px}}
 .card.bad{{background:#3f1d1d;color:#fca5a5;border:1px solid #7f1d1d}}
 .card.good{{background:#14321f;color:#86efac;border:1px solid #166534}}
-.chart{{margin:26px 0;background:#0f1729;border:1px solid #1e293b;border-radius:16px;padding:18px}}
+.chart{{margin:22px 0;background:#0f1729;border:1px solid #1e293b;border-radius:16px;padding:18px}}
+.chart .cap{{font-size:13px;color:#94a3b8;text-align:center;margin-top:8px;font-weight:600;letter-spacing:.01em}}
+.metric-note{{font-size:clamp(14px,1.6vw,18px);line-height:1.5;background:#1e293b;
+ border:1px solid #334155;border-left:4px solid #f59e0b;border-radius:0 12px 12px 0;
+ padding:14px 18px;margin:18px 0 0;color:#e2e8f0;max-width:56ch}}
+.metric-note b{{color:#fff}}
 .kpis{{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:30px 0}}
 .k{{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:16px;padding:20px;text-align:center}}
 .kv{{font-size:clamp(26px,3.4vw,40px);font-weight:800;color:#16a34a}}
