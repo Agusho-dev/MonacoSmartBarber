@@ -1,0 +1,63 @@
+{
+  "_meta": {
+    "generado": "2026-05-16",
+    "fuente": "Supabase prod (gzsfoqpxvnwmvngfoqqk) — consultas agregadas",
+    "ventana_servicio_dias": 90,
+    "ventana_operativa_dias": 60,
+    "nota": "Sucursales 'Test*' excluidas del análisis real (datos de prueba: 56% cancelado, 37% dinámico). Análisis sobre Parana, Rondeau, Caseros."
+  },
+  "servicio": {
+    "n": 5272, "media_min": 35.01, "sd_min": 13.67, "cv": 0.390,
+    "p10": 19.6, "p50": 33.5, "p90": 51.3, "p95": 58.2,
+    "mu_log": 3.4827, "sigma_log": 0.3915,
+    "mu_servicio_por_hora": 1.7138
+  },
+  "servicio_por_tipo": [
+    {"servicio": "Corte", "n": 3073, "media": 32.7, "sd": 11.2, "p50": 31.6},
+    {"servicio": "Corte (var.)", "n": 1774, "media": 38.0, "sd": 15.6, "p50": 36.2},
+    {"servicio": "Corte y Barba", "n": 177, "media": 41.6, "sd": 12.9, "p50": 40.2},
+    {"servicio": "Corte + Barba", "n": 126, "media": 43.3, "sd": 17.2, "p50": 43.3},
+    {"servicio": "Corte + Barba (var.)", "n": 59, "media": 34.8, "sd": 10.6, "p50": 32.7},
+    {"servicio": "Barba", "n": 40, "media": 22.6, "sd": 15.6, "p50": 18.5}
+  ],
+  "llegadas_por_hora": {
+    "Parana": {"9":1.33,"10":5.17,"11":4.59,"12":3.79,"13":4.11,"14":4.98,"15":6.37,"16":6.16,"17":5.84,"18":6.88,"19":5.67,"20":2.36},
+    "Rondeau": {"10":3.13,"11":3.22,"12":3.02,"13":2.66,"14":3.46,"15":3.98,"16":4.73,"17":5.45,"18":5.69,"19":5.25,"20":2.31}
+  },
+  "poisson_rondeau": {
+    "ventana_horas": "10-20",
+    "mean_per_30min": 2.415, "var_per_30min": 2.245, "indice_dispersion": 0.930,
+    "n_buckets": 821, "mean_interarrival_min": 14.92, "interarrival_cv": 1.229
+  },
+  "espera_por_sucursal": [
+    {"name": "Parana", "n": 2591, "wait_mean": 18.7, "p50": 9.4, "p90": 48.4, "p95": 60.1},
+    {"name": "Rondeau", "n": 1904, "wait_mean": 21.7, "p50": 13.8, "p90": 52.8, "p95": 67.0},
+    {"name": "Caseros", "n": 768, "wait_mean": 17.7, "p50": 5.4, "p90": 51.1, "p95": 68.2}
+  ],
+  "patrones_por_sucursal": [
+    {"name": "Parana", "total": 2667, "dias_op": 50, "entries_dia": 53.3, "pct_dinamico": 1.5, "pct_cancelado": 3.1, "pct_completado": 96.8, "barberos_dia": 5.8},
+    {"name": "Rondeau", "total": 1984, "dias_op": 50, "entries_dia": 39.7, "pct_dinamico": 2.3, "pct_cancelado": 4.5, "pct_completado": 95.3, "barberos_dia": 4.9},
+    {"name": "Caseros", "total": 786, "dias_op": 46, "entries_dia": 17.1, "pct_dinamico": 0.6, "pct_cancelado": 2.7, "pct_completado": 96.8, "barberos_dia": 2.0}
+  ],
+  "equidad_rondeau_30d": [
+    {"barbero": "Fabrizio", "cortes": 224},
+    {"barbero": "Simón", "cortes": 212},
+    {"barbero": "Nico U.", "cortes": 195},
+    {"barbero": "Chipi", "cortes": 182},
+    {"barbero": "Nico M.", "cortes": 169},
+    {"barbero": "Rodri", "cortes": 19},
+    {"barbero": "Tony", "cortes": 14}
+  ],
+  "heatmap_rondeau": {
+    "dow_labels": ["Lun","Mar","Mié","Jue","Vie","Sáb"],
+    "horas": [10,11,12,13,14,15,16,17,18,19,20],
+    "data": [
+      [15,14,26,12,26,21,26,28,38,25,5],
+      [22,25,16,15,19,19,36,32,49,31,18],
+      [32,22,13,16,33,19,33,35,51,35,17],
+      [31,26,25,22,30,41,41,59,49,66,16],
+      [27,25,20,30,28,48,52,64,45,58,22],
+      [20,33,24,22,23,39,39,38,47,37,12]
+    ]
+  }
+}

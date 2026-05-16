@@ -593,4 +593,5 @@ turno inminente, ruido multi-sucursal.
 - Panel barbero: [`src/components/barber/queue-panel.tsx`](../src/components/barber/queue-panel.tsx)
 - Hint client-side: [`src/lib/barber-utils.ts`](../src/lib/barber-utils.ts)
 - Evidencia Monte Carlo: [`docs/sim/fila_montecarlo.py`](sim/fila_montecarlo.py) · [`docs/sim/results.json`](sim/results.json)
+- Informe de ingeniería (teoría de colas / Markov / pooling, web + PDF): [`docs/informe/`](informe/) — `informe-fila-dinamica.html` · `informe-fila-dinamica.pdf`
 - Incidente 30-abr-2026 (DB saturada, contexto mig 124): [`docs/incidentes/2026-04-30_db-saturada-polling-realtime.md`](incidentes/2026-04-30_db-saturada-polling-realtime.md)
