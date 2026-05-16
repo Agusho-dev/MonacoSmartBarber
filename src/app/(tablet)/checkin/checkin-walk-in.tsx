@@ -49,6 +49,7 @@ import {
   mobileStatusLabels,
   pickBestBarber,
   getBarbersOnBreakIds,
+  getBarbersAttendingIds,
 } from '@/lib/barber-utils'
 import { FaceCamera } from '@/components/checkin/face-camera'
 import { FaceEnrollment } from '@/components/checkin/face-enrollment'
@@ -625,6 +626,13 @@ export function CheckinWalkIn() {
     [queueEntries]
   )
 
+  // Barberos atendiendo ahora: el CTA "Menor espera" debe sugerir un barbero
+  // realmente libre, igual que el panel (consistencia kiosk↔panel).
+  const barbersAttending = useMemo(
+    () => getBarbersAttendingIds(queueEntries),
+    [queueEntries]
+  )
+
   // Barbero "Menor espera" del CTA: ranking unificado con `assignDynamicBarbers`
   // (ETA → cortes hoy → último corte → id), filtrando barberos no aptos.
   const minWaitBarber = useMemo(() => {
@@ -639,8 +647,9 @@ export function CheckinWalkIn() {
       now,
       dailyServiceCounts,
       lastCompletedAt,
+      busyBarberIds: barbersAttending,
     })
-  }, [barbers, queueEntries, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers, barbersOnBreak, dailyServiceCounts, lastCompletedAt])
+  }, [barbers, queueEntries, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers, barbersOnBreak, barbersAttending, dailyServiceCounts, lastCompletedAt])
 
   // Barberos activos para cálculo de posición optimista
   // Excluye barberos en descanso para que el ETA del cliente no asuma capacidad
