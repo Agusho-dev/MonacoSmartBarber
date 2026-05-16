@@ -144,7 +144,7 @@ def slide(bg, content, dark=False, kicker="", n=0):
 
 S = []
 S.append(slide("#0b1220", f"""
- <div class="logobox" style="margin-bottom:18px"><img class="logo logo-lg" src="{LOGO}" alt="studiOS"></div>
+ <img class="logo logo-lg" src="{LOGO}" alt="studiOS" style="margin-bottom:18px">
  <div class="kicker">studiOS · Caso de ingeniería</div>
  <h1>Teníamos barberos <span class="hl">parados</span><br>mientras los clientes esperaban.</h1>
  <p class="lead">Un viernes a las 7 de la tarde: cola en la puerta y un barbero
@@ -248,7 +248,7 @@ S.append(slide("#0b1220", f"""
  <p class="lead">Teoría de colas (M/G/c, Erlang), cadenas de Markov, Ley de Little
  y Monte Carlo — aplicados a un problema real de operación de
  <b>Monaco Smart Barber</b>, el producto que construimos en studiOS.</p>
- <div class="logobox" style="margin-top:24px"><img class="logo" src="{LOGO}" alt="studiOS"></div>
+ <img class="logo" src="{LOGO}" alt="studiOS" style="margin-top:24px">
  <p class="sign">Ignacio Baldovino · Co-fundador de studiOS · {D['_meta']['generado']}</p>""", dark=True, n=10))
 
 NSL = len(S)
@@ -307,9 +307,8 @@ h2{{font-size:clamp(22px,3.3vw,40px);line-height:1.1;letter-spacing:-.02em;font-
  font-weight:800;display:flex;align-items:center;justify-content:center}}
 .lessons{{counter-reset:li}}
 .sign{{margin-top:20px;font-size:15px;color:#94a3b8;font-weight:600}}
-.logobox{{background:#f1f5f9;border-radius:14px;padding:13px 22px;display:inline-block;line-height:0}}
-.logo{{height:40px;display:block}}
-.logo-lg{{height:58px}}
+.logo{{height:44px;display:block;filter:invert(1)}}
+.logo-lg{{height:62px}}
 .pg{{position:absolute;bottom:22px;left:0;right:0;text-align:center;font-size:12px;
  color:#64748b;letter-spacing:.04em}}
 .slide:not(.dark) .pg{{color:#94a3b8}}
