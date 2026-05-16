@@ -1,0 +1,152 @@
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fila Dinámica · de barberos parados a teoría de colas — Monaco Smart Barber</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+html,body{height:100%}
+body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+ background:#0b1220;color:#0f172a;-webkit-font-smoothing:antialiased}
+.deck{height:100vh;overflow-y:scroll;scroll-snap-type:y mandatory;scroll-behavior:smooth}
+.slide{position:relative;width:100%;height:100vh;scroll-snap-align:start;
+ display:flex;align-items:center;justify-content:center;overflow:hidden;color:#0f172a}
+.slide.dark{color:#f1f5f9}
+.inner{width:min(1080px,86vw);padding:40px 0}
+.kicker{font-size:14px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
+ color:#3b82f6;margin-bottom:22px}
+.slide.dark .kicker{color:#60a5fa}
+h1{font-size:clamp(34px,5.4vw,62px);line-height:1.06;letter-spacing:-.02em;font-weight:800}
+h2{font-size:clamp(28px,4.4vw,50px);line-height:1.1;letter-spacing:-.02em;font-weight:800}
+.hl{color:#22c55e} .hl-r{color:#ef4444}
+.lead{font-size:clamp(16px,1.9vw,22px);line-height:1.55;margin-top:22px;
+ max-width:40ch;color:#334155}
+.slide.dark .lead{color:#cbd5e1}
+.big{font-size:clamp(80px,15vw,170px);font-weight:800;color:#ef4444;
+ line-height:1;margin:18px 0 8px;letter-spacing:-.03em}
+.chips{display:flex;gap:10px;flex-wrap:wrap;margin-top:30px}
+.chips span{font-size:14px;font-weight:600;background:#1e293b;color:#e2e8f0;
+ padding:8px 14px;border-radius:999px;border:1px solid #334155}
+.two{display:flex;gap:18px;margin-top:30px}
+.card{flex:1;padding:22px;border-radius:16px;font-size:20px;font-weight:700;text-align:center}
+.card small{display:block;font-weight:500;opacity:.75;margin-top:6px;font-size:14px}
+.card.bad{background:#3f1d1d;color:#fca5a5;border:1px solid #7f1d1d}
+.card.good{background:#14321f;color:#86efac;border:1px solid #166534}
+.chart{margin:26px 0;background:#0f1729;border:1px solid #1e293b;border-radius:16px;padding:18px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:30px 0}
+.k{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:16px;padding:20px;text-align:center}
+.kv{font-size:clamp(26px,3.4vw,40px);font-weight:800;color:#16a34a}
+.kl{font-size:14px;font-weight:600;margin-top:6px;color:#334155}
+.kl small{font-weight:500;color:#64748b}
+.lessons{margin:24px 0 0 0;list-style:none;display:grid;gap:14px;max-width:46ch}
+.lessons li{font-size:clamp(15px,1.8vw,20px);line-height:1.5;padding-left:34px;
+ position:relative;color:#cbd5e1}
+.lessons li b{color:#f1f5f9}
+.lessons li:before{content:counter(li);counter-increment:li;position:absolute;left:0;top:0;
+ width:24px;height:24px;background:#3b82f6;color:#fff;border-radius:7px;font-size:13px;
+ font-weight:800;display:flex;align-items:center;justify-content:center}
+.lessons{counter-reset:li}
+.sign{margin-top:34px;font-size:15px;color:#64748b;font-weight:600}
+.pg{position:absolute;bottom:22px;left:0;right:0;text-align:center;font-size:12px;
+ color:#64748b;letter-spacing:.04em}
+.slide:not(.dark) .pg{color:#94a3b8}
+.nav{position:fixed;right:20px;top:50%;transform:translateY(-50%);display:flex;
+ flex-direction:column;gap:10px;z-index:10}
+.nav button{width:10px;height:10px;border-radius:50%;border:1.5px solid #64748b;
+ background:transparent;cursor:pointer;padding:0}
+.nav button.on{background:#3b82f6;border-color:#3b82f6;transform:scale(1.25)}
+.hint{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);font-size:12px;
+ color:#64748b;z-index:10;animation:fade 2.6s ease-in-out infinite}
+@keyframes fade{0%,100%{opacity:.35}50%{opacity:.9}}
+@media print{
+ @page{size:1280px 720px;margin:0}
+ html,body{background:#0b1220;height:auto}
+ .deck{height:auto;overflow:visible;scroll-snap-type:none;display:block}
+ .nav,.hint{display:none}
+ .slide{width:1280px;height:720px;overflow:hidden;break-after:page;page-break-after:always}
+ .slide:last-child{break-after:auto;page-break-after:auto}
+ .inner{width:1080px;padding:0}
+}
+@media(max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}.two{flex-direction:column}}
+</style></head><body>
+<div class="deck" id="deck"><section class="slide dark" style="background:#0b1220"><div class="inner">
+ <div class="kicker">Monaco Smart Barber · Ingeniería · Caso real</div>
+ <h1>Teníamos barberos <span class="hl">parados</span><br>mientras los clientes esperaban.</h1>
+ <p class="lead">Lo encontramos y lo resolvimos con <b>teoría de colas</b>,
+ cadenas de Markov y simulación Monte Carlo sobre datos de producción.</p>
+ <div class="chips"><span>3 sucursales</span>
+ <span>5,439 walk-ins / 60 d</span>
+ <span>3,414 clientes</span>
+ <span>43,200 turnos simulados</span></div></div><div class="pg">01 · Monaco Smart Barber · Ingeniería</div></section><section class="slide" style="background:#ffffff"><div class="inner">
+ <div class="kicker">El síntoma</div>
+ <h2>Un barbero libre. Un cliente esperando.<br><span class="hl-r">Al mismo tiempo.</span></h2>
+ <div class="big">89%</div>
+ <p class="lead">de los turnos tenían <b>al menos un barbero ocioso</b> con un cliente
+ dinámico esperando. Hasta <b>71 min por turno</b> de silla vacía con
+ cola — exactamente lo contrario de lo que promete "menor espera".</p></div><div class="pg">02 · Monaco Smart Barber · Ingeniería</div></section><section class="slide dark" style="background:#0b1220"><div class="inner">
+ <div class="kicker">La causa raíz</div>
+ <h2>El sistema "reservaba" cada cliente<br>a un barbero <span class="hl">al llegar</span>.</h2>
+ <p class="lead">De facto, no era <b>una fila para todos</b>: eran
+ <b>c filas separadas</b>, una por barbero. Si tu barbero asignado se complicaba,
+ esperabas — aunque otro estuviera libre y no pudiera atenderte.</p>
+ <div class="two"><div class="card bad">❌ Binding al check-in<br><small>c × fila individual</small></div>
+ <div class="card good">✓ Pool al liberarse<br><small>1 fila · c servidores</small></div></div></div><div class="pg">03 · Monaco Smart Barber · Ingeniería</div></section><section class="slide" style="background:#ffffff"><div class="inner">
+ <div class="kicker">No era un caso de borde</div>
+ <h2>≈ <span class="hl-r">47%</span> de los clientes elige<br>"el que esté libre".</h2>
+ <p class="lead">El bug degradaba a <b>la mayoría</b>, no a un nicho. Y fuimos
+ honestos con los datos: <b>detectamos y corregimos un error en nuestra propia
+ métrica</b> que subestimaba esa adopción (un flag que se reseteaba al asignar).
+ La rigurosidad también es revisar lo propio.</p></div><div class="pg">04 · Monaco Smart Barber · Ingeniería</div></section><section class="slide dark" style="background:#0b1220"><div class="inner">
+ <div class="kicker">La teoría lo predice — teorema de pooling</div>
+ <h2>Una sola fila para <i>c</i> barberos es<br><span class="hl">siempre</span> mejor que <i>c</i> filas.</h2>
+ <div class="chart"><svg viewBox="0 0 1000 440" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif" style="width:100%;height:auto"><line x1="70" y1="386" x2="980" y2="386" stroke="#374151"/><text x="60" y="391" font-size="15" fill="#9ca3af" text-anchor="end">0</text><line x1="70" y1="300" x2="980" y2="300" stroke="#374151"/><text x="60" y="304" font-size="15" fill="#9ca3af" text-anchor="end">20</text><line x1="70" y1="213" x2="980" y2="213" stroke="#374151"/><text x="60" y="218" font-size="15" fill="#9ca3af" text-anchor="end">40</text><line x1="70" y1="126" x2="980" y2="126" stroke="#374151"/><text x="60" y="132" font-size="15" fill="#9ca3af" text-anchor="end">60</text><line x1="70" y1="40" x2="980" y2="40" stroke="#374151"/><text x="60" y="45" font-size="15" fill="#9ca3af" text-anchor="end">80</text><rect x="206" y="369" width="312" height="17" fill="#22c55e" rx="3"/><text x="363" y="361" font-size="15" font-weight="700" fill="#e5e7eb" text-anchor="middle">4 min</text><rect x="525" y="87" width="312" height="299" fill="#ef4444" rx="3"/><text x="681" y="79" font-size="15" font-weight="700" fill="#e5e7eb" text-anchor="middle">69 min</text><text x="525" y="410" font-size="16" fill="#e5e7eb" text-anchor="middle">Espera media en hora pico (min)</text><rect x="70" y="8" width="15" height="15" fill="#22c55e" rx="3"/><text x="91" y="21" font-size="15" fill="#e5e7eb">1 fila para todos (M/M/c) — modelo nuevo</text><rect x="492.0" y="8" width="15" height="15" fill="#ef4444" rx="3"/><text x="513.0" y="21" font-size="15" fill="#e5e7eb">1 fila por barbero (c×M/M/1) — modelo viejo</text></svg></div>
+ <p class="lead">Mismos barberos, misma demanda. Solo cambia la arquitectura de la
+ cola: <b>10× menos espera</b> en hora pico (M/M/c vs c×M/M/1, μ=1.71/h reales).</p></div><div class="pg">05 · Monaco Smart Barber · Ingeniería</div></section><section class="slide dark" style="background:#0b1220"><div class="inner">
+ <div class="kicker">Lo probamos — Monte Carlo, 43,200 turnos</div>
+ <h2>Simulamos miles de escenarios.<br>El resultado no deja lugar a dudas.</h2>
+ <div class="chart"><svg viewBox="0 0 1000 440" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif" style="width:100%;height:auto"><line x1="70" y1="386" x2="980" y2="386" stroke="#374151"/><text x="60" y="391" font-size="15" fill="#9ca3af" text-anchor="end">0</text><line x1="70" y1="300" x2="980" y2="300" stroke="#374151"/><text x="60" y="304" font-size="15" fill="#9ca3af" text-anchor="end">20</text><line x1="70" y1="213" x2="980" y2="213" stroke="#374151"/><text x="60" y="218" font-size="15" fill="#9ca3af" text-anchor="end">41</text><line x1="70" y1="126" x2="980" y2="126" stroke="#374151"/><text x="60" y="132" font-size="15" fill="#9ca3af" text-anchor="end">61</text><line x1="70" y1="40" x2="980" y2="40" stroke="#374151"/><text x="60" y="45" font-size="15" fill="#9ca3af" text-anchor="end">81</text><rect x="104" y="303" width="74" height="83" fill="#ef4444" rx="3"/><text x="141" y="295" font-size="15" font-weight="700" fill="#e5e7eb" text-anchor="middle">19 min</text><rect x="184" y="386" width="74" height="0" fill="#22c55e" rx="3"/><text x="221" y="378" font-size="15" font-weight="700" fill="#e5e7eb" text-anchor="middle">0 min</text><text x="184" y="410" font-size="16" fill="#e5e7eb" text-anchor="middle">3 barberos</text><rect x="332" y="224" width="74" height="162" fill="#ef4444" rx="3"/><text x="368" y="216" font-size="15" font-weight="700" fill="#e5e7eb" text-anchor="middle">38 min</text><rect x="411" y="386" width="74" height="0" fill="#22c55e" rx="3"/><text x="448" y="378" font-size="15" font-weight="700" fill="#e5e7eb" text-anchor="middle">0 min</text><text x="411" y="410" font-size="16" fill="#e5e7eb" text-anchor="middle">5 barberos</text><rect x="559" y="153" width="74" height="233" fill="#ef4444" rx="3"/><text x="596" y="145" font-size="15" font-weight="700" fill="#e5e7eb" text-anchor="middle">55 min</text><rect x="639" y="386" width="74" height="0" fill="#22c55e" rx="3"/><text x="676" y="378" font-size="15" font-weight="700" fill="#e5e7eb" text-anchor="middle">0 min</text><text x="639" y="410" font-size="16" fill="#e5e7eb" text-anchor="middle">7 barberos</text><rect x="787" y="85" width="74" height="301" fill="#ef4444" rx="3"/><text x="823" y="77" font-size="15" font-weight="700" fill="#e5e7eb" text-anchor="middle">71 min</text><rect x="866" y="386" width="74" height="0" fill="#22c55e" rx="3"/><text x="903" y="378" font-size="15" font-weight="700" fill="#e5e7eb" text-anchor="middle">0 min</text><text x="866" y="410" font-size="16" fill="#e5e7eb" text-anchor="middle">10 barberos</text><rect x="70" y="8" width="15" height="15" fill="#ef4444" rx="3"/><text x="91" y="21" font-size="15" fill="#e5e7eb">Modelo viejo (binding)</text><rect x="321.0" y="8" width="15" height="15" fill="#22c55e" rx="3"/><text x="342.0" y="21" font-size="15" fill="#e5e7eb">Modelo nuevo (pool)</text></svg></div>
+ <p class="lead">Minutos por turno con un barbero ocioso y un cliente esperando.
+ Modelo nuevo (pool): <b>0.00</b> — el problema desaparece de raíz, y escala.</p></div><div class="pg">06 · Monaco Smart Barber · Ingeniería</div></section><section class="slide" style="background:#ffffff"><div class="inner">
+ <div class="kicker">El impacto</div>
+ <h2>Mejor para el cliente <span class="hl">y</span> para el negocio.</h2>
+ <div class="kpis">
+ <div class="k"><div class="kv">0.00</div><div class="kl">min de inanición<br><small>antes: 20–71 / turno</small></div></div>
+ <div class="k"><div class="kv">−44%</div><div class="kl">espera P50<br><small>con priorización WSJF</small></div></div>
+ <div class="k"><div class="kv">+2 pp</div><div class="kl">utilización<br><small>≈ 0.2 barbero/10 sillas</small></div></div>
+ <div class="k"><div class="kv">0.96–1.00</div><div class="kl">equidad (Jain)<br><small>carga pareja entre barberos</small></div></div>
+ </div>
+ <p class="lead">Y no es solo simulación: validado contra los datos reales con
+ <b>Erlang-C</b> y la aproximación <b>Allen-Cunneen</b> (G/G/c).</p></div><div class="pg">07 · Monaco Smart Barber · Ingeniería</div></section><section class="slide dark" style="background:#0b1220"><div class="inner">
+ <div class="kicker">4 lecciones de ingeniería</div>
+ <h2>Lo que nos llevamos.</h2>
+ <ol class="lessons">
+ <li><b>Asigná cuando el recurso se libera</b>, no cuando el trabajo llega.
+ La asignación temprana destruye la conservación de trabajo.</li>
+ <li><b>La equidad nunca debe retener trabajo.</b> Un "gate de justicia" que deja
+ a alguien parado reintroduce el problema (lo probamos).</li>
+ <li><b>Validá con teoría + simulación + datos</b>, no con intuición. Los tres
+ coincidieron.</li>
+ <li><b>Medí dos veces.</b> Corregimos nuestro propio error de métrica antes de
+ sacar conclusiones.</li>
+ </ol></div><div class="pg">08 · Monaco Smart Barber · Ingeniería</div></section><section class="slide dark" style="background:#0b1220"><div class="inner">
+ <div class="kicker">Monaco Smart Barber</div>
+ <h1>Construimos software de gestión<br>para barberías con <span class="hl">esta</span> vara.</h1>
+ <p class="lead">Teoría de colas (M/G/c, Erlang), cadenas de Markov, Ley de Little
+ y Monte Carlo — aplicados a un problema real de operación, no a una slide.</p>
+ <p class="sign">— Equipo de Plataforma · 2026-05-16</p></div><div class="pg">09 · Monaco Smart Barber · Ingeniería</div></section></div>
+<div class="nav"><button data-i="0" aria-label="slide 1"></button><button data-i="1" aria-label="slide 2"></button><button data-i="2" aria-label="slide 3"></button><button data-i="3" aria-label="slide 4"></button><button data-i="4" aria-label="slide 5"></button><button data-i="5" aria-label="slide 6"></button><button data-i="6" aria-label="slide 7"></button><button data-i="7" aria-label="slide 8"></button><button data-i="8" aria-label="slide 9"></button></div>
+<div class="hint">↓ scroll · ←→ flechas</div>
+<script>
+var deck=document.getElementById('deck');
+var slides=[].slice.call(document.querySelectorAll('.slide'));
+var dots=[].slice.call(document.querySelectorAll('.nav button'));
+function cur(){var i=Math.round(deck.scrollTop/window.innerHeight);
+ return Math.max(0,Math.min(slides.length-1,i));}
+function mark(){var c=cur();dots.forEach(function(d,i){d.classList.toggle('on',i===c);});}
+deck.addEventListener('scroll',mark);mark();
+dots.forEach(function(d){d.onclick=function(){
+ slides[+d.getAttribute('data-i')].scrollIntoView();};});
+addEventListener('keydown',function(ev){
+ if(['ArrowDown','ArrowRight',' ','PageDown'].indexOf(ev.key)>=0){ev.preventDefault();
+  var n=Math.min(slides.length-1,cur()+1);slides[n].scrollIntoView();}
+ if(['ArrowUp','ArrowLeft','PageUp'].indexOf(ev.key)>=0){ev.preventDefault();
+  var p=Math.max(0,cur()-1);slides[p].scrollIntoView();}});
+</script></body></html>

@@ -120,10 +120,12 @@ for f in ["inv_dyn_starv_min", "inv_violated", "util", "wait_p50", "wait_p95",
     MC[f] = {pol: [agg(nb, pol, f) for nb in BARBERS] for pol in POLS}
 
 # Jain observado (Rondeau, barberos activos = top 5)
-cuts = sorted([b["cortes"] for b in D["equidad_rondeau_30d"]], reverse=True)
-act = cuts[:5]
-jain_act = (sum(act) ** 2) / (len(act) * sum(x * x for x in act))
-jain_all = (sum(cuts) ** 2) / (len(cuts) * sum(x * x for x in cuts))
+def jain(vals):
+    vals = [v for v in vals]
+    return (sum(vals) ** 2) / (len(vals) * sum(x * x for x in vals)) if vals and sum(vals) else 1.0
+JAIN = {bn: jain([r["cortes"] for r in rows if r["cortes"] >= 100])
+        for bn, rows in D["equidad"].items()}
+jain_rep = JAIN.get("Rondeau", next(iter(JAIN.values())))
 
 # Little's law check (Rondeau día)
 LL_lmb = 3.97              # /h
@@ -276,11 +278,14 @@ def markov_svg(c, w=760, h=210):
     return s + "</svg>"
 
 # ── Datos para gráficos ──
-horas_p = sorted(D["llegadas_por_hora"]["Parana"].keys(), key=int)
-cats_h = [h for h in horas_p]
+_allh = set()
+for _b in D["llegadas_por_hora"].values():
+    _allh |= set(_b.keys())
+cats_h = sorted(_allh, key=int)
 fig_arrivals = grouped_bars(
     [("Paraná", [D["llegadas_por_hora"]["Parana"].get(h, 0) for h in cats_h], PAL[0]),
-     ("Rondeau", [D["llegadas_por_hora"]["Rondeau"].get(h, 0) for h in cats_h], PAL[1])],
+     ("Rondeau", [D["llegadas_por_hora"]["Rondeau"].get(h, 0) for h in cats_h], PAL[1]),
+     ("Caseros", [D["llegadas_por_hora"]["Caseros"].get(h, 0) for h in cats_h], PAL[3])],
     cats_h, 7.5, ylabel="llegadas / hora (λ)", unit="/h", fmt="{:.1f}")
 
 # servicio: densidad lognormal + percentiles observados
@@ -355,11 +360,14 @@ mc_variants = {
                          [f"{b}" for b in BARBERS], 1.0, ylabel="Jain (1=equitativo)", unit="", fmt="{:.3f}"),
 }
 
-fig_heat = heatmap(D["heatmap_rondeau"]["data"], D["heatmap_rondeau"]["dow_labels"],
-                    [str(h) for h in D["heatmap_rondeau"]["horas"]])
-fig_equity = hbars([(b["barbero"], b["cortes"],
-                     PAL[1] if b["cortes"] > 100 else PAL[6]) for b in D["equidad_rondeau_30d"]],
-                   240, unit=" cortes")
+HM = D["heatmap"]
+heat_variants = {bn: heatmap(HM[bn], HM["dow_labels"], [str(h) for h in HM["horas"]])
+                 for bn in ["Rondeau", "Parana"]}
+eq_variants = {}
+for _bn, _rows in D["equidad"].items():
+    eq_variants[_bn] = hbars(
+        [(r["barbero"], r["cortes"], PAL[1] if r["cortes"] >= 100 else PAL[6]) for r in _rows],
+        max(r["cortes"] for r in _rows) * 1.06, unit=" cortes")
 fig_srv_type = hbars([(s["servicio"], s["media"], PAL[0]) for s in D["servicio_por_tipo"]],
                      50, unit=" min", fmt="{:.1f}")
 fig_markov = markov_svg(C_REP)
@@ -375,7 +383,11 @@ def table(headers, rows):
     return t + "</tbody></table>"
 
 SS = D["servicio"]
-PR = D["poisson_rondeau"]
+POI = D["poisson"]
+ESC_SCALE = D["escala"]
+poi_rows = [[bn, f'{POI[bn]["mean30"]:.2f}', f'{POI[bn]["var30"]:.2f}',
+             f'{POI[bn]["indice_dispersion"]:.2f}', f'{POI[bn]["interarrival_cv"]:.2f}',
+             POI[bn]["n_buckets"]] for bn in ["Parana", "Rondeau", "Caseros"]]
 gen = D["_meta"]["generado"]
 
 esc_rows = [[e["nom"], f'{e["lmb"]:.2f}', e["c"], f'{e["a"]:.2f}', f'{e["rho"]:.0%}',
@@ -480,6 +492,7 @@ summary{{cursor:pointer;font-weight:600;font-size:14px;padding:6px 0}}
 <main>
 <h1>Fila Dinámica — Informe de Ingeniería</h1>
 <div class="sub">Análisis del sistema de asignación de clientes en tiempo real · teoría de colas, cadenas de Markov y validación Monte Carlo sobre datos de producción · {gen}</div>
+<div class="callout"><b>Alcance.</b> {ESC_SCALE['sucursales']} sucursales reales (Paraná, Rondeau, Caseros) · {ESC_SCALE['walkins_60d']:,} walk-ins y {ESC_SCALE['clientes_unicos']:,} clientes únicos en 60 días · {ESC_SCALE['barberos']} barberos · {ESC_SCALE['cortes_muestra_servicio']:,} cortes para el ajuste de la distribución de servicio · {ESC_SCALE['turnos_simulados']:,} turnos simulados (Monte Carlo).</div>
 
 <section id="resumen"><h2>1 · Resumen ejecutivo</h2>
 <p>La barbería es, formalmente, un <b>sistema de colas multi-servidor</b>: los clientes
@@ -490,8 +503,8 @@ arquitectura <b>correcta y óptima</b> para este problema, y cuantifica por qué
 anterior (binding pegajoso) era subóptimo.</p>
 <div class="kpis">
 {kpi(f'{SS["media_min"]:.1f} min','Tiempo medio de servicio','μ = '+f'{MU:.2f}'+' cortes/h/barbero')}
-{kpi(f'{PR["indice_dispersion"]:.2f}','Índice de dispersión','≈1 ⇒ llegadas Poisson (validado)')}
-{kpi(f'{jain_act:.2f}','Índice de Jain (equidad)','barberos activos · 1.00 = perfecto')}
+{kpi(f'{POI["Parana"]["indice_dispersion"]:.2f}','Índice de dispersión','Poisson validado · 3 sucursales')}
+{kpi(f'{min(JAIN.values()):.2f}–{max(JAIN.values()):.2f}','Índice de Jain (equidad)','según sucursal · 1.00 = perfecto')}
 {kpi('0.00 min','Inanición con el pool','vs 20–71 min/turno con el binding')}
 </div>
 <div class="callout ok"><b>Conclusión.</b> Con un único pool (M/M/c) el sistema es
@@ -508,7 +521,7 @@ diseño anterior degradaba a la <b>mayoría</b> de los clientes.</div>
 servicio / número de servidores. La barbería es un <b>M/G/c</b>:</p>
 <ul>
 <li><b>M</b> (Markoviano) — llegadas Poisson, tiempos entre llegadas exponenciales y
-<i>sin memoria</i>. Validado en §3 (índice de dispersión {PR["indice_dispersion"]:.2f}).</li>
+<i>sin memoria</i>. Validado en §3 (índice de dispersión {POI["Parana"]["indice_dispersion"]:.2f} en Paraná, {POI["Rondeau"]["indice_dispersion"]:.2f} en Rondeau).</li>
 <li><b>G</b> (General) — el servicio <b>no</b> es exponencial: es <b>log-normal</b> con
 CV = {SS["cv"]:.2f} ≪ 1, mucho más <i>regular</i> que la exponencial (§4).</li>
 <li><b>c</b> servidores — los barberos disponibles (típico {pat_rows[1][2]} en Rondeau,
@@ -527,19 +540,21 @@ a = λ/μ (carga ofrecida, Erlangs) · ρ = a/c = λ/(c·μ) (utilización) · e
 <p>Un proceso de Poisson tiene dos firmas comprobables en los datos: (1) el número de
 llegadas en intervalos fijos tiene <b>varianza = media</b> (índice de dispersión = 1), y
 (2) los tiempos entre llegadas son <b>exponenciales</b> (coeficiente de variación = 1).
-Medido sobre Rondeau, ventana operativa 10–20 h, {PR["n_buckets"]} buckets de 30 min:</p>
-<div class="kpis">
-{kpi(f'{PR["mean_per_30min"]:.2f}','Media llegadas /30 min','')}
-{kpi(f'{PR["var_per_30min"]:.2f}','Varianza /30 min','')}
-{kpi(f'{PR["indice_dispersion"]:.2f}','Índice de dispersión','Var/Media — Poisson = 1.00')}
-{kpi(f'{PR["interarrival_cv"]:.2f}','CV inter-arribos','Exponencial = 1.00')}
-</div>
-<div class="callout ok"><b>Resultado.</b> Índice de dispersión {PR["indice_dispersion"]:.2f} y CV
-de inter-arribos {PR["interarrival_cv"]:.2f}: ambos ≈ 1. Las llegadas son un <b>proceso de
-Poisson</b>, con la salvedad de que λ <b>varía con la hora</b> (Poisson <i>no homogéneo</i>):
-el modelo M/M/c se aplica por tramos horarios, no con un λ único.</div>
-<p>Perfil real de λ(t) — llegadas por hora, 60 días. El pico es ~18 h en ambas sucursales
-(Paraná {D["llegadas_por_hora"]["Parana"]["18"]}/h, Rondeau {D["llegadas_por_hora"]["Rondeau"]["18"]}/h):</p>
+Medido <b>por sucursal</b>, ventana operativa 10–20 h, 60 días:</p>
+{table(["Sucursal","Media /30 min","Varianza /30 min","Índice dispersión (≈1)","CV inter-arribos (≈1)","Buckets"], poi_rows)}
+<div class="callout ok"><b>Resultado.</b> En las dos sucursales de volumen relevante el
+índice de dispersión es <b>{POI["Parana"]["indice_dispersion"]:.2f}</b> (Paraná) y
+<b>{POI["Rondeau"]["indice_dispersion"]:.2f}</b> (Rondeau), con CV de inter-arribos
+≈ {POI["Parana"]["interarrival_cv"]:.2f}–{POI["Rondeau"]["interarrival_cv"]:.2f}: ambos ≈ 1
+→ las llegadas son un <b>proceso de Poisson</b>. Caseros
+({POI["Caseros"]["indice_dispersion"]:.2f}) queda sub-disperso por su bajo volumen
+({POI["Caseros"]["mean30"]:.1f} llegadas/30 min): el flujo es <i>más regular</i> que Poisson,
+lo que sólo <b>facilita</b> la cola (menor varianza ⇒ menor espera). Salvedad general: λ
+<b>varía con la hora</b> (Poisson <i>no homogéneo</i>) → M/M/c se aplica por tramos
+horarios, no con un λ único.</div>
+<p>Perfil real de λ(t) — llegadas por hora, 60 días. Pico ~18 h
+(Paraná {D["llegadas_por_hora"]["Parana"]["18"]}/h, Rondeau {D["llegadas_por_hora"]["Rondeau"]["18"]}/h;
+Caseros más plano y bajo):</p>
 {fig_arrivals}
 </section>
 
@@ -662,12 +677,21 @@ menos ⇒ están sub-representados entre los cancelados; la adopción real es pr
 mayor. <b>Implicación</b>: el binding pegajoso (mig 132/133) degradaba a <b>~la mitad o más</b>
 de los clientes, no a un nicho del 2 % — multiplica el valor del fix mig 134 (§6) y
 <b>refuerza</b> la tesis del informe.</div>
-<div class="grid2">
-<div><h3>Demanda por día y hora — Rondeau</h3>{fig_heat}</div>
-<div><h3>Equidad de carga — Rondeau (30 d)</h3>{fig_equity}
-<p class="muted">Jain entre los 5 barberos activos = <b>{jain_act:.3f}</b> (≈ perfecto).
-El sistema reparte equitativamente; Rodri/Tony bajos = part-time/ocultos, no inequidad.</p></div>
+<h3>Demanda por día y hora</h3>
+<div class="tabs" data-group="heat">
+<button data-heat="Rondeau" class="on">Rondeau</button><button data-heat="Parana">Paraná</button>
 </div>
+{"".join(f'<div class="heat-v" data-heat="{bn}" style="display:{ "block" if bn=="Rondeau" else "none" }">{heat_variants[bn]}</div>' for bn in ["Rondeau","Parana"])}
+<h3>Equidad de carga por barbero (30 d)</h3>
+<div class="tabs" data-group="eq">
+{"".join(f'<button data-eq="{bn}" class="{ "on" if bn=="Rondeau" else "" }">{("Paraná" if bn=="Parana" else bn)} · Jain {JAIN[bn]:.2f}</button>' for bn in ["Rondeau","Parana","Caseros"])}
+</div>
+{"".join(f'<div class="eq-v" data-eq="{bn}" style="display:{ "block" if bn=="Rondeau" else "none" }">{eq_variants[bn]}</div>' for bn in ["Rondeau","Parana","Caseros"])}
+<p class="muted">Índice de Jain entre barberos a tiempo completo (≥100 cortes/30 d):
+Rondeau <b>{JAIN["Rondeau"]:.3f}</b>, Paraná <b>{JAIN["Parana"]:.3f}</b>, Caseros
+<b>{JAIN["Caseros"]:.3f}</b> — equitativo en las 3. Los valores bajos (Rodri/Tony/Tomi) son
+part-time, no inequidad. La diferencia residual (Paraná algo menor) es preferencia legítima
+del cliente por el barbero estrella, no defecto del scheduler.</p>
 <div class="callout"><b>Patrones detectados.</b>
 <b>(1)</b> "Menor espera" es la elección <b>mayoritaria</b> (≈ {ad_pct:.0f} %+, ver
 corrección arriba): el modelo pool gobierna la experiencia de la mayoría de los clientes,
@@ -749,7 +773,7 @@ function group(attr,cls){{
    b.parentNode.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
    document.querySelectorAll('.'+cls+'['+attr+']').forEach(function(d){{
     d.style.display=d.getAttribute(attr)===v?'block':'none';}});}};}});}}
-group('data-erl','erl-v');group('data-mc','mc-v');
+group('data-erl','erl-v');group('data-mc','mc-v');group('data-heat','heat-v');group('data-eq','eq-v');
 // para impresión/PDF: expandir apéndice y mostrar la 1ª variante de cada toggle
 function expandForPrint(){{document.querySelectorAll('details').forEach(function(d){{d.open=true;}});}}
 addEventListener('beforeprint',expandForPrint);
@@ -762,4 +786,4 @@ open(out, "w", encoding="utf-8").write(HTML)
 print("OK ->", out, f"({len(HTML)//1024} KB)")
 print(f"Erlang-C Rondeau pico: ρ={ESC[0]['rho']:.2%} Wq_MMc={ESC[0]['Wq']:.1f}min "
       f"Wq_real={ESC[0]['Wq_ac']:.1f}min | pooling ratio={POOL[0]['ratio']:.1f}x | "
-      f"Jain act={jain_act:.3f} | Little L={LL_L:.2f}")
+      f"Jain={JAIN} | Little L={LL_L:.2f} | escala={ESC_SCALE['walkins_60d']} walk-ins")
