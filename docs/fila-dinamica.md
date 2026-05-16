@@ -467,9 +467,43 @@ coordinarse con el flujo físico, no solo con la integridad de datos. El Monte
 Carlo confirmó además que el push-on-complete era irrelevante para el
 invariante: el fix correcto era el pool, no el push.
 
+### Incidente 2026-05-16 — dinámico figuraba con barbero ocupado habiendo uno libre
+
+**Síntoma**: 3 barberos; Simón y Rodri cortando, Fabri libre. Entra un
+dinámico ("Menor espera"). El panel lo mostraba "Se atiende con Simón"
+(ocupado hace 29 min) y NO se lo ofrecía a Fabri (libre). Inconsistente
+además entre tablets (Fabri "General 0" / Rodri "General 1").
+
+**Causa**: el hint visual (`assignDynamicBarbers` → `compareBarbersForDynamic`)
+rankeaba por ETA. `computeBarberEtaMinutes` da `remaining = max(0, avg-elapsed)`;
+con avg=25 y Simón a 29 min → ETA 0, empatando a un barbero realmente libre
+(ETA 0); el desempate (cortes hoy) se lo daba al ocupado. Empate frágil que
+oscilaba entre tablets. **El server (pool, mig 134) estaba OK** — era solo el
+hint de UI.
+
+**Fix (2026-05-16, client-side, sin migración — commit `0409494`)**: criterio
+0 en `compareBarbersForDynamic` — un barbero **idle ahora** (no atendiendo)
+gana SIEMPRE a uno ocupado, antes que el ETA. Señal objetiva y estable entre
+tablets. Si todos están ocupados, cae al ETA como antes (sin regresión en
+barbería llena). `assignDynamicBarbers` arma el set de "atendiendo" y lo crece
+al pre-asignar (dos dinámicos no caen sobre el mismo libre). Mismo criterio en
+el CTA "Menor espera" del kiosk (`getBarbersAttendingIds`).
+
+**Decisión registrada (2026-05-16)**: el panel del barbero usa el avg fallback
+(25), NO el promedio real por barbero, **a propósito**. La consulta del panel
+se mantiene liviana porque corre en cada tick de Realtime y un `visits` pesado
+repetido fue la causa del P0 del 30/04 (ver Known Risks #9/#10 en CLAUDE.md).
+El kiosko sí usa el promedio real (`buildBarberAvgMinutes`, frecuencia mucho
+menor). Llevar el promedio real al panel se evaluó y se **pospuso a §14.1** (el
+avg correcto es por barbero+servicio, precalculado por cron — no un promedio
+crudo recalculado por tick). El fix de disponibilidad ya resuelve el síntoma;
+el promedio solo afecta el caso secundario "todos ocupados".
+
 ### Pendiente (Phase 2 — §14)
 
-- Predicción de duración por (barbero, servicio, cliente) — hoy avg global.
+- Predicción de duración por (barbero, servicio) — hoy el panel usa avg
+  fallback 25 (decisión 2026-05-16, ver incidente arriba); el kiosko usa el
+  promedio real por barbero. El correcto (por servicio, precalculado) es §14.1.
 - WSJF acotado por aging en el pool (P50 −40 % en sim) — **como score en el
   claim, nunca como gate bloqueante**.
 - `shift_end` consciente del servicio.
