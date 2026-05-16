@@ -77,18 +77,22 @@ def agg_hd(nb, pol, f):
     return sum(SIM[k][f] for k in ks) / len(ks) if ks else 0.0
 INV_A_HD = [agg_hd(nb, "A", "inv_dyn_starv_min") for nb in BAR]
 INV_C_HD = [agg_hd(nb, "C", "inv_dyn_starv_min") for nb in BAR]
+W_A_HD = [round(agg_hd(nb, "A", "wait_p50")) for nb in BAR]   # espera viejo, alta demanda
+W_C_HD = [round(agg_hd(nb, "C", "wait_p50")) for nb in BAR]   # espera pool
+W_D_HD = [round(agg_hd(nb, "D", "wait_p50")) for nb in BAR]   # espera pool+WSJF
 
 def e(s): return html.escape(str(s))
 
 # ── SVG (estilo slide: grande, alto contraste) ──
-def bars(series, cats, ymax, w=1000, h=440, unit="", fmt="{:.0f}", dark=False):
+def bars(series, cats, ymax, w=1200, h=360, unit="", fmt="{:.0f}", dark=False):
     fg = "#e5e7eb" if dark else "#0f172a"
     grid = "#374151" if dark else "#e2e8f0"
     mut = "#9ca3af" if dark else "#64748b"
     pl, pb, pt, pr = 70, 54, 40, 20
     pw, ph = w - pl - pr, h - pb - pt
     s = (f'<svg viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg" '
-         f'font-family="Inter,system-ui,sans-serif" style="width:100%;height:auto">')
+         f'preserveAspectRatio="xMidYMid meet" '
+         f'font-family="Inter,system-ui,sans-serif">')
     for g in range(5):
         gy = pt + ph - ph * g / 4
         s += f'<line x1="{pl}" y1="{gy:.0f}" x2="{w-pr}" y2="{gy:.0f}" stroke="{grid}"/>'
@@ -119,6 +123,9 @@ fig_pool = bars(
 fig_inv = bars(
     [("Modelo viejo (binding)", INV_A, RED), ("Modelo nuevo (pool)", INV_C, GREEN)],
     [f"{b} barberos" for b in BAR], max(INV_A) * 1.15, unit=" min", fmt="{:.0f}", dark=True)
+fig_hd_wait = bars(
+    [("Modelo viejo (binding)", W_A_HD, RED), ("Modelo nuevo (pool)", W_C_HD, GREEN)],
+    [f"{b} barberos" for b in BAR], max(W_A_HD) * 1.2, unit=" min", fmt="{:.0f}", dark=True)
 fig_peak = bars(
     [("Día tranquilo (valle)", [_pk[n]["valle_p50"] for n in ["Parana", "Rondeau", "Caseros"]], BLUE),
      ("Pico — viernes tarde", [_pk[n]["pico_p50"] for n in ["Parana", "Rondeau", "Caseros"]], RED)],
@@ -150,10 +157,9 @@ S.append(slide("#ffffff", f"""
  <div class="chart" style="background:#0f1729">{fig_peak}
  <div class="cap" style="color:#94a3b8;text-align:center;margin-top:8px;font-size:13px">
  Espera típica real (mediana) · día tranquilo vs pico (Jue–Sáb 16–20 h)</div></div>
- <p class="lead">En el pico la espera <b>típica</b> real se <b>triplica</b>
- (P50 ≈ 17 min), el P95 trepa a <b>{obs95_lo}–{obs95_hi} min</b> y el peor caso a
- <b>{PK_MAX} min</b>. En valle hay holgura y casi da igual el modelo:
- <b>el retorno de la mejora vive en el pico</b>.</p>""", n=2))
+ <p class="lead">La espera <b>típica</b> se <b>triplica</b> en el pico (P50 ≈ 17 min);
+ P95 <b>{obs95_lo}–{obs95_hi} min</b>, peor caso <b>{PK_MAX} min</b>. En valle casi da
+ igual el modelo: <b>el retorno de la mejora vive en el pico</b>.</p>""", n=2))
 
 S.append(slide("#0b1220", f"""
  <div class="kicker">La causa raíz</div>
@@ -176,10 +182,10 @@ S.append(slide("#0b1220", f"""
  <div class="kicker">La teoría lo predice — teorema de pooling</div>
  <h2>Una sola fila para <i>c</i> barberos es<br><span class="hl">siempre</span> mejor que <i>c</i> filas.</h2>
  <div class="chart">{fig_pool}</div>
- <p class="lead">Mismos barberos, misma demanda — solo cambia la arquitectura:
- <b>{RATIO}× menos espera</b> en el pico. Y valida con la realidad: el modelo viejo
- (c×M/M/1) predice <b>{bind_lo}–{bind_hi} min</b> en el pico; los datos reales del
- pico muestran P95 <b>{obs95_lo}–{obs95_hi} min</b>. <b>Coinciden.</b></p>""",
+ <p class="lead">Misma gente, misma demanda — solo cambia la arquitectura:
+ <b>{RATIO}× menos espera</b> en el pico. El modelo viejo predice
+ <b>{bind_lo}–{bind_hi} min</b>; el P95 real del pico es
+ <b>{obs95_lo}–{obs95_hi} min</b>. <b>Coinciden.</b></p>""",
  dark=True, n=5))
 
 S.append(slide("#0b1220", f"""
@@ -194,6 +200,17 @@ S.append(slide("#0b1220", f"""
  <div class="cap">Desperdicio = min/turno con barbero LIBRE + cliente esperando · invariante a la carga · no es el tiempo de espera</div></div>""",
  dark=True, n=6))
 
+S.append(slide("#0b1220", f"""
+ <div class="kicker">La espera en alta demanda — viejo vs nuevo</div>
+ <h2>En el pico, la espera<br>se <span class="hl">desploma</span>.</h2>
+ <div class="chart">{fig_hd_wait}
+ <div class="cap">Espera mediana simulada · régimen saturado (ρ≥1) · misma carga y capacidad · por nº de barberos</div></div>
+ <div class="metric-note">La comparativa que importa en <b>alta demanda</b>:
+ binding (viejo) deja P50 <b>{min(W_A_HD)}–{max(W_A_HD)} min</b>; el pool (nuevo, ya en
+ producción) <b>{min(W_C_HD)}–{max(W_C_HD)} min</b>; con WSJF (Phase 2)
+ <b>{min(W_D_HD)}–{max(W_D_HD)} min</b>. Misma gente, misma demanda — solo cambia el modelo.</div>""",
+ dark=True, n=7))
+
 S.append(slide("#ffffff", f"""
  <div class="kicker">El impacto</div>
  <h2>Mejor para el cliente <span class="hl">y</span> para el negocio.</h2>
@@ -205,7 +222,7 @@ S.append(slide("#ffffff", f"""
  </div>
  <p class="lead">La espera <b>baja</b> —no se elimina: en un pico sigue habiendo
  cola y se espera—, pero deja de haber <b>sillas vacías con gente esperando</b>.
- Validado además contra datos reales con <b>Erlang-C</b> y <b>Allen-Cunneen</b> (G/G/c).</p>""", n=7))
+ Validado además contra datos reales con <b>Erlang-C</b> y <b>Allen-Cunneen</b> (G/G/c).</p>""", n=8))
 
 S.append(slide("#0b1220", f"""
  <div class="kicker">4 lecciones de ingeniería</div>
@@ -219,14 +236,14 @@ S.append(slide("#0b1220", f"""
  coincidieron.</li>
  <li><b>Medí dos veces.</b> Corregimos nuestro propio error de métrica antes de
  sacar conclusiones.</li>
- </ol>""", dark=True, n=8))
+ </ol>""", dark=True, n=9))
 
 S.append(slide("#0b1220", f"""
  <div class="kicker">Monaco Smart Barber</div>
  <h1>Construimos software de gestión<br>para barberías con <span class="hl">esta</span> vara.</h1>
  <p class="lead">Teoría de colas (M/G/c, Erlang), cadenas de Markov, Ley de Little
  y Monte Carlo — aplicados a un problema real de operación, no a una slide.</p>
- <p class="sign">— Equipo de Plataforma · {D['_meta']['generado']}</p>""", dark=True, n=9))
+ <p class="sign">— Equipo de Plataforma · {D['_meta']['generado']}</p>""", dark=True, n=10))
 
 NSL = len(S)
 dots = "".join(f'<button data-i="{i}" aria-label="slide {i+1}"></button>' for i in range(NSL))
@@ -243,15 +260,15 @@ body{{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
 .slide{{position:relative;width:100%;height:100vh;scroll-snap-align:start;
  display:flex;align-items:center;justify-content:center;overflow:hidden;color:#0f172a}}
 .slide.dark{{color:#f1f5f9}}
-.inner{{width:min(1080px,86vw);padding:40px 0}}
-.kicker{{font-size:14px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
- color:#3b82f6;margin-bottom:22px}}
+.inner{{width:min(1080px,88vw);max-height:90vh;display:flex;flex-direction:column;justify-content:center;padding:18px 0}}
+.kicker{{font-size:13px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;
+ color:#3b82f6;margin-bottom:12px}}
 .slide.dark .kicker{{color:#60a5fa}}
-h1{{font-size:clamp(34px,5.4vw,62px);line-height:1.06;letter-spacing:-.02em;font-weight:800}}
-h2{{font-size:clamp(28px,4.4vw,50px);line-height:1.1;letter-spacing:-.02em;font-weight:800}}
+h1{{font-size:clamp(28px,4.4vw,52px);line-height:1.05;letter-spacing:-.02em;font-weight:800;margin:0}}
+h2{{font-size:clamp(22px,3.3vw,40px);line-height:1.1;letter-spacing:-.02em;font-weight:800;margin:0}}
 .hl{{color:#22c55e}} .hl-r{{color:#ef4444}}
-.lead{{font-size:clamp(16px,1.9vw,22px);line-height:1.55;margin-top:22px;
- max-width:40ch;color:#334155}}
+.lead{{font-size:clamp(13px,1.5vw,18px);line-height:1.5;margin-top:13px;
+ max-width:48ch;color:#334155}}
 .slide.dark .lead{{color:#cbd5e1}}
 .big{{font-size:clamp(80px,15vw,170px);font-weight:800;color:#ef4444;
  line-height:1;margin:18px 0 8px;letter-spacing:-.03em}}
@@ -263,11 +280,12 @@ h2{{font-size:clamp(28px,4.4vw,50px);line-height:1.1;letter-spacing:-.02em;font-
 .card small{{display:block;font-weight:500;opacity:.75;margin-top:6px;font-size:14px}}
 .card.bad{{background:#3f1d1d;color:#fca5a5;border:1px solid #7f1d1d}}
 .card.good{{background:#14321f;color:#86efac;border:1px solid #166534}}
-.chart{{margin:22px 0;background:#0f1729;border:1px solid #1e293b;border-radius:16px;padding:18px}}
-.chart .cap{{font-size:13px;color:#94a3b8;text-align:center;margin-top:8px;font-weight:600;letter-spacing:.01em}}
-.metric-note{{font-size:clamp(14px,1.6vw,18px);line-height:1.5;background:#1e293b;
+.chart{{margin:13px 0;background:#0f1729;border:1px solid #1e293b;border-radius:16px;padding:14px;height:clamp(190px,40vh,330px);display:flex;flex-direction:column}}
+.chart svg{{width:100%;flex:1;min-height:0;display:block}}
+.chart .cap{{font-size:12px;color:#94a3b8;text-align:center;margin-top:6px;font-weight:600;letter-spacing:.01em;flex:0 0 auto}}
+.metric-note{{font-size:clamp(12px,1.3vw,15px);line-height:1.42;background:#1e293b;
  border:1px solid #334155;border-left:4px solid #f59e0b;border-radius:0 12px 12px 0;
- padding:14px 18px;margin:18px 0 0;color:#e2e8f0;max-width:56ch}}
+ padding:11px 16px;margin:10px 0 0;color:#e2e8f0;max-width:62ch}}
 .metric-note b{{color:#fff}}
 .kpis{{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:30px 0}}
 .k{{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:16px;padding:20px;text-align:center}}
@@ -301,7 +319,8 @@ h2{{font-size:clamp(28px,4.4vw,50px);line-height:1.1;letter-spacing:-.02em;font-
  .nav,.hint{{display:none}}
  .slide{{width:1280px;height:720px;overflow:hidden;break-after:page;page-break-after:always}}
  .slide:last-child{{break-after:auto;page-break-after:auto}}
- .inner{{width:1080px;padding:0}}
+ .inner{{width:1080px;max-height:none;padding:0}}
+ .chart{{height:300px}}
 }}
 @media(max-width:760px){{.kpis{{grid-template-columns:repeat(2,1fr)}}.two{{flex-direction:column}}}}
 </style></head><body>
