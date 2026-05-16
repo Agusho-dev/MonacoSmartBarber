@@ -37,8 +37,19 @@
   "patrones_por_sucursal": [
     {"name": "Parana", "total": 2667, "dias_op": 50, "entries_dia": 53.3, "pct_dinamico": 1.5, "pct_cancelado": 3.1, "pct_completado": 96.8, "barberos_dia": 5.8},
     {"name": "Rondeau", "total": 1984, "dias_op": 50, "entries_dia": 39.7, "pct_dinamico": 2.3, "pct_cancelado": 4.5, "pct_completado": 95.3, "barberos_dia": 4.9},
-    {"name": "Caseros", "total": 786, "dias_op": 46, "entries_dia": 17.1, "pct_dinamico": 0.6, "pct_cancelado": 2.7, "pct_completado": 96.8, "barberos_dia": 2.0}
+    {"name": "Caseros", "total": 786, "dias_op": 46, "entries_dia": 17.1, "pct_cancelado": 2.7, "pct_completado": 96.8, "barberos_dia": 2.0}
   ],
+  "adopcion_dinamico": {
+    "artefacto": "claim_next_for_barber ejecuta SET is_dynamic=false al asignar al cliente. Las entries 'completed' (95–96% del total) pierden la marca → medir is_dynamic sobre el histórico la subcuenta groseramente (daba 0.6–2.3%, INCORRECTO).",
+    "completed_dyn_pct": 0.0,
+    "cancelled_subset": [
+      {"name": "Parana", "cancel_n": 82, "dyn": 40, "pct": 48.8},
+      {"name": "Rondeau", "cancel_n": 90, "dyn": 46, "pct": 51.1},
+      {"name": "Caseros", "cancel_n": 21, "dyn": 5, "pct": 23.8}
+    ],
+    "estimacion": "≈47–51% en Paraná/Rondeau sobre el único subconjunto donde la marca sobrevive (cancelados, nunca reclamados). Probable COTA INFERIOR: los dinámicos esperan menos → cancelan menos → quedan sub-representados entre cancelados. Conclusión: la mayoría de los walk-ins elige 'menor espera', consistente con la operación diaria. La medición exacta requiere una columna inmutable fijada en el check-in.",
+    "no_persistente": "No existe ninguna columna que persista la modalidad de check-in: solo is_dynamic (que se muta) y break_request_id. Ningún trigger la captura."
+  },
   "equidad_rondeau_30d": [
     {"barbero": "Fabrizio", "cortes": 224},
     {"barbero": "Simón", "cortes": 212},

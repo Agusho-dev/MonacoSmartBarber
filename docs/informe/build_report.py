@@ -387,8 +387,11 @@ pool_rows = [[p["nom"], f'{p["wq_pool"]:.1f} min', f'{p["wq_pool_ac"]:.1f} min',
               (f'{p["ratio"]:.1f}×' if p["ratio"]!=float("inf") else "∞")] for p in POOL]
 wait_rows = [[r["name"], r["n"], f'{r["wait_mean"]} min', f'{r["p50"]} min',
               f'{r["p90"]} min', f'{r["p95"]} min'] for r in D["espera_por_sucursal"]]
-pat_rows = [[r["name"], r["entries_dia"], f'{r["barberos_dia"]}', f'{r["pct_dinamico"]}%',
+pat_rows = [[r["name"], r["entries_dia"], f'{r["barberos_dia"]}',
              f'{r["pct_cancelado"]}%', f'{r["pct_completado"]}%'] for r in D["patrones_por_sucursal"]]
+AD = D["adopcion_dinamico"]
+ad_rows = [[c["name"], c["cancel_n"], c["dyn"], f'{c["pct"]}%'] for c in AD["cancelled_subset"]]
+ad_pct = 100.0 * sum(c["dyn"] for c in AD["cancelled_subset"]) / sum(c["cancel_n"] for c in AD["cancelled_subset"])
 srv_rows = [[s["servicio"], s["n"], f'{s["media"]} min', f'±{s["sd"]}', f'{s["p50"]} min']
             for s in D["servicio_por_tipo"]]
 mc_tbl = [[f"{b} barberos",
@@ -495,7 +498,9 @@ anterior (binding pegajoso) era subóptimo.</p>
 <b>trabajo-conservativo</b> y alcanza el óptimo teórico de espera. El diseño anterior
 equivalía a <b>c filas independientes (c × M/M/1)</b>, que el teorema de pooling demuestra
 estrictamente peor: hasta <b>{max(p["ratio"] for p in POOL if p["ratio"]!=float("inf")):.0f}×</b>
-más espera y barberos ociosos con clientes esperando en el 71–98 % de los turnos.</div>
+más espera y barberos ociosos con clientes esperando en el 71–98 % de los turnos. Y no es
+un caso de borde: <b>≈ la mitad o más</b> de los walk-ins eligen "menor espera" (§8) — el
+diseño anterior degradaba a la <b>mayoría</b> de los clientes.</div>
 </section>
 
 <section id="modelo"><h2>2 · El modelo formal</h2>
@@ -640,7 +645,23 @@ sillas).</p>
 el modelo G/G/c corregido para carga media — el modelo <b>explica los datos</b>. Las colas
 P90/P95 (~50–67 min) corresponden a los picos de 17–19 h, donde ρ→0.8.</p>
 <h3>Operación por sucursal</h3>
-{table(["Sucursal","Entries/día","Barberos/día","% dinámico","% cancelado","% completado"], pat_rows)}
+{table(["Sucursal","Entries/día","Barberos/día","% cancelado","% completado"], pat_rows)}
+<h3>Adopción real de "menor espera" — corrección metodológica</h3>
+<div class="callout bad"><b>Corrección.</b> Una versión preliminar reportó adopción de
+"menor espera" de 0.6–2.3 %. <b>Es incorrecto.</b> <code>claim_next_for_barber</code> hace
+<code>SET is_dynamic=false</code> al asignar al cliente: las entries <code>completed</code>
+(95–96 % del total) pierden la marca. Medir <code>is_dynamic</code> sobre el histórico mide
+ruido (dinámicos que se cancelaron), no adopción.</div>
+<p>El único subconjunto donde la marca <b>sobrevive</b> (entries <b>canceladas</b>, nunca
+reclamadas) muestra la realidad:</p>
+{table(["Sucursal","Cancelados (n)","Dinámicos","% dinámico (marca intacta)"], ad_rows)}
+<div class="callout ok"><b>Lectura correcta.</b> ≈ <b>{ad_pct:.0f} %</b> de los walk-ins
+eligen "menor espera" (Paraná 48.8 %, Rondeau 51.1 %) — <b>la mayoría</b>, consistente con
+la operación diaria. Es una <b>cota inferior</b>: los dinámicos esperan menos ⇒ cancelan
+menos ⇒ están sub-representados entre los cancelados; la adopción real es probablemente
+mayor. <b>Implicación</b>: el binding pegajoso (mig 132/133) degradaba a <b>~la mitad o más</b>
+de los clientes, no a un nicho del 2 % — multiplica el valor del fix mig 134 (§6) y
+<b>refuerza</b> la tesis del informe.</div>
 <div class="grid2">
 <div><h3>Demanda por día y hora — Rondeau</h3>{fig_heat}</div>
 <div><h3>Equidad de carga — Rondeau (30 d)</h3>{fig_equity}
@@ -648,14 +669,18 @@ P90/P95 (~50–67 min) corresponden a los picos de 17–19 h, donde ρ→0.8.</p
 El sistema reparte equitativamente; Rodri/Tony bajos = part-time/ocultos, no inequidad.</p></div>
 </div>
 <div class="callout"><b>Patrones detectados.</b>
-<b>(1)</b> Adopción de "menor espera" muy baja (0.6–2.3 %): el pool protege el sistema, pero
-la función está infrautilizada — gran oportunidad de producto.
+<b>(1)</b> "Menor espera" es la elección <b>mayoritaria</b> (≈ {ad_pct:.0f} %+, ver
+corrección arriba): el modelo pool gobierna la experiencia de la mayoría de los clientes,
+no la de un nicho.
 <b>(2)</b> Abandono bajo (cancelado 3–4.5 %): los clientes esperan en vez de irse → la
 espera es un costo real de experiencia, no de ingresos perdidos (aún).
 <b>(3)</b> Demanda muy concentrada Jue–Sáb 17–19 h: la capacidad (c) debería escalar por
 franja, no ser plana.
 <b>(4)</b> Higiene de datos: servicios duplicados por espacios ("Corte" vs "Corte ") —
-distorsiona analítica por servicio; normalizar.</div>
+distorsiona analítica por servicio; normalizar.
+<b>(5)</b> <b>Brecha de modelo de datos</b>: la modalidad de check-in no se persiste
+(<code>is_dynamic</code> se muta al asignar). Imposible medir adopción o segmentar el
+histórico por modalidad — ver §9.</div>
 </section>
 
 <section id="mejoras"><h2>9 · Mejoras notables (Phase 2)</h2>
@@ -670,9 +695,11 @@ Impacto: estimación de espera fiable, base para WSJF.</li>
 gate (lección de E / mig 129).</li>
 <li><b>Capacidad dinámica por franja.</b> ρ→0.8 sólo Jue–Sáb 17–19 h. Sugerir refuerzo en
 esas 6 franjas reduce el P95 sin contratar a tiempo completo.</li>
-<li><b>Empujar la adopción de "menor espera".</b> Con 0.6–2.3 % de uso, el beneficio del
-pool está latente; subir adopción al 30–40 % es donde el modelo M/M/c rinde su máximo
-(la §6 muestra el potencial {POOL[0]["ratio"]:.0f}×).</li>
+<li><b>Columna inmutable de modalidad de check-in</b> (p. ej. <code>chose_dynamic</code>,
+fijada en el INSERT y nunca mutada). Hoy <code>is_dynamic</code> se resetea al asignar →
+imposible medir adopción, ETA por modalidad o segmentar el histórico. Cambio chico
+(1 columna + set en <code>checkinClient</code>); habilita toda la analítica de producto
+sobre la función que usa la mayoría. <b>Prioridad alta.</b></li>
 </ol>
 </section>
 
