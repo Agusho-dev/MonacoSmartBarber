@@ -899,7 +899,16 @@ export function QueuePanel({
               )}
             </div>
             <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-              {(!myActiveEntry && !myActiveBreak && entry.id === myWaitingEntries[0]?.id) && (
+              {(!myActiveEntry && !myActiveBreak && (
+                entry.id === myWaitingEntries[0]?.id ||
+                // Rescate de limbos del hint divergente: si estoy viendo "General"
+                // y el cliente es dinámico (o sin barber_id), cualquier barbero
+                // libre puede reclamarlo. El claim server es pool no bloqueante
+                // (mig 134): FOR UPDATE SKIP LOCKED resuelve la carrera. Sin
+                // esto, un hint contradictorio entre tablets dejaba al cliente
+                // fuera de "Mi fila" de TODOS y nadie podía tocar Atender.
+                (isGeneralQueue && (entry.is_dynamic || !entry.barber_id))
+              )) && (
                 <Button
                   size="sm"
                   className="h-10 px-3 sm:h-14 sm:px-6 text-sm sm:text-lg"
