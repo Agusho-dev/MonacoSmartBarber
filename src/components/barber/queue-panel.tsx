@@ -899,26 +899,44 @@ export function QueuePanel({
               )}
             </div>
             <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-              {(!myActiveEntry && !myActiveBreak && (
-                entry.id === myWaitingEntries[0]?.id ||
-                // Rescate de limbos del hint divergente: si estoy viendo "General"
-                // y el cliente es dinámico (o sin barber_id), cualquier barbero
-                // libre puede reclamarlo. El claim server es pool no bloqueante
-                // (mig 134): FOR UPDATE SKIP LOCKED resuelve la carrera. Sin
-                // esto, un hint contradictorio entre tablets dejaba al cliente
-                // fuera de "Mi fila" de TODOS y nadie podía tocar Atender.
-                (isGeneralQueue && (entry.is_dynamic || !entry.barber_id))
-              )) && (
-                <Button
-                  size="sm"
-                  className="h-10 px-3 sm:h-14 sm:px-6 text-sm sm:text-lg"
-                  onClick={() => handleStartService(entry.id)}
-                  disabled={actionLoading === entry.id}
-                >
-                  <Scissors className="size-4 sm:size-5 sm:mr-2" />
-                  <span className="hidden sm:inline">Atender</span>
-                </Button>
-              )}
+              {(() => {
+                if (myActiveEntry || myActiveBreak) return null
+                const isMyMainTap = entry.id === myWaitingEntries[0]?.id
+                // Rescate de limbos del hint divergente (mig 134 + commit 1cb1a41):
+                // en General, cualquier barbero libre puede reclamar un dinámico.
+                // El claim server es pool no bloqueante (FOR UPDATE SKIP LOCKED),
+                // así que el "rescate" es seguro a nivel datos. Sin esto, hints
+                // contradictorios entre tablets dejaban al cliente fuera de
+                // "Mi fila" de TODOS y nadie podía tocar Atender.
+                const generalClaimAllowed =
+                  isGeneralQueue && (entry.is_dynamic || !entry.barber_id)
+                if (!isMyMainTap && !generalClaimAllowed) return null
+                // Rescate visual: en General, si el hint apunta a OTRO barbero,
+                // el botón pasa a secundario ("Reclamar") para evitar la duda
+                // del 2026-05-26 (dos barberos libres + mismo cliente → ¿quién
+                // lo toma?). El sugerido sigue viendo "Atender" primario en
+                // Mi fila; el otro ve "Reclamar" outline en General. Si nadie
+                // está sugerido (pool puro, barber_id NULL) el botón sigue
+                // primario porque no hay a quien "robarle".
+                const isRescueOfOtherHint =
+                  isGeneralQueue &&
+                  entry.barber_id != null &&
+                  entry.barber_id !== session.staff_id
+                return (
+                  <Button
+                    size="sm"
+                    variant={isRescueOfOtherHint ? 'outline' : 'default'}
+                    className="h-10 px-3 sm:h-14 sm:px-6 text-sm sm:text-lg"
+                    onClick={() => handleStartService(entry.id)}
+                    disabled={actionLoading === entry.id}
+                  >
+                    <Scissors className="size-4 sm:size-5 sm:mr-2" />
+                    <span className="hidden sm:inline">
+                      {isRescueOfOtherHint ? 'Reclamar' : 'Atender'}
+                    </span>
+                  </Button>
+                )
+              })()}
 
               <AlertDialog>
                 <AlertDialogTrigger asChild>

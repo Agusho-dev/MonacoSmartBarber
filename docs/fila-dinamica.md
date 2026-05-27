@@ -499,6 +499,30 @@ avg correcto es por barbero+servicio, precalculado por cron — no un promedio
 crudo recalculado por tick). El fix de disponibilidad ya resuelve el síntoma;
 el promedio solo afecta el caso secundario "todos ocupados".
 
+### Incidente 2026-05-26 — dos barberos libres, mismo cliente, duda de quién atiende
+
+**Síntoma**: dos barberos libres ven al mismo dinámico con botón "Atender"
+habilitado y nadie sabe quién debería tomarlo.
+
+**Causa**: efecto colateral del commit `1cb1a41` (2026-05-20). Para rescatar
+los limbos por hint divergente (incidente Lucas Ibarra), el botón "Atender" en
+el tab General quedó habilitado para **cualquier barbero libre** sobre
+**cualquier dinámico**, aunque el hint local sí hubiese asignado correctamente
+al barbero "dueño". El sugerido veía "Atender" en Mi fila y el otro veía
+"Atender" en General con label "Se atiende con [otro]" — el server seguía OK
+(SKIP LOCKED resuelve la carrera y ningún `in_progress` se duplicó), pero la
+UX no decía quién debía tocar primero. A nivel datos no hubo doble asignación;
+fue exclusivamente confusión visual.
+
+**Fix (2026-05-26, client-side, sin migración)**: en `queue-panel.tsx`, el
+botón en General pasa a `variant="outline"` y cambia el label a **"Reclamar"**
+cuando el hint apunta a otro barbero (rescate de cliente sugerido a otro). El
+sugerido sigue viendo "Atender" primario en Mi fila; los demás libres ven
+"Reclamar" outline, claramente subordinado. Si nadie está sugerido
+(`barber_id` NULL → pool puro), el botón sigue primario porque no hay a quien
+"robarle". El rescate de limbos del 1cb1a41 no se pierde — el claim sigue
+disponible para todos los libres, solo cambia la jerarquía visual.
+
 ### Pendiente (Phase 2 — §14)
 
 - Predicción de duración por (barbero, servicio) — hoy el panel usa avg
