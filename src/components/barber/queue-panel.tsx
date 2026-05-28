@@ -199,15 +199,34 @@ export function QueuePanel({
     setDayStats(stats)
   }, [session.staff_id, session.branch_id])
 
-  // Refresca SOLO los inputs del sort dinámico (dailyServiceCounts y lastCompletedAt).
-  // Llamado en cada evento Realtime de queue_entries para que los paneles converjan
-  // al mismo "barbero más justo" tras completar un servicio en otro tablet. Sin esto,
-  // assignDynamicBarbers en cada tablet rankea con datos stale y un mismo dinámico
-  // puede aparecer en "Mi fila" de varios barberos.
+  // Ref espejo de allBarbers para que fetchAssignmentData pueda leerlo sin
+  // recrearse cuando cambia la lista de barberos (mantiene useCallback estable
+  // y evita re-suscripciones del canal Realtime).
+  const allBarbersRef = useRef<Staff[]>([])
+
+  // Refresca los inputs del sort dinámico (dailyServiceCounts, lastCompletedAt)
+  // Y el estado de fichaje (notClockedInBarbers). Llamado en cada evento Realtime
+  // de queue_entries para que los paneles converjan al mismo "barbero más justo"
+  // tras completar un servicio en otro tablet, y para que un barbero que recién
+  // fichó deje de estar marcado como "no fichado" cuando llega un cliente nuevo.
+  //
+  // attendance viene acá porque la tabla salió del realtime publication (mig 124)
+  // y antes el panel quedaba con notClockedInBarbers stale toda la jornada —
+  // incidente prod 2026-05-28: un dinámico se pre-asignó al único barbero que el
+  // panel "veía" fichado (su propio dueño), aunque otros estuvieran libres.
   const fetchAssignmentData = useCallback(async () => {
     const data = await fetchBranchAssignmentData(session.branch_id)
     setDailyServiceCounts(data.dailyServiceCounts ?? {})
     setLastCompletedAt(data.lastCompletedAt ?? {})
+
+    const latestAttendance = data.latestAttendance ?? {}
+    const notClocked = new Set<string>()
+    for (const b of allBarbersRef.current) {
+      if (latestAttendance[b.id] !== 'clock_in') {
+        notClocked.add(b.id)
+      }
+    }
+    setNotClockedInBarbers(notClocked)
   }, [session.branch_id])
 
   const fetchBarbersAndSchedules = useCallback(async () => {
@@ -384,15 +403,27 @@ export function QueuePanel({
     }
   }, [supabase, session.branch_id, session.staff_id, fetchQueue, refreshStats, fetchAssignmentData, fetchBarbersAndSchedules, fetchBreakRequestStatus, fetchPendingBreakRequests, fetchHiddenStatus])
 
-  // Al volver al tab o en el polling fallback, refrescamos solo la cola y las stats.
-  // Los datos de barberos/schedules cambian con poca frecuencia y se refrescan
-  // cuando el WebSocket reconecta (evento SUBSCRIBED). Esto reduce el burst de queries
-  // cuando múltiples tablets reconectan simultáneamente.
+  // Mantener el ref sincronizado con allBarbers. fetchAssignmentData lo usa para
+  // derivar notClockedInBarbers sin depender de allBarbers en su closure (mantiene
+  // estable el useCallback y evita re-suscripciones del canal Realtime).
+  useEffect(() => {
+    allBarbersRef.current = allBarbers
+  }, [allBarbers])
+
+  // Al volver al tab o en el polling fallback, refrescamos cola, stats y datos
+  // de asignación. fetchAssignmentData entra acá tras el incidente 2026-05-28:
+  // attendance_logs no está en realtime publication (mig 124), así que un
+  // barbero que ficha mientras este panel ya está abierto solo se hace visible
+  // cuando entra un cliente (que dispara fetchAssignmentData en queue_entries
+  // event) o cuando vuelve el foco al tab. Sin esta tercera vía, un panel sin
+  // clientes nuevos pero con otros fichajes posteriores quedaba con
+  // notClockedInBarbers stale hasta reconectar el WS.
   useVisibilityRefresh(
     useCallback(() => {
       fetchQueue()
       refreshStats()
-    }, [fetchQueue, refreshStats]),
+      fetchAssignmentData()
+    }, [fetchQueue, refreshStats, fetchAssignmentData]),
     30_000
   )
 

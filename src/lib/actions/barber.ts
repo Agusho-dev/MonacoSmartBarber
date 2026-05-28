@@ -306,7 +306,7 @@ export async function fetchBarberDayStats(staffId: string, branchId: string) {
 
 export async function fetchBranchAssignmentData(branchId: string) {
   const orgId = await getCurrentOrgId()
-  if (!orgId) return { dailyServiceCounts: {}, lastCompletedAt: {} }
+  if (!orgId) return { dailyServiceCounts: {}, lastCompletedAt: {}, latestAttendance: {} }
 
   const supabase = createAdminClient()
 
@@ -317,15 +317,20 @@ export async function fetchBranchAssignmentData(branchId: string) {
     .eq('id', branchId)
     .eq('organization_id', orgId)
     .maybeSingle()
-  if (!branchCheck) return { dailyServiceCounts: {}, lastCompletedAt: {} }
+  if (!branchCheck) return { dailyServiceCounts: {}, lastCompletedAt: {}, latestAttendance: {} }
 
   const dayStart = new Date()
   dayStart.setHours(0, 0, 0, 0)
 
-  // (mig 131/134) `fairBarberId` removido del response: sin fairness gate, el
-  // claim es pool FIFO no bloqueante con FOR UPDATE SKIP LOCKED dentro de
-  // claim_next_for_barber. get_fair_barber fue dropeado en mig 136.
-  const [dailyRes, lastRes] = await Promise.all([
+  // attendance_logs viaja también acá: fue removido del realtime publication
+  // (mig 124) por carga, así que el panel del barbero no se entera cuando otro
+  // barbero ficha mientras su tab está abierto. Sin esto, `notClockedInBarbers`
+  // queda stale toda la jornada y `assignDynamicBarbers` pre-asigna los
+  // dinámicos al único barbero que el panel "ve" fichado (el dueño del tab).
+  // Incidente prod 2026-05-28 (Nico Ulloque): Thomas Franco apareció en su
+  // "Mi fila" porque Chipi/Simón estaban fichados pero su panel los marcaba
+  // como NO fichados.
+  const [dailyRes, lastRes, attendanceRes] = await Promise.all([
     supabase
       .from('visits')
       .select('barber_id')
@@ -339,6 +344,12 @@ export async function fetchBranchAssignmentData(branchId: string) {
       .not('barber_id', 'is', null)
       .order('completed_at', { ascending: false })
       .limit(200),
+    supabase
+      .from('attendance_logs')
+      .select('staff_id, action_type')
+      .eq('branch_id', branchId)
+      .gte('recorded_at', dayStart.toISOString())
+      .order('recorded_at', { ascending: false }),
   ])
 
   const dailyServiceCounts: Record<string, number> = {}
@@ -353,9 +364,17 @@ export async function fetchBranchAssignmentData(branchId: string) {
     }
   }
 
+  const latestAttendance: Record<string, string> = {}
+  for (const log of (attendanceRes.data ?? []) as { staff_id: string; action_type: string }[]) {
+    if (!latestAttendance[log.staff_id]) {
+      latestAttendance[log.staff_id] = log.action_type
+    }
+  }
+
   return {
     dailyServiceCounts,
     lastCompletedAt,
+    latestAttendance,
   }
 }
 
