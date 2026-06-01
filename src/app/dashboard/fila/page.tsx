@@ -86,6 +86,7 @@ export default async function FilaAdminPage() {
         branches={branches ?? []}
         breakConfigs={breakConfigs ?? []}
         timezone={timezone}
+        orgId={orgId}
       />
     </FilaTabsWrapper>
   )

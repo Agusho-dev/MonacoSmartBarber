@@ -700,10 +700,16 @@ export function QueuePanel({
     if ('error' in result) {
       toast.error(result.error)
     } else if (!result.entryId) {
-      // Después de mig 131 (sin fairness gate) los casos de NULL son: cliente
-      // ya tomado por otra tablet, descanso pendiente bloqueando, turno
-      // inminente, o pool vacío. Todos comparten el mismo mensaje neutro.
-      toast.info('El cliente ya no está disponible')
+      // El claim devuelve NULL por varias causas (cliente ya tomado por otra
+      // tablet, turno inminente, pool vacío, o —desde mig 139— el barbero ya
+      // tiene un corte/descanso in_progress). Diferenciamos con el estado local
+      // para no mentir: si ya estás ocupado, el motivo es ese (guard #13), no
+      // "el cliente". Evita el toast técnico 23505 que aparecía antes.
+      if (myActiveEntry || myActiveBreak) {
+        toast.info('Terminá tu corte actual antes de tomar otro')
+      } else {
+        toast.info('El cliente ya no está disponible')
+      }
     } else if (result.entryId !== entryId) {
       toast.info('El cliente fue tomado por otro barbero. Se asignó el siguiente.')
     }
@@ -961,8 +967,8 @@ export function QueuePanel({
                     onClick={() => handleStartService(entry.id)}
                     disabled={actionLoading === entry.id}
                   >
-                    <Scissors className="size-4 sm:size-5 sm:mr-2" />
-                    <span className="hidden sm:inline">
+                    <Scissors className="size-4 sm:size-5 mr-1.5 sm:mr-2" />
+                    <span>
                       {isRescueOfOtherHint ? 'Reclamar' : 'Atender'}
                     </span>
                   </Button>

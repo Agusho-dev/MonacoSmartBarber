@@ -251,8 +251,17 @@ export async function completeService(
   if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
 
   // 1. Complete the queue entry – this fires the on_queue_completed trigger
-  //    which creates a visit record with amount=0 as placeholder
-  const { error } = await supabase
+  //    which creates a visit record with amount=0 as placeholder.
+  //    `.select('id')` nos da el rowcount: si la UPDATE matchea 0 filas
+  //    significa que el entry YA no estaba en 'in_progress' (doble-tap,
+  //    reintento de red tras AbortError de 8s, dos pestañas/dispositivos). En
+  //    ese caso el trigger NO disparó de nuevo (es idempotente vía
+  //    OLD.status='in_progress'), pero el RESTO de este server action SÍ correría
+  //    sus efectos colaterales (recordTransfer, processProductSales, redención
+  //    de puntos, salary_reports, mensajes post-servicio) sobre la visita ya
+  //    existente, duplicándolos. Cortamos acá ANTES de cualquier efecto.
+  //    (Auditoría jun-2026: este doble-disparo infló caja en +272.000 ARS.)
+  const { data: completedRows, error } = await supabase
     .from('queue_entries')
     .update({
       status: 'completed',
@@ -260,10 +269,17 @@ export async function completeService(
     })
     .eq('id', queueEntryId)
     .eq('status', 'in_progress')
+    .select('id')
 
   if (error) {
     console.error('completeService error:', error)
     return { error: 'Error al completar servicio: ' + error.message }
+  }
+
+  if (!completedRows || completedRows.length === 0) {
+    // Ya fue completado por una llamada previa: retorno idempotente, sin efectos.
+    console.warn(`[completeService] entry ${queueEntryId} ya no estaba in_progress; retorno idempotente`)
+    return { success: true as const, alreadyCompleted: true as const }
   }
 
   // 1b. Si la queue entry proviene de un turno, marcarlo como completado
@@ -433,12 +449,15 @@ export async function completeService(
 
     const cost = config?.redemption_threshold || 10
 
-    // Filtrar client_points por org para evitar canjes cruzados
+    // Filtrar client_points por org para evitar canjes cruzados.
+    // NO filtrar por branch_id: la fila es única por (client_id, organization_id)
+    // (idx_client_points_unique_client_org) y branch_id puede ser NULL o de otra
+    // sucursal de la misma org → filtrar por branch perdía la fila y abortaba el
+    // canje (entregaba el premio sin descontar puntos). Auditoría jun-2026 #15.
     let cpQuery = supabase
       .from('client_points')
       .select('points_balance, total_redeemed')
       .eq('client_id', visit.client_id)
-      .eq('branch_id', visit.branch_id)
     if (orgId) cpQuery = (cpQuery as typeof cpQuery).eq('organization_id', orgId)
     const { data: clientPoints } = await cpQuery.maybeSingle()
 
@@ -452,7 +471,7 @@ export async function completeService(
         description: 'Canje de beneficio',
       })
 
-      // Descontar puntos escopado a org+branch
+      // Descontar puntos escopado a org (fila única por client_id+organization_id).
       let updateQuery = supabase
         .from('client_points')
         .update({
@@ -460,7 +479,6 @@ export async function completeService(
           total_redeemed: (clientPoints.total_redeemed || 0) + cost,
         })
         .eq('client_id', visit.client_id)
-        .eq('branch_id', visit.branch_id)
       if (orgId) updateQuery = (updateQuery as typeof updateQuery).eq('organization_id', orgId)
       await updateQuery
     }
@@ -946,13 +964,25 @@ export async function cancelQueueEntry(queueEntryId: string) {
   const orgAccess = await validateBranchAccess(entry.branch_id)
   if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
 
-  const { error } = await supabase
+  // Guard de estado: sólo cancelar entries 'waiting'. Sin esto, un tap en la X
+  // ("No se presentó") sobre un cliente que OTRO barbero ya pasó a in_progress
+  // (carrera de UI por lag de realtime) pisaba ese in_progress y dejaba el corte
+  // sin poder cobrarse. No se filtra is_break: el dashboard sí permite cancelar
+  // un descanso encolado (waiting) desde acá — eso se preserva.
+  const { data: cancelledRows, error } = await supabase
     .from('queue_entries')
     .update({ status: 'cancelled' })
     .eq('id', queueEntryId)
+    .eq('status', 'waiting')
+    .select('id')
 
   if (error) {
     return { error: 'Error al cancelar' }
+  }
+
+  if (!cancelledRows || cancelledRows.length === 0) {
+    // El entry ya no estaba 'waiting' (lo empezaron a atender o se completó).
+    return { error: 'El cliente ya está siendo atendido o fue completado' }
   }
 
   revalidatePath('/barbero/fila')
@@ -1083,19 +1113,39 @@ export async function checkinClientByFace(
 
 export async function reassignMyBarber(
   queueEntryId: string,
-  newBarberId: string
+  newBarberId: string,
+  clientId: string
 ) {
   if (!isValidUUID(queueEntryId) || !isValidUUID(newBarberId)) return { error: 'Datos inválidos' }
+  // Prueba de posesión: el cliente debe conocer el client_id de SU entry. Es el
+  // único ownership factible sin sesión de cliente en el kiosk compartido.
+  // Sin esto, cualquier anónimo con un queueEntryId (visible vía RLS pública)
+  // podía reasignar el barbero de OTRO cliente (IDOR — auditoría jun-2026).
+  if (!isValidUUID(clientId)) return { error: 'Datos inválidos' }
   const supabase = createAdminClient()
 
-  // Operación pública del kiosko: verificar que la entrada y la sucursal existan
+  // Operación pública del kiosko: traer también client_id y status para ownership.
   const { data: entry } = await supabase
     .from('queue_entries')
-    .select('branch_id')
+    .select('branch_id, client_id, status')
     .eq('id', queueEntryId)
     .maybeSingle()
 
   if (!entry) return { error: 'Entrada no encontrada' }
+
+  // Ownership: el client_id provisto debe coincidir con el dueño del entry.
+  // Mensaje genérico para no filtrar si el entry existe o no.
+  if (entry.client_id !== clientId) return { error: 'Entrada no encontrada' }
+
+  // Sólo se puede reasignar mientras se espera (no en in_progress/completed).
+  if (entry.status !== 'waiting') return { error: 'El cliente ya está siendo atendido' }
+
+  // Rate-limit por IP+branch contra fuerza bruta del IDOR.
+  const { RateLimits } = await import('@/lib/rate-limit')
+  const gate = await RateLimits.kioskReassign(entry.branch_id)
+  if (!gate.allowed) {
+    return { error: 'Demasiados cambios en poco tiempo. Esperá un momento.' }
+  }
 
   // Verificar que la sucursal esté activa (validación mínima para operaciones públicas)
   const { data: branchCheck } = await supabase

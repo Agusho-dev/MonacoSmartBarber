@@ -1,0 +1,54 @@
+-- 140_lockdown_queue_entries_public_read.sql
+-- ---------------------------------------------------------------------------
+-- FIX #9 (auditoría fila dinámica jun-2026) — lockdown de RLS.
+--
+-- ⚠️⚠️  NO APLICAR TODAVÍA  ⚠️⚠️
+-- A diferencia de la 139, esta migración NO se aplicó el 1/6/2026. Es DESTRUCTIVA
+-- para la app mobile YA DESPLEGADA y requiere una secuencia de rollout.
+--
+-- QUÉ HACE
+-- --------
+-- Elimina la policy `queue_entries_public_read` (rol `authenticated`, qual
+-- `status IN (waiting,in_progress)` SIN scope de org). Esa policy deja que
+-- cualquier usuario autenticado lea la cola activa (filas crudas: client_id,
+-- barber_id, timestamps) de CUALQUIER organización. Es el leak cross-org + el
+-- vector de fan-out del incidente mig 124, del lado del cliente.
+--
+-- Tras dropearla, los reads de `queue_entries` para authenticated quedan
+-- gobernados por `queue_entries_read_by_org` (sólo branches de la org del user).
+-- El dashboard usa service_role (no afectado). TV/kiosk usan `anon`
+-- (`queue_entries_anon_read`, no afectado). Mobile: ver prerequisito.
+--
+-- PREREQUISITO (por qué NO aplicar aún)
+-- -------------------------------------
+-- La app mobile mostraba ocupación EN VIVO de branches de OTRAS orgs ("browse
+-- libre") suscribiéndose directo a `queue_entries` (provider
+-- `branchQueueRealtimeProvider`). Ese stream depende de esta policy abierta.
+--
+-- Ya se reescribió ese provider para streamear `branch_signals` en su lugar
+-- (agregado PII-free, refrescado por trigger en cada cambio de cola; el detalle
+-- se trae por el RPC SECURITY DEFINER `get_branch_public_detail`). Ver
+-- `Monaco-mobile/lib/features/occupancy/providers/occupancy_provider.dart`.
+--
+-- Pero los teléfonos con la versión VIEJA siguen usando el stream crudo hasta
+-- que actualicen. Aplicar este DROP antes de que el release con el rewire tenga
+-- adopción suficiente romperá los updates en vivo cross-org de esos usuarios
+-- (la carga inicial seguiría andando vía RPC; sólo se pierde el refresh en vivo).
+--
+-- CUÁNDO Y CÓMO APLICAR
+-- ---------------------
+-- 1. Publicar el release mobile con el rewire a `branch_signals`.
+-- 2. Esperar adopción (p. ej. >90% de sesiones activas en la versión nueva, o
+--    forzar update mínimo).
+-- 3. Aplicar esta migración (supabase db push / apply_migration).
+-- 4. Verificar: un cliente autenticado de la org A ya NO recibe filas de
+--    queue_entries de la org B vía PostgREST/realtime; la pantalla de detalle
+--    cross-org sigue mostrando ocupación (vía branch_signals + RPC).
+--
+-- ROLLBACK: recrear la policy
+--   CREATE POLICY queue_entries_public_read ON public.queue_entries
+--     FOR SELECT TO authenticated
+--     USING (status = ANY (ARRAY['waiting'::queue_status,'in_progress'::queue_status]));
+-- ---------------------------------------------------------------------------
+
+DROP POLICY IF EXISTS queue_entries_public_read ON public.queue_entries;

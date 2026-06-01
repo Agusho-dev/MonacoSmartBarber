@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
 import type { QueueEntry, StaffStatus, StaffSchedule, Staff } from '@/lib/types/database'
-import { assignDynamicBarbers, calculateEffectiveAhead } from '@/lib/barber-utils'
+import { assignDynamicBarbers, calculateEffectiveAhead, countActiveDynamicCapableBarbers } from '@/lib/barber-utils'
 import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
 import {
   Select,
@@ -290,13 +290,17 @@ export function TvClient({
         },
         () => fetchBarbers()
       )
+      // FIX #14: antes se escuchaba attendance_logs, que NO está en la publication
+      // supabase_realtime (mig 124) → listener muerto. branch_signals SÍ está
+      // publicada y se actualiza por trigger al fichar/desfichar, así que es el
+      // reemplazo válido para refrescar la ocupación. No tiene organization_id →
+      // sin filtro (baja frecuencia; fetchSchedules ya viene org-scopeado server-side).
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'attendance_logs',
-          ...(orgFilter ? { filter: orgFilter } : {}),
+          table: 'branch_signals',
         },
         () => fetchSchedules()
       )
@@ -360,11 +364,14 @@ export function TvClient({
     [dynamicEntries]
   )
 
-  // Barberos activos (clocked in + is_active)
+  // FIX #5: divisor canónico de barberos capaces de tomar dinámicos (excluye
+  // descanso y fin de turno, no sólo clock-in/is_active). Mismo criterio que el
+  // kiosk y, en lo posible, que get_client_queue_position (mobile).
   const activeBarberCount = useMemo(() => {
+    const branchEntries = selectedBranchId ? entries.filter(e => e.branch_id === selectedBranchId) : entries
     const branchBarbers = selectedBranchId ? liveBarbers.filter(b => b.branch_id === selectedBranchId) : liveBarbers
-    return branchBarbers.filter(b => b.is_active && !notClockedInBarbers.has(b.id)).length
-  }, [liveBarbers, selectedBranchId, notClockedInBarbers])
+    return countActiveDynamicCapableBarbers(branchBarbers, branchEntries, schedules, notClockedInBarbers, assignmentTime, { marginMinutes: shiftEndMargin })
+  }, [entries, liveBarbers, selectedBranchId, schedules, notClockedInBarbers, assignmentTime, shiftEndMargin])
 
   // --- Sizing dinámico por columna ---
   const ipMode = getSizeMode(inProgressEntries.length)
@@ -437,12 +444,15 @@ export function TvClient({
               // Predicción server-side (mig 132/133): is_dynamic=true con barber_id ya seteado.
               const isServerPredicted = entry.is_dynamic && entry.barber
               if (isClientPredicted || isServerPredicted) {
+                // FIX #14: NO mostrar el nombre del barbero pre-asignado: es sólo un
+                // hint (ranking por ETA), pero el claim real es FIFO y lo toma el
+                // primer barbero libre que tapea "Atender". Mostrar el nombre prometía
+                // algo que el server no garantiza y el cliente terminaba con otro.
                 return (
                   <p className={`text-emerald-400 ${ws.barberInfo} flex items-center`}>
                     <Zap className={ws.chevronSize} />
                     <span className="font-medium">Menor espera</span>
-                    <ChevronRight className={ws.chevronSize} />
-                    <span className="font-medium text-zinc-300">{entry.barber?.full_name}</span>
+                    <span className="ml-1 font-medium text-zinc-400">· primer barbero libre</span>
                   </p>
                 )
               }
