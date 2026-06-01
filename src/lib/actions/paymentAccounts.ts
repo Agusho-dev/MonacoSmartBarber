@@ -189,7 +189,7 @@ export async function recordTransfer(visitId: string, accountId: string, amount:
 
   const supabase = createAdminClient()
 
-  // 1. Log the transfer
+  // 1. Log the transfer (idempotente por visit_id — defensa en profundidad).
   const { error: logError } = await supabase
     .from('transfer_logs')
     .insert({
@@ -199,7 +199,16 @@ export async function recordTransfer(visitId: string, accountId: string, amount:
       branch_id: branchId
     })
 
-  if (logError) return { error: logError.message }
+  if (logError) {
+    // 23505 = unique_violation sobre visit_id (uq_transfer_logs_visit_id, mig 139):
+    // ya había un log para esta visita (doble-complete / reintento). No es un error
+    // real → salimos ANTES de re-incrementar el acumulado de la cuenta (el efecto
+    // monetario más peligroso, que infló caja +272.000 ARS en la auditoría jun-2026).
+    if (logError.code === '23505') {
+      return { success: true as const, alreadyLogged: true as const }
+    }
+    return { error: logError.message }
+  }
 
   // 2. Incremento atómico via RPC (evita race condition: read-modify-write no era seguro bajo concurrencia).
   const { error: rpcError } = await supabase.rpc('increment_account_accumulated', {

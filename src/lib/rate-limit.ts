@@ -79,6 +79,13 @@ export const RateLimits = {
     return rateLimit('kiosk_checkin', `${ip}:${branchId}`, { limit: 20, window: 60 })
   },
 
+  // Reasignación de barbero desde el kiosk (endpoint público sin auth real del
+  // cliente): 10 por IP+branch cada 60s. Acota el abuso por fuerza bruta del IDOR.
+  kioskReassign: async (branchId: string) => {
+    const ip = await getClientIP()
+    return rateLimit('kiosk_reassign', `${ip}:${branchId}`, { limit: 10, window: 60 })
+  },
+
   // Review submit: 1 por token (tokens son únicos, redundante pero defensa extra)
   reviewSubmit: async (token: string) => {
     return rateLimit('review_submit', token, { limit: 3, window: 300 })

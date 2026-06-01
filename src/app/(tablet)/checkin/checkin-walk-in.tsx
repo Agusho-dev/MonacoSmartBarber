@@ -50,6 +50,7 @@ import {
   pickBestBarber,
   getBarbersOnBreakIds,
   getBarbersAttendingIds,
+  countActiveDynamicCapableBarbers,
 } from '@/lib/barber-utils'
 import { FaceCamera } from '@/components/checkin/face-camera'
 import { FaceEnrollment } from '@/components/checkin/face-enrollment'
@@ -651,23 +652,21 @@ export function CheckinWalkIn() {
     })
   }, [barbers, queueEntries, dynamicEntries, schedules, barberAvgMinutes, now, shiftEndMargin, notClockedInBarbers, barbersOnBreak, barbersAttending, dailyServiceCounts, lastCompletedAt])
 
-  // Barberos activos para cálculo de posición optimista
-  // Excluye barberos en descanso para que el ETA del cliente no asuma capacidad
-  // que no existe (no van a tomar dinámicos hasta que terminen el descanso).
+  // FIX #5: divisor canónico de barberos capaces de tomar dinámicos (mismo criterio
+  // que TV y, en lo posible, que get_client_queue_position del mobile). Suma el
+  // bloqueo por fin de turno además de descanso/clock-in.
   const activeBarberCount = useMemo(() => {
-    return barbers.filter(b =>
-      b.is_active &&
-      !b.hidden_from_checkin &&
-      !notClockedInBarbers.has(b.id) &&
-      !barbersOnBreak.has(b.id)
-    ).length
-  }, [barbers, notClockedInBarbers, barbersOnBreak])
+    return countActiveDynamicCapableBarbers(barbers, queueEntries, schedules, notClockedInBarbers, now, { marginMinutes: shiftEndMargin })
+  }, [barbers, queueEntries, schedules, notClockedInBarbers, now, shiftEndMargin])
 
-  // Posición optimista del cliente en la fila (considerando paralelismo)
+  // Posición optimista del cliente en la fila (considerando paralelismo).
+  // FIX #6: usar queueEntries CRUDAS (barber_id real NULL para dinámicos), no
+  // dynamicEntries — el hint de assignDynamicBarbers inyecta barber_id y empujaba
+  // al dinámico a la rama "específico", colapsando dynamicsAhead a 0 y subestimando.
   const effectiveAhead = useMemo(() => {
     if (!queueEntryId) return null
-    return calculateEffectiveAhead(dynamicEntries, queueEntryId, activeBarberCount)
-  }, [dynamicEntries, queueEntryId, activeBarberCount])
+    return calculateEffectiveAhead(queueEntries, queueEntryId, activeBarberCount)
+  }, [queueEntries, queueEntryId, activeBarberCount])
 
   // Nivel de disponibilidad global (1-4) usado por el CTA "Menor espera".
   // La vista por barbero usa directamente la lógica del mobile
@@ -906,7 +905,14 @@ export function CheckinWalkIn() {
       setSubmitting(true)
       setError('')
       try {
-        const result = await reassignMyBarber(entryId, newBarberId)
+        // Prueba de posesión: client_id del turno actual (de myQueueEntry o faceClientId).
+        const ownerClientId = myQueueEntry?.client_id ?? faceClientId
+        if (!ownerClientId) {
+          setError('No pudimos verificar tu turno. Volvé a registrarte.')
+          setSubmitting(false)
+          return
+        }
+        const result = await reassignMyBarber(entryId, newBarberId, ownerClientId)
         if ('error' in result && result.error) {
           setError(result.error)
         } else {
@@ -928,7 +934,7 @@ export function CheckinWalkIn() {
         setSubmitting(false)
       }
     },
-    [myQueueEntry]
+    [myQueueEntry, faceClientId]
   )
 
   const goToBarberStep = () => {
@@ -1071,7 +1077,8 @@ export function CheckinWalkIn() {
   const renderBarberCard = (
     barber: Staff,
     onSelect: (barberId: string) => void,
-    _showExpand = true
+    _showExpand = true,
+    selectable = true
   ) => {
     const isNotClockedIn = notClockedInBarbers.has(barber.id)
     const isOnBreak = barbersOnBreak.has(barber.id)
@@ -1114,10 +1121,16 @@ export function CheckinWalkIn() {
     return (
       <GlassRing key={barber.id} halo={false}>
         <button
-          onClick={() => onSelect(barber.id)}
-          disabled={submitting || isOnBreak}
-          aria-disabled={isOnBreak || undefined}
-          aria-label={isOnBreak ? `${barber.full_name} (en descanso, no disponible)` : barber.full_name}
+          onClick={() => { if (selectable && !isOnBreak) onSelect(barber.id) }}
+          disabled={submitting || isOnBreak || !selectable}
+          aria-disabled={isOnBreak || !selectable || undefined}
+          aria-label={
+            isOnBreak
+              ? `${barber.full_name} (en descanso, no disponible)`
+              : !selectable
+                ? `${barber.full_name} (aún no llegó, no disponible)`
+                : barber.full_name
+          }
           className={cn(
             'group relative w-full overflow-hidden rounded-2xl border p-4 md:p-5 text-left transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2',
             isLightBg
@@ -1217,7 +1230,7 @@ export function CheckinWalkIn() {
     )
   }
 
-  const renderBarberList = (onSelect: (barberId: string) => void, showExpand = true) => {
+  const renderBarberList = (onSelect: (barberId: string) => void, showExpand = true, allowDynamicFallback = true) => {
     // Barberos disponibles para SELECCIONAR: fichados, no bloqueados por fin de
     // turno y NO en descanso. Los en descanso se muestran en su propia sección
     // (deshabilitados) para que el cliente entienda por qué su barbero no aparece.
@@ -1368,6 +1381,29 @@ export function CheckinWalkIn() {
                 }, showExpand))}
               </div>
 
+              {/* FIX #8: estado vacío cuando NINGÚN barbero está disponible para elegir
+                  (todos en descanso o sin llegar). Antes el modal quedaba en un dead-end
+                  o el cliente terminaba eligiendo un barbero ausente. */}
+              {availableBarbers.length === 0 && (
+                <div className={cn(
+                  'rounded-2xl border p-6 text-center space-y-4',
+                  isLightBg ? 'border-zinc-200 bg-zinc-50' : 'border-white/10 bg-white/5'
+                )}>
+                  <p className={cn('text-sm md:text-base font-medium', isLightBg ? 'text-zinc-700' : 'text-white/80')}>
+                    Ahora mismo no hay barberos disponibles para elegir (todos en descanso o sin llegar).
+                  </p>
+                  {allowDynamicFallback && (
+                    <Button
+                      onClick={() => { setShowBarberPreference(false); onSelect(null as unknown as string) }}
+                      disabled={submitting}
+                      className="h-12 px-6 text-base"
+                    >
+                      <Zap className="size-4 mr-2" /> Ponerme en la fila igual
+                    </Button>
+                  )}
+                </div>
+              )}
+
               {onBreakBarbers.length > 0 && (
                 <>
                   <div className={cn('w-full h-px my-6', isLightBg ? 'bg-zinc-200' : 'bg-white/8')} />
@@ -1380,7 +1416,7 @@ export function CheckinWalkIn() {
                     {onBreakBarbers.map((barber) => renderBarberCard(barber, () => {
                       // No-op: la card está deshabilitada por isOnBreak.
                       // El handler se mantiene por la firma del prop.
-                    }, showExpand))}
+                    }, showExpand, false))}
                   </div>
                 </>
               )}
@@ -1394,10 +1430,9 @@ export function CheckinWalkIn() {
                     <div className={cn('h-px flex-1', isLightBg ? 'bg-zinc-200' : 'bg-white/10')} />
                   </div>
                   <div className="grid grid-cols-2 gap-3 md:gap-4 pb-4">
-                    {notArrivedBarbers.map((barber) => renderBarberCard(barber, (id) => {
-                      setShowBarberPreference(false);
-                      onSelect(id);
-                    }, showExpand))}
+                    {notArrivedBarbers.map((barber) => renderBarberCard(barber, () => {
+                      // No-op: no se puede elegir un barbero que aún no llegó (#8).
+                    }, showExpand, false))}
                   </div>
                 </>
               )}
@@ -2212,7 +2247,7 @@ export function CheckinWalkIn() {
               ) : (
                 renderBarberList((barberId) => {
                   if (queueEntryId) handleReassign(queueEntryId, barberId)
-                }, false)
+                }, false, false)
               )}
 
               {error && (
@@ -2719,7 +2754,7 @@ export function CheckinWalkIn() {
               ) : (
                 renderBarberList((barberId) => {
                   handleReassign(myQueueEntry.id, barberId)
-                }, false)
+                }, false, false)
               )}
 
               {error && (

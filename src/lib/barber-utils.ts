@@ -1,6 +1,10 @@
 import type { Staff, QueueEntry, Visit, StaffSchedule } from '@/lib/types/database'
+type VisitAvgInput = Pick<Visit, 'barber_id' | 'started_at' | 'completed_at'> & {
+  paused_duration_seconds?: number | null
+}
+
 export function buildBarberAvgMinutes(
-  visits: Pick<Visit, 'barber_id' | 'started_at' | 'completed_at'>[],
+  visits: VisitAvgInput[],
   fallback: number
 ): Record<string, number> {
   const groups: Record<string, number[]> = {}
@@ -8,9 +12,12 @@ export function buildBarberAvgMinutes(
   for (const v of visits) {
     if (!v.started_at || !v.completed_at) continue
     if (!v.barber_id) continue
+    // FIX sm-4: descontar el tiempo pausado para que el promedio refleje minutos
+    // efectivos de corte (un corte pausado 20min no debe inflar el ETA del barbero).
+    const pausedMin = Math.max(0, (v.paused_duration_seconds ?? 0) / 60)
     const mins =
       (new Date(v.completed_at).getTime() - new Date(v.started_at).getTime()) /
-      60_000
+      60_000 - pausedMin
     if (mins < 5 || mins > 120) continue
       ; (groups[v.barber_id] ??= []).push(mins)
   }
@@ -260,6 +267,65 @@ export function isBarberBlockedByShiftEnd(
   return true
 }
 
+// Forma mínima de barbero que el contador canónico necesita. TV trae un subset
+// (sin role/hidden_from_checkin/is_also_barber); por eso son opcionales y se
+// asume el default permisivo cuando faltan (ver countActiveDynamicCapableBarbers).
+export interface DynamicCapableBarber {
+  id: string
+  is_active: boolean
+  role?: string
+  is_also_barber?: boolean
+  hidden_from_checkin?: boolean
+}
+
+// ────────────────────────────────────────────────────────────────
+// FIX #5: contador CANÓNICO de barberos con capacidad para tomar dinámicos.
+// Único divisor de la estimación de espera en TODO el front. Espeja el criterio
+// de `get_client_queue_position` (DB). Criterio:
+//   is_active && (role==='barber' || is_also_barber) && !hidden_from_checkin
+//   && fichado (clock-in) && !on_break (ghost break in_progress)
+//   && !blocked_by_shift_end && walkin_mode != 'appointments_only'
+//
+// Notas de fidelidad:
+//  - `role`/`is_also_barber`: si el barbero viene sin `role` (caso TV, que no lo
+//    selecciona) se ASUME barbero (la query ya filtró role.eq.barber ||
+//    is_also_barber.eq.true). Cuando `role` está presente, exigimos
+//    role==='barber' O is_also_barber===true.
+//  - `walkin_mode`: HOY no se carga en el front (vive en appointment_staff). El
+//    parámetro `appointmentsOnlyIds` permite inyectarlo cuando se cargue; mientras
+//    esté vacío, el criterio es no-op. La DB (RPC) sí lo excluye; mobile puede dar
+//    un número levemente distinto de TV/kiosk hasta que se cargue acá (aceptado).
+// ────────────────────────────────────────────────────────────────
+export function countActiveDynamicCapableBarbers(
+  barbers: DynamicCapableBarber[],
+  entries: QueueEntry[],
+  schedules: StaffSchedule[],
+  notClockedInIds: Set<string>,
+  now: number,
+  options?: {
+    marginMinutes?: number
+    appointmentsOnlyIds?: Set<string>
+  }
+): number {
+  const margin = options?.marginMinutes ?? 35
+  const appointmentsOnly = options?.appointmentsOnlyIds ?? new Set<string>()
+  const onBreak = getBarbersOnBreakIds(entries)
+
+  return barbers.filter((b) => {
+    if (!b.is_active) return false
+    // Capacidad de corte: barbero por rol, o staff marcado como también-barbero.
+    // Estricto sólo si `role` está presente (TV no lo trae → se asume barbero).
+    if (b.role !== undefined && b.role !== 'barber' && b.is_also_barber !== true) return false
+    if (b.hidden_from_checkin === true) return false
+    if (notClockedInIds.has(b.id)) return false
+    if (onBreak.has(b.id)) return false
+    if (appointmentsOnly.has(b.id)) return false
+    // isBarberBlockedByShiftEnd espera un Staff; sólo usa b.id contra schedules.
+    if (isBarberBlockedByShiftEnd(b as unknown as Staff, entries, schedules, now, margin)) return false
+    return true
+  }).length
+}
+
 // Contexto necesario para rankear barberos al asignar un cliente dinámico.
 // `etaOverrides` permite mantener un ETA mutable cuando se pre-asignan varios
 // dinámicos en cadena (cada asignación suma `avg` al barbero elegido).
@@ -428,7 +494,14 @@ export function assignDynamicBarbers(
   // sobre el mismo barbero libre).
   const busyBarberIds = new Set<string>(barbersAttendingNow)
 
-  unassigned.sort((a, b) => a.position - b.position)
+  unassigned.sort((a, b) => {
+    // FIX #11: ordenar por priority_order (FIFO real); position es inestable
+    // (se recicla al vaciarse la cola), sólo desempata.
+    const pa = new Date(a.priority_order).getTime()
+    const pb = new Date(b.priority_order).getTime()
+    if (pa !== pb) return pa - pb
+    return a.position - b.position
+  })
 
   for (const u of unassigned) {
     const eligibleBarbers = barbers.filter(b =>
@@ -476,9 +549,15 @@ export function assignDynamicBarbers(
     busyBarberIds.add(selectedBarber.id)
   }
 
-  // Orden por position para que un dinámico con turno más temprano siempre aparezca
-  // antes que un asignado de turno posterior, sin importar el orden de pre-asignación.
-  return result.sort((a, b) => a.position - b.position)
+  // FIX #11: orden por priority_order (fuente FIFO real) para que un dinámico con
+  // turno más temprano aparezca antes; position sólo desempata (se recicla al
+  // vaciarse la cola, así que no es un ordinal estable).
+  return result.sort((a, b) => {
+    const pa = new Date(a.priority_order).getTime()
+    const pb = new Date(b.priority_order).getTime()
+    if (pa !== pb) return pa - pb
+    return a.position - b.position
+  })
 }
 
 /**
@@ -517,7 +596,13 @@ export function calculateEffectiveAhead(
     // Específico: los dinámicos adelante se reparten, los específicos de mi barbero no
     const specificsAhead = ahead.filter(e => e.barber_id === myEntry.barber_id).length
     const dynamicsAhead = ahead.filter(e => !e.barber_id).length
-    effectiveAhead = specificsAhead + Math.ceil(dynamicsAhead / barbers)
+    // FIX #4: el corte que mi barbero atiende AHORA cuenta como +1 adelante (antes
+    // daba "Sos el siguiente" con alguien físicamente en la silla). Espeja v_self_busy
+    // de get_client_queue_position (DB).
+    const myBarberBusy = entries.some(
+      e => e.barber_id === myEntry.barber_id && e.status === 'in_progress' && !e.is_break
+    ) ? 1 : 0
+    effectiveAhead = specificsAhead + myBarberBusy + Math.ceil(dynamicsAhead / barbers)
   }
 
   if (effectiveAhead === 0) return { ahead: 0, label: 'Sos el siguiente' }

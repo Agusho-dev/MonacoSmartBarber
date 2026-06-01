@@ -84,6 +84,7 @@ interface FilaClientProps {
   branches: BranchRow[]
   breakConfigs: BreakConfig[]
   timezone: string
+  orgId: string
 }
 
 type ColumnId = string // 'breaks', 'dynamic', or barber.id
@@ -796,7 +797,7 @@ function BarberRow({
 
 // ─── Componente Principal ───────────────────────────────────────────────────
 
-export function FilaClient({ initialEntries, barbers, branches, breakConfigs, timezone }: FilaClientProps) {
+export function FilaClient({ initialEntries, barbers, branches, breakConfigs, timezone, orgId }: FilaClientProps) {
   const selectedBranchId = useBranchStore(s => s.selectedBranchId)
   const [entries, setEntries] = useState<QueueEntry[]>(initialEntries)
   const [liveBarbers, setLiveBarbers] = useState<BarberRow[]>(barbers)
@@ -843,9 +844,12 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
   const fetchQueue = useCallback(async () => {
     // Query liviano: solo los campos que el kanban efectivamente renderiza.
     // Evitamos clients(*) y staff(*) que traen columnas no usadas.
+    // FIX #9: scopear por organization_id. Sin esto (y con la policy pública
+    // queue_entries_public_read) el dashboard traía la cola de TODAS las orgs.
     const { data } = await supabase
       .from('queue_entries')
       .select('*, client:clients(id, name, phone), barber:staff(id, full_name, avatar_url)')
+      .eq('organization_id', orgId)
       .in('status', ['waiting', 'in_progress'])
       .order('position')
     if (data) {
@@ -853,17 +857,19 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       setEntries(typed)
       confirmedEntriesRef.current = typed
     }
-  }, [supabase])
+  }, [supabase, orgId])
 
   const fetchBarbers = useCallback(async () => {
+    // FIX #9: scopear por organization_id (paridad con el server-fetch de page.tsx).
     const { data } = await supabase
       .from('staff')
       .select('id, full_name, branch_id, status, is_active, hidden_from_checkin, avatar_url')
+      .eq('organization_id', orgId)
       .or('role.eq.barber,is_also_barber.eq.true')
       .eq('is_active', true)
       .order('full_name')
     if (data) setLiveBarbers(data as BarberRow[])
-  }, [supabase])
+  }, [supabase, orgId])
 
   const fetchSchedules = useCallback(async () => {
     // Bounds del día en TZ de la org (no UTC). El bug previo usaba
@@ -934,11 +940,13 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
 
     const channel = supabase
       .channel('admin-queue')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue_entries' }, () =>
+      // FIX #9: filtrar por organization_id para no recibir el fan-out de cambios
+      // de queue_entries/staff de OTRAS orgs (regresión del incidente mig 124).
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue_entries', filter: `organization_id=eq.${orgId}` }, () =>
         fetchQueue()
       )
       // staff → refresca lista de barberos y sus estados
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'staff' }, () =>
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'staff', filter: `organization_id=eq.${orgId}` }, () =>
         fetchBarbers()
       )
       // NOTA: el listener de attendance_logs fue eliminado porque esa tabla fue
@@ -957,7 +965,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       })
 
     return () => { clearTimeout(initId); supabase.removeChannel(channel) }
-  }, [supabase, fetchQueue, fetchBarbers, fetchSchedules])
+  }, [supabase, fetchQueue, fetchBarbers, fetchSchedules, orgId])
 
   // Refresh data when returning to tab or as polling fallback
   useVisibilityRefresh(
