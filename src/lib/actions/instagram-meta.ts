@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from './org'
 import { revalidatePath } from 'next/cache'
+import { sendToMeta, extractInstagramId } from '@/lib/meta-send'
 
 const META_API_VERSION = 'v22.0'
 
@@ -112,60 +113,39 @@ export async function sendInstagramMessage(
     return { error: 'Instagram no configurado. Completá las credenciales en Configuración.' }
   }
 
-  let res: Response
-  try {
-    // Instagram Messaging API usa graph.instagram.com con /me/messages
-    res = await fetch(
-      `https://graph.instagram.com/${META_API_VERSION}/me/messages`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${igConfig.instagram_page_access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          recipient: { id: to },
-          message: { text: content },
-        }),
-      }
-    )
-  } catch {
+  // Instagram Messaging API usa graph.instagram.com con /me/messages.
+  // sendToMeta reintenta ante errores transitorios (rate-limit/5xx) y captura
+  // el error completo de Meta — los fallos transitorios de IG eran la causa raíz
+  // de "no se envían los mensajes" (incidente 02/jun/2026).
+  const outcome = await sendToMeta({
+    url: `https://graph.instagram.com/${META_API_VERSION}/me/messages`,
+    token: igConfig.instagram_page_access_token,
+    payload: {
+      recipient: { id: to },
+      message: { text: content },
+    },
+    extractId: extractInstagramId,
+  })
+
+  if (!outcome.ok) {
     await supabase.from('messages').insert({
       conversation_id: conversationId,
       direction: 'outbound',
       content_type: 'text',
       content,
       status: 'failed',
-      error_message: 'Error de red al contactar Meta API',
+      error_message: outcome.errorMessage,
       sent_by_staff_id: staffId ?? null,
     })
-    return { error: 'Error de red al contactar Meta API' }
+    return { error: outcome.errorMessage ?? 'Error al enviar mensaje' }
   }
-
-  const result = await res.json()
-
-  if (!res.ok) {
-    const errMsg: string = result.error?.message ?? 'Error al enviar mensaje'
-    await supabase.from('messages').insert({
-      conversation_id: conversationId,
-      direction: 'outbound',
-      content_type: 'text',
-      content,
-      status: 'failed',
-      error_message: errMsg,
-      sent_by_staff_id: staffId ?? null,
-    })
-    return { error: errMsg }
-  }
-
-  const platformMsgId: string | undefined = result.message_id
 
   await supabase.from('messages').insert({
     conversation_id: conversationId,
     direction: 'outbound',
     content_type: 'text',
     content,
-    platform_message_id: platformMsgId ?? null,
+    platform_message_id: outcome.platformMessageId,
     status: 'sent',
     sent_by_staff_id: staffId ?? null,
   })

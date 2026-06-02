@@ -5,7 +5,7 @@ import {
   Send, Clock, ArrowLeft, Plus, Settings,
   CheckCircle2, Archive, RotateCcw, User, MessageSquare, FileText,
   ExternalLink, MessageCircle, Search, X, Sparkles,
-  Download, FileIcon, CalendarPlus, CalendarSearch,
+  Download, FileIcon, CalendarPlus, CalendarSearch, AlertCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -38,7 +38,7 @@ export function ChatView({
     messagesEndRef,
     isConfigured, isInstagramConfigured,
     canReply, replyWindowLeft,
-    handleSend, handleStatusChange,
+    handleSend, handleResend, handleStatusChange,
     handleOpenTemplateDialog,
     handleAutoTag, autoTagging,
     isSending, isActing,
@@ -265,11 +265,11 @@ export function ChatView({
                     return (
                       <div key={msg.id} className={`flex mb-1.5 ${isOut ? 'justify-end' : 'justify-start'} animate-[msgIn_0.25s_ease-out_both]`}>
                         {isInteractiveButtons ? (
-                          <InteractiveButtonsBubble msg={msg} isOut={isOut} />
+                          <InteractiveButtonsBubble msg={msg} isOut={isOut} onResend={handleResend} resending={isSending} />
                         ) : isTemplate && msg.template_name ? (
                           <TemplateBubble msg={msg} isOut={isOut} templates={waTemplates} />
                         ) : msg.media_url && ['image', 'video', 'audio', 'document'].includes(msg.content_type) ? (
-                          <MediaBubble msg={msg} isOut={isOut} />
+                          <MediaBubble msg={msg} isOut={isOut} onResend={handleResend} resending={isSending} />
                         ) : (
                           <div className={`relative max-w-[65%] px-3 py-1.5 rounded-lg text-sm ${isOut ? 'bg-green-700 text-white rounded-tr-none' : 'bg-card text-card-foreground rounded-tl-none'}`}>
                             {msg.content && <p className="whitespace-pre-wrap wrap-break-word leading-[1.45]">{msg.content}</p>}
@@ -279,9 +279,12 @@ export function ChatView({
                                 {' (archivo no disponible)'}
                               </p>
                             )}
-                            {msg.error_message && isOut && (
-                              <p className="text-[10px] text-red-300 mt-1 wrap-break-word opacity-90">{msg.error_message}</p>
+                            {!msg.content && !['image', 'video', 'audio', 'document'].includes(msg.content_type) && (
+                              <p className={`text-xs italic ${isOut ? 'text-white/60' : 'text-muted-foreground'}`}>
+                                {msg.content_type === 'interactive' ? '🔘 Mensaje interactivo' : '✨ Sticker o adjunto'}
+                              </p>
                             )}
+                            <FailedNotice msg={msg} onResend={handleResend} resending={isSending} />
                             <div className={`flex items-center gap-1 mt-0.5 ${isOut ? 'justify-end' : ''}`}>
                               <span className="text-[10px] text-muted-foreground">{formatTime(msg.created_at)}</span>
                               {isOut && <MessageStatusIcon status={msg.status} />}
@@ -460,7 +463,34 @@ export function ChatView({
   )
 }
 
-function InteractiveButtonsBubble({ msg, isOut }: { msg: Message; isOut: boolean }) {
+// Aviso de "no enviado" con botón de reintento para mensajes salientes fallidos.
+// Antes un fallo sólo mostraba un ícono rojo diminuto (o nada, cuando IG ni
+// guardaba el error) — ahora es explícito y accionable.
+function FailedNotice({ msg, onResend, resending }: { msg: Message; onResend?: (id: string) => void; resending?: boolean }) {
+  if (msg.status !== 'failed' || msg.direction !== 'outbound') return null
+  return (
+    <div className="mt-1 border-t border-red-300/30 pt-1">
+      <div className="flex items-center gap-1.5 text-[10px] text-red-100">
+        <AlertCircle className="size-3 shrink-0" />
+        <span className="font-semibold">No enviado</span>
+        {onResend && (
+          <button
+            onClick={() => onResend(msg.id)}
+            disabled={resending}
+            className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 bg-white/15 hover:bg-white/25 disabled:opacity-50 transition-colors"
+          >
+            <RotateCcw className="size-2.5" /> Reintentar
+          </button>
+        )}
+      </div>
+      {msg.error_message && (
+        <p className="text-[10px] text-red-100/80 mt-0.5 wrap-break-word leading-snug">{msg.error_message}</p>
+      )}
+    </div>
+  )
+}
+
+function InteractiveButtonsBubble({ msg, isOut, onResend, resending }: { msg: Message; isOut: boolean; onResend?: (id: string) => void; resending?: boolean }) {
   const tp = msg.template_params as { buttons: Array<{ id: string; title: string }> }
   const buttons = tp?.buttons ?? []
 
@@ -491,14 +521,14 @@ function InteractiveButtonsBubble({ msg, isOut }: { msg: Message; isOut: boolean
           </div>
         ))}
       </div>
-      {msg.error_message && isOut && (
-        <p className="text-[10px] text-red-300 bg-green-900/50 px-2 py-1 wrap-break-word">{msg.error_message}</p>
-      )}
+      <div className="px-2 pb-1">
+        <FailedNotice msg={msg} onResend={onResend} resending={resending} />
+      </div>
     </div>
   )
 }
 
-function MediaBubble({ msg, isOut }: { msg: Message; isOut: boolean }) {
+function MediaBubble({ msg, isOut, onResend, resending }: { msg: Message; isOut: boolean; onResend?: (id: string) => void; resending?: boolean }) {
   const [expanded, setExpanded] = useState(false)
   const url = msg.media_url!
 
@@ -570,9 +600,9 @@ function MediaBubble({ msg, isOut }: { msg: Message; isOut: boolean }) {
           </div>
         )}
 
-        {msg.error_message && isOut && (
-          <p className="text-[10px] text-red-300 px-3 pb-0.5 wrap-break-word opacity-90">{msg.error_message}</p>
-        )}
+        <div className="px-3">
+          <FailedNotice msg={msg} onResend={onResend} resending={resending} />
+        </div>
 
         <div className={`flex items-center gap-1 px-3 pb-1.5 ${msg.content_type === 'audio' ? 'pt-0' : ''} ${isOut ? 'justify-end' : ''}`}>
           <span className={`text-[10px] ${isOut ? 'text-white/50' : 'text-muted-foreground'}`}>{formatTime(msg.created_at)}</span>

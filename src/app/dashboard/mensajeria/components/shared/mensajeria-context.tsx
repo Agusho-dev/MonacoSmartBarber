@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useMemo, useRef, useCallback, useTransition, useEffect } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { sendMessage as sendMessageAction, markAsRead, cancelScheduledMessage, sendTemplateToConversation, sendTemplateToClient } from '@/lib/actions/messaging'
+import { sendMessage as sendMessageAction, markAsRead, cancelScheduledMessage, sendTemplateToConversation, sendTemplateToClient, resendMessage } from '@/lib/actions/messaging'
 import { getQuickReplies } from '@/lib/actions/quick-replies'
 import { syncWhatsAppTemplates } from '@/lib/actions/whatsapp-meta'
 import { startConversation, updateConversationStatus, getClientVisits, scheduleMessageAuto } from '@/lib/actions/conversations'
@@ -96,6 +96,7 @@ interface MensajeriaContextValue {
 
   // Handlers
   handleSend: () => void
+  handleResend: (messageId: string) => void
   handleStatusChange: (status: 'open' | 'closed' | 'archived') => void
   handleStartConversation: (clientId: string) => void
   handleSchedule: (data: { clientId: string; content: string; scheduledFor: string }) => void
@@ -280,7 +281,15 @@ export function MensajeriaProvider({
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
         const newMsg = payload.new as Message
         if (activeConv && newMsg.conversation_id === activeConv.id) {
-          setMessages(prev => prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg])
+          // Insertar en orden por created_at (no blind-append): los webhooks
+          // guardan created_at = timestamp de Meta, que puede llegar fuera de
+          // orden respecto a los envíos salientes (created_at = now()).
+          setMessages(prev => {
+            if (prev.some(m => m.id === newMsg.id)) return prev
+            const next = [...prev, newMsg]
+            next.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+            return next
+          })
         }
         const isOutbound = newMsg.direction === 'outbound'
         setConversations(prev =>
@@ -446,6 +455,22 @@ export function MensajeriaProvider({
         setMessages(prev => prev.filter(m => m.id !== tempMsg.id))
       } else {
         setMessages(prev => prev.filter(m => m.id !== tempMsg.id))
+      }
+    })
+  }
+
+  const handleResend = (messageId: string) => {
+    const convId = activeConv?.id
+    // Quitar la burbuja fallida de inmediato; el reenvío exitoso llega por realtime.
+    setMessages(prev => prev.filter(m => m.id !== messageId))
+    startSending(async () => {
+      const result = await resendMessage(messageId)
+      if (result.error) {
+        toast.error(result.error)
+        // Restaurar el estado real (la fila fallida sigue en DB).
+        if (convId) loadMessages(convId)
+      } else {
+        toast.success('Mensaje reenviado')
       }
     })
   }
@@ -662,7 +687,7 @@ export function MensajeriaProvider({
     isConfigured, isInstagramConfigured,
     filteredConversations,
     canReply, replyWindowLeft,
-    handleSend, handleStatusChange, handleStartConversation,
+    handleSend, handleResend, handleStatusChange, handleStartConversation,
     handleSchedule, handleCancelScheduled,
     handleSyncTemplates, handleOpenTemplateDialog, handleSendTemplate,
     handleCreateTag, handleDeleteTag, handleToggleTag, handleUpdateTag, handleAutoTag, autoTagging,

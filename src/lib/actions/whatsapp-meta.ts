@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from './org'
 import { requireOrgAccessToEntity } from './guard'
 import { revalidatePath } from 'next/cache'
+import { sendToMeta, extractWhatsAppId } from '@/lib/meta-send'
 
 const META_API_VERSION = 'v22.0'
 
@@ -162,61 +163,39 @@ export async function sendMetaWhatsAppMessage(
 
   const phone = normalizeArgPhone(to)
 
-  let res: Response
-  try {
-    res = await fetch(
-      `https://graph.facebook.com/${META_API_VERSION}/${waConfig.whatsapp_phone_id}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${waConfig.whatsapp_access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: phone,
-          type: 'text',
-          text: { body: content },
-        }),
-      }
-    )
-  } catch {
+  // sendToMeta reintenta ante errores transitorios (rate-limit/5xx) y captura
+  // el error completo de Meta para guardarlo en error_message.
+  const outcome = await sendToMeta({
+    url: `https://graph.facebook.com/${META_API_VERSION}/${waConfig.whatsapp_phone_id}/messages`,
+    token: waConfig.whatsapp_access_token,
+    payload: {
+      messaging_product: 'whatsapp',
+      to: phone,
+      type: 'text',
+      text: { body: content },
+    },
+    extractId: extractWhatsAppId,
+  })
+
+  if (!outcome.ok) {
     await supabase.from('messages').insert({
       conversation_id: conversationId,
       direction: 'outbound',
       content_type: 'text',
       content,
       status: 'failed',
-      error_message: 'Error de red al contactar Meta API',
+      error_message: outcome.errorMessage,
       sent_by_staff_id: staffId ?? null,
     })
-    return { error: 'Error de red al contactar Meta API' }
+    return { error: outcome.errorMessage ?? 'Error al enviar mensaje' }
   }
-
-  const result = await res.json()
-
-  if (!res.ok) {
-    const errMsg: string = result.error?.message ?? 'Error al enviar mensaje'
-    await supabase.from('messages').insert({
-      conversation_id: conversationId,
-      direction: 'outbound',
-      content_type: 'text',
-      content,
-      status: 'failed',
-      error_message: errMsg,
-      sent_by_staff_id: staffId ?? null,
-    })
-    return { error: errMsg }
-  }
-
-  const platformMsgId: string | undefined = result.messages?.[0]?.id
 
   await supabase.from('messages').insert({
     conversation_id: conversationId,
     direction: 'outbound',
     content_type: 'text',
     content,
-    platform_message_id: platformMsgId ?? null,
+    platform_message_id: outcome.platformMessageId,
     status: 'sent',
     sent_by_staff_id: staffId ?? null,
   })

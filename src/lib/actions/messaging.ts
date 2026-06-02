@@ -12,16 +12,11 @@ export async function getConversations(channelFilter?: string) {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: [], error: 'No autorizado' }
 
-  const { data: orgBranches } = await supabase
-    .from('branches')
-    .select('id')
-    .eq('organization_id', orgId)
-  const branchIds = orgBranches?.map((b) => b.id) ?? []
-
+  // Canales org-scope: incluir org-wide (branch_id=NULL) y legacy por-sucursal.
   const { data: orgChannels } = await supabase
     .from('social_channels')
     .select('id')
-    .in('branch_id', branchIds)
+    .eq('organization_id', orgId)
   const channelIds = orgChannels?.map((c) => c.id) ?? []
 
   let query = supabase
@@ -170,19 +165,14 @@ export async function sendTemplateToClient(
 
   if (!client?.phone) return { error: 'El cliente no tiene teléfono registrado' }
 
-  // Obtener canal WA
-  const { data: orgBranches } = await supabase
-    .from('branches')
-    .select('id')
-    .eq('organization_id', orgId)
-  const branchIds = orgBranches?.map((b: { id: string }) => b.id) ?? []
-
+  // Canal WA org-scope: org-wide (branch_id=NULL) o legacy por-sucursal.
   const { data: waChannel } = await supabase
     .from('social_channels')
     .select('id')
-    .in('branch_id', branchIds)
+    .eq('organization_id', orgId)
     .eq('platform', 'whatsapp')
     .eq('is_active', true)
+    .order('branch_id', { ascending: true, nullsFirst: true })
     .limit(1)
     .maybeSingle()
 
@@ -239,6 +229,35 @@ export async function sendTemplateToClient(
     components,
     staffId
   )
+}
+
+// Reenvía un mensaje saliente que quedó en estado 'failed'. Reutiliza sendMessage
+// (que enruta a WhatsApp/Instagram con reintentos) y elimina la fila fallida si el
+// reenvío fue exitoso, para que no quede duplicada en el inbox.
+export async function resendMessage(messageId: string) {
+  const supabase = createAdminClient()
+
+  const { data: msg } = await supabase
+    .from('messages')
+    .select('id, conversation_id, content, direction, status')
+    .eq('id', messageId)
+    .maybeSingle()
+
+  if (!msg) return { error: 'Mensaje no encontrado' }
+  if (msg.direction !== 'outbound') return { error: 'Solo se pueden reenviar mensajes salientes' }
+  if (!msg.content) return { error: 'El mensaje no tiene texto para reenviar' }
+
+  const orgAccess = await requireOrgAccessToEntity('conversations', msg.conversation_id)
+  if (!orgAccess.ok) return { error: 'Acceso denegado' }
+
+  const result = await sendMessage(msg.conversation_id, msg.content)
+  if (result.error) return { error: result.error }
+
+  // El reenvío creó una fila nueva ('sent'); borrar la fallida para no duplicar.
+  await supabase.from('messages').delete().eq('id', messageId).eq('status', 'failed')
+
+  revalidatePath('/dashboard/mensajeria')
+  return { success: true }
 }
 
 export async function markAsRead(conversationId: string) {
@@ -316,16 +335,11 @@ export async function getScheduledMessages() {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: [], error: 'No autorizado' }
 
-  const { data: orgBranches } = await supabase
-    .from('branches')
-    .select('id')
-    .eq('organization_id', orgId)
-  const branchIds = orgBranches?.map((b) => b.id) ?? []
-
+  // Canales org-scope: incluir org-wide (branch_id=NULL) y legacy por-sucursal.
   const { data: orgChannels } = await supabase
     .from('social_channels')
     .select('id')
-    .in('branch_id', branchIds)
+    .eq('organization_id', orgId)
   const channelIds = orgChannels?.map((c) => c.id) ?? []
 
   const { data, error } = await supabase
@@ -352,16 +366,10 @@ export async function getChannels() {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { data: [], error: 'No autorizado' }
 
-  const { data: orgBranches } = await supabase
-    .from('branches')
-    .select('id')
-    .eq('organization_id', orgId)
-  const branchIds = orgBranches?.map((b) => b.id) ?? []
-
   const { data, error } = await supabase
     .from('social_channels')
     .select('*')
-    .in('branch_id', branchIds)
+    .eq('organization_id', orgId)
     .eq('is_active', true)
     .order('platform')
 

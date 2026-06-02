@@ -11,8 +11,23 @@
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
+import { sendToMeta, extractWhatsAppId, extractInstagramId } from './meta-send'
 
 const META_API_VERSION = 'v22.0'
+
+// Inserta el registro de un mensaje saliente y loguea si el insert falla.
+// El insert silencioso era una fuente de bugs (mensajes enviados a Meta que
+// nunca aparecían en el inbox por violar un CHECK constraint, p. ej. content_type).
+async function insertOutboundMessage(
+  supabase: SupabaseClient,
+  row: Record<string, unknown>,
+  ctx: string
+): Promise<void> {
+  const { error } = await supabase.from('messages').insert(row)
+  if (error) {
+    console.error(`[WorkflowEngine] Error insertando mensaje (${ctx}):`, error.message, JSON.stringify(row).slice(0, 200))
+  }
+}
 
 // ─── Tipos internos ──────────────────────────────────────────────
 
@@ -1247,65 +1262,52 @@ async function sendPlatformMessage(
   text: string
 ): Promise<void> {
   if (params.platform === 'whatsapp' && params.waConfig) {
-    const res = await fetch(
-      `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${params.waConfig.whatsapp_access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: params.platformUserId,
-          type: 'text',
-          text: { body: text },
-        }),
-      }
-    )
-    const data = await res.json()
-    const platformMsgId = data.messages?.[0]?.id ?? null
+    const outcome = await sendToMeta({
+      url: `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
+      token: params.waConfig.whatsapp_access_token,
+      payload: {
+        messaging_product: 'whatsapp',
+        to: params.platformUserId,
+        type: 'text',
+        text: { body: text },
+      },
+      extractId: extractWhatsAppId,
+    })
 
-    await supabase.from('messages').insert({
+    await insertOutboundMessage(supabase, {
       conversation_id: params.conversationId,
       direction: 'outbound',
       content_type: 'text',
       content: text,
-      platform_message_id: platformMsgId,
-      status: platformMsgId ? 'sent' : 'failed',
-      error_message: platformMsgId ? null : JSON.stringify(data).slice(0, 500),
-    })
+      platform_message_id: outcome.platformMessageId,
+      status: outcome.ok ? 'sent' : 'failed',
+      error_message: outcome.errorMessage,
+    }, 'wa:text')
 
     await supabase
       .from('conversations')
       .update({ last_message_at: new Date().toISOString() })
       .eq('id', params.conversationId)
   } else if (params.platform === 'instagram' && params.igConfig) {
-    const res = await fetch(
-      `https://graph.instagram.com/${META_API_VERSION}/me/messages`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${params.igConfig.instagram_page_access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          recipient: { id: params.platformUserId },
-          message: { text },
-        }),
-      }
-    )
-    const data = await res.json()
-    const platformMsgId = data.message_id ?? null
+    const outcome = await sendToMeta({
+      url: `https://graph.instagram.com/${META_API_VERSION}/me/messages`,
+      token: params.igConfig.instagram_page_access_token,
+      payload: {
+        recipient: { id: params.platformUserId },
+        message: { text },
+      },
+      extractId: extractInstagramId,
+    })
 
-    await supabase.from('messages').insert({
+    await insertOutboundMessage(supabase, {
       conversation_id: params.conversationId,
       direction: 'outbound',
       content_type: 'text',
       content: text,
-      platform_message_id: platformMsgId,
-      status: platformMsgId ? 'sent' : 'failed',
-    })
+      platform_message_id: outcome.platformMessageId,
+      status: outcome.ok ? 'sent' : 'failed',
+      error_message: outcome.errorMessage,
+    }, 'ig:text')
 
     await supabase
       .from('conversations')
@@ -1321,41 +1323,75 @@ async function sendPlatformMedia(
   mediaType: string,
   caption: string
 ): Promise<void> {
-  if (params.platform === 'whatsapp' && params.waConfig) {
-    const typeMap: Record<string, string> = { image: 'image', video: 'video', document: 'document', audio: 'audio' }
-    const waType = typeMap[mediaType] || 'document'
+  // content_type debe respetar el CHECK constraint de messages.
+  const allowedMediaTypes = new Set(['image', 'video', 'audio', 'document'])
+  const safeContentType = allowedMediaTypes.has(mediaType) ? mediaType : 'document'
 
+  if (params.platform === 'whatsapp' && params.waConfig) {
     const mediaPayload: Record<string, unknown> = { link: mediaUrl }
     if (caption) mediaPayload.caption = caption
 
-    const res = await fetch(
-      `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${params.waConfig.whatsapp_access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: params.platformUserId,
-          type: waType,
-          [waType]: mediaPayload,
-        }),
-      }
-    )
-    const data = await res.json()
-    const platformMsgId = data.messages?.[0]?.id ?? null
+    const outcome = await sendToMeta({
+      url: `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
+      token: params.waConfig.whatsapp_access_token,
+      payload: {
+        messaging_product: 'whatsapp',
+        to: params.platformUserId,
+        type: safeContentType,
+        [safeContentType]: mediaPayload,
+      },
+      extractId: extractWhatsAppId,
+    })
 
-    await supabase.from('messages').insert({
+    await insertOutboundMessage(supabase, {
       conversation_id: params.conversationId,
       direction: 'outbound',
-      content_type: mediaType,
+      content_type: safeContentType,
       content: caption || null,
       media_url: mediaUrl,
-      platform_message_id: platformMsgId,
-      status: platformMsgId ? 'sent' : 'failed',
+      platform_message_id: outcome.platformMessageId,
+      status: outcome.ok ? 'sent' : 'failed',
+      error_message: outcome.errorMessage,
+    }, 'wa:media')
+
+    await supabase
+      .from('conversations')
+      .update({ last_message_at: new Date().toISOString() })
+      .eq('id', params.conversationId)
+  } else if (params.platform === 'instagram' && params.igConfig) {
+    // Instagram Messaging API: attachment con type image/video/audio.
+    // (No soporta 'document'; se degrada a enviar el caption como texto.)
+    const igAttachType = mediaType === 'video' ? 'video' : mediaType === 'audio' ? 'audio' : 'image'
+    const outcome = await sendToMeta({
+      url: `https://graph.instagram.com/${META_API_VERSION}/me/messages`,
+      token: params.igConfig.instagram_page_access_token,
+      payload: {
+        recipient: { id: params.platformUserId },
+        message: { attachment: { type: igAttachType, payload: { url: mediaUrl } } },
+      },
+      extractId: extractInstagramId,
     })
+
+    await insertOutboundMessage(supabase, {
+      conversation_id: params.conversationId,
+      direction: 'outbound',
+      content_type: safeContentType,
+      content: caption || null,
+      media_url: mediaUrl,
+      platform_message_id: outcome.platformMessageId,
+      status: outcome.ok ? 'sent' : 'failed',
+      error_message: outcome.errorMessage,
+    }, 'ig:media')
+
+    // El caption no viaja en el attachment de IG → enviarlo como texto aparte.
+    if (outcome.ok && caption) {
+      await sendPlatformMessage(supabase, params, caption)
+    } else {
+      await supabase
+        .from('conversations')
+        .update({ last_message_at: new Date().toISOString() })
+        .eq('id', params.conversationId)
+    }
   }
 }
 
@@ -1374,48 +1410,38 @@ async function sendWhatsAppButtons(
     reply: { id: String(btn.id).trim(), title: String(btn.title).trim().slice(0, 20) },
   }))
 
-  const res = await fetch(
-    `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${params.waConfig.whatsapp_access_token}`,
-        'Content-Type': 'application/json',
+  const outcome = await sendToMeta({
+    url: `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
+    token: params.waConfig.whatsapp_access_token,
+    payload: {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: params.platformUserId,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: bodyText },
+        action: { buttons: waButtons },
       },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to: params.platformUserId,
-        type: 'interactive',
-        interactive: {
-          type: 'button',
-          body: { text: bodyText },
-          action: { buttons: waButtons },
-        },
-      }),
-    }
-  )
-  const data = await res.json()
-  const platformMsgId = data.messages?.[0]?.id ?? null
-  const errSnippet = platformMsgId
-    ? null
-    : (data.error?.message || JSON.stringify(data)).slice(0, 500)
+    },
+    extractId: extractWhatsAppId,
+  })
 
   const uiButtons = waButtons.map(b => ({
     id: b.reply.id,
     title: b.reply.title,
   }))
 
-  await supabase.from('messages').insert({
+  await insertOutboundMessage(supabase, {
     conversation_id: params.conversationId,
     direction: 'outbound',
     content_type: 'interactive',
     content: bodyText,
     template_params: { interactive_type: 'button', buttons: uiButtons },
-    platform_message_id: platformMsgId,
-    status: platformMsgId ? 'sent' : 'failed',
-    error_message: errSnippet,
-  })
+    platform_message_id: outcome.platformMessageId,
+    status: outcome.ok ? 'sent' : 'failed',
+    error_message: outcome.errorMessage,
+  }, 'wa:buttons')
 
   await supabase
     .from('conversations')
@@ -1432,40 +1458,40 @@ async function sendWhatsAppList(
 ): Promise<void> {
   if (!params.waConfig) return
 
-  const res = await fetch(
-    `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${params.waConfig.whatsapp_access_token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to: params.platformUserId,
-        type: 'interactive',
-        interactive: {
-          type: 'list',
-          body: { text: body },
-          action: {
-            button: buttonText,
-            sections,
-          },
+  const outcome = await sendToMeta({
+    url: `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
+    token: params.waConfig.whatsapp_access_token,
+    payload: {
+      messaging_product: 'whatsapp',
+      to: params.platformUserId,
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        body: { text: body },
+        action: {
+          button: buttonText,
+          sections,
         },
-      }),
-    }
-  )
-  const data = await res.json()
-  const platformMsgId = data.messages?.[0]?.id ?? null
+      },
+    },
+    extractId: extractWhatsAppId,
+  })
 
-  await supabase.from('messages').insert({
+  await insertOutboundMessage(supabase, {
     conversation_id: params.conversationId,
     direction: 'outbound',
-    content_type: 'template',
+    content_type: 'interactive',
     content: body,
-    platform_message_id: platformMsgId,
-    status: platformMsgId ? 'sent' : 'failed',
-  })
+    template_params: { interactive_type: 'list', button_text: buttonText, sections },
+    platform_message_id: outcome.platformMessageId,
+    status: outcome.ok ? 'sent' : 'failed',
+    error_message: outcome.errorMessage,
+  }, 'wa:list')
+
+  await supabase
+    .from('conversations')
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', params.conversationId)
 }
 
 async function sendWhatsAppTemplate(
@@ -1476,37 +1502,36 @@ async function sendWhatsAppTemplate(
 ): Promise<void> {
   if (!params.waConfig) return
 
-  const res = await fetch(
-    `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${params.waConfig.whatsapp_access_token}`,
-        'Content-Type': 'application/json',
+  const outcome = await sendToMeta({
+    url: `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
+    token: params.waConfig.whatsapp_access_token,
+    payload: {
+      messaging_product: 'whatsapp',
+      to: params.platformUserId,
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: languageCode },
       },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to: params.platformUserId,
-        type: 'template',
-        template: {
-          name: templateName,
-          language: { code: languageCode },
-        },
-      }),
-    }
-  )
-  const data = await res.json()
-  const platformMsgId = data.messages?.[0]?.id ?? null
+    },
+    extractId: extractWhatsAppId,
+  })
 
-  await supabase.from('messages').insert({
+  await insertOutboundMessage(supabase, {
     conversation_id: params.conversationId,
     direction: 'outbound',
     content_type: 'template',
     content: `[Template: ${templateName}]`,
     template_name: templateName,
-    platform_message_id: platformMsgId,
-    status: platformMsgId ? 'sent' : 'failed',
-  })
+    platform_message_id: outcome.platformMessageId,
+    status: outcome.ok ? 'sent' : 'failed',
+    error_message: outcome.errorMessage,
+  }, 'wa:template')
+
+  await supabase
+    .from('conversations')
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', params.conversationId)
 }
 
 // ─── Variables en mensajes ───────────────────────────────────────

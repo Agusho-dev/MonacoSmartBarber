@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { MessageSquare, Megaphone, Zap, MessageCircle, Settings, Bell, Maximize2, Minimize2 } from 'lucide-react'
+import { MessageSquare, Megaphone, Zap, MessageCircle, Settings, Bell, Maximize2, Minimize2, Frown } from 'lucide-react'
 import { MensajeriaProvider, useMensajeria } from './components/shared/mensajeria-context'
 import { ConversationList } from './components/inbox/conversation-list'
 import { ChatView } from './components/inbox/chat-view'
@@ -15,7 +15,9 @@ import { BroadcastSection } from './components/broadcasts/broadcast-section'
 import { WorkflowList } from './components/workflows/workflow-list'
 import { QuickReplySection } from './components/quick-replies/quick-reply-section'
 import { CrmAlertsPanel } from './components/alerts/crm-alerts-panel'
+import { CrmCasesPanel } from './components/casos/crm-cases-panel'
 import { getUnreadAlertCount } from '@/lib/actions/workflows'
+import { getOpenCrmCaseCount } from '@/lib/actions/crm-cases'
 import { createClient } from '@/lib/supabase/client'
 import type { MensajeriaProps, CrmSection } from './components/shared/types'
 
@@ -24,6 +26,7 @@ const NAV_ITEMS: { key: CrmSection; icon: React.ElementType; label: string }[] =
   { key: 'broadcasts', icon: Megaphone, label: 'Difusiones' },
   { key: 'automations', icon: Zap, label: 'Workflows' },
   { key: 'alerts', icon: Bell, label: 'Alertas' },
+  { key: 'casos', icon: Frown, label: 'Casos' },
   { key: 'quick-replies', icon: MessageCircle, label: 'Rápidos' },
   { key: 'settings', icon: Settings, label: 'Config' },
 ]
@@ -38,6 +41,7 @@ export function MensajeriaClient(props: MensajeriaProps) {
   const [showNewChat, setShowNewChat] = useState(false)
   const [showScheduleDialog, setShowScheduleDialog] = useState(false)
   const [alertCount, setAlertCount] = useState(0)
+  const [casosCount, setCasosCount] = useState(0)
 
   const toggleFocusMode = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString())
@@ -47,18 +51,22 @@ export function MensajeriaClient(props: MensajeriaProps) {
     router.replace(`/dashboard/mensajeria${qs ? `?${qs}` : ''}`, { scroll: false })
   }, [isFocusMode, router, searchParams])
 
-  // Cargar count de alertas no leídas
+  // Cargar count de alertas no leídas + casos pendientes
   useEffect(() => {
     getUnreadAlertCount().then(r => setAlertCount(r.count))
+    getOpenCrmCaseCount().then(r => setCasosCount(r.count))
   }, [])
 
-  // Realtime para actualizar el badge cuando llega una alerta nueva
+  // Realtime para actualizar los badges cuando llega una alerta o un caso nuevo
   useEffect(() => {
     const supabase = createClient()
     const channel = supabase
       .channel('crm-alerts-badge')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_alerts' }, () => {
         setAlertCount(prev => prev + 1)
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_cases' }, () => {
+        getOpenCrmCaseCount().then(r => setCasosCount(r.count))
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
@@ -71,6 +79,9 @@ export function MensajeriaClient(props: MensajeriaProps) {
       if (key === 'alerts') {
         // Al entrar a alertas, refrescar count
         getUnreadAlertCount().then(r => setAlertCount(r.count))
+      }
+      if (key === 'casos') {
+        getOpenCrmCaseCount().then(r => setCasosCount(r.count))
       }
       setSection(key)
     }
@@ -119,6 +130,11 @@ export function MensajeriaClient(props: MensajeriaProps) {
                     {alertCount > 9 ? '9+' : alertCount}
                   </span>
                 )}
+                {key === 'casos' && casosCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 flex items-center justify-center rounded-full bg-orange-500 text-[9px] font-bold text-white px-1">
+                    {casosCount > 9 ? '9+' : casosCount}
+                  </span>
+                )}
               </button>
             )
           })}
@@ -163,6 +179,11 @@ export function MensajeriaClient(props: MensajeriaProps) {
                     {alertCount > 9 ? '9+' : alertCount}
                   </span>
                 )}
+                {key === 'casos' && casosCount > 0 && (
+                  <span className="absolute top-0.5 right-0 min-w-3.5 h-3.5 flex items-center justify-center rounded-full bg-orange-500 text-[8px] font-bold text-white px-0.5">
+                    {casosCount > 9 ? '9+' : casosCount}
+                  </span>
+                )}
               </button>
             )
           })}
@@ -199,6 +220,7 @@ export function MensajeriaClient(props: MensajeriaProps) {
         {section === 'broadcasts' && <BroadcastSection />}
         {section === 'automations' && <WorkflowList />}
         {section === 'alerts' && <CrmAlertsPanel onNavigateToInbox={() => setSection('inbox')} />}
+        {section === 'casos' && <CrmCasesPanel onNavigateToInbox={() => setSection('inbox')} />}
         {section === 'quick-replies' && <QuickReplySection />}
 
         </div>

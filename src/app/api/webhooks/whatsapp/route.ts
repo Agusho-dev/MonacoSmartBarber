@@ -556,7 +556,7 @@ export async function POST(req: NextRequest) {
           convId = newConv.id
         }
 
-        await supabase.from('messages').insert({
+        const { error: waMsgErr } = await supabase.from('messages').insert({
           conversation_id: convId,
           direction: 'inbound',
           content_type: contentType,
@@ -566,6 +566,9 @@ export async function POST(req: NextRequest) {
           status: 'delivered',
           created_at: new Date(parseInt(timestamp) * 1000).toISOString(),
         })
+        if (waMsgErr) {
+          console.error('[WA Webhook] Error insertando mensaje:', waMsgErr.message, 'content_type:', contentType)
+        }
 
         // ── Workflow Engine: evaluar reglas y workflows ──
         if (waConfig.whatsapp_access_token && waConfig.whatsapp_phone_id) {
@@ -591,14 +594,19 @@ export async function POST(req: NextRequest) {
       }
 
       // Procesar actualizaciones de estado
+      const VALID_STATUSES = new Set(['pending', 'sent', 'delivered', 'read', 'failed'])
       for (const statusUpdate of value.statuses ?? []) {
         const metaMsgId: string = statusUpdate.id
         const newStatus: string = statusUpdate.status
+        // Meta puede mandar estados fuera del enum (ej: 'deleted', 'warning') que
+        // violarían el CHECK constraint y harían fallar el UPDATE en silencio.
+        if (!VALID_STATUSES.has(newStatus)) continue
 
-        await supabase
+        const { error: stErr } = await supabase
           .from('messages')
           .update({ status: newStatus })
           .eq('platform_message_id', metaMsgId)
+        if (stErr) console.error('[WA Webhook] Error actualizando status:', stErr.message, newStatus)
       }
     }
   }

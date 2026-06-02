@@ -12,47 +12,34 @@ export async function startConversation(clientId: string) {
 
   const supabase = createAdminClient()
 
-  // Obtener datos del cliente
+  // Obtener datos del cliente (scopeado por org — evita IDOR cross-org por id)
   const { data: client } = await supabase
     .from('clients')
     .select('id, name, phone')
     .eq('id', clientId)
-    .single()
+    .eq('organization_id', orgId)
+    .maybeSingle()
 
   if (!client?.phone) return { error: 'El cliente no tiene teléfono registrado' }
 
-  // Obtener canal WhatsApp activo de la org
-  const { data: branches } = await supabase
-    .from('branches')
-    .select('id')
-    .eq('organization_id', orgId)
-
-  const branchIds = (branches as { id: string }[] | null)?.map((b) => b.id) ?? []
-  if (branchIds.length === 0) return { error: 'No hay sucursales configuradas' }
-
-  const { data: channel } = await supabase
+  // Obtener canal WhatsApp activo de la org. Los canales son org-scope:
+  // pueden ser org-wide (branch_id=NULL) o legacy por-sucursal. Resolver por
+  // organization_id (NO por branch_id, que excluye los org-wide). Preferir el
+  // org-wide (nullsFirst).
+  const { data: waChannels } = await supabase
     .from('social_channels')
     .select('id')
-    .in('branch_id', branchIds)
+    .eq('organization_id', orgId)
     .eq('platform', 'whatsapp')
     .eq('is_active', true)
-    .limit(1)
-    .maybeSingle()
+    .order('branch_id', { ascending: true, nullsFirst: true })
 
-  if (!channel) return { error: 'No hay un canal WhatsApp configurado. Guardá tus credenciales primero.' }
+  const allChannelIds = (waChannels as { id: string }[] | null)?.map((c) => c.id) ?? []
+  if (allChannelIds.length === 0) return { error: 'No hay un canal WhatsApp configurado. Guardá tus credenciales primero.' }
+  const channel = { id: allChannelIds[0] }
 
   let phoneClean = client.phone.replace(/\D/g, '')
   if (!phoneClean.startsWith('54')) phoneClean = '54' + phoneClean
-
-  // Obtener todos los canales WA de la org para buscar conversaciones existentes
-  const { data: allWaChannels } = await supabase
-    .from('social_channels')
-    .select('id')
-    .in('branch_id', branchIds)
-    .eq('platform', 'whatsapp')
-    .eq('is_active', true)
-
-  const allChannelIds = (allWaChannels as { id: string }[] | null)?.map((c) => c.id) ?? [channel.id]
 
   // Buscar conversación existente por sufijo de teléfono para evitar duplicados
   // por diferencia de formato (ej: 549xxx vs 54xxx)
@@ -150,23 +137,19 @@ export async function scheduleMessageAuto(data: {
     .from('clients')
     .select('phone')
     .eq('id', data.clientId)
-    .single()
+    .eq('organization_id', orgId)
+    .maybeSingle()
 
   if (!client?.phone) return { error: 'El cliente no tiene teléfono registrado' }
 
-  const { data: branches } = await supabase
-    .from('branches')
-    .select('id')
-    .eq('organization_id', orgId)
-
-  const branchIds = (branches as { id: string }[] | null)?.map((b) => b.id) ?? []
-
+  // Canal WA org-scope (org-wide branch_id=NULL o legacy por-sucursal).
   const { data: channel } = await supabase
     .from('social_channels')
     .select('id')
-    .in('branch_id', branchIds)
+    .eq('organization_id', orgId)
     .eq('platform', 'whatsapp')
     .eq('is_active', true)
+    .order('branch_id', { ascending: true, nullsFirst: true })
     .limit(1)
     .maybeSingle()
 

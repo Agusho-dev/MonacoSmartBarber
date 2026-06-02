@@ -401,11 +401,25 @@ export async function POST(req: NextRequest) {
           contentType = 'audio'
         } else if (attachment.type === 'file') {
           contentType = 'document'
+        } else if (mediaUrl) {
+          // Tipo no mapeado (sticker/gif/reel/etc.) pero trae archivo: mostrarlo
+          // como imagen — es lo más común en IG y evita perder el contenido.
+          contentType = 'image'
         } else if (attachment.type && ['fallback', 'share'].includes(attachment.type)) {
            // Meta also sends share or fallback types sometimes.
            contentType = 'text'
            caption = caption ? `[Adjunto: ${attachment.type}]\n${caption}` : `[Adjunto: ${attachment.type}]`
+        } else if (attachment.type) {
+          contentType = 'text'
+          caption = caption ? `[${attachment.type}]\n${caption}` : `[${attachment.type}]`
         }
+      }
+
+      // Anti-fantasma: un sticker/“like” de Instagram puede llegar SIN texto ni
+      // adjunto con URL. Sin esto se inserta content=NULL y el inbox dibuja una
+      // burbuja vacía que parece un mensaje del negocio "que apareció primero".
+      if (!isEcho && !caption && !mediaUrl && contentType === 'text') {
+        caption = '[Sticker]'
       }
 
       const { error: msgErr } = await supabase.from('messages').insert({
