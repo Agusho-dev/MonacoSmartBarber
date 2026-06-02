@@ -98,6 +98,11 @@ export function CrmAlertsPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_alerts' }, () => {
         loadAlerts()
       })
+      // Sincronizar el estado de leído/no-leído entre usuarios (antes era optimista local).
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'crm_alerts' }, (payload) => {
+        const updated = payload.new as { id: string; is_read: boolean; read_at: string | null }
+        setAlerts(prev => prev.map(a => a.id === updated.id ? { ...a, is_read: updated.is_read, read_at: updated.read_at } : a))
+      })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [loadAlerts])

@@ -140,7 +140,7 @@ export async function sendInstagramMessage(
     return { error: outcome.errorMessage ?? 'Error al enviar mensaje' }
   }
 
-  await supabase.from('messages').insert({
+  const { error: insErr } = await supabase.from('messages').insert({
     conversation_id: conversationId,
     direction: 'outbound',
     content_type: 'text',
@@ -149,6 +149,7 @@ export async function sendInstagramMessage(
     status: 'sent',
     sent_by_staff_id: staffId ?? null,
   })
+  if (insErr) console.error('[Instagram Meta] Mensaje enviado a Meta pero no registrado en DB:', insErr.message)
 
   await supabase
     .from('conversations')

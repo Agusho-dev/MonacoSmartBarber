@@ -105,7 +105,7 @@ export function ConversationList({
                       onClick={() => { setActiveConv(conv); setShowMobileChat(true); setShowProfile(false) }}
                       className={`flex w-full items-center gap-3 px-3 py-3 transition-colors border-b border ${isActive ? 'bg-accent' : 'hover:bg-card'}`}>
                       <div className="relative shrink-0">
-                        <Avatar name={name} size={10} />
+                        <Avatar name={name} size={10} avatarUrl={conv.platform_user_avatar} />
                         {conv.channel?.platform === 'instagram' && (
                           <span className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-background flex items-center justify-center">
                             <Instagram className="size-2.5 text-pink-400" />
@@ -195,6 +195,11 @@ export function ConversationList({
                       </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground line-clamp-2">{msg.content}</p>
+                    {msg.status === 'failed' && (msg as { error_message?: string | null }).error_message && (
+                      <p className="text-[10px] text-red-400/90 line-clamp-2 leading-snug">
+                        ⚠ {(msg as { error_message?: string | null }).error_message}
+                      </p>
+                    )}
                     <div className="flex items-center justify-between">
                       <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
                         <Clock className="size-2.5" />

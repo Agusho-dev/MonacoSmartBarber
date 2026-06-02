@@ -8,28 +8,36 @@ function getSupabase() {
   )
 }
 
-// Obtener el nombre/username del usuario de Instagram vía Graph API
-async function fetchIgUserProfile(userId: string, accessToken: string): Promise<{ name: string | null; username: string | null }> {
+// Obtener nombre / username / foto de perfil del usuario de Instagram vía Graph API.
+type IgProfile = { name: string | null; username: string | null; profilePic: string | null }
+async function fetchIgUserProfile(userId: string, accessToken: string): Promise<IgProfile> {
+  const parse = (d: Record<string, unknown>): IgProfile => ({
+    name: (d.name as string) ?? null,
+    username: (d.username as string) ?? null,
+    profilePic: (d.profile_pic as string) ?? null,
+  })
   try {
     const res = await fetch(
-      `https://graph.instagram.com/${userId}?fields=name,username&access_token=${encodeURIComponent(accessToken)}`,
+      `https://graph.instagram.com/${userId}?fields=name,username,profile_pic&access_token=${encodeURIComponent(accessToken)}`,
       { signal: AbortSignal.timeout(5000) }
     )
     if (!res.ok) {
       // Fallback: intentar con graph.facebook.com (para IG-scoped IDs)
       const fbRes = await fetch(
-        `https://graph.facebook.com/v21.0/${userId}?fields=name,username&access_token=${encodeURIComponent(accessToken)}`,
+        `https://graph.facebook.com/v21.0/${userId}?fields=name,username,profile_pic&access_token=${encodeURIComponent(accessToken)}`,
         { signal: AbortSignal.timeout(5000) }
       )
-      if (!fbRes.ok) return { name: null, username: null }
-      const fbData = await fbRes.json()
-      return { name: fbData.name ?? null, username: fbData.username ?? null }
+      if (!fbRes.ok) {
+        // Log del motivo (token vencido = code 190) para diagnóstico.
+        try { const e = await res.json(); console.warn('[IG Webhook] perfil no disponible:', e?.error?.message) } catch { /* noop */ }
+        return { name: null, username: null, profilePic: null }
+      }
+      return parse(await fbRes.json())
     }
-    const data = await res.json()
-    return { name: data.name ?? null, username: data.username ?? null }
+    return parse(await res.json())
   } catch (err) {
     console.warn('[IG Webhook] Error obteniendo perfil de usuario:', (err as Error).message)
-    return { name: null, username: null }
+    return { name: null, username: null, profilePic: null }
   }
 }
 
@@ -309,24 +317,31 @@ export async function POST(req: NextRequest) {
         .eq('instagram', from)
         .maybeSingle()
 
-      // Intentar obtener el nombre del perfil de Instagram si no hay cliente vinculado
-      let displayName: string = client?.name ?? from
-      if (!client?.name && !isEcho && igConfig.instagram_page_access_token) {
-        const profile = await fetchIgUserProfile(from, igConfig.instagram_page_access_token)
-        if (profile.name) {
-          displayName = profile.name
-        } else if (profile.username) {
-          displayName = `@${profile.username}`
-        }
-      }
-
-      // Buscar o crear conversación
+      // Conversación existente (para saber si ya tenemos nombre/foto guardados)
       const { data: existingConv } = await supabase
         .from('conversations')
-        .select('id, unread_count, platform_user_name, client_id')
+        .select('id, unread_count, platform_user_name, platform_user_avatar, client_id')
         .eq('channel_id', igChannel.id)
         .eq('platform_user_id', from)
         .maybeSingle()
+
+      // Traer perfil de IG (nombre + @usuario + foto) cuando es inbound y falta
+      // info: sin cliente vinculado, o el nombre guardado es el ID numérico (un
+      // fetch viejo falló — típicamente por token vencido), o aún no hay avatar.
+      let displayName: string = client?.name ?? existingConv?.platform_user_name ?? from
+      let igHandle: string | null = null
+      let igAvatar: string | null = null
+      const storedName = existingConv?.platform_user_name
+      const nameLooksNumeric = !storedName || /^[0-9]+$/.test(storedName)
+      const needsProfile = !isEcho && !!igConfig.instagram_page_access_token && !client?.name
+        && (nameLooksNumeric || !existingConv?.platform_user_avatar)
+      if (needsProfile) {
+        const profile = await fetchIgUserProfile(from, igConfig.instagram_page_access_token!)
+        if (profile.name) displayName = profile.name
+        else if (profile.username) displayName = `@${profile.username}`
+        igHandle = profile.username
+        igAvatar = profile.profilePic
+      }
 
       let convId: string
       const replyUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
@@ -345,7 +360,7 @@ export async function POST(req: NextRequest) {
             .eq('id', convId)
         } else {
           // Inbound = usuario escribió → incrementar unread
-          const shouldUpdateName = existingConv.platform_user_name === from && displayName !== from
+          const shouldUpdateName = (existingConv.platform_user_name === from || !existingConv.platform_user_name) && displayName !== from
           await supabase
             .from('conversations')
             .update({
@@ -354,6 +369,8 @@ export async function POST(req: NextRequest) {
               client_id: client?.id ?? null,
               can_reply_until: replyUntil,
               ...(shouldUpdateName ? { platform_user_name: displayName } : {}),
+              ...(igHandle ? { platform_user_handle: igHandle } : {}),
+              ...(igAvatar ? { platform_user_avatar: igAvatar } : {}),
             })
             .eq('id', convId)
         }
@@ -365,6 +382,8 @@ export async function POST(req: NextRequest) {
             client_id: client?.id ?? null,
             platform_user_id: from,
             platform_user_name: displayName,
+            platform_user_handle: igHandle,
+            platform_user_avatar: igAvatar,
             status: 'open',
             unread_count: isEcho ? 0 : 1,
             last_message_at: new Date().toISOString(),

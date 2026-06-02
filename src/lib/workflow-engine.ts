@@ -790,8 +790,10 @@ async function executeNode(
   try {
     // Validar ventana Meta de 24h para nodos que envían contenido libre.
     // Si está fuera de ventana y el workflow tiene fallback_template_name, se degrada.
+    // Ventana Meta de 24h: aplica tanto a WhatsApp como a Instagram (ambos
+    // bloquean texto libre fuera de las 24h desde el último mensaje del usuario).
     const freeFormNodeTypes = new Set(['send_message', 'send_media', 'send_buttons', 'send_list'])
-    if (freeFormNodeTypes.has(node.node_type) && params.platform === 'whatsapp') {
+    if (freeFormNodeTypes.has(node.node_type) && (params.platform === 'whatsapp' || params.platform === 'instagram')) {
       const outOfWindow = await isConversationOutOfMetaWindow(supabase, params.conversationId)
       if (outOfWindow) {
         const { data: wf } = await supabase
@@ -800,7 +802,8 @@ async function executeNode(
           .eq('id', workflowId)
           .maybeSingle()
         if (wf?.requires_meta_window !== false) {
-          if (wf?.fallback_template_name) {
+          // Los templates HSM son sólo de WhatsApp; Instagram no tiene fallback.
+          if (params.platform === 'whatsapp' && wf?.fallback_template_name) {
             await sendWhatsAppTemplate(supabase, params, wf.fallback_template_name, 'es_AR')
             await logExecution(supabase, executionId, node.id, node.node_type, 'success', {
               warning: 'out_of_meta_window_fallback_template',
@@ -822,8 +825,9 @@ async function executeNode(
     switch (node.node_type) {
       case 'send_message': {
         const text = resolveVariables(config.text as string || '', context, params)
-        await sendPlatformMessage(supabase, params, text)
-        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { text })
+        const ok = await sendPlatformMessage(supabase, params, text)
+        // Logear el resultado real del envío (antes siempre 'success' aunque Meta fallara).
+        await logExecution(supabase, executionId, node.id, node.node_type, ok ? 'success' : 'error', { text }, ok ? undefined : 'Envío a Meta falló (ver messages.error_message)')
         await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
         break
       }
@@ -832,8 +836,8 @@ async function executeNode(
         const caption = resolveVariables(config.caption as string || '', context, params)
         const mediaUrl = config.media_url as string
         const mediaType = config.media_type as string || 'image'
-        await sendPlatformMedia(supabase, params, mediaUrl, mediaType, caption)
-        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { mediaUrl, mediaType })
+        const ok = await sendPlatformMedia(supabase, params, mediaUrl, mediaType, caption)
+        await logExecution(supabase, executionId, node.id, node.node_type, ok ? 'success' : 'error', { mediaUrl, mediaType }, ok ? undefined : 'Envío de media a Meta falló')
         await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
         break
       }
@@ -846,24 +850,38 @@ async function executeNode(
         )
         const raw = (config.buttons as Array<{ id: string; title: string }>) ?? []
         const buttons = raw.filter(b => b && String(b.id).trim() && String(b.title).trim())
+        let btnOk: boolean
         if (buttons.length === 0) {
           const fallback = body.trim() || 'Mensaje sin botones configurados.'
-          await sendPlatformMessage(supabase, params, fallback)
-          await logExecution(supabase, executionId, node.id, node.node_type, 'success', { warning: 'sin_botones', fallback })
+          btnOk = await sendPlatformMessage(supabase, params, fallback)
+          await logExecution(supabase, executionId, node.id, node.node_type, btnOk ? 'success' : 'error', { warning: 'sin_botones', fallback })
         } else if (params.platform === 'whatsapp' && params.waConfig) {
-          await sendWhatsAppButtons(supabase, params, body, buttons)
-          await logExecution(supabase, executionId, node.id, node.node_type, 'success', { body, buttons })
+          btnOk = await sendWhatsAppButtons(supabase, params, body, buttons)
+          await logExecution(supabase, executionId, node.id, node.node_type, btnOk ? 'success' : 'error', { body, buttons })
+        } else if (params.platform === 'instagram' && params.igConfig) {
+          // Instagram soporta quick replies nativos (tappables) — antes se mandaban
+          // como texto plano "▸ Si/▸ No" y el cliente no podía disparar la rama.
+          btnOk = await sendInstagramButtons(supabase, params, body, buttons)
+          await logExecution(supabase, executionId, node.id, node.node_type, btnOk ? 'success' : 'error', { body, buttons, channel: 'ig_quick_replies' })
         } else {
           const lines = buttons.map(b => `▸ ${b.title}`).join('\n')
           const combined = [body.trim(), lines].filter(Boolean).join('\n\n')
-          await sendPlatformMessage(supabase, params, combined || lines)
-          await logExecution(supabase, executionId, node.id, node.node_type, 'success', { warning: 'botones_no_interactivos', body, buttons })
+          btnOk = await sendPlatformMessage(supabase, params, combined || lines)
+          await logExecution(supabase, executionId, node.id, node.node_type, btnOk ? 'success' : 'error', { warning: 'botones_no_interactivos', body, buttons })
         }
-        // Después de enviar botones, poner en espera
-        await supabase
-          .from('workflow_executions')
-          .update({ status: 'waiting_reply', current_node_id: node.id, waiting_since: new Date().toISOString(), updated_at: new Date().toISOString() })
-          .eq('id', executionId)
+        // Sólo esperar respuesta si el envío salió. Si falló, no dejar la ejecución
+        // colgada en waiting_reply sin haber mandado nada — marcarla en error.
+        if (btnOk) {
+          await supabase
+            .from('workflow_executions')
+            .update({ status: 'waiting_reply', current_node_id: node.id, waiting_since: new Date().toISOString(), updated_at: new Date().toISOString() })
+            .eq('id', executionId)
+        } else {
+          await supabase
+            .from('workflow_executions')
+            .update({ status: 'error', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+            .eq('id', executionId)
+        }
         break
       }
 
@@ -871,21 +889,28 @@ async function executeNode(
         const body = resolveVariables(config.body as string || '', context, params)
         const buttonText = config.button_text as string || 'Ver opciones'
         const sections = config.sections as Array<{ title: string; rows: Array<{ id: string; title: string; description?: string }> }>
-        await sendWhatsAppList(supabase, params, body, buttonText, sections)
-        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { body })
-        // Después de enviar lista, poner en espera
-        await supabase
-          .from('workflow_executions')
-          .update({ status: 'waiting_reply', current_node_id: node.id, waiting_since: new Date().toISOString(), updated_at: new Date().toISOString() })
-          .eq('id', executionId)
+        const listOk = await sendWhatsAppList(supabase, params, body, buttonText, sections)
+        await logExecution(supabase, executionId, node.id, node.node_type, listOk ? 'success' : 'error', { body })
+        // Sólo esperar respuesta si la lista se envió; si no, no colgar la ejecución.
+        if (listOk) {
+          await supabase
+            .from('workflow_executions')
+            .update({ status: 'waiting_reply', current_node_id: node.id, waiting_since: new Date().toISOString(), updated_at: new Date().toISOString() })
+            .eq('id', executionId)
+        } else {
+          await supabase
+            .from('workflow_executions')
+            .update({ status: 'error', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+            .eq('id', executionId)
+        }
         break
       }
 
       case 'send_template': {
         const templateName = config.template_name as string
         const languageCode = config.language_code as string || 'es_AR'
-        await sendWhatsAppTemplate(supabase, params, templateName, languageCode)
-        await logExecution(supabase, executionId, node.id, node.node_type, 'success', { templateName })
+        const tplOk = await sendWhatsAppTemplate(supabase, params, templateName, languageCode)
+        await logExecution(supabase, executionId, node.id, node.node_type, tplOk ? 'success' : 'error', { templateName }, tplOk ? undefined : 'Envío de template a Meta falló')
 
         // Si el siguiente nodo espera interacción del usuario (condition con
         // button_response o wait_reply), pausar en waiting_reply en vez de avanzar
@@ -1081,7 +1106,7 @@ async function executeNode(
             { model, error: lastAiError.message, used_fallback: true }, lastAiError.message)
         }
 
-        await sendPlatformMessage(supabase, params, aiResponse)
+        const aiSendOk = await sendPlatformMessage(supabase, params, aiResponse)
 
         context.variables = context.variables ?? {}
         context.variables.ai_response = aiResponse
@@ -1092,7 +1117,8 @@ async function executeNode(
           .eq('id', executionId)
 
         if (!lastAiError) {
-          await logExecution(supabase, executionId, node.id, node.node_type, 'success', { model, response_preview: aiResponse.slice(0, 200) })
+          await logExecution(supabase, executionId, node.id, node.node_type, aiSendOk ? 'success' : 'error',
+            { model, response_preview: aiResponse.slice(0, 200) }, aiSendOk ? undefined : 'La respuesta IA no se pudo enviar a Meta')
         }
         await advanceFromNode(supabase, executionId, workflowId, node.id, context, params)
         break
@@ -1260,7 +1286,7 @@ async function sendPlatformMessage(
   supabase: SupabaseClient,
   params: Parameters<typeof evaluateIncomingMessage>[0],
   text: string
-): Promise<void> {
+): Promise<boolean> {
   if (params.platform === 'whatsapp' && params.waConfig) {
     const outcome = await sendToMeta({
       url: `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
@@ -1288,6 +1314,7 @@ async function sendPlatformMessage(
       .from('conversations')
       .update({ last_message_at: new Date().toISOString() })
       .eq('id', params.conversationId)
+    return outcome.ok
   } else if (params.platform === 'instagram' && params.igConfig) {
     const outcome = await sendToMeta({
       url: `https://graph.instagram.com/${META_API_VERSION}/me/messages`,
@@ -1313,7 +1340,9 @@ async function sendPlatformMessage(
       .from('conversations')
       .update({ last_message_at: new Date().toISOString() })
       .eq('id', params.conversationId)
+    return outcome.ok
   }
+  return false
 }
 
 async function sendPlatformMedia(
@@ -1322,7 +1351,7 @@ async function sendPlatformMedia(
   mediaUrl: string,
   mediaType: string,
   caption: string
-): Promise<void> {
+): Promise<boolean> {
   // content_type debe respetar el CHECK constraint de messages.
   const allowedMediaTypes = new Set(['image', 'video', 'audio', 'document'])
   const safeContentType = allowedMediaTypes.has(mediaType) ? mediaType : 'document'
@@ -1358,6 +1387,7 @@ async function sendPlatformMedia(
       .from('conversations')
       .update({ last_message_at: new Date().toISOString() })
       .eq('id', params.conversationId)
+    return outcome.ok
   } else if (params.platform === 'instagram' && params.igConfig) {
     // Instagram Messaging API: attachment con type image/video/audio.
     // (No soporta 'document'; se degrada a enviar el caption como texto.)
@@ -1392,7 +1422,57 @@ async function sendPlatformMedia(
         .update({ last_message_at: new Date().toISOString() })
         .eq('id', params.conversationId)
     }
+    return outcome.ok
   }
+  return false
+}
+
+// Instagram quick replies (botones tappables nativos). Persiste el mensaje como
+// content_type='interactive' (igual que WhatsApp) para que el inbox lo renderice
+// con <InteractiveButtonsBubble> y para cerrar el loop con el quick_reply inbound.
+async function sendInstagramButtons(
+  supabase: SupabaseClient,
+  params: Parameters<typeof evaluateIncomingMessage>[0],
+  body: string,
+  buttons: Array<{ id: string; title: string }>
+): Promise<boolean> {
+  if (!params.igConfig) return false
+
+  // IG admite hasta 13 quick replies; título máx. 20 chars.
+  const quickReplies = buttons.slice(0, 13).map(b => ({
+    content_type: 'text' as const,
+    title: String(b.title).trim().slice(0, 20),
+    payload: String(b.id).trim(),
+  }))
+  const bodyText = body.trim() || 'Elegí una opción:'
+
+  const outcome = await sendToMeta({
+    url: `https://graph.instagram.com/${META_API_VERSION}/me/messages`,
+    token: params.igConfig.instagram_page_access_token,
+    payload: {
+      recipient: { id: params.platformUserId },
+      message: { text: bodyText, quick_replies: quickReplies },
+    },
+    extractId: extractInstagramId,
+  })
+
+  const uiButtons = quickReplies.map(q => ({ id: q.payload, title: q.title }))
+  await insertOutboundMessage(supabase, {
+    conversation_id: params.conversationId,
+    direction: 'outbound',
+    content_type: 'interactive',
+    content: bodyText,
+    template_params: { interactive_type: 'button', buttons: uiButtons },
+    platform_message_id: outcome.platformMessageId,
+    status: outcome.ok ? 'sent' : 'failed',
+    error_message: outcome.errorMessage,
+  }, 'ig:buttons')
+
+  await supabase
+    .from('conversations')
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', params.conversationId)
+  return outcome.ok
 }
 
 async function sendWhatsAppButtons(
@@ -1400,8 +1480,8 @@ async function sendWhatsAppButtons(
   params: Parameters<typeof evaluateIncomingMessage>[0],
   body: string,
   buttons: Array<{ id: string; title: string }>
-): Promise<void> {
-  if (!params.waConfig) return
+): Promise<boolean> {
+  if (!params.waConfig) return false
 
   // WhatsApp: cuerpo obligatorio (máx. 1024), hasta 3 botones, título máx. 20
   const bodyText = (body.trim() || 'Elegí una opción:').slice(0, 1024)
@@ -1447,6 +1527,7 @@ async function sendWhatsAppButtons(
     .from('conversations')
     .update({ last_message_at: new Date().toISOString() })
     .eq('id', params.conversationId)
+  return outcome.ok
 }
 
 async function sendWhatsAppList(
@@ -1455,8 +1536,8 @@ async function sendWhatsAppList(
   body: string,
   buttonText: string,
   sections: Array<{ title: string; rows: Array<{ id: string; title: string; description?: string }> }>
-): Promise<void> {
-  if (!params.waConfig) return
+): Promise<boolean> {
+  if (!params.waConfig) return false
 
   const outcome = await sendToMeta({
     url: `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
@@ -1492,6 +1573,7 @@ async function sendWhatsAppList(
     .from('conversations')
     .update({ last_message_at: new Date().toISOString() })
     .eq('id', params.conversationId)
+  return outcome.ok
 }
 
 async function sendWhatsAppTemplate(
@@ -1499,8 +1581,8 @@ async function sendWhatsAppTemplate(
   params: Parameters<typeof evaluateIncomingMessage>[0],
   templateName: string,
   languageCode: string
-): Promise<void> {
-  if (!params.waConfig) return
+): Promise<boolean> {
+  if (!params.waConfig) return false
 
   const outcome = await sendToMeta({
     url: `https://graph.facebook.com/${META_API_VERSION}/${params.waConfig.whatsapp_phone_id}/messages`,
@@ -1532,6 +1614,7 @@ async function sendWhatsAppTemplate(
     .from('conversations')
     .update({ last_message_at: new Date().toISOString() })
     .eq('id', params.conversationId)
+  return outcome.ok
 }
 
 // ─── Variables en mensajes ───────────────────────────────────────

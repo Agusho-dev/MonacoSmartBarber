@@ -160,7 +160,7 @@ export function ChatView({
           </Button>
           <button onClick={() => { setShowProfile(v => !v); if (!showProfile && activeConv.client_id) loadVisits(activeConv.client_id) }}
             className="flex items-center gap-3 flex-1 min-w-0 text-left hover:opacity-80 transition-opacity">
-            <Avatar name={activeConvName} size={9} />
+            <Avatar name={activeConvName} size={9} avatarUrl={activeConv.platform_user_avatar} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-foreground">{activeConvName}</p>
               <p className="text-[11px] text-muted-foreground">

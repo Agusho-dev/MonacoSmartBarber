@@ -2,7 +2,6 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from './org'
-import { getScopedBranchIds } from './branch-access'
 import { requireOrgAccessToEntity } from './guard'
 import { revalidatePath } from 'next/cache'
 import type { AudienceFilters } from './client-segments'
@@ -132,7 +131,24 @@ export async function sendBroadcast(broadcastId: string) {
     }
   }
 
-  // Crear recipients en lotes
+  // ── Claim atómico: transicionar draft → sending/scheduled SOLO si sigue en
+  // 'draft'. Esto evita la condición de carrera del doble-submit (dos llamadas
+  // concurrentes pasaban el check de 'draft' y ambas insertaban recipients +
+  // scheduled_messages → DOBLE ENVÍO). Si otra ejecución ya lo tomó, abortamos.
+  const nextStatus = broadcast.scheduled_for ? 'scheduled' : 'sending'
+  const { data: claimed, error: claimErr } = await supabase
+    .from('broadcasts')
+    .update({ status: nextStatus, audience_count: clients.length, started_at: new Date().toISOString() })
+    .eq('id', broadcastId)
+    .eq('status', 'draft')
+    .select('id')
+    .maybeSingle()
+  if (claimErr) return { error: 'Error al iniciar la difusión: ' + claimErr.message }
+  if (!claimed) return { error: 'La difusión ya está en proceso o fue enviada' }
+
+  // Crear recipients en lotes. La idempotencia real la da el claim atómico de
+  // arriba (la función corre una sola vez por difusión). La migración 145 agrega
+  // un UNIQUE (broadcast_id, client_id) como defensa en profundidad — opcional.
   const BATCH = 500
   const recipients = clients.map(c => ({
     broadcast_id: broadcastId,
@@ -149,25 +165,19 @@ export async function sendBroadcast(broadcastId: string) {
     if (recipErr) return { error: 'Error al crear destinatarios: ' + recipErr.message }
   }
 
-  // Obtener canal WA para scheduled_messages
-  const { data: orgBranches } = await supabase
-    .from('branches')
+  // Canal WA org-scope: org-wide (branch_id=NULL) o legacy por-sucursal.
+  // NUNCA por .in('branch_id', ...) — eso excluye el canal org-wide y dejaba
+  // channel_id=NULL en los scheduled_messages.
+  const { data: ch } = await supabase
+    .from('social_channels')
     .select('id')
     .eq('organization_id', orgId)
-  const branchIds = orgBranches?.map((b: { id: string }) => b.id) ?? []
-
-  let channelId: string | null = null
-  if (branchIds.length > 0) {
-    const { data: ch } = await supabase
-      .from('social_channels')
-      .select('id')
-      .in('branch_id', branchIds)
-      .eq('platform', 'whatsapp')
-      .eq('is_active', true)
-      .limit(1)
-      .maybeSingle()
-    channelId = ch?.id ?? null
-  }
+    .eq('platform', 'whatsapp')
+    .eq('is_active', true)
+    .order('branch_id', { ascending: true, nullsFirst: true })
+    .limit(1)
+    .maybeSingle()
+  const channelId: string | null = ch?.id ?? null
 
   // Template components base del broadcast
   const baseComponents = (broadcast.template_components as TemplateVariable[] | null) ?? []
@@ -207,19 +217,17 @@ export async function sendBroadcast(broadcastId: string) {
     if (schedErr) return { error: 'Error al programar mensajes: ' + schedErr.message }
   }
 
-  // Actualizar broadcast
-  await supabase
-    .from('broadcasts')
-    .update({
-      status: broadcast.scheduled_for ? 'scheduled' : 'sending',
-      audience_count: clients.length,
-      started_at: new Date().toISOString(),
-    })
-    .eq('id', broadcastId)
+  // (El estado y audience_count ya se setearon en el claim atómico de arriba.)
 
   // Registrar uso (cada broadcast cuenta como 1 del cap mensual del plan).
-  const { incrementUsage } = await import('@/lib/actions/entitlements')
-  await incrementUsage('broadcasts_sent', 1, orgId)
+  // En try/catch: si el tracking de uso falla NO debe romper el envío (la difusión
+  // ya se programó), pero sí debe quedar logueado en vez de tirar abajo la acción.
+  try {
+    const { incrementUsage } = await import('@/lib/actions/entitlements')
+    await incrementUsage('broadcasts_sent', 1, orgId)
+  } catch (usageErr) {
+    console.error('[broadcasts] incrementUsage falló para', broadcastId, usageErr)
+  }
 
   revalidatePath('/dashboard/mensajeria')
   return { success: true, recipientCount: clients.length }
@@ -282,12 +290,13 @@ export async function getTemplatesByChannel(channelId?: string) {
 
   const supabase = createAdminClient()
 
-  // Obtener canales de la org para acotar la query
-  const orgBranchIds = await getScopedBranchIds()
+  // Canales org-scope: incluir org-wide (branch_id=NULL) y legacy por-sucursal.
+  // Con .in('branch_id', ...) el picker de templates quedaba vacío para orgs con
+  // canal WhatsApp org-wide.
   const { data: orgChannels } = await supabase
     .from('social_channels')
     .select('id')
-    .in('branch_id', orgBranchIds)
+    .eq('organization_id', result.orgId)
   const orgChannelIds = (orgChannels ?? []).map(c => c.id)
 
   if (orgChannelIds.length === 0) return { data: [], error: null }

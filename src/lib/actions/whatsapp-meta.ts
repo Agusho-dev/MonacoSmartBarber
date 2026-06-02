@@ -190,7 +190,7 @@ export async function sendMetaWhatsAppMessage(
     return { error: outcome.errorMessage ?? 'Error al enviar mensaje' }
   }
 
-  await supabase.from('messages').insert({
+  const { error: insErr } = await supabase.from('messages').insert({
     conversation_id: conversationId,
     direction: 'outbound',
     content_type: 'text',
@@ -199,6 +199,7 @@ export async function sendMetaWhatsAppMessage(
     status: 'sent',
     sent_by_staff_id: staffId ?? null,
   })
+  if (insErr) console.error('[WhatsApp Meta] Mensaje enviado a Meta pero no registrado en DB:', insErr.message)
 
   await supabase
     .from('conversations')
@@ -309,7 +310,7 @@ export async function sendMetaWhatsAppTemplate(
 
   const platformMsgId: string | undefined = result.messages?.[0]?.id
 
-  await supabase.from('messages').insert({
+  const { error: tplInsErr } = await supabase.from('messages').insert({
     conversation_id: conversationId,
     direction: 'outbound',
     content_type: 'template',
@@ -319,6 +320,7 @@ export async function sendMetaWhatsAppTemplate(
     status: 'sent',
     sent_by_staff_id: staffId ?? null,
   })
+  if (tplInsErr) console.error('[WhatsApp Meta] Template enviado a Meta pero no registrado en DB:', tplInsErr.message)
 
   await supabase
     .from('conversations')

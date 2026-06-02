@@ -96,7 +96,11 @@ Deno.serve(async (req: Request) => {
     const orgSettingsCache = new Map<string, { wa_api_url: string | null }>()
     const orgChannelCache = new Map<string, { id: string }[]>()
     const orgConfigCache = new Map<string, { whatsapp_access_token: string; whatsapp_phone_id: string } | null>()
-    const broadcastCounters = new Map<string, { sent: number; failed: number }>()
+    // Trackeamos los client_id EXACTOS procesados en esta corrida (no un conteo),
+    // para actualizar broadcast_recipients de forma determinística. Antes se
+    // re-consultaba scheduled_messages con LIMIT sin ORDER BY, lo que en difusiones
+    // de +50 (procesadas en varias corridas del cron) dejaba recipients en 'pending'.
+    const broadcastCounters = new Map<string, { sentClients: string[]; failedClients: Array<{ clientId: string; error: string | null }> }>()
     const results: Array<{ id: string; sent: boolean; error: string | null; retry: boolean }> = []
 
     // Procesa el batch con concurrencia limitada (8 mensajes en vuelo simultáneamente).
@@ -145,7 +149,7 @@ Deno.serve(async (req: Request) => {
         errorMsg = 'No se pudo resolver la organización del mensaje programado'
         await persistResult(msg, false, errorMsg, false /* willRetry */, 'permanent')
         results.push({ id: msg.id, sent: false, error: errorMsg, retry: false })
-        trackBroadcast(broadcastCounters, msg.broadcast_id, false)
+        trackBroadcast(broadcastCounters, msg.broadcast_id, false, msg.client_id, errorMsg)
         continue
       }
 
@@ -265,7 +269,9 @@ Deno.serve(async (req: Request) => {
       const finalKind: 'transient' | 'permanent' | null = sent ? null : (isTransient ? 'transient' : 'permanent')
 
       await persistResult(msg, sent, errorMsg, willRetry, finalKind)
-      trackBroadcast(broadcastCounters, msg.broadcast_id, sent)
+      // Solo trackear para broadcast_recipients cuando es estado FINAL (no si va a
+      // reintentar) — un reintento pendiente no debe marcar al recipient.
+      if (!willRetry) trackBroadcast(broadcastCounters, msg.broadcast_id, sent, msg.client_id, errorMsg)
       results.push({ id: msg.id, sent, error: errorMsg, retry: willRetry })
     }) // fin processWithConcurrency
 
@@ -574,16 +580,27 @@ async function recordInConversation(msg: ScheduledMessage, orgId: string, orgCha
   }
 }
 
-function trackBroadcast(counters: Map<string, { sent: number; failed: number }>, broadcastId: string | null, sent: boolean) {
-  if (!broadcastId) return
-  const existing = counters.get(broadcastId) ?? { sent: 0, failed: 0 }
-  if (sent) existing.sent++
-  else existing.failed++
+function trackBroadcast(
+  counters: Map<string, { sentClients: string[]; failedClients: Array<{ clientId: string; error: string | null }> }>,
+  broadcastId: string | null,
+  sent: boolean,
+  clientId: string | null | undefined,
+  errorMsg: string | null,
+) {
+  if (!broadcastId || !clientId) return
+  const existing = counters.get(broadcastId) ?? { sentClients: [], failedClients: [] }
+  if (sent) existing.sentClients.push(clientId)
+  else existing.failedClients.push({ clientId, error: errorMsg })
   counters.set(broadcastId, existing)
 }
 
-async function updateBroadcastCounters(counters: Map<string, { sent: number; failed: number }>) {
+async function updateBroadcastCounters(
+  counters: Map<string, { sentClients: string[]; failedClients: Array<{ clientId: string; error: string | null }> }>,
+) {
   for (const [broadcastId, counts] of counters) {
+    const sentCount = counts.sentClients.length
+    const failedCount = counts.failedClients.length
+
     const { data: broadcast, error: bcErr } = await supabase
       .from('broadcasts')
       .select('audience_count, sent_count, failed_count')
@@ -596,8 +613,8 @@ async function updateBroadcastCounters(counters: Map<string, { sent: number; fai
     }
     if (!broadcast) continue
 
-    const newSent = (broadcast.sent_count ?? 0) + counts.sent
-    const newFailed = (broadcast.failed_count ?? 0) + counts.failed
+    const newSent = (broadcast.sent_count ?? 0) + sentCount
+    const newFailed = (broadcast.failed_count ?? 0) + failedCount
     const total = broadcast.audience_count ?? 0
     const allProcessed = (newSent + newFailed) >= total
 
@@ -614,54 +631,28 @@ async function updateBroadcastCounters(counters: Map<string, { sent: number; fai
       console.error('[broadcasts] update error broadcast=' + broadcastId + ':', bcUpdErr.message)
     }
 
-    if (counts.sent > 0) {
-      const { data: sentMsgs, error: smErr } = await supabase
-        .from('scheduled_messages')
-        .select('client_id')
+    // Actualizar broadcast_recipients con los client_id EXACTOS de esta corrida
+    // (no un re-query con LIMIT sin orden). Funciona aunque la difusión abarque
+    // múltiples corridas del cron.
+    if (sentCount > 0) {
+      const { error: brUpdErr } = await supabase
+        .from('broadcast_recipients')
+        .update({ status: 'sent', sent_at: new Date().toISOString() })
         .eq('broadcast_id', broadcastId)
-        .eq('status', 'sent')
-        .limit(counts.sent)
-      if (smErr) {
-        console.error('[broadcasts] sent_msgs lookup error broadcast=' + broadcastId + ':', smErr.message)
-      }
-
-      if (sentMsgs && sentMsgs.length > 0) {
-        const clientIds = sentMsgs.map(m => m.client_id)
-        const { error: brUpdErr } = await supabase
-          .from('broadcast_recipients')
-          .update({ status: 'sent', sent_at: new Date().toISOString() })
-          .eq('broadcast_id', broadcastId)
-          .in('client_id', clientIds)
-          .eq('status', 'pending')
-        if (brUpdErr) {
-          console.error('[broadcasts] recipients sent update error broadcast=' + broadcastId + ':', brUpdErr.message)
-        }
+        .in('client_id', counts.sentClients)
+      if (brUpdErr) {
+        console.error('[broadcasts] recipients sent update error broadcast=' + broadcastId + ':', brUpdErr.message)
       }
     }
 
-    if (counts.failed > 0) {
-      const { data: failedMsgs, error: fmErr } = await supabase
-        .from('scheduled_messages')
-        .select('client_id, error_message')
+    for (const fc of counts.failedClients) {
+      const { error: brUpdErr } = await supabase
+        .from('broadcast_recipients')
+        .update({ status: 'failed', error_message: fc.error })
         .eq('broadcast_id', broadcastId)
-        .eq('status', 'failed')
-        .limit(counts.failed)
-      if (fmErr) {
-        console.error('[broadcasts] failed_msgs lookup error broadcast=' + broadcastId + ':', fmErr.message)
-      }
-
-      if (failedMsgs && failedMsgs.length > 0) {
-        for (const fm of failedMsgs) {
-          const { error: brUpdErr } = await supabase
-            .from('broadcast_recipients')
-            .update({ status: 'failed', error_message: fm.error_message })
-            .eq('broadcast_id', broadcastId)
-            .eq('client_id', fm.client_id)
-            .eq('status', 'pending')
-          if (brUpdErr) {
-            console.error('[broadcasts] recipients failed update error broadcast=' + broadcastId + ' client=' + fm.client_id + ':', brUpdErr.message)
-          }
-        }
+        .eq('client_id', fc.clientId)
+      if (brUpdErr) {
+        console.error('[broadcasts] recipients failed update error broadcast=' + broadcastId + ' client=' + fc.clientId + ':', brUpdErr.message)
       }
     }
   }

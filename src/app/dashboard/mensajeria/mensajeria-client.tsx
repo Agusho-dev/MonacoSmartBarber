@@ -16,6 +16,7 @@ import { WorkflowList } from './components/workflows/workflow-list'
 import { QuickReplySection } from './components/quick-replies/quick-reply-section'
 import { CrmAlertsPanel } from './components/alerts/crm-alerts-panel'
 import { CrmCasesPanel } from './components/casos/crm-cases-panel'
+import { TokenHealthBanner } from './components/shared/token-health-banner'
 import { getUnreadAlertCount } from '@/lib/actions/workflows'
 import { getOpenCrmCaseCount } from '@/lib/actions/crm-cases'
 import { createClient } from '@/lib/supabase/client'
@@ -103,6 +104,8 @@ export function MensajeriaClient(props: MensajeriaProps) {
           isFocusMode ? 'max-lg:pb-[calc(2.75rem+env(safe-area-inset-bottom,0px))]' : ''
         }`}
       >
+
+        <TokenHealthBanner onOpenSettings={() => setShowSettings(true)} />
 
         <TopTagsBar />
 

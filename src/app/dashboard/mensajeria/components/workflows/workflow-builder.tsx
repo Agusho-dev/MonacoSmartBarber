@@ -398,6 +398,53 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
     startSaving(async () => {
       const currentNodes = nodesRef.current
       const currentEdges = edgesRef.current
+
+      // Validación: detectar nodos/triggers que se guardarían "rotos" y fallarían
+      // silenciosamente en runtime (mensaje vacío, sin template, botones sin texto,
+      // keyword sin palabras, rama de condición sin valor).
+      const problems: string[] = []
+      for (const n of currentNodes) {
+        const cfg = (n.config ?? {}) as Record<string, unknown>
+        const label = (cfg.label as string) || n.node_type
+        if (n.node_type === 'send_message') {
+          if (!(((cfg.text as string) || (cfg.body as string) || '').trim())) problems.push(`“${label}”: el mensaje está vacío`)
+        } else if (n.node_type === 'send_template') {
+          if (!(((cfg.template_name as string) || '').trim())) problems.push(`“${label}”: falta elegir el template`)
+        } else if (n.node_type === 'send_media') {
+          if (!(((cfg.media_url as string) || '').trim())) problems.push(`“${label}”: falta la URL del archivo`)
+        } else if (n.node_type === 'send_buttons') {
+          const btns = (cfg.buttons as Array<{ id?: string; title?: string }> | undefined) ?? []
+          if (!btns.some(b => b && String(b.id ?? '').trim() && String(b.title ?? '').trim())) problems.push(`“${label}”: agregá al menos un botón con texto`)
+        } else if (n.node_type === 'send_list') {
+          const secs = (cfg.sections as Array<{ rows?: Array<{ id?: string; title?: string }> }> | undefined) ?? []
+          if (!secs.some(s => (s.rows ?? []).some(r => String(r.id ?? '').trim() && String(r.title ?? '').trim()))) problems.push(`“${label}”: la lista no tiene opciones válidas`)
+        }
+      }
+      const trig = currentNodes.find(n => n.is_entry_point)
+      if (trig) {
+        const tcfg = (trig.config ?? {}) as Record<string, unknown>
+        const ttype = (tcfg.trigger_type as string) ?? workflow?.trigger_type
+        if (ttype === 'keyword' && !(((tcfg.keywords as string[]) ?? []).some(k => String(k ?? '').trim()))) {
+          problems.push('El disparador por palabra clave no tiene keywords')
+        }
+      }
+      const condNodeIds = new Set(currentNodes.filter(n => n.node_type === 'condition').map(n => n.id))
+      if (currentEdges.some(e => condNodeIds.has(e.source_node_id)
+        && !String((e as { condition_value?: string | null }).condition_value ?? '').trim()
+        && String((e as { source_handle?: string | null }).source_handle ?? '') !== 'default')) {
+        problems.push('Una condición tiene una rama sin valor — definí la respuesta esperada o marcala como “Otro”')
+      }
+
+      if (problems.length > 0) {
+        const msg = problems.slice(0, 3).join(' · ') + (problems.length > 3 ? ` (+${problems.length - 3} más)` : '')
+        // Un workflow ACTIVO no puede quedar roto → bloquear. Borrador → avisar y permitir.
+        if (workflow?.is_active) {
+          toast.error('No se puede guardar un workflow activo con errores: ' + msg)
+          return
+        }
+        toast.warning('Guardado con advertencias: ' + msg)
+      }
+
       // Sincronizar trigger node config al registro del workflow
       const triggerNode = currentNodes.find(n => n.is_entry_point)
       if (triggerNode) {

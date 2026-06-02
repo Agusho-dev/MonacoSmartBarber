@@ -70,7 +70,7 @@ Role-based access also supports per-branch scoping via the `role_branch_scope` t
 
 ### Messaging integrations
 
-`supabase/functions/wa-incoming/` handles inbound WhatsApp/Instagram webhooks (Meta Business API). `supabase/functions/process-scheduled-messages/` sends queued outbound messages on a cron. Server actions for messaging live in `src/lib/actions/messaging.ts`, `whatsapp-meta.ts`, `instagram-meta.ts`, `conversations.ts`, and `tags.ts`.
+Los webhooks inbound de Meta (WhatsApp Cloud API + Instagram) los manejan los **route handlers de Next.js** en `src/app/api/webhooks/whatsapp/route.ts` e `src/app/api/webhooks/instagram/route.ts` (ahí corre el workflow-engine). La edge function `supabase/functions/wa-incoming/` es el path del microservicio **Baileys (no oficial)** y la edge function `meta-webhook` es un handler Meta **legacy** — ninguno de los dos dispara el workflow-engine; ambos están deployados pero NO son el path activo (Meta apunta a las rutas Next.js). `supabase/functions/process-scheduled-messages/` envía los mensajes programados/difusiones/post-servicio en un cron. Server actions for messaging live in `src/lib/actions/messaging.ts`, `whatsapp-meta.ts`, `instagram-meta.ts`, `conversations.ts`, and `tags.ts`.
 
 ### Channels org-scope (migración 103)
 
@@ -91,7 +91,7 @@ Supabase Realtime WebSocket subscriptions on `queue_entries` and `staff` power t
 ### Edge Functions
 
 `supabase/functions/` contains three Deno functions:
-- `wa-incoming` — inbound webhook for WhatsApp & Instagram messages
+- `wa-incoming` — inbound webhook del microservicio Baileys (no oficial, API-key auth). NO es el path Meta activo (ver arriba); legacy/sin uso si solo se usa Meta Cloud API
 - `process-scheduled-messages` — cron-triggered outbound message sender
 - `client-auth` — mobile app client authentication
 

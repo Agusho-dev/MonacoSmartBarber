@@ -706,6 +706,8 @@ export interface Conversation {
   platform_conversation_id: string | null
   platform_user_id: string
   platform_user_name: string | null
+  platform_user_avatar: string | null
+  platform_user_handle: string | null
   status: ConversationStatus
   last_message_at: string | null
   last_inbound_at: string | null

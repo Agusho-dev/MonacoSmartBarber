@@ -32,7 +32,7 @@ export function ClientProfile() {
         <div className="p-4 space-y-5">
           {/* Avatar + nombre */}
           <div className="flex flex-col items-center gap-2 pt-2">
-            <Avatar name={activeConvName} size={16} />
+            <Avatar name={activeConvName} size={16} avatarUrl={activeConv.platform_user_avatar} />
             <p className="font-semibold text-foreground text-center">{activeConvName}</p>
             {activeConv.client?.phone && (
               <p className="text-xs text-muted-foreground">{activeConv.client.phone}</p>
