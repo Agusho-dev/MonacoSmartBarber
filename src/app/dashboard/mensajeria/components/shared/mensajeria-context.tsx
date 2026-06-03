@@ -22,6 +22,16 @@ export interface QuickReply {
   created_at: string
 }
 
+// Columnas de `messages` que un UPDATE de Realtime puede modificar y que reflejamos
+// en vivo. Se mergean SOLO si vienen no-null: con replica identity 'default', las
+// columnas grandes (TOAST: content/media_url/template_params) NO se re-emiten en un
+// UPDATE que no las tocó y llegan como null en payload.new — mergearlas blanquearía
+// la burbuja. (Ver handler UPDATE de messages más abajo.)
+const MESSAGE_UPDATE_MERGE_KEYS = [
+  'status', 'content', 'media_url', 'error_message',
+  'platform_message_id', 'template_name', 'template_params', 'external_id',
+] as const
+
 interface MensajeriaContextValue {
   // Supabase
   supabase: ReturnType<typeof createClient>
@@ -159,6 +169,15 @@ export function MensajeriaProvider({
   // Conversations
   const [conversations, setConversations] = useState(initialConversations)
   const [activeConv, setActiveConv] = useState<ConversationWithRelations | null>(null)
+  // Ref espejo de activeConv: los handlers de Realtime lo leen para tener el valor
+  // fresco SIN meter activeConv en las deps del efecto. Antes, activeConv en deps
+  // recreaba el canal en cada cambio de conversación y, como Postgres Changes no
+  // tiene replay/backfill, los eventos que caían en la ventana de re-subscribe se
+  // perdían (causa raíz de "no se actualiza en vivo").
+  const activeConvRef = useRef<ConversationWithRelations | null>(null)
+  // Contador de cargas: descarta respuestas viejas de loadMessages (race al cambiar
+  // de conversación o al reconectar) — solo la última carga pinta.
+  const loadSeqRef = useRef(0)
   const [messages, setMessages] = useState<Message[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
 
@@ -228,12 +247,16 @@ export function MensajeriaProvider({
 
   // Load messages
   const loadMessages = useCallback(async (convId: string) => {
+    const seq = ++loadSeqRef.current
     setLoadingMessages(true)
     const { data } = await supabase
       .from('messages')
       .select('*, sent_by:staff(full_name)')
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true })
+    // Guard de respuesta-stale: si entró otra carga después (cambio de conversación,
+    // reconexión, wake), descartamos esta respuesta para no pintar la conv equivocada.
+    if (loadSeqRef.current !== seq) return
     setMessages(data ?? [])
     setLoadingMessages(false)
   }, [supabase])
@@ -274,13 +297,32 @@ export function MensajeriaProvider({
     }
   }, [messages, loadingMessages])
 
+  // Mantener el ref de activeConv sincronizado para los handlers de Realtime,
+  // así el efecto de Realtime NO depende de activeConv y el canal vive una sola vez.
+  useEffect(() => {
+    activeConvRef.current = activeConv
+  }, [activeConv])
+
   // Realtime
   useEffect(() => {
+    // Reconciliación de gap: Postgres Changes no hace backfill, así que tras un
+    // (re)subscribe / wake recargamos la conversación activa. Coalescido en el tiempo
+    // para evitar dobles recargas casi-simultáneas (SUBSCRIBED + visibilitychange).
+    let lastReconcileAt = 0
+    const reconcileActiveConv = () => {
+      const conv = activeConvRef.current
+      if (!conv) return
+      const now = Date.now()
+      if (now - lastReconcileAt < 1500) return
+      lastReconcileAt = now
+      loadMessages(conv.id)
+    }
+
     const channel = supabase
       .channel('mensajeria-realtime')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
         const newMsg = payload.new as Message
-        if (activeConv && newMsg.conversation_id === activeConv.id) {
+        if (activeConvRef.current && newMsg.conversation_id === activeConvRef.current.id) {
           // Insertar en orden por created_at (no blind-append): los webhooks
           // guardan created_at = timestamp de Meta, que puede llegar fuera de
           // orden respecto a los envíos salientes (created_at = now()).
@@ -300,7 +342,7 @@ export function MensajeriaProvider({
               last_message_at: newMsg.created_at,
               last_message: [{ content: newMsg.content, direction: newMsg.direction, content_type: newMsg.content_type, created_at: newMsg.created_at }],
               // Solo incrementar unread para mensajes inbound, no para outbound (echo)
-              unread_count: isOutbound ? 0 : (activeConv?.id === c.id ? 0 : c.unread_count + 1),
+              unread_count: isOutbound ? 0 : (activeConvRef.current?.id === c.id ? 0 : c.unread_count + 1),
             }
           }).sort((a, b) => {
             const da = a.last_message_at ? new Date(a.last_message_at).getTime() : 0
@@ -310,8 +352,19 @@ export function MensajeriaProvider({
         )
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (payload) => {
-        const updated = payload.new as Message
-        setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, status: updated.status } : m))
+        // OJO TOAST (replica identity 'default'): un UPDATE status-only NO re-emite las
+        // columnas grandes (content/media_url/template_params) — llegan como null en
+        // payload.new. El webhook de WA hace .update({ status }) por cada recibo de
+        // entrega, así que mergear todo blanquearía la burbuja de mensajes largos.
+        // Mergeamos SOLO los campos presentes (no-null) de la allow-list. El join
+        // sent_by no viene en el payload, así que se preserva desde m.
+        const updated = payload.new as Record<string, unknown>
+        const id = updated.id as string
+        const patch: Record<string, unknown> = {}
+        for (const k of MESSAGE_UPDATE_MERGE_KEYS) {
+          if (updated[k] != null) patch[k] = updated[k]
+        }
+        setMessages(prev => prev.map(m => m.id === id ? { ...m, ...patch } as Message : m))
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations' }, (payload) => {
         const updated = payload.new as ConversationWithRelations
@@ -336,7 +389,7 @@ export function MensajeriaProvider({
               }
             : c,
         ))
-        if (activeConv?.id === updated.id) {
+        if (activeConvRef.current?.id === updated.id) {
           setActiveConv(prev => prev
             ? {
                 ...prev,
@@ -372,7 +425,7 @@ export function MensajeriaProvider({
           if (c.tags?.some(t => t.tag_id === assignment.tag_id)) return c
           return { ...c, tags: [...(c.tags ?? []), { tag_id: assignment.tag_id, tag }] }
         }))
-        if (activeConv?.id === assignment.conversation_id) {
+        if (activeConvRef.current?.id === assignment.conversation_id) {
           setActiveConv(prev => {
             if (!prev || prev.tags?.some(t => t.tag_id === assignment.tag_id)) return prev
             return { ...prev, tags: [...(prev.tags ?? []), { tag_id: assignment.tag_id, tag }] }
@@ -384,7 +437,7 @@ export function MensajeriaProvider({
         setConversations(prev => prev.map(c =>
           c.id === old.conversation_id ? { ...c, tags: c.tags?.filter(t => t.tag_id !== old.tag_id) } : c
         ))
-        if (activeConv?.id === old.conversation_id) {
+        if (activeConvRef.current?.id === old.conversation_id) {
           setActiveConv(prev => prev ? { ...prev, tags: prev.tags?.filter(t => t.tag_id !== old.tag_id) } : prev)
         }
       })
@@ -403,9 +456,31 @@ export function MensajeriaProvider({
         const conv = (fullConv ?? newConvRaw) as ConversationWithRelations
         setConversations(prev => prev.some(c => c.id === conv.id) ? prev : [conv, ...prev])
       })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [supabase, activeConv])
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          reconcileActiveConv()
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          // Antes era 100% silencioso. Además del log, reconciliamos para no quedar
+          // stale si el canal cayó (ej. JWT vencido con la pestaña en foreground).
+          console.error('[mensajeria realtime] canal en estado', status, err)
+          reconcileActiveConv()
+        }
+      })
+
+    // Al volver de background (pestaña suspendida → posible gap de eventos o refresh
+    // de sesión) re-sincronizamos. reconcileActiveConv coalesce con el SUBSCRIBED.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') reconcileActiveConv()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      supabase.removeChannel(channel)
+    }
+    // activeConv NO va en deps: el canal se crea una sola vez; los handlers leen
+    // activeConvRef.current. loadMessages es estable (useCallback([supabase])).
+  }, [supabase, loadMessages])
 
   // Filtered conversations
   const filteredConversations = useMemo(() => {

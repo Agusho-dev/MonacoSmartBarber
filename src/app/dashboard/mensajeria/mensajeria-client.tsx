@@ -66,10 +66,16 @@ export function MensajeriaClient(props: MensajeriaProps) {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_alerts' }, () => {
         setAlertCount(prev => prev + 1)
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_cases' }, () => {
-        getOpenCrmCaseCount().then(r => setCasosCount(r.count))
+      // NOTA: crm_cases NO está en la publication supabase_realtime, así que un
+      // listener postgres_changes sobre esa tabla nunca dispara (era código muerto).
+      // El badge de casos se refresca por refetch manual al montar y al navegar
+      // (handleNavClick). Si se quiere en vivo, agregar crm_cases a la publication
+      // (bajo riesgo: tasa de cambios baja y el callback solo refetchea un count).
+      .subscribe((status, err) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.error('[crm-alerts-badge realtime] canal en estado', status, err)
+        }
       })
-      .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [])
 
