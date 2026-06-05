@@ -114,7 +114,7 @@ function PrizeDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md overflow-y-auto">
         {open && (
           <PrizeForm
             key={reward?.id ?? 'none'}

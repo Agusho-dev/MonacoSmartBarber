@@ -206,7 +206,7 @@ function BracketEditDialog({
 }) {
   return (
     <Dialog open={!!match} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md overflow-y-auto">
         {match && <BracketEditForm key={match.id} match={match} teams={teams} onClose={onClose} />}
       </DialogContent>
     </Dialog>

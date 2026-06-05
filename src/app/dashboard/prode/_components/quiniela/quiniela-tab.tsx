@@ -229,7 +229,7 @@ function QuestionCard({
         </span>
         {question.answer_type === 'team' ? (
           <Select value={answer} onValueChange={setAnswer}>
-            <SelectTrigger className="w-56">
+            <SelectTrigger className="w-full sm:w-56">
               <SelectValue placeholder="Equipo correcto" />
             </SelectTrigger>
             <SelectContent>
@@ -242,7 +242,7 @@ function QuestionCard({
           </Select>
         ) : question.answer_type === 'choice' && choiceOptions.length > 0 ? (
           <Select value={answer} onValueChange={setAnswer}>
-            <SelectTrigger className="w-56">
+            <SelectTrigger className="w-full sm:w-56">
               <SelectValue placeholder="Opción correcta" />
             </SelectTrigger>
             <SelectContent>
@@ -259,7 +259,7 @@ function QuestionCard({
             value={answer}
             onChange={(e) => setAnswer(e.target.value)}
             placeholder="Respuesta correcta"
-            className="w-56"
+            className="w-full sm:w-56"
           />
         )}
         <Button onClick={onResolve} disabled={isPending} size="sm" variant={resolved ? 'outline' : 'default'}>

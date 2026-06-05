@@ -93,3 +93,16 @@
   height: 2px;
   background: var(--line);
 }
+
+/* En mobile angostamos columnas y conectores para que entre más cuadro. */
+@media (max-width: 640px) {
+  .bracket {
+    --conn: 14px;
+  }
+  .round {
+    width: 170px;
+  }
+  .cell {
+    flex-basis: 64px;
+  }
+}
