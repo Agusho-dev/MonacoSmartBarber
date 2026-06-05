@@ -57,6 +57,7 @@ export function ProdeClient({ data }: { data: ProdePageData | null }) {
           <PremiosTab
             tournament={data.tournament}
             weeklyPrizes={data.weeklyPrizes}
+            challengePrizes={data.challengePrizes}
             rewards={data.rewards}
           />
         </TabsContent>

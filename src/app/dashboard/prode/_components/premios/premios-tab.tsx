@@ -31,7 +31,12 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import type { ProdeWeeklyPrize, RewardLite, TournamentLite } from '../../_lib/types'
+import type {
+  ProdeChallengePrize,
+  ProdeWeeklyPrize,
+  RewardLite,
+  TournamentLite,
+} from '../../_lib/types'
 import { fmtDateShort } from '../../_lib/fmt'
 import {
   awardGrandPrize,
@@ -40,6 +45,7 @@ import {
   type WeeklyLeaderboardRow,
 } from '@/lib/actions/prode'
 import { PrizeSlotCard, type PrizeSlot } from './prize-slot-card'
+import { ChallengePrizeSection } from './challenge-prize-section'
 
 // Semanas Lun–Dom (ARG) desde starts_at hasta min(ends_at, hoy).
 interface WeekWindow {
@@ -88,7 +94,7 @@ const SLOTS: { slot: PrizeSlot; title: string; legacyName: string; settingsKey: 
     legacyName: 'Cupón Mundial: Bienvenida',
     settingsKey: 'welcome_reward_id',
     icon: Sparkles,
-    hint: 'Se entrega al sumarse al Prode.',
+    hint: '25% OFF al sumarse · vence a las 48h.',
   },
   {
     slot: 'weekly',
@@ -100,21 +106,39 @@ const SLOTS: { slot: PrizeSlot; title: string; legacyName: string; settingsKey: 
   },
   {
     slot: 'grand',
-    title: 'Gran Premio',
+    title: 'Gran Premio · 1°',
     legacyName: 'Mundial: Gran Premio',
     settingsKey: 'grand_reward_id',
     icon: Crown,
-    hint: 'Para el campeón del torneo.',
+    hint: '1° de la tabla general (1 año + camiseta).',
+  },
+  {
+    slot: 'grand2',
+    title: 'Gran Premio · 2°',
+    legacyName: 'Prode: 6 meses de cortes + camiseta',
+    settingsKey: 'grand_2nd_reward_id',
+    icon: Crown,
+    hint: '2° de la tabla general (6 meses + camiseta).',
+  },
+  {
+    slot: 'grand3',
+    title: 'Gran Premio · 3°',
+    legacyName: 'Prode: 3 meses de cortes + camiseta',
+    settingsKey: 'grand_3rd_reward_id',
+    icon: Crown,
+    hint: '3° de la tabla general (3 meses + camiseta).',
   },
 ]
 
 export function PremiosTab({
   tournament,
   weeklyPrizes,
+  challengePrizes,
   rewards,
 }: {
   tournament: TournamentLite
   weeklyPrizes: ProdeWeeklyPrize[]
+  challengePrizes: ProdeChallengePrize[]
   rewards: RewardLite[]
 }) {
   return (
@@ -144,6 +168,12 @@ export function PremiosTab({
           })}
         </div>
       </div>
+
+      <ChallengePrizeSection
+        tournament={tournament}
+        challengePrizes={challengePrizes}
+        rewards={rewards}
+      />
 
       <WeeklyPrizeSection tournament={tournament} weeklyPrizes={weeklyPrizes} />
 

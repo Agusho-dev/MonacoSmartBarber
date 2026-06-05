@@ -5,6 +5,7 @@ import { ProdeClient } from './prode-client'
 import type {
   LeagueRow,
   ParticipantRow,
+  ProdeChallengePrize,
   ProdeMatch,
   ProdeQuestion,
   ProdeStats,
@@ -60,6 +61,7 @@ export default async function ProdePage() {
     leaguesRes,
     leagueMembersRes,
     prizesRes,
+    challengePrizesRes,
     rewardsRes,
     matchPredsRes,
     questionPredsRes,
@@ -110,6 +112,13 @@ export default async function ProdePage() {
       .eq('organization_id', orgId)
       .eq('tournament_id', tournamentId)
       .order('week_start', { ascending: true }),
+    supabase
+      .from('prode_challenge_prizes')
+      .select(
+        'id, challenge_key, stage, matchday, winner_participant_id, winner_points, reward_id, client_reward_id, awarded_at'
+      )
+      .eq('organization_id', orgId)
+      .eq('tournament_id', tournamentId),
     supabase
       .from('reward_catalog')
       .select('id, name, description, type, discount_pct, is_free_service, is_active, valid_until')
@@ -239,6 +248,7 @@ export default async function ProdePage() {
         participants,
         leagues,
         weeklyPrizes: (prizesRes.data ?? []) as ProdeWeeklyPrize[],
+        challengePrizes: (challengePrizesRes.data ?? []) as ProdeChallengePrize[],
         rewards: (rewardsRes.data ?? []) as RewardLite[],
         stats,
         distribution,

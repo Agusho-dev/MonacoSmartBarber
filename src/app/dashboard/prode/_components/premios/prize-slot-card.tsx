@@ -27,7 +27,7 @@ import {
 import type { RewardLite } from '../../_lib/types'
 import { setPrizeMapping, updateReward } from '@/lib/actions/prode'
 
-export type PrizeSlot = 'welcome' | 'weekly' | 'grand'
+export type PrizeSlot = 'welcome' | 'weekly' | 'grand' | 'grand2' | 'grand3'
 
 function benefitLabel(r: RewardLite): string {
   if (r.is_free_service) return 'Servicio gratis'

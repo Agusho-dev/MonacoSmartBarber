@@ -18,7 +18,11 @@ export interface ProdeSettings {
   featured_multiplier?: number
   weekly_reward_id?: string
   grand_reward_id?: string
+  grand_2nd_reward_id?: string
+  grand_3rd_reward_id?: string
   welcome_reward_id?: string
+  /** Mapa challenge_key → reward_id para premiar cada Desafío. */
+  challenge_rewards?: Record<string, string>
   grand_prize_awarded_at?: string
   [k: string]: unknown
 }
@@ -94,6 +98,18 @@ export interface ProdeWeeklyPrize {
   notified_at: string | null
 }
 
+export interface ProdeChallengePrize {
+  id: string
+  challenge_key: string
+  stage: string
+  matchday: number | null
+  winner_participant_id: string | null
+  winner_points: number | null
+  reward_id: string | null
+  client_reward_id: string | null
+  awarded_at: string
+}
+
 export interface RewardLite {
   id: string
   name: string
@@ -123,6 +139,7 @@ export interface ProdePageData {
   participants: ParticipantRow[]
   leagues: LeagueRow[]
   weeklyPrizes: ProdeWeeklyPrize[]
+  challengePrizes: ProdeChallengePrize[]
   rewards: RewardLite[]
   stats: ProdeStats
   distribution: QuestionDistribution

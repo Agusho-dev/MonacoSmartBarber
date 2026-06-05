@@ -861,7 +861,13 @@ export async function setMatchTeams(input: {
 // H. Premios: mapeo de recompensa por slot + edición de la recompensa
 // ---------------------------------------------------------------------------
 
-const PRIZE_SLOTS = { weekly: 'weekly_reward_id', grand: 'grand_reward_id', welcome: 'welcome_reward_id' } as const
+const PRIZE_SLOTS = {
+  weekly: 'weekly_reward_id',
+  grand: 'grand_reward_id',
+  welcome: 'welcome_reward_id',
+  grand2: 'grand_2nd_reward_id',
+  grand3: 'grand_3rd_reward_id',
+} as const
 
 export async function setPrizeMapping(input: {
   slot: keyof typeof PRIZE_SLOTS
@@ -942,6 +948,115 @@ export async function updateReward(input: {
 
   revalidatePath('/dashboard/prode')
   return { success: true }
+}
+
+// ---------------------------------------------------------------------------
+// H.2 Premios por Desafío (D1/D2/D3, 16vos, 8vos): mapeo + tabla + premiación
+// ---------------------------------------------------------------------------
+
+export interface ChallengeLeaderboardRow {
+  rank: number
+  participant_id: string
+  display_name: string
+  challenge_points: number
+  exact_hits: number
+}
+
+/** Tabla del Desafío (suma de puntos de los partidos de ese stage/matchday). */
+export async function getChallengeLeaderboard(input: { stage: string; matchday: number | null }) {
+  const result = await requireOrgId()
+  if ('error' in result) return { error: result.error }
+
+  const tournamentId = await resolveTournamentId(result.orgId)
+  if (!tournamentId) return { error: 'No hay torneo configurado' }
+
+  const supabase = createAdminClient()
+  const { data, error } = await supabase.rpc('prode_challenge_leaderboard', {
+    p_tournament_id: tournamentId,
+    p_stage: input.stage,
+    p_matchday: input.matchday,
+    p_limit: 10,
+  })
+  if (error) return { error: 'Error al cargar la tabla: ' + error.message }
+  return { success: true, rows: (data ?? []) as ChallengeLeaderboardRow[] }
+}
+
+/** Mapea qué recompensa entrega un Desafío (settings.challenge_rewards[key]). */
+export async function setChallengeReward(input: { key: string; rewardId: string }) {
+  const result = await requireOrgId()
+  if ('error' in result) return { error: result.error }
+  const orgId = result.orgId
+
+  if (!input.key) return { error: 'Desafío inválido' }
+  if (!z.string().uuid().safeParse(input.rewardId).success) return { error: 'Recompensa inválida' }
+
+  const supabase = createAdminClient()
+  const { data: reward } = await supabase
+    .from('reward_catalog')
+    .select('id')
+    .eq('id', input.rewardId)
+    .eq('organization_id', orgId)
+    .maybeSingle()
+  if (!reward) return { error: 'Recompensa no encontrada' }
+
+  const t = await loadTournamentSettings(orgId)
+  if (!t) return { error: 'No hay torneo configurado' }
+
+  const current = (t.settings.challenge_rewards as Record<string, string> | undefined) ?? {}
+  const next = { ...t.settings, challenge_rewards: { ...current, [input.key]: input.rewardId } }
+
+  const { error } = await supabase
+    .from('prode_tournament')
+    .update({ settings: next, updated_at: new Date().toISOString() })
+    .eq('id', t.id)
+    .eq('organization_id', orgId)
+  if (error) return { error: 'No se pudo guardar el premio del desafío: ' + error.message }
+
+  revalidatePath('/dashboard/prode')
+  return { success: true }
+}
+
+/** Premia al 1° de un Desafío (manual). Idempotente: una vez por challenge_key. */
+export async function awardChallengePrize(input: {
+  key: string
+  stage: string
+  matchday: number | null
+  rewardId: string
+}) {
+  const result = await requireOrgId()
+  if ('error' in result) return { error: result.error }
+
+  const tournamentId = await resolveTournamentId(result.orgId)
+  if (!tournamentId) return { error: 'No hay torneo configurado' }
+  if (!z.string().uuid().safeParse(input.rewardId).success)
+    return { error: 'Elegí qué recompensa entregar para este desafío' }
+
+  const supabase = createAdminClient()
+  const { data, error } = await supabase.rpc('prode_award_challenge_prize', {
+    p_tournament_id: tournamentId,
+    p_challenge_key: input.key,
+    p_stage: input.stage,
+    p_matchday: input.matchday,
+    p_reward_id: input.rewardId,
+  })
+  if (error) return { error: 'Error al premiar el desafío: ' + error.message }
+
+  const res = (data ?? {}) as {
+    ok?: boolean
+    winner?: { participant_id: string; display_name: string; points: number } | null
+    already?: boolean
+    error?: string
+    reason?: string
+  }
+  if (res.ok === false) return { error: res.error ?? 'No se pudo premiar el desafío' }
+
+  revalidatePath('/dashboard/prode')
+  return {
+    success: true,
+    winner: res.winner ?? null,
+    already: res.already ?? false,
+    reason: res.reason ?? null,
+  }
 }
 
 // ---------------------------------------------------------------------------
