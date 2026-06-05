@@ -1,6 +1,6 @@
 'use client'
 
-import { X, CheckCircle2, Archive, RotateCcw, Calendar } from 'lucide-react'
+import { X, CheckCircle2, Archive, RotateCcw, Calendar, ArrowLeft } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Avatar } from '../shared/avatar'
@@ -21,15 +21,19 @@ export function ClientProfile() {
   const activeConvName = displayName(activeConv.client?.name || activeConv.platform_user_name || activeConv.platform_user_id, activeConv.channel?.platform)
 
   return (
-    <div className="hidden lg:flex h-full min-h-0 flex-col w-72 shrink-0 bg-background border-l border">
+    <div className="fixed inset-0 z-[60] flex h-full min-h-0 flex-col bg-background lg:static lg:inset-auto lg:z-auto lg:w-72 lg:shrink-0 lg:border-l lg:border">
       <div className="flex shrink-0 items-center justify-between px-4 py-3 bg-card border-b border">
+        <button onClick={() => setShowProfile(false)} className="-ml-1 flex items-center gap-1.5 text-muted-foreground hover:text-foreground lg:hidden" aria-label="Volver al chat">
+          <ArrowLeft className="size-4" />
+          <span className="text-sm font-medium">Volver</span>
+        </button>
         <span className="text-sm font-semibold text-foreground">Perfil del cliente</span>
-        <button onClick={() => setShowProfile(false)} className="text-muted-foreground hover:text-foreground">
+        <button onClick={() => setShowProfile(false)} className="text-muted-foreground hover:text-foreground" aria-label="Cerrar">
           <X className="size-4" />
         </button>
       </div>
       <ScrollArea className="min-h-0 flex-1 overflow-hidden">
-        <div className="p-4 space-y-5">
+        <div className="p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] space-y-5">
           {/* Avatar + nombre */}
           <div className="flex flex-col items-center gap-2 pt-2">
             <Avatar name={activeConvName} size={16} avatarUrl={activeConv.platform_user_avatar} />

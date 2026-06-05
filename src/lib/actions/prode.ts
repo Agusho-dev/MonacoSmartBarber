@@ -969,8 +969,23 @@ export async function triggerProdeSync(): Promise<{
       matchesUpserted?: number
       scored?: number
     }
-    if (!res.ok || json.ok === false)
+    if (!res.ok || json.ok === false) {
+      if (res.status === 404)
+        return {
+          error:
+            'La función de sincronización (prode-sync) no está deployada en Supabase. Hay que deployarla una vez para habilitar el botón.',
+        }
+      if (res.status === 403)
+        return {
+          error:
+            'El sync rechazó la llamada (403): el PRODE_SYNC_SECRET del dashboard no coincide con el CRON_SECRET de la función.',
+        }
+      if (json.error?.includes('FOOTBALL_DATA_API_KEY'))
+        return {
+          error: 'Falta el secret FOOTBALL_DATA_API_KEY en Supabase para que el sync traiga los datos.',
+        }
       return { error: json.error ? `Sync falló: ${json.error}` : `Sync falló (${res.status})` }
+    }
 
     revalidatePath('/dashboard/prode')
     return {
