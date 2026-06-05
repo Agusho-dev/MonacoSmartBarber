@@ -91,7 +91,7 @@ export default async function ProdePage() {
       .order('name', { ascending: true }),
     supabase
       .from('prode_participants')
-      .select('id, display_name, profile_completed_at, created_at, clients(name, phone)')
+      .select('id, display_name, profile_completed_at, created_at, pin_hash, clients(name, phone)')
       .eq('organization_id', orgId)
       .eq('tournament_id', tournamentId)
       .order('created_at', { ascending: false }),
@@ -176,6 +176,7 @@ export default async function ProdePage() {
       profile_completed: !!p.profile_completed_at,
       created_at: p.created_at as string,
       plays: playsByParticipant.get(p.id) ?? 0,
+      has_pin: !!(p as { pin_hash?: string | null }).pin_hash,
     }
   })
 

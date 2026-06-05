@@ -176,6 +176,29 @@ export async function deleteParticipant(id: string) {
   return { success: true }
 }
 
+/**
+ * Resetea el PIN de un participante (login del Prode). Pone pin_hash en NULL: el
+ * jugador fija un PIN nuevo en su próximo ingreso (teléfono + PIN). Cero mensajes.
+ */
+export async function resetParticipantPin(id: string) {
+  const result = await requireOrgId()
+  if ('error' in result) return { error: result.error }
+  const orgId = result.orgId
+
+  if (!z.string().uuid().safeParse(id).success) return { error: 'ID inválido' }
+
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from('prode_participants')
+    .update({ pin_hash: null })
+    .eq('id', id)
+    .eq('organization_id', orgId)
+
+  if (error) return { error: 'Error al resetear el PIN: ' + error.message }
+  revalidatePath('/dashboard/prode')
+  return { success: true }
+}
+
 export async function deleteLeague(id: string) {
   const result = await requireOrgId()
   if ('error' in result) return { error: result.error }

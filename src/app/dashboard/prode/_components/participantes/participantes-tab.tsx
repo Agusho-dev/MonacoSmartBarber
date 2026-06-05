@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
-import { Check, Copy, Loader2, Search, Trash2, Trophy, Users } from 'lucide-react'
+import { Check, Copy, KeyRound, Loader2, Search, Trash2, Trophy, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import type { LeagueRow, ParticipantRow } from '../../_lib/types'
 import { fmtDateShort } from '../../_lib/fmt'
-import { deleteLeague, deleteParticipant } from '@/lib/actions/prode'
+import { deleteLeague, deleteParticipant, resetParticipantPin } from '@/lib/actions/prode'
 
 export function ParticipantesTab({
   participants,
@@ -87,6 +87,7 @@ export function ParticipantesTab({
                   <TableHead>Nombre</TableHead>
                   <TableHead>Teléfono</TableHead>
                   <TableHead>Perfil</TableHead>
+                  <TableHead>PIN</TableHead>
                   <TableHead className="text-center">Jugadas</TableHead>
                   <TableHead>Alta</TableHead>
                   <TableHead className="text-right">Acción</TableHead>
@@ -139,11 +140,19 @@ export function ParticipantesTab({
 
 function ParticipantRowItem({ participant }: { participant: ParticipantRow }) {
   const [isPending, startTransition] = useTransition()
+  const [isResetting, startReset] = useTransition()
   const onDelete = () => {
     startTransition(async () => {
       const r = await deleteParticipant(participant.id)
       if ('error' in r) toast.error(r.error)
       else toast.success('Participante eliminado')
+    })
+  }
+  const onResetPin = () => {
+    startReset(async () => {
+      const r = await resetParticipantPin(participant.id)
+      if ('error' in r) toast.error(r.error)
+      else toast.success('PIN reseteado. El jugador elige uno nuevo al entrar.')
     })
   }
   return (
@@ -159,15 +168,36 @@ function ParticipantRowItem({ participant }: { participant: ParticipantRow }) {
           <Badge variant="outline">Incompleto</Badge>
         )}
       </TableCell>
+      <TableCell>
+        {participant.has_pin ? (
+          <Badge variant="outline" className="border-emerald-300 text-emerald-600">
+            Con PIN
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="text-muted-foreground">Sin PIN</Badge>
+        )}
+      </TableCell>
       <TableCell className="text-center tabular-nums">{participant.plays}</TableCell>
       <TableCell className="text-muted-foreground">{fmtDateShort(participant.created_at)}</TableCell>
       <TableCell className="text-right">
-        <ConfirmDelete
-          title="¿Eliminar participante?"
-          description={`Se eliminará "${participant.display_name}" y sus jugadas. Esta acción no se puede deshacer.`}
-          onConfirm={onDelete}
-          disabled={isPending}
-        />
+        <div className="flex items-center justify-end gap-1">
+          <ConfirmAction
+            icon={KeyRound}
+            title="¿Resetear el PIN?"
+            description={`Se borra el PIN de "${participant.display_name}". La próxima vez que entre con su teléfono, elige un PIN nuevo. No pierde sus jugadas.`}
+            confirmLabel="Resetear PIN"
+            onConfirm={onResetPin}
+            loading={isResetting}
+            disabled={!participant.has_pin}
+            destructive={false}
+          />
+          <ConfirmDelete
+            title="¿Eliminar participante?"
+            description={`Se eliminará "${participant.display_name}" y sus jugadas. Esta acción no se puede deshacer.`}
+            onConfirm={onDelete}
+            disabled={isPending}
+          />
+        </div>
       </TableCell>
     </TableRow>
   )
@@ -272,6 +302,59 @@ export function ConfirmDelete({
             className="bg-destructive text-white hover:bg-destructive/90"
           >
             Eliminar
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+function ConfirmAction({
+  icon: Icon,
+  title,
+  description,
+  confirmLabel,
+  onConfirm,
+  loading,
+  disabled,
+  destructive = true,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  description: string
+  confirmLabel: string
+  onConfirm: () => void
+  loading?: boolean
+  disabled?: boolean
+  destructive?: boolean
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="ghost" size="icon" disabled={disabled || loading} aria-label={confirmLabel}>
+          {loading ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Icon className={`size-4 ${destructive ? 'text-destructive' : 'text-amber-500'}`} />
+          )}
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={onConfirm}
+            className={
+              destructive
+                ? 'bg-destructive text-white hover:bg-destructive/90'
+                : 'bg-amber-500 text-white hover:bg-amber-600'
+            }
+          >
+            {confirmLabel}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -71,6 +71,7 @@ export interface ParticipantRow {
   profile_completed: boolean
   created_at: string
   plays: number
+  has_pin: boolean
 }
 
 export interface LeagueRow {
