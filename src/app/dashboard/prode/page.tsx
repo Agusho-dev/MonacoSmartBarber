@@ -2,6 +2,17 @@ import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { ProdeClient } from './prode-client'
+import type {
+  LeagueRow,
+  ParticipantRow,
+  ProdeMatch,
+  ProdeQuestion,
+  ProdeStats,
+  ProdeTeam,
+  ProdeWeeklyPrize,
+  QuestionDistribution,
+  RewardLite,
+} from './_lib/types'
 
 const REMINDER_TEMPLATE_NAME = 'prode_recordatorio'
 
@@ -36,19 +47,7 @@ export default async function ProdePage() {
   const tournament = await resolveTournament(supabase, orgId)
 
   if (!tournament) {
-    return (
-      <ProdeClient
-        tournament={null}
-        matches={[]}
-        questions={[]}
-        teams={[]}
-        participants={[]}
-        leagues={[]}
-        weeklyPrizes={[]}
-        whatsappActive={false}
-        reminderTemplateStatus={null}
-      />
-    )
+    return <ProdeClient data={null} />
   }
 
   const tournamentId = tournament.id
@@ -61,25 +60,32 @@ export default async function ProdePage() {
     leaguesRes,
     leagueMembersRes,
     prizesRes,
+    rewardsRes,
+    matchPredsRes,
+    questionPredsRes,
+    matchPredCount,
+    questionPredCount,
     waConfigRes,
   ] = await Promise.all([
     supabase
       .from('prode_matches')
       .select(
-        'id, kickoff_at, status, home_score, away_score, is_featured, stage, group_label, home_team_label, away_team_label, home_team_id, away_team_id'
+        'id, kickoff_at, status, home_score, away_score, is_featured, stage, group_label, matchday, home_team_label, away_team_label, home_team_id, away_team_id, venue, updated_at'
       )
       .eq('organization_id', orgId)
       .eq('tournament_id', tournamentId)
       .order('kickoff_at', { ascending: true }),
     supabase
       .from('prode_questions')
-      .select('id, label, answer_type, options, points, correct_answer, resolved_at, sort_order')
+      .select(
+        'id, kind, label, help_text, answer_type, options, points, correct_answer, resolved_at, sort_order'
+      )
       .eq('organization_id', orgId)
       .eq('tournament_id', tournamentId)
       .order('sort_order', { ascending: true }),
     supabase
       .from('prode_teams')
-      .select('id, name, code')
+      .select('id, name, short_name, code, group_label, flag_url')
       .eq('organization_id', orgId)
       .eq('tournament_id', tournamentId)
       .order('name', { ascending: true }),
@@ -95,16 +101,40 @@ export default async function ProdePage() {
       .eq('organization_id', orgId)
       .eq('tournament_id', tournamentId)
       .order('is_house', { ascending: false }),
-    supabase
-      .from('prode_league_members')
-      .select('league_id')
-      .eq('organization_id', orgId),
+    supabase.from('prode_league_members').select('league_id').eq('organization_id', orgId),
     supabase
       .from('prode_weekly_prizes')
-      .select('id, week_start, week_end, winner_participant_id, winner_points, client_reward_id, awarded_at, notified_at')
+      .select(
+        'id, week_start, week_end, winner_participant_id, winner_points, client_reward_id, awarded_at, notified_at'
+      )
       .eq('organization_id', orgId)
       .eq('tournament_id', tournamentId)
       .order('week_start', { ascending: true }),
+    supabase
+      .from('reward_catalog')
+      .select('id, name, description, type, discount_pct, is_free_service, is_active, valid_until')
+      .eq('organization_id', orgId)
+      .order('name', { ascending: true }),
+    // Para # jugadas por participante (capado; pre-lanzamiento es chico).
+    supabase
+      .from('prode_match_predictions')
+      .select('participant_id')
+      .eq('organization_id', orgId)
+      .limit(50000),
+    // Para distribución de respuestas + jugadas de quiniela por participante.
+    supabase
+      .from('prode_question_predictions')
+      .select('participant_id, question_id, answer')
+      .eq('organization_id', orgId)
+      .limit(50000),
+    supabase
+      .from('prode_match_predictions')
+      .select('*', { count: 'exact', head: true })
+      .eq('organization_id', orgId),
+    supabase
+      .from('prode_question_predictions')
+      .select('*', { count: 'exact', head: true })
+      .eq('organization_id', orgId),
     supabase
       .from('organization_whatsapp_config')
       .select('is_active')
@@ -112,15 +142,62 @@ export default async function ProdePage() {
       .maybeSingle(),
   ])
 
+  const matches = (matchesRes.data ?? []) as ProdeMatch[]
+
   // Conteo de miembros por liga
   const memberCounts = new Map<string, number>()
   for (const m of leagueMembersRes.data ?? []) {
     memberCounts.set(m.league_id, (memberCounts.get(m.league_id) ?? 0) + 1)
   }
-  const leagues = (leaguesRes.data ?? []).map((l) => ({
+  const leagues: LeagueRow[] = (leaguesRes.data ?? []).map((l) => ({
     ...l,
     member_count: memberCounts.get(l.id) ?? 0,
   }))
+
+  // Jugadas por participante (partidos + quiniela)
+  const playsByParticipant = new Map<string, number>()
+  for (const r of matchPredsRes.data ?? [])
+    playsByParticipant.set(r.participant_id, (playsByParticipant.get(r.participant_id) ?? 0) + 1)
+  for (const r of questionPredsRes.data ?? [])
+    playsByParticipant.set(r.participant_id, (playsByParticipant.get(r.participant_id) ?? 0) + 1)
+
+  // Normalizar participantes (clients puede venir como array por el join)
+  const participants: ParticipantRow[] = (participantsRes.data ?? []).map((p) => {
+    const rel = p.clients as
+      | { name: string | null; phone: string | null }
+      | { name: string | null; phone: string | null }[]
+      | null
+    const client = Array.isArray(rel) ? rel[0] : rel
+    return {
+      id: p.id,
+      display_name: p.display_name,
+      phone: client?.phone ?? null,
+      client_name: client?.name ?? null,
+      profile_completed: !!p.profile_completed_at,
+      created_at: p.created_at as string,
+      plays: playsByParticipant.get(p.id) ?? 0,
+    }
+  })
+
+  // Distribución de respuestas de la quiniela: questionId -> answer -> count
+  const distribution: QuestionDistribution = {}
+  for (const r of questionPredsRes.data ?? []) {
+    const q = (distribution[r.question_id] ??= {})
+    q[r.answer] = (q[r.answer] ?? 0) + 1
+  }
+
+  // Última sincronización: el updated_at más reciente entre los partidos.
+  let lastSyncAt: string | null = null
+  for (const m of matches) {
+    if (m.updated_at && (!lastSyncAt || m.updated_at > lastSyncAt)) lastSyncAt = m.updated_at
+  }
+
+  const stats: ProdeStats = {
+    participants: participants.length,
+    plays: (matchPredCount.count ?? 0) + (questionPredCount.count ?? 0),
+    matchesPlayed: matches.filter((m) => m.status === 'finished').length,
+    matchesTotal: matches.length,
+  }
 
   // Estado del template de recordatorio (vía canal WA org-default)
   let reminderTemplateStatus: string | null = null
@@ -142,82 +219,32 @@ export default async function ProdePage() {
     reminderTemplateStatus = tpl?.status ?? null
   }
 
-  // Normalizar participantes (clients puede venir como array por el join)
-  const participants = (participantsRes.data ?? []).map((p) => {
-    const rel = p.clients as { name: string | null; phone: string | null } | { name: string | null; phone: string | null }[] | null
-    const client = Array.isArray(rel) ? rel[0] : rel
-    return {
-      id: p.id,
-      display_name: p.display_name,
-      phone: client?.phone ?? null,
-      client_name: client?.name ?? null,
-      profile_completed: !!p.profile_completed_at,
-      created_at: p.created_at as string,
-    }
-  })
-
   return (
     <ProdeClient
-      tournament={{
-        id: tournament.id,
-        name: tournament.name,
-        season: tournament.season,
-        status: tournament.status,
-        starts_at: tournament.starts_at,
-        ends_at: tournament.ends_at,
+      data={{
+        tournament: {
+          id: tournament.id,
+          name: tournament.name,
+          season: tournament.season,
+          status: tournament.status,
+          starts_at: tournament.starts_at,
+          ends_at: tournament.ends_at,
+          predictions_lock_at: tournament.predictions_lock_at ?? null,
+          settings: (tournament.settings as Record<string, unknown>) ?? {},
+        },
+        matches,
+        questions: (questionsRes.data ?? []) as ProdeQuestion[],
+        teams: (teamsRes.data ?? []) as ProdeTeam[],
+        participants,
+        leagues,
+        weeklyPrizes: (prizesRes.data ?? []) as ProdeWeeklyPrize[],
+        rewards: (rewardsRes.data ?? []) as RewardLite[],
+        stats,
+        distribution,
+        lastSyncAt,
+        whatsappActive: !!waConfigRes.data?.is_active,
+        reminderTemplateStatus,
       }}
-      matches={(matchesRes.data ?? []) as ProdeMatch[]}
-      questions={(questionsRes.data ?? []) as ProdeQuestion[]}
-      teams={(teamsRes.data ?? []) as ProdeTeam[]}
-      participants={participants}
-      leagues={leagues}
-      weeklyPrizes={(prizesRes.data ?? []) as ProdeWeeklyPrize[]}
-      whatsappActive={!!waConfigRes.data?.is_active}
-      reminderTemplateStatus={reminderTemplateStatus}
     />
   )
-}
-
-// Tipos compartidos con el client (re-exportados desde el client)
-export interface ProdeMatch {
-  id: string
-  kickoff_at: string
-  status: string
-  home_score: number | null
-  away_score: number | null
-  is_featured: boolean
-  stage: string | null
-  group_label: string | null
-  home_team_label: string | null
-  away_team_label: string | null
-  home_team_id: string | null
-  away_team_id: string | null
-}
-
-export interface ProdeQuestion {
-  id: string
-  label: string
-  answer_type: string
-  options: unknown
-  points: number
-  correct_answer: string | null
-  resolved_at: string | null
-  sort_order: number
-}
-
-export interface ProdeTeam {
-  id: string
-  name: string
-  code: string | null
-}
-
-export interface ProdeWeeklyPrize {
-  id: string
-  week_start: string
-  week_end: string
-  winner_participant_id: string | null
-  winner_points: number | null
-  client_reward_id: string | null
-  awarded_at: string
-  notified_at: string | null
 }
