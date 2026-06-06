@@ -1344,10 +1344,11 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
   }
 
   async function handleCancel(entryId: string) {
+    const isBreak = entries.find((e) => e.id === entryId)?.is_break ?? false
     setActionLoading(entryId)
     const result = await cancelQueueEntry(entryId)
     if ('error' in result) toast.error(result.error)
-    else toast.success('Turno cancelado')
+    else toast.success(isBreak ? 'Descanso cancelado' : 'Turno cancelado')
     await fetchQueue()
     setActionLoading(null)
   }

@@ -952,10 +952,10 @@ export async function cancelQueueEntry(queueEntryId: string) {
   if (!isValidUUID(queueEntryId)) return { error: 'ID inválido' }
   const supabase = createAdminClient()
 
-  // Obtener la entrada para validar que la sucursal pertenece a la org activa
+  // Obtener la entrada para validar la sucursal y decidir qué estados son cancelables.
   const { data: entry } = await supabase
     .from('queue_entries')
-    .select('branch_id')
+    .select('branch_id, is_break, break_request_id')
     .eq('id', queueEntryId)
     .maybeSingle()
 
@@ -964,16 +964,20 @@ export async function cancelQueueEntry(queueEntryId: string) {
   const orgAccess = await validateBranchAccess(entry.branch_id)
   if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
 
-  // Guard de estado: sólo cancelar entries 'waiting'. Sin esto, un tap en la X
-  // ("No se presentó") sobre un cliente que OTRO barbero ya pasó a in_progress
+  // Guard de estado: para CLIENTES sólo se cancela 'waiting'. Sin esto, un tap en
+  // la X ("No se presentó") sobre un cliente que OTRO barbero ya pasó a in_progress
   // (carrera de UI por lag de realtime) pisaba ese in_progress y dejaba el corte
-  // sin poder cobrarse. No se filtra is_break: el dashboard sí permite cancelar
-  // un descanso encolado (waiting) desde acá — eso se preserva.
+  // sin poder cobrarse. Para DESCANSOS sí permitimos cancelar también el que ya
+  // arrancó (in_progress): no hay corte que cobrar y el descanso pudo crearse por
+  // error o el barbero quiere volver antes (createBreakEntry lo arranca solo si el
+  // barbero no tenía corte activo, así que la X tiene que poder cancelarlo).
+  const cancelableStatuses = entry.is_break ? ['waiting', 'in_progress'] : ['waiting']
+
   const { data: cancelledRows, error } = await supabase
     .from('queue_entries')
     .update({ status: 'cancelled' })
     .eq('id', queueEntryId)
-    .eq('status', 'waiting')
+    .in('status', cancelableStatuses)
     .select('id')
 
   if (error) {
@@ -981,8 +985,22 @@ export async function cancelQueueEntry(queueEntryId: string) {
   }
 
   if (!cancelledRows || cancelledRows.length === 0) {
-    // El entry ya no estaba 'waiting' (lo empezaron a atender o se completó).
-    return { error: 'El cliente ya está siendo atendido o fue completado' }
+    // El entry ya no estaba en un estado cancelable (lo empezaron a atender,
+    // se completó, o el descanso ya había terminado).
+    return {
+      error: entry.is_break
+        ? 'El descanso ya finalizó'
+        : 'El cliente ya está siendo atendido o fue completado',
+    }
+  }
+
+  // Si el descanso provenía de una solicitud formal (break_request), cerrarla para
+  // no dejarla huérfana en estado 'approved' — BreakRequestStatus no tiene 'cancelled'.
+  if (entry.is_break && entry.break_request_id) {
+    await supabase
+      .from('break_requests')
+      .update({ status: 'completed', actual_completed_at: new Date().toISOString() })
+      .eq('id', entry.break_request_id)
   }
 
   revalidatePath('/barbero/fila')
