@@ -214,6 +214,21 @@ export async function attendNextClient(barberId: string, branchId: string, prefe
   return { success: true as const, entryId: claim.entry_id, wasDynamic: claim.was_dynamic }
 }
 
+/** Traduce los códigos de error de la RPC redeem_coupon_for_visit a texto en español. */
+function mapCouponError(code: string | undefined): string {
+  switch (code) {
+    case 'wrong_client': return 'El cupón pertenece a otro cliente'
+    case 'wrong_org': return 'El cupón es de otra organización'
+    case 'already_redeemed': return 'El cupón ya fue canjeado'
+    case 'expired': return 'El cupón está vencido'
+    case 'not_found': return 'Cupón no encontrado'
+    case 'not_available': return 'El cupón no está disponible'
+    case 'no_discount': return 'El cupón no tiene descuento aplicable'
+    case 'visit_not_found': return 'No se encontró la visita'
+    default: return 'No se pudo aplicar el cupón'
+  }
+}
+
 export async function completeService(
   queueEntryId: string,
   paymentMethod: 'cash' | 'card' | 'transfer',
@@ -225,6 +240,9 @@ export async function completeService(
   tipAmount: number = 0,
   tipPaymentMethod: 'cash' | 'card' | 'transfer' | null = null,
   barberNote: string | null = null,
+  // Cupón de descuento (client_rewards.qr_code) escaneado en el cobro. Se valida
+  // sin consumir al escanear; acá se consume atómicamente al confirmar la venta.
+  couponQrCode: string | null = null,
 ) {
   if (!isValidUUID(queueEntryId)) return { error: 'queueEntryId inválido' }
   if (serviceId && !isValidUUID(serviceId)) return { error: 'serviceId inválido' }
@@ -379,6 +397,10 @@ export async function completeService(
     }
   }
 
+  // Subtotal de servicios (principal + extras). Es la base del descuento por cupón:
+  // el 20% se aplica SOLO a servicios, no a productos ni a la propina.
+  const serviceSubtotal = amount
+
   // 3.5 Calculate product prices and commissions using shared function
   let productCommissionAmount = 0
   if (productsToSell && productsToSell.length > 0) {
@@ -410,7 +432,8 @@ export async function completeService(
     }
   }
 
-  // 4. Update the visit with correct data
+  // 4. Update the visit with correct data (amount = bruto neto de prepagos; SIN cupón
+  //    todavía — el descuento del cupón lo aplica la RPC abajo, atómico con el consumo).
   const visitUpdate: Record<string, unknown> = {
     payment_method: paymentMethod,
     amount,
@@ -427,10 +450,60 @@ export async function completeService(
     visitUpdate.barber_note = barberNote.trim().slice(0, 500)
   }
 
-  await supabase
+  const { error: visitUpdateError } = await supabase
     .from('visits')
     .update(visitUpdate)
     .eq('id', visit.id)
+  if (visitUpdateError) {
+    console.error('[completeService] error al actualizar la visita:', visitUpdateError.message)
+  }
+
+  // 4.5 Canje de cupón de descuento (client_rewards) al confirmar el cobro.
+  //     La RPC redeem_coupon_for_visit hace EN UNA SOLA TRANSACCIÓN: validar
+  //     (dueño/org/vigencia), consumir (lock + guarda anti-doble-canje) y escribir el
+  //     descuento sobre la visita (amount/discount_amount/client_reward_id). Así
+  //     consumo y descuento NUNCA divergen. No usa auth.uid → sirve en el panel PIN.
+  //     Va DESPUÉS del write base de la visita (la RPC necesita leer el amount bruto)
+  //     y DESPUÉS del guard idempotente (un reintento sobre un entry ya completado
+  //     retorna antes y nunca re-consume). El descuento aplica solo a servicios; la
+  //     comisión queda sobre el bruto (el cupón no recorta la paga del barbero).
+  //     FAIL-OPEN: si el cupón ya no es canjeable o si el write base falló, NO se
+  //     consume y se cobra a precio lleno con un aviso para el barbero.
+  let couponClientRewardId: string | null = null
+  let couponDiscountAmount = 0
+  let couponWarning: string | null = null
+  if (couponQrCode && !isRewardClaim) {
+    const cleanCoupon = couponQrCode.trim().toLowerCase()
+    if (visitUpdateError) {
+      couponWarning = 'No se pudo registrar el cobro; el cupón no se canjeó'
+    } else if (!/^[0-9a-f-]{8,64}$/.test(cleanCoupon)) {
+      couponWarning = 'El código del cupón no es válido; se cobró sin descuento'
+    } else if (serviceSubtotal <= 0) {
+      couponWarning = 'No hay servicio para aplicar el descuento; el cupón no se canjeó'
+    } else {
+      const { data: redeemData, error: redeemErr } = await supabase.rpc('redeem_coupon_for_visit', {
+        p_qr_code: cleanCoupon,
+        p_visit_id: visit.id,
+        p_service_subtotal: serviceSubtotal,
+      })
+      const row = (redeemData ?? {}) as {
+        success?: boolean
+        error?: string
+        discount_amount?: number | null
+        net_amount?: number | null
+        client_reward_id?: string
+      }
+      if (redeemErr || !row.success) {
+        if (redeemErr) console.error('[completeService] redeem_coupon_for_visit error:', redeemErr.message)
+        couponWarning = mapCouponError(row.error) + '; se cobró sin descuento'
+      } else {
+        couponClientRewardId = row.client_reward_id ?? null
+        couponDiscountAmount = Number(row.discount_amount ?? 0)
+        // La RPC ya escribió el amount neto en la visita; usamos ese neto para caja/transfer.
+        amount = Number(row.net_amount ?? amount)
+      }
+    }
+  }
 
   if (paymentMethod === 'transfer' && paymentAccountId) {
     await recordTransfer(visit.id, paymentAccountId, amount, visit.branch_id)
@@ -945,7 +1018,14 @@ export async function completeService(
   revalidatePath('/dashboard/fila')
   revalidatePath('/dashboard/finanzas')
   revalidatePath('/dashboard/estadisticas')
-  return { success: true, visitId: visit.id, breakAutoStarted }
+  return {
+    success: true as const,
+    visitId: visit.id,
+    breakAutoStarted,
+    couponApplied: couponClientRewardId != null,
+    couponDiscountAmount,
+    couponWarning,
+  }
 }
 
 export async function cancelQueueEntry(queueEntryId: string) {
@@ -1131,10 +1211,14 @@ export async function checkinClientByFace(
 
 export async function reassignMyBarber(
   queueEntryId: string,
-  newBarberId: string,
+  newBarberId: string | null,
   clientId: string
 ) {
-  if (!isValidUUID(queueEntryId) || !isValidUUID(newBarberId)) return { error: 'Datos inválidos' }
+  if (!isValidUUID(queueEntryId)) return { error: 'Datos inválidos' }
+  // newBarberId null = volver al pool dinámico ("Menor espera"). El UPDATE de abajo
+  // ya setea is_dynamic: !newBarberId. Sólo validamos el UUID si se eligió un barbero
+  // específico (antes esta guarda rechazaba null y rompía el CTA "Menor espera").
+  if (newBarberId !== null && !isValidUUID(newBarberId)) return { error: 'Datos inválidos' }
   // Prueba de posesión: el cliente debe conocer el client_id de SU entry. Es el
   // único ownership factible sin sesión de cliente en el kiosk compartido.
   // Sin esto, cualquier anónimo con un queueEntryId (visible vía RLS pública)
@@ -1175,16 +1259,19 @@ export async function reassignMyBarber(
 
   if (!branchCheck) return { error: 'Sucursal no encontrada o inactiva' }
 
-  // Verificar que el nuevo barbero pertenece a la misma sucursal
-  const { data: barberCheck } = await supabase
-    .from('staff')
-    .select('id')
-    .eq('id', newBarberId)
-    .eq('branch_id', entry.branch_id)
-    .eq('is_active', true)
-    .maybeSingle()
+  // Verificar que el nuevo barbero pertenece a la misma sucursal.
+  // Si newBarberId es null (pool dinámico / "Menor espera") se omite el chequeo.
+  if (newBarberId) {
+    const { data: barberCheck } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('id', newBarberId)
+      .eq('branch_id', entry.branch_id)
+      .eq('is_active', true)
+      .maybeSingle()
 
-  if (!barberCheck) return { error: 'Barbero no disponible en esta sucursal' }
+    if (!barberCheck) return { error: 'Barbero no disponible en esta sucursal' }
+  }
 
   const { error } = await supabase
     .from('queue_entries')

@@ -33,12 +33,14 @@ import {
   ArrowLeft,
   Gift,
   Wallet,
+  TicketPercent,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency } from '@/lib/format'
 import { AliasCopyHero } from './alias-copy-hero'
 import { PaymentMethodButtons, type PaymentOptionValue } from './payment-method-buttons'
 import { TipSelector } from './tip-selector'
+import { CouponScanDialog, type AppliedCoupon } from './coupon-scan-dialog'
 
 interface CompleteServiceDialogProps {
   entry: QueueEntry | null
@@ -81,6 +83,10 @@ export function CompleteServiceDialog({
   const [tipMethod, setTipMethod] = useState<PaymentMethod | null>(null)
   const [barberNote, setBarberNote] = useState<string>('')
 
+  // Cupón de descuento (validado pero todavía no consumido; se consume al cobrar)
+  const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null)
+  const [couponScanOpen, setCouponScanOpen] = useState(false)
+
   useEffect(() => {
     if (!entry) {
       setStep(1)
@@ -99,6 +105,8 @@ export function CompleteServiceDialog({
       setTipAmount(0)
       setTipMethod(null)
       setBarberNote('')
+      setAppliedCoupon(null)
+      setCouponScanOpen(false)
       return
     }
 
@@ -198,12 +206,23 @@ export function CompleteServiceDialog({
         tipAmount,
         tipAmount > 0 ? (tipMethod ?? (selectedPayment === 'points' ? 'cash' : selectedPayment)) : null,
         barberNote.trim() || null,
+        // No mandamos el cupón si no aplica (canje por puntos, o sin servicio para descontar):
+        // así el chip oculto y el valor transmitido nunca divergen.
+        (selectedPayment === 'points' || !canUseCoupon) ? null : (appliedCoupon?.qrCode ?? null),
       )
 
       if ('error' in result) {
         toast.error(result.error)
         setLoading(false)
         return
+      }
+
+      // Aviso de cupón: si el canje falló al confirmar (ya usado / vencido / carrera),
+      // se cobró a precio lleno. Si se aplicó, confirmamos el descuento.
+      if ('couponWarning' in result && result.couponWarning) {
+        toast.warning(result.couponWarning)
+      } else if ('couponApplied' in result && result.couponApplied) {
+        toast.success(`Cupón aplicado: ${formatCurrency(result.couponDiscountAmount ?? 0)} de descuento`)
       }
 
       if (result.visitId) {
@@ -253,7 +272,20 @@ export function CompleteServiceDialog({
 
   const totalPrice = mainServicePrice + extrasPrice + productsPrice
 
+  // Descuento por cupón: aplica SOLO al subtotal de servicios (no productos ni
+  // propina), igual que el servidor (completeService usa serviceSubtotal).
+  const serviceSubtotal = mainServicePrice + extrasPrice
+  const couponPct = appliedCoupon
+    ? (appliedCoupon.isFreeService ? 100 : (appliedCoupon.discountPct ?? 0))
+    : 0
+  const couponDiscount = couponPct > 0 ? Math.round(serviceSubtotal * (couponPct / 100)) : 0
+  const totalAfterDiscount = Math.max(0, totalPrice - couponDiscount)
+  // El cupón se vincula a un cliente; sin cliente no se puede ofrecer. Tampoco
+  // coexiste con el canje por puntos (reward_claimed), que ya lleva el corte a $0.
+  const canUseCoupon = !!entry?.client_id && !entry?.reward_claimed && serviceSubtotal > 0
+
   return (
+    <>
     <Dialog open={!!entry} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-xl max-h-[90dvh] overflow-y-auto p-5 sm:p-6 gap-3 sm:gap-4">
         <DialogHeader>
@@ -531,17 +563,57 @@ export function CompleteServiceDialog({
             </div>
           ) : (
             <div className="space-y-5">
+              {/* Cupón de descuento — botón → cámara frontal → escanear → aplica el % */}
+              {canUseCoupon && (
+                appliedCoupon ? (
+                  <div className="flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-700 dark:text-emerald-300">
+                    <TicketPercent className="size-5 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">
+                        {appliedCoupon.rewardName ?? 'Cupón'} — {appliedCoupon.isFreeService ? 'servicio gratis' : `${couponPct}% OFF`}
+                      </p>
+                      <p className="text-xs opacity-90">−{formatCurrency(couponDiscount)} en servicios</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAppliedCoupon(null)}
+                      className="rounded-md p-1 text-emerald-700/80 hover:bg-emerald-500/20 dark:text-emerald-300/80"
+                      aria-label="Quitar cupón"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="lg"
+                    className="h-12 w-full border-emerald-500/40 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
+                    onClick={() => setCouponScanOpen(true)}
+                  >
+                    <TicketPercent className="mr-2 size-5" />
+                    Canjear cupón de descuento
+                  </Button>
+                )
+              )}
+
               {/* Monto GIGANTE */}
               <div className="-mt-1 rounded-2xl border bg-muted/30 px-4 py-4 sm:px-6 sm:py-5 text-center">
                 <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
                   Monto a cobrar
                 </p>
                 <p className="mt-1 text-[clamp(44px,11vw,80px)] font-black leading-none tracking-tighter tabular-nums break-all">
-                  {formatCurrency(totalPrice + tipAmount)}
+                  {formatCurrency(totalAfterDiscount + tipAmount)}
                 </p>
+                {couponDiscount > 0 && (
+                  <p className="mt-1 text-sm">
+                    <span className="text-muted-foreground line-through">{formatCurrency(totalPrice + tipAmount)}</span>
+                    <span className="ml-2 font-semibold text-emerald-600 dark:text-emerald-400">−{couponPct}% cupón</span>
+                  </p>
+                )}
                 {tipAmount > 0 && (
                   <p className="mt-2 text-xs sm:text-sm text-muted-foreground">
-                    {formatCurrency(totalPrice)} servicio · <span className="font-semibold text-foreground">{formatCurrency(tipAmount)}</span> propina
+                    {formatCurrency(totalAfterDiscount)} servicio · <span className="font-semibold text-foreground">{formatCurrency(tipAmount)}</span> propina
                   </p>
                 )}
               </div>
@@ -599,7 +671,7 @@ export function CompleteServiceDialog({
                       <AliasCopyHero
                         alias={selectedAccount.alias_or_cbu}
                         accountName={selectedAccount.name}
-                        amountText={formatCurrency(totalPrice + tipAmount)}
+                        amountText={formatCurrency(totalAfterDiscount + tipAmount)}
                       />
                     )
                   })()}
@@ -609,7 +681,7 @@ export function CompleteServiceDialog({
               {/* Propina */}
               {selectedPayment && selectedPayment !== 'points' && (
                 <TipSelector
-                  baseAmount={totalPrice}
+                  baseAmount={totalAfterDiscount}
                   value={tipAmount}
                   method={tipMethod}
                   onChange={(amt, m) => { setTipAmount(amt); setTipMethod(m) }}
@@ -654,7 +726,7 @@ export function CompleteServiceDialog({
                   <span className="truncate">
                     {loading
                       ? 'Procesando...'
-                      : `Cobrar ${formatCurrency(totalPrice + tipAmount)}`}
+                      : `Cobrar ${formatCurrency(totalAfterDiscount + tipAmount)}`}
                   </span>
                 </Button>
               </div>
@@ -663,5 +735,17 @@ export function CompleteServiceDialog({
         </>
       </DialogContent>
     </Dialog >
+
+    <CouponScanDialog
+      open={couponScanOpen}
+      branchId={branchId}
+      clientId={entry?.client_id ?? null}
+      onClose={() => setCouponScanOpen(false)}
+      onApplied={(coupon) => {
+        setAppliedCoupon(coupon)
+        setCouponScanOpen(false)
+      }}
+    />
+    </>
   )
 }

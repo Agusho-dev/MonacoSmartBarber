@@ -315,6 +315,10 @@ export interface Visit {
   amount: number
   commission_pct: number
   commission_amount: number
+  /** Migración 147: monto descontado por cupón. amount es el neto; bruto = amount + discount_amount. */
+  discount_amount: number
+  /** Migración 147: cupón (client_rewards.id) consumido en esta visita, si hubo. */
+  client_reward_id: string | null
   notes: string | null
   tags: string[] | null
   /** Migración 101: propina separada del amount. */

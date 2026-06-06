@@ -180,7 +180,6 @@ export function CheckinWalkIn() {
   const [showBarberPreference, setShowBarberPreference] = useState(false)
   const [globalCheckinBg, setGlobalCheckinBg] = useState('#3f3f46')
 
-  const resetTimer = useRef<ReturnType<typeof setTimeout>>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -225,12 +224,6 @@ export function CheckinWalkIn() {
     loadBranches()
     // searchParams es estable (only read once on mount)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      if (resetTimer.current) clearTimeout(resetTimer.current)
-    }
   }, [])
 
   useEffect(() => {
@@ -443,15 +436,14 @@ export function CheckinWalkIn() {
       })
   }, [step, selectedBranch])
 
-  const goTo = (next: Step) => {
+  const goTo = useCallback((next: Step) => {
     setAnimKey((k) => k + 1)
     setStep(next)
     setError('')
     setShowBarberPreference(false)
-  }
+  }, [])
 
-  const reset = () => {
-    if (resetTimer.current) clearTimeout(resetTimer.current)
+  const reset = useCallback(() => {
     setPhone('')
     setName('')
     setIsReturning(false)
@@ -492,7 +484,25 @@ export function CheckinWalkIn() {
     setBarberNextArrival({})
     // Keep selectedBranch — go back to home, not branch
     goTo('home')
-  }
+  }, [goTo])
+
+  // ── Auto-reset declarativo ──
+  // Único dueño del timer de "Volviendo al inicio". Antes esto se programaba con
+  // `setTimeout(reset)` imperativo y disperso en cada goTo('success')/goTo('manage_turn'),
+  // lo que dejaba huecos donde el timer se limpiaba sin reprogramarse (ej: al volver de
+  // "Cambiar barbero") y la pantalla quedaba trabada — sólo recargando se recuperaba.
+  // Ahora el timer se deriva del `step`: al entrar a una pantalla terminal (y sin estar
+  // el usuario eligiendo barbero) se agenda exactamente uno; al salir o al entrar al
+  // sub-flujo de cambio de barbero, el cleanup lo cancela; al volver, se reagenda solo.
+  useEffect(() => {
+    const onTerminalScreen =
+      (step === 'success' && !changingBarberInSuccess) ||
+      (step === 'manage_turn' && !changingBarberInManage) ||
+      (step === 'staff_action_confirm' && staffActionDone)
+    if (!onTerminalScreen) return
+    const t = setTimeout(() => reset(), RESET_DELAY_MS)
+    return () => clearTimeout(t)
+  }, [step, changingBarberInSuccess, changingBarberInManage, staffActionDone, reset])
 
   // ── Branch ──
 
@@ -580,7 +590,6 @@ export function CheckinWalkIn() {
           setMyQueueEntry(activeEntry as unknown as QueueEntry)
           setLookingUp(false)
           goTo('manage_turn')
-          resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
           return
         }
       } else {
@@ -729,11 +738,10 @@ export function CheckinWalkIn() {
     if (activeEntry) {
       setMyQueueEntry(activeEntry as unknown as QueueEntry)
       goTo('manage_turn')
-      resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
     } else {
       goTo('service_selection')
     }
-    // reset es estable y no causa re-trigger del callback
+    // goTo es estable (useCallback); el auto-reset lo maneja el effect declarativo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [faceClientId, faceDescriptor, capturedScanPhoto, selectedBranch])
 
@@ -795,7 +803,6 @@ export function CheckinWalkIn() {
           if (entry) setMyQueueEntry(entry as unknown as QueueEntry)
           setSubmitting(false)
           goTo('manage_turn')
-          resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
           return
         }
 
@@ -805,13 +812,12 @@ export function CheckinWalkIn() {
         }
         setSubmitting(false)
         goTo('success')
-        resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
       } catch {
         setError('Error al registrar. Intentá de nuevo.')
         setSubmitting(false)
       }
     },
-    // reset es estable y no causa re-trigger del callback
+    // goTo es estable (useCallback); el auto-reset lo maneja el effect declarativo
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selectedBranch, faceClientId, submitting, selectedServiceId]
   )
@@ -858,7 +864,6 @@ export function CheckinWalkIn() {
           if (entry) setMyQueueEntry(entry as unknown as QueueEntry)
           setSubmitting(false)
           goTo('manage_turn')
-          resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
           return
         }
 
@@ -889,19 +894,18 @@ export function CheckinWalkIn() {
 
         setSubmitting(false)
         goTo('success')
-        resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
       } catch {
         setError('Error al registrar. Intentá de nuevo.')
         setSubmitting(false)
       }
     },
-    // reset es estable y no causa re-trigger del callback
+    // goTo es estable (useCallback); el auto-reset lo maneja el effect declarativo
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selectedBranch, name, phone, submitting, faceClientId, handleFaceConfirmBarber, wantsEnrollment, capturedFaceDescriptors, capturedFacePhoto, selectedServiceId]
   )
 
   const handleReassign = useCallback(
-    async (entryId: string, newBarberId: string) => {
+    async (entryId: string, newBarberId: string | null) => {
       setSubmitting(true)
       setError('')
       try {
@@ -985,10 +989,9 @@ export function CheckinWalkIn() {
         return () => goTo('name')
       case 'success':
         if (changingBarberInSuccess) {
-          return () => {
-            setChangingBarberInSuccess(false)
-            resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
-          }
+          // Volver a la pantalla de éxito; el effect declarativo reagenda el auto-reset
+          // al detectar changingBarberInSuccess === false.
+          return () => setChangingBarberInSuccess(false)
         }
         return null
       case 'staff_pin':
@@ -2169,10 +2172,7 @@ export function CheckinWalkIn() {
               <div className="w-full max-w-xl flex flex-col items-center gap-2">
                 {queueEntryId && (
                   <Button
-                    onClick={() => {
-                      if (resetTimer.current) clearTimeout(resetTimer.current)
-                      setChangingBarberInSuccess(true)
-                    }}
+                    onClick={() => setChangingBarberInSuccess(true)}
                     variant="outline"
                     className={cn(
                       'h-11 md:h-12 text-sm md:text-base rounded-xl w-full max-w-xs',
@@ -2189,10 +2189,7 @@ export function CheckinWalkIn() {
                 {/* Face enrollment offer */}
                 {!hasExistingFace && faceClientId && (
                   <button
-                    onClick={() => {
-                      if (resetTimer.current) clearTimeout(resetTimer.current)
-                      goTo('face_enroll')
-                    }}
+                    onClick={() => goTo('face_enroll')}
                     className={cn(
                       'flex items-center gap-3 rounded-xl border p-3 w-full max-w-xs transition-all active:scale-[0.98]',
                       isLightBg
@@ -2332,7 +2329,6 @@ export function CheckinWalkIn() {
 
                     setStaffAction('clock_in')
                     setStaffActionDone(true)
-                    resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
                   }}
                   className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-emerald-400/35 bg-emerald-950/35 p-6 shadow-[0_0_24px_rgba(52,211,153,0.08)] backdrop-blur-sm transition-all hover:border-emerald-300/50 hover:bg-emerald-950/50 hover:shadow-[0_0_32px_rgba(52,211,153,0.15)] active:scale-95"
                 >
@@ -2352,7 +2348,6 @@ export function CheckinWalkIn() {
 
                     setStaffAction('clock_out')
                     setStaffActionDone(true)
-                    resetTimer.current = setTimeout(reset, RESET_DELAY_MS)
                   }}
                   className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-red-400/35 bg-red-950/35 p-6 shadow-[0_0_24px_rgba(248,113,113,0.08)] backdrop-blur-sm transition-all hover:border-red-300/50 hover:bg-red-950/50 hover:shadow-[0_0_32px_rgba(248,113,113,0.15)] active:scale-95"
                 >
@@ -2714,10 +2709,7 @@ export function CheckinWalkIn() {
               <div className="w-full max-w-xl flex flex-col items-center gap-2">
                 {myQueueEntry.status === 'waiting' && (
                   <Button
-                    onClick={() => {
-                      if (resetTimer.current) clearTimeout(resetTimer.current)
-                      setChangingBarberInManage(true)
-                    }}
+                    onClick={() => setChangingBarberInManage(true)}
                     variant="outline"
                     className={cn(
                       'h-11 md:h-12 text-sm md:text-base rounded-xl w-full max-w-xs',

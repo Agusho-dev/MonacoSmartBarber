@@ -30,7 +30,10 @@ export interface CajaTicket {
   paymentMethod: 'cash' | 'card' | 'transfer'
   paymentAccountId: string | null
   paymentAccountName: string | null
+  /** Monto neto cobrado (ya con el descuento de cupón aplicado). */
   amount: number
+  /** Descuento por cupón (mig 147). 0 si no hubo. Bruto = amount + discountAmount. */
+  discountAmount: number
   services: CajaTicketService[]
   products: CajaTicketProduct[]
 }
@@ -102,7 +105,7 @@ export async function fetchCajaTickets(params: {
   let query = supabase
     .from('visits')
     .select(`
-      id, completed_at, amount, payment_method, payment_account_id,
+      id, completed_at, amount, discount_amount, payment_method, payment_account_id,
       barber_id, client_id, service_id, extra_services,
       client:clients!inner(id, name, phone),
       barber:staff!inner(full_name),
@@ -211,6 +214,7 @@ export async function fetchCajaTickets(params: {
       paymentAccountId: v.payment_account_id ?? null,
       paymentAccountName: account?.name ?? null,
       amount: v.amount,
+      discountAmount: Number(v.discount_amount ?? 0),
       services,
       products: productsByVisit.get(v.id) ?? [],
     }

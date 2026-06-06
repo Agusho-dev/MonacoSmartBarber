@@ -13,6 +13,7 @@ import {
   User,
   Scissors,
   Package,
+  TicketPercent,
   MessageSquare,
   X,
   FileSpreadsheet,
@@ -1159,6 +1160,15 @@ function TicketRow({
                 </div>
               )}
               <Separator className="bg-white/[0.05]" />
+              {ticket.discountAmount > 0 && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-1.5 text-emerald-400">
+                    <TicketPercent className="size-3" />
+                    Descuento (cupón)
+                  </span>
+                  <span className="text-emerald-400 tabular-nums">−{formatCurrency(ticket.discountAmount)}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between text-xs font-semibold">
                 <span className="text-zinc-400">Total</span>
                 <span className="text-zinc-100 tabular-nums">{formatCurrency(ticket.amount)}</span>
