@@ -11,6 +11,7 @@ import { ParticipantesTab } from './_components/participantes/participantes-tab'
 import { PremiosTab } from './_components/premios/premios-tab'
 import { ConfigTab } from './_components/config/config-tab'
 import { CanjearTab } from './_components/canjear/canjear-tab'
+import { CanjesTab } from './_components/canjes/canjes-tab'
 
 export function ProdeClient({ data }: { data: ProdePageData | null }) {
   if (!data) {
@@ -42,6 +43,7 @@ export function ProdeClient({ data }: { data: ProdePageData | null }) {
           <TabsTrigger value="premios" className="shrink-0">Premios</TabsTrigger>
           <TabsTrigger value="config" className="shrink-0">Configuración</TabsTrigger>
           <TabsTrigger value="canjear" className="shrink-0">Canjear premio</TabsTrigger>
+          <TabsTrigger value="canjes" className="shrink-0">Canjes</TabsTrigger>
         </TabsList>
 
         <TabsContent value="resultados" className="mt-4">
@@ -70,6 +72,9 @@ export function ProdeClient({ data }: { data: ProdePageData | null }) {
         </TabsContent>
         <TabsContent value="canjear" className="mt-4">
           <CanjearTab />
+        </TabsContent>
+        <TabsContent value="canjes" className="mt-4">
+          <CanjesTab redemptions={data.redemptions} />
         </TabsContent>
       </Tabs>
     </div>

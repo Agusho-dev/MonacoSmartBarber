@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { ProdeClient } from './prode-client'
 import type {
+  CouponRedemptionRow,
   LeagueRow,
   ParticipantRow,
   ProdeChallengePrize,
@@ -68,6 +69,7 @@ export default async function ProdePage() {
     matchPredCount,
     questionPredCount,
     waConfigRes,
+    redemptionsRes,
   ] = await Promise.all([
     supabase
       .from('prode_matches')
@@ -149,6 +151,22 @@ export default async function ProdePage() {
       .select('is_active')
       .eq('organization_id', orgId)
       .maybeSingle(),
+    // Historial de cupones canjeados (client_rewards.status='redeemed'). Embeds con
+    // hints de FK explícitos porque hay varias relaciones a tablas distintas.
+    supabase
+      .from('client_rewards')
+      .select(`
+        id, redeemed_at,
+        reward:reward_catalog!client_rewards_reward_id_fkey(name, discount_pct, is_free_service),
+        client:clients!client_rewards_client_id_fkey(name, phone),
+        redeemer:staff!client_rewards_redeemed_by_fkey(full_name),
+        branch:branches!client_rewards_redeemed_branch_id_fkey(name),
+        visit:visits!client_rewards_redeemed_visit_id_fkey(amount, discount_amount)
+      `)
+      .eq('organization_id', orgId)
+      .eq('status', 'redeemed')
+      .order('redeemed_at', { ascending: false })
+      .limit(1000),
   ])
 
   const matches = (matchesRes.data ?? []) as ProdeMatch[]
@@ -229,6 +247,32 @@ export default async function ProdePage() {
     reminderTemplateStatus = tpl?.status ?? null
   }
 
+  // Normalizar canjes. PostgREST tipa los embeds to-one como array; en runtime
+  // vienen como objeto (o null). Usamos el mismo patrón que `participants` arriba.
+  type Rel<T> = T | T[] | null
+  const pickOne = <T,>(rel: Rel<T>): T | null =>
+    Array.isArray(rel) ? (rel[0] ?? null) : (rel ?? null)
+  const redemptions: CouponRedemptionRow[] = (redemptionsRes.data ?? []).map((r) => {
+    const reward = pickOne(r.reward as Rel<{ name: string | null; discount_pct: number | null; is_free_service: boolean }>)
+    const client = pickOne(r.client as Rel<{ name: string | null; phone: string | null }>)
+    const redeemer = pickOne(r.redeemer as Rel<{ full_name: string | null }>)
+    const branch = pickOne(r.branch as Rel<{ name: string | null }>)
+    const visit = pickOne(r.visit as Rel<{ amount: number | null; discount_amount: number | null }>)
+    return {
+      id: r.id,
+      redeemedAt: r.redeemed_at,
+      rewardName: reward?.name ?? null,
+      discountPct: reward?.discount_pct ?? null,
+      isFreeService: !!reward?.is_free_service,
+      clientName: client?.name ?? null,
+      clientPhone: client?.phone ?? null,
+      barberName: redeemer?.full_name ?? null,
+      branchName: branch?.name ?? null,
+      discountAmount: visit?.discount_amount != null ? Number(visit.discount_amount) : null,
+      visitAmount: visit?.amount != null ? Number(visit.amount) : null,
+    }
+  })
+
   return (
     <ProdeClient
       data={{
@@ -250,6 +294,7 @@ export default async function ProdePage() {
         weeklyPrizes: (prizesRes.data ?? []) as ProdeWeeklyPrize[],
         challengePrizes: (challengePrizesRes.data ?? []) as ProdeChallengePrize[],
         rewards: (rewardsRes.data ?? []) as RewardLite[],
+        redemptions,
         stats,
         distribution,
         lastSyncAt,

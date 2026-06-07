@@ -128,6 +128,23 @@ export interface ProdeStats {
   matchesTotal: number
 }
 
+/** Una fila del historial de cupones canjeados (client_rewards status='redeemed'). */
+export interface CouponRedemptionRow {
+  id: string
+  redeemedAt: string | null
+  rewardName: string | null
+  discountPct: number | null
+  isFreeService: boolean
+  clientName: string | null
+  clientPhone: string | null
+  barberName: string | null
+  branchName: string | null
+  /** Monto descontado en la visita (sólo canjes hechos en el cobro del barbero). */
+  discountAmount: number | null
+  /** Monto neto cobrado en esa visita. */
+  visitAmount: number | null
+}
+
 // Distribución de respuestas por pregunta: answer -> count.
 export type QuestionDistribution = Record<string, Record<string, number>>
 
@@ -141,6 +158,7 @@ export interface ProdePageData {
   weeklyPrizes: ProdeWeeklyPrize[]
   challengePrizes: ProdeChallengePrize[]
   rewards: RewardLite[]
+  redemptions: CouponRedemptionRow[]
   stats: ProdeStats
   distribution: QuestionDistribution
   lastSyncAt: string | null
