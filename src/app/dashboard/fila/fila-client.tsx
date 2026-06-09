@@ -32,6 +32,16 @@ import { createClient } from '@/lib/supabase/client'
 import { cancelQueueEntry, updateQueueOrder, createBreakEntry, startService, checkinClient } from '@/lib/actions/queue'
 import { searchClients } from '@/lib/actions/clients'
 import { CompleteServiceDialog } from '@/components/barber/complete-service-dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import type { QueueEntry, StaffStatus, StaffSchedule, Staff, BreakConfig, Service } from '@/lib/types/database'
@@ -811,6 +821,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
   const [latestAttendance, setLatestAttendance] = useState<Record<string, string>>({})
   
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
+  // Confirmación para cancelar un corte ya iniciado (in_progress) desde el dashboard.
+  const [cancelConfirmEntry, setCancelConfirmEntry] = useState<QueueEntry | null>(null)
 
   const [draggedEntry, setDraggedEntry] = useState<QueueEntry | null>(null)
   const [draggedTemplate, setDraggedTemplate] = useState<BreakConfig | null>(null)
@@ -1343,10 +1355,24 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     }
   }
 
-  async function handleCancel(entryId: string) {
+  // Dispatcher de la X: si el corte ya empezó (in_progress, no descanso) pide
+  // confirmación avisando que no se cobra; para waiting/descansos cancela directo.
+  function handleCancel(entryId: string) {
+    const entry = entries.find((e) => e.id === entryId)
+    if (entry && entry.status === 'in_progress' && !entry.is_break) {
+      setCancelConfirmEntry(entry)
+      return
+    }
+    doCancel(entryId)
+  }
+
+  // El dashboard es admin (Supabase Auth) → allowInProgress: true habilita el
+  // override server-side. El panel del barbero (PIN) llama sin el flag y conserva
+  // la protección.
+  async function doCancel(entryId: string) {
     const isBreak = entries.find((e) => e.id === entryId)?.is_break ?? false
     setActionLoading(entryId)
-    const result = await cancelQueueEntry(entryId)
+    const result = await cancelQueueEntry(entryId, { allowInProgress: true })
     if ('error' in result) toast.error(result.error)
     else toast.success(isBreak ? 'Descanso cancelado' : 'Turno cancelado')
     await fetchQueue()
@@ -1776,6 +1802,33 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
           }}
         />
       )}
+
+      <AlertDialog
+        open={!!cancelConfirmEntry}
+        onOpenChange={(open) => { if (!open) setCancelConfirmEntry(null) }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Cancelar un corte en curso?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{cancelConfirmEntry?.client?.name ?? 'El cliente'}</strong> ya está siendo atendido. Si lo cancelás, ese corte <strong>no se va a cobrar ni registrar</strong> y saldrá de la fila.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Volver</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                const id = cancelConfirmEntry?.id
+                setCancelConfirmEntry(null)
+                if (id) doCancel(id)
+              }}
+            >
+              Sí, cancelar corte
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DndContext>
   )
 }

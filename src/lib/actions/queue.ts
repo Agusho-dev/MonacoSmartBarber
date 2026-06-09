@@ -1,6 +1,6 @@
 'use server'
 
-import { createAdminClient } from '@/lib/supabase/server'
+import { createAdminClient, createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { recordTransfer } from '@/lib/actions/paymentAccounts'
 import { validateBranchAccess, getCurrentOrgId } from './org'
@@ -1028,7 +1028,10 @@ export async function completeService(
   }
 }
 
-export async function cancelQueueEntry(queueEntryId: string) {
+export async function cancelQueueEntry(
+  queueEntryId: string,
+  options?: { allowInProgress?: boolean },
+) {
   if (!isValidUUID(queueEntryId)) return { error: 'ID inválido' }
   const supabase = createAdminClient()
 
@@ -1044,14 +1047,32 @@ export async function cancelQueueEntry(queueEntryId: string) {
   const orgAccess = await validateBranchAccess(entry.branch_id)
   if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
 
+  // Override de admin (solo dashboard): permitir cancelar un corte YA iniciado
+  // (in_progress). Se exige sesión de Supabase Auth — el panel del barbero usa cookie
+  // PIN (barber_session) y NO tiene auth user, así que NUNCA puede forzar esto y
+  // conserva la protección de abajo. El cobro de ese corte se pierde a propósito:
+  // es una decisión explícita del admin, confirmada en la UI del dashboard.
+  let adminCanCancelInProgress = false
+  if (options?.allowInProgress) {
+    try {
+      const authClient = await createClient()
+      const { data: { user } } = await authClient.auth.getUser()
+      adminCanCancelInProgress = !!user
+    } catch {
+      adminCanCancelInProgress = false
+    }
+  }
+
   // Guard de estado: para CLIENTES sólo se cancela 'waiting'. Sin esto, un tap en
   // la X ("No se presentó") sobre un cliente que OTRO barbero ya pasó a in_progress
   // (carrera de UI por lag de realtime) pisaba ese in_progress y dejaba el corte
   // sin poder cobrarse. Para DESCANSOS sí permitimos cancelar también el que ya
   // arrancó (in_progress): no hay corte que cobrar y el descanso pudo crearse por
   // error o el barbero quiere volver antes (createBreakEntry lo arranca solo si el
-  // barbero no tenía corte activo, así que la X tiene que poder cancelarlo).
-  const cancelableStatuses = entry.is_break ? ['waiting', 'in_progress'] : ['waiting']
+  // barbero no tenía corte activo, así que la X tiene que poder cancelarlo). El
+  // admin del dashboard también puede cancelar in_progress vía override explícito.
+  const cancelableStatuses =
+    entry.is_break || adminCanCancelInProgress ? ['waiting', 'in_progress'] : ['waiting']
 
   const { data: cancelledRows, error } = await supabase
     .from('queue_entries')
