@@ -89,6 +89,32 @@ async function sameClientPerson(
   return ka.length >= 8 && ka === norm(b.phone) && !/^(.)\1*$/.test(ka)
 }
 
+/** Timezone de la sucursal (fallback Argentina) — para evaluar el día de canje. */
+async function getBranchTimezone(
+  supabase: ReturnType<typeof createAdminClient>,
+  branchId: string,
+): Promise<string> {
+  const { data } = await supabase.from('branches').select('timezone').eq('id', branchId).maybeSingle()
+  return data?.timezone || 'America/Argentina/Buenos_Aires'
+}
+
+/** Día de la semana ISO (1=lunes .. 7=domingo) en una timezone dada. */
+function isoWeekdayInTz(tz: string): number {
+  const short = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(new Date())
+  return ({ Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 } as Record<string, number>)[short] ?? 0
+}
+
+const DIAS_ES = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']
+/** Frase legible de los días permitidos: [1,2,3] → "de lunes a miércoles". */
+function weekdayPhrase(days: number[]): string {
+  const s = [...new Set(days)].filter((d) => d >= 1 && d <= 7).sort((a, b) => a - b)
+  if (s.length === 0) return 'ningún día'
+  if (s.length === 1) return `los ${DIAS_ES[s[0]]}`
+  const contiguo = s.every((d, i) => i === 0 || d === s[i - 1] + 1)
+  if (contiguo) return `de ${DIAS_ES[s[0]]} a ${DIAS_ES[s[s.length - 1]]}`
+  return s.slice(0, -1).map((d) => DIAS_ES[d]).join(', ') + ' y ' + DIAS_ES[s[s.length - 1]]
+}
+
 /**
  * Valida (SIN consumir) un cupón de descuento (client_rewards) para aplicarlo en
  * el cobro del panel de barberos. Se usa al escanear el QR: confirma que existe,
@@ -117,7 +143,7 @@ export async function validateCouponForCheckout(
   const supabase = createAdminClient()
   const { data: reward, error } = await supabase
     .from('client_rewards')
-    .select('id, status, expires_at, client_id, organization_id, reward:reward_catalog(name, discount_pct, is_free_service)')
+    .select('id, status, expires_at, client_id, organization_id, created_at, reward:reward_catalog(name, discount_pct, is_free_service, activation_delay_minutes, redeemable_weekdays)')
     .eq('qr_code', clean)
     .maybeSingle()
 
@@ -142,6 +168,27 @@ export async function validateCouponForCheckout(
   if (!cat) return { error: 'Cupón inválido' }
   if (!cat.is_free_service && (cat.discount_pct ?? 0) <= 0) {
     return { error: 'Este cupón no tiene descuento aplicable' }
+  }
+
+  // Reglas de tiempo (mismas que la RPC redeem_coupon_for_visit, mig 151): activación
+  // diferida y días permitidos. Es un pre-check al escanear para mostrar el motivo;
+  // la autoridad sigue siendo la RPC al confirmar el cobro.
+  const delayMin = cat.activation_delay_minutes ?? 0
+  const weekdays = (cat.redeemable_weekdays as number[] | null) ?? null
+  if (delayMin > 0 || (weekdays && weekdays.length)) {
+    const tz = await getBranchTimezone(supabase, branchId)
+    if (delayMin > 0 && reward.created_at) {
+      const activatesAt = new Date(reward.created_at).getTime() + delayMin * 60_000
+      if (Date.now() < activatesAt) {
+        const cuando = new Date(activatesAt).toLocaleString('es-AR', {
+          timeZone: tz, weekday: 'short', hour: '2-digit', minute: '2-digit',
+        })
+        return { error: `El cupón todavía no está activo. Se activa ${cuando} (un rato después de crear la cuenta).` }
+      }
+    }
+    if (weekdays && weekdays.length && !weekdays.includes(isoWeekdayInTz(tz))) {
+      return { error: `Este cupón solo se puede canjear ${weekdayPhrase(weekdays)}.` }
+    }
   }
 
   return {

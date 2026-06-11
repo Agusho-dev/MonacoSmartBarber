@@ -235,6 +235,8 @@ function mapCouponError(code: string | undefined): string {
     case 'not_found': return 'Cupón no encontrado'
     case 'not_available': return 'El cupón no está disponible'
     case 'no_discount': return 'El cupón no tiene descuento aplicable'
+    case 'not_active_yet': return 'El cupón todavía no está activo (se activa un rato después de crear la cuenta)'
+    case 'wrong_weekday': return 'Este cupón solo se puede canjear de lunes a miércoles'
     case 'visit_not_found': return 'No se encontró la visita'
     default: return 'No se pudo aplicar el cupón'
   }
