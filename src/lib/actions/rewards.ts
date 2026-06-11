@@ -60,6 +60,36 @@ interface CheckoutCouponInfo {
 }
 
 /**
+ * ¿Dos client_id son la MISMA persona? (misma org + mismos últimos 10 dígitos de
+ * teléfono). Cubre el duplicado por normalización de teléfono inconsistente entre
+ * Prode (guarda dígitos crudos) y el check-in del kiosko (formato libre), que deja
+ * el cupón en una fila de clients y la visita en otra → sin esto, el canje del
+ * cupón de bienvenida fallaba con "pertenece a otro cliente". Ver mig 149.
+ */
+async function sameClientPerson(
+  supabase: ReturnType<typeof createAdminClient>,
+  idA: string,
+  idB: string,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('clients')
+    .select('id, phone, organization_id')
+    .in('id', [idA, idB])
+  if (error) {
+    console.error('[sameClientPerson]', error.message)
+    return false
+  }
+  if (!data || data.length < 2) return false
+  const [a, b] = data
+  if (a.organization_id !== b.organization_id) return false
+  const norm = (p: string | null) => (p ?? '').replace(/\D/g, '').slice(-10)
+  const ka = norm(a.phone)
+  // Misma persona sólo si la clave (últimos 10 díg.) coincide, tiene >= 8 dígitos y NO
+  // es degenerada (un dígito repetido, ej '0000000000' = placeholder, no identifica).
+  return ka.length >= 8 && ka === norm(b.phone) && !/^(.)\1*$/.test(ka)
+}
+
+/**
  * Valida (SIN consumir) un cupón de descuento (client_rewards) para aplicarlo en
  * el cobro del panel de barberos. Se usa al escanear el QR: confirma que existe,
  * está disponible, no venció, pertenece a la org de la sucursal y —si se pasa el
@@ -95,7 +125,11 @@ export async function validateCouponForCheckout(
   if (!reward) return { error: 'Cupón no encontrado' }
   if (reward.organization_id !== orgId) return { error: 'Este cupón es de otra organización' }
   if (clientId && reward.client_id !== clientId) {
-    return { error: 'Este cupón pertenece a otro cliente' }
+    // No es necesariamente ajeno: la misma persona puede tener 2 filas en clients por
+    // teléfono normalizado distinto (Prode vs check-in) → cupón en una, visita en otra.
+    // Si son la misma persona (misma org + últimos 10 dígitos), el cupón es válido.
+    const same = await sameClientPerson(supabase, reward.client_id, clientId)
+    if (!same) return { error: 'Este cupón pertenece a otro cliente' }
   }
   if (reward.status === 'redeemed') return { error: 'Este cupón ya fue canjeado' }
   if (reward.status === 'expired') return { error: 'El cupón está vencido' }

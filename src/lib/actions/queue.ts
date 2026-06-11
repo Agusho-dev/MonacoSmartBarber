@@ -40,12 +40,23 @@ export async function checkinClient(formData: FormData) {
 
   let clientId: string
 
-  const { data: existingClient } = await supabase
-    .from('clients')
-    .select('id')
-    .eq('phone', phone)
-    .eq('organization_id', branchResult.organization_id)
-    .maybeSingle()
+  // Buscar cliente existente por teléfono NORMALIZADO (últimos 10 dígitos), no por
+  // string exacto: Prode y el check-in guardan el mismo número en formatos distintos
+  // (con/sin prefijo país) y el match exacto creaba un cliente DUPLICADO por persona
+  // → el cupón de bienvenida quedaba en una fila y las visitas en otra, rompiendo el
+  // canje ("pertenece a otro cliente"). Ver mig 149 / find_client_id_by_phone.
+  const { data: matchedClientId, error: matchErr } = await supabase.rpc('find_client_id_by_phone', {
+    p_org: branchResult.organization_id,
+    p_phone: phone,
+  })
+  if (matchErr) {
+    // Fail-closed: ante un fallo transitorio de la RPC NO seguimos al insert, porque
+    // crearía un cliente DUPLICADO (un reintento del cliente es barato; una identidad
+    // partida no). Ver mig 149 y CLAUDE.md riesgo #5/#12.
+    console.error('[checkinClient] find_client_id_by_phone:', matchErr.message)
+    return { error: 'No se pudo verificar el cliente, intentá de nuevo' }
+  }
+  const existingClient = matchedClientId ? { id: matchedClientId as string } : null
 
   if (existingClient) {
     clientId = existingClient.id
