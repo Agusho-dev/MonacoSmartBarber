@@ -21,7 +21,8 @@ ALTER TABLE public.reward_catalog
   ADD COLUMN IF NOT EXISTS redeemable_weekdays smallint[];
 
 -- Vigencia (en días) con la que se emite el cupón: expires_at = created_at + validity_days.
--- La consume la emisión (prode_auth_with_pin). NULL = comportamiento previo de cada path.
+-- La consume la emisión (prode_auth_with_pin). NULL = el emisor usa su fallback propio
+-- (prode_auth_with_pin: coalesce(validity_days, 2) → 2 días).
 ALTER TABLE public.reward_catalog
   ADD COLUMN IF NOT EXISTS validity_days int;
 

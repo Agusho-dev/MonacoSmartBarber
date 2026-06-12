@@ -174,8 +174,11 @@ export async function validateCouponForCheckout(
   // diferida y días permitidos. Es un pre-check al escanear para mostrar el motivo;
   // la autoridad sigue siendo la RPC al confirmar el cobro.
   const delayMin = cat.activation_delay_minutes ?? 0
+  // null = sin restricción de día; un array (aunque vacío) = restricción activa, para
+  // espejar EXACTO la semántica `redeemable_weekdays IS NOT NULL` de la RPC de canje
+  // (si no, un futuro `{}` "escanearía OK pero la RPC lo bloquearía" al cobrar).
   const weekdays = (cat.redeemable_weekdays as number[] | null) ?? null
-  if (delayMin > 0 || (weekdays && weekdays.length)) {
+  if (delayMin > 0 || weekdays !== null) {
     const tz = await getBranchTimezone(supabase, branchId)
     if (delayMin > 0 && reward.created_at) {
       const activatesAt = new Date(reward.created_at).getTime() + delayMin * 60_000
@@ -186,7 +189,7 @@ export async function validateCouponForCheckout(
         return { error: `El cupón todavía no está activo. Se activa ${cuando} (un rato después de crear la cuenta).` }
       }
     }
-    if (weekdays && weekdays.length && !weekdays.includes(isoWeekdayInTz(tz))) {
+    if (weekdays !== null && !weekdays.includes(isoWeekdayInTz(tz))) {
       return { error: `Este cupón solo se puede canjear ${weekdayPhrase(weekdays)}.` }
     }
   }
