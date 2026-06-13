@@ -61,6 +61,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -68,7 +69,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Clock, User, Scissors, X, Pause, GripVertical, Zap, UserPlus, Play, Check, ChevronDown, Search, FileEdit, ExternalLink } from 'lucide-react'
+import { Clock, User, Scissors, X, Pause, GripVertical, Zap, UserPlus, Play, Check, ChevronDown, Search, FileEdit, ExternalLink, Sparkles, Info } from 'lucide-react'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -832,7 +833,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
   const [searchDialogOpen, setSearchDialogOpen] = useState(false)
   const [services, setServices] = useState<Service[]>([])
   const DYNAMIC_BARBER = '__dynamic__'
-  const [manualForm, setManualForm] = useState({ phone: '', name: '', serviceId: '', barberId: DYNAMIC_BARBER })
+  const [manualForm, setManualForm] = useState({ phone: '', name: '', serviceId: '', barberId: DYNAMIC_BARBER, isSpecial: false })
   const [manualLoading, setManualLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<{ id: string; name: string; phone: string }[]>([])
@@ -1009,19 +1010,24 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
 
   // ── Handlers registro manual ──────────────────────────────────────────────
   const handleManualCheckin = async () => {
-    if (!manualForm.phone || !manualForm.name) {
-      toast.error('Nombre y teléfono son obligatorios')
-      return
-    }
     if (!selectedBranchId) {
       toast.error('Seleccioná una sucursal primero')
+      return
+    }
+    // Cliente especial: sin teléfono y con nombre opcional (lo resuelve el server).
+    if (!manualForm.isSpecial && (!manualForm.phone || !manualForm.name)) {
+      toast.error('Nombre y teléfono son obligatorios')
       return
     }
     setManualLoading(true)
     const fd = new FormData()
     fd.set('name', manualForm.name)
-    fd.set('phone', manualForm.phone)
     fd.set('branch_id', selectedBranchId)
+    if (manualForm.isSpecial) {
+      fd.set('special', '1')
+    } else {
+      fd.set('phone', manualForm.phone)
+    }
     if (manualForm.serviceId) fd.set('service_id', manualForm.serviceId)
     if (manualForm.barberId && manualForm.barberId !== DYNAMIC_BARBER) {
       fd.set('barber_id', manualForm.barberId)
@@ -1033,8 +1039,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     } else if (result.alreadyInQueue) {
       toast.info('El cliente ya está en la fila')
     } else {
-      toast.success('Cliente registrado en la fila')
-      setManualForm({ phone: '', name: '', serviceId: '', barberId: DYNAMIC_BARBER })
+      toast.success(manualForm.isSpecial ? 'Cliente especial agregado a la fila' : 'Cliente registrado en la fila')
+      setManualForm({ phone: '', name: '', serviceId: '', barberId: DYNAMIC_BARBER, isSpecial: false })
       setManualDialogOpen(false)
     }
   }
@@ -1486,26 +1492,64 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
             </div>
 
             {/* Dialog: Registro manual */}
-            <Dialog open={manualDialogOpen} onOpenChange={setManualDialogOpen}>
+            <Dialog open={manualDialogOpen} onOpenChange={(open) => {
+              setManualDialogOpen(open)
+              if (!open) {
+                setManualForm({ phone: '', name: '', serviceId: '', barberId: DYNAMIC_BARBER, isSpecial: false })
+              }
+            }}>
               <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                   <DialogTitle>Registro manual</DialogTitle>
                 </DialogHeader>
                 <div className="flex flex-col gap-4 py-2">
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="manual-phone">Teléfono</Label>
-                    <Input
-                      id="manual-phone"
-                      placeholder="Ej: 1122334455"
-                      value={manualForm.phone}
-                      onChange={(e) => setManualForm((f) => ({ ...f, phone: e.target.value }))}
+                  {/* Toggle "cliente especial": walk-in sin teléfono (niño, invitado, etc.).
+                      Label + Switch como hermanos (no anidados) para no meter un button
+                      dentro de otro y evitar el doble-toggle. */}
+                  <div className={`flex items-center gap-3 rounded-lg border p-3 transition-colors ${
+                    manualForm.isSpecial ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30'
+                  }`}>
+                    <label htmlFor="manual-special-switch" className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
+                      <span className={`flex size-9 shrink-0 items-center justify-center rounded-md transition-colors ${
+                        manualForm.isSpecial ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'
+                      }`}>
+                        <Sparkles className="size-5" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium leading-tight">Cliente especial</span>
+                        <span className="block text-xs text-muted-foreground leading-tight mt-0.5">
+                          Sin teléfono — niños, invitados o quien no deja su número
+                        </span>
+                      </span>
+                    </label>
+                    <Switch
+                      id="manual-special-switch"
+                      checked={manualForm.isSpecial}
+                      onCheckedChange={(v) => setManualForm((f) => ({ ...f, isSpecial: v }))}
                     />
                   </div>
+
+                  {manualForm.isSpecial ? (
+                    <div className="flex items-start gap-2 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                      <Info className="size-4 shrink-0 mt-0.5" />
+                      <span>Se agrega sin teléfono. Cada cliente especial queda como un registro aparte en la fila.</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="manual-phone">Teléfono</Label>
+                      <Input
+                        id="manual-phone"
+                        placeholder="Ej: 1122334455"
+                        value={manualForm.phone}
+                        onChange={(e) => setManualForm((f) => ({ ...f, phone: e.target.value }))}
+                      />
+                    </div>
+                  )}
                   <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="manual-name">Nombre</Label>
+                    <Label htmlFor="manual-name">{manualForm.isSpecial ? 'Nombre (opcional)' : 'Nombre'}</Label>
                     <Input
                       id="manual-name"
-                      placeholder="Nombre del cliente"
+                      placeholder={manualForm.isSpecial ? 'Ej: Niño, Invitado…' : 'Nombre del cliente'}
                       value={manualForm.name}
                       onChange={(e) => setManualForm((f) => ({ ...f, name: e.target.value }))}
                     />
@@ -1556,7 +1600,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
                     </Select>
                   </div>
                   <Button onClick={handleManualCheckin} disabled={manualLoading} className="w-full">
-                    {manualLoading ? 'Registrando…' : 'Agregar a la fila'}
+                    {manualLoading ? 'Registrando…' : (manualForm.isSpecial ? 'Agregar cliente especial' : 'Agregar a la fila')}
                   </Button>
                 </div>
               </DialogContent>

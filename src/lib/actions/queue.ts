@@ -9,14 +9,34 @@ import { isValidUUID } from '@/lib/validation'
 
 export async function checkinClient(formData: FormData) {
   const supabase = createAdminClient()
-  const name = (formData.get('name') as string).trim()
-  const phone = (formData.get('phone') as string).trim()
+  const rawName = ((formData.get('name') as string | null) ?? '').trim()
+  const rawPhone = ((formData.get('phone') as string | null) ?? '').trim()
   const branchId = formData.get('branch_id') as string
   const barberId = (formData.get('barber_id') as string | null) || null
   const serviceId = (formData.get('service_id') as string | null) || null
+  const specialFlag = formData.get('special')
+  const isSpecialRequested = specialFlag === '1' || specialFlag === 'true'
 
-  if (!name || !phone || !branchId) {
-    return { error: 'Todos los campos son obligatorios' }
+  // "Cliente especial": walk-in sin teléfono (un niño, un invitado, alguien que no
+  // deja su número). El staff lo marca con el toggle del registro manual; por compat
+  // histórica también lo inferimos si tipea un teléfono placeholder degenerado (todos
+  // ceros / un solo dígito repetido, de cualquier largo). Un placeholder así no
+  // identifica a nadie y, peor, choca contra el UNIQUE (organization_id, phone) en
+  // cuanto entra el segundo del día → "Error al registrar cliente". Igual que el
+  // kiosko, a cada uno le damos un teléfono virtual ÚNICO 00XXXXXXXX para que sea su
+  // propio registro, y nos salteamos el dedup por teléfono.
+  const phoneDigits = rawPhone.replace(/\D/g, '')
+  const isDegeneratePhone = phoneDigits.length > 0 && /^(.)\1*$/.test(phoneDigits)
+  const isSpecial = isSpecialRequested || isDegeneratePhone
+
+  const name = isSpecial ? (rawName || 'Cliente especial') : rawName
+  const phone = rawPhone
+
+  if (!branchId) {
+    return { error: 'Falta la sucursal' }
+  }
+  if (!isSpecial && (!name || !phone)) {
+    return { error: 'Nombre y teléfono son obligatorios' }
   }
 
   // Rate limit: 20 check-ins por IP+branch cada 60s (permisivo para uso real, restrictivo contra bots)
@@ -40,23 +60,29 @@ export async function checkinClient(formData: FormData) {
 
   let clientId: string
 
-  // Buscar cliente existente por teléfono NORMALIZADO (últimos 10 dígitos), no por
-  // string exacto: Prode y el check-in guardan el mismo número en formatos distintos
-  // (con/sin prefijo país) y el match exacto creaba un cliente DUPLICADO por persona
-  // → el cupón de bienvenida quedaba en una fila y las visitas en otra, rompiendo el
-  // canje ("pertenece a otro cliente"). Ver mig 149 / find_client_id_by_phone.
-  const { data: matchedClientId, error: matchErr } = await supabase.rpc('find_client_id_by_phone', {
-    p_org: branchResult.organization_id,
-    p_phone: phone,
-  })
-  if (matchErr) {
-    // Fail-closed: ante un fallo transitorio de la RPC NO seguimos al insert, porque
-    // crearía un cliente DUPLICADO (un reintento del cliente es barato; una identidad
-    // partida no). Ver mig 149 y CLAUDE.md riesgo #5/#12.
-    console.error('[checkinClient] find_client_id_by_phone:', matchErr.message)
-    return { error: 'No se pudo verificar el cliente, intentá de nuevo' }
+  // Cliente especial: NO buscamos duplicado. Cada walk-in sin teléfono es una persona
+  // distinta y merece su propio registro (con teléfono virtual único). El dedup por
+  // teléfono no aplica acá (y find_client_id_by_phone ya descarta degenerados, mig 150).
+  let existingClient: { id: string } | null = null
+  if (!isSpecial) {
+    // Buscar cliente existente por teléfono NORMALIZADO (últimos 10 dígitos), no por
+    // string exacto: Prode y el check-in guardan el mismo número en formatos distintos
+    // (con/sin prefijo país) y el match exacto creaba un cliente DUPLICADO por persona
+    // → el cupón de bienvenida quedaba en una fila y las visitas en otra, rompiendo el
+    // canje ("pertenece a otro cliente"). Ver mig 149 / find_client_id_by_phone.
+    const { data: matchedClientId, error: matchErr } = await supabase.rpc('find_client_id_by_phone', {
+      p_org: branchResult.organization_id,
+      p_phone: phone,
+    })
+    if (matchErr) {
+      // Fail-closed: ante un fallo transitorio de la RPC NO seguimos al insert, porque
+      // crearía un cliente DUPLICADO (un reintento del cliente es barato; una identidad
+      // partida no). Ver mig 149 y CLAUDE.md riesgo #5/#12.
+      console.error('[checkinClient] find_client_id_by_phone:', matchErr.message)
+      return { error: 'No se pudo verificar el cliente, intentá de nuevo' }
+    }
+    existingClient = matchedClientId ? { id: matchedClientId as string } : null
   }
-  const existingClient = matchedClientId ? { id: matchedClientId as string } : null
 
   if (existingClient) {
     clientId = existingClient.id
@@ -74,6 +100,29 @@ export async function checkinClient(formData: FormData) {
     if (activeEntry) {
       return { alreadyInQueue: true, position: activeEntry.position, queueEntryId: activeEntry.id }
     }
+  } else if (isSpecial) {
+    // Teléfono virtual único 00XXXXXXXX (mismo formato que el kiosko). Reintentamos si
+    // por casualidad astronómica choca con el UNIQUE (organization_id, phone).
+    let inserted: { id: string } | null = null
+    for (let attempt = 0; attempt < 5 && !inserted; attempt++) {
+      const virtualPhone = `00${Math.floor(Math.random() * 1e8).toString().padStart(8, '0')}`
+      const { data: newClient, error } = await supabase
+        .from('clients')
+        .insert({ name, phone: virtualPhone, organization_id: branchResult.organization_id })
+        .select('id')
+        .single()
+      if (newClient) {
+        inserted = newClient
+      } else if (error?.code !== '23505') {
+        console.error('[checkinClient] insert cliente especial:', error?.message)
+        return { error: 'Error al registrar cliente' }
+      }
+      // 23505 → colisión rarísima del teléfono virtual: reintenta con otro número.
+    }
+    if (!inserted) {
+      return { error: 'No se pudo registrar el cliente, intentá de nuevo' }
+    }
+    clientId = inserted.id
   } else {
     const { data: newClient, error } = await supabase
       .from('clients')
