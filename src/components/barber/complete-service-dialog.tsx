@@ -58,6 +58,8 @@ export function CompleteServiceDialog({
   const supabase = useMemo(() => createClient(), [])
 
   const [services, setServices] = useState<Service[]>([])
+  // Servicio principal pre-seleccionado, traído por id sin filtros (ver effect).
+  const [preselectedService, setPreselectedService] = useState<Service | null>(null)
   const [products, setProducts] = useState<Product[]>([])
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([])
   const [step, setStep] = useState<1 | 2>(1)
@@ -92,6 +94,7 @@ export function CompleteServiceDialog({
       setStep(1)
       setSelectedPayment(null)
       setSelectedService('')
+      setPreselectedService(null)
       setExtraServices([])
       setSelectedProducts([])
       setPhotoFiles([])
@@ -112,6 +115,20 @@ export function CompleteServiceDialog({
 
     if (entry.service_id) {
       setSelectedService(entry.service_id)
+      // El servicio principal pre-seleccionado puede tener availability 'checkin' (que NO
+      // aparece en la lista de upsell/both de abajo) y, según la superficie que abre el
+      // diálogo, entry.service puede no venir joineado (la fila del dashboard no lo trae).
+      // Lo buscamos por id —sin filtrar availability/is_active— para resolver SIEMPRE su
+      // precio; si no, el corte se mostraba como "$0" (bug solo visible en sucursales cuyos
+      // servicios principales son 'checkin', ej. Caseros).
+      supabase
+        .from('services')
+        .select('*')
+        .eq('id', entry.service_id)
+        .maybeSingle()
+        .then(({ data }) => { if (data) setPreselectedService(data as Service) })
+    } else {
+      setPreselectedService(null)
     }
 
     if (entry.client_id) {
@@ -256,9 +273,15 @@ export function CompleteServiceDialog({
     onClose()
   }
 
-  const mainService = selectedService === entry?.service_id && entry?.service
-    ? entry.service
-    : services.find((s) => s.id === selectedService)
+  // Resolución del servicio principal, en orden de confiabilidad:
+  //   1) entry.service joineado (si la superficie lo trajo)
+  //   2) preselectedService traído por id (cualquier availability/estado)
+  //   3) la lista de upsell/both (caso dropdown editable, sin pre-selección)
+  const mainService =
+    (entry?.service_id && selectedService === entry.service_id
+      ? (entry.service ?? preselectedService)
+      : null)
+    ?? services.find((s) => s.id === selectedService)
 
   const mainServicePrice = mainService?.price ?? 0
 
