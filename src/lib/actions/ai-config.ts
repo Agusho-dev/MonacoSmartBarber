@@ -19,6 +19,16 @@ export interface OrgAiConfig {
   auto_tag_model: string
   created_at: string
   updated_at: string
+  // ── Asistente IA (copiloto) — migración 154 ──
+  assistant_model: string | null
+  embedding_model: string | null
+  assistant_temperature: number | null
+  assistant_max_tokens: number | null
+  assistant_persona: string | null
+  assistant_system_prompt: string | null
+  assistant_data_access: Record<string, boolean> | null
+  assistant_suggested_prompts: unknown | null
+  assistant_pro_mode: boolean | null
 }
 
 export async function getOrgAiConfig() {

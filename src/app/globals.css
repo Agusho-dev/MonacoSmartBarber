@@ -403,3 +403,71 @@
 @media (prefers-reduced-motion: reduce) {
   .alias-hero { animation: none !important; }
 }
+
+/* ════════════════════════ Asistente IA ════════════════════════ */
+
+/* Entrada de mensajes (reutiliza el keyframe msgIn existente) */
+.animate-msg-in { animation: msgIn 0.25s ease-out both; }
+
+/* Caret de tipeo mientras streamea */
+.typing-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  animation: typewriter-cursor 1s step-end infinite;
+}
+
+/* Línea shimmer para el skeleton de "pensando" */
+.asst-shimmer {
+  background: linear-gradient(90deg,
+    oklch(1 0 0 / 0.04) 25%,
+    oklch(1 0 0 / 0.10) 50%,
+    oklch(1 0 0 / 0.04) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* Chip de actividad de herramienta */
+.asst-tool-chip {
+  border: 1px solid oklch(1 0 0 / 0.10);
+  background: oklch(0.16 0 0 / 0.6);
+  backdrop-filter: blur(8px);
+}
+
+/* ── Modo Pro: acento dorado + celebración al activar ── */
+.assistant-pro {
+  position: relative;
+}
+.assistant-pro .pro-accent {
+  background: linear-gradient(135deg, oklch(0.78 0.12 85), oklch(0.68 0.12 65));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.assistant-pro-ring {
+  box-shadow: 0 0 0 1px oklch(0.78 0.12 85 / 0.35), 0 0 24px oklch(0.78 0.12 85 / 0.18);
+}
+@keyframes proCelebrate {
+  0%   { transform: scale(0.6); opacity: 0; }
+  40%  { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.animate-pro-celebrate { animation: proCelebrate 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+@keyframes proSweep {
+  0% { background-position: -150% center; }
+  100% { background-position: 250% center; }
+}
+.pro-sweep {
+  background: linear-gradient(90deg, transparent, oklch(0.78 0.12 85 / 0.18), transparent);
+  background-size: 200% 100%;
+  animation: proSweep 1.6s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-msg-in, .asst-shimmer, .typing-caret, .animate-pro-celebrate, .pro-sweep {
+    animation: none !important;
+  }
+}

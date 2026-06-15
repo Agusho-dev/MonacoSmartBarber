@@ -20,6 +20,7 @@ export const NAV_FEATURE_MAP: Record<string, NavFeatureMeta> = {
   '/dashboard/servicios':      { featureKey: 'services.enabled',       moduleId: 'services' },
   '/dashboard/clientes':       { featureKey: 'clients.enabled',        moduleId: 'clients' },
   '/dashboard/mensajeria':     { featureKey: 'messaging.inbox',        moduleId: 'messaging_whatsapp',  minPlan: 'pro' },
+  '/dashboard/asistente':      { featureKey: 'ai.enabled',             moduleId: null,                  minPlan: 'enterprise' },
   '/dashboard/app-movil':      { featureKey: 'mobile_app.enabled',     moduleId: 'mobile_app',          minPlan: 'pro' },
   '/dashboard/convenios':      { featureKey: 'agreements.enabled',     moduleId: 'agreements',          minPlan: 'enterprise' },
   '/dashboard/estadisticas':   { featureKey: 'reports.basic',          moduleId: 'reports_basic',       minPlan: 'start' },
