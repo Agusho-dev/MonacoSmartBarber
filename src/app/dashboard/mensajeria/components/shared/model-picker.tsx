@@ -33,6 +33,8 @@ export const MODEL_GROUPS: ModelGroup[] = [
     models: [
       { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', hint: 'Rápido' },
       { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', hint: 'Potente' },
+      { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', hint: 'Máxima capacidad' },
+      { id: 'claude-opus-4-7', label: 'Claude Opus 4.7', hint: 'Muy capaz' },
     ],
   },
   {

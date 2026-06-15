@@ -75,6 +75,7 @@ import { TrialBanner } from '@/components/billing/trial-banner'
 import { Badge } from '@/components/ui/badge'
 import { Lock, Clock as ClockIcon, CreditCard } from 'lucide-react'
 import { NAV_FEATURE_MAP } from '@/lib/billing/nav-feature-map'
+import { AiFeatureAnnouncement } from './ai-feature-announcement'
 
 const navItems = [
   { href: '/dashboard/fila', label: 'Fila', icon: ListOrdered, requiredPermissions: ['queue.view'] },
@@ -215,27 +216,32 @@ function SortableNavItem({
     )
   }
 
-  // Modo normal — comportamiento de link igual al original
+  // Modo normal — comportamiento de link igual al original.
+  // El Asistente IA lleva un borde con brillo animado (nav-ai-glow).
+  const isAi = item.href === '/dashboard/asistente'
   return (
     <div ref={setNodeRef} style={style}>
-      <Link
-        href={item.href}
-        onClick={onNavigate}
-        className={cn(
-          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-          isActive
-            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-            : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-        )}
-      >
-        <item.icon className="size-4 shrink-0" />
-        {item.label}
-        {item.href === '/dashboard/equipo' && pendingBreakCount > 0 && (
-          <span className="ml-auto flex size-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
-            {pendingBreakCount}
-          </span>
-        )}
-      </Link>
+      <div className={isAi ? 'nav-ai-glow rounded-lg' : undefined}>
+        <Link
+          href={item.href}
+          onClick={onNavigate}
+          className={cn(
+            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+            isActive
+              ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+              : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+          )}
+        >
+          <item.icon className={cn('size-4 shrink-0', isAi && 'text-[oklch(0.82_0.12_285)]')} />
+          {isAi ? <span className="font-semibold">{item.label}</span> : item.label}
+          {isAi && <Sparkles className="ml-auto size-3.5 text-[oklch(0.80_0.13_85)]" />}
+          {item.href === '/dashboard/equipo' && pendingBreakCount > 0 && (
+            <span className="ml-auto flex size-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
+              {pendingBreakCount}
+            </span>
+          )}
+        </Link>
+      </div>
     </div>
   )
 }
@@ -461,11 +467,13 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   }, [entitlements, moduleMetaById])
 
   // Ítems filtrados por permisos y ordenados según preferencia del usuario.
-  // NO filtramos por entitlements: los items bloqueados se renderizan con lock/badge
-  // para incentivar upgrade en lugar de ocultarlos.
+  // Ocultamos los módulos NO concedidos (estado 'upgrade'): si un módulo no está
+  // habilitado para la organización, no aparece en el sidebar. Los 'coming_soon'
+  // sí se muestran como teaser. El upsell vive en la página de planes/módulos.
   const orderedItems = useMemo(() => {
     const filtered = navItems.filter(item =>
-      item.requiredPermissions.some(p => permissions[p])
+      item.requiredPermissions.some(p => permissions[p]) &&
+      lockStateByHref.get(item.href)?.state !== 'upgrade'
     )
     return [...filtered].sort((a, b) => {
       const ai = navOrder.indexOf(a.href)
@@ -475,7 +483,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
       if (bi === -1) return -1
       return ai - bi
     })
-  }, [navOrder, permissions])
+  }, [navOrder, permissions, lockStateByHref])
 
   // Estado de los modales de upgrade / coming_soon
   const [upgradeModal, setUpgradeModal] = useState<{ open: boolean; featureName: string; minPlan: 'start'|'pro'|'enterprise' }>(
@@ -758,6 +766,10 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
         estimatedRelease={comingSoonModal.estimatedRelease}
       />
     <div className="flex h-screen overflow-hidden">
+      <AiFeatureAnnouncement
+        canUse={!!entitlements?.features?.['ai.enabled'] && (!!permissions['stats.view'] || !!permissions['settings.view'])}
+        userKey={user.email}
+      />
       <aside
         className={cn(
           'hidden lg:flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shrink-0 overflow-hidden transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]',

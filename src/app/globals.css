@@ -466,8 +466,55 @@
   animation: proSweep 1.6s ease-out;
 }
 
+/* ── Navbar: ítem del Asistente IA con borde brillante animado ── */
+.nav-ai-glow {
+  position: relative;
+  border-radius: 0.5rem;
+  isolation: isolate;
+}
+/* Borde gradiente animado (técnica de máscara: solo se ve el anillo de 1px) */
+.nav-ai-glow::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(115deg,
+    oklch(0.72 0.17 290),
+    oklch(0.74 0.15 230),
+    oklch(0.80 0.13 85),
+    oklch(0.72 0.17 290));
+  background-size: 260% 260%;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: aiGlowMove 4s linear infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+/* Halo exterior suave que respira */
+.nav-ai-glow::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: 0 0 14px oklch(0.74 0.16 285 / 0.4);
+  pointer-events: none;
+  z-index: -1;
+  animation: aiGlowPulse 3s ease-in-out infinite;
+}
+@keyframes aiGlowMove {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 260% 50%; }
+}
+@keyframes aiGlowPulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 0.9; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-msg-in, .asst-shimmer, .typing-caret, .animate-pro-celebrate, .pro-sweep {
     animation: none !important;
   }
+  .nav-ai-glow::before, .nav-ai-glow::after { animation: none !important; }
 }
