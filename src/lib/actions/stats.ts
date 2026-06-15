@@ -59,12 +59,23 @@ export interface Segmentation {
   total: number
 }
 
+export interface Retention {
+  /** Clientes con 2+ visitas DENTRO del período [desde, hasta]. */
+  returning_in_period: number
+  /** Clientes únicos atendidos en el período. */
+  unique_in_period: number
+  /** returning_in_period / unique_in_period (0-1). Numerador y denominador en la MISMA ventana. */
+  rate: number
+}
+
 export interface StatsData {
   heatmap: HeatmapCell[]
   ranking: BarberRank[]
   trends: TrendPoint[]
   revenueByMethod: MethodRevenue[]
   segmentation: Segmentation
+  /** Tasa de retorno calculada dentro del período consultado (a diferencia de segmentation, que usa ventana móvil). */
+  retention: Retention
   totals: {
     revenue: number
     cuts: number
@@ -94,6 +105,7 @@ export async function fetchStats(
       trends: [],
       revenueByMethod: [],
       segmentation: { new_count: 0, recurring: 0, at_risk: 0, lost: 0, total: 0 },
+      retention: { returning_in_period: 0, unique_in_period: 0, rate: 0 },
       totals: { revenue: 0, cuts: 0, avgTicket: 0, clients: 0 },
     }
   }
@@ -107,6 +119,7 @@ export async function fetchStats(
       trends: [],
       revenueByMethod: [],
       segmentation: { new_count: 0, recurring: 0, at_risk: 0, lost: 0, total: 0 },
+      retention: { returning_in_period: 0, unique_in_period: 0, rate: 0 },
       totals: { revenue: 0, cuts: 0, avgTicket: 0, clients: 0 },
     }
   }
@@ -260,6 +273,16 @@ export async function fetchStats(
   const totalCuts = safe.length
   const uniqueClients = new Set(safe.map((v) => v.client_id)).size
 
+  // Tasa de retorno DENTRO del período [fromISO, toISO]: clientes con 2+ visitas
+  // en el período / clientes únicos del período. A diferencia de `segmentation.recurring`
+  // (ventana móvil ~lostDays*2), acá numerador y denominador comparten la misma ventana,
+  // así "¿qué % de gente volvió?" es inequívoco y reproducible.
+  const periodVisitCount = new Map<string, number>()
+  for (const v of safe) periodVisitCount.set(v.client_id, (periodVisitCount.get(v.client_id) || 0) + 1)
+  let returningInPeriod = 0
+  for (const count of periodVisitCount.values()) if (count >= 2) returningInPeriod++
+  const retentionRate = uniqueClients > 0 ? returningInPeriod / uniqueClients : 0
+
   return {
     heatmap,
     ranking,
@@ -271,6 +294,11 @@ export async function fetchStats(
       at_risk: atRisk,
       lost,
       total: totalClients,
+    },
+    retention: {
+      returning_in_period: returningInPeriod,
+      unique_in_period: uniqueClients,
+      rate: retentionRate,
     },
     totals: {
       revenue: totalRevenue,

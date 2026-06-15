@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import dynamic from 'next/dynamic'
-import { Download, Maximize2, FileText, TrendingUp, TrendingDown, Loader2 } from 'lucide-react'
+import { Download, Maximize2, FileText, TrendingUp, TrendingDown, Loader2, Building2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { exportAssistantReportPDF } from '@/lib/export'
@@ -265,12 +265,19 @@ export function ToolResultBlock({ name, output, orgName }: { name: string; outpu
   if (name === 'estadisticas') {
     const t = o.totales as Rec | undefined
     if (!t) return null
+    const ret = o.retorno_clientes as Rec | undefined
     const kpis: Kpi[] = [
       { label: 'Ingresos', value: formatARS(Number(t.revenue ?? 0)) },
       { label: 'Cortes', value: formatNum(Number(t.cuts ?? 0)) },
       { label: 'Ticket prom.', value: formatARS(Number(t.avgTicket ?? 0)) },
       { label: 'Clientes', value: formatNum(Number(t.clients ?? 0)) },
     ]
+    if (ret && Number(ret.clientes_unicos ?? 0) > 0) {
+      kpis.push({
+        label: `Volvieron (${formatNum(Number(ret.clientes_que_volvieron ?? 0))}/${formatNum(Number(ret.clientes_unicos ?? 0))})`,
+        value: `${formatNum(Number(ret.tasa_pct ?? 0))}%`,
+      })
+    }
     const ranking = (o.ranking_barberos as Rec[] | undefined)?.slice(0, 6) ?? []
     return (
       <>
@@ -279,6 +286,30 @@ export function ToolResultBlock({ name, output, orgName }: { name: string; outpu
           <ChartView chart={{ title: 'Cortes por barbero', type: 'bar', data: ranking.map((b) => ({ label: String(b.name ?? '—').split(' ')[0], value: Number(b.cuts ?? 0) })) }} />
         )}
       </>
+    )
+  }
+
+  if (name === 'listar_sucursales') {
+    const sucursales = (o.sucursales as Rec[] | undefined) ?? []
+    if (sucursales.length === 0) return null
+    return (
+      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {sucursales.map((s, i) => (
+          <div
+            key={i}
+            className="animate-scale-in flex items-start gap-2.5 rounded-xl border border-border bg-card/60 p-3"
+            style={{ animationDelay: `${i * 40}ms` }}
+          >
+            <Building2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{String(s.nombre ?? '—')}</p>
+              {s.direccion != null && s.direccion !== '' && (
+                <p className="truncate text-[11px] text-muted-foreground">{String(s.direccion)}</p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     )
   }
 
@@ -313,6 +344,27 @@ export function ToolResultBlock({ name, output, orgName }: { name: string; outpu
       ...Object.entries(por).slice(0, 3).map(([k, v]) => ({ label: k, value: formatNum(Number(v)) })),
     ]
     return <KpiStrip kpis={kpis} />
+  }
+
+  // Fallback genérico de error: cualquier herramienta que devuelva { error, message }
+  // (sin_acceso, sucursal_no_resuelta, etc.) muestra una tarjeta clara en vez de nada.
+  if (typeof o.error === 'string') {
+    const opciones = Array.isArray(o.sucursales_disponibles) ? (o.sucursales_disponibles as string[]) : []
+    return (
+      <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+        <p className="text-xs text-amber-300">{String(o.message ?? 'No pude completar la consulta.')}</p>
+        {opciones.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {opciones.map((nombre, i) => (
+              <span key={i} className="inline-flex items-center gap-1 rounded-full border border-border bg-card/60 px-2 py-0.5 text-[11px] text-muted-foreground">
+                <Building2 className="size-3 opacity-70" />
+                {nombre}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    )
   }
 
   return null

@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, DollarSign, BarChart3, TrendingUp, Receipt, Users,
-  Star, CalendarClock, BookOpen, FileText, Terminal, type LucideIcon,
+  Star, CalendarClock, BookOpen, FileText, Terminal, Building2, type LucideIcon,
 } from 'lucide-react'
 
 export interface ToolMeta {
@@ -12,6 +12,7 @@ export interface ToolMeta {
 
 export const TOOL_META: Record<string, ToolMeta> = {
   resumen_negocio: { label: 'Resumen', icon: LayoutDashboard, running: 'Armando el resumen…' },
+  listar_sucursales: { label: 'Sucursales', icon: Building2, running: 'Buscando sucursales…' },
   finanzas_pyl: { label: 'Finanzas', icon: DollarSign, running: 'Consultando finanzas…' },
   estadisticas: { label: 'Estadísticas', icon: BarChart3, running: 'Analizando estadísticas…' },
   rendimiento_barberos: { label: 'Rendimiento', icon: TrendingUp, running: 'Midiendo rendimiento…' },

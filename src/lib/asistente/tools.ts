@@ -48,6 +48,62 @@ export function buildTools(ctx: AssistantContext) {
 
   const branchHint = ctx.scopedBranchIds.length === 1 ? ' (tenés acceso a una sola sucursal)' : ''
 
+  // ── Resolución tolerante de sucursal ──────────────────────────────
+  // Acepta nombre ("Rondeau"), slug ("rondeau") o UUID y lo mapea a un id EN ALCANCE.
+  // Antes las tools pedían `branchId: uuid`: el modelo no conocía los UUID, metía el
+  // nombre, Zod lo rechazaba y devolvía "necesito el identificador en formato UUID".
+  // Ahora el modelo pasa el nombre y el servidor resuelve (con el directorio ya scopeado).
+  const BRANCH_PARAM = z
+    .string()
+    .optional()
+    .describe('Nombre, slug o ID de la sucursal a filtrar (ej: "Rondeau"). Omitir para incluir TODAS las sucursales.')
+
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+  const allBranchNames = () => ctx.branches.map((b) => b.name)
+
+  type BranchError = { error: 'sucursal_no_resuelta'; message: string; sucursales_disponibles: string[] }
+  type BranchPick = null | { id: string; name: string } | BranchError
+
+  function branchErr(message: string, opciones: string[] = allBranchNames()): BranchError {
+    return { error: 'sucursal_no_resuelta', message, sucursales_disponibles: opciones }
+  }
+  function isBranchErr(p: BranchPick): p is BranchError {
+    return p !== null && 'error' in p
+  }
+
+  /** null = todas; {id,name} = resuelta; BranchError = no se pudo (el modelo puede repreguntar). */
+  function resolveBranch(input?: string | null): BranchPick {
+    if (input == null || input.trim() === '') return null
+    const raw = input.trim()
+    const branches = ctx.branches
+    if (branches.length === 0) return branchErr('No hay sucursales accesibles en tu cuenta.', [])
+
+    if (UUID_RE.test(raw)) {
+      const hit = branches.find((b) => b.id === raw)
+      return hit ? { id: hit.id, name: hit.name } : branchErr(`No tenés acceso a una sucursal con ese identificador. Sucursales disponibles: ${allBranchNames().join(', ')}.`)
+    }
+
+    const q = norm(raw)
+    // 1) coincidencia exacta por slug o nombre
+    let hit = branches.find((b) => (b.slug ? norm(b.slug) === q : false) || norm(b.name) === q)
+    // 2) prefijo
+    if (!hit) {
+      const starts = branches.filter((b) => norm(b.name).startsWith(q) || (b.slug ? norm(b.slug).startsWith(q) : false))
+      if (starts.length === 1) hit = starts[0]
+      else if (starts.length > 1) return branchErr(`"${raw}" coincide con varias sucursales: ${starts.map((b) => b.name).join(', ')}. ¿Cuál querés?`, starts.map((b) => b.name))
+    }
+    // 3) substring: solo si el NOMBRE (o slug) contiene el query, nunca al revés.
+    //    Unidireccional + largo mínimo evita que un input largo que contenga un nombre
+    //    corto ("Test") resuelva silenciosamente a la sucursal equivocada (→ datos errados).
+    if (!hit && q.length >= 3) {
+      const incl = branches.filter((b) => norm(b.name).includes(q) || (b.slug ? norm(b.slug).includes(q) : false))
+      if (incl.length === 1) hit = incl[0]
+      else if (incl.length > 1) return branchErr(`"${raw}" coincide con varias sucursales: ${incl.map((b) => b.name).join(', ')}. ¿Cuál querés?`, incl.map((b) => b.name))
+    }
+    return hit ? { id: hit.id, name: hit.name } : branchErr(`No encontré una sucursal que coincida con "${raw}". Sucursales disponibles: ${allBranchNames().join(', ')}.`)
+  }
+
   return {
     resumen_negocio: tool({
       description: `Resumen del día de hoy: ingresos, atenciones completadas, clientes nuevos del mes y últimas visitas. Usalo para "¿cómo va el día?" o un panorama rápido.${branchHint}`,
@@ -74,21 +130,41 @@ export function buildTools(ctx: AssistantContext) {
       },
     }),
 
+    listar_sucursales: tool({
+      description:
+        'Lista las sucursales a las que tenés acceso, con su nombre, dirección y modo de operación. Usalo para "¿qué sucursales tengo?" o si necesitás saber qué sucursales existen antes de filtrar por una.',
+      inputSchema: z.object({}),
+      execute: async () => {
+        ok('listar_sucursales')
+        return {
+          total: ctx.branches.length,
+          sucursales: ctx.branches.map((b) => ({
+            nombre: b.name,
+            direccion: b.address ?? null,
+            modo_operacion: b.operation_mode ?? null,
+          })),
+        }
+      },
+    }),
+
     finanzas_pyl: tool({
       description:
         'Análisis financiero: P&L mensual (ingresos, gastos, ganancia neta), ranking de barberos por rentabilidad, ingresos por servicio, break-even y variación mes a mes. Parámetro mesesAtras: cuántos meses hacia atrás incluir (0 = todo el historial).',
       inputSchema: z.object({
         mesesAtras: z.number().int().min(0).max(24).default(6),
         mesFinal: z.string().regex(/^\d{4}-\d{2}$/).optional().describe('Mes final YYYY-MM, opcional'),
-        branchId: z.string().uuid().optional(),
+        sucursal: BRANCH_PARAM,
       }),
-      execute: async ({ mesesAtras, mesFinal, branchId }) => {
+      execute: async ({ mesesAtras, mesFinal, sucursal }) => {
         const d = gate('finances.view_summary', 'finanzas')
         if (d) return deny('finanzas_pyl', d)
-        const branch = branchId && ctx.scopedBranchIds.includes(branchId) ? branchId : null
+        const picked = resolveBranch(sucursal)
+        if (isBranchErr(picked)) return picked
+        const branch = picked?.id ?? null
         const f = await fetchFinancialData(mesesAtras, branch, mesFinal ?? null)
-        ok('finanzas_pyl', { mesesAtras })
+        ok('finanzas_pyl', { mesesAtras, sucursal: picked?.name ?? 'todas' })
         return {
+          sucursal: picked?.name ?? 'todas las sucursales',
           totales: f.totals,
           break_even: f.breakEven,
           variacion_mensual: f.momChange,
@@ -104,24 +180,39 @@ export function buildTools(ctx: AssistantContext) {
 
     estadisticas: tool({
       description:
-        'Estadísticas operativas en un rango de fechas: ranking de barberos, tendencia diaria de ingresos/cortes, ingresos por método de pago, segmentación de clientes (nuevos/recurrentes/en riesgo/perdidos) y horarios pico. Pasá fechas ISO (ej: 2026-05-01T00:00:00).',
+        'Estadísticas operativas en un rango de fechas: ranking de barberos, tendencia diaria de ingresos/cortes, ingresos por método de pago, segmentación de clientes (nuevos/recurrentes/en riesgo/perdidos), TASA DE RETORNO del período (qué % de la gente volvió, en `retorno_clientes`) y horarios pico. Pasá fechas ISO (ej: 2026-05-01T00:00:00). Para "¿qué % volvió?" sin período explícito, usá los últimos 90 días.',
       inputSchema: z.object({
-        desde: z.string().describe('Fecha/hora ISO de inicio'),
-        hasta: z.string().describe('Fecha/hora ISO de fin'),
-        branchId: z.string().uuid().optional(),
+        desde: z.string().optional().describe('Fecha/hora ISO de inicio. Omitir = últimos 90 días.'),
+        hasta: z.string().optional().describe('Fecha/hora ISO de fin. Omitir = hoy.'),
+        sucursal: BRANCH_PARAM,
       }),
-      execute: async ({ desde, hasta, branchId }) => {
+      execute: async ({ desde, hasta, sucursal }) => {
         const d = gate('stats.view', 'estadisticas')
         if (d) return deny('estadisticas', d)
-        const branch = branchId && ctx.scopedBranchIds.includes(branchId) ? branchId : null
-        const s = await fetchStats(desde, hasta, branch)
-        ok('estadisticas')
+        const picked = resolveBranch(sucursal)
+        if (isBranchErr(picked)) return picked
+        const branch = picked?.id ?? null
+        // Default server-side: últimos 90 días (no le pedimos al modelo que calcule fechas).
+        const nowISO = new Date().toISOString()
+        const hastaISO = hasta || nowISO
+        const desdeISO = desde || new Date(Date.now() - 90 * 86400000).toISOString()
+        const s = await fetchStats(desdeISO, hastaISO, branch)
+        ok('estadisticas', { sucursal: picked?.name ?? 'todas' })
         const peakHours = [...s.heatmap]
           .sort((a, b) => b.count - a.count)
           .slice(0, 6)
           .map((c) => ({ dia: ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][c.day], hora: c.hour, atenciones: c.count }))
         return {
+          sucursal: picked?.name ?? 'todas las sucursales',
+          periodo: { desde: desdeISO, hasta: hastaISO },
           totales: s.totals,
+          // Tasa de retorno del período: clientes con 2+ visitas ÷ clientes únicos atendidos
+          // entre `desde` y `hasta` (misma ventana). Es la respuesta a "¿qué % de gente volvió?".
+          retorno_clientes: {
+            clientes_que_volvieron: s.retention.returning_in_period,
+            clientes_unicos: s.retention.unique_in_period,
+            tasa_pct: Math.round(s.retention.rate * 1000) / 10,
+          },
           ranking_barberos: s.ranking,
           ingresos_por_metodo: s.revenueByMethod,
           segmentacion_clientes: s.segmentation,
@@ -134,13 +225,15 @@ export function buildTools(ctx: AssistantContext) {
     sueldos_comisiones: tool({
       description:
         'Resumen de comisiones y sueldos: total pendiente y pagado, y desglose de comisiones pendientes por barbero. Información sensible (requiere permiso de sueldos).',
-      inputSchema: z.object({ branchId: z.string().uuid().optional() }),
-      execute: async ({ branchId }) => {
+      inputSchema: z.object({ sucursal: BRANCH_PARAM }),
+      execute: async ({ sucursal }) => {
         const d = gate('salary.view', 'salarios')
         if (d) return deny('sueldos_comisiones', d)
-        const branch = branchId && ctx.scopedBranchIds.includes(branchId) ? branchId : null
+        const picked = resolveBranch(sucursal)
+        if (isBranchErr(picked)) return picked
+        const branch = picked?.id ?? null
         const sum = await getCommissionSummary(branch)
-        ok('sueldos_comisiones')
+        ok('sueldos_comisiones', { sucursal: picked?.name ?? 'todas' })
         // Resolver nombres de barberos
         const ids = sum.pendingByBarber.map((p) => p.staffId)
         const names = new Map<string, string>()
@@ -235,11 +328,13 @@ export function buildTools(ctx: AssistantContext) {
       inputSchema: z.object({
         desde: z.string().describe('YYYY-MM-DD'),
         hasta: z.string().describe('YYYY-MM-DD'),
-        branchId: z.string().uuid().optional(),
+        sucursal: BRANCH_PARAM,
       }),
-      execute: async ({ desde, hasta, branchId }) => {
+      execute: async ({ desde, hasta, sucursal }) => {
         const d = gate('appointments.view', 'turnos')
         if (d) return deny('turnos_resumen', d)
+        const picked = resolveBranch(sucursal)
+        if (isBranchErr(picked)) return picked
         const supabase = createAdminClient()
         let q = supabase
           .from('appointments')
@@ -247,12 +342,12 @@ export function buildTools(ctx: AssistantContext) {
           .eq('organization_id', ctx.orgId)
           .gte('appointment_date', desde)
           .lte('appointment_date', hasta)
-        if (branchId && ctx.scopedBranchIds.includes(branchId)) q = q.eq('branch_id', branchId)
+        if (picked) q = q.eq('branch_id', picked.id)
         const { data } = await q
         const counts: Record<string, number> = {}
         for (const a of data ?? []) counts[a.status] = (counts[a.status] ?? 0) + 1
-        ok('turnos_resumen')
-        return { total: data?.length ?? 0, por_estado: counts }
+        ok('turnos_resumen', { sucursal: picked?.name ?? 'todas' })
+        return { sucursal: picked?.name ?? 'todas las sucursales', total: data?.length ?? 0, por_estado: counts }
       },
     }),
 

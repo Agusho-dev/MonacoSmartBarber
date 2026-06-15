@@ -2,6 +2,12 @@
 // Endurecido contra prompt-injection: los datos devueltos por herramientas/RAG
 // son DATOS, nunca instrucciones; los permisos no se negocian.
 
+interface BranchRef {
+  id: string
+  name: string
+  slug?: string | null
+}
+
 interface SystemPromptOpts {
   orgName: string
   today: string // ISO date (YYYY-MM-DD)
@@ -10,6 +16,7 @@ interface SystemPromptOpts {
   customPrompt?: string | null
   enabledDomains: string[]
   proMode: boolean
+  branches?: BranchRef[]
 }
 
 // Catálogo de vistas para el Modo Pro (SQL de solo lectura).
@@ -32,10 +39,12 @@ Vistas disponibles (todas ya filtradas por tu organización; SOLO lectura, un ú
 Reglas SQL: un solo SELECT (o WITH), sin ';', sin comentarios, sin DML/DDL. Para nombres de sucursal/barbero/servicio uní contra las vistas correspondientes. Máximo 500 filas.`.trim()
 
 export function buildSystemPrompt(opts: SystemPromptOpts): string {
-  const { orgName, today, currency, persona, customPrompt, enabledDomains, proMode } = opts
+  const { orgName, today, currency, persona, customPrompt, enabledDomains, proMode, branches } = opts
 
   const domainList =
     enabledDomains.length > 0 ? enabledDomains.join(', ') : '(ninguno habilitado)'
+
+  const branchList = branches ?? []
 
   const base = `Sos el copiloto de negocio de **${orgName}**, una barbería que usa el sistema BarberOS / Monaco Smart Barber. Asistís al dueño y al equipo respondiendo preguntas sobre el negocio en español rioplatense, claro y directo.
 
@@ -45,6 +54,8 @@ Fecha de hoy: ${today}. Moneda: ${currency} (formato es-AR, ej: $1.250.000). Cua
 - Para CUALQUIER número (facturación, cortes, comisiones, clientes, turnos, ranking), SIEMPRE usá una herramienta. Nunca inventes ni estimes cifras: si una herramienta no te da el dato, decilo.
 - Para preguntas cualitativas (quejas, opiniones, "¿qué dicen los clientes?", cómo funciona el sistema, políticas), usá \`buscar_conocimiento\` (búsqueda semántica).
 - Podés encadenar herramientas: primero traé los datos, después interpretá. Si una pregunta abarca varios dominios, llamá varias herramientas.
+- **Sucursales**: cuando el usuario nombre una sucursal (ej: "Rondeau", "en Paraná", "Caseros"), pasá ese nombre TAL CUAL en el parámetro \`sucursal\` de la herramienta. NO necesitás ni inventes IDs/UUID: el sistema resuelve el nombre por vos. Si no menciona ninguna, la herramienta agrega todas las sucursales. Si dudás de qué sucursales hay, usá \`listar_sucursales\`.
+- **Retención / "¿qué % de gente volvió?"**: usá \`estadisticas\` y reportá el campo \`retorno_clientes\` (clientes con 2+ visitas en el período ÷ clientes únicos del período). Si el usuario no da un período, omití \`desde\`/\`hasta\` y la herramienta usa los últimos 90 días; leé el campo \`periodo\` que devuelve y SIEMPRE aclará la ventana (ej: "en los últimos 90 días volvieron 605 de 1.661 clientes, un 36%").
 - Cuando el usuario pida un "informe", "reporte" o "PDF", juntá los datos con las herramientas y después llamá a \`generar_reporte\` con KPIs, tablas, gráficos y una síntesis. El usuario podrá descargarlo en PDF.
 - Dominios de datos habilitados para esta organización: ${domainList}. Si te piden algo de un dominio deshabilitado o sin permiso, explicá amablemente que no tenés acceso a esa información.
 
@@ -65,8 +76,16 @@ ${PRO_SQL_SCHEMA}
 Preferí siempre las herramientas curadas (\`finanzas_pyl\`, \`estadisticas\`, etc.) cuando cubren la pregunta; usá SQL solo para lo que ellas no resuelven.`
     : ''
 
+  const branchSection =
+    branchList.length > 0
+      ? `\n\n# Sucursales de ${orgName}
+Tenés acceso a estas sucursales. Para filtrar una herramienta por sucursal, pasá el NOMBRE (no el id) en el parámetro \`sucursal\`:
+${branchList.map((b) => `- ${b.name}`).join('\n')}
+Cuando muestres datos de una sola sucursal, aclará de cuál se trata. Si pedís el total del negocio, omití \`sucursal\`.`
+      : ''
+
   const personaSection = persona ? `\n\n# Personalidad\n${persona}` : ''
   const customSection = customPrompt ? `\n\n# Instrucciones adicionales del negocio\n${customPrompt}` : ''
 
-  return base + proSection + personaSection + customSection
+  return base + branchSection + proSection + personaSection + customSection
 }

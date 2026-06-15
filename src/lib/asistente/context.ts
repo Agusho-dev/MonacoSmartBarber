@@ -26,6 +26,15 @@ export const DEFAULT_DATA_ACCESS: Record<DataDomain, boolean> = {
   fidelizacion: true,
 }
 
+/** Sucursal accesible por el usuario, con metadata para que el asistente la resuelva por nombre. */
+export interface BranchRef {
+  id: string
+  name: string
+  slug: string | null
+  address: string | null
+  operation_mode: string | null
+}
+
 export interface AssistantContext {
   orgId: string
   userId: string | null
@@ -34,6 +43,8 @@ export interface AssistantContext {
   isOwnerOrAdmin: boolean
   permissions: Record<string, boolean>
   scopedBranchIds: string[]
+  /** Directorio de sucursales en alcance (mismo scope que scopedBranchIds) con nombre/slug. */
+  branches: BranchRef[]
   dataAccess: Record<string, boolean>
   proMode: boolean
   config: OrgAiConfig | null
@@ -91,6 +102,30 @@ async function resolveUserAccess(orgId: string): Promise<{
   }
 }
 
+/**
+ * Directorio de sucursales en alcance, con nombre/slug/dirección.
+ * Respeta el mismo scope que scopedBranchIds (rol → role_branch_scope).
+ * El asistente lo usa para resolver "Rondeau"/"Paraná" a su UUID sin que el modelo
+ * tenga que adivinar identificadores.
+ */
+async function getBranchDirectory(orgId: string, scopedBranchIds: string[]): Promise<BranchRef[]> {
+  if (scopedBranchIds.length === 0) return []
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from('branches')
+    .select('id, name, slug, address, operation_mode')
+    .eq('organization_id', orgId)
+    .in('id', scopedBranchIds)
+    .order('name')
+  return (data ?? []).map((b) => ({
+    id: b.id,
+    name: b.name,
+    slug: (b as { slug?: string | null }).slug ?? null,
+    address: b.address ?? null,
+    operation_mode: (b as { operation_mode?: string | null }).operation_mode ?? null,
+  }))
+}
+
 async function getOrgMeta(orgId: string): Promise<{ name: string; currency: string } | null> {
   const supabase = createAdminClient()
   const { data } = await supabase
@@ -121,6 +156,8 @@ export async function getAssistantContext(): Promise<AssistantContext | null> {
   const dataAccess =
     (config?.assistant_data_access as Record<string, boolean> | null) ?? DEFAULT_DATA_ACCESS
 
+  const branches = await getBranchDirectory(orgId, scopedBranchIds)
+
   return {
     orgId,
     userId: access.userId,
@@ -129,6 +166,7 @@ export async function getAssistantContext(): Promise<AssistantContext | null> {
     isOwnerOrAdmin: access.isOwnerOrAdmin,
     permissions: access.permissions,
     scopedBranchIds,
+    branches,
     dataAccess,
     // Modo Pro requiere flag de org + ser owner/admin (gate doble).
     proMode: Boolean(config?.assistant_pro_mode) && access.isOwnerOrAdmin,

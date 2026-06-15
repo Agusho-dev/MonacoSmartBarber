@@ -83,6 +83,7 @@ export async function POST(req: NextRequest) {
     customPrompt: config?.assistant_system_prompt,
     enabledDomains,
     proMode: ctx.proMode,
+    branches: ctx.branches,
   })
   const tools = buildTools(ctx)
 

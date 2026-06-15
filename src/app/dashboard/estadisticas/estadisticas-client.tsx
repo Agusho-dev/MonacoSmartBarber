@@ -723,7 +723,7 @@ function RankingTab({ data }: { data: StatsData }) {
 /* ─── Segmentation Tab ─── */
 
 function SegmentationTab({ data }: { data: StatsData }) {
-  const { segmentation: s } = data
+  const { segmentation: s, retention: r } = data
 
   const segments = [
     {
@@ -791,10 +791,17 @@ function SegmentationTab({ data }: { data: StatsData }) {
               <Badge variant="secondary">{s.total}</Badge>
             </div>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Tasa de retención</span>
+              <span className="text-muted-foreground">
+                Tasa de retención
+                {r.unique_in_period > 0 && (
+                  <span className="ml-1 text-xs text-muted-foreground/60">
+                    ({r.returning_in_period} de {r.unique_in_period} volvieron en el período)
+                  </span>
+                )}
+              </span>
               <Badge variant="secondary">
-                {s.total > 0
-                  ? `${Math.round((s.recurring / s.total) * 100)}%`
+                {r.unique_in_period > 0
+                  ? `${Math.round(r.rate * 100)}%`
                   : '–'}
               </Badge>
             </div>
