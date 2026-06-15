@@ -149,7 +149,7 @@ export function buildTools(ctx: AssistantContext) {
 
     finanzas_pyl: tool({
       description:
-        'Análisis financiero: P&L mensual (ingresos, gastos, ganancia neta), ranking de barberos por rentabilidad, ingresos por servicio, break-even y variación mes a mes. Parámetro mesesAtras: cuántos meses hacia atrás incluir (0 = todo el historial).',
+        'Análisis financiero: P&L mensual (ingresos, gastos, ganancia neta), ranking de barberos por rentabilidad, ingresos por servicio, break-even y variación mes a mes. Parámetro mesesAtras: cuántos meses hacia atrás incluir (0 = todo el historial). Siempre se incluye al menos el mes anterior para poder comparar la variación; para "este mes" usá mesesAtras=1.',
       inputSchema: z.object({
         mesesAtras: z.number().int().min(0).max(24).default(6),
         mesFinal: z.string().regex(/^\d{4}-\d{2}$/).optional().describe('Mes final YYYY-MM, opcional'),
@@ -161,7 +161,10 @@ export function buildTools(ctx: AssistantContext) {
         const picked = resolveBranch(sucursal)
         if (isBranchErr(picked)) return picked
         const branch = picked?.id ?? null
-        const f = await fetchFinancialData(mesesAtras, branch, mesFinal ?? null)
+        // Garantizar baseline para la variación mes a mes: con 1 mes no hay con qué comparar.
+        // mesesAtras=0 (todo el historial) se respeta; cualquier ventana acotada incluye >=2 meses.
+        const mesesEfectivos = mesesAtras === 0 ? 0 : Math.max(mesesAtras, 2)
+        const f = await fetchFinancialData(mesesEfectivos, branch, mesFinal ?? null)
         ok('finanzas_pyl', { mesesAtras, sucursal: picked?.name ?? 'todas' })
         return {
           sucursal: picked?.name ?? 'todas las sucursales',
