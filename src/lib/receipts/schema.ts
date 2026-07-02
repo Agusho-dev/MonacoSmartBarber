@@ -66,6 +66,8 @@ export const EXTRACTION_PROMPT =
   '(bancos, Mercado Pago, billeteras virtuales). Analizá la imagen — que puede ser ' +
   'una foto de la pantalla de un celular, con reflejos — y devolvé los datos. Reglas: ' +
   'monto como número sin símbolo y con punto decimal (15000.50, no "$15.000,50"); ' +
+  'IMPORTANTE: el monto es el importe TRANSFERIDO/ENVIADO/PAGADO, NUNCA el saldo, ' +
+  'el "dinero disponible" ni el balance "antes y después"; ' +
   'fecha en ISO 8601; CBU/CVU de 22 dígitos; nº de operación tal cual figura; ' +
   'devolvé null en todo campo que no aparezca (NO inventes montos ni números de operación); ' +
   'confianza entre 0 y 1 según qué tan legible estaba la imagen.'

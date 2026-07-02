@@ -1,5 +1,6 @@
 'use server'
 
+import { randomUUID } from 'node:crypto'
 import { createAdminClient, createClient } from '@/lib/supabase/server'
 import { getBarberSession } from '@/lib/actions/auth'
 import { getCurrentOrgId } from '@/lib/actions/org'
@@ -77,6 +78,71 @@ export async function linkReceiptToVisit(
     console.error('[linkReceiptToVisit]', error.message)
     return { error: 'No se pudo vincular el comprobante' }
   }
+  return { ok: true }
+}
+
+// ============================================================
+// Fallback QR — el cliente sube el comprobante desde su propio celular
+// ============================================================
+// El barbero abre un QR en la tablet → el cliente lo escanea → sube la foto
+// desde su cel a `/upload-comprobante/[token]`. La imagen va SIEMPRE al bucket
+// privado `transfer-receipts` (path efímero `{org}/qr/{token}.webp`). La tablet
+// hace polling (robusto en el panel PIN, sin depender de Realtime anon) y cuando
+// llega la corre por el mismo pipeline que la cámara frontal.
+
+const QR_TMP = (orgId: string, token: string) => `${orgId}/qr/${token}.webp`
+
+/** Crea una sesión de subida QR para la org del barbero. Devuelve el token. */
+export async function createReceiptUploadSession(): Promise<{ token: string } | { error: string }> {
+  const session = await getBarberSession()
+  if (!session) return { error: 'No autorizado' }
+  const supabase = createAdminClient()
+  const token = randomUUID()
+  const { error } = await supabase
+    .from('qr_photo_sessions')
+    .insert({ token, organization_id: session.organization_id })
+  if (error) { console.error('[createReceiptUploadSession]', error.message); return { error: 'No se pudo iniciar' } }
+  return { token }
+}
+
+/** La tablet pregunta si ya llegó la imagen. Devuelve una signed URL cuando existe. */
+export async function pollReceiptUpload(token: string): Promise<{ url: string } | { pending: true } | { error: string }> {
+  const session = await getBarberSession()
+  if (!session) return { error: 'No autorizado' }
+  const supabase = createAdminClient()
+  const { data } = await supabase.storage
+    .from('transfer-receipts')
+    .createSignedUrl(QR_TMP(session.organization_id, token), 300)
+  if (data?.signedUrl) return { url: data.signedUrl }
+  return { pending: true }
+}
+
+/**
+ * Subida desde el celular del cliente (página pública `/upload-comprobante`).
+ * Sin sesión de barbero: se valida por el token (capability). Sube al bucket
+ * PRIVADO. El barber NO es usuario Supabase auth → va por service role.
+ */
+export async function submitReceiptUpload(
+  token: string,
+  base64: string,
+  mediaType: string,
+): Promise<{ ok: true } | { error: string }> {
+  if (!token || !base64) return { error: 'Datos incompletos' }
+  const supabase = createAdminClient()
+  const { data: sess } = await supabase
+    .from('qr_photo_sessions')
+    .select('organization_id, is_active')
+    .eq('token', token)
+    .maybeSingle()
+  if (!sess || !sess.is_active) return { error: 'El código expiró. Pedile al barbero que genere uno nuevo.' }
+
+  const { error } = await supabase.storage
+    .from('transfer-receipts')
+    .upload(QR_TMP(sess.organization_id, token), Buffer.from(base64, 'base64'), {
+      contentType: mediaType || 'image/webp',
+      upsert: true,
+    })
+  if (error) { console.error('[submitReceiptUpload]', error.message); return { error: 'No se pudo subir la imagen' } }
   return { ok: true }
 }
 

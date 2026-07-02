@@ -53,8 +53,11 @@ function detectCanal(t: string): string | null {
   return null
 }
 
-const AMOUNT_LABEL = /(?:monto|importe|total|transferiste|enviaste|pagaste)[^\d$]{0,20}(\$?\s?[\d.]+(?:,\d{1,2})?)/i
-const ANY_AMOUNT = /\$\s?([\d]{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)/g
+const AMOUNT_LABEL = /(?:monto|importe|transferiste|enviaste|pagaste|transferencia\s+enviada)[^\d$]{0,24}\$?\s?([\d.]+(?:,\d{1,2})?)/i
+// Captura cada monto con su contexto previo (para descartar saldos/balances).
+const AMOUNT_CTX = /([\s\S]{0,26})\$\s?([\d]{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)/g
+// Un monto precedido por estas palabras NO es el importe transferido, es el saldo.
+const NEG_CTX = /(disponible|saldo|antes|despu[eé]s|balance|comisi[oó]n|l[ií]mite)/i
 const OP_NUMBER = /(?:n[°º.]?\s*(?:de\s*)?(?:operaci[oó]n|comprobante|transacci[oó]n|referencia|control)|c[oó]digo(?:\s*de\s*transferencia)?)\s*[:#]?\s*([A-Za-z0-9][A-Za-z0-9-]{4,})/i
 const CBU_CVU = /\b(\d{22})\b/g
 const ALIAS = /alias\s*[:\-]?\s*([a-zA-Z0-9][a-zA-Z0-9.\-]{3,})/i
@@ -63,13 +66,20 @@ const ALIAS = /alias\s*[:\-]?\s*([a-zA-Z0-9][a-zA-Z0-9.\-]{3,})/i
 export function parseComprobanteAR(text: string): ExtractedReceipt {
   const clean = text.replace(/ /g, ' ')
 
-  // Monto: preferir el que está junto a una etiqueta; si no, el mayor plausible.
+  // Monto: 1) el que está junto a una etiqueta ("transferiste/enviaste/monto…");
+  // 2) si no, el mayor EXCLUYENDO saldos/balances ("dinero disponible antes y
+  // después", etc.) — esos NO son el importe transferido.
   let amount: number | null = null
   const labeled = clean.match(AMOUNT_LABEL)
   if (labeled) amount = parseArNumber(labeled[1])
   if (amount == null) {
-    const all = [...clean.matchAll(ANY_AMOUNT)].map((m) => parseArNumber(m[1])).filter((n): n is number => n != null)
-    if (all.length) amount = Math.max(...all)
+    const candidates: number[] = []
+    for (const m of clean.matchAll(AMOUNT_CTX)) {
+      if (NEG_CTX.test(m[1])) continue
+      const v = parseArNumber(m[2])
+      if (v != null && v > 0) candidates.push(v)
+    }
+    if (candidates.length) amount = Math.max(...candidates)
   }
 
   const op = clean.match(OP_NUMBER)?.[1] ?? null
