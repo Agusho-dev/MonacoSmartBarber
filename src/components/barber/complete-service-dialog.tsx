@@ -34,6 +34,9 @@ import {
   Gift,
   Wallet,
   TicketPercent,
+  ScanLine,
+  Check,
+  AlertTriangle,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency } from '@/lib/format'
@@ -41,6 +44,8 @@ import { AliasCopyHero } from './alias-copy-hero'
 import { PaymentMethodButtons, type PaymentOptionValue } from './payment-method-buttons'
 import { TipSelector } from './tip-selector'
 import { CouponScanDialog, type AppliedCoupon } from './coupon-scan-dialog'
+import { ReceiptScanDialog, type ReceiptScanResult } from './receipt-scan-dialog'
+import { getTransferReceiptSettings, linkReceiptToVisit, type TransferReceiptSettingsView } from '@/lib/actions/receipts'
 
 interface CompleteServiceDialogProps {
   entry: QueueEntry | null
@@ -89,6 +94,11 @@ export function CompleteServiceDialog({
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null)
   const [couponScanOpen, setCouponScanOpen] = useState(false)
 
+  // Comprobante de transferencia (mig 157)
+  const [receiptSettings, setReceiptSettings] = useState<TransferReceiptSettingsView | null>(null)
+  const [receiptScan, setReceiptScan] = useState<ReceiptScanResult | null>(null)
+  const [scanOpen, setScanOpen] = useState(false)
+
   useEffect(() => {
     if (!entry) {
       setStep(1)
@@ -110,6 +120,8 @@ export function CompleteServiceDialog({
       setBarberNote('')
       setAppliedCoupon(null)
       setCouponScanOpen(false)
+      setReceiptScan(null)
+      setScanOpen(false)
       return
     }
 
@@ -130,6 +142,8 @@ export function CompleteServiceDialog({
     } else {
       setPreselectedService(null)
     }
+
+    getTransferReceiptSettings().then(setReceiptSettings)
 
     if (entry.client_id) {
       supabase
@@ -261,6 +275,11 @@ export function CompleteServiceDialog({
         }
       }
 
+      // Vincular el comprobante de transferencia escaneado a la visita creada.
+      if (result.visitId && receiptScan?.receiptId) {
+        await linkReceiptToVisit(receiptScan.receiptId, result.visitId)
+      }
+
       if (entry.client_id && clientNotes.trim() !== originalClientNotes) {
         await updateClientNotes(entry.client_id, clientNotes.trim(), '')
       }
@@ -306,6 +325,11 @@ export function CompleteServiceDialog({
   // El cupón se vincula a un cliente; sin cliente no se puede ofrecer. Tampoco
   // coexiste con el canje por puntos (reward_claimed), que ya lleva el corte a $0.
   const canUseCoupon = !!entry?.client_id && !entry?.reward_claimed && serviceSubtotal > 0
+
+  // Comprobante obligatorio al cobrar por transferencia (si la org lo activó).
+  const chargeAmount = totalAfterDiscount + tipAmount
+  const needsReceipt =
+    !!receiptSettings?.isEnabled && selectedPayment === 'transfer' && !entry?.reward_claimed
 
   return (
     <>
@@ -701,6 +725,55 @@ export function CompleteServiceDialog({
                 </div>
               )}
 
+              {/* Comprobante de transferencia (obligatorio si la org lo activó) */}
+              {needsReceipt && (
+                <div className="space-y-2">
+                  {receiptScan ? (
+                    receiptScan.status === 'verified' ? (
+                      <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-700 dark:text-emerald-300">
+                        <Check className="size-5 shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold">Comprobante verificado</p>
+                          {receiptScan.extracted?.amount != null && (
+                            <p className="text-xs opacity-90">{formatCurrency(receiptScan.extracted.amount)} leído</p>
+                          )}
+                        </div>
+                        <button type="button" onClick={() => setScanOpen(true)} className="shrink-0 text-xs underline opacity-80">
+                          Re-escanear
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-400">
+                        <AlertTriangle className="size-5 shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold">
+                            {receiptScan.status === 'duplicate' && 'Comprobante ya usado'}
+                            {receiptScan.status === 'amount_mismatch' && 'El monto no coincide'}
+                            {receiptScan.status === 'needs_review' && 'Comprobante en revisión'}
+                          </p>
+                          <p className="text-xs opacity-90">Se registrará igual para conciliar.</p>
+                        </div>
+                        <button type="button" onClick={() => setScanOpen(true)} className="shrink-0 text-xs underline opacity-80">
+                          Re-escanear
+                        </button>
+                      </div>
+                    )
+                  ) : (
+                    <Button
+                      type="button"
+                      onClick={() => setScanOpen(true)}
+                      size="lg"
+                      className="h-14 w-full bg-emerald-600 font-bold text-white hover:bg-emerald-700"
+                    >
+                      <ScanLine className="mr-2 size-5" /> Confirmar con escaneo
+                    </Button>
+                  )}
+                  <p className="text-center text-xs text-muted-foreground">
+                    Obligatorio para cobrar por transferencia
+                  </p>
+                </div>
+              )}
+
               {/* Propina */}
               {selectedPayment && selectedPayment !== 'points' && (
                 <TipSelector
@@ -744,7 +817,7 @@ export function CompleteServiceDialog({
                   className="h-14 sm:h-16 flex-1 text-base sm:text-lg font-black uppercase tracking-wide min-w-0"
                   size="lg"
                   onClick={finishService}
-                  disabled={loading || !selectedPayment}
+                  disabled={loading || !selectedPayment || (needsReceipt && !receiptScan)}
                 >
                   <span className="truncate">
                     {loading
@@ -768,6 +841,16 @@ export function CompleteServiceDialog({
         setAppliedCoupon(coupon)
         setCouponScanOpen(false)
       }}
+    />
+
+    <ReceiptScanDialog
+      open={scanOpen}
+      engine={receiptSettings?.engine ?? 'ai'}
+      expectedAmount={chargeAmount}
+      paymentAccountId={selectedAccountId || null}
+      clientId={entry?.client_id ?? null}
+      onClose={() => setScanOpen(false)}
+      onAccept={(r) => { setReceiptScan(r); setScanOpen(false) }}
     />
     </>
   )

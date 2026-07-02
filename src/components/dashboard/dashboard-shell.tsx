@@ -21,6 +21,7 @@ import {
   Check,
   ChevronDown,
   Receipt,
+  ScanLine,
   Handshake,
   CalendarClock,
   Trophy,
@@ -91,6 +92,7 @@ const navItems = [
   { href: '/dashboard/convenios', label: 'Convenios', icon: Handshake, requiredPermissions: ['agreements.view'] },
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3, requiredPermissions: ['stats.view'] },
   { href: '/dashboard/caja', label: 'Caja', icon: Receipt, requiredPermissions: ['caja.view'] },
+  { href: '/dashboard/comprobantes', label: 'Comprobantes', icon: ScanLine, requiredPermissions: ['comprobantes.view'] },
   { href: '/dashboard/finanzas', label: 'Finanzas', icon: DollarSign, requiredPermissions: ['finances.view', 'salary.view'] },
   { href: '/dashboard/configuracion', label: 'Configuración', icon: Settings, requiredPermissions: ['settings.view'] },
 ]

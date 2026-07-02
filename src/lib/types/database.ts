@@ -427,6 +427,56 @@ export interface PaymentAccount {
   created_at: string
 }
 
+// ── Comprobantes de transferencia (mig 157) ──────────────────
+export type ReceiptStatus =
+  | 'verified' | 'amount_mismatch' | 'duplicate' | 'needs_review' | 'manual_ok' | 'overridden'
+
+export type ReceiptCaptureMethod = 'front_camera' | 'qr_upload' | 'gallery'
+export type ReceiptEngine = 'ai' | 'ocr'
+
+export interface PaymentReceipt {
+  id: string
+  organization_id: string
+  branch_id: string
+  visit_id: string | null
+  transfer_log_id: string | null
+  payment_account_id: string | null
+  barber_id: string | null
+  client_id: string | null
+  image_path: string | null
+  capture_method: ReceiptCaptureMethod
+  extraction_engine: ReceiptEngine | null
+  status: ReceiptStatus
+  extracted_amount: number | null
+  extracted_datetime: string | null
+  operation_number: string | null
+  sender_name: string | null
+  sender_cbu_alias: string | null
+  recipient_name: string | null
+  recipient_cbu_alias: string | null
+  bank_or_wallet: string | null
+  canal: string | null
+  confidence: number | null
+  raw_extraction: Record<string, unknown> | null
+  expected_amount: number | null
+  amount_matches: boolean | null
+  alias_matches: boolean | null
+  reconciled_at: string | null
+  reconciled_by: string | null
+  review_note: string | null
+  created_at: string
+}
+
+export interface TransferReceiptSettings {
+  organization_id: string
+  is_enabled: boolean
+  extraction_engine: ReceiptEngine
+  required_since: string | null
+  amount_tolerance: number
+  created_at: string
+  updated_at: string
+}
+
 export interface ExpenseTicket {
   id: string
   branch_id: string

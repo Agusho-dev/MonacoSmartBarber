@@ -65,6 +65,13 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
             'caja.export': 'Exportar reportes de caja (CSV/ZIP)',
         },
     },
+    comprobantes: {
+        label: 'Comprobantes',
+        permissions: {
+            'comprobantes.view': 'Ver la conciliación de comprobantes de transferencia',
+            'comprobantes.manage': 'Conciliar a mano y configurar el escaneo de comprobantes',
+        },
+    },
     salary: {
         label: 'Sueldos',
         permissions: {
@@ -202,6 +209,9 @@ export const PERMISSION_DESCRIPTIONS: Record<string, string> = {
 
     'caja.view': 'Permite ver la caja del día: tickets cobrados, totales por método de pago y cierres de barberos.',
     'caja.export': 'Permite exportar los reportes de caja a CSV o ZIP (por barbero o por período).',
+
+    'comprobantes.view': 'Permite ver el tablero de conciliación: cruza cada cobro por transferencia contra su comprobante escaneado.',
+    'comprobantes.manage': 'Permite conciliar comprobantes a mano, marcar problemas y elegir el motor de lectura (IA/OCR).',
 
     'salary.view': 'Permite ver los sueldos configurados para cada miembro del equipo.',
     'salary.view_commissions': 'Permite ver el detalle de comisiones generadas por atención.',

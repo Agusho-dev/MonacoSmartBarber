@@ -512,9 +512,44 @@
   50%      { opacity: 0.9; }
 }
 
+/* ── Escaneo de comprobante de transferencia (tablet barbero) ── */
+@keyframes scanLaser {
+  0%   { top: 3%;  opacity: 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { top: 97%; opacity: 0; }
+}
+.scan-laser {
+  position: absolute;
+  left: 5%; right: 5%;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, oklch(0.85 0.15 165 / 0.95), transparent);
+  box-shadow: 0 0 16px 3px oklch(0.85 0.15 165 / 0.55);
+  will-change: top, opacity;
+  animation: scanLaser 2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+@keyframes reticleBreathe {
+  0%, 100% { opacity: 0.8; }
+  50%      { opacity: 1; }
+}
+.reticle-breathe { animation: reticleBreathe 2.4s ease-in-out infinite; }
+@keyframes scanDots {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+  40%           { opacity: 1;    transform: scale(1.1); }
+}
+.scan-dot { animation: scanDots 1.2s ease-in-out infinite; }
+@keyframes scanAmountIn {
+  0%   { transform: translateY(10px) scale(0.94); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.animate-scan-amount { animation: scanAmountIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
 @media (prefers-reduced-motion: reduce) {
   .animate-msg-in, .asst-shimmer, .typing-caret, .animate-pro-celebrate, .pro-sweep {
     animation: none !important;
   }
   .nav-ai-glow::before, .nav-ai-glow::after { animation: none !important; }
+  .scan-laser, .reticle-breathe, .scan-dot, .animate-scan-amount { animation: none !important; }
+  .scan-laser { opacity: 0.4; top: 50%; }
 }
