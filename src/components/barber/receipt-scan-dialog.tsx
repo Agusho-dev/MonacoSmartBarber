@@ -41,39 +41,77 @@ interface ReceiptScanDialogProps {
 
 type Phase = 'starting' | 'invite' | 'reading' | 'result'
 
-// Detector de la pantalla del comprobante DENTRO del recuadro. Sólo auto-captura
-// cuando hay una región brillante (pantalla del cel) grande y centrada; si no,
-// devuelve una indicación ("movelo a la derecha", "acercá", etc.).
+// Detector de la pantalla del comprobante. Aísla la región brillante MÁS GRANDE
+// (la pantalla del cel — ignora luces de techo sueltas), exige que entre COMPLETA
+// dentro del recuadro (sin tocar bordes) y centrada. Sólo entonces habilita la
+// auto-captura, que además requiere un "hold" de ~1.4s (da tiempo a acomodar).
 const SMALL_W = 48
 const SMALL_H = 64            // el mini-canvas respeta el 3:4 del viewport
-const READY_TICKS = 3        // ~3 * 180ms ≈ 0.5s bien encuadrado antes de disparar
+const READY_TICKS = 7        // ~7 * 200ms ≈ 1.4s bien encuadrado antes de disparar
+const SKIP_TOP = 0.14        // banda superior IGNORADA: ahí vive la luz del techo (tablet fija)
 
 function analyzeFrame(data: Uint8ClampedArray, W: number, H: number): { ready: boolean; hint: string } {
-  // Zona de interés = el recuadro guía (centrado).
-  const gx0 = Math.floor(W * 0.11), gx1 = Math.floor(W * 0.89)
-  const gy0 = Math.floor(H * 0.13), gy1 = Math.floor(H * 0.87)
-  let bright = 0, sx = 0, sy = 0, area = 0
-  for (let y = gy0; y < gy1; y++) {
-    for (let x = gx0; x < gx1; x++) {
-      const i = (y * W + x) * 4
+  const skipTop = Math.round(H * SKIP_TOP)
+  const N = W * H
+  const bright = new Uint8Array(N)
+  // Sólo miramos por debajo de la banda del techo → la luz fija no contamina.
+  for (let y = skipTop; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const j = y * W + x
+      const i = j * 4
       const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
-      area++
-      if (lum > 150) { bright++; sx += x; sy += y }
+      bright[j] = lum > 150 ? 1 : 0
     }
   }
-  const coverage = bright / area
-  if (coverage < 0.12) return { ready: false, hint: 'Mostrá el comprobante en el recuadro' }
-  if (coverage > 0.93) return { ready: false, hint: 'Alejá un poco el comprobante' }
-  // Centroide de la región brillante, normalizado 0..1 dentro del recuadro.
-  const cx = (sx / bright - gx0) / (gx1 - gx0)
-  const cy = (sy / bright - gy0) / (gy1 - gy0)
-  const previewCx = 1 - cx // el preview está espejado → invertimos el eje X para la guía
-  if (previewCx < 0.36) return { ready: false, hint: 'Movelo hacia la derecha' }
-  if (previewCx > 0.64) return { ready: false, hint: 'Movelo hacia la izquierda' }
-  if (cy < 0.36) return { ready: false, hint: 'Bajá el comprobante' }
-  if (cy > 0.64) return { ready: false, hint: 'Subí el comprobante' }
-  if (coverage < 0.30) return { ready: false, hint: 'Acercá el comprobante' }
-  return { ready: true, hint: 'Perfecto, no te muevas' }
+  // Componente brillante conexo más grande = la pantalla del cel.
+  const label = new Uint8Array(N)
+  const stack: number[] = []
+  let bestSize = 0, bMinX = 0, bMaxX = 0, bMinY = 0, bMaxY = 0, bSumX = 0, bSumY = 0
+  for (let s = 0; s < N; s++) {
+    if (!bright[s] || label[s]) continue
+    let size = 0, minX = W, maxX = -1, minY = H, maxY = -1, sumX = 0, sumY = 0
+    stack.length = 0; stack.push(s); label[s] = 1
+    while (stack.length) {
+      const p = stack.pop()!
+      const x = p % W, y = (p / W) | 0
+      size++; sumX += x; sumY += y
+      if (x < minX) minX = x; if (x > maxX) maxX = x
+      if (y < minY) minY = y; if (y > maxY) maxY = y
+      if (x > 0 && bright[p - 1] && !label[p - 1]) { label[p - 1] = 1; stack.push(p - 1) }
+      if (x < W - 1 && bright[p + 1] && !label[p + 1]) { label[p + 1] = 1; stack.push(p + 1) }
+      if (y > 0 && bright[p - W] && !label[p - W]) { label[p - W] = 1; stack.push(p - W) }
+      if (y < H - 1 && bright[p + W] && !label[p + W]) { label[p + W] = 1; stack.push(p + W) }
+    }
+    if (size > bestSize) { bestSize = size; bMinX = minX; bMaxX = maxX; bMinY = minY; bMaxY = maxY; bSumX = sumX; bSumY = sumY }
+  }
+
+  const area = W * (H - skipTop)
+  const coverage = bestSize / area
+  if (coverage < 0.16) return { ready: false, hint: 'Mostrá la pantalla del comprobante' }
+
+  // ¿La pantalla toca los bordes del recuadro? → está cortada, falta pantalla.
+  const mx = 2, my = 2
+  const touchTop = bMinY <= skipTop + my
+  const touchBottom = bMaxY >= H - 1 - my
+  const touchLeft = bMinX <= mx
+  const touchRight = bMaxX >= W - 1 - mx
+  if (coverage > 0.86 || (touchTop && touchBottom) || (touchLeft && touchRight))
+    return { ready: false, hint: 'Alejá el celular — que entre toda la pantalla' }
+  if (touchBottom) return { ready: false, hint: 'Subí el celular' }
+  if (touchTop) return { ready: false, hint: 'Bajá el celular' }
+  if (touchLeft) return { ready: false, hint: 'Movelo hacia la izquierda' }   // preview espejado
+  if (touchRight) return { ready: false, hint: 'Movelo hacia la derecha' }
+  if (coverage < 0.26) return { ready: false, hint: 'Acercá el celular' }
+
+  // Centrado (dentro del recuadro, por debajo de la banda del techo)
+  const cx = (bSumX / bestSize) / W
+  const cy = (bSumY / bestSize - skipTop) / (H - skipTop)
+  const previewCx = 1 - cx
+  if (previewCx < 0.40) return { ready: false, hint: 'Movelo hacia la derecha' }
+  if (previewCx > 0.60) return { ready: false, hint: 'Movelo hacia la izquierda' }
+  if (cy < 0.38) return { ready: false, hint: 'Bajá el celular' }
+  if (cy > 0.62) return { ready: false, hint: 'Subí el celular' }
+  return { ready: true, hint: 'Perfecto, mantené firme' }
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
@@ -123,6 +161,7 @@ export function ReceiptScanDialog({
   const [qrToken, setQrToken] = useState<string | null>(null)
   const [hint, setHint] = useState('Mostrá el comprobante en el recuadro')
   const [ready, setReady] = useState(false)
+  const [hold, setHold] = useState(0)
 
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop())
@@ -226,6 +265,7 @@ export function ReceiptScanDialog({
   const startStabilityLoop = useCallback(() => {
     stopLoop()
     stableRef.current = 0
+    setHold(0); setReady(false)
     if (!smallCanvasRef.current) {
       const c = document.createElement('canvas'); c.width = SMALL_W; c.height = SMALL_H
       smallCanvasRef.current = c
@@ -250,18 +290,20 @@ export function ReceiptScanDialog({
       setReady(res.ready)
       if (res.ready) {
         stableRef.current += 1
+        setHold(Math.min(1, stableRef.current / READY_TICKS))
         if (stableRef.current >= READY_TICKS) { stopLoop(); void capture() }
       } else {
         stableRef.current = 0
+        setHold(0)
       }
-    }, 180)
+    }, 200)
   }, [stopLoop, capture])
 
   // ── Abrir/cerrar cámara ──
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    setPhase('starting'); setResult(null); setCamError(null); priorReceiptId.current = null; setQrToken(null); setReady(false)
+    setPhase('starting'); setResult(null); setCamError(null); priorReceiptId.current = null; setQrToken(null); setReady(false); setHold(0)
     primeAudioContext()
     ;(async () => {
       try {
@@ -334,7 +376,7 @@ export function ReceiptScanDialog({
   }
 
   function retry() {
-    stopPoll(); setQrToken(null)
+    stopPoll(); setQrToken(null); setReady(false); setHold(0)
     setResult(null); setCamError(null); setPhase('starting')
     // re-open camera via facingMode toggle trick is heavy; just restart stream
     ;(async () => {
@@ -427,12 +469,21 @@ export function ReceiptScanDialog({
 
           {/* Reticle + guía con indicaciones (invite) */}
           {phase === 'invite' && !qrToken && (
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-between p-5">
-              <div className={`flex items-center gap-2 rounded-full px-4 py-2 text-white shadow-lg backdrop-blur-sm transition-colors ${ready ? 'bg-emerald-600/90' : 'bg-black/65'}`}>
-                {ready ? <ScanLine className="size-4" /> : <Smartphone className="size-4 text-emerald-300" />}
-                <span className="text-sm font-semibold">{hint}</span>
+            <div className="pointer-events-none absolute inset-0">
+              {/* Indicación arriba */}
+              <div className="absolute inset-x-0 top-4 flex flex-col items-center gap-2 px-5">
+                <div className={`flex items-center gap-2 rounded-full px-4 py-2 text-white shadow-lg backdrop-blur-sm transition-colors ${ready ? 'bg-emerald-600/90' : 'bg-black/65'}`}>
+                  {ready ? <ScanLine className="size-4" /> : <Smartphone className="size-4 text-emerald-300" />}
+                  <span className="text-sm font-semibold">{hint}</span>
+                </div>
+                {hold > 0 && (
+                  <div className="h-1.5 w-44 overflow-hidden rounded-full bg-white/25">
+                    <div className="h-full rounded-full bg-emerald-400" style={{ width: `${Math.round(hold * 100)}%`, transition: 'width 0.18s linear' }} />
+                  </div>
+                )}
               </div>
-              <div className="relative" style={{ width: '82%', aspectRatio: '3 / 4' }}>
+              {/* Recuadro alineado a la zona que se analiza (debajo de la banda del techo) */}
+              <div className="absolute" style={{ top: '14%', bottom: '4%', left: '9%', right: '9%' }}>
                 {[
                   'top-0 left-0 border-t-[3px] border-l-[3px] rounded-tl-xl',
                   'top-0 right-0 border-t-[3px] border-r-[3px] rounded-tr-xl',
@@ -446,8 +497,9 @@ export function ReceiptScanDialog({
                   />
                 ))}
               </div>
-              <p className="rounded-full bg-black/45 px-3 py-1 text-xs text-white/85 backdrop-blur-sm">
-                {ready ? 'Escaneando…' : 'O tocá “Capturar” cuando esté centrado'}
+              {/* Nota abajo */}
+              <p className="absolute inset-x-0 bottom-4 mx-auto w-fit rounded-full bg-black/45 px-3 py-1 text-xs text-white/85 backdrop-blur-sm">
+                {ready ? 'Escaneando…' : 'O tocá “Capturar”'}
               </p>
             </div>
           )}
