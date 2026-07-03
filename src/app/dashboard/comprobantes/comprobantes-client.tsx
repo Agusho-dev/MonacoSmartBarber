@@ -428,7 +428,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
                   <CompareRow label="Remitente" value={detail.receipt?.senderName ?? '—'} />
                   <CompareRow label="Banco / billetera" value={detail.receipt?.bankOrWallet ?? '—'} />
                   {detail.receipt && (
-                    <CompareRow label="Leído por" value={detail.receipt.engine === 'ai' ? 'IA (Claude)' : detail.receipt.engine === 'ocr' ? 'Motor OCR' : '—'} />
+                    <CompareRow label="Leído por" value={detail.receipt.engine === 'ai' ? 'IA' : detail.receipt.engine === 'ocr' ? 'Motor OCR' : '—'} />
                   )}
                 </div>
 
@@ -479,8 +479,8 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
               <p className="mb-2 text-sm font-semibold">Motor de lectura</p>
               <div className="grid grid-cols-2 gap-2">
                 <EngineOption active={sEngine === 'ai'} onClick={() => canManage && setSEngine('ai')}
-                  icon={Sparkles} title="IA" subtitle="Claude vision" badge="Paga" tone="ai"
-                  desc="Máxima precisión, lee fotos con reflejo." />
+                  icon={Sparkles} title="IA" subtitle="GPT-4o mini" badge="Barata" tone="ai"
+                  desc="Rápida y precisa con reflejos. Usa tu cuenta de IA (OpenAI/Claude), centavos por lectura." />
                 <EngineOption active={sEngine === 'ocr'} onClick={() => canManage && setSEngine('ocr')}
                   icon={Cpu} title="Motor" subtitle="OCR local" badge="Gratis" tone="ocr"
                   desc="Sin costo, corre en la tablet. Menos preciso." />

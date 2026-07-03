@@ -1,25 +1,40 @@
 import 'server-only'
 import { generateObject } from 'ai'
 import { createAnthropic } from '@ai-sdk/anthropic'
+import { createOpenAI } from '@ai-sdk/openai'
 import { comprobanteSchema, normalizeExtraction, EXTRACTION_PROMPT, type ExtractedReceipt } from './schema'
 
-// Modelo de visión para el path IA (pago). Sonnet = rápido/barato en el hot path.
-// Mismo id que usa el asistente del proyecto (src/lib/asistente/models.ts).
-const VISION_MODEL = 'claude-sonnet-4-6'
+export type VisionProvider = 'openai' | 'anthropic'
+
+// Defaults por proveedor. gpt-4o-mini: rápido y barato (centavos por lectura),
+// reusa la key de OpenAI que la org ya tiene cargada. Sonnet como alternativa.
+export const DEFAULT_OPENAI_VISION = 'gpt-4o-mini'
+export const DEFAULT_ANTHROPIC_VISION = 'claude-sonnet-4-6'
+
+export interface VisionOpts {
+  provider: VisionProvider
+  apiKey: string
+  model: string
+}
 
 /**
- * Extrae los datos de un comprobante con Claude vision (path IA / pago).
- * Usa generateObject + Zod → JSON válido garantizado contra el schema.
- * El fetch propio del AI SDK esquiva el timeout de 8s de Supabase.
+ * Extrae los datos de un comprobante con un modelo de visión (path IA / pago).
+ * Provider-flexible: OpenAI (gpt-4o-mini) o Anthropic (Claude). Usa generateObject
+ * + Zod → JSON válido garantizado. El fetch propio del AI SDK esquiva el timeout
+ * de 8s de Supabase.
  */
-export async function extractWithAi(
+export async function extractWithVision(
   image: Buffer,
   mediaType: string,
-  apiKey: string,
+  opts: VisionOpts,
 ): Promise<ExtractedReceipt> {
-  const anthropic = createAnthropic({ apiKey })
+  const model =
+    opts.provider === 'openai'
+      ? createOpenAI({ apiKey: opts.apiKey })(opts.model)
+      : createAnthropic({ apiKey: opts.apiKey })(opts.model)
+
   const { object } = await generateObject({
-    model: anthropic(VISION_MODEL),
+    model,
     schema: comprobanteSchema,
     messages: [
       {
@@ -31,5 +46,5 @@ export async function extractWithAi(
       },
     ],
   })
-  return { ...normalizeExtraction(object), raw: { engine: 'ai', ...object } }
+  return { ...normalizeExtraction(object), raw: { engine: opts.provider, model: opts.model, ...object } }
 }

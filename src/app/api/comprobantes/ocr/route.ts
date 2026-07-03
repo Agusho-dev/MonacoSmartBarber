@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
 import { getBarberSession } from '@/lib/actions/auth'
 import { createAdminClient } from '@/lib/supabase/server'
-import { extractWithAi } from '@/lib/receipts/extract'
+import { extractWithVision, DEFAULT_OPENAI_VISION, DEFAULT_ANTHROPIC_VISION, type VisionOpts } from '@/lib/receipts/extract'
 import type { ExtractedReceipt } from '@/lib/receipts/schema'
 import type { ReceiptStatus } from '@/lib/types/database'
 
@@ -53,19 +53,23 @@ export async function POST(req: NextRequest) {
     // Motor gratis: el cliente ya parseó con Tesseract; sólo persistimos + validamos.
     extracted = body.parsed ?? null
   } else {
-    // Motor IA (pago): key global de plataforma, fallback a la de la org.
-    let apiKey = process.env.ANTHROPIC_API_KEY ?? null
-    if (!apiKey) {
-      const { data: cfg } = await supabase
-        .from('organization_ai_config')
-        .select('anthropic_api_key')
-        .eq('organization_id', orgId)
-        .maybeSingle()
-      apiKey = cfg?.anthropic_api_key ?? null
-    }
-    if (!apiKey) {
+    // Motor IA (pago): prioriza OpenAI (más barato/rápido y normalmente ya cargado),
+    // fallback a Anthropic. Key global de plataforma o la de la org.
+    const { data: cfg } = await supabase
+      .from('organization_ai_config')
+      .select('openai_api_key, anthropic_api_key')
+      .eq('organization_id', orgId)
+      .maybeSingle()
+    const openaiKey = process.env.OPENAI_API_KEY ?? cfg?.openai_api_key ?? null
+    const anthropicKey = process.env.ANTHROPIC_API_KEY ?? cfg?.anthropic_api_key ?? null
+
+    let vopts: VisionOpts | null = null
+    if (openaiKey) vopts = { provider: 'openai', apiKey: openaiKey, model: DEFAULT_OPENAI_VISION }
+    else if (anthropicKey) vopts = { provider: 'anthropic', apiKey: anthropicKey, model: DEFAULT_ANTHROPIC_VISION }
+
+    if (!vopts) {
       return NextResponse.json(
-        { error: 'Falta la API key de IA. Configurala o usá el motor OCR gratis.', code: 'no_key' },
+        { error: 'Configurá una cuenta de IA (OpenAI o Anthropic) o usá el motor OCR gratis.', code: 'no_key' },
         { status: 422 },
       )
     }
@@ -73,10 +77,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Falta la imagen' }, { status: 400 })
     }
     try {
-      extracted = await extractWithAi(Buffer.from(body.imageBase64, 'base64'), mediaType, apiKey)
+      extracted = await extractWithVision(Buffer.from(body.imageBase64, 'base64'), mediaType, vopts)
     } catch (e) {
       // La lectura falló → guardamos la imagen igual y queda 'needs_review' (en revisión).
-      console.error('[comprobante ocr] extractWithAi:', e instanceof Error ? e.message : String(e))
+      console.error('[comprobante ocr] extractWithVision:', e instanceof Error ? e.message : String(e))
       extracted = null
     }
   }
