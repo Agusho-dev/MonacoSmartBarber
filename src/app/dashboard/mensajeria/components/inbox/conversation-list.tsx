@@ -60,7 +60,7 @@ export function ConversationList({
 
   const chipBase = 'px-3 py-1 rounded-full text-[13px] font-medium shrink-0 transition-colors'
   const chipOn = 'bg-[#103629] text-[#00a884]'
-  const chipOff = 'bg-[#202c33] text-[#8696a0] hover:bg-[#2a3942]'
+  const chipOff = 'text-[#8696a0] hover:bg-[#202c33]'
 
   return (
     <div className={`flex flex-col bg-[#111b21] w-full lg:w-[400px] lg:max-w-md shrink-0 overflow-hidden border-r border-[#222d34] ${showMobileChat ? 'hidden lg:flex' : 'flex'}`}>
@@ -183,13 +183,13 @@ export function ConversationList({
                             )}
                           </div>
                           {conv.last_message_at && (
-                            <span className={`shrink-0 text-[12px] ${isUnread ? 'text-[#25d366]' : 'text-[#8696a0]'}`}>
+                            <span className={`shrink-0 text-[12px] ${isUnread ? 'text-[#25d366]' : isActive ? 'text-[#aebac1]' : 'text-[#8696a0]'}`}>
                               {formatRelativeDate(conv.last_message_at)}
                             </span>
                           )}
                         </div>
                         <div className="flex items-center justify-between gap-2 mt-0.5">
-                          <p className={`flex items-center gap-1 truncate text-[13px] ${isUnread && !isOutbound ? 'text-[#e9edef]' : 'text-[#8696a0]'}`}>
+                          <p className={`flex items-center gap-1 truncate text-[13px] ${isUnread && !isOutbound ? 'text-[#e9edef]' : isActive ? 'text-[#aebac1]' : 'text-[#8696a0]'}`}>
                             {isOutbound && last && (
                               <CheckCheck className="size-3.5 shrink-0 text-[#8696a0]" />
                             )}

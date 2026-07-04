@@ -4,7 +4,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   Send, Clock, ArrowLeft, Plus, Settings, MoreVertical,
   CheckCircle2, Archive, RotateCcw, User, MessageSquare, FileText,
-  ExternalLink, Zap, Search, X, Sparkles, Mic, Smile,
+  ExternalLink, Zap, Search, X, Sparkles, Mic, Smile, Lock,
   Download, FileIcon, CalendarPlus, CalendarSearch, AlertCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -154,7 +154,7 @@ export function ChatView({
   if (!activeConv) {
     return (
       <div className={`flex flex-col flex-1 min-w-0 ${!showMobileChat ? 'hidden lg:flex' : 'flex'}`}>
-        <div className="flex h-full flex-col items-center justify-center gap-4 bg-[#222e35] border-b-[6px] border-[#00a884]">
+        <div className="relative flex h-full flex-col items-center justify-center gap-4 bg-[#222e35] border-b-[6px] border-[#00a884]">
           <div className="flex size-28 items-center justify-center rounded-full bg-[#182229]">
             <MessageSquare className="size-14 text-[#00a884]/60" />
           </div>
@@ -174,6 +174,9 @@ export function ChatView({
                 <Settings className="mr-1.5 size-3.5" /> Configuración
               </Button>
             </div>
+          </div>
+          <div className="absolute bottom-8 flex items-center gap-1.5 text-[13px] text-[#8696a0]">
+            <Lock className="size-3.5" /> Cifrado de extremo a extremo
           </div>
         </div>
       </div>
@@ -201,7 +204,7 @@ export function ChatView({
           </button>
           <div className="flex items-center gap-1 shrink-0 text-[#aebac1]">
             {replyWindowLeft && (
-              <span className="hidden sm:flex items-center gap-1 text-[11px] rounded-full border border-yellow-500/30 text-yellow-400 bg-yellow-500/5 px-2 py-0.5">
+              <span className="flex items-center gap-1 text-[11px] rounded-full border border-yellow-500/30 text-yellow-400 bg-yellow-500/5 px-2 py-0.5">
                 <Clock className="size-2.5" />{replyWindowLeft}
               </span>
             )}
@@ -374,7 +377,7 @@ export function ChatView({
                       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-[#8696a0]" />
                       <input
                         ref={quickReplySearchRef}
-                        className="w-full h-7 rounded-md bg-[#2a3942] pl-8 pr-3 text-xs text-[#e9edef] placeholder:text-[#8696a0] outline-none focus:ring-1 focus:ring-[#00a884]/40"
+                        className="w-full h-7 rounded-md bg-[#2a3942] pl-8 pr-3 text-xs text-[#e9edef] placeholder:text-[#aebac1] outline-none focus:ring-1 focus:ring-[#00a884]/40"
                         placeholder="Buscar mensaje rápido..."
                         value={quickReplySearch}
                         onChange={e => setQuickReplySearch(e.target.value)}
@@ -464,9 +467,9 @@ export function ChatView({
                 <textarea
                   ref={messageTextareaRef}
                   rows={1}
-                  className="flex-1 rounded-lg bg-[#2a3942] px-4 py-2.5 text-[15px] text-[#e9edef] placeholder:text-[#8696a0] outline-none resize-none min-h-11 max-h-[min(40vh,17.5rem)] overflow-y-auto wa-scroll leading-[1.4]"
+                  className="flex-1 rounded-lg bg-[#2a3942] px-4 py-2.5 text-[15px] text-[#e9edef] placeholder:text-[#aebac1] outline-none resize-none min-h-11 max-h-[min(40vh,17.5rem)] overflow-y-auto wa-scroll leading-[1.4]"
                   style={{ height: '2.75rem' }}
-                  placeholder="Escribí un mensaje  ·  / para respuestas rápidas"
+                  placeholder="Escribí un mensaje"
                   value={messageInput}
                   onChange={(e) => {
                     const val = e.target.value
