@@ -106,7 +106,7 @@ export function MensajeriaClient(props: MensajeriaProps) {
       branches={props.branches}
     >
       <div
-        className={`flex flex-col h-full min-h-0 overflow-hidden bg-background transition-[padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${
+        className={`wa-scope flex flex-col h-full min-h-0 overflow-hidden bg-[#0b141a] transition-[padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${
           isFocusMode ? 'max-lg:pb-[calc(2.75rem+env(safe-area-inset-bottom,0px))]' : ''
         }`}
       >
@@ -117,18 +117,18 @@ export function MensajeriaClient(props: MensajeriaProps) {
 
         <div className="flex flex-1 min-h-0 overflow-hidden">
 
-        {/* ═══ NAV BAR — Iconos de sección ═══ */}
-        <div className="hidden lg:flex flex-col items-center w-14 shrink-0 bg-background border-r border py-3 gap-1">
+        {/* ═══ NAV BAR — Iconos de sección (estilo WhatsApp Web) ═══ */}
+        <div className="hidden lg:flex flex-col items-center w-16 shrink-0 bg-[#202c33] border-r border-[#0b141a] py-3 gap-1">
           {NAV_ITEMS.map(({ key, icon: Icon, label }) => {
             const isActive = key === section || (key === 'settings' && showSettings)
             return (
               <button
                 key={key}
                 onClick={() => handleNavClick(key)}
-                className={`relative flex flex-col items-center justify-center w-11 h-11 rounded-xl transition-colors group ${
+                className={`relative flex flex-col items-center justify-center w-12 h-12 rounded-xl transition-colors group ${
                   isActive
-                    ? 'bg-green-600/15 text-green-400'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    ? 'bg-[#00a884]/15 text-[#00a884]'
+                    : 'text-[#aebac1] hover:bg-[#2a3942] hover:text-[#e9edef]'
                 }`}
                 title={label}
               >

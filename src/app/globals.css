@@ -222,6 +222,126 @@
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   WhatsApp Web — clon visual del inbox de Mensajería.
+   Paleta oficial WhatsApp dark. El inbox es una superficie inmersiva: mantiene
+   el look dark siempre (el dashboard ya es dark). Utilidades para wallpaper,
+   burbujas con tails SVG y el "float" del timestamp (reserva inline de espacio).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.wa-scope {
+  color-scheme: dark;
+  --wa-panel: #111b21;
+  --wa-header: #202c33;
+  --wa-in: #202c33;
+  --wa-out: #005c4b;
+  --wa-text: #e9edef;
+  --wa-muted: #8696a0;
+  --wa-accent: #00a884;
+  --wa-unread: #25d366;
+  --wa-hover: #202c33;
+  --wa-active: #2a3942;
+  --wa-tick: #53bdeb;
+  --wa-input: #2a3942;
+  --wa-divider: rgba(134, 150, 160, 0.14);
+}
+
+/* Wallpaper del panel de chat: base sólida + patrón doodle (imagen provista,
+   optimizada a WebP ~74KB). Va en una capa absoluta detrás de los mensajes para
+   quedar fija mientras el hilo scrollea (igual que WhatsApp). */
+.wa-wallpaper {
+  background-color: #0b141a;
+  background-image: url('/fondo_whatsapp_dark.webp');
+  background-repeat: repeat;
+  background-size: 412px auto;
+  background-position: center top;
+}
+
+/* Burbuja base */
+.wa-bubble {
+  position: relative;
+  max-width: min(65%, 30rem);
+  border-radius: 7.5px;
+  padding: 6px 9px 8px 9px;
+  font-size: 14.2px;
+  line-height: 19px;
+  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.wa-bubble-out { background: var(--wa-out); color: var(--wa-text); border-top-right-radius: 0; }
+.wa-bubble-in  { background: var(--wa-in);  color: var(--wa-text); border-top-left-radius: 0; }
+/* Relleno para mensajes consecutivos del mismo emisor (sin tail, esquinas redondeadas) */
+.wa-fill-out { background: var(--wa-out); color: var(--wa-text); }
+.wa-fill-in  { background: var(--wa-in);  color: var(--wa-text); }
+
+/* Tails: SVG oficial de WhatsApp como pseudo-elemento en la esquina superior */
+.wa-bubble-out::before,
+.wa-bubble-in::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 13px;
+  background-repeat: no-repeat;
+}
+.wa-bubble-out::before {
+  right: -8px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='13'%3E%3Cpath fill='%23005c4b' d='M5.188 0H0v11.193l6.467-8.625C7.526 1.156 6.958 0 5.188 0z'/%3E%3C/svg%3E");
+}
+.wa-bubble-in::before {
+  left: -8px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='13'%3E%3Cpath fill='%23202c33' d='M2.812 0H8v11.193L1.533 2.568C.474 1.156 1.042 0 2.812 0z'/%3E%3C/svg%3E");
+}
+
+/* Meta (hora + ticks) flotando abajo-derecha; el .wa-spacer reserva el ancho
+   en la última línea del texto para que no se solape (técnica de WhatsApp). */
+.wa-meta {
+  position: absolute;
+  right: 8px;
+  bottom: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  line-height: 15px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.wa-meta-out { color: rgba(233, 237, 239, 0.6); }
+.wa-meta-in  { color: var(--wa-muted); }
+.wa-spacer { display: inline-block; height: 1px; }
+.wa-spacer-out { width: 68px; }
+.wa-spacer-in  { width: 46px; }
+
+/* Meta sobre imágenes/videos: scrim + texto claro con sombra */
+.wa-img-scrim {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 34px;
+  background: linear-gradient(to top, rgba(11, 20, 26, 0.5), transparent);
+  pointer-events: none;
+}
+.wa-img-meta {
+  position: absolute;
+  right: 9px;
+  bottom: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #e9edef;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+/* Barra de scroll fina estilo WhatsApp (sólo visible al hover del panel) */
+.wa-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.wa-scroll:hover { scrollbar-color: rgba(134, 150, 160, 0.3) transparent; }
+.wa-scroll::-webkit-scrollbar { width: 6px; }
+.wa-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+.wa-scroll:hover::-webkit-scrollbar-thumb { background: rgba(134, 150, 160, 0.3); }
+
 /* ── Auth/Onboarding premium animations ────────────────────────────────────── */
 
 @keyframes float-slow {

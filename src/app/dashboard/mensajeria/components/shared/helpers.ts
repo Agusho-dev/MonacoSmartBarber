@@ -50,9 +50,35 @@ export const TAG_COLORS = [
   '#06B6D4', '#3B82F6', '#8B5CF6', '#EC4899', '#6B7280',
 ]
 
+export type LastMessageMediaKind =
+  | 'image' | 'video' | 'audio' | 'document' | 'template' | 'sticker' | 'location'
+
+/**
+ * Tipo de media del último mensaje para renderizar un ícono lucide en la lista
+ * de chats (estilo WhatsApp: ícono + etiqueta). Devuelve null para texto plano.
+ */
+export function lastMessageMediaKind(
+  msg: { content_type: string } | undefined | null,
+): LastMessageMediaKind | null {
+  if (!msg) return null
+  switch (msg.content_type) {
+    case 'image':
+    case 'video':
+    case 'audio':
+    case 'document':
+    case 'template':
+    case 'sticker':
+    case 'location':
+      return msg.content_type
+    default:
+      return null
+  }
+}
+
 /**
  * Devuelve siempre un preview del último mensaje, incluso cuando el content es null
  * (ej: imágenes sin caption, audios, templates). Nunca devuelve string vacío.
+ * Sin emojis: el ícono lo pone la lista con lucide (ver lastMessageMediaKind).
  */
 export function formatLastMessagePreview(
   msg: { content: string | null; direction: string; content_type: string } | undefined | null,
@@ -60,18 +86,17 @@ export function formatLastMessagePreview(
 ): string {
   if (!msg) return fallback?.trim() || 'Sin mensajes aún'
 
-  const prefix = msg.direction === 'outbound' ? 'Vos: ' : ''
   const content = (msg.content ?? '').trim()
 
   switch (msg.content_type) {
-    case 'image':    return `${prefix}📷 Imagen${content ? ` · ${content}` : ''}`
-    case 'video':    return `${prefix}🎬 Video${content ? ` · ${content}` : ''}`
-    case 'audio':    return `${prefix}🎤 Audio`
-    case 'document': return `${prefix}📎 Documento${content ? ` · ${content}` : ''}`
-    case 'template': return `${prefix}📋 Template${content ? ` · ${content}` : ''}`
-    case 'sticker':  return `${prefix}💠 Sticker`
-    case 'location': return `${prefix}📍 Ubicación`
-    default:         return content ? `${prefix}${content}` : `${prefix}(mensaje sin contenido)`
+    case 'image':    return `Foto${content ? ` · ${content}` : ''}`
+    case 'video':    return `Video${content ? ` · ${content}` : ''}`
+    case 'audio':    return 'Mensaje de voz'
+    case 'document': return `Documento${content ? ` · ${content}` : ''}`
+    case 'template': return `Plantilla${content ? ` · ${content}` : ''}`
+    case 'sticker':  return 'Sticker'
+    case 'location': return 'Ubicación'
+    default:         return content || '(mensaje sin contenido)'
   }
 }
 

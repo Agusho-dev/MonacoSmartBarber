@@ -12,11 +12,13 @@ export function WhatsAppIcon({ className = 'size-4' }: { className?: string }) {
 
 export function MessageStatusIcon({ status }: { status: string }) {
   switch (status) {
-    case 'sent': return <Check className="size-3 opacity-70" />
-    case 'delivered': return <CheckCheck className="size-3 opacity-70" />
-    case 'read': return <CheckCheck className="size-3 text-sky-300" />
+    // sent/delivered heredan el color del contenedor (.wa-meta) como en WhatsApp;
+    // read usa el celeste oficial #53bdeb.
+    case 'sent': return <Check className="size-[15px]" />
+    case 'delivered': return <CheckCheck className="size-[15px]" />
+    case 'read': return <CheckCheck className="size-[15px] text-[#53bdeb]" />
     case 'failed': return <AlertCircle className="size-3 text-red-400" />
-    default: return <Clock className="size-3 opacity-40" />
+    default: return <Clock className="size-3 opacity-70" />
   }
 }
 

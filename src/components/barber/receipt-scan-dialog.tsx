@@ -52,22 +52,30 @@ const SMALL_H = 64            // el mini-canvas respeta el 3:4 del viewport
 const READY_TICKS = 7        // ~7 * 200ms ≈ 1.4s bien encuadrado antes de disparar
 const SKIP_TOP = 0.14        // banda superior IGNORADA: ahí vive la luz del techo (tablet fija)
 
-function analyzeFrame(data: Uint8ClampedArray, W: number, H: number): { ready: boolean; hint: string } {
+interface FrameResult { ready: boolean; hint: string; black: boolean }
+
+// Optimizado para tablets flojas: reusa los buffers (cero allocations por frame →
+// sin presión de GC) y detecta "cámara sin señal" (frame casi negro).
+function analyzeFrame(
+  data: Uint8ClampedArray, W: number, H: number,
+  bright: Uint8Array, label: Uint8Array, stack: number[],
+): FrameResult {
   const skipTop = Math.round(H * SKIP_TOP)
   const N = W * H
-  const bright = new Uint8Array(N)
+  bright.fill(0)
+  label.fill(0)
+  let lumSum = 0
   // Sólo miramos por debajo de la banda del techo → la luz fija no contamina.
   for (let y = skipTop; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const j = y * W + x
       const i = j * 4
       const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
+      lumSum += lum
       bright[j] = lum > 150 ? 1 : 0
     }
   }
   // Componente brillante conexo más grande = la pantalla del cel.
-  const label = new Uint8Array(N)
-  const stack: number[] = []
   let bestSize = 0, bMinX = 0, bMaxX = 0, bMinY = 0, bMaxY = 0, bSumX = 0, bSumY = 0
   for (let s = 0; s < N; s++) {
     if (!bright[s] || label[s]) continue
@@ -88,8 +96,9 @@ function analyzeFrame(data: Uint8ClampedArray, W: number, H: number): { ready: b
   }
 
   const area = W * (H - skipTop)
+  const black = lumSum / area < 12
   const coverage = bestSize / area
-  if (coverage < 0.16) return { ready: false, hint: 'Mostrá la pantalla del comprobante' }
+  if (coverage < 0.16) return { ready: false, hint: 'Mostrá la pantalla del comprobante', black }
 
   // ¿La pantalla toca los bordes del recuadro? → está cortada, falta pantalla.
   const mx = 2, my = 2
@@ -98,22 +107,22 @@ function analyzeFrame(data: Uint8ClampedArray, W: number, H: number): { ready: b
   const touchLeft = bMinX <= mx
   const touchRight = bMaxX >= W - 1 - mx
   if (coverage > 0.86 || (touchTop && touchBottom) || (touchLeft && touchRight))
-    return { ready: false, hint: 'Alejá el celular — que entre toda la pantalla' }
-  if (touchBottom) return { ready: false, hint: 'Subí el celular' }
-  if (touchTop) return { ready: false, hint: 'Bajá el celular' }
-  if (touchLeft) return { ready: false, hint: 'Movelo hacia la izquierda' }   // preview espejado
-  if (touchRight) return { ready: false, hint: 'Movelo hacia la derecha' }
-  if (coverage < 0.26) return { ready: false, hint: 'Acercá el celular' }
+    return { ready: false, hint: 'Alejá el celular — que entre toda la pantalla', black }
+  if (touchBottom) return { ready: false, hint: 'Subí el celular', black }
+  if (touchTop) return { ready: false, hint: 'Bajá el celular', black }
+  if (touchLeft) return { ready: false, hint: 'Movelo hacia la izquierda', black }   // preview espejado
+  if (touchRight) return { ready: false, hint: 'Movelo hacia la derecha', black }
+  if (coverage < 0.26) return { ready: false, hint: 'Acercá el celular', black }
 
   // Centrado (dentro del recuadro, por debajo de la banda del techo)
   const cx = (bSumX / bestSize) / W
   const cy = (bSumY / bestSize - skipTop) / (H - skipTop)
   const previewCx = 1 - cx
-  if (previewCx < 0.40) return { ready: false, hint: 'Movelo hacia la derecha' }
-  if (previewCx > 0.60) return { ready: false, hint: 'Movelo hacia la izquierda' }
-  if (cy < 0.38) return { ready: false, hint: 'Bajá el celular' }
-  if (cy > 0.62) return { ready: false, hint: 'Subí el celular' }
-  return { ready: true, hint: 'Perfecto, mantené firme' }
+  if (previewCx < 0.40) return { ready: false, hint: 'Movelo hacia la derecha', black }
+  if (previewCx > 0.60) return { ready: false, hint: 'Movelo hacia la izquierda', black }
+  if (cy < 0.38) return { ready: false, hint: 'Bajá el celular', black }
+  if (cy > 0.62) return { ready: false, hint: 'Subí el celular', black }
+  return { ready: true, hint: 'Perfecto, mantené firme', black }
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
@@ -152,6 +161,15 @@ export function ReceiptScanDialog({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const priorReceiptId = useRef<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Buffers reusados por el detector (sin allocations por frame) + últimos valores
+  // para cortar re-renders (sólo actualizamos estado cuando algo cambia).
+  const brightBufRef = useRef<Uint8Array | null>(null)
+  const labelBufRef = useRef<Uint8Array | null>(null)
+  const stackBufRef = useRef<number[]>([])
+  const lastHintRef = useRef('')
+  const lastReadyRef = useRef(false)
+  const lastHoldRef = useRef(0)
+  const blackRef = useRef(0)
 
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user')
   const [phase, setPhase] = useState<Phase>('starting')
@@ -258,7 +276,7 @@ export function ReceiptScanDialog({
     if (!video || video.readyState < 2) return
     stopLoop()
     try {
-      const blob = await frameToWebp(video, 1400, 0.85)
+      const blob = await frameToWebp(video, 1200, 0.82)
       await processCapture(blob, 'front_camera')
     } catch {
       setCamError('No se pudo capturar. Reintentá.')
@@ -269,11 +287,17 @@ export function ReceiptScanDialog({
   const startStabilityLoop = useCallback(() => {
     stopLoop()
     stableRef.current = 0
+    blackRef.current = 0
+    lastHintRef.current = ''; lastReadyRef.current = false; lastHoldRef.current = 0
     setHold(0); setReady(false)
+    const N = SMALL_W * SMALL_H
     if (!smallCanvasRef.current) {
       const c = document.createElement('canvas'); c.width = SMALL_W; c.height = SMALL_H
       smallCanvasRef.current = c
     }
+    if (!brightBufRef.current) brightBufRef.current = new Uint8Array(N)
+    if (!labelBufRef.current) labelBufRef.current = new Uint8Array(N)
+
     loopRef.current = setInterval(() => {
       const video = videoRef.current
       const canvas = smallCanvasRef.current
@@ -289,17 +313,31 @@ export function ReceiptScanDialog({
       ctx.drawImage(video, sx, sy, sw, sh, 0, 0, SMALL_W, SMALL_H)
       const { data } = ctx.getImageData(0, 0, SMALL_W, SMALL_H)
 
-      const res = analyzeFrame(data, SMALL_W, SMALL_H)
-      setHint(res.hint)
-      setReady(res.ready)
-      if (res.ready) {
+      const res = analyzeFrame(data, SMALL_W, SMALL_H, brightBufRef.current!, labelBufRef.current!, stackBufRef.current)
+
+      // Cámara sin señal (frame negro) sostenida → empujar al fallback Foto/QR.
+      let hint = res.hint
+      let ready = res.ready
+      if (res.black) {
+        blackRef.current += 1
+        if (blackRef.current >= 10) { hint = 'La cámara casi no da imagen — usá “Foto” o “QR”'; ready = false }
+      } else {
+        blackRef.current = 0
+      }
+
+      // Sólo re-render cuando algo CAMBIA (evita 5 renders/seg en tablets flojas).
+      if (hint !== lastHintRef.current) { lastHintRef.current = hint; setHint(hint) }
+      if (ready !== lastReadyRef.current) { lastReadyRef.current = ready; setReady(ready) }
+
+      let newHold = 0
+      if (ready) {
         stableRef.current += 1
-        setHold(Math.min(1, stableRef.current / READY_TICKS))
+        newHold = Math.min(1, stableRef.current / READY_TICKS)
         if (stableRef.current >= READY_TICKS) { stopLoop(); void capture() }
       } else {
         stableRef.current = 0
-        setHold(0)
       }
+      if (newHold !== lastHoldRef.current) { lastHoldRef.current = newHold; setHold(newHold) }
     }, 200)
   }, [stopLoop, capture])
 
@@ -312,7 +350,7 @@ export function ReceiptScanDialog({
     ;(async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode, width: { ideal: 1280 }, height: { ideal: 960 } },
+          video: { facingMode, width: { ideal: 1024 }, height: { ideal: 768 }, frameRate: { ideal: 15, max: 24 } },
           audio: false,
         })
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return }
@@ -386,7 +424,7 @@ export function ReceiptScanDialog({
     ;(async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode, width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false,
+          video: { facingMode, width: { ideal: 1024 }, height: { ideal: 768 }, frameRate: { ideal: 15, max: 24 } }, audio: false,
         })
         streamRef.current = stream
         if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play().catch(() => {}) }
@@ -406,7 +444,7 @@ export function ReceiptScanDialog({
     if (!files?.length) return
     stopLoop(); stopStream()
     try {
-      const blob = await compressToWebP(files[0], 1400, 0.85)
+      const blob = await compressToWebP(files[0], 1200, 0.82)
       await processCapture(blob, 'gallery')
     } catch {
       setCamError('No se pudo leer la imagen.')
@@ -437,7 +475,8 @@ export function ReceiptScanDialog({
           {/* Video en vivo (invite) */}
           <video
             ref={videoRef}
-            playsInline muted
+            playsInline muted autoPlay
+            onCanPlay={() => videoRef.current?.play().catch(() => {})}
             className={`absolute inset-0 size-full object-cover ${phase === 'invite' && !qrToken ? 'opacity-100' : 'opacity-0'}`}
             style={{ transform: 'scaleX(-1)' }}
           />

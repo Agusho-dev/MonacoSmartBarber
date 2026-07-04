@@ -13,7 +13,7 @@ interface Props {
 
 export function FilaTabsWrapper({ children, appointments, noShowToleranceMinutes }: Props) {
   return (
-    <Tabs defaultValue="fila" className="h-full">
+    <Tabs defaultValue="fila" className="md:h-full">
       <div className="px-3 pt-1">
         <TabsList>
           <TabsTrigger value="fila" className="gap-1.5">
@@ -32,7 +32,7 @@ export function FilaTabsWrapper({ children, appointments, noShowToleranceMinutes
         </TabsList>
       </div>
 
-      <TabsContent value="fila" className="mt-0 h-full">
+      <TabsContent value="fila" className="mt-0 md:h-full">
         {children}
       </TabsContent>
 

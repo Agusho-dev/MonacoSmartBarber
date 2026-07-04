@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import { Play, Pause } from 'lucide-react'
 
 interface AudioPlayerProps {
@@ -15,44 +15,52 @@ function formatTime(seconds: number) {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+const BAR_COUNT = 34
+
+// Waveform determinístico derivado del src (sin decodificar el audio: evita
+// problemas de CORS con el CDN de Meta/Supabase y es instantáneo). WhatsApp Web
+// también muestra una onda pseudo-aleatoria hasta que decodifica el archivo.
+function useWaveform(src: string) {
+  return useMemo(() => {
+    let seed = 0
+    for (let i = 0; i < src.length; i++) seed = (seed * 31 + src.charCodeAt(i)) >>> 0
+    const rand = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      return seed / 0x7fffffff
+    }
+    return Array.from({ length: BAR_COUNT }, (_, i) => {
+      // Perfil tipo "voz": más energía al centro, algo de variación aleatoria.
+      const centerBias = 1 - Math.abs(i - BAR_COUNT / 2) / (BAR_COUNT / 2)
+      const h = 0.28 + rand() * 0.72 * (0.5 + centerBias * 0.5)
+      return Math.max(0.18, Math.min(1, h))
+    })
+  }, [src])
+}
+
 export function AudioPlayer({ src, isOut }: AudioPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
-  const [, setIsLoaded] = useState(false)
   const audioRef = useRef<HTMLAudioElement>(null)
+  const bars = useWaveform(src)
 
-  // Load duration when metadata is ready
   const handleLoadedMetadata = () => {
-    if (audioRef.current) {
-      setDuration(audioRef.current.duration)
-      setIsLoaded(true)
-    }
+    if (audioRef.current) setDuration(audioRef.current.duration)
   }
-
   const handleTimeUpdate = () => {
-    if (audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime)
-    }
+    if (audioRef.current) setCurrentTime(audioRef.current.currentTime)
   }
-
   const handleEnded = () => {
     setIsPlaying(false)
     setCurrentTime(0)
-    if (audioRef.current) {
-      audioRef.current.currentTime = 0
-    }
+    if (audioRef.current) audioRef.current.currentTime = 0
   }
 
   const togglePlay = () => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause()
-      } else {
-        audioRef.current.play().catch(err => console.error("Error playing audio", err))
-      }
-      setIsPlaying(!isPlaying)
-    }
+    if (!audioRef.current) return
+    if (isPlaying) audioRef.current.pause()
+    else audioRef.current.play().catch((err) => console.error('Error playing audio', err))
+    setIsPlaying(!isPlaying)
   }
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -63,88 +71,73 @@ export function AudioPlayer({ src, isOut }: AudioPlayerProps) {
     }
   }
 
-  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0
+  const progress = duration > 0 ? currentTime / duration : 0
+  const playedBars = Math.round(progress * BAR_COUNT)
+
+  // Colores WhatsApp: barras reproducidas en celeste (out) / verde (in),
+  // pendientes en un tono apagado.
+  const playedColor = isOut ? '#8ad4ff' : '#00a884'
+  const restColor = isOut ? 'rgba(233,237,239,0.35)' : 'rgba(134,150,160,0.45)'
+  const timeColor = isOut ? 'rgba(233,237,239,0.6)' : '#8696a0'
 
   return (
-    <div className={`flex flex-col w-full max-w-[240px] px-2.5 py-1.5`}>
-      <div className="flex items-center gap-3">
-        <audio
-          ref={audioRef}
-          src={src}
-          preload="metadata"
-          onLoadedMetadata={handleLoadedMetadata}
-          onTimeUpdate={handleTimeUpdate}
-          onEnded={handleEnded}
-          onPause={() => setIsPlaying(false)}
-          onPlay={() => setIsPlaying(true)}
-          className="hidden"
-        />
-        
-        {/* Play/Pause Button */}
-        <button
-          onClick={togglePlay}
-          className={`shrink-0 flex items-center justify-center size-9 rounded-full transition-colors ${
-            isOut ? 'bg-green-600 hover:bg-green-500 text-white' : 'bg-muted hover:bg-muted/80 text-foreground'
-          }`}
-        >
-          {isPlaying ? (
-            <Pause className="size-4" />
-          ) : (
-            <Play className="size-4 ml-0.5" />
-          )}
-        </button>
+    <div className="flex items-center gap-2.5 w-full max-w-[248px] pl-1 pr-2 py-1.5">
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onLoadedMetadata={handleLoadedMetadata}
+        onTimeUpdate={handleTimeUpdate}
+        onEnded={handleEnded}
+        onPause={() => setIsPlaying(false)}
+        onPlay={() => setIsPlaying(true)}
+        className="hidden"
+      />
 
-        <div className="flex-1 flex flex-col justify-center gap-1 min-w-[120px]">
-          {/* Progress Bar Container */}
-          <div className="group relative h-4 flex items-center w-full">
-            {/* Background Track */}
-            <div className={`absolute w-full h-1 rounded-full ${
-               isOut ? 'bg-green-800/40' : 'bg-accent-foreground/10'
-            }`} />
-            
-            {/* Progress Track */}
-            <div 
-              className={`absolute h-1 rounded-full ${
-                isOut ? 'bg-green-300' : 'bg-green-500'
-              }`}
-              style={{ width: `${progressPercent}%` }}
-            />
-            
-            {/* Thumb (visible on hover or always slightly visible) */}
-            <div 
-              className={`absolute size-3 rounded-full shadow transition-transform 
-              ${isOut ? 'bg-white' : 'bg-green-500'} 
-              group-hover:scale-110`}
-              style={{ 
-                left: `calc(${progressPercent}% - 6px)`,
-              }} 
-            />
-            
-            {/* Invisible native input range for interaction */}
-            <input
-              type="range"
-              min={0}
-              max={duration || 100}
-              value={currentTime}
-              onChange={handleSeek}
-              className="absolute w-full opacity-0 cursor-pointer h-full"
-            />
-          </div>
+      {/* Play/Pause */}
+      <button
+        onClick={togglePlay}
+        aria-label={isPlaying ? 'Pausar' : 'Reproducir'}
+        className={`shrink-0 flex items-center justify-center size-9 rounded-full transition-colors ${
+          isOut ? 'bg-white/15 hover:bg-white/25 text-white' : 'bg-white/10 hover:bg-white/15 text-[#e9edef]'
+        }`}
+      >
+        {isPlaying ? <Pause className="size-4" /> : <Play className="size-4 ml-0.5" />}
+      </button>
 
-          {/* Time Display */}
-          <div className="flex justify-between items-center px-1">
-            <span className={`text-[10px] tabular-nums font-medium ${
-              isOut ? 'text-green-100' : 'text-muted-foreground'
-            }`}>
-              {formatTime(currentTime)}
-            </span>
-            <span className={`text-[10px] tabular-nums font-medium ${
-              isOut ? 'text-green-100' : 'text-muted-foreground'
-            }`}>
-              {formatTime(duration)}
-            </span>
+      <div className="flex-1 flex flex-col justify-center gap-1 min-w-[130px]">
+        {/* Waveform */}
+        <div className="relative h-6 flex items-center">
+          <div className="flex items-center gap-[2px] w-full h-full" aria-hidden="true">
+            {bars.map((h, i) => (
+              <span
+                key={i}
+                className="flex-1 rounded-full transition-colors"
+                style={{
+                  height: `${Math.round(h * 100)}%`,
+                  minWidth: 2,
+                  backgroundColor: i < playedBars ? playedColor : restColor,
+                }}
+              />
+            ))}
           </div>
+          {/* Seek (invisible, accesible) */}
+          <input
+            type="range"
+            min={0}
+            max={duration || 100}
+            step="any"
+            value={currentTime}
+            onChange={handleSeek}
+            aria-label="Buscar en el audio"
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          />
         </div>
+
+        {/* Tiempo: al reproducir muestra transcurrido; en reposo, duración total */}
+        <span className="text-[11px] tabular-nums font-medium" style={{ color: timeColor }}>
+          {formatTime(isPlaying || currentTime > 0 ? currentTime : duration)}
+        </span>
       </div>
     </div>
   )

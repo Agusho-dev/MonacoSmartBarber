@@ -2,13 +2,15 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react'
 import {
-  Send, Clock, ArrowLeft, Plus, Settings,
+  Send, Clock, ArrowLeft, Plus, Settings, MoreVertical,
   CheckCircle2, Archive, RotateCcw, User, MessageSquare, FileText,
-  ExternalLink, MessageCircle, Search, X, Sparkles,
+  ExternalLink, Zap, Search, X, Sparkles, Mic, Smile,
   Download, FileIcon, CalendarPlus, CalendarSearch, AlertCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
 import { Avatar } from '../shared/avatar'
 import { MessageStatusIcon } from '../shared/icons'
 import { displayName, formatTime, formatDateSeparator } from '../shared/helpers'
@@ -22,6 +24,30 @@ import {
   AppointmentBookingDialog,
   type BookingServiceOption,
 } from '@/components/appointments/appointment-booking-dialog'
+
+// Meta (hora + ticks) que flota abajo-derecha de la burbuja de texto. El
+// <span.wa-spacer> reserva el ancho en la última línea (técnica WhatsApp).
+function TextMeta({ msg, isOut }: { msg: Message; isOut: boolean }) {
+  return (
+    <>
+      <span className={`wa-spacer ${isOut ? 'wa-spacer-out' : 'wa-spacer-in'}`} aria-hidden="true" />
+      <span className={`wa-meta ${isOut ? 'wa-meta-out' : 'wa-meta-in'}`}>
+        {formatTime(msg.created_at)}
+        {isOut && <MessageStatusIcon status={msg.status} />}
+      </span>
+    </>
+  )
+}
+
+// Meta en fila (para media/template/interactive)
+function RowMeta({ msg, isOut }: { msg: Message; isOut: boolean }) {
+  return (
+    <div className={`flex items-center gap-1 ${isOut ? 'justify-end' : ''}`}>
+      <span className={`text-[11px] ${isOut ? 'text-[#e9edef]/60' : 'text-[#8696a0]'}`}>{formatTime(msg.created_at)}</span>
+      {isOut && <span className={isOut ? 'text-[#e9edef]/60' : ''}><MessageStatusIcon status={msg.status} /></span>}
+    </div>
+  )
+}
 
 export function ChatView({
   onOpenSettings,
@@ -63,14 +89,12 @@ export function ChatView({
     setAppointmentServices((data ?? []) as BookingServiceOption[])
   }
 
-  const openAvailability = () => {
-    setShowAvailability(true)
-  }
-
+  const openAvailability = () => setShowAvailability(true)
   const openBooking = async () => {
     await loadAppointmentServices()
     setShowBooking(true)
   }
+
   const [quickReplySearch, setQuickReplySearch] = useState('')
   const quickReplySearchRef = useRef<HTMLInputElement>(null)
   const messageTextareaRef = useRef<HTMLTextAreaElement>(null)
@@ -101,44 +125,48 @@ export function ChatView({
     setQuickReplySearch('')
   }
 
-  // Focus search input when quick replies panel opens
   useEffect(() => {
     if (showQuickReplies) quickReplySearchRef.current?.focus()
   }, [showQuickReplies])
 
   const activeConvName = activeConv ? displayName(activeConv.client?.name || activeConv.platform_user_name || activeConv.platform_user_id, activeConv.channel?.platform) : ''
+  const isWhatsapp = activeConv?.channel?.platform === 'whatsapp'
+  const hasText = messageInput.trim().length > 0
 
-  function groupedMessages() {
-    const groups: { date: string; msgs: Message[] }[] = []
+  // Agrupa por día y marca el primer mensaje de cada "run" (cambio de emisor)
+  // para dibujar el tail sólo ahí y espaciar los runs, como WhatsApp.
+  const groups = useMemo(() => {
+    const out: { date: string; msgs: { msg: Message; firstOfRun: boolean }[] }[] = []
     for (const msg of messages) {
       const day = new Date(msg.created_at).toDateString()
-      const last = groups[groups.length - 1]
-      if (!last || last.date !== day) groups.push({ date: day, msgs: [msg] })
-      else last.msgs.push(msg)
+      const last = out[out.length - 1]
+      const bucket = !last || last.date !== day ? (out.push({ date: day, msgs: [] }), out[out.length - 1]) : last
+      const prev = bucket.msgs[bucket.msgs.length - 1]?.msg
+      const firstOfRun = !prev || prev.direction !== msg.direction
+      bucket.msgs.push({ msg, firstOfRun })
     }
-    return groups
-  }
+    return out
+  }, [messages])
 
   if (!activeConv) {
     return (
       <div className={`flex flex-col flex-1 min-w-0 ${!showMobileChat ? 'hidden lg:flex' : 'flex'}`}>
-        <div className="flex h-full flex-col items-center justify-center gap-4 bg-background">
-          <div className="flex size-24 items-center justify-center rounded-full bg-muted border">
-            <MessageSquare className="size-12 text-green-500/50" />
+        <div className="flex h-full flex-col items-center justify-center gap-4 bg-[#222e35] border-b-[6px] border-[#00a884]">
+          <div className="flex size-28 items-center justify-center rounded-full bg-[#182229]">
+            <MessageSquare className="size-14 text-[#00a884]/60" />
           </div>
-          <div className="text-center">
-            <p className="text-lg font-semibold text-foreground/70">Mensajería</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {(isConfigured || isInstagramConfigured) ? 'Seleccioná una conversación o iniciá una nueva' : 'Configurá WhatsApp o Instagram para comenzar'}
+          <div className="text-center px-6">
+            <p className="text-2xl font-light text-[#e9edef]">Mensajería</p>
+            <p className="text-sm text-[#8696a0] mt-2 max-w-sm">
+              {(isConfigured || isInstagramConfigured) ? 'Seleccioná una conversación de la lista o iniciá una nueva.' : 'Configurá WhatsApp o Instagram para comenzar a chatear con tus clientes.'}
             </p>
-            <div className="flex items-center justify-center gap-2 mt-4">
+            <div className="flex items-center justify-center gap-2 mt-5">
               {(isConfigured || isInstagramConfigured) && (
-                <Button variant="outline" size="sm" className="border-green-500/30 text-green-400 hover:bg-green-500/10"
-                  onClick={onNewChat}>
+                <Button size="sm" className="bg-[#00a884] hover:bg-[#02735e] text-white" onClick={onNewChat}>
                   <Plus className="mr-1.5 size-3.5" /> Nueva conversación
                 </Button>
               )}
-              <Button variant="outline" size="sm" className="border text-muted-foreground hover:text-foreground"
+              <Button variant="outline" size="sm" className="border-[#2a3942] bg-transparent text-[#8696a0] hover:text-[#e9edef] hover:bg-[#202c33]"
                 onClick={onOpenSettings}>
                 <Settings className="mr-1.5 size-3.5" /> Configuración
               </Button>
@@ -151,214 +179,226 @@ export function ChatView({
 
   return (
     <div className={`flex flex-col flex-1 min-w-0 ${!showMobileChat ? 'hidden lg:flex' : 'flex'}`}>
-      <div className="flex h-full flex-col bg-background">
-        {/* Chat header */}
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-card border-b border">
-          <Button variant="ghost" size="icon" className="lg:hidden size-8 text-muted-foreground hover:text-foreground shrink-0"
+      <div className="flex h-full flex-col bg-[#0b141a]">
+        {/* Header */}
+        <div className="flex items-center gap-3 px-4 h-16 bg-[#202c33] shrink-0 z-10">
+          <Button variant="ghost" size="icon" className="lg:hidden size-9 text-[#aebac1] hover:text-[#e9edef] hover:bg-[#2a3942] shrink-0"
             onClick={() => setShowMobileChat(false)}>
-            <ArrowLeft className="size-4" />
+            <ArrowLeft className="size-5" />
           </Button>
           <button onClick={() => { setShowProfile(v => !v); if (!showProfile && activeConv.client_id) loadVisits(activeConv.client_id) }}
-            className="flex items-center gap-3 flex-1 min-w-0 text-left hover:opacity-80 transition-opacity">
-            <Avatar name={activeConvName} size={9} avatarUrl={activeConv.platform_user_avatar} />
+            className="flex items-center gap-3 flex-1 min-w-0 text-left hover:opacity-90 transition-opacity">
+            <Avatar name={activeConvName} size={10} avatarUrl={activeConv.platform_user_avatar} />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-foreground">{activeConvName}</p>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="truncate text-[16px] font-medium text-[#e9edef]">{activeConvName}</p>
+              <p className="text-[13px] text-[#8696a0] truncate">
                 {activeConv.client?.phone || (activeConv.channel?.platform === 'instagram' ? (activeConv.client?.instagram || 'Instagram DM') : activeConv.platform_user_id)}
               </p>
             </div>
           </button>
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-1 shrink-0 text-[#aebac1]">
             {replyWindowLeft && (
-              <Badge variant="outline" className="gap-1 text-[10px] border-yellow-500/30 text-yellow-400 bg-yellow-500/5">
+              <span className="hidden sm:flex items-center gap-1 text-[11px] rounded-full border border-yellow-500/30 text-yellow-400 bg-yellow-500/5 px-2 py-0.5">
                 <Clock className="size-2.5" />{replyWindowLeft}
-              </Badge>
+              </span>
             )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className={`size-8 transition-colors ${autoTagging ? 'text-purple-400 animate-pulse' : 'text-muted-foreground hover:text-purple-400'}`}
-              title="Auto-etiquetar con IA"
-              onClick={() => handleAutoTag(activeConv.id)}
-              disabled={autoTagging}
-            >
-              <Sparkles className="size-4" />
+            <Button variant="ghost" size="icon" className="size-9 rounded-full hover:bg-[#2a3942] hover:text-[#e9edef]"
+              onClick={() => { setShowProfile(v => !v); if (!showProfile && activeConv.client_id) loadVisits(activeConv.client_id) }} title="Ver perfil">
+              <User className={`size-5 ${showProfile ? 'text-[#00a884]' : ''}`} />
             </Button>
-            {activeConv.status === 'open' ? (
-              <>
-                <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-blue-400" title="Cerrar conversación"
-                  onClick={() => handleStatusChange('closed')} disabled={isActing}>
-                  <CheckCircle2 className="size-4" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="size-9 rounded-full hover:bg-[#2a3942] hover:text-[#e9edef]" title="Más opciones">
+                  <MoreVertical className="size-5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-foreground/50" title="Archivar"
-                  onClick={() => handleStatusChange('archived')} disabled={isActing}>
-                  <Archive className="size-4" />
-                </Button>
-              </>
-            ) : (
-              <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-green-400" title="Reabrir"
-                onClick={() => handleStatusChange('open')} disabled={isActing}>
-                <RotateCcw className="size-4" />
-              </Button>
-            )}
-            <Button variant="ghost" size="icon" className={`size-8 ${showProfile ? 'text-green-400' : 'text-muted-foreground hover:text-foreground'}`}
-              onClick={() => setShowProfile(v => !v)} title="Ver perfil">
-              <User className="size-4" />
-            </Button>
-          </div>
-        </div>
-
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto min-h-0 px-[5%] scroll-smooth">
-          <div className="py-4 space-y-0.5">
-            {loadingMessages ? (
-              <div className="space-y-3 py-4">
-                {/* Skeleton: fecha */}
-                <div className="flex justify-center">
-                  <div className="h-5 w-24 rounded-full bg-muted animate-pulse" />
-                </div>
-                {/* Skeleton: burbujas alternadas */}
-                {[false, false, true, false, true, true, false].map((isOut, i) => (
-                  <div key={i} className={`flex ${isOut ? 'justify-end' : 'justify-start'} animate-pulse`} style={{ animationDelay: `${i * 60}ms` }}>
-                    <div className={`rounded-lg ${isOut ? 'rounded-tr-none bg-green-700/30' : 'rounded-tl-none bg-muted'}`}
-                      style={{ width: `${30 + Math.random() * 30}%`, height: isOut && i === 4 ? 52 : 36 }}>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <MessageSquare className="mb-2 size-8 opacity-20" />
-                <p className="text-xs">No hay mensajes aún</p>
-                {activeConv.channel?.platform === 'whatsapp' && (
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52 bg-[#233138] border-[#2a3942] text-[#e9edef]">
+                <DropdownMenuItem onClick={() => handleAutoTag(activeConv.id)} disabled={autoTagging}
+                  className="gap-2 focus:bg-[#2a3942] focus:text-[#e9edef]">
+                  <Sparkles className={`size-4 ${autoTagging ? 'text-purple-400 animate-pulse' : 'text-purple-400'}`} />
+                  Auto-etiquetar con IA
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { setShowProfile(true); if (activeConv.client_id) loadVisits(activeConv.client_id) }}
+                  className="gap-2 focus:bg-[#2a3942] focus:text-[#e9edef]">
+                  <User className="size-4" /> Ver perfil del cliente
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-[#2a3942]" />
+                {activeConv.status === 'open' ? (
                   <>
-                    <p className="text-[10px] mt-1 opacity-60">Enviá un template aprobado para iniciar la conversación</p>
-                    <button
-                      onClick={() => handleOpenTemplateDialog({ type: 'conversation', conversationId: activeConv.id })}
-                      className="mt-3 flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs transition-colors"
-                    >
-                      <FileText className="size-3.5" />
-                      Enviar template
-                    </button>
+                    <DropdownMenuItem onClick={() => handleStatusChange('closed')} disabled={isActing}
+                      className="gap-2 focus:bg-[#2a3942] focus:text-[#e9edef]">
+                      <CheckCircle2 className="size-4 text-blue-400" /> Cerrar conversación
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleStatusChange('archived')} disabled={isActing}
+                      className="gap-2 focus:bg-[#2a3942] focus:text-[#e9edef]">
+                      <Archive className="size-4" /> Archivar
+                    </DropdownMenuItem>
                   </>
+                ) : (
+                  <DropdownMenuItem onClick={() => handleStatusChange('open')} disabled={isActing}
+                    className="gap-2 focus:bg-[#2a3942] focus:text-[#e9edef]">
+                    <RotateCcw className="size-4 text-[#00a884]" /> Reabrir conversación
+                  </DropdownMenuItem>
                 )}
-              </div>
-            ) : (
-              groupedMessages().map(({ date, msgs }) => (
-                <div key={date}>
-                  <div className="flex items-center justify-center my-3">
-                    <span className="px-3 py-1 rounded-full bg-muted text-muted-foreground text-[11px]">
-                      {formatDateSeparator(msgs[0].created_at)}
-                    </span>
-                  </div>
-                  {msgs.map(msg => {
-                    const isOut = msg.direction === 'outbound'
-                    const tp = msg.template_params as { interactive_type?: string; buttons?: Array<{ id: string; title: string }> } | null
-                    const isInteractiveButtons =
-                      msg.content_type === 'interactive' &&
-                      tp?.interactive_type === 'button' &&
-                      Array.isArray(tp.buttons) &&
-                      tp.buttons.length > 0
-                    const isTemplate =
-                      !isInteractiveButtons &&
-                      (msg.content_type === 'template' || (msg.template_name && (!msg.content || msg.content.startsWith('[Template:'))))
-                    return (
-                      <div key={msg.id} className={`flex mb-1.5 ${isOut ? 'justify-end' : 'justify-start'} animate-[msgIn_0.25s_ease-out_both]`}>
-                        {isInteractiveButtons ? (
-                          <InteractiveButtonsBubble msg={msg} isOut={isOut} onResend={handleResend} resending={isSending} />
-                        ) : isTemplate && msg.template_name ? (
-                          <TemplateBubble msg={msg} isOut={isOut} templates={waTemplates} />
-                        ) : msg.media_url && ['image', 'video', 'audio', 'document'].includes(msg.content_type) ? (
-                          <MediaBubble msg={msg} isOut={isOut} onResend={handleResend} resending={isSending} />
-                        ) : (
-                          <div className={`relative max-w-[65%] px-3 py-1.5 rounded-lg text-sm ${isOut ? 'bg-green-700 text-white rounded-tr-none' : 'bg-card text-card-foreground rounded-tl-none'}`}>
-                            {msg.content && <p className="whitespace-pre-wrap wrap-break-word leading-[1.45]">{msg.content}</p>}
-                            {!msg.content && ['image', 'video', 'audio', 'document'].includes(msg.content_type) && (
-                              <p className="text-xs text-muted-foreground italic">
-                                {msg.content_type === 'image' ? '📷 Imagen' : msg.content_type === 'video' ? '🎬 Video' : msg.content_type === 'audio' ? '🎤 Audio' : '📎 Documento'}
-                                {' (archivo no disponible)'}
-                              </p>
-                            )}
-                            {!msg.content && !['image', 'video', 'audio', 'document'].includes(msg.content_type) && (
-                              <p className={`text-xs italic ${isOut ? 'text-white/60' : 'text-muted-foreground'}`}>
-                                {msg.content_type === 'interactive' ? '🔘 Mensaje interactivo' : '✨ Sticker o adjunto'}
-                              </p>
-                            )}
-                            <FailedNotice msg={msg} onResend={handleResend} resending={isSending} />
-                            <div className={`flex items-center gap-1 mt-0.5 ${isOut ? 'justify-end' : ''}`}>
-                              <span className="text-[10px] text-muted-foreground">{formatTime(msg.created_at)}</span>
-                              {isOut && <MessageStatusIcon status={msg.status} />}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              ))
-            )}
-            <div ref={messagesEndRef} />
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
-        {/* Input */}
-        <div className="px-4 py-3 bg-card">
+        {/* Mensajes: wallpaper fijo + hilo scrolleable encima */}
+        <div className="relative flex-1 min-h-0 overflow-hidden">
+          <div className="absolute inset-0 wa-wallpaper" aria-hidden="true" />
+          <div className="relative h-full overflow-y-auto wa-scroll px-[5%] md:px-[6%] scroll-smooth">
+            <div className="py-4 flex flex-col">
+              {loadingMessages ? (
+                <div className="space-y-3 py-4">
+                  <div className="flex justify-center">
+                    <div className="h-6 w-24 rounded-lg bg-[#1d282f] animate-pulse" />
+                  </div>
+                  {[false, false, true, false, true, true, false].map((isOut, i) => (
+                    <div key={i} className={`flex ${isOut ? 'justify-end' : 'justify-start'} animate-pulse`} style={{ animationDelay: `${i * 60}ms` }}>
+                      <div className={`rounded-lg ${isOut ? 'rounded-tr-none bg-[#005c4b]/40' : 'rounded-tl-none bg-[#202c33]'}`}
+                        style={{ width: `${34 + (i % 3) * 14}%`, height: isOut && i === 4 ? 52 : 36 }} />
+                    </div>
+                  ))}
+                </div>
+              ) : messages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-[#8696a0]">
+                  <div className="rounded-lg bg-[#182229]/90 px-4 py-3 text-center max-w-xs">
+                    <MessageSquare className="mb-2 size-7 opacity-40 mx-auto" />
+                    <p className="text-xs">No hay mensajes aún</p>
+                    {isWhatsapp && (
+                      <>
+                        <p className="text-[10px] mt-1 opacity-70">Enviá un template aprobado para iniciar la conversación</p>
+                        <button
+                          onClick={() => handleOpenTemplateDialog({ type: 'conversation', conversationId: activeConv.id })}
+                          className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#00a884] hover:bg-[#02735e] text-white text-xs transition-colors"
+                        >
+                          <FileText className="size-3.5" /> Enviar template
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                groups.map(({ date, msgs }) => (
+                  <div key={date} className="flex flex-col">
+                    <div className="flex items-center justify-center my-2 sticky top-1 z-[1]">
+                      <span className="px-3 py-1 rounded-lg bg-[#182229]/95 text-[#8696a0] text-[12px] uppercase shadow-sm">
+                        {formatDateSeparator(msgs[0].msg.created_at)}
+                      </span>
+                    </div>
+                    {msgs.map(({ msg, firstOfRun }) => {
+                      const isOut = msg.direction === 'outbound'
+                      const tp = msg.template_params as { interactive_type?: string; buttons?: Array<{ id: string; title: string }> } | null
+                      const isInteractiveButtons =
+                        msg.content_type === 'interactive' &&
+                        tp?.interactive_type === 'button' &&
+                        Array.isArray(tp.buttons) &&
+                        tp.buttons.length > 0
+                      const isTemplate =
+                        !isInteractiveButtons &&
+                        (msg.content_type === 'template' || (msg.template_name && (!msg.content || msg.content.startsWith('[Template:'))))
+                      const isMedia = !!msg.media_url && ['image', 'video', 'audio', 'document'].includes(msg.content_type)
+                      return (
+                        <div key={msg.id}
+                          className={`flex ${isOut ? 'justify-end' : 'justify-start'} ${firstOfRun ? 'mt-2' : 'mt-0.5'} animate-[msgIn_0.18s_ease-out_both]`}>
+                          {isInteractiveButtons ? (
+                            <InteractiveButtonsBubble msg={msg} isOut={isOut} tail={firstOfRun} onResend={handleResend} resending={isSending} />
+                          ) : isTemplate && msg.template_name ? (
+                            <TemplateBubble msg={msg} isOut={isOut} tail={firstOfRun} templates={waTemplates} />
+                          ) : isMedia ? (
+                            <MediaBubble msg={msg} isOut={isOut} tail={firstOfRun} onResend={handleResend} resending={isSending} />
+                          ) : (
+                            <div className={`wa-bubble ${firstOfRun ? (isOut ? 'wa-bubble-out' : 'wa-bubble-in') : (isOut ? 'wa-fill-out' : 'wa-fill-in')}`}>
+                              {msg.content ? (
+                                <p className="whitespace-pre-wrap">
+                                  {msg.content}
+                                  <TextMeta msg={msg} isOut={isOut} />
+                                </p>
+                              ) : ['image', 'video', 'audio', 'document'].includes(msg.content_type) ? (
+                                <p className="text-[13px] italic text-[#e9edef]/70">
+                                  {msg.content_type === 'image' ? 'Foto' : msg.content_type === 'video' ? 'Video' : msg.content_type === 'audio' ? 'Audio' : 'Documento'}
+                                  {' (archivo no disponible)'}
+                                  <TextMeta msg={msg} isOut={isOut} />
+                                </p>
+                              ) : (
+                                <p className={`text-[13px] italic ${isOut ? 'text-[#e9edef]/60' : 'text-[#8696a0]'}`}>
+                                  {msg.content_type === 'interactive' ? 'Mensaje interactivo' : 'Sticker o adjunto'}
+                                  <TextMeta msg={msg} isOut={isOut} />
+                                </p>
+                              )}
+                              <FailedNotice msg={msg} onResend={handleResend} resending={isSending} />
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                ))
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          </div>
+        </div>
+
+        {/* Composer */}
+        <div className="bg-[#202c33] shrink-0">
           {activeConv.status !== 'open' ? (
-            <div className="rounded-lg border bg-muted px-3 py-2 text-center flex items-center justify-center gap-2">
-              <p className="text-xs text-muted-foreground">Conversación {activeConv.status === 'closed' ? 'cerrada' : 'archivada'}</p>
-              <button className="text-xs text-green-400 hover:underline" onClick={() => handleStatusChange('open')}>Reabrir</button>
+            <div className="px-4 py-4 text-center flex items-center justify-center gap-2">
+              <p className="text-xs text-[#8696a0]">Conversación {activeConv.status === 'closed' ? 'cerrada' : 'archivada'}</p>
+              <button className="text-xs text-[#00a884] hover:underline" onClick={() => handleStatusChange('open')}>Reabrir</button>
             </div>
           ) : !canReply ? (
-            <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-3 py-2 text-center">
+            <div className="px-4 py-3 text-center">
               <p className="text-xs text-yellow-400">Ventana de 24h expirada — solo podés enviar templates aprobados</p>
-              {activeConv.channel?.platform === 'whatsapp' && (
+              {isWhatsapp && (
                 <button
                   onClick={() => handleOpenTemplateDialog({ type: 'conversation', conversationId: activeConv.id })}
-                  className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-green-600 hover:bg-green-500 text-white text-xs transition-colors"
+                  className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#00a884] hover:bg-[#02735e] text-white text-xs transition-colors"
                 >
-                  <FileText className="size-3" />
-                  Enviar template
+                  <FileText className="size-3" /> Enviar template
                 </button>
               )}
             </div>
           ) : (
-            <div className="space-y-0">
-              {/* Quick replies carousel */}
+            <div>
+              {/* Carrusel de respuestas rápidas */}
               {showQuickReplies && quickReplies.length > 0 && (
-                <div className="border-b border px-2 py-2 space-y-2">
+                <div className="border-b border-[#2a3942] px-3 py-2 space-y-2 bg-[#111b21]">
                   <div className="flex items-center gap-2">
                     <div className="relative flex-1">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-[#8696a0]" />
                       <input
                         ref={quickReplySearchRef}
-                        className="w-full h-7 rounded-md bg-accent pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
+                        className="w-full h-7 rounded-md bg-[#2a3942] pl-8 pr-3 text-xs text-[#e9edef] placeholder:text-[#8696a0] outline-none focus:ring-1 focus:ring-[#00a884]/40"
                         placeholder="Buscar mensaje rápido..."
                         value={quickReplySearch}
                         onChange={e => setQuickReplySearch(e.target.value)}
                       />
                     </div>
                     <button onClick={() => { setShowQuickReplies(false); setQuickReplySearch('') }}
-                      className="size-6 shrink-0 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground">
+                      className="size-6 shrink-0 rounded-md hover:bg-[#2a3942] flex items-center justify-center text-[#8696a0] hover:text-[#e9edef]">
                       <X className="size-3.5" />
                     </button>
                   </div>
-                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-muted-foreground/20 scrollbar-track-transparent">
+                  <div className="flex gap-2 overflow-x-auto pb-1 wa-scroll">
                     {filteredQuickReplies.length === 0 ? (
-                      <p className="text-xs text-muted-foreground py-2 px-1">Sin resultados</p>
+                      <p className="text-xs text-[#8696a0] py-2 px-1">Sin resultados</p>
                     ) : (
                       filteredQuickReplies.map(reply => (
                         <button
                           key={reply.id}
                           onClick={() => insertQuickReply(reply)}
-                          className="shrink-0 w-48 text-left rounded-lg border bg-accent hover:bg-muted p-2.5 transition-colors group"
+                          className="shrink-0 w-48 text-left rounded-lg border border-[#2a3942] bg-[#202c33] hover:bg-[#2a3942] p-2.5 transition-colors"
                         >
                           <div className="flex items-center gap-1.5 mb-1">
-                            <span className="text-xs font-medium text-foreground truncate">{reply.title}</span>
+                            <span className="text-xs font-medium text-[#e9edef] truncate">{reply.title}</span>
                             {reply.shortcut && (
-                              <span className="text-[9px] px-1 py-0.5 rounded bg-muted-foreground/10 text-muted-foreground font-mono shrink-0">/{reply.shortcut}</span>
+                              <span className="text-[9px] px-1 py-0.5 rounded bg-[#00a884]/15 text-[#00a884] font-mono shrink-0">/{reply.shortcut}</span>
                             )}
                           </div>
-                          <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">{reply.content}</p>
+                          <p className="text-[11px] text-[#8696a0] line-clamp-2 leading-relaxed">{reply.content}</p>
                         </button>
                       ))
                     )}
@@ -366,55 +406,70 @@ export function ChatView({
                 </div>
               )}
 
-              <div className="flex items-end gap-2">
-                {activeConv.channel?.platform === 'whatsapp' && (
-                  <button
-                    onClick={() => handleOpenTemplateDialog({ type: 'conversation', conversationId: activeConv.id })}
-                    className="size-10 shrink-0 rounded-full bg-accent hover:bg-accent flex items-center justify-center transition-colors"
-                    title="Enviar template"
-                  >
-                    <FileText className="size-4 text-muted-foreground" />
-                  </button>
-                )}
+              <div className="flex items-end gap-1.5 px-3 py-2">
+                {/* Emoji (decorativo, enfoca el input) */}
+                <button
+                  onClick={() => messageTextareaRef.current?.focus()}
+                  className="size-10 shrink-0 rounded-full flex items-center justify-center text-[#8696a0] hover:text-[#e9edef] hover:bg-[#2a3942] transition-colors"
+                  title="Emojis"
+                  tabIndex={-1}
+                >
+                  <Smile className="size-6" />
+                </button>
+
+                {/* Adjuntar: template / disponibilidad / turno */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      className="size-10 shrink-0 rounded-full flex items-center justify-center text-[#8696a0] hover:text-[#e9edef] hover:bg-[#2a3942] transition-colors"
+                      title="Adjuntar"
+                    >
+                      <Plus className="size-6" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" side="top" className="w-56 bg-[#233138] border-[#2a3942] text-[#e9edef]">
+                    {isWhatsapp && (
+                      <DropdownMenuItem
+                        onClick={() => handleOpenTemplateDialog({ type: 'conversation', conversationId: activeConv.id })}
+                        className="gap-2 focus:bg-[#2a3942] focus:text-[#e9edef]"
+                      >
+                        <FileText className="size-4 text-[#00a884]" /> Enviar template
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onClick={openAvailability} className="gap-2 focus:bg-[#2a3942] focus:text-[#e9edef]">
+                      <CalendarSearch className="size-4 text-sky-400" /> Ver disponibilidad
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={openBooking} className="gap-2 focus:bg-[#2a3942] focus:text-[#e9edef]">
+                      <CalendarPlus className="size-4 text-violet-400" /> Agendar turno
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* Respuestas rápidas */}
                 {quickReplies.length > 0 && (
                   <button
                     onClick={() => setShowQuickReplies(v => !v)}
                     className={`size-10 shrink-0 rounded-full flex items-center justify-center transition-colors ${
-                      showQuickReplies ? 'bg-blue-500/15 text-blue-400' : 'bg-accent text-muted-foreground hover:text-foreground'
+                      showQuickReplies ? 'bg-[#00a884]/20 text-[#00a884]' : 'text-[#8696a0] hover:text-[#e9edef] hover:bg-[#2a3942]'
                     }`}
-                    title="Mensajes rápidos"
+                    title="Respuestas rápidas"
                   >
-                    <MessageCircle className="size-4" />
+                    <Zap className="size-5" />
                   </button>
                 )}
-                <button
-                  onClick={openAvailability}
-                  className="size-10 shrink-0 rounded-full bg-accent hover:bg-accent flex items-center justify-center transition-colors"
-                  title="Ver agenda"
-                >
-                  <CalendarSearch className="size-4 text-muted-foreground" />
-                </button>
-                <button
-                  onClick={openBooking}
-                  className="size-10 shrink-0 rounded-full bg-accent hover:bg-accent flex items-center justify-center transition-colors"
-                  title="Agendar turno"
-                >
-                  <CalendarPlus className="size-4 text-muted-foreground" />
-                </button>
+
                 <textarea
                   ref={messageTextareaRef}
                   rows={1}
-                  className="flex-1 rounded-lg bg-accent px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:ring-1 focus:ring-ring min-h-10 max-h-[min(40vh,17.5rem)] overflow-y-auto leading-[1.45]"
-                  style={{ height: '2.5rem' }}
-                  placeholder="Escribí un mensaje... (/ para rápidos)"
+                  className="flex-1 rounded-lg bg-[#2a3942] px-4 py-2.5 text-[15px] text-[#e9edef] placeholder:text-[#8696a0] outline-none resize-none min-h-11 max-h-[min(40vh,17.5rem)] overflow-y-auto wa-scroll leading-[1.4]"
+                  style={{ height: '2.75rem' }}
+                  placeholder="Escribí un mensaje  ·  / para respuestas rápidas"
                   value={messageInput}
                   onChange={(e) => {
                     const val = e.target.value
                     setMessageInput(val)
-                    // Detect /shortcut pattern
                     if (val.startsWith('/') && quickReplies.length > 0) {
                       const query = val.slice(1)
-                      // Check for exact shortcut match
                       const exact = quickReplies.find(r => r.shortcut && r.shortcut.toLowerCase() === query.toLowerCase())
                       if (exact) {
                         setMessageInput(exact.content)
@@ -435,10 +490,20 @@ export function ChatView({
                   }}
                   disabled={isSending}
                 />
-                <button onClick={handleSend} disabled={!messageInput.trim() || isSending}
-                  className="size-10 shrink-0 rounded-full bg-green-600 hover:bg-green-500 disabled:opacity-40 flex items-center justify-center transition-colors">
-                  <Send className="size-4 text-white" />
-                </button>
+
+                {hasText ? (
+                  <button onClick={handleSend} disabled={isSending}
+                    className="size-10 shrink-0 rounded-full bg-[#00a884] hover:bg-[#02735e] disabled:opacity-50 flex items-center justify-center transition-colors"
+                    title="Enviar">
+                    <Send className="size-5 text-white" />
+                  </button>
+                ) : (
+                  <button onClick={() => messageTextareaRef.current?.focus()}
+                    className="size-10 shrink-0 rounded-full flex items-center justify-center text-[#8696a0] hover:text-[#e9edef] hover:bg-[#2a3942] transition-colors"
+                    title="Escribir mensaje" tabIndex={-1}>
+                    <Mic className="size-5" />
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -464,8 +529,6 @@ export function ChatView({
 }
 
 // Aviso de "no enviado" con botón de reintento para mensajes salientes fallidos.
-// Antes un fallo sólo mostraba un ícono rojo diminuto (o nada, cuando IG ni
-// guardaba el error) — ahora es explícito y accionable.
 function FailedNotice({ msg, onResend, resending }: { msg: Message; onResend?: (id: string) => void; resending?: boolean }) {
   if (msg.status !== 'failed' || msg.direction !== 'outbound') return null
   return (
@@ -490,126 +553,128 @@ function FailedNotice({ msg, onResend, resending }: { msg: Message; onResend?: (
   )
 }
 
-function InteractiveButtonsBubble({ msg, isOut, onResend, resending }: { msg: Message; isOut: boolean; onResend?: (id: string) => void; resending?: boolean }) {
+function bubbleFill(isOut: boolean, tail: boolean) {
+  if (tail) return isOut ? 'wa-bubble-out' : 'wa-bubble-in'
+  return isOut ? 'wa-fill-out' : 'wa-fill-in'
+}
+
+function InteractiveButtonsBubble({ msg, isOut, tail, onResend, resending }: { msg: Message; isOut: boolean; tail: boolean; onResend?: (id: string) => void; resending?: boolean }) {
   const tp = msg.template_params as { buttons: Array<{ id: string; title: string }> }
   const buttons = tp?.buttons ?? []
 
   return (
-    <div className={`relative max-w-[70%] w-72 rounded-lg overflow-hidden ${isOut ? 'rounded-tr-none' : 'rounded-tl-none'}`}>
-      <div className={`${isOut ? 'bg-green-700 text-white' : 'bg-card text-card-foreground'}`}>
+    <div className={`wa-bubble ${bubbleFill(isOut, tail)} !p-0 overflow-hidden max-w-[75%] w-72`}>
+      <div>
         {msg.content && (
-          <div className="px-3 py-2">
-            <p className="whitespace-pre-wrap text-[13px] leading-[1.45]">{msg.content}</p>
+          <div className="px-2.5 pt-2 pb-1">
+            <p className="whitespace-pre-wrap text-[14px] leading-[1.4]">{msg.content}</p>
           </div>
         )}
-        <div className={`flex items-center gap-1 px-3 pb-1.5 ${isOut ? 'justify-end' : ''}`}>
-          <span className={`text-[10px] ${isOut ? 'text-white/50' : 'text-muted-foreground'}`}>{formatTime(msg.created_at)}</span>
-          {isOut && <MessageStatusIcon status={msg.status} />}
+        <div className="px-2.5 pb-1.5">
+          <RowMeta msg={msg} isOut={isOut} />
         </div>
       </div>
-      <div className={`border-t ${isOut ? 'border-green-600/50 bg-green-800/40' : 'border-border bg-muted/30'}`}>
+      <div className={`border-t ${isOut ? 'border-white/10' : 'border-white/10'}`}>
         {buttons.map((btn, i) => (
           <div
             key={btn.id || i}
-            className={`flex items-center justify-center py-2.5 text-[13px] font-medium ${
-              isOut
-                ? `text-sky-200 ${i < buttons.length - 1 ? 'border-b border-green-600/40' : ''}`
-                : `text-sky-400 ${i < buttons.length - 1 ? 'border-b border-border' : ''}`
-            }`}
+            className={`flex items-center justify-center py-2.5 text-[14px] font-medium text-[#53bdeb] ${i < buttons.length - 1 ? 'border-b border-white/10' : ''}`}
           >
             {btn.title}
           </div>
         ))}
       </div>
-      <div className="px-2 pb-1">
-        <FailedNotice msg={msg} onResend={onResend} resending={resending} />
-      </div>
+      <div className="px-2 pb-1"><FailedNotice msg={msg} onResend={onResend} resending={resending} /></div>
     </div>
   )
 }
 
-function MediaBubble({ msg, isOut, onResend, resending }: { msg: Message; isOut: boolean; onResend?: (id: string) => void; resending?: boolean }) {
+function MediaBubble({ msg, isOut, tail, onResend, resending }: { msg: Message; isOut: boolean; tail: boolean; onResend?: (id: string) => void; resending?: boolean }) {
   const [expanded, setExpanded] = useState(false)
   const url = msg.media_url!
+  const hasCaption = !!msg.content && msg.content_type !== 'document'
 
   return (
-    <>
-      <div className={`relative max-w-[65%] rounded-lg overflow-hidden text-sm ${isOut ? 'bg-green-700 text-white rounded-tr-none' : 'bg-card text-card-foreground rounded-tl-none'}`}>
-        {msg.content_type === 'image' && (
-          <>
-            <button onClick={() => setExpanded(true)} className="block w-full cursor-pointer">
+    <div className={`wa-bubble ${bubbleFill(isOut, tail)} !p-1 overflow-hidden max-w-[65%]`}>
+      {msg.content_type === 'image' && (
+        <div className="relative">
+          <button onClick={() => setExpanded(true)} className="block w-full cursor-pointer">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={url} alt="Imagen" className="w-full max-w-xs rounded-[6px] object-cover" loading="lazy" />
+          </button>
+          {!hasCaption && (
+            <>
+              <div className="wa-img-scrim rounded-b-[6px]" />
+              <span className="wa-img-meta">
+                {formatTime(msg.created_at)}
+                {isOut && <MessageStatusIcon status={msg.status} />}
+              </span>
+            </>
+          )}
+          {expanded && (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 p-4" onClick={() => setExpanded(false)}>
+              <button className="absolute top-4 right-4 text-white hover:text-gray-300" onClick={() => setExpanded(false)}>
+                <X className="size-6" />
+              </button>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={url}
-                alt="Imagen"
-                className="w-full max-w-xs rounded-t-lg object-cover"
-                loading="lazy"
-              />
-            </button>
-            {expanded && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={() => setExpanded(false)}>
-                <button className="absolute top-4 right-4 text-white hover:text-gray-300" onClick={() => setExpanded(false)}>
-                  <X className="size-6" />
-                </button>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={url} alt="Imagen" className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg" />
-              </div>
-            )}
-          </>
-        )}
-
-        {msg.content_type === 'video' && (
-          <video
-            src={url}
-            controls
-            preload="metadata"
-            className="w-full max-w-xs rounded-t-lg"
-          />
-        )}
-
-        {msg.content_type === 'audio' && (
-          <div className="pt-2">
-            <AudioPlayer src={url} isOut={isOut} />
-          </div>
-        )}
-
-        {msg.content_type === 'document' && (
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`flex items-center gap-2.5 px-3 py-2.5 transition-colors ${isOut ? 'hover:bg-green-600/50' : 'hover:bg-muted'}`}
-          >
-            <div className={`flex items-center justify-center size-10 rounded-lg shrink-0 ${isOut ? 'bg-green-600/50' : 'bg-muted'}`}>
-              <FileIcon className="size-5 opacity-70" />
+              <img src={url} alt="Imagen" className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg" />
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-medium truncate">{msg.content || 'Documento'}</p>
-              <p className={`text-[10px] ${isOut ? 'text-white/50' : 'text-muted-foreground'}`}>
-                Toca para descargar
-              </p>
-            </div>
-            <Download className="size-4 opacity-50 shrink-0" />
-          </a>
-        )}
+          )}
+        </div>
+      )}
 
-        {/* Caption (para imágenes/videos/documentos) */}
-        {msg.content && msg.content_type !== 'document' && (
-          <div className="px-3 py-1">
-            <p className="whitespace-pre-wrap wrap-break-word text-[13px] leading-[1.45]">{msg.content}</p>
+      {msg.content_type === 'video' && (
+        <div className="relative">
+          <video src={url} controls preload="metadata" className="w-full max-w-xs rounded-[6px]" />
+          {!hasCaption && (
+            <>
+              <div className="wa-img-scrim rounded-b-[6px]" />
+              <span className="wa-img-meta">
+                {formatTime(msg.created_at)}
+                {isOut && <MessageStatusIcon status={msg.status} />}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      {msg.content_type === 'audio' && (
+        <div className="min-w-[230px]">
+          <AudioPlayer src={url} isOut={isOut} />
+          <div className="px-2 pb-0.5"><RowMeta msg={msg} isOut={isOut} /></div>
+        </div>
+      )}
+
+      {msg.content_type === 'document' && (
+        <a href={url} target="_blank" rel="noopener noreferrer"
+          className="flex items-center gap-2.5 px-2.5 py-2.5 rounded-[6px] transition-colors hover:bg-white/5">
+          <div className="flex items-center justify-center size-10 rounded-lg shrink-0 bg-white/10">
+            <FileIcon className="size-5 opacity-80" />
           </div>
-        )}
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium truncate">{msg.content || 'Documento'}</p>
+            <p className="text-[10px] text-[#e9edef]/60">Toca para descargar</p>
+          </div>
+          <Download className="size-4 opacity-60 shrink-0" />
+        </a>
+      )}
 
-        <div className="px-3">
-          <FailedNotice msg={msg} onResend={onResend} resending={resending} />
+      {/* Caption + meta (para imágenes/videos con texto) */}
+      {hasCaption && (
+        <div className="px-2 pt-1 pb-0.5">
+          <p className="whitespace-pre-wrap text-[14px] leading-[1.4]">
+            {msg.content}
+            <TextMeta msg={msg} isOut={isOut} />
+          </p>
         </div>
+      )}
 
-        <div className={`flex items-center gap-1 px-3 pb-1.5 ${msg.content_type === 'audio' ? 'pt-0' : ''} ${isOut ? 'justify-end' : ''}`}>
-          <span className={`text-[10px] ${isOut ? 'text-white/50' : 'text-muted-foreground'}`}>{formatTime(msg.created_at)}</span>
-          {isOut && <MessageStatusIcon status={msg.status} />}
-        </div>
-      </div>
-    </>
+      {msg.content_type === 'document' && (
+        <div className="px-2 pb-0.5"><RowMeta msg={msg} isOut={isOut} /></div>
+      )}
+
+      <div className="px-2"><FailedNotice msg={msg} onResend={onResend} resending={resending} /></div>
+    </div>
   )
 }
 
@@ -619,7 +684,7 @@ interface TemplateComponent {
   buttons?: Array<{ text?: string; type?: string }>
 }
 
-function TemplateBubble({ msg, isOut, templates }: { msg: Message; isOut: boolean; templates: WaTemplate[] }) {
+function TemplateBubble({ msg, isOut, tail, templates }: { msg: Message; isOut: boolean; tail: boolean; templates: WaTemplate[] }) {
   const tpl = templates.find(t => t.name === msg.template_name)
   const components = tpl?.components as TemplateComponent[] | undefined
 
@@ -630,69 +695,44 @@ function TemplateBubble({ msg, isOut, templates }: { msg: Message; isOut: boolea
 
   if (!components) {
     return (
-      <div className={`relative max-w-[65%] rounded-lg overflow-hidden ${isOut ? 'rounded-tr-none' : 'rounded-tl-none'}`}>
-        <div className={`px-3 py-2 text-sm ${isOut ? 'bg-green-700 text-white' : 'bg-card text-card-foreground'}`}>
-          <div className="flex items-center gap-1.5 mb-1">
-            <FileText className="size-3.5 opacity-60" />
-            <span className="text-xs font-medium opacity-70">Template</span>
-          </div>
-          <p className="font-medium text-sm">{msg.template_name}</p>
-          <div className={`flex items-center gap-1 mt-1 ${isOut ? 'justify-end' : ''}`}>
-            <span className="text-[10px] text-muted-foreground">{formatTime(msg.created_at)}</span>
-            {isOut && <MessageStatusIcon status={msg.status} />}
-          </div>
+      <div className={`wa-bubble ${bubbleFill(isOut, tail)} max-w-[65%]`}>
+        <div className="flex items-center gap-1.5 mb-1">
+          <FileText className="size-3.5 opacity-60" />
+          <span className="text-xs font-medium opacity-70">Plantilla</span>
         </div>
+        <p className="font-medium text-sm">
+          {msg.template_name}
+          <TextMeta msg={msg} isOut={isOut} />
+        </p>
       </div>
     )
   }
 
   return (
-    <div className={`relative max-w-[70%] w-72 rounded-lg overflow-hidden ${isOut ? 'rounded-tr-none' : 'rounded-tl-none'}`}>
-      <div className={`${isOut ? 'bg-green-700 text-white' : 'bg-card text-card-foreground'}`}>
+    <div className={`wa-bubble ${bubbleFill(isOut, tail)} !p-0 overflow-hidden max-w-[75%] w-72`}>
+      <div>
         {header?.text && (
-          <div className="px-3 pt-2 pb-0.5">
-            <p className="font-bold text-sm">{header.text}</p>
-          </div>
+          <div className="px-2.5 pt-2 pb-0.5"><p className="font-bold text-sm">{header.text}</p></div>
         )}
-
         {body?.text && (
-          <div className="px-3 py-1.5">
-            <p className="whitespace-pre-wrap text-[13px] leading-[1.45]">{body.text}</p>
-          </div>
+          <div className="px-2.5 py-1"><p className="whitespace-pre-wrap text-[14px] leading-[1.4]">{body.text}</p></div>
         )}
-
         {footer?.text && (
-          <div className="px-3 pb-1.5">
-            <p className={`text-[11px] ${isOut ? 'text-white/50' : 'text-muted-foreground'}`}>{footer.text}</p>
-          </div>
+          <div className="px-2.5 pb-1"><p className="text-[11px] text-[#e9edef]/50">{footer.text}</p></div>
         )}
-
-        <div className={`flex items-center gap-1 px-3 pb-1.5 ${isOut ? 'justify-end' : ''}`}>
-          <span className={`text-[10px] ${isOut ? 'text-white/50' : 'text-muted-foreground'}`}>{formatTime(msg.created_at)}</span>
-          {isOut && <MessageStatusIcon status={msg.status} />}
-        </div>
+        <div className="px-2.5 pb-1.5"><RowMeta msg={msg} isOut={isOut} /></div>
       </div>
 
       {buttons?.buttons && buttons.buttons.length > 0 && (
-        (() => {
-          const btnList = buttons.buttons!
-          return (
-            <div className={`border-t ${isOut ? 'border-green-600/50' : 'border-border'}`}>
-              {btnList.map((btn, i) => (
-                <div key={i}
-                  className={`flex items-center justify-center gap-1.5 py-2 text-[13px] font-medium ${
-                    isOut
-                      ? `text-sky-200 ${i < btnList.length - 1 ? 'border-b border-green-600/50' : ''}`
-                      : `text-sky-400 ${i < btnList.length - 1 ? 'border-b border-border' : ''}`
-                  }`}
-                >
-                  {btn.type === 'URL' && <ExternalLink className="size-3" />}
-                  {btn.text}
-                </div>
-              ))}
+        <div className="border-t border-white/10">
+          {buttons.buttons.map((btn, i) => (
+            <div key={i}
+              className={`flex items-center justify-center gap-1.5 py-2 text-[14px] font-medium text-[#53bdeb] ${i < buttons.buttons!.length - 1 ? 'border-b border-white/10' : ''}`}>
+              {btn.type === 'URL' && <ExternalLink className="size-3" />}
+              {btn.text}
             </div>
-          )
-        })()
+          ))}
+        </div>
       )}
     </div>
   )

@@ -1442,7 +1442,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
         fetchQueue() // reset visual state
       }}
     >
-      <div className="flex flex-col gap-2 lg:gap-4 p-1 md:h-[calc(100dvh-9rem)] lg:h-[calc(100dvh-9.5rem)] md:overflow-hidden">
+      <div className="flex flex-col gap-2 lg:gap-4 p-1 max-md:pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:h-[calc(100dvh-9rem)] lg:h-[calc(100dvh-9.5rem)] md:overflow-hidden">
 
         {/* Encabezado y Descansos (Top Bar) */}
         <div className="flex shrink-0 flex-col gap-2 lg:gap-3 px-2">

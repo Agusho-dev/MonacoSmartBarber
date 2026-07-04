@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/format'
 import { Button } from '@/components/ui/button'
@@ -48,9 +48,13 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { useBranchStore } from '@/stores/branch-store'
-import { RefreshCw, Search, Plus, Trash2 } from 'lucide-react'
+import { RefreshCw, Search, Plus, Trash2, ChevronDown, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { createManualVisit, deleteVisit } from '@/lib/actions/visit-history'
+
+// Tamaño de página del historial paginado (infinite scroll). Un valor
+// intermedio: trae varios días por página sin castigar el TTFB.
+const PAGE_SIZE = 80
 
 interface Branch {
   id: string
@@ -133,6 +137,11 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
 
   const [visits, setVisits] = useState<VisitHistory[]>([])
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+  const offsetRef = useRef(0)
+  const loadingMoreRef = useRef(false)
+  const sentinelRef = useRef<HTMLTableRowElement>(null)
 
   // Filtros
   const [branchId, setBranchId] = useState<string>(selectedBranchId ?? 'all')
@@ -190,44 +199,96 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const fetchHistory = useCallback(async () => {
-    setLoading(true)
-    try {
-      let q = supabase
-        .from('visits')
-        .select(`
-          id,
-          amount,
-          started_at,
-          completed_at,
-          payment_method,
-          payment_account_id,
-          notes,
-          tags,
-          branch:branches(name),
-          barber:staff(full_name),
-          client:clients(name, phone),
-          service:services(name),
-          payment_account:payment_accounts(id, name, alias_or_cbu)
-        `)
-        .order('completed_at', { ascending: false })
-        .limit(100)
+  const fetchHistory = useCallback(
+    async (mode: 'reset' | 'append' = 'reset') => {
+      const isReset = mode === 'reset'
+      // Evitar cargas concurrentes de "más días"
+      if (!isReset && loadingMoreRef.current) return
+      if (isReset) {
+        offsetRef.current = 0
+        setLoading(true)
+      } else {
+        loadingMoreRef.current = true
+        setLoadingMore(true)
+      }
+      const from = offsetRef.current
+      try {
+        let q = supabase
+          .from('visits')
+          .select(`
+            id,
+            amount,
+            started_at,
+            completed_at,
+            payment_method,
+            payment_account_id,
+            notes,
+            tags,
+            branch:branches(name),
+            barber:staff(full_name),
+            client:clients(name, phone),
+            service:services(name),
+            payment_account:payment_accounts(id, name, alias_or_cbu)
+          `)
+          .order('completed_at', { ascending: false })
+          .range(from, from + PAGE_SIZE - 1)
 
-      if (branchId !== 'all') q = q.eq('branch_id', branchId)
-      if (barberId !== 'all') q = q.eq('barber_id', barberId)
-      if (dateFrom) q = q.gte('completed_at', dateFrom + 'T00:00:00-03:00')
-      if (dateTo) q = q.lte('completed_at', dateTo + 'T23:59:59.999-03:00')
+        if (branchId !== 'all') q = q.eq('branch_id', branchId)
+        if (barberId !== 'all') q = q.eq('barber_id', barberId)
+        if (dateFrom) q = q.gte('completed_at', dateFrom + 'T00:00:00-03:00')
+        if (dateTo) q = q.lte('completed_at', dateTo + 'T23:59:59.999-03:00')
 
-      const { data, error } = await q
-      if (!error && data) setVisits(data as unknown as VisitHistory[])
-    } finally {
-      setLoading(false)
-    }
-  }, [supabase, branchId, barberId, dateFrom, dateTo])
+        const { data, error } = await q
+        if (!error && data) {
+          const rows = data as unknown as VisitHistory[]
+          setHasMore(rows.length === PAGE_SIZE)
+          offsetRef.current = from + rows.length
+          if (isReset) {
+            setVisits(rows)
+          } else {
+            // Dedupe defensivo por si una edición/borrado desfasó el offset
+            setVisits((prev) => {
+              const seen = new Set(prev.map((v) => v.id))
+              return [...prev, ...rows.filter((v) => !seen.has(v.id))]
+            })
+          }
+        } else if (error && !isReset) {
+          // Reintentable: no marcamos hasMore=false por un error transitorio
+          setHasMore(true)
+        }
+      } finally {
+        if (isReset) {
+          setLoading(false)
+        } else {
+          loadingMoreRef.current = false
+          setLoadingMore(false)
+        }
+      }
+    },
+    [supabase, branchId, barberId, dateFrom, dateTo]
+  )
 
+  // Reset (nueva búsqueda / cambio de filtros): fetchHistory se recrea al
+  // cambiar cualquier filtro, por lo que este efecto vuelve a la página 0.
   useEffect(() => {
-    fetchHistory()
+    fetchHistory('reset')
   }, [fetchHistory])
+
+  // Infinite scroll: cuando el centinela entra en viewport, cargar más días.
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el || !hasMore) return
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && !loadingMoreRef.current) {
+          fetchHistory('append')
+        }
+      },
+      { rootMargin: '600px 0px' }
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [fetchHistory, hasMore, visits.length])
 
   const fetchPaymentAccounts = useCallback(async () => {
     if (paymentAccounts.length > 0) return
@@ -403,9 +464,13 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
     (s) => s.branch_id === null || s.branch_id === addBranchId
   )
 
-  // Agrupar visitas por día
-  const groupedVisits: DayGroup[] = []
-  if (!loading && visits.length > 0) {
+  // Agrupar visitas por día (memoizado: la lista crece con el infinite scroll).
+  // El agrupado es robusto a páginas apendeadas porque el array viene ordenado
+  // por completed_at desc, así que las filas de un mismo día quedan contiguas y
+  // se fusionan correctamente aunque una página corte un día por la mitad.
+  const groupedVisits: DayGroup[] = useMemo(() => {
+    const groups: DayGroup[] = []
+    if (loading && visits.length === 0) return groups
     let currentGroup: DayGroup | null = null
     for (const v of visits) {
       const d = new Date(v.completed_at)
@@ -415,7 +480,7 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
         year: 'numeric',
       })
       if (!currentGroup || currentGroup.dateKey !== dateKey) {
-        if (currentGroup) groupedVisits.push(currentGroup)
+        if (currentGroup) groups.push(currentGroup)
         currentGroup = {
           dateKey,
           dateObj: d,
@@ -434,8 +499,9 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
       else if (v.payment_method === 'transfer') currentGroup.transferCuts += 1
       else if (v.payment_method === 'card') currentGroup.cardCuts += 1
     }
-    if (currentGroup) groupedVisits.push(currentGroup)
-  }
+    if (currentGroup) groups.push(currentGroup)
+    return groups
+  }, [visits, loading])
 
   const todayStr = new Date().toLocaleDateString('es-AR', {
     day: '2-digit',
@@ -461,7 +527,7 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
             <div>
               <CardTitle>Historial de Servicios</CardTitle>
               <CardDescription>
-                Últimos 100 servicios completados. Hacé clic en una fila para editarla.
+                Servicios completados, agrupados por día. Desplazate para ver días anteriores.
               </CardDescription>
             </div>
             <Button size="sm" onClick={openAddDialog}>
@@ -522,7 +588,7 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
               />
             </div>
             <div className="flex items-end">
-              <Button onClick={fetchHistory} disabled={loading} className="w-full">
+              <Button onClick={() => fetchHistory('reset')} disabled={loading} className="w-full">
                 {loading ? (
                   <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
@@ -653,6 +719,49 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
                       </Fragment>
                     )
                   })
+                )}
+                {visits.length > 0 && (
+                  <>
+                    {/* Centinela de infinite scroll (invisible) */}
+                    <tr ref={sentinelRef} aria-hidden="true">
+                      <td colSpan={9} className="h-px p-0" />
+                    </tr>
+                    {(hasMore || loadingMore) && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={9} className="py-4 text-center">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => fetchHistory('append')}
+                            disabled={loadingMore}
+                            className="text-muted-foreground"
+                          >
+                            {loadingMore ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Cargando más días…
+                              </>
+                            ) : (
+                              <>
+                                <ChevronDown className="mr-2 h-4 w-4" />
+                                Cargar más días
+                              </>
+                            )}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {!hasMore && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell
+                          colSpan={9}
+                          className="py-3 text-center text-xs text-muted-foreground"
+                        >
+                          No hay más servicios para mostrar
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </>
                 )}
               </TableBody>
             </Table>
