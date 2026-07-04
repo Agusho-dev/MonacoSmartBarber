@@ -149,13 +149,13 @@ export function MensajeriaClient(props: MensajeriaProps) {
           })}
           {/* Separador + toggle modo foco */}
           <div className="mt-auto flex flex-col items-center gap-1 pt-2">
-            <div className="h-px w-8 bg-border" />
+            <div className="h-px w-8 bg-[#2a3942]" />
             <button
               onClick={toggleFocusMode}
-              className={`relative flex flex-col items-center justify-center w-11 h-11 rounded-xl transition-colors ${
+              className={`relative flex flex-col items-center justify-center w-12 h-12 rounded-xl transition-colors ${
                 isFocusMode
-                  ? 'bg-green-600/15 text-green-400'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  ? 'bg-[#00a884]/15 text-[#00a884]'
+                  : 'text-[#aebac1] hover:bg-[#2a3942] hover:text-[#e9edef]'
               }`}
               title={isFocusMode ? 'Salir de modo foco' : 'Modo foco'}
               aria-pressed={isFocusMode}
@@ -168,7 +168,7 @@ export function MensajeriaClient(props: MensajeriaProps) {
 
         {/* ═══ MOBILE NAV — Bottom bar (solo mobile) ═══ */}
         <div
-          className="lg:hidden fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around bg-background border-t border py-1 px-2"
+          className="lg:hidden fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around bg-[#202c33] border-t border-[#0b141a] py-1 px-2"
           style={{ paddingBottom: 'max(0.25rem, env(safe-area-inset-bottom))' }}
         >
           {NAV_ITEMS.map(({ key, icon: Icon, label }) => {
@@ -178,7 +178,7 @@ export function MensajeriaClient(props: MensajeriaProps) {
                 key={key}
                 onClick={() => handleNavClick(key)}
                 className={`relative flex flex-col items-center justify-center py-1.5 px-2 rounded-lg transition-colors ${
-                  isActive ? 'text-green-400' : 'text-muted-foreground'
+                  isActive ? 'text-[#00a884]' : 'text-[#aebac1]'
                 }`}
               >
                 <Icon className="size-4.5" />
