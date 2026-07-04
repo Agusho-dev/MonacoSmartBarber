@@ -49,7 +49,7 @@ type Phase = 'starting' | 'invite' | 'reading' | 'result'
 // auto-captura, que además requiere un "hold" de ~1.4s (da tiempo a acomodar).
 const SMALL_W = 48
 const SMALL_H = 64            // el mini-canvas respeta el 3:4 del viewport
-const READY_TICKS = 7        // ~7 * 200ms ≈ 1.4s bien encuadrado antes de disparar
+const READY_TICKS = 6        // ~6 * 250ms ≈ 1.5s bien encuadrado antes de disparar
 const SKIP_TOP = 0.14        // banda superior IGNORADA: ahí vive la luz del techo (tablet fija)
 
 interface FrameResult { ready: boolean; hint: string; black: boolean }
@@ -276,7 +276,7 @@ export function ReceiptScanDialog({
     if (!video || video.readyState < 2) return
     stopLoop()
     try {
-      const blob = await frameToWebp(video, 1200, 0.82)
+      const blob = await frameToWebp(video, 1280, 0.85)
       await processCapture(blob, 'front_camera')
     } catch {
       setCamError('No se pudo capturar. Reintentá.')
@@ -338,7 +338,7 @@ export function ReceiptScanDialog({
         stableRef.current = 0
       }
       if (newHold !== lastHoldRef.current) { lastHoldRef.current = newHold; setHold(newHold) }
-    }, 200)
+    }, 250)
   }, [stopLoop, capture])
 
   // ── Abrir/cerrar cámara ──
@@ -350,7 +350,7 @@ export function ReceiptScanDialog({
     ;(async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode, width: { ideal: 1024 }, height: { ideal: 768 }, frameRate: { ideal: 15, max: 24 } },
+          video: { facingMode, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
           audio: false,
         })
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return }
@@ -424,7 +424,7 @@ export function ReceiptScanDialog({
     ;(async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode, width: { ideal: 1024 }, height: { ideal: 768 }, frameRate: { ideal: 15, max: 24 } }, audio: false,
+          video: { facingMode, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } }, audio: false,
         })
         streamRef.current = stream
         if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play().catch(() => {}) }

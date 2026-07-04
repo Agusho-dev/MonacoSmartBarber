@@ -139,8 +139,11 @@ export function ChatView({
     const out: { date: string; msgs: { msg: Message; firstOfRun: boolean }[] }[] = []
     for (const msg of messages) {
       const day = new Date(msg.created_at).toDateString()
-      const last = out[out.length - 1]
-      const bucket = !last || last.date !== day ? (out.push({ date: day, msgs: [] }), out[out.length - 1]) : last
+      let bucket = out[out.length - 1]
+      if (!bucket || bucket.date !== day) {
+        bucket = { date: day, msgs: [] }
+        out.push(bucket)
+      }
       const prev = bucket.msgs[bucket.msgs.length - 1]?.msg
       const firstOfRun = !prev || prev.direction !== msg.direction
       bucket.msgs.push({ msg, firstOfRun })

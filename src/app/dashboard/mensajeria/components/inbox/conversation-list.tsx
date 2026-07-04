@@ -2,12 +2,12 @@
 
 import { useState, useMemo } from 'react'
 import {
-  Search, Calendar, Plus, Pencil, MessageSquare, Instagram, Facebook, Clock, X,
+  Search, Calendar, Plus, Pencil, MessageSquare, Instagram, Facebook, Clock, X, CheckCheck,
   Camera, Video, Mic, FileText, LayoutTemplate, Sticker, MapPin,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar } from '../shared/avatar'
-import { WhatsAppIcon, MessageStatusIcon } from '../shared/icons'
+import { WhatsAppIcon } from '../shared/icons'
 import {
   displayName, formatRelativeDate, formatLastMessagePreview, lastMessageMediaKind,
   type LastMessageMediaKind,
@@ -191,9 +191,7 @@ export function ConversationList({
                         <div className="flex items-center justify-between gap-2 mt-0.5">
                           <p className={`flex items-center gap-1 truncate text-[13px] ${isUnread && !isOutbound ? 'text-[#e9edef]' : 'text-[#8696a0]'}`}>
                             {isOutbound && last && (
-                              <span className="shrink-0 text-[#8696a0] [&_svg]:size-3.5">
-                                <MessageStatusIcon status={last.status} />
-                              </span>
+                              <CheckCheck className="size-3.5 shrink-0 text-[#8696a0]" />
                             )}
                             {kind && <PreviewIcon kind={kind} />}
                             <span className="truncate">

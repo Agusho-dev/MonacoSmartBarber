@@ -199,7 +199,7 @@ export function MensajeriaClient(props: MensajeriaProps) {
           <button
             onClick={toggleFocusMode}
             className={`relative flex flex-col items-center justify-center py-1.5 px-2 rounded-lg transition-colors ${
-              isFocusMode ? 'text-green-400' : 'text-muted-foreground'
+              isFocusMode ? 'text-[#00a884]' : 'text-[#aebac1]'
             }`}
             aria-pressed={isFocusMode}
             aria-label={isFocusMode ? 'Salir de modo foco' : 'Modo foco'}
@@ -248,11 +248,11 @@ function TopTagsBar() {
   const { tags, tagFilter, setTagFilter } = useMensajeria()
   if (tags.length === 0) return null
   return (
-    <div className="border-b border bg-card px-3 py-2 overflow-x-auto scrollbar-thin scrollbar-thumb-muted-foreground/20 scrollbar-track-transparent">
+    <div className="border-b border-[#0b141a] bg-[#111b21] px-3 py-2 overflow-x-auto wa-scroll">
       <div className="flex items-center gap-1 whitespace-nowrap w-max">
         <button
           onClick={() => setTagFilter(null)}
-          className={`px-2.5 py-1 rounded-full text-[11px] font-medium shrink-0 transition-colors ${tagFilter === null ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+          className={`px-2.5 py-1 rounded-full text-[11px] font-medium shrink-0 transition-colors ${tagFilter === null ? 'bg-[#2a3942] text-[#e9edef]' : 'text-[#8696a0] hover:text-[#e9edef]'}`}
         >
           Todas
         </button>
@@ -260,7 +260,7 @@ function TopTagsBar() {
           <button
             key={tag.id}
             onClick={() => setTagFilter(tagFilter === tag.id ? null : tag.id)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all border shrink-0 ${tagFilter === tag.id ? 'text-white border-transparent' : 'text-muted-foreground border hover:border-foreground/30'}`}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all border shrink-0 ${tagFilter === tag.id ? 'text-white border-transparent' : 'text-[#8696a0] border-[#2a3942] hover:border-[#3b4a54]'}`}
             style={tagFilter === tag.id ? { backgroundColor: tag.color, borderColor: tag.color } : {}}
           >
             <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
