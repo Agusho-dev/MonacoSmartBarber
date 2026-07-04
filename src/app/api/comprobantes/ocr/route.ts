@@ -33,10 +33,20 @@ function normAlias(s: string | null | undefined): string {
 /** Instante del comprobante en ms. Si la fecha no trae zona horaria, asume AR (-03:00). */
 function parseReceiptInstant(iso: string | null): number | null {
   if (!iso) return null
-  const s = iso.trim()
-  const hasTz = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)
-  const t = Date.parse(hasTz ? s : s + '-03:00')
+  let s = iso.trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    // Sólo fecha (sin hora) → mediodía AR, para que caiga en el día correcto.
+    s = s + 'T12:00:00-03:00'
+  } else if (!/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)) {
+    s = s + '-03:00'
+  }
+  const t = Date.parse(s)
   return Number.isNaN(t) ? null : t
+}
+
+/** Día calendario en Argentina (YYYY-MM-DD) de un instante ms. */
+function arDayString(ms: number): string {
+  return new Date(ms - 3 * 3600000).toISOString().slice(0, 10)
 }
 
 export async function POST(req: NextRequest) {
@@ -153,8 +163,15 @@ export async function POST(req: NextRequest) {
   let dateOk: boolean | null = null
   const receiptInstant = parseReceiptInstant(extracted?.datetime ?? null)
   if (receiptInstant != null) {
-    const ageMs = Date.now() - receiptInstant
-    dateOk = ageMs >= -15 * 60000 && ageMs <= toleranceMin * 60000
+    const nowMs = Date.now()
+    // Robusto a lecturas de hora imprecisas (cámara de baja resolución): el
+    // comprobante vale si es del MISMO DÍA (AR) o cae dentro de la ventana
+    // (esta última cubre el borde de medianoche). Sólo se marca "viejo" si es
+    // de OTRO día y fuera de la ventana.
+    const sameDay = arDayString(receiptInstant) === arDayString(nowMs)
+    const ageMs = nowMs - receiptInstant
+    const withinWindow = ageMs >= -15 * 60000 && ageMs <= toleranceMin * 60000
+    dateOk = sameDay || withinWindow
   }
 
   // ── 4) Estado (cascada por prioridad de riesgo) ──────────

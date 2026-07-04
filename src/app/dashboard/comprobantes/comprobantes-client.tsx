@@ -496,7 +496,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
             </div>
 
             <div className={cn(!sEnabled && 'pointer-events-none opacity-50')}>
-              <p className="mb-2 text-sm font-semibold">Antigüedad máxima del comprobante</p>
+              <p className="mb-2 text-sm font-semibold">Tolerancia de horario</p>
               <Select value={String(sDateTol)} onValueChange={(v) => canManage && setSDateTol(Number(v))}>
                 <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -508,7 +508,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
                 </SelectContent>
               </Select>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                Un comprobante más viejo que esto se marca <span className="font-semibold text-rose-600 dark:text-rose-400">“Fecha vieja”</span> y no se da por válido. Más corto = más seguro contra comprobantes reusados.
+                Se marca <span className="font-semibold text-rose-600 dark:text-rose-400">“Fecha vieja”</span> si el comprobante es de <b>otro día</b>. Esta ventana tolera además transferencias hechas un rato antes (útil cerca de medianoche).
               </p>
             </div>
 
