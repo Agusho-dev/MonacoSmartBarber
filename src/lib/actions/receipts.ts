@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { createAdminClient, createClient } from '@/lib/supabase/server'
-import { getBarberSession } from '@/lib/actions/auth'
+import { resolveReceiptContext } from '@/lib/receipts/context'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { getEffectivePermissions } from '@/lib/permissions'
@@ -28,14 +28,14 @@ const DEFAULTS: TransferReceiptSettingsView = {
  * Si no hay fila, la feature está apagada (default seguro multi-tenant).
  */
 export async function getTransferReceiptSettings(): Promise<TransferReceiptSettingsView> {
-  const session = await getBarberSession()
-  if (!session) return DEFAULTS
+  const ctx = await resolveReceiptContext()
+  if (!ctx) return DEFAULTS
 
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('transfer_receipt_settings')
     .select('is_enabled, extraction_engine, required_since, amount_tolerance')
-    .eq('organization_id', session.organization_id)
+    .eq('organization_id', ctx.organizationId)
     .maybeSingle()
 
   if (!data) return DEFAULTS
@@ -56,8 +56,8 @@ export async function linkReceiptToVisit(
   receiptId: string,
   visitId: string,
 ): Promise<{ ok: true } | { error: string }> {
-  const session = await getBarberSession()
-  if (!session) return { error: 'No autorizado' }
+  const ctx = await resolveReceiptContext()
+  if (!ctx) return { error: 'No autorizado' }
 
   const supabase = createAdminClient()
 
@@ -72,7 +72,7 @@ export async function linkReceiptToVisit(
     .from('payment_receipts')
     .update({ visit_id: visitId, transfer_log_id: log?.id ?? null })
     .eq('id', receiptId)
-    .eq('organization_id', session.organization_id)
+    .eq('organization_id', ctx.organizationId)
 
   if (error) {
     console.error('[linkReceiptToVisit]', error.message)
@@ -94,25 +94,25 @@ const QR_TMP = (orgId: string, token: string) => `${orgId}/qr/${token}.webp`
 
 /** Crea una sesión de subida QR para la org del barbero. Devuelve el token. */
 export async function createReceiptUploadSession(): Promise<{ token: string } | { error: string }> {
-  const session = await getBarberSession()
-  if (!session) return { error: 'No autorizado' }
+  const ctx = await resolveReceiptContext()
+  if (!ctx) return { error: 'No autorizado' }
   const supabase = createAdminClient()
   const token = randomUUID()
   const { error } = await supabase
     .from('qr_photo_sessions')
-    .insert({ token, organization_id: session.organization_id })
+    .insert({ token, organization_id: ctx.organizationId })
   if (error) { console.error('[createReceiptUploadSession]', error.message); return { error: 'No se pudo iniciar' } }
   return { token }
 }
 
 /** La tablet pregunta si ya llegó la imagen. Devuelve una signed URL cuando existe. */
 export async function pollReceiptUpload(token: string): Promise<{ url: string } | { pending: true } | { error: string }> {
-  const session = await getBarberSession()
-  if (!session) return { error: 'No autorizado' }
+  const ctx = await resolveReceiptContext()
+  if (!ctx) return { error: 'No autorizado' }
   const supabase = createAdminClient()
   const { data } = await supabase.storage
     .from('transfer-receipts')
-    .createSignedUrl(QR_TMP(session.organization_id, token), 300)
+    .createSignedUrl(QR_TMP(ctx.organizationId, token), 300)
   if (data?.signedUrl) return { url: data.signedUrl }
   return { pending: true }
 }

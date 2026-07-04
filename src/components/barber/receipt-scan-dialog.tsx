@@ -32,6 +32,8 @@ interface ReceiptScanDialogProps {
   engine: ReceiptEngine
   /** Monto que se está cobrando (para validar contra el comprobante). */
   expectedAmount: number
+  branchId: string
+  barberId: string | null
   paymentAccountId: string | null
   clientId: string | null
   onClose: () => void
@@ -140,7 +142,7 @@ function frameToWebp(video: HTMLVideoElement, maxW: number, quality: number): Pr
 }
 
 export function ReceiptScanDialog({
-  open, engine, expectedAmount, paymentAccountId, clientId, onClose, onAccept,
+  open, engine, expectedAmount, branchId, barberId, paymentAccountId, clientId, onClose, onAccept,
 }: ReceiptScanDialogProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -215,6 +217,8 @@ export function ReceiptScanDialog({
             engine,
             imageBase64: base64,
             mediaType: 'image/webp',
+            branchId,
+            barberId,
             expectedAmount,
             paymentAccountId,
             clientId,
@@ -246,7 +250,7 @@ export function ReceiptScanDialog({
         setPhase('invite')
       }
     },
-    [engine, expectedAmount, paymentAccountId, clientId, stopStream, stopLoop],
+    [engine, expectedAmount, branchId, barberId, paymentAccountId, clientId, stopStream, stopLoop],
   )
 
   const capture = useCallback(async () => {

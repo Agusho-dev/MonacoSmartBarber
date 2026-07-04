@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
-import { getBarberSession } from '@/lib/actions/auth'
+import { resolveReceiptContext } from '@/lib/receipts/context'
 import { createAdminClient } from '@/lib/supabase/server'
 import { extractWithVision, DEFAULT_OPENAI_VISION, DEFAULT_ANTHROPIC_VISION, type VisionOpts } from '@/lib/receipts/extract'
 import type { ExtractedReceipt } from '@/lib/receipts/schema'
@@ -13,6 +13,8 @@ interface OcrBody {
   engine: 'ai' | 'ocr'
   imageBase64: string
   mediaType?: string
+  branchId?: string | null
+  barberId?: string | null
   expectedAmount?: number | null
   paymentAccountId?: string | null
   clientId?: string | null
@@ -29,8 +31,8 @@ function normAlias(s: string | null | undefined): string {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getBarberSession()
-  if (!session) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+  const ctx = await resolveReceiptContext()
+  if (!ctx) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
   let body: OcrBody
   try {
@@ -39,9 +41,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Body inválido' }, { status: 400 })
   }
 
-  const orgId = session.organization_id
-  const branchId = session.branch_id
+  const orgId = ctx.organizationId
   const supabase = createAdminClient()
+
+  // La sucursal viene del cobro (funciona igual desde panel barbero o dashboard);
+  // validamos que pertenezca a la org del que está cobrando.
+  if (!body.branchId) return NextResponse.json({ error: 'Falta la sucursal' }, { status: 400 })
+  const { data: br } = await supabase
+    .from('branches').select('organization_id').eq('id', body.branchId).maybeSingle()
+  if (!br || br.organization_id !== orgId) {
+    return NextResponse.json({ error: 'Sucursal inválida' }, { status: 403 })
+  }
+  const branchId = body.branchId
   const mediaType = body.mediaType || 'image/webp'
   const expectedAmount = body.expectedAmount != null ? Number(body.expectedAmount) : null
 
@@ -150,7 +161,7 @@ export async function POST(req: NextRequest) {
   const fields = {
     organization_id: orgId,
     branch_id: branchId,
-    barber_id: session.staff_id,
+    barber_id: body.barberId ?? ctx.staffId,
     client_id: body.clientId ?? null,
     payment_account_id: body.paymentAccountId ?? null,
     image_path: imagePath,

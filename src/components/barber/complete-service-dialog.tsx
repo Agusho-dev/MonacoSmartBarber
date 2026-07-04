@@ -847,6 +847,8 @@ export function CompleteServiceDialog({
       open={scanOpen}
       engine={receiptSettings?.engine ?? 'ai'}
       expectedAmount={chargeAmount}
+      branchId={branchId}
+      barberId={entry?.barber_id ?? null}
       paymentAccountId={selectedAccountId || null}
       clientId={entry?.client_id ?? null}
       onClose={() => setScanOpen(false)}
