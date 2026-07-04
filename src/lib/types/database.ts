@@ -429,7 +429,7 @@ export interface PaymentAccount {
 
 // ── Comprobantes de transferencia (mig 157) ──────────────────
 export type ReceiptStatus =
-  | 'verified' | 'amount_mismatch' | 'duplicate' | 'needs_review' | 'manual_ok' | 'overridden'
+  | 'verified' | 'amount_mismatch' | 'duplicate' | 'needs_review' | 'manual_ok' | 'overridden' | 'date_mismatch'
 
 export type ReceiptCaptureMethod = 'front_camera' | 'qr_upload' | 'gallery'
 export type ReceiptEngine = 'ai' | 'ocr'
@@ -461,6 +461,7 @@ export interface PaymentReceipt {
   expected_amount: number | null
   amount_matches: boolean | null
   alias_matches: boolean | null
+  date_ok: boolean | null
   reconciled_at: string | null
   reconciled_by: string | null
   review_note: string | null
@@ -473,6 +474,7 @@ export interface TransferReceiptSettings {
   extraction_engine: ReceiptEngine
   required_since: string | null
   amount_tolerance: number
+  date_tolerance_minutes: number
   created_at: string
   updated_at: string
 }

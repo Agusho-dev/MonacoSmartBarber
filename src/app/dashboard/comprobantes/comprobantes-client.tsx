@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition, type ComponentType } from 
 import {
   ScanLine, Settings, CheckCircle2, AlertTriangle, Copy, Clock, FileQuestion,
   ReceiptText, Download, Sparkles, Cpu, ShieldCheck, ExternalLink, X, ChevronRight,
-  Loader2, Building2, Wallet,
+  Loader2, Building2, Wallet, CalendarX2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -34,13 +34,14 @@ const STATE_META: Record<ReconState, {
   conciliado:      { label: 'Conciliado',        short: 'Conciliados',     icon: CheckCircle2,  text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10', ring: 'border-emerald-500/30' },
   sin_comprobante: { label: 'Sin comprobante',   short: 'Sin comprobante', icon: ReceiptText,   text: 'text-amber-600 dark:text-amber-400',     bg: 'bg-amber-500/10',   ring: 'border-amber-500/30' },
   monto:           { label: 'Monto no coincide', short: 'Monto ≠',         icon: AlertTriangle, text: 'text-orange-600 dark:text-orange-400',   bg: 'bg-orange-500/10',  ring: 'border-orange-500/30' },
+  fecha:           { label: 'Fecha vieja',        short: 'Fecha vieja',    icon: CalendarX2,    text: 'text-rose-600 dark:text-rose-400',       bg: 'bg-rose-500/10',    ring: 'border-rose-500/30' },
   duplicado:       { label: 'Duplicado',         short: 'Duplicados',      icon: Copy,          text: 'text-red-600 dark:text-red-400',         bg: 'bg-red-500/10',     ring: 'border-red-500/30' },
   revision:        { label: 'En revisión',       short: 'En revisión',     icon: Clock,         text: 'text-sky-600 dark:text-sky-400',         bg: 'bg-sky-500/10',     ring: 'border-sky-500/30' },
   huerfano:        { label: 'Sin cobro',         short: 'Sin cobro',       icon: FileQuestion,  text: 'text-violet-600 dark:text-violet-400',   bg: 'bg-violet-500/10',  ring: 'border-violet-500/30' },
   historico:       { label: 'Histórico',         short: 'Histórico',       icon: Clock,         text: 'text-muted-foreground',                  bg: 'bg-muted',          ring: 'border-border' },
 }
 
-const TILE_ORDER: ReconState[] = ['conciliado', 'sin_comprobante', 'monto', 'duplicado', 'revision', 'huerfano']
+const TILE_ORDER: ReconState[] = ['conciliado', 'sin_comprobante', 'monto', 'fecha', 'duplicado', 'revision', 'huerfano']
 
 function useCountUp(target: number, dur = 750): number {
   const [v, setV] = useState(0)
@@ -147,6 +148,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [sEnabled, setSEnabled] = useState(initialSettings.isEnabled)
   const [sEngine, setSEngine] = useState<ReceiptEngine>(initialSettings.engine)
+  const [sDateTol, setSDateTol] = useState(initialSettings.dateToleranceMinutes)
   const [sSaving, setSSaving] = useState(false)
 
   function refetch(next?: { preset?: Preset; branchId?: string; accountId?: string }) {
@@ -188,16 +190,17 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
   function openSettings() {
     setSEnabled(settings.isEnabled)
     setSEngine(settings.engine)
+    setSDateTol(settings.dateToleranceMinutes)
     setSettingsOpen(true)
   }
 
   async function saveSettings() {
     setSSaving(true)
-    const res = await updateReceiptSettings({ isEnabled: sEnabled, engine: sEngine })
+    const res = await updateReceiptSettings({ isEnabled: sEnabled, engine: sEngine, dateToleranceMinutes: sDateTol })
     setSSaving(false)
     if ('error' in res) { toast.error(res.error); return }
     toast.success('Configuración guardada')
-    setSettings({ ...settings, isEnabled: sEnabled, engine: sEngine, requiredSince: settings.requiredSince ?? (sEnabled ? new Date().toISOString() : null) })
+    setSettings({ ...settings, isEnabled: sEnabled, engine: sEngine, dateToleranceMinutes: sDateTol, requiredSince: settings.requiredSince ?? (sEnabled ? new Date().toISOString() : null) })
     setSettingsOpen(false)
     refetch()
   }
@@ -422,6 +425,11 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
                 <div className="space-y-2 rounded-xl border p-4">
                   <CompareRow label="Monto cobrado" value={detail.chargedAmount != null ? formatCurrency(detail.chargedAmount) : '—'} />
                   <CompareRow label="Monto en el comprobante" value={detail.receipt?.extractedAmount != null ? formatCurrency(detail.receipt.extractedAmount) : '—'} ok={detail.receipt?.amountMatches} />
+                  <CompareRow
+                    label="Fecha del comprobante"
+                    value={detail.receipt?.extractedDatetime ? new Date(detail.receipt.extractedDatetime).toLocaleString('es-AR') : '—'}
+                    ok={detail.receipt?.dateOk}
+                  />
                   <Separator />
                   <CompareRow label="Nº de operación" value={detail.receipt?.operationNumber ?? '—'} mono />
                   <CompareRow label="Alias/CBU destino" value={detail.receipt?.recipientAlias ?? '—'} ok={detail.receipt?.aliasMatches} mono />
@@ -485,6 +493,23 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
                   icon={Cpu} title="Motor" subtitle="OCR local" badge="Gratis" tone="ocr"
                   desc="Sin costo, corre en la tablet. Menos preciso." />
               </div>
+            </div>
+
+            <div className={cn(!sEnabled && 'pointer-events-none opacity-50')}>
+              <p className="mb-2 text-sm font-semibold">Antigüedad máxima del comprobante</p>
+              <Select value={String(sDateTol)} onValueChange={(v) => canManage && setSDateTol(Number(v))}>
+                <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="30">30 minutos</SelectItem>
+                  <SelectItem value="60">1 hora</SelectItem>
+                  <SelectItem value="120">2 horas</SelectItem>
+                  <SelectItem value="180">3 horas</SelectItem>
+                  <SelectItem value="360">6 horas</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Un comprobante más viejo que esto se marca <span className="font-semibold text-rose-600 dark:text-rose-400">“Fecha vieja”</span> y no se da por válido. Más corto = más seguro contra comprobantes reusados.
+              </p>
             </div>
 
             <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-3 text-xs text-muted-foreground">

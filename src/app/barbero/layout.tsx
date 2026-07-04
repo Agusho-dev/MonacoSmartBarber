@@ -1,3 +1,5 @@
+import type { Metadata, Viewport } from 'next'
+
 import { BarberNav } from '@/components/barber/barber-nav'
 import { getBarberSession } from '@/lib/actions/auth'
 
@@ -7,6 +9,24 @@ import { OfflineBanner } from '@/components/barber/offline-banner'
 import { DbDownError } from '@/components/dashboard/db-down-error'
 
 import { BarberThemeClient } from '@/components/barber/barber-theme-client'
+import { SwRegister } from '@/components/barber/sw-register'
+
+// Metadata scopeada a /barbero: inyecta el manifest PWA y los meta de
+// standalone SOLO en el panel (no en dashboard/kiosko/TV).
+export const metadata: Metadata = {
+  title: 'Panel Barbero',
+  manifest: '/barbero.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Panel Barbero',
+  },
+}
+
+export const viewport: Viewport = {
+  // El panel es tema claro (bg #f2f2f2): status bar acorde en standalone/TWA.
+  themeColor: '#f2f2f2',
+}
 
 export default async function BarberLayout({
   children,
@@ -49,6 +69,7 @@ export default async function BarberLayout({
   return (
     <div className="barber-theme min-h-dvh bg-background text-foreground pb-20">
       <BarberThemeClient />
+      <SwRegister />
       <WakeLock />
       <OfflineBanner />
       {children}

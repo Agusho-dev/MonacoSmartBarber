@@ -389,6 +389,16 @@ export function ReceiptScanDialog({
     return () => cancelAnimationFrame(raf)
   }, [phase, result])
 
+  // Auto-finalizar: si el comprobante quedó VERIFICADO, avanzamos solos (sin tap).
+  // Se muestra el éxito ~1.5s y luego se acepta → el cobro se cierra automáticamente.
+  useEffect(() => {
+    if (open && phase === 'result' && result?.status === 'verified') {
+      const id = setTimeout(() => onAccept(result), 1500)
+      return () => clearTimeout(id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, phase, result])
+
   // ── Fallback QR: el cliente sube desde su propio celular ──
   async function startQr() {
     stopLoop(); stopStream(); setCamError(null)
@@ -457,7 +467,7 @@ export function ReceiptScanDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="max-w-md overflow-hidden p-0 gap-0">
+      <DialogContent className="max-w-md overflow-hidden p-0 gap-0" showCloseButton={false}>
         <DialogHeader className="p-5 pb-3">
           <DialogTitle className="flex items-center gap-2">
             <ScanLine className="size-5 text-emerald-500" />
@@ -593,12 +603,14 @@ export function ReceiptScanDialog({
                     <p className="mt-4 text-lg font-bold text-white">
                       {result.status === 'duplicate' && 'Comprobante ya usado'}
                       {result.status === 'amount_mismatch' && 'El monto no coincide'}
+                      {result.status === 'date_mismatch' && 'Comprobante viejo'}
                       {result.status === 'needs_review' && 'No pudimos leerlo'}
                     </p>
                     <p className="mt-1 max-w-[16rem] text-sm text-white/80">
                       {result.status === 'duplicate' && 'Este número de operación ya se registró en otro cobro.'}
                       {result.status === 'amount_mismatch' && extracted?.amount != null &&
                         `Leído ${formatCurrency(extracted.amount)} · esperado ${formatCurrency(expectedAmount)}.`}
+                      {result.status === 'date_mismatch' && 'La fecha no corresponde a este cobro (es viejo o de otro día).'}
                       {result.status === 'needs_review' && 'La imagen quedó guardada para que un admin la revise.'}
                     </p>
                   </>
@@ -652,9 +664,9 @@ export function ReceiptScanDialog({
 
           {phase === 'result' && result && (
             isVerified ? (
-              <Button onClick={() => onAccept(result)} size="lg" className="h-14 w-full text-base font-bold">
-                <Check className="mr-2 size-5" /> Continuar
-              </Button>
+              <div className="flex items-center justify-center gap-2 py-3 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                <Loader2 className="size-4 animate-spin" /> Finalizando el cobro…
+              </div>
             ) : (
               <div className="flex gap-2">
                 <Button variant="outline" size="lg" className="h-14 flex-1" onClick={retry}>

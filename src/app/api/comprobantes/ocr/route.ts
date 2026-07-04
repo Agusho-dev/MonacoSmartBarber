@@ -30,6 +30,15 @@ function normAlias(s: string | null | undefined): string {
   return (s ?? '').toLowerCase().replace(/[\s.\-]/g, '')
 }
 
+/** Instante del comprobante en ms. Si la fecha no trae zona horaria, asume AR (-03:00). */
+function parseReceiptInstant(iso: string | null): number | null {
+  if (!iso) return null
+  const s = iso.trim()
+  const hasTz = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)
+  const t = Date.parse(hasTz ? s : s + '-03:00')
+  return Number.isNaN(t) ? null : t
+}
+
 export async function POST(req: NextRequest) {
   const ctx = await resolveReceiptContext()
   if (!ctx) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
@@ -116,7 +125,7 @@ export async function POST(req: NextRequest) {
   // ── 3) Matching monto + alias ────────────────────────────
   const { data: settings } = await supabase
     .from('transfer_receipt_settings')
-    .select('amount_tolerance')
+    .select('amount_tolerance, date_tolerance_minutes')
     .eq('organization_id', orgId)
     .maybeSingle()
   const tolerance = Number(settings?.amount_tolerance ?? 1)
@@ -138,14 +147,20 @@ export async function POST(req: NextRequest) {
     if (want && got) aliasMatches = want === got || want.includes(got) || got.includes(want)
   }
 
-  // ── 4) Estado ────────────────────────────────────────────
-  let status: ReceiptStatus
-  if (!extracted || extracted.amount == null) status = 'needs_review'
-  else if (amountMatches === false) status = 'amount_mismatch'
-  else status = 'verified'
+  // Frescura de la fecha: el comprobante debe ser RECIENTE (anti-fraude "comprobante viejo").
+  // true = reciente · false = viejo o futuro · null = no se pudo leer la fecha.
+  const toleranceMin = Number(settings?.date_tolerance_minutes ?? 180)
+  let dateOk: boolean | null = null
+  const receiptInstant = parseReceiptInstant(extracted?.datetime ?? null)
+  if (receiptInstant != null) {
+    const ageMs = Date.now() - receiptInstant
+    dateOk = ageMs >= -15 * 60000 && ageMs <= toleranceMin * 60000
+  }
 
+  // ── 4) Estado (cascada por prioridad de riesgo) ──────────
   // Anti-duplicado: mismo nº de operación ya usado en un comprobante válido.
-  if (status !== 'needs_review' && extracted?.operationNumber) {
+  let isDuplicate = false
+  if (extracted?.operationNumber) {
     const { data: dup } = await supabase
       .from('payment_receipts')
       .select('id')
@@ -154,8 +169,16 @@ export async function POST(req: NextRequest) {
       .in('status', ['verified', 'amount_mismatch', 'manual_ok', 'overridden'])
       .limit(1)
       .maybeSingle()
-    if (dup) status = 'duplicate'
+    if (dup) isDuplicate = true
   }
+
+  let status: ReceiptStatus
+  if (!extracted || extracted.amount == null) status = 'needs_review'
+  else if (isDuplicate) status = 'duplicate'
+  else if (dateOk === false) status = 'date_mismatch'       // comprobante viejo o futuro
+  else if (dateOk === null) status = 'needs_review'         // fecha ilegible → revisar (fail-closed)
+  else if (amountMatches === false) status = 'amount_mismatch'
+  else status = 'verified'
 
   // ── 5) Persistir: UPDATE si es reintento (evita huérfanos), INSERT si es nuevo ──
   const fields = {
@@ -181,6 +204,7 @@ export async function POST(req: NextRequest) {
     expected_amount: expectedAmount,
     amount_matches: amountMatches,
     alias_matches: aliasMatches,
+    date_ok: dateOk,
   }
 
   let savedId: string | null = null

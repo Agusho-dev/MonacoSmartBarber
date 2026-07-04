@@ -14,6 +14,7 @@ export interface TransferReceiptSettingsView {
   engine: ReceiptEngine
   requiredSince: string | null
   amountTolerance: number
+  dateToleranceMinutes: number
 }
 
 const DEFAULTS: TransferReceiptSettingsView = {
@@ -21,6 +22,7 @@ const DEFAULTS: TransferReceiptSettingsView = {
   engine: 'ai',
   requiredSince: null,
   amountTolerance: 1,
+  dateToleranceMinutes: 180,
 }
 
 /**
@@ -34,7 +36,7 @@ export async function getTransferReceiptSettings(): Promise<TransferReceiptSetti
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('transfer_receipt_settings')
-    .select('is_enabled, extraction_engine, required_since, amount_tolerance')
+    .select('is_enabled, extraction_engine, required_since, amount_tolerance, date_tolerance_minutes')
     .eq('organization_id', ctx.organizationId)
     .maybeSingle()
 
@@ -44,6 +46,7 @@ export async function getTransferReceiptSettings(): Promise<TransferReceiptSetti
     engine: (data.extraction_engine as ReceiptEngine) ?? 'ai',
     requiredSince: data.required_since,
     amountTolerance: Number(data.amount_tolerance ?? 1),
+    dateToleranceMinutes: Number(data.date_tolerance_minutes ?? 180),
   }
 }
 
@@ -151,7 +154,7 @@ export async function submitReceiptUpload(
 // ============================================================
 
 export type ReconState =
-  | 'conciliado' | 'sin_comprobante' | 'monto' | 'duplicado' | 'revision' | 'huerfano' | 'historico'
+  | 'conciliado' | 'sin_comprobante' | 'monto' | 'fecha' | 'duplicado' | 'revision' | 'huerfano' | 'historico'
 
 export interface ReconReceipt {
   id: string
@@ -165,6 +168,8 @@ export interface ReconReceipt {
   imagePath: string | null
   amountMatches: boolean | null
   aliasMatches: boolean | null
+  dateOk: boolean | null
+  extractedDatetime: string | null
   captureMethod: string
   engine: string | null
   reviewNote: string | null
@@ -201,7 +206,7 @@ export interface ReconResult {
 }
 
 const EMPTY_COUNTS: Record<ReconState, number> = {
-  conciliado: 0, sin_comprobante: 0, monto: 0, duplicado: 0, revision: 0, huerfano: 0, historico: 0,
+  conciliado: 0, sin_comprobante: 0, monto: 0, fecha: 0, duplicado: 0, revision: 0, huerfano: 0, historico: 0,
 }
 const EMPTY_RESULT: ReconResult = {
   rows: [],
@@ -248,6 +253,8 @@ function mapReceipt(r: Record<string, unknown> | null): ReconReceipt | null {
     imagePath: (r.image_path as string) ?? null,
     amountMatches: (r.amount_matches as boolean | null) ?? null,
     aliasMatches: (r.alias_matches as boolean | null) ?? null,
+    dateOk: (r.date_ok as boolean | null) ?? null,
+    extractedDatetime: (r.extracted_datetime as string) ?? null,
     captureMethod: (r.capture_method as string) ?? 'front_camera',
     engine: (r.extraction_engine as string) ?? null,
     reviewNote: (r.review_note as string) ?? null,
@@ -260,6 +267,7 @@ function stateFromReceipt(status: ReceiptStatus): ReconState {
     case 'verified':
     case 'manual_ok': return 'conciliado'
     case 'amount_mismatch': return 'monto'
+    case 'date_mismatch': return 'fecha'
     case 'duplicate': return 'duplicado'
     case 'needs_review':
     case 'overridden':
@@ -305,7 +313,7 @@ export async function getReconciliation(params: {
       client:clients(name),
       barber:staff(full_name),
       account:payment_accounts(name),
-      receipt:payment_receipts(id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, capture_method, extraction_engine, review_note, created_at, expected_amount)`)
+      receipt:payment_receipts(id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, created_at, expected_amount)`)
     .eq('organization_id', orgId)
     .eq('payment_method', 'transfer')
     .in('branch_id', branchIds)
@@ -319,7 +327,7 @@ export async function getReconciliation(params: {
 
   let oq = supabase
     .from('payment_receipts')
-    .select(`id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, capture_method, extraction_engine, review_note, created_at, expected_amount, payment_account_id, barber:staff(full_name), account:payment_accounts(name)`)
+    .select(`id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, created_at, expected_amount, payment_account_id, barber:staff(full_name), account:payment_accounts(name)`)
     .eq('organization_id', orgId)
     .is('visit_id', null)
     .in('branch_id', branchIds)
@@ -451,7 +459,7 @@ export async function getReceiptSettingsForOrg(): Promise<TransferReceiptSetting
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('transfer_receipt_settings')
-    .select('is_enabled, extraction_engine, required_since, amount_tolerance')
+    .select('is_enabled, extraction_engine, required_since, amount_tolerance, date_tolerance_minutes')
     .eq('organization_id', orgId)
     .maybeSingle()
   if (!data) return DEFAULTS
@@ -460,6 +468,7 @@ export async function getReceiptSettingsForOrg(): Promise<TransferReceiptSetting
     engine: (data.extraction_engine as ReceiptEngine) ?? 'ai',
     requiredSince: data.required_since,
     amountTolerance: Number(data.amount_tolerance ?? 1),
+    dateToleranceMinutes: Number(data.date_tolerance_minutes ?? 180),
   }
 }
 
@@ -467,6 +476,7 @@ export async function getReceiptSettingsForOrg(): Promise<TransferReceiptSetting
 export async function updateReceiptSettings(input: {
   isEnabled: boolean
   engine: ReceiptEngine
+  dateToleranceMinutes?: number
 }): Promise<{ ok: true } | { error: string }> {
   const perms = await getDashboardPerms()
   if (!perms['comprobantes.manage']) return { error: 'No tenés permiso para configurar' }
@@ -483,18 +493,20 @@ export async function updateReceiptSettings(input: {
     ? existing?.required_since ?? new Date().toISOString()
     : existing?.required_since ?? null
 
+  const row: Record<string, unknown> = {
+    organization_id: orgId,
+    is_enabled: input.isEnabled,
+    extraction_engine: input.engine,
+    required_since: requiredSince,
+    updated_at: new Date().toISOString(),
+  }
+  if (input.dateToleranceMinutes != null) {
+    row.date_tolerance_minutes = Math.max(5, Math.round(input.dateToleranceMinutes))
+  }
+
   const { error } = await supabase
     .from('transfer_receipt_settings')
-    .upsert(
-      {
-        organization_id: orgId,
-        is_enabled: input.isEnabled,
-        extraction_engine: input.engine,
-        required_since: requiredSince,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'organization_id' },
-    )
+    .upsert(row, { onConflict: 'organization_id' })
   if (error) { console.error('[updateReceiptSettings]', error.message); return { error: 'No se pudo guardar' } }
   revalidatePath('/dashboard/comprobantes')
   return { ok: true }

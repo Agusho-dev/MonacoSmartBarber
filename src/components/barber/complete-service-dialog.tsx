@@ -221,8 +221,8 @@ export function CompleteServiceDialog({
     setPhotoPreviews((prev) => prev.filter((_, i) => i !== index))
   }
 
-  async function finishService() {
-    if (!entry || !selectedPayment) return
+  async function finishService(receiptForLink?: ReceiptScanResult | null) {
+    if (!entry || !selectedPayment || loading) return
     setLoading(true)
 
     try {
@@ -276,8 +276,9 @@ export function CompleteServiceDialog({
       }
 
       // Vincular el comprobante de transferencia escaneado a la visita creada.
-      if (result.visitId && receiptScan?.receiptId) {
-        await linkReceiptToVisit(receiptScan.receiptId, result.visitId)
+      const scanForLink = receiptForLink ?? receiptScan
+      if (result.visitId && scanForLink?.receiptId) {
+        await linkReceiptToVisit(scanForLink.receiptId, result.visitId)
       }
 
       if (entry.client_id && clientNotes.trim() !== originalClientNotes) {
@@ -749,6 +750,7 @@ export function CompleteServiceDialog({
                           <p className="text-sm font-semibold">
                             {receiptScan.status === 'duplicate' && 'Comprobante ya usado'}
                             {receiptScan.status === 'amount_mismatch' && 'El monto no coincide'}
+                            {receiptScan.status === 'date_mismatch' && 'Comprobante viejo'}
                             {receiptScan.status === 'needs_review' && 'Comprobante en revisión'}
                           </p>
                           <p className="text-xs opacity-90">Se registrará igual para conciliar.</p>
@@ -816,7 +818,7 @@ export function CompleteServiceDialog({
                 <Button
                   className="h-14 sm:h-16 flex-1 text-base sm:text-lg font-black uppercase tracking-wide min-w-0"
                   size="lg"
-                  onClick={finishService}
+                  onClick={() => finishService()}
                   disabled={loading || !selectedPayment || (needsReceipt && !receiptScan)}
                 >
                   <span className="truncate">
@@ -852,7 +854,7 @@ export function CompleteServiceDialog({
       paymentAccountId={selectedAccountId || null}
       clientId={entry?.client_id ?? null}
       onClose={() => setScanOpen(false)}
-      onAccept={(r) => { setReceiptScan(r); setScanOpen(false) }}
+      onAccept={(r) => { setReceiptScan(r); setScanOpen(false); finishService(r) }}
     />
     </>
   )

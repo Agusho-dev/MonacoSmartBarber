@@ -68,6 +68,8 @@ export const EXTRACTION_PROMPT =
   'monto como número sin símbolo y con punto decimal (15000.50, no "$15.000,50"); ' +
   'IMPORTANTE: el monto es el importe TRANSFERIDO/ENVIADO/PAGADO, NUNCA el saldo, ' +
   'el "dinero disponible" ni el balance "antes y después"; ' +
-  'fecha en ISO 8601; CBU/CVU de 22 dígitos; nº de operación tal cual figura; ' +
+  'fecha Y HORA del comprobante en ISO 8601 con offset -03:00 (hora Argentina), ' +
+  'ej "2026-07-04T16:24:00-03:00" — leé la fecha y hora con la mayor precisión posible; ' +
+  'CBU/CVU de 22 dígitos; nº de operación tal cual figura; ' +
   'devolvé null en todo campo que no aparezca (NO inventes montos ni números de operación); ' +
   'confianza entre 0 y 1 según qué tan legible estaba la imagen.'
