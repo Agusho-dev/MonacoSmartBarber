@@ -96,7 +96,8 @@ function analyzeFrame(
   }
 
   const area = W * (H - skipTop)
-  const black = lumSum / area < 12
+  const mean = lumSum / area
+  const black = mean < 12
   const coverage = bestSize / area
   if (coverage < 0.16) return { ready: false, hint: 'Mostrá la pantalla del comprobante', black }
 
@@ -122,6 +123,8 @@ function analyzeFrame(
   if (previewCx > 0.60) return { ready: false, hint: 'Movelo hacia la izquierda', black }
   if (cy < 0.38) return { ready: false, hint: 'Bajá el celular', black }
   if (cy > 0.62) return { ready: false, hint: 'Subí el celular', black }
+  // Bien encuadrado pero demasiado oscuro → la captura saldría ilegible.
+  if (mean < 40) return { ready: false, hint: 'Poca luz — subí el brillo del celular', black }
   return { ready: true, hint: 'Perfecto, mantené firme', black }
 }
 

@@ -208,7 +208,10 @@ export async function POST(req: NextRequest) {
     capture_method: body.captureMethod ?? 'front_camera',
     extraction_engine: usedEngine,
     extracted_amount: extracted?.amount ?? null,
-    extracted_datetime: extracted?.datetime ?? null,
+    // Normalizado a ISO válido (o null). La IA a veces devuelve el string "null"
+    // u otra basura para la fecha; escribirlo crudo en un timestamptz rompía el
+    // insert ("invalid input syntax for type timestamp with time zone: null").
+    extracted_datetime: receiptInstant != null ? new Date(receiptInstant).toISOString() : null,
     operation_number: extracted?.operationNumber ?? null,
     sender_name: extracted?.senderName ?? null,
     sender_cbu_alias: extracted?.senderCbuAlias ?? null,
