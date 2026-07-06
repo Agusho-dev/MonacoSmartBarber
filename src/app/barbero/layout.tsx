@@ -10,6 +10,7 @@ import { DbDownError } from '@/components/dashboard/db-down-error'
 
 import { BarberThemeClient } from '@/components/barber/barber-theme-client'
 import { SwRegister } from '@/components/barber/sw-register'
+import { KioskBackGuard } from '@/components/barber/kiosk-back-guard'
 
 // Metadata scopeada a /barbero: inyecta el manifest PWA y los meta de
 // standalone SOLO en el panel (no en dashboard/kiosko/TV).
@@ -70,6 +71,7 @@ export default async function BarberLayout({
     <div className="barber-theme min-h-dvh bg-background text-foreground pb-20">
       <BarberThemeClient />
       <SwRegister />
+      <KioskBackGuard />
       <WakeLock />
       <OfflineBanner />
       {children}
