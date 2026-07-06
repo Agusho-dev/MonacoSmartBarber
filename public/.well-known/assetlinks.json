@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.monacosmartbarber.panel",
+      "sha256_cert_fingerprints": [
+        "A8:5B:7F:6A:7E:E2:88:7D:DE:F3:A0:85:04:04:3A:C1:75:F6:9C:4F:16:3A:DB:0C:9C:FC:85:8A:36:07:32:73"
+      ]
+    }
+  }
+]
