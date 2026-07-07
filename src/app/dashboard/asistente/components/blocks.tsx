@@ -266,12 +266,19 @@ export function ToolResultBlock({ name, output, orgName }: { name: string; outpu
     const t = o.totales as Rec | undefined
     if (!t) return null
     const ret = o.retorno_clientes as Rec | undefined
+    const prod = o.productividad as Rec | undefined
     const kpis: Kpi[] = [
       { label: 'Ingresos', value: formatARS(Number(t.revenue ?? 0)) },
       { label: 'Cortes', value: formatNum(Number(t.cuts ?? 0)) },
       { label: 'Ticket prom.', value: formatARS(Number(t.avgTicket ?? 0)) },
       { label: 'Clientes', value: formatNum(Number(t.clients ?? 0)) },
     ]
+    if (prod && Number(prod.dias_operados ?? 0) > 0) {
+      // 1 decimal: la tool devuelve p.ej. 108,4 a propósito; formatNum lo truncaría a 108.
+      const cortesDia = Number(prod.cortes_por_dia ?? 0).toLocaleString('es-AR', { maximumFractionDigits: 1 })
+      kpis.push({ label: 'Cortes / día', value: cortesDia })
+      kpis.push({ label: 'Días trabajados', value: formatNum(Number(prod.dias_operados ?? 0)) })
+    }
     if (ret && Number(ret.clientes_unicos ?? 0) > 0) {
       kpis.push({
         label: `Volvieron (${formatNum(Number(ret.clientes_que_volvieron ?? 0))}/${formatNum(Number(ret.clientes_unicos ?? 0))})`,

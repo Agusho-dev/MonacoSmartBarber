@@ -327,7 +327,7 @@ export function AsistenteConfigClient({ initial }: Props) {
               <Label>Modelo</Label>
               <ModelPicker value={model} onChange={(id) => setModel(id)} compact />
               <p className="text-xs text-muted-foreground">
-                Claude Sonnet 4.6 es el equilibrio recomendado. Opus para máxima capacidad, Haiku para velocidad.
+                GPT-5.2 es el recomendado (máxima precisión para elegir la herramienta correcta). GPT-5.1 si querés más velocidad; GPT-4.1 es liviano sin razonamiento.
               </p>
             </div>
 

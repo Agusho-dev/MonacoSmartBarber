@@ -21,10 +21,12 @@ export const MODEL_GROUPS: ModelGroup[] = [
     provider: 'OpenAI',
     color: 'text-emerald-400',
     models: [
-      { id: 'gpt-4o-mini', label: 'GPT-4o Mini', hint: 'Rápido · Barato' },
-      { id: 'gpt-4o', label: 'GPT-4o', hint: 'Multimodal' },
-      { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
-      { id: 'gpt-4.1', label: 'GPT-4.1' },
+      { id: 'gpt-5.2', label: 'GPT-5.2', hint: 'Recomendado · máxima precisión' },
+      { id: 'gpt-5.1', label: 'GPT-5.1', hint: 'Rápido e inteligente' },
+      { id: 'gpt-5-mini', label: 'GPT-5 Mini', hint: 'Económico' },
+      { id: 'gpt-4.1', label: 'GPT-4.1', hint: 'Sin razonamiento · veloz' },
+      { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', hint: 'Básico' },
+      { id: 'gpt-4o-mini', label: 'GPT-4o Mini', hint: 'Legacy · evitar para análisis' },
     ],
   },
   {

@@ -15,7 +15,7 @@ import { EntitlementError } from '@/lib/billing/types'
 import { getAssistantContext } from '@/lib/asistente/context'
 import { buildTools } from '@/lib/asistente/tools'
 import { buildSystemPrompt } from '@/lib/asistente/system-prompt'
-import { providerForModel, DEFAULT_CHAT_MODEL } from '@/lib/asistente/models'
+import { providerForModel, DEFAULT_CHAT_MODEL, isReasoningModel, supportsTemperature } from '@/lib/asistente/models'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -87,6 +87,18 @@ export async function POST(req: NextRequest) {
   })
   const tools = buildTools(ctx)
 
+  // Ajustes por familia de modelo (evita fallos silenciosos):
+  // - Los modelos de razonamiento (GPT-5, o1/o3) rechazan `temperature` ≠ 1 → la omitimos.
+  // - Su `max_output_tokens` incluye el razonamiento → damos headroom o la respuesta sale vacía.
+  const reasoning = isReasoningModel(modelId)
+  const temperature = supportsTemperature(modelId) ? (config?.assistant_temperature ?? 0.4) : undefined
+  const maxOutputTokens = reasoning
+    ? Math.max(config?.assistant_max_tokens ?? 0, 8000)
+    : (config?.assistant_max_tokens ?? 2000)
+  // Razonamiento bajo: precisión de tools alta con latencia contenida para un chat.
+  const providerOptions =
+    reasoning && provider === 'openai' ? { openai: { reasoningEffort: 'low' as const } } : undefined
+
   // 6) Persistir el hilo + el mensaje del usuario (best-effort)
   void persistUserTurn(ctx.orgId, ctx.userId, conversationId, messages)
 
@@ -97,8 +109,9 @@ export async function POST(req: NextRequest) {
     messages: convertToModelMessages(messages),
     tools,
     stopWhen: stepCountIs(8),
-    temperature: config?.assistant_temperature ?? 0.4,
-    maxOutputTokens: config?.assistant_max_tokens ?? 1800,
+    ...(temperature !== undefined ? { temperature } : {}),
+    maxOutputTokens,
+    ...(providerOptions ? { providerOptions } : {}),
     onFinish: async ({ text }) => {
       void incrementUsage('ai_messages', 1, ctx.orgId)
       if (conversationId && text) {

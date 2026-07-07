@@ -183,7 +183,7 @@ export function buildTools(ctx: AssistantContext) {
 
     estadisticas: tool({
       description:
-        'Estadísticas operativas en un rango de fechas: ranking de barberos, tendencia diaria de ingresos/cortes, ingresos por método de pago, segmentación de clientes (nuevos/recurrentes/en riesgo/perdidos), TASA DE RETORNO del período (qué % de la gente volvió, en `retorno_clientes`) y horarios pico. Pasá fechas ISO (ej: 2026-05-01T00:00:00). Para "¿qué % volvió?" sin período explícito, usá los últimos 90 días.',
+        'CORTES / ATENCIONES / SERVICIOS realizados en un rango de fechas (un "corte" = una visita completada; NO son turnos/citas). Devuelve: total de cortes, PRODUCTIVIDAD (cortes totales, días operados y PROMEDIO DE CORTES POR DÍA trabajado), ranking de barberos, tendencia diaria de ingresos/cortes, ingresos por método de pago, segmentación de clientes (nuevos/recurrentes/en riesgo/perdidos), TASA DE RETORNO del período (qué % de la gente volvió, en `retorno_clientes`) y horarios pico. USALA para: "cuántos cortes/atenciones", "promedio de cortes por día", "cortes por día vs días trabajados", "productividad", "qué barbero rindió más", "horarios pico", "% que volvió". Pasá fechas ISO (ej: 2026-06-01T00:00:00 a 2026-06-30T23:59:59). Sin período explícito usá los últimos 90 días.',
       inputSchema: z.object({
         desde: z.string().optional().describe('Fecha/hora ISO de inicio. Omitir = últimos 90 días.'),
         hasta: z.string().optional().describe('Fecha/hora ISO de fin. Omitir = hoy.'),
@@ -196,19 +196,33 @@ export function buildTools(ctx: AssistantContext) {
         if (isBranchErr(picked)) return picked
         const branch = picked?.id ?? null
         // Default server-side: últimos 90 días (no le pedimos al modelo que calcule fechas).
+        // Robustez: si el modelo pasa una fecha solo-día (YYYY-MM-DD), la expandimos a inicio/fin
+        // de día. Sin esto, `lte('2026-06-30')` sobre un timestamptz excluiría todo el 30 de junio
+        // (lo interpreta como 2026-06-30T00:00:00) → undercount de un día.
+        const isDateOnly = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s)
         const nowISO = new Date().toISOString()
-        const hastaISO = hasta || nowISO
-        const desdeISO = desde || new Date(Date.now() - 90 * 86400000).toISOString()
+        const hastaISO = hasta ? (isDateOnly(hasta) ? `${hasta}T23:59:59.999` : hasta) : nowISO
+        const desdeISO = desde ? (isDateOnly(desde) ? `${desde}T00:00:00` : desde) : new Date(Date.now() - 90 * 86400000).toISOString()
         const s = await fetchStats(desdeISO, hastaISO, branch)
         ok('estadisticas', { sucursal: picked?.name ?? 'todas' })
         const peakHours = [...s.heatmap]
           .sort((a, b) => b.count - a.count)
           .slice(0, 6)
           .map((c) => ({ dia: ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][c.day], hora: c.hour, atenciones: c.count }))
+        // Productividad: "días operados" = días distintos con al menos un corte en el período
+        // (s.trends tiene un punto por día con actividad). "Cortes por día" = cortes / días operados.
+        // Responde directo a "promedio de cortes por día respecto a días trabajados".
+        const diasOperados = s.trends.length
+        const cortesPorDia = diasOperados > 0 ? Math.round((s.totals.cuts / diasOperados) * 10) / 10 : 0
         return {
           sucursal: picked?.name ?? 'todas las sucursales',
           periodo: { desde: desdeISO, hasta: hastaISO },
           totales: s.totals,
+          productividad: {
+            cortes_totales: s.totals.cuts,
+            dias_operados: diasOperados,
+            cortes_por_dia: cortesPorDia,
+          },
           // Tasa de retorno del período: clientes con 2+ visitas ÷ clientes únicos atendidos
           // entre `desde` y `hasta` (misma ventana). Es la respuesta a "¿qué % de gente volvió?".
           retorno_clientes: {
@@ -327,7 +341,7 @@ export function buildTools(ctx: AssistantContext) {
 
     turnos_resumen: tool({
       description:
-        'Resumen de turnos agendados en un rango: conteo por estado (confirmados, completados, cancelados, no-show) y total. Pasá fechas YYYY-MM-DD.',
+        'Resumen de TURNOS/CITAS AGENDADAS (la agenda de reservas), NO de cortes realizados. Conteo por estado (confirmados, completados, cancelados, no-show) y total. Ojo: la mayoría de las sucursales trabaja por orden de llegada (walk-in) y tiene ~0 turnos agendados; si el usuario pregunta por "cortes", "atenciones" o "servicios realizados" usá `estadisticas`, NO esta herramienta. Pasá fechas YYYY-MM-DD.',
       inputSchema: z.object({
         desde: z.string().describe('YYYY-MM-DD'),
         hasta: z.string().describe('YYYY-MM-DD'),
@@ -350,7 +364,28 @@ export function buildTools(ctx: AssistantContext) {
         const counts: Record<string, number> = {}
         for (const a of data ?? []) counts[a.status] = (counts[a.status] ?? 0) + 1
         ok('turnos_resumen', { sucursal: picked?.name ?? 'todas' })
-        return { sucursal: picked?.name ?? 'todas las sucursales', total: data?.length ?? 0, por_estado: counts }
+        const total = data?.length ?? 0
+        // Modo de operación de las sucursales en alcance: si todas son walk-in, avisamos
+        // que 0 turnos NO significa 0 actividad (los cortes viven en `estadisticas`).
+        const modos = ctx.branches
+          .filter((b) => (picked ? b.id === picked.id : true))
+          .map((b) => b.operation_mode ?? 'walk_in')
+        const todasWalkIn = modos.length > 0 && modos.every((m) => m === 'walk_in')
+        return {
+          sucursal: picked?.name ?? 'todas las sucursales',
+          total,
+          por_estado: counts,
+          ...(total === 0
+            ? {
+                aclaracion:
+                  'No hay TURNOS AGENDADOS en este período. Esto NO significa que no se trabajó: ' +
+                  (todasWalkIn
+                    ? 'esta operación es por orden de llegada (walk-in), así que casi no usa turnos. '
+                    : '') +
+                  'Si preguntaban por cortes/atenciones/servicios realizados, respondé con la herramienta `estadisticas` (los cortes son visitas completadas, no turnos).',
+              }
+            : {}),
+        }
       },
     }),
 

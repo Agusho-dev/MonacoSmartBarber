@@ -43,9 +43,9 @@ export const SUGGESTED_GROUPS: SuggestedGroup[] = [
     prompts: ['¿Cómo viene el mes vs. el anterior?', '¿Cuál es mi punto de equilibrio?'],
   },
   {
-    theme: 'Operación',
+    theme: 'Cortes y equipo',
     icon: BarChart3,
-    prompts: ['¿Qué barbero rindió más esta semana?', '¿Cuáles son mis horarios pico?'],
+    prompts: ['¿Cuál fue el promedio de cortes por día este mes?', '¿Qué barbero rindió más esta semana?'],
   },
   {
     theme: 'Clientes',
