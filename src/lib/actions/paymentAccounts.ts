@@ -95,20 +95,45 @@ export async function togglePaymentAccount(id: string, isActive: boolean) {
   return { success: true }
 }
 
-export async function deletePaymentAccount(id: string) {
+type DeleteAccountResult =
+  | { error: string }
+  | { blocked: true; transferCount: number }
+  | { success: true }
+
+export async function deletePaymentAccount(id: string): Promise<DeleteAccountResult> {
   const supabase = createAdminClient()
   const { data: acc } = await supabase.from('payment_accounts').select('branch_id').eq('id', id).single()
   if (!acc) return { error: 'Cuenta no encontrada' }
   const orgId = await validateBranchAccess(acc.branch_id)
   if (!orgId) return { error: 'No autorizado' }
 
+  // Una cuenta con transferencias registradas es historia contable: alimenta los
+  // balances, el cierre de caja y la conciliación de comprobantes (mig 157). Borrarla
+  // dejaría ese ledger huérfano (FK transfer_logs, NO ACTION a propósito) y descuadraría
+  // la caja hacia atrás. En ese caso NO se elimina: se desactiva (is_active=false).
+  const { count } = await supabase
+    .from('transfer_logs')
+    .select('id', { count: 'exact', head: true })
+    .eq('payment_account_id', id)
+
+  if (count && count > 0) {
+    return { blocked: true as const, transferCount: count }
+  }
+
   const { error } = await supabase
     .from('payment_accounts')
     .delete()
     .eq('id', id)
-  if (error) return { error: error.message }
+  if (error) {
+    // Red de seguridad: si a futuro otra tabla referencia la cuenta con una FK dura,
+    // devolvemos el mismo flujo amigable en vez de filtrar el SQL crudo al usuario.
+    if (error.code === '23503') return { blocked: true as const, transferCount: 0 }
+    return { error: 'No se pudo eliminar la cuenta. Probá de nuevo en un momento.' }
+  }
   revalidatePath('/dashboard/cuentas')
-  return { success: true }
+  revalidatePath('/dashboard/finanzas')
+  revalidatePath('/dashboard/caja')
+  return { success: true as const }
 }
 
 /**

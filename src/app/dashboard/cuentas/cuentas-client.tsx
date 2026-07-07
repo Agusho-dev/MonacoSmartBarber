@@ -55,6 +55,8 @@ export function CuentasClient({ accounts, branches }: Props) {
   const [form, setForm] = useState(EMPTY_FORM)
   const [filterBranchId, setFilterBranchId] = useState<string>('all')
   const [, startTransition] = useTransition()
+  // Cuenta cuyo borrado se bloqueó por tener historial contable (transfer_logs).
+  const [blockedAccount, setBlockedAccount] = useState<{ id: string; name: string; isActive: boolean; count: number } | null>(null)
 
   const filteredAccounts = filterBranchId === 'all'
     ? accounts
@@ -169,11 +171,30 @@ export function CuentasClient({ accounts, branches }: Props) {
     })
   }
 
-  function handleDelete(id: string) {
+  function handleDelete(acc: AccountWithBranch) {
     startTransition(async () => {
-      const result = await deletePaymentAccount(id)
+      const result = await deletePaymentAccount(acc.id)
+      if ('blocked' in result) {
+        // Tiene historial: no se borra, se ofrece desactivar (o se informa si ya está inactiva).
+        setBlockedAccount({ id: acc.id, name: acc.name, isActive: acc.is_active, count: result.transferCount })
+        return
+      }
+      if ('error' in result) {
+        toast.error(result.error)
+        return
+      }
+      toast.success('Cuenta eliminada')
+    })
+  }
+
+  function confirmDeactivateBlocked() {
+    if (!blockedAccount) return
+    const { id, name } = blockedAccount
+    setBlockedAccount(null)
+    startTransition(async () => {
+      const result = await togglePaymentAccount(id, false)
       if (result.error) toast.error(result.error)
-      else toast.success('Cuenta eliminada')
+      else toast.success(`"${name}" quedó desactivada`)
     })
   }
 
@@ -292,14 +313,14 @@ export function CuentasClient({ accounts, branches }: Props) {
                     <AlertDialogHeader>
                       <AlertDialogTitle>¿Eliminar cuenta?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        Esta acción no se puede deshacer. Las visitas ya imputadas a esta cuenta conservarán el registro.
+                        Si la cuenta tiene transferencias registradas, se conserva el historial contable y vas a poder desactivarla en lugar de eliminarla. Las visitas ya imputadas mantienen su registro.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                       <AlertDialogCancel>Cancelar</AlertDialogCancel>
                       <AlertDialogAction
                         className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                        onClick={() => handleDelete(acc.id)}
+                        onClick={() => handleDelete(acc)}
                       >
                         Eliminar
                       </AlertDialogAction>
@@ -601,6 +622,43 @@ export function CuentasClient({ accounts, branches }: Props) {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      {/* Borrado bloqueado por historial contable → ofrecer desactivar (o informar) */}
+      <AlertDialog open={!!blockedAccount} onOpenChange={(open) => { if (!open) setBlockedAccount(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>No se puede eliminar esta cuenta</AlertDialogTitle>
+            <AlertDialogDescription>
+              {blockedAccount && (blockedAccount.isActive ? (
+                <>
+                  <span className="font-medium text-foreground">{blockedAccount.name}</span> tiene{' '}
+                  {blockedAccount.count.toLocaleString('es-AR')} transferencia{blockedAccount.count === 1 ? '' : 's'} registrada{blockedAccount.count === 1 ? '' : 's'}. Eliminarla borraría ese historial de balances, caja y comprobantes.{' '}
+                  En su lugar podés <span className="font-medium text-foreground">desactivarla</span>: deja de ofrecerse a los barberos al cobrar y conserva todos los registros.
+                </>
+              ) : (
+                <>
+                  <span className="font-medium text-foreground">{blockedAccount.name}</span> ya está desactivada y tiene{' '}
+                  {blockedAccount.count.toLocaleString('es-AR')} transferencia{blockedAccount.count === 1 ? '' : 's'} registrada{blockedAccount.count === 1 ? '' : 's'}. Se conserva por el historial contable de balances, caja y comprobantes, por eso no puede eliminarse.
+                </>
+              ))}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            {blockedAccount?.isActive ? (
+              <>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction onClick={confirmDeactivateBlocked}>
+                  Desactivar cuenta
+                </AlertDialogAction>
+              </>
+            ) : (
+              <AlertDialogAction onClick={() => setBlockedAccount(null)}>
+                Entendido
+              </AlertDialogAction>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
