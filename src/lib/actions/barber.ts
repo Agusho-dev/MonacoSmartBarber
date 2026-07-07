@@ -202,6 +202,7 @@ export async function createStaffMember(data: {
   role_id: string | null
   email: string | null
   phone: string | null
+  is_also_barber: boolean
 }) {
   const supabase = createAdminClient()
   const orgId = await getCurrentOrgId()
@@ -240,6 +241,7 @@ export async function updateStaffMember(staffId: string, data: {
   role_id: string | null
   email: string | null
   phone: string | null
+  is_also_barber: boolean
 }) {
   const supabase = createAdminClient()
   const orgId = await getCurrentOrgId()

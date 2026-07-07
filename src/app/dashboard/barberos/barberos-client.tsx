@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Power, Trash2, Camera, Eye, EyeOff, Smartphone } from 'lucide-react'
+import { Plus, Pencil, Power, Trash2, Camera, Eye, EyeOff, Smartphone, Scissors } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
 import { formatCurrency } from '@/lib/format'
@@ -37,6 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 
 interface BarberVisitRow {
   barber_id: string
@@ -66,6 +67,7 @@ const emptyForm = {
   role_id: '',
   email: '',
   phone: '',
+  is_also_barber: false,
 }
 
 export function BarberosClient({ barbers, branches, todayVisits, roles, canHideStaff }: Props) {
@@ -112,6 +114,7 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, canHideS
       role_id: barber.role_id ?? '',
       email: barber.email ?? '',
       phone: barber.phone ?? '',
+      is_also_barber: barber.is_also_barber ?? false,
       password: '',
       hasAuth: !!barber.auth_user_id,
     })
@@ -155,6 +158,8 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, canHideS
       role_id: form.role_id || null,
       email: form.email || null,
       phone: form.phone || null,
+      // Un barbero "puro" ya matchea por rol; el flag solo aplica a roles no-barbero.
+      is_also_barber: form.role === 'barber' ? false : form.is_also_barber,
     }
 
     let savedStaffId = editingId
@@ -582,7 +587,17 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, canHideS
                 value={form.role_id ? `custom:${form.role_id}` : `sys:${form.role}`}
                 onValueChange={(v) => {
                   if (v.startsWith('sys:')) {
-                    setForm({ ...form, role: v.slice(4) as UserRole, role_id: '' })
+                    const nextRole = v.slice(4) as UserRole
+                    // Al pasar de barbero a un rol no-barbero preservamos su capacidad de
+                    // atender por default: así hacerlo admin no lo borra de la caja/fila.
+                    // Si vuelve a barbero, el flag es redundante (ya matchea por rol).
+                    const nextIsAlsoBarber =
+                      nextRole === 'barber'
+                        ? false
+                        : form.role === 'barber'
+                          ? true
+                          : form.is_also_barber
+                    setForm({ ...form, role: nextRole, role_id: '', is_also_barber: nextIsAlsoBarber })
                   } else if (v.startsWith('custom:')) {
                     setForm({ ...form, role_id: v.slice(7) })
                   }
@@ -615,6 +630,32 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, canHideS
                 <span className="font-medium">Equipo → Roles</span>.
               </p>
             </div>
+
+            {/* Un admin/recepcionista/dueño puede además atender clientes. Sin esto,
+                al cambiarlo de barbero a otro rol desaparecía de la caja y la fila. */}
+            {form.role !== 'barber' && (
+              <div className="flex items-center justify-between gap-4 rounded-lg border bg-muted/30 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                    <Scissors className="size-4" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="is-also-barber" className="cursor-pointer">
+                      También atiende como barbero
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Conserva su rol y, además, aparece en la caja, la fila y la asignación de turnos.
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  id="is-also-barber"
+                  checked={form.is_also_barber}
+                  onCheckedChange={(checked) => setForm({ ...form, is_also_barber: checked })}
+                  className="shrink-0"
+                />
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>PIN de la Barbería (4 dígitos)</Label>
