@@ -63,7 +63,7 @@ export function ChatView({
     showProfile, setShowProfile, loadVisits,
     messagesEndRef,
     isConfigured, isInstagramConfigured,
-    canReply, replyWindowLeft,
+    canReply, replyWindowState, replyWindowLeft,
     handleSend, handleResend, handleStatusChange,
     handleOpenTemplateDialog,
     handleAutoTag, autoTagging,
@@ -310,11 +310,11 @@ export function ChatView({
                         <div key={msg.id}
                           className={`flex ${isOut ? 'justify-end' : 'justify-start'} ${firstOfRun ? 'mt-2' : 'mt-0.5'} animate-[msgIn_0.18s_ease-out_both]`}>
                           {isInteractiveButtons ? (
-                            <InteractiveButtonsBubble msg={msg} isOut={isOut} tail={firstOfRun} onResend={handleResend} resending={isSending} />
+                            <InteractiveButtonsBubble msg={msg} isOut={isOut} tail={firstOfRun} onResend={canReply ? handleResend : undefined} resending={isSending} />
                           ) : isTemplate && msg.template_name ? (
                             <TemplateBubble msg={msg} isOut={isOut} tail={firstOfRun} templates={waTemplates} />
                           ) : isMedia ? (
-                            <MediaBubble msg={msg} isOut={isOut} tail={firstOfRun} onResend={handleResend} resending={isSending} />
+                            <MediaBubble msg={msg} isOut={isOut} tail={firstOfRun} onResend={canReply ? handleResend : undefined} resending={isSending} />
                           ) : (
                             <div className={`wa-bubble ${firstOfRun ? (isOut ? 'wa-bubble-out' : 'wa-bubble-in') : (isOut ? 'wa-fill-out' : 'wa-fill-in')}`}>
                               {msg.content ? (
@@ -334,7 +334,7 @@ export function ChatView({
                                   <TextMeta msg={msg} isOut={isOut} />
                                 </p>
                               )}
-                              <FailedNotice msg={msg} onResend={handleResend} resending={isSending} />
+                              <FailedNotice msg={msg} onResend={canReply ? handleResend : undefined} resending={isSending} />
                             </div>
                           )}
                         </div>
@@ -357,14 +357,20 @@ export function ChatView({
             </div>
           ) : !canReply ? (
             <div className="px-4 py-3 text-center">
-              <p className="text-xs text-yellow-400">Ventana de 24h expirada — solo podés enviar templates aprobados</p>
-              {isWhatsapp && (
+              <p className="text-xs text-yellow-400">
+                {replyWindowState === 'never'
+                  ? 'El cliente todavía no te escribió — WhatsApp solo permite iniciar con un template aprobado'
+                  : 'Pasaron 24h desde el último mensaje del cliente — para reabrir la charla solo podés enviar un template aprobado'}
+              </p>
+              {isWhatsapp ? (
                 <button
                   onClick={() => handleOpenTemplateDialog({ type: 'conversation', conversationId: activeConv.id })}
                   className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#00a884] hover:bg-[#02735e] text-white text-xs transition-colors"
                 >
                   <FileText className="size-3" /> Enviar template
                 </button>
+              ) : (
+                <p className="mt-1 text-[11px] text-[#8696a0]">Esperá a que responda para poder escribirle.</p>
               )}
             </div>
           ) : (

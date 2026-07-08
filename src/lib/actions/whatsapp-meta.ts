@@ -322,12 +322,13 @@ export async function sendMetaWhatsAppTemplate(
   })
   if (tplInsErr) console.error('[WhatsApp Meta] Template enviado a Meta pero no registrado en DB:', tplInsErr.message)
 
+  // NO tocar can_reply_until acá: la ventana de servicio de 24h SOLO la abre un
+  // mensaje ENTRANTE del cliente (lo setea el webhook). Un template saliente no
+  // abre ventana en WhatsApp; setearla acá creaba una ventana falsa que habilitaba
+  // el textarea de texto libre y esos envíos morían en Meta (fuera de ventana).
   await supabase
     .from('conversations')
-    .update({
-      last_message_at: new Date().toISOString(),
-      can_reply_until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    })
+    .update({ last_message_at: new Date().toISOString() })
     .eq('id', conversationId)
 
   revalidatePath('/dashboard/mensajeria')

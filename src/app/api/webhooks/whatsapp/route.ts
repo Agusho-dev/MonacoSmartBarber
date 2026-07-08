@@ -46,7 +46,15 @@ type WaIncomingMessage = {
 type WaWebhookValue = {
   metadata?: { phone_number_id?: string; display_phone_number?: string }
   messages?: WaIncomingMessage[]
-  statuses?: Array<{ id: string; status: string; timestamp: string; recipient_id?: string }>
+  statuses?: Array<{
+    id: string
+    status: string
+    timestamp: string
+    recipient_id?: string
+    // Meta adjunta el motivo cuando status='failed' (fuera de ventana 131047,
+    // no-entregable, etc.). Sin persistirlo, el mensaje queda failed sin diagnóstico.
+    errors?: Array<{ code?: number; title?: string; message?: string; error_data?: { details?: string } }>
+  }>
   contacts?: unknown
 }
 
@@ -602,9 +610,22 @@ export async function POST(req: NextRequest) {
         // violarían el CHECK constraint y harían fallar el UPDATE en silencio.
         if (!VALID_STATUSES.has(newStatus)) continue
 
+        // Cuando Meta falla un mensaje ASÍNCRONAMENTE (lo aceptó con 200 y lo mató
+        // después) el motivo viene en statusUpdate.errors[]. Persistirlo es lo que
+        // hace visible el "por qué" en el inbox y evita el "Reintentar" a ciegas.
+        const update: { status: string; error_message?: string } = { status: newStatus }
+        if (newStatus === 'failed') {
+          const err = statusUpdate.errors?.[0]
+          if (err) {
+            const idPart = err.code != null ? `code ${err.code}` : 'error'
+            const detail = err.error_data?.details || err.message || err.title || 'Falla de entrega de Meta'
+            update.error_message = `[${idPart}] ${detail}`.slice(0, 500)
+          }
+        }
+
         const { error: stErr } = await supabase
           .from('messages')
-          .update({ status: newStatus })
+          .update(update)
           .eq('platform_message_id', metaMsgId)
         if (stErr) console.error('[WA Webhook] Error actualizando status:', stErr.message, newStatus)
       }

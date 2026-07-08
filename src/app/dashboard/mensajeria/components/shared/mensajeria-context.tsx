@@ -102,6 +102,7 @@ interface MensajeriaContextValue {
   isInstagramConfigured: boolean
   filteredConversations: ConversationWithRelations[]
   canReply: boolean
+  replyWindowState: 'open' | 'never' | 'expired'
   replyWindowLeft: string | null
 
   // Handlers
@@ -496,11 +497,21 @@ export function MensajeriaProvider({
     })
   }, [conversations, platformFilter, statusFilter, tagFilter, search])
 
-  // Reply window
-  const canReply = useMemo(() => {
-    if (!activeConv?.can_reply_until) return true
-    return new Date(activeConv.can_reply_until) > new Date()
+  // Ventana de servicio de 24h de WhatsApp/IG. SOLO la abre un mensaje ENTRANTE
+  // del cliente (el webhook setea can_reply_until = inbound + 24h). Mandar un
+  // template NO abre ventana. Distinguimos 3 estados:
+  //   'open'    → ventana vigente: se puede mandar texto libre
+  //   'never'   → el cliente nunca escribió (can_reply_until NULL): SOLO templates
+  //   'expired' → hubo ventana pero venció (>24h sin respuesta): SOLO templates
+  // OJO: NULL != "sin restricción". Tratarlo como repliable era el bug que dejaba
+  // mandar textos que Meta rechaza fuera de ventana (los aceptaba y los mataba async).
+  const replyWindowState = useMemo<'open' | 'never' | 'expired'>(() => {
+    if (!activeConv) return 'open'
+    if (!activeConv.can_reply_until) return 'never'
+    return new Date(activeConv.can_reply_until) > new Date() ? 'open' : 'expired'
   }, [activeConv])
+
+  const canReply = replyWindowState === 'open'
 
   const replyWindowLeft = useMemo(() => {
     if (!activeConv?.can_reply_until) return null
@@ -765,7 +776,7 @@ export function MensajeriaProvider({
     templateTarget, setTemplateTarget,
     isConfigured, isInstagramConfigured,
     filteredConversations,
-    canReply, replyWindowLeft,
+    canReply, replyWindowState, replyWindowLeft,
     handleSend, handleResend, handleStatusChange, handleStartConversation,
     handleSchedule, handleCancelScheduled,
     handleSyncTemplates, handleOpenTemplateDialog, handleSendTemplate,
