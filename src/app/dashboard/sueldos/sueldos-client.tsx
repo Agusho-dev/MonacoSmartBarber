@@ -1353,17 +1353,18 @@ export function SueldosClient({ branches, staffMembers, paymentAccounts }: Props
 
       {/* ── Dialog: Confirmar pago ──────────────────────────────────────────── */}
       <Dialog open={payDialogOpen} onOpenChange={(o) => !o && setPayDialogOpen(false)}>
-        <DialogContent>
-          <DialogHeader>
+        <DialogContent className="flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Confirmar pago</DialogTitle>
             <DialogDescription>
               Vas a registrar el pago de {selectedIds.size} reporte
               {selectedIds.size !== 1 ? 's' : ''} para {currentStaff?.full_name}.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
             {/* Resumen de reportes seleccionados */}
-            <div className="rounded-lg border border-border divide-y divide-border text-sm">
+            <div className="overflow-hidden rounded-lg border border-border text-sm">
+              <div className="max-h-[40dvh] divide-y divide-border overflow-y-auto">
               {reports
                 .filter((r) => selectedIds.has(r.id))
                 .map((r) => {
@@ -1394,8 +1395,9 @@ export function SueldosClient({ branches, staffMembers, paymentAccounts }: Props
                     </div>
                   )
                 })}
-              {/* Total */}
-              <div className="flex items-center justify-between px-3 py-2.5 bg-muted/30">
+              </div>
+              {/* Total (fijo, siempre visible bajo la lista) */}
+              <div className="flex items-center justify-between border-t border-border px-3 py-2.5 bg-muted/40">
                 <span className="font-semibold text-sm">Total</span>
                 <span
                   className={cn(
@@ -1479,7 +1481,7 @@ export function SueldosClient({ branches, staffMembers, paymentAccounts }: Props
               />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <Button variant="outline" onClick={() => setPayDialogOpen(false)}>
               Cancelar
             </Button>
