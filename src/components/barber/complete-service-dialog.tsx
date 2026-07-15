@@ -4,11 +4,13 @@ import { useEffect, useState, useRef, useMemo } from 'react'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
 import { completeService } from '@/lib/actions/queue'
+import { getTransferAccountsState } from '@/lib/actions/paymentAccounts'
 import { saveVisitDetails } from '@/lib/actions/visit-history'
 import { updateClientNotes } from '@/lib/actions/clients'
 import { compressToWebP, uploadVisitPhotos } from '@/lib/image-utils'
 import { QrPhotoButton } from '@/components/barber/qr-photo-button'
-import type { QueueEntry, Service, PaymentMethod, PaymentAccount, Product } from '@/lib/types/database'
+import type { QueueEntry, Service, PaymentMethod, Product } from '@/lib/types/database'
+import { pickTransferAccount, type TransferAccountState } from '@/lib/payment-accounts'
 import {
   Dialog,
   DialogContent,
@@ -32,7 +34,6 @@ import {
   ArrowRight,
   ArrowLeft,
   Gift,
-  Wallet,
   TicketPercent,
   ScanLine,
   Check,
@@ -40,7 +41,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency } from '@/lib/format'
-import { AliasCopyHero } from './alias-copy-hero'
+import { TransferAccountPicker } from './transfer-account-picker'
 import { PaymentMethodButtons, type PaymentOptionValue } from './payment-method-buttons'
 import { TipSelector } from './tip-selector'
 import { CouponScanDialog, type AppliedCoupon } from './coupon-scan-dialog'
@@ -66,7 +67,11 @@ export function CompleteServiceDialog({
   // Servicio principal pre-seleccionado, traído por id sin filtros (ver effect).
   const [preselectedService, setPreselectedService] = useState<Service | null>(null)
   const [products, setProducts] = useState<Product[]>([])
-  const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([])
+  const [paymentAccounts, setPaymentAccounts] = useState<TransferAccountState[]>([])
+  // Cuentas que el sistema salteó por haber llegado a su tope del mes, y si NO quedó
+  // ninguna con margen (ahí el cobro sigue, pero hay que avisar).
+  const [rotatedFrom, setRotatedFrom] = useState<TransferAccountState[]>([])
+  const [allAccountsFull, setAllAccountsFull] = useState(false)
   const [step, setStep] = useState<1 | 2>(1)
   const [loading, setLoading] = useState(false)
 
@@ -178,32 +183,18 @@ export function CompleteServiceDialog({
         if (data) setProducts(data as Product[])
       })
 
-    supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('branch_id', branchId)
-      .eq('is_active', true)
-      .order('sort_order', { ascending: true })
-      .order('name')
-      .then(({ data }) => {
-        if (data && data.length > 0) {
-          const accs = data as PaymentAccount[]
-          setPaymentAccounts(accs)
-
-          let selected = accs[0]
-          for (const acc of accs) {
-            if (acc.daily_limit === null) {
-              selected = acc
-              break
-            }
-            if ((acc.accumulated_today ?? 0) < acc.daily_limit) {
-              selected = acc
-              break
-            }
-          }
-          setSelectedAccountId(selected.id)
-        }
-      })
+    // Cuentas de cobro con su acumulado REAL del mes (server action que valida la sesión
+    // de barbero y lee transfer_logs con service_role — NO exponemos la RPC a anon).
+    // Se pide al abrir el cobro, no al cargar el panel: si la cuenta se llenó hace un
+    // minuto, el barbero tiene que ver ya la siguiente. La rotación por tope la decide
+    // pickTransferAccount, la misma regla que muestra el dashboard.
+    getTransferAccountsState(branchId).then((accs) => {
+      setPaymentAccounts(accs)
+      const pick = pickTransferAccount(accs)
+      setRotatedFrom(pick.skipped)
+      setAllAccountsFull(pick.allFull)
+      if (pick.account) setSelectedAccountId(pick.account.id)
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entry, branchId])
 
@@ -327,8 +318,17 @@ export function CompleteServiceDialog({
   // coexiste con el canje por puntos (reward_claimed), que ya lleva el corte a $0.
   const canUseCoupon = !!entry?.client_id && !entry?.reward_claimed && serviceSubtotal > 0
 
-  // Comprobante obligatorio al cobrar por transferencia (si la org lo activó).
-  const chargeAmount = totalAfterDiscount + tipAmount
+  // La propina hereda el método del cobro salvo que el barbero elija otro
+  // (TipSelector permite propina en efectivo aunque el servicio se cobre por transferencia).
+  // El cliente sólo transfiere la propina si ésta también va por transferencia; si no, la
+  // deja en mano y NO entra en el monto del comprobante ni en el alias.
+  const effectiveTipMethod = tipAmount > 0 ? (tipMethod ?? selectedPayment) : null
+  const tipViaTransfer = effectiveTipMethod === 'transfer'
+  const transferAmount = totalAfterDiscount + (tipViaTransfer ? tipAmount : 0)
+
+  // Comprobante obligatorio al cobrar por transferencia (si la org lo activó). El monto
+  // esperado del comprobante = exactamente lo que el cliente transfiere.
+  const chargeAmount = transferAmount
   const needsReceipt =
     !!receiptSettings?.isEnabled && selectedPayment === 'transfer' && !entry?.reward_claimed
 
@@ -678,52 +678,16 @@ export function CompleteServiceDialog({
                 />
               </div>
 
-              {/* Transfer: alias gigante */}
+              {/* Transfer: rotación + alias gigante (componente compartido con venta directa) */}
               {selectedPayment === 'transfer' && paymentAccounts.length > 0 && (
-                <div className="space-y-3">
-                  {paymentAccounts.length > 1 && (
-                    <div>
-                      <p className="mb-1.5 text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-                        <Wallet className="size-3.5" />
-                        Cuenta de cobro
-                      </p>
-                      <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
-                        <SelectTrigger className="h-11 w-full text-sm">
-                          <SelectValue placeholder="Seleccionar cuenta..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {paymentAccounts.map((acc) => (
-                            <SelectItem key={acc.id} value={acc.id}>
-                              <span className="font-medium">{acc.name}</span>
-                              {acc.alias_or_cbu && (
-                                <span className="ml-2 text-muted-foreground text-xs">
-                                  {acc.alias_or_cbu}
-                                </span>
-                              )}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                  {(() => {
-                    const selectedAccount = paymentAccounts.find(a => a.id === selectedAccountId) ?? paymentAccounts[0]
-                    if (!selectedAccount?.alias_or_cbu) {
-                      return (
-                        <div className="rounded-2xl border border-dashed border-amber-500/40 bg-amber-500/5 p-4 text-center text-sm text-amber-700 dark:text-amber-400">
-                          Esta cuenta no tiene alias configurado. Avisá a tu admin.
-                        </div>
-                      )
-                    }
-                    return (
-                      <AliasCopyHero
-                        alias={selectedAccount.alias_or_cbu}
-                        accountName={selectedAccount.name}
-                        amountText={formatCurrency(totalAfterDiscount + tipAmount)}
-                      />
-                    )
-                  })()}
-                </div>
+                <TransferAccountPicker
+                  accounts={paymentAccounts}
+                  selectedAccountId={selectedAccountId}
+                  onSelect={setSelectedAccountId}
+                  rotatedFrom={rotatedFrom}
+                  allFull={allAccountsFull}
+                  amountText={formatCurrency(transferAmount)}
+                />
               )}
 
               {/* Comprobante de transferencia (obligatorio si la org lo activó) */}

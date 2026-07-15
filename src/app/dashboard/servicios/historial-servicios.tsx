@@ -78,6 +78,7 @@ interface PaymentAccountOption {
   id: string
   name: string
   alias_or_cbu: string | null
+  branch_id?: string | null
 }
 
 interface VisitHistory {
@@ -87,6 +88,7 @@ interface VisitHistory {
   completed_at: string
   payment_method: string
   payment_account_id: string | null
+  branch_id: string | null
   notes: string | null
   tags: string[] | null
   branch: { name: string } | null
@@ -222,6 +224,7 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
             completed_at,
             payment_method,
             payment_account_id,
+            branch_id,
             notes,
             tags,
             branch:branches(name),
@@ -294,11 +297,21 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
     if (paymentAccounts.length > 0) return
     const { data } = await supabase
       .from('payment_accounts')
-      .select('id, name, alias_or_cbu')
+      .select('id, name, alias_or_cbu, branch_id')
       .eq('is_active', true)
+      .order('sort_order')
       .order('name')
     setPaymentAccounts(data ?? [])
   }, [supabase, paymentAccounts.length])
+
+  // Una visita sólo puede imputarse a una cuenta de SU sucursal: si no, la plata de una
+  // sucursal termina contada en la cuenta bancaria de un barbero de otra (y el tope del
+  // mes se consume donde no corresponde).
+  const accountsForBranch = useCallback(
+    (branchIdOfVisit: string | null) =>
+      paymentAccounts.filter((a) => !branchIdOfVisit || !a.branch_id || a.branch_id === branchIdOfVisit),
+    [paymentAccounts]
+  )
 
   function openEdit(visit: VisitHistory) {
     setEditingVisit(visit)
@@ -865,11 +878,30 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">Sin cuenta asignada</SelectItem>
-                          {paymentAccounts.map((pa) => (
-                            <SelectItem key={pa.id} value={pa.id}>
-                              {pa.name}
-                            </SelectItem>
-                          ))}
+                          {(() => {
+                            const opts = accountsForBranch(editingVisit?.branch_id ?? null)
+                            // Si la visita ya quedó imputada a una cuenta de OTRA sucursal (historial
+                            // viejo), la mostramos igual para que el selector no aparezca vacío y el
+                            // admin vea a qué cuenta apunta antes de reasignarla.
+                            const current = editPaymentAccountId
+                              ? paymentAccounts.find((p) => p.id === editPaymentAccountId)
+                              : null
+                            const extra = current && !opts.some((o) => o.id === current.id) ? current : null
+                            return (
+                              <>
+                                {opts.map((pa) => (
+                                  <SelectItem key={pa.id} value={pa.id}>
+                                    {pa.name}
+                                  </SelectItem>
+                                ))}
+                                {extra && (
+                                  <SelectItem key={extra.id} value={extra.id}>
+                                    {extra.name} — de otra sucursal
+                                  </SelectItem>
+                                )}
+                              </>
+                            )
+                          })()}
                         </SelectContent>
                       </Select>
                       {editPaymentAccountId &&
@@ -1155,7 +1187,7 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Sin cuenta asignada</SelectItem>
-                    {paymentAccounts.map((pa) => (
+                    {accountsForBranch(addBranchId || null).map((pa) => (
                       <SelectItem key={pa.id} value={pa.id}>
                         {pa.name}
                         {pa.alias_or_cbu && (

@@ -2,7 +2,6 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { recordTransfer } from '@/lib/actions/paymentAccounts'
 import { validateBranchAccess } from './org'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getActiveTimezone } from '@/lib/i18n'
@@ -188,10 +187,8 @@ export async function directProductSale(
     return { error: result.error }
   }
 
-  // Manejar transferencias
-  if (paymentMethod === 'transfer' && paymentAccountId) {
-    await recordTransfer(visit.id, paymentAccountId, preAmount, branchId)
-  }
+  // La transferencia queda registrada en transfer_logs por el trigger
+  // trg_visits_sync_transfer_log (mig 160) al insertar la visita de arriba.
 
   // Actualizar o crear salary_report de comisión por producto.
   // Solo aplica cuando hay barbero asignado (no en ventas de la barbería).

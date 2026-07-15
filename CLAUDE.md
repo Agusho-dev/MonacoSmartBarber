@@ -88,6 +88,16 @@ Patrón obligatorio en edge functions: siempre chequear `error` de cada `.insert
 
 Supabase Realtime WebSocket subscriptions on `queue_entries` and `staff` power the live queue in the barber panel and TV display.
 
+### Cuentas de cobro: tope mensual y rotación (migración 160+)
+
+Los cobros por transferencia entran a cuentas bancarias personales de los barberos (`payment_accounts`), cada una con `monthly_limit` (tope de acreditaciones del mes). El cobro va a la **primera cuenta activa por `sort_order` que no llegó al tope**, y el sistema rota solo cuando se llena.
+
+- **`transfer_logs` es una proyección de `visits` mantenida por trigger** (`trg_visits_sync_transfer_log`). NO escribir el ledger a mano: cualquier escritura sobre `visits` (incluida la edición del historial, que va DIRECTO desde el browser) lo sincroniza. FK `visit_id` en `ON DELETE CASCADE`.
+- Ingreso real de la cuenta = `amount + tip_amount` (la propina transferida entra a la misma cuenta; `amount` queda como la facturación que concilia caja y comprobantes).
+- El tope lo consumen **sólo las acreditaciones**. Sueldos/gastos pagados desde la cuenta bajan el saldo (`expense_tickets`), no el tope.
+- El acumulado **se deriva** de `transfer_logs` vía `get_transfer_accounts_state(branch)` (grant a `anon`: el panel del barbero se autentica por PIN) y `get_payment_accounts_month_income(branch_ids[])`. No hay contador denormalizado: el viejo (`accumulated_today` + `increment_account_accumulated`) nunca escribió un peso —la RPC fallaba con 42702— y por eso la rotación nunca funcionó.
+- Regla de rotación única: `src/lib/payment-accounts.ts → pickTransferAccount()`, compartida por tablet y dashboard.
+
 ### Edge Functions
 
 `supabase/functions/` contains three Deno functions:

@@ -618,13 +618,10 @@ export async function paySelectedReports(
       .update({ expense_ticket_id: expenseTicket.id })
       .eq('id', batch.id)
 
-    // Si fue transferencia, incrementar accumulated de la cuenta (para tope mensual)
-    if (paymentMethod === 'transfer' && paymentAccountId) {
-      await supabase.rpc('increment_account_accumulated', {
-        p_account_id: paymentAccountId,
-        p_amount: totalAmount,
-      })
-    }
+    // El sueldo es plata que SALE de la cuenta: baja su saldo (vía el expense_ticket
+    // de arriba) pero NO consume el tope mensual, que mide acreditaciones. Antes acá
+    // se sumaba al acumulado del tope — habría sacado de rotación una cuenta con
+    // margen real de cobro (mig 160).
   }
 
   // Marcar los reportes como pagados y asociarlos al batch

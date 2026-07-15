@@ -416,12 +416,8 @@ export async function payAllPendingTipsForBarber(
       .update({ expense_ticket_id: expenseTicket.id })
       .eq('id', batch.id)
 
-    if (paymentMethod === 'transfer' && paymentAccountId) {
-      await supabase.rpc('increment_account_accumulated', {
-        p_account_id: paymentAccountId,
-        p_amount: total,
-      })
-    }
+    // Pagarle las propinas al barbero es un EGRESO de la cuenta: baja el saldo (vía el
+    // expense_ticket) pero no consume el tope mensual, que mide lo que ENTRA (mig 160).
   }
 
   // Marcar todos los reports como pagados

@@ -1,8 +1,14 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useMemo, useTransition } from 'react'
 import { upsertPaymentAccount, togglePaymentAccount, deletePaymentAccount, getAccountBalanceSummary, getAccountMonthlyAccumulated } from '@/lib/actions/paymentAccounts'
 import type { Branch, PaymentAccount } from '@/lib/types/database'
+import {
+  pickTransferAccount,
+  accountRemaining,
+  accountUsage,
+  type TransferAccountState,
+} from '@/lib/payment-accounts'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -33,24 +39,107 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Plus, Pencil, Trash2, Wallet, Eye, ArrowDownRight, ArrowUpRight, Loader2 } from 'lucide-react'
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Wallet,
+  Eye,
+  ArrowDownRight,
+  ArrowUpRight,
+  Loader2,
+  AlertTriangle,
+  CircleCheck,
+  CirclePause,
+  Clock,
+  RefreshCw,
+  Infinity as InfinityIcon,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
 interface AccountWithBranch extends PaymentAccount {
   branch?: { name: string } | null
 }
 
+export interface AccountMonthIncome {
+  monthIncome: number
+  monthCount: number
+}
+
 interface Props {
   accounts: AccountWithBranch[]
   branches: Branch[]
+  /** Acumulado real del mes por cuenta (derivado de transfer_logs en la DB, mig 160). */
+  monthIncome: Record<string, AccountMonthIncome>
 }
 
 type BalanceSummary = Awaited<ReturnType<typeof getAccountBalanceSummary>>
 
-const EMPTY_FORM = { id: '', branch_id: '', name: '', alias_or_cbu: '', daily_limit: '', sort_order: '0', is_active: true, is_salary_account: false }
+const EMPTY_FORM = { id: '', branch_id: '', name: '', alias_or_cbu: '', monthly_limit: '', sort_order: '0', is_active: true, is_salary_account: false }
 
-export function CuentasClient({ accounts, branches }: Props) {
+const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+
+/** Estado de una cuenta dentro de la cadena de rotación de su sucursal. */
+type RotationRole = 'receiving' | 'receiving_overflow' | 'waiting' | 'full' | 'paused'
+
+const ROLE_STYLE: Record<RotationRole, { label: string; badge: string; dot: string }> = {
+  receiving: {
+    label: 'Recibiendo ahora',
+    badge: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
+    dot: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+  },
+  // Todas llenas: el sistema igual cobra en la menos excedida (así lo hace la tablet).
+  receiving_overflow: {
+    label: 'Recibiendo — tope superado',
+    badge: 'bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/30',
+    dot: 'bg-orange-500/15 text-orange-600 dark:text-orange-400',
+  },
+  waiting: {
+    label: 'En espera',
+    badge: 'bg-muted text-muted-foreground border-border',
+    dot: 'bg-muted text-muted-foreground',
+  },
+  full: {
+    label: 'Llegó al tope',
+    badge: 'bg-destructive/15 text-destructive border-destructive/30',
+    dot: 'bg-destructive/15 text-destructive',
+  },
+  paused: {
+    label: 'Pausada',
+    badge: 'bg-muted text-muted-foreground border-border',
+    dot: 'bg-muted text-muted-foreground',
+  },
+}
+
+/**
+ * A este ritmo, ¿cuándo se llena? Texto corto o null (sin tope / sin datos).
+ * La tasa es una aproximación month-to-date (ingreso del mes / días transcurridos): para una
+ * cuenta que recién entró en rotación subestima el ritmo real, así que es un "a este ritmo…",
+ * no una fecha exacta.
+ */
+function fillForecast(monthIncome: number, limit: number | null): string | null {
+  if (!limit || limit <= 0) return null
+  const remaining = limit - monthIncome
+  if (remaining <= 0) return null
+
+  const now = new Date()
+  const dayOfMonth = now.getDate()
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+  const dailyRate = monthIncome / dayOfMonth
+  if (dailyRate <= 0) return null
+
+  const daysToFill = remaining / dailyRate
+  // El guard de fin de mes va PRIMERO: si a este ritmo no llega al tope antes de que termine
+  // el mes, "se llena mañana/en N días" sería engañoso (el tope se resetea el día 1).
+  if (dayOfMonth + daysToFill > daysInMonth) return 'A este ritmo no se llena este mes'
+  if (daysToFill < 1) return 'A este ritmo se llena hoy'
+  if (daysToFill < 2) return 'A este ritmo se llena mañana'
+  return `A este ritmo se llena en ${Math.round(daysToFill)} días`
+}
+
+export function CuentasClient({ accounts, branches, monthIncome }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [filterBranchId, setFilterBranchId] = useState<string>('all')
@@ -58,28 +147,84 @@ export function CuentasClient({ accounts, branches }: Props) {
   // Cuenta cuyo borrado se bloqueó por tener historial contable (transfer_logs).
   const [blockedAccount, setBlockedAccount] = useState<{ id: string; name: string; isActive: boolean; count: number } | null>(null)
 
-  const filteredAccounts = filterBranchId === 'all'
-    ? accounts
-    : accounts.filter((a) => a.branch_id === filterBranchId)
-
   // Balance dialog state
   const [balanceDialogOpen, setBalanceDialogOpen] = useState(false)
   const [balanceAccount, setBalanceAccount] = useState<AccountWithBranch | null>(null)
   const [balanceData, setBalanceData] = useState<BalanceSummary | null>(null)
   const [balanceLoading, setBalanceLoading] = useState(false)
-  // Rango de fechas configurable para el balance (F9)
   const todayStr = new Date().toISOString().slice(0, 10)
   const [balanceFrom, setBalanceFrom] = useState<string>(todayStr)
   const [balanceTo, setBalanceTo] = useState<string>(todayStr)
-  // Histórico mensual (F10): año y mes seleccionados para ver acumulado
-  const nowDate = new Date()
+  // Histórico mensual: mes cerrado que el dueño quiera revisar
+  const nowDate = useMemo(() => new Date(), [])
   const [histYear, setHistYear] = useState<number>(nowDate.getFullYear())
   const [histMonth, setHistMonth] = useState<number>(nowDate.getMonth() + 1)
   const [histTotal, setHistTotal] = useState<number | null>(null)
   const [histLoading, setHistLoading] = useState(false)
 
+  const currentMonthName = MONTH_NAMES[nowDate.getMonth()]
+
+  function incomeOf(accountId: string): number {
+    return monthIncome[accountId]?.monthIncome ?? 0
+  }
+  function countOf(accountId: string): number {
+    return monthIncome[accountId]?.monthCount ?? 0
+  }
+
+  /**
+   * La cadena de rotación de cada sucursal: quién recibe ahora, quién espera, quién
+   * llegó al tope. Se calcula con la MISMA regla que usa la tablet del barbero
+   * (pickTransferAccount), así las dos pantallas nunca dicen cosas distintas.
+   */
+  const branchesInView = useMemo(() => {
+    const visible = filterBranchId === 'all'
+      ? branches
+      : branches.filter((b) => b.id === filterBranchId)
+
+    return visible
+      .map((branch) => {
+        const branchAccounts = accounts
+          .filter((a) => a.branch_id === branch.id)
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name))
+
+        const activeStates: TransferAccountState[] = branchAccounts
+          .filter((a) => a.is_active)
+          .map((a) => ({
+            id: a.id,
+            name: a.name,
+            alias_or_cbu: a.alias_or_cbu,
+            sort_order: a.sort_order ?? 0,
+            monthly_limit: a.monthly_limit,
+            month_income: incomeOf(a.id),
+            is_full: a.monthly_limit != null && incomeOf(a.id) >= a.monthly_limit,
+          }))
+
+        const pick = pickTransferAccount(activeStates)
+
+        const roleOf = (acc: AccountWithBranch): RotationRole => {
+          if (!acc.is_active) return 'paused'
+          // La cuenta que efectivamente recibe: normal, o "overflow" si todas están llenas.
+          if (pick.account?.id === acc.id) return pick.allFull ? 'receiving_overflow' : 'receiving'
+          if (acc.monthly_limit != null && incomeOf(acc.id) >= acc.monthly_limit) return 'full'
+          return 'waiting'
+        }
+
+        return {
+          branch,
+          accounts: branchAccounts,
+          receiving: pick.account,
+          allFull: pick.allFull,
+          hasActive: activeStates.length > 0,
+          roleOf,
+        }
+      })
+      .filter((b) => b.accounts.length > 0 || filterBranchId !== 'all')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts, branches, filterBranchId, monthIncome])
+
   function openCreate() {
-    setForm({ ...EMPTY_FORM, branch_id: branches[0]?.id ?? '' })
+    const branchId = filterBranchId !== 'all' ? filterBranchId : branches[0]?.id ?? ''
+    setForm({ ...EMPTY_FORM, branch_id: branchId })
     setDialogOpen(true)
   }
 
@@ -89,7 +234,7 @@ export function CuentasClient({ accounts, branches }: Props) {
       branch_id: acc.branch_id,
       name: acc.name,
       alias_or_cbu: acc.alias_or_cbu ?? '',
-      daily_limit: acc.daily_limit ? String(acc.daily_limit) : '',
+      monthly_limit: acc.monthly_limit ? String(acc.monthly_limit) : '',
       sort_order: String(acc.sort_order ?? 0),
       is_active: acc.is_active,
       is_salary_account: acc.is_salary_account ?? false,
@@ -134,7 +279,6 @@ export function CuentasClient({ accounts, branches }: Props) {
     setHistLoading(false)
   }
 
-  const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
   const historyYearOptions = (() => {
     const years = [] as number[]
     for (let y = nowDate.getFullYear(); y >= nowDate.getFullYear() - 3; y--) years.push(y)
@@ -148,7 +292,7 @@ export function CuentasClient({ accounts, branches }: Props) {
     fd.append('branch_id', form.branch_id)
     fd.append('name', form.name)
     fd.append('alias_or_cbu', form.alias_or_cbu)
-    if (form.daily_limit) fd.append('daily_limit', form.daily_limit)
+    if (form.monthly_limit) fd.append('monthly_limit', form.monthly_limit)
     fd.append('sort_order', form.sort_order)
     fd.append('is_active', String(form.is_active))
     fd.append('is_salary_account', String(form.is_salary_account))
@@ -198,13 +342,16 @@ export function CuentasClient({ accounts, branches }: Props) {
     })
   }
 
+  const hasAnyAccount = accounts.length > 0
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold">Cuentas de cobro</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Configurá los alias y CBUs disponibles para que los barberos puedan imputar cobros.
+          <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+            Los cobros por transferencia entran en la primera cuenta activa que todavía no llegó a su
+            tope del mes. Cuando se llena, el sistema pasa solo a la siguiente.
           </p>
         </div>
         <Button onClick={openCreate}>
@@ -228,107 +375,218 @@ export function CuentasClient({ accounts, branches }: Props) {
         </Select>
       </div>
 
-      {filteredAccounts.length === 0 ? (
+      {!hasAnyAccount ? (
         <div className="rounded-xl border bg-card p-12 text-center">
           <Wallet className="size-10 mx-auto mb-4 text-muted-foreground" />
-          <p className="font-medium">
-            {filterBranchId === 'all' ? 'No hay cuentas configuradas' : 'No hay cuentas en esta sucursal'}
-          </p>
+          <p className="font-medium">No hay cuentas configuradas</p>
           <p className="text-sm text-muted-foreground mt-1 mb-4">
-            {filterBranchId === 'all'
-              ? 'Agregá cuentas bancarias o alias para que los barberos las usen al cerrar cada servicio.'
-              : 'Elegí otra sucursal o creá una cuenta nueva para esta.'}
+            Agregá cuentas bancarias o alias para que los barberos las usen al cerrar cada servicio.
           </p>
           <Button onClick={openCreate} variant="outline">
             <Plus className="size-4 mr-2" />
-            {filterBranchId === 'all' ? 'Agregar primera cuenta' : 'Agregar cuenta'}
+            Agregar primera cuenta
           </Button>
         </div>
       ) : (
-        <div className="divide-y rounded-xl border bg-card">
-          {filteredAccounts.map((acc) => (
-            <div key={acc.id} className="flex items-center gap-4 px-5 py-4">
-              <div className="flex size-10 items-center justify-center rounded-full bg-muted shrink-0">
-                <Wallet className="size-5 text-muted-foreground" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="font-medium">{acc.name}</p>
-                  {!acc.is_active && (
-                    <Badge variant="secondary" className="text-xs">Inactiva</Badge>
-                  )}
-                </div>
-                {acc.alias_or_cbu && (
-                  <p className="text-sm text-muted-foreground font-mono">{acc.alias_or_cbu}</p>
+        <div className="space-y-8">
+          {branchesInView.map(({ branch, accounts: branchAccounts, receiving, allFull, hasActive, roleOf }) => (
+            <section key={branch.id} className="space-y-3">
+              {/* Cabecera de sucursal: quién está cobrando AHORA */}
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  {branch.name}
+                </h2>
+                {receiving && (
+                  <p className="text-xs text-muted-foreground">
+                    Cobrando en{' '}
+                    <span className="font-medium text-foreground">{receiving.name}</span>
+                    {allFull ? (
+                      <span className="text-orange-600 dark:text-orange-400"> · todas al tope</span>
+                    ) : accountRemaining(receiving) !== null ? (
+                      <> · le entran {formatCurrency(accountRemaining(receiving)!)} antes del tope</>
+                    ) : null}
+                  </p>
                 )}
-                <div className="flex gap-2 items-center mt-1 flex-wrap">
-                  <Badge variant="outline" className="text-xs">Orden: {acc.sort_order}</Badge>
-                  {acc.is_salary_account && (
-                    <Badge variant="outline" className="text-xs bg-indigo-500/10 text-indigo-400 border-indigo-500/30">
-                      Sueldos
-                    </Badge>
-                  )}
+              </div>
+
+              {branchAccounts.length === 0 ? (
+                <div className="rounded-xl border border-dashed bg-card p-6 text-center text-sm text-muted-foreground">
+                  Esta sucursal no tiene cuentas de cobro.
                 </div>
-                <div className="mt-3 text-xs text-muted-foreground max-w-[240px]">
-                  <div className="flex justify-between mb-1.5">
-                    <span>Acumulado del mes:</span>
-                    <span className="font-medium text-foreground">
-                      {formatCurrency(acc.accumulated_today ?? 0)}
-                      {acc.daily_limit !== null && <> / {formatCurrency(acc.daily_limit)}</>}
-                    </span>
-                  </div>
-                  {acc.daily_limit !== null ? (
-                    <div className="w-full bg-secondary h-1.5 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full ${((acc.accumulated_today ?? 0) / acc.daily_limit) >= 1 ? 'bg-destructive' : 'bg-primary'}`}
-                        style={{ width: `${Math.min(((acc.accumulated_today ?? 0) / acc.daily_limit) * 100, 100)}%` }}
-                      />
+              ) : (
+                <>
+                  {/* Sin cuenta disponible: los cobros por transferencia siguen entrando igual */}
+                  {!hasActive && (
+                    <div className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+                      <AlertTriangle className="size-5 shrink-0 mt-0.5" />
+                      <p>
+                        No hay ninguna cuenta activa en {branch.name}: los barberos no pueden cobrar por
+                        transferencia. Activá al menos una.
+                      </p>
                     </div>
-                  ) : (
-                    <p className="text-[11px] italic">Sin tope configurado</p>
                   )}
-                </div>
-                {acc.branch && (
-                  <p className="text-xs text-muted-foreground mt-1.5">{acc.branch.name}</p>
-                )}
-              </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <Button variant="ghost" size="icon" onClick={() => openBalance(acc)} title="Ver balance">
-                  <Eye className="size-4" />
-                </Button>
-                <Switch
-                  checked={acc.is_active}
-                  onCheckedChange={() => handleToggle(acc.id, acc.is_active)}
-                />
-                <Button variant="ghost" size="icon" onClick={() => openEdit(acc)}>
-                  <Pencil className="size-4" />
-                </Button>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>¿Eliminar cuenta?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Si la cuenta tiene transferencias registradas, se conserva el historial contable y vas a poder desactivarla en lugar de eliminarla. Las visitas ya imputadas mantienen su registro.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                      <AlertDialogAction
-                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                        onClick={() => handleDelete(acc)}
-                      >
-                        Eliminar
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-            </div>
+                  {hasActive && allFull && (
+                    <div className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+                      <AlertTriangle className="size-5 shrink-0 mt-0.5" />
+                      <p>
+                        Todas las cuentas activas de {branch.name} llegaron al tope del mes. Los cobros
+                        siguen entrando en la menos excedida: activá otra cuenta o subí el tope.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="divide-y rounded-xl border bg-card">
+                    {branchAccounts.map((acc) => {
+                      const role = roleOf(acc)
+                      const style = ROLE_STYLE[role]
+                      const income = incomeOf(acc.id)
+                      const count = countOf(acc.id)
+                      const limit = acc.monthly_limit
+                      const usage = accountUsage({ monthly_limit: limit, month_income: income })
+                      const remaining = accountRemaining({ monthly_limit: limit, month_income: income })
+                      const forecast = role === 'receiving' ? fillForecast(income, limit) : null
+
+                      return (
+                        <div
+                          key={acc.id}
+                          className={cn(
+                            'flex items-center gap-4 px-5 py-4',
+                            role === 'paused' && 'opacity-60'
+                          )}
+                        >
+                          <div className={cn('flex size-10 items-center justify-center rounded-full shrink-0', style.dot)}>
+                            {role === 'receiving' ? (
+                              <CircleCheck className="size-5" />
+                            ) : role === 'receiving_overflow' ? (
+                              <RefreshCw className="size-5" />
+                            ) : role === 'full' ? (
+                              <AlertTriangle className="size-5" />
+                            ) : role === 'paused' ? (
+                              <CirclePause className="size-5" />
+                            ) : (
+                              <Clock className="size-5" />
+                            )}
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-medium">{acc.name}</p>
+                              <Badge variant="outline" className={cn('text-xs', style.badge)}>
+                                {style.label}
+                              </Badge>
+                              {acc.is_salary_account && (
+                                <Badge variant="outline" className="text-xs bg-indigo-500/10 text-indigo-400 border-indigo-500/30">
+                                  Sueldos
+                                </Badge>
+                              )}
+                            </div>
+
+                            {acc.alias_or_cbu ? (
+                              <p className="text-sm text-muted-foreground font-mono">{acc.alias_or_cbu}</p>
+                            ) : (
+                              <p className="text-sm text-amber-600 dark:text-amber-400">
+                                Sin alias cargado — el barbero no puede mostrarle nada al cliente
+                              </p>
+                            )}
+
+                            <div className="mt-3 max-w-sm text-xs text-muted-foreground">
+                              <div className="flex justify-between gap-3 mb-1.5">
+                                <span>
+                                  {currentMonthName}
+                                  {count > 0 && <> · {count} transferencia{count === 1 ? '' : 's'}</>}
+                                </span>
+                                <span className="font-medium text-foreground tabular-nums">
+                                  {formatCurrency(income)}
+                                  {limit !== null && <> / {formatCurrency(limit)}</>}
+                                </span>
+                              </div>
+
+                              {limit !== null ? (
+                                <>
+                                  <div className="w-full bg-secondary h-1.5 rounded-full overflow-hidden">
+                                    <div
+                                      className={cn(
+                                        'h-full transition-all',
+                                        usage >= 1
+                                          ? 'bg-destructive'
+                                          : usage >= 0.9
+                                            ? 'bg-orange-500'
+                                            : usage >= 0.7
+                                              ? 'bg-amber-500'
+                                              : 'bg-emerald-500'
+                                      )}
+                                      style={{ width: `${Math.min(usage * 100, 100)}%` }}
+                                    />
+                                  </div>
+                                  <p className="mt-1.5">
+                                    {usage >= 1 ? (
+                                      <span className="text-destructive font-medium">
+                                        Tope superado por {formatCurrency(income - limit)}
+                                      </span>
+                                    ) : (
+                                      <>
+                                        <span className="text-foreground font-medium">
+                                          {formatCurrency(remaining ?? 0)}
+                                        </span>{' '}
+                                        disponibles ({Math.round(usage * 100)}% del tope)
+                                        {forecast && <> · {forecast}</>}
+                                      </>
+                                    )}
+                                  </p>
+                                </>
+                              ) : (
+                                <p className="flex items-center gap-1.5 text-[11px]">
+                                  <InfinityIcon className="size-3.5" />
+                                  Sin tope: nunca rota a la siguiente cuenta
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3 shrink-0">
+                            <Button variant="ghost" size="icon" onClick={() => openBalance(acc)} title="Ver balance">
+                              <Eye className="size-4" />
+                            </Button>
+                            <Switch
+                              checked={acc.is_active}
+                              onCheckedChange={() => handleToggle(acc.id, acc.is_active)}
+                              title={acc.is_active ? 'Pausar cuenta' : 'Activar cuenta'}
+                            />
+                            <Button variant="ghost" size="icon" onClick={() => openEdit(acc)}>
+                              <Pencil className="size-4" />
+                            </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
+                                  <Trash2 className="size-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>¿Eliminar cuenta?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Si la cuenta tiene transferencias registradas, se conserva el historial contable y vas a poder desactivarla en lugar de eliminarla. Las visitas ya imputadas mantienen su registro.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                    onClick={() => handleDelete(acc)}
+                                  >
+                                    Eliminar
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+            </section>
           ))}
         </div>
       )}
@@ -377,17 +635,21 @@ export function CuentasClient({ accounts, branches }: Props) {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label>Límite Diario ($) <span className="text-muted-foreground">(opcional)</span></Label>
+                <Label>Tope mensual ($)</Label>
                 <Input
                   className="mt-1.5"
                   type="number"
-                  placeholder="Ej: 50000"
-                  value={form.daily_limit}
-                  onChange={(e) => setForm((f) => ({ ...f, daily_limit: e.target.value }))}
+                  min={1}
+                  placeholder="Ej: 500000"
+                  value={form.monthly_limit}
+                  onChange={(e) => setForm((f) => ({ ...f, monthly_limit: e.target.value }))}
                 />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Al alcanzarlo, el cobro pasa solo a la siguiente cuenta. Vacío = sin tope.
+                </p>
               </div>
               <div>
-                <Label>Orden de prioridad</Label>
+                <Label>Orden de rotación</Label>
                 <Input
                   className="mt-1.5"
                   type="number"
@@ -395,13 +657,16 @@ export function CuentasClient({ accounts, branches }: Props) {
                   value={form.sort_order}
                   onChange={(e) => setForm((f) => ({ ...f, sort_order: e.target.value }))}
                 />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Menor número = se usa primero.
+                </p>
               </div>
             </div>
             <div className="flex items-center justify-between rounded-lg border p-3">
               <div>
                 <Label>Estado de la cuenta</Label>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {form.is_active ? 'Activa — visible para barberos' : 'Inactiva — oculta para barberos'}
+                  {form.is_active ? 'Activa — entra en la rotación de cobros' : 'Pausada — los barberos no la ven'}
                 </p>
               </div>
               <Switch
@@ -448,7 +713,42 @@ export function CuentasClient({ accounts, branches }: Props) {
             )}
           </DialogHeader>
 
-          {/* Filtro de rango de fechas para el balance (F9) */}
+          {/* Tope del MES en curso: no depende del rango de fechas de abajo */}
+          {balanceAccount && balanceAccount.monthly_limit !== null && (() => {
+            const income = incomeOf(balanceAccount.id)
+            const limit = balanceAccount.monthly_limit!
+            const usage = accountUsage({ monthly_limit: limit, month_income: income })
+            return (
+              <div className="rounded-lg border p-3">
+                <div className="flex justify-between text-sm mb-2">
+                  <span className="text-muted-foreground">Tope de {currentMonthName}</span>
+                  <span className="font-medium tabular-nums">
+                    {formatCurrency(income)} / {formatCurrency(limit)}
+                  </span>
+                </div>
+                <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
+                  <div
+                    className={cn(
+                      'h-full transition-all',
+                      usage >= 1 ? 'bg-destructive' : usage >= 0.8 ? 'bg-amber-500' : 'bg-emerald-500'
+                    )}
+                    style={{ width: `${Math.min(usage * 100, 100)}%` }}
+                  />
+                </div>
+                {usage >= 0.8 && (
+                  <p className={cn(
+                    'text-xs mt-1.5 flex items-center gap-1.5',
+                    usage >= 1 ? 'text-destructive' : 'text-amber-600 dark:text-amber-400'
+                  )}>
+                    <AlertTriangle className="size-3.5" />
+                    {usage >= 1 ? 'Llegó al tope del mes' : 'Cerca del tope del mes'}
+                  </p>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* Filtro de rango de fechas para los movimientos */}
           <div className="grid grid-cols-2 gap-3 rounded-lg border p-3">
             <div>
               <Label className="text-xs">Desde</Label>
@@ -499,30 +799,7 @@ export function CuentasClient({ accounts, branches }: Props) {
                 </div>
               </div>
 
-              {/* Daily limit progress */}
-              {balanceAccount?.daily_limit !== null && balanceAccount?.daily_limit !== undefined && (
-                <div className="rounded-lg border p-3">
-                  <div className="flex justify-between text-sm mb-2">
-                    <span className="text-muted-foreground">Tope diario</span>
-                    <span className="font-medium">{formatCurrency(balanceData.totalIncome)} / {formatCurrency(balanceAccount.daily_limit)}</span>
-                  </div>
-                  <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full transition-all ${(balanceData.totalIncome / balanceAccount.daily_limit) >= 1 ? 'bg-destructive' : (balanceData.totalIncome / balanceAccount.daily_limit) >= 0.8 ? 'bg-yellow-500' : 'bg-primary'}`}
-                      style={{ width: `${Math.min((balanceData.totalIncome / balanceAccount.daily_limit) * 100, 100)}%` }}
-                    />
-                  </div>
-                  {(balanceData.totalIncome / balanceAccount.daily_limit) >= 0.8 && (
-                    <p className="text-xs text-yellow-500 mt-1.5">
-                      {(balanceData.totalIncome / balanceAccount.daily_limit) >= 1
-                        ? '⚠️ Tope diario alcanzado'
-                        : '⚠️ Próximo al tope diario'}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Acumulado mensual histórico (F10) */}
+              {/* Acumulado mensual histórico */}
               <div className="rounded-lg border p-3 space-y-2">
                 <p className="text-sm font-medium">Acumulado mensual histórico</p>
                 <div className="grid grid-cols-2 gap-2">
@@ -563,7 +840,7 @@ export function CuentasClient({ accounts, branches }: Props) {
                 </div>
                 <div className="flex items-center justify-between text-sm pt-1">
                   <span className="text-muted-foreground">Total ingresado</span>
-                  <span className="font-semibold">
+                  <span className="font-semibold tabular-nums">
                     {histLoading ? '…' : formatCurrency(histTotal ?? 0)}
                   </span>
                 </div>
@@ -578,6 +855,7 @@ export function CuentasClient({ accounts, branches }: Props) {
                   <div className="space-y-1.5 max-h-[250px] overflow-y-auto">
                     {balanceData.transfers.map((t) => {
                       const visit = t.visit as { client?: { name: string } | null; barber?: { full_name: string } | null } | null
+                      const tip = Number(t.tip_amount ?? 0)
                       return (
                       <div key={`t-${t.id}`} className="flex items-center justify-between rounded-lg border px-3 py-2">
                         <div className="flex items-center gap-2 min-w-0">
@@ -588,10 +866,13 @@ export function CuentasClient({ accounts, branches }: Props) {
                             </p>
                             <p className="text-xs text-muted-foreground">
                               {visit?.barber?.full_name ?? 'Barbero'} · {new Date(t.transferred_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                              {tip > 0 && <> · incluye {formatCurrency(tip)} de propina</>}
                             </p>
                           </div>
                         </div>
-                        <span className="text-sm font-medium text-emerald-500 shrink-0">+{formatCurrency(t.amount)}</span>
+                        <span className="text-sm font-medium text-emerald-500 shrink-0 tabular-nums">
+                          +{formatCurrency(Number(t.amount) + tip)}
+                        </span>
                       </div>
                       )
                     })}
@@ -611,7 +892,7 @@ export function CuentasClient({ accounts, branches }: Props) {
                             </p>
                           </div>
                         </div>
-                        <span className="text-sm font-medium text-red-500 shrink-0">-{formatCurrency(e.amount)}</span>
+                        <span className="text-sm font-medium text-red-500 shrink-0 tabular-nums">-{formatCurrency(e.amount)}</span>
                       </div>
                       )
                     })}

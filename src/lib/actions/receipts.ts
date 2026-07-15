@@ -64,7 +64,8 @@ export async function linkReceiptToVisit(
 
   const supabase = createAdminClient()
 
-  // El transfer_log lo creó recordTransfer dentro de completeService.
+  // El transfer_log ya existe: lo crea el trigger trg_visits_sync_transfer_log cuando
+  // completeService marca la visita como cobrada por transferencia (mig 160).
   const { data: log } = await supabase
     .from('transfer_logs')
     .select('id')
@@ -309,7 +310,7 @@ export async function getReconciliation(params: {
 
   let vq = supabase
     .from('visits')
-    .select(`id, amount, tip_amount, completed_at, payment_account_id,
+    .select(`id, amount, tip_amount, tip_payment_method, completed_at, payment_account_id,
       client:clients(name),
       barber:staff(full_name),
       account:payment_accounts(name),
@@ -343,7 +344,12 @@ export async function getReconciliation(params: {
   for (const v of (visits ?? []) as unknown as Record<string, unknown>[]) {
     const rRaw = firstOf(v.receipt as Record<string, unknown> | Record<string, unknown>[] | null)
     const receipt = mapReceipt(rRaw)
-    const charged = Number(v.amount ?? 0)
+    // Lo que el cliente transfirió de verdad = cobro + propina, cuando la propina también
+    // fue por transferencia (el alias de la tablet pide el total junto). Comparar sólo
+    // contra visits.amount marcaba como "monto no coincide" comprobantes que estaban bien.
+    const charged =
+      Number(v.amount ?? 0) +
+      (v.tip_payment_method === 'transfer' ? Number(v.tip_amount ?? 0) : 0)
     let state: ReconState
     if (receipt) {
       state = stateFromReceipt(receipt.status)

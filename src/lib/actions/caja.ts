@@ -255,6 +255,10 @@ export async function fetchCajaSummary(params: {
       .in('branch_id', branchIds)
       .gte('completed_at', start)
       .lte('completed_at', end),
+    // Arqueo = FACTURACIÓN del día: acá el desglose por cuenta usa sólo `amount` (sin la
+    // propina transferida), para cuadrar con totalTransfer (que viene de visits.amount).
+    // La propina cuenta para el TOPE MENSUAL de la cuenta (otra pregunta, en /dashboard/cuentas),
+    // no para el arqueo diario. No sumar tip_amount acá es intencional.
     supabase
       .from('transfer_logs')
       .select('amount, payment_account_id, payment_account:payment_accounts(name)')

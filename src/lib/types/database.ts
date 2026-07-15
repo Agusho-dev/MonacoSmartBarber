@@ -412,21 +412,6 @@ export interface AppSettings {
   updated_at: string
 }
 
-export interface PaymentAccount {
-  id: string
-  branch_id: string
-  name: string
-  bank_name: string | null
-  cbu_cvu: string | null
-  alias: string | null
-  is_active: boolean
-  daily_limit: number | null
-  sort_order: number
-  accumulated_today: number
-  last_reset_date: string
-  created_at: string
-}
-
 // ── Comprobantes de transferencia (mig 157) ──────────────────
 export type ReceiptStatus =
   | 'verified' | 'amount_mismatch' | 'duplicate' | 'needs_review' | 'manual_ok' | 'overridden' | 'date_mismatch'
@@ -592,10 +577,12 @@ export interface PaymentAccount {
   alias_or_cbu: string | null
   is_active: boolean
   is_salary_account: boolean
-  daily_limit: number | null
+  /**
+   * Tope de acreditaciones del mes calendario. NULL = sin tope.
+   * (Migración 160: antes se llamaba `daily_limit` aunque el tope siempre fue mensual.)
+   */
+  monthly_limit: number | null
   sort_order: number
-  accumulated_today: number
-  last_reset_date: string
   created_at: string
   updated_at: string
 }

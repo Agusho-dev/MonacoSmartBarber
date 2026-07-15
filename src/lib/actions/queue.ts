@@ -2,7 +2,6 @@
 
 import { createAdminClient, createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { recordTransfer } from '@/lib/actions/paymentAccounts'
 import { validateBranchAccess, getCurrentOrgId } from './org'
 import { getActiveTimezone } from '@/lib/i18n'
 import { isValidUUID } from '@/lib/validation'
@@ -480,17 +479,25 @@ export async function completeService(
   //     mismo appointment_id), esa plata ya impactó en caja; esta visita
   //     sólo registra el remanente.
   if (queueEntryData?.appointment_id) {
-    const { data: priorPrepayments } = await supabase
+    const { data: priorPrepayments, error: prepayErr } = await supabase
       .from('visits')
       .select('amount')
       .eq('appointment_id', queueEntryData.appointment_id)
       .is('queue_entry_id', null)
 
-    const prepaidTotal = (priorPrepayments ?? []).reduce((sum, v) => sum + Number(v.amount ?? 0), 0)
-    if (prepaidTotal > 0) {
-      amount = Math.max(0, amount - prepaidTotal)
-      // Las comisiones se calculan sobre el precio total del servicio (ya computadas
-      // arriba); el prepago es sólo una partición del cobro, no afecta la comisión.
+    // No degradar en silencio: hoy visits.appointment_id NO existe en prod (la mig 109
+    // nunca se aplicó → esta query FALLA siempre y `data` viene null). Si asumimos "null =
+    // sin prepagos" y el prepago se llega a activar, el cliente pagaría dos veces. Logueamos
+    // el error de schema para que sea visible en vez de restar $0 calladamente.
+    if (prepayErr) {
+      console.error('[completeService] no pude leer prepagos del turno:', prepayErr.message)
+    } else {
+      const prepaidTotal = (priorPrepayments ?? []).reduce((sum, v) => sum + Number(v.amount ?? 0), 0)
+      if (prepaidTotal > 0) {
+        amount = Math.max(0, amount - prepaidTotal)
+        // Las comisiones se calculan sobre el precio total del servicio (ya computadas
+        // arriba); el prepago es sólo una partición del cobro, no afecta la comisión.
+      }
     }
   }
 
@@ -567,9 +574,10 @@ export async function completeService(
     }
   }
 
-  if (paymentMethod === 'transfer' && paymentAccountId) {
-    await recordTransfer(visit.id, paymentAccountId, amount, visit.branch_id)
-  }
+  // El registro en transfer_logs (el ledger de las cuentas de cobro) NO se escribe
+  // acá: lo mantiene el trigger trg_visits_sync_transfer_log a partir de la visita
+  // (mig 160), con el monto YA neto de cupón y con la propina transferida incluida.
+  // Así ningún camino que toque una visita puede olvidarse de actualizar el ledger.
 
   // 5. Handle reward redemption (deduct points)
   if (isRewardClaim && visit.client_id && visit.branch_id) {

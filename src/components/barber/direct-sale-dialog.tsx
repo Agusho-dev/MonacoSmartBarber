@@ -3,7 +3,10 @@
 import { useEffect, useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { directProductSale } from '@/lib/actions/sales'
-import type { PaymentMethod, PaymentAccount, Product } from '@/lib/types/database'
+import { getTransferAccountsState } from '@/lib/actions/paymentAccounts'
+import type { PaymentMethod, Product } from '@/lib/types/database'
+import { pickTransferAccount, type TransferAccountState } from '@/lib/payment-accounts'
+import { TransferAccountPicker } from './transfer-account-picker'
 import {
   Dialog,
   DialogContent,
@@ -25,9 +28,9 @@ import {
   CreditCard,
   ArrowRightLeft,
   X,
-  Wallet,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { formatCurrency } from '@/lib/format'
 import { toast } from 'sonner'
 
 const PAYMENT_OPTIONS: {
@@ -58,7 +61,9 @@ export function DirectSaleDialog({
   const supabase = useMemo(() => createClient(), [])
 
   const [products, setProducts] = useState<Product[]>([])
-  const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([])
+  const [paymentAccounts, setPaymentAccounts] = useState<TransferAccountState[]>([])
+  const [rotatedFrom, setRotatedFrom] = useState<TransferAccountState[]>([])
+  const [allAccountsFull, setAllAccountsFull] = useState(false)
   const [loading, setLoading] = useState(false)
 
   // Selection state
@@ -87,32 +92,16 @@ export function DirectSaleDialog({
         if (data) setProducts(data as Product[])
       })
 
-    supabase
-      .from('payment_accounts')
-      .select('*')
-      .eq('branch_id', branchId)
-      .eq('is_active', true)
-      .order('sort_order', { ascending: true })
-      .order('name')
-      .then(({ data }) => {
-        if (data && data.length > 0) {
-          const accs = data as PaymentAccount[]
-          setPaymentAccounts(accs)
-
-          let selected = accs[0]
-          for (const acc of accs) {
-            if (acc.daily_limit === null) {
-              selected = acc
-              break
-            }
-            if ((acc.accumulated_today ?? 0) < acc.daily_limit) {
-              selected = acc
-              break
-            }
-          }
-          setSelectedAccountId(selected.id)
-        }
-      })
+    // Mismo criterio que el cobro de un servicio: acumulado real del mes desde el ledger
+    // y rotación a la primera cuenta que todavía tenga margen (mig 160). Server action
+    // que valida la sesión de barbero (la RPC no se expone a anon).
+    getTransferAccountsState(branchId).then((accs) => {
+      setPaymentAccounts(accs)
+      const pick = pickTransferAccount(accs)
+      setRotatedFrom(pick.skipped)
+      setAllAccountsFull(pick.allFull)
+      if (pick.account) setSelectedAccountId(pick.account.id)
+    })
   }, [open, branchId, supabase])
 
   async function finishSale() {
@@ -249,31 +238,17 @@ export function DirectSaleDialog({
             </div>
           </div>
 
-          {/* Payment account */}
+          {/* Payment account (componente compartido con el cobro de servicios) */}
           {selectedPayment === 'transfer' && paymentAccounts.length > 0 && (
-            <div>
-              <p className="mb-2 text-sm font-medium flex items-center gap-1.5">
-                <Wallet className="size-4" />
-                Cuenta de cobro <span className="text-muted-foreground">(opcional)</span>
-              </p>
-              <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
-                <SelectTrigger className="h-14 w-full text-lg">
-                  <SelectValue placeholder="Seleccionar cuenta..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {paymentAccounts.map((acc) => (
-                    <SelectItem key={acc.id} value={acc.id}>
-                      <span className="font-medium">{acc.name}</span>
-                      {acc.alias_or_cbu && (
-                        <span className="ml-2 text-muted-foreground text-xs">
-                          {acc.alias_or_cbu}
-                        </span>
-                      )}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <TransferAccountPicker
+              accounts={paymentAccounts}
+              selectedAccountId={selectedAccountId}
+              onSelect={setSelectedAccountId}
+              rotatedFrom={rotatedFrom}
+              allFull={allAccountsFull}
+              amountText={formatCurrency(totalPrice)}
+              showAliasHero={false}
+            />
           )}
 
           <Button
