@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getCurrentOrgId } from './org'
+import { requireOrgAccessToEntity } from './guard'
 
 // service_tags: escrituras del dashboard vía `createAdminClient()` + `getCurrentOrgId` y
 // `.eq('organization_id', orgId)`. NO usar `createClient()`: la RLS es owner/admin vía la
@@ -141,11 +142,17 @@ export async function updateConversationTag(
 }
 
 export async function deleteConversationTag(tagId: string) {
+  // Gate de org: admin client saltea RLS, así que scopeamos el delete a la org del caller
+  // (antes cualquier usuario autenticado podía borrar la etiqueta de otra org por id).
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'No autorizado' }
+
   const supabase = createAdminClient()
   const { error } = await supabase
     .from('conversation_tags')
     .delete()
     .eq('id', tagId)
+    .eq('organization_id', orgId)
 
   if (error) return { error: error.message }
   revalidatePath('/dashboard/mensajeria')
@@ -153,7 +160,23 @@ export async function deleteConversationTag(tagId: string) {
 }
 
 export async function assignConversationTag(conversationId: string, tagId: string) {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'No autorizado' }
+
+  // Validar que la conversación Y la etiqueta pertenecen a la org del caller (sin esto,
+  // un caller podía etiquetar la conversación de otra org, o con una etiqueta ajena).
+  const convAccess = await requireOrgAccessToEntity('conversations', conversationId)
+  if (!convAccess.ok) return { error: 'No autorizado' }
+
   const supabase = createAdminClient()
+  const { data: tag } = await supabase
+    .from('conversation_tags')
+    .select('id')
+    .eq('id', tagId)
+    .eq('organization_id', orgId)
+    .maybeSingle()
+  if (!tag) return { error: 'Etiqueta no encontrada' }
+
   const { error } = await supabase
     .from('conversation_tag_assignments')
     .upsert({ conversation_id: conversationId, tag_id: tagId }, { onConflict: 'conversation_id,tag_id' })
@@ -163,6 +186,13 @@ export async function assignConversationTag(conversationId: string, tagId: strin
 }
 
 export async function removeConversationTag(conversationId: string, tagId: string) {
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return { error: 'No autorizado' }
+
+  // Validar que la conversación es de la org del caller antes de tocar sus asignaciones.
+  const convAccess = await requireOrgAccessToEntity('conversations', conversationId)
+  if (!convAccess.ok) return { error: 'No autorizado' }
+
   const supabase = createAdminClient()
   const { error } = await supabase
     .from('conversation_tag_assignments')
@@ -184,6 +214,11 @@ export async function removeConversationTag(conversationId: string, tagId: strin
 export async function autoTagConversation(conversationId: string) {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { applied: [], error: 'No autorizado' }
+
+  // Validar que la conversación es de la org: sin esto se leerían los mensajes de otra org
+  // y se mandarían al proveedor de IA (fuga de datos cross-org), además de escribir tags ajenos.
+  const convAccess = await requireOrgAccessToEntity('conversations', conversationId)
+  if (!convAccess.ok) return { applied: [], error: 'No autorizado' }
 
   const supabase = createAdminClient()
 

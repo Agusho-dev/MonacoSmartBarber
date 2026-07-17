@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { revalidatePath } from 'next/cache'
 import { getMonthBoundsStr, getLocalNow } from '@/lib/time-utils'
@@ -500,13 +500,24 @@ export async function upsertFixedExpense(data: {
   due_day?: number | null   // día de vencimiento del mes
   is_active?: boolean
 }) {
-  // Validar que la sucursal pertenece a la organización del usuario
+  // NOTA: duplicado MUERTO. El catálogo de gastos fijos usa las versiones vivas de
+  // `fixed-expenses.ts` (createAdminClient). Estas dos (upsert/delete) no tienen callers.
+  // Se dejan alineadas al patrón admin+validateBranchAccess por si alguna vez se re-wirean.
   const orgId = await validateBranchAccess(data.branch_id)
   if (!orgId) return { error: 'No tienes acceso a esta sucursal' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   if (data.id) {
+    // Validar la fila existente (no confiar en el branch del form) antes de update por id.
+    const { data: existing } = await supabase
+      .from('fixed_expenses')
+      .select('branch_id')
+      .eq('id', data.id)
+      .maybeSingle()
+    if (!existing) return { error: 'Gasto fijo no encontrado' }
+    if (!(await validateBranchAccess(existing.branch_id))) return { error: 'No autorizado' }
+
     const { error } = await supabase
       .from('fixed_expenses')
       .update({
@@ -535,7 +546,8 @@ export async function upsertFixedExpense(data: {
 }
 
 export async function deleteFixedExpense(id: string) {
-  const supabase = await createClient()
+  // Duplicado MUERTO (ver upsertFixedExpense arriba): el catálogo usa fixed-expenses.ts.
+  const supabase = createAdminClient()
 
   // Obtener el gasto para verificar a qué sucursal pertenece
   const { data: expense, error: fetchError } = await supabase

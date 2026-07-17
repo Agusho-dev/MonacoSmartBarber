@@ -87,27 +87,26 @@ export async function createDisciplinaryEvent(
   createdBy: string | null,
   source: string = 'manual'
 ) {
-  // Las llamadas con source='system' provienen de checkTardiness (interno), sin contexto de usuario
-  if (source !== 'system') {
-    const orgId = await validateBranchAccess(branchId)
-    if (!orgId) return { error: 'No autorizado' }
+  // Autorización SIEMPRE. Antes esto estaba envuelto en `if (source !== 'system')`, y como
+  // `source` lo controla el caller, un POST directo con source='system' salteaba TODO el gate
+  // y podía fabricar eventos disciplinarios (con descuento) en cualquier org/sucursal. Los
+  // eventos automáticos de tardanza los inserta ahora checkTardiness() inline (server-side
+  // interno), no por acá, así que este path exige sesión sin excepción.
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
 
-    // Validar que el staff pertenece al branch indicado
-    const adminCheck = createAdminClient()
-    const { data: staffRow } = await adminCheck
-      .from('staff')
-      .select('branch_id')
-      .eq('id', staffId)
-      .maybeSingle()
-    if (!staffRow || staffRow.branch_id !== branchId) {
-      return { error: 'El barbero no pertenece a esta sucursal' }
-    }
-  }
-
-  // Siempre admin: las escrituras de disciplina van por service role + autorización en app
-  // (validateBranchAccess arriba). Con createClient() la RLS staff-only bloqueaba a admins
-  // cross-branch / owners de organization_members.
+  // Escrituras de disciplina: service role + autorización en app (validateBranchAccess arriba).
   const supabase = createAdminClient()
+
+  // Validar que el staff pertenece al branch indicado
+  const { data: staffRow } = await supabase
+    .from('staff')
+    .select('branch_id')
+    .eq('id', staffId)
+    .maybeSingle()
+  if (!staffRow || staffRow.branch_id !== branchId) {
+    return { error: 'El barbero no pertenece a esta sucursal' }
+  }
 
   // Count previous occurrences this month
   const startOfMonth = eventDate.slice(0, 7) + '-01'
@@ -186,6 +185,17 @@ export async function getBarberDisciplinarySummary(branchId: string) {
 export async function checkTardiness(staffId: string, branchId: string) {
   const supabase = createAdminClient()
 
+  // Guard: el evento sólo aplica si el staff realmente pertenece (y está activo en) esa
+  // sucursal. checkTardiness es una server action exportada; sin este chequeo, un POST directo
+  // podría fabricar tardanzas (con descuento) para staff/sucursal arbitrarios. Su único caller
+  // legítimo (registerBarberClockIn) ya valida este mismo pairing antes de invocarla.
+  const { data: staffRow } = await supabase
+    .from('staff')
+    .select('branch_id, is_active')
+    .eq('id', staffId)
+    .maybeSingle()
+  if (!staffRow || !staffRow.is_active || staffRow.branch_id !== branchId) return
+
   const tz = await getActiveTimezone()
   const now = new Date()
   const argTimeOptions = { timeZone: tz, hour12: false } as const
@@ -253,6 +263,41 @@ export async function checkTardiness(staffId: string, branchId: string) {
 
   if (count && count > 0) return
 
+  // Insertamos el evento inline (NO via createDisciplinaryEvent): ese action ahora exige
+  // sesión y acá corremos fire-and-forget desde el clock-in, sin contexto de cookies. El
+  // staff-pertenece-a-sucursal ya está validado en el guard de arriba.
+  const startOfMonth = ymdFormat.slice(0, 7) + '-01'
+  const { data: countData } = await supabase.rpc('get_occurrence_count', {
+    p_staff_id: staffId,
+    p_event_type: 'late',
+    p_from_date: startOfMonth,
+  })
+  const occurrenceNumber = (countData ?? 0) + 1
+
+  const { data: rule } = await supabase
+    .from('disciplinary_rules')
+    .select('consequence, deduction_amount')
+    .eq('branch_id', branchId)
+    .eq('event_type', 'late')
+    .eq('occurrence_number', occurrenceNumber)
+    .single()
+
   const notes = `Llegada tarde a las ${currentTimeStr} (Horario: ${relevantBlock.start_time})`
-  await createDisciplinaryEvent(staffId, branchId, 'late', ymdFormat, notes, null, 'system')
+  const { error } = await supabase.from('disciplinary_events').insert({
+    staff_id: staffId,
+    branch_id: branchId,
+    event_type: 'late',
+    event_date: ymdFormat,
+    occurrence_number: occurrenceNumber,
+    consequence_applied: rule?.consequence ?? null,
+    deduction_amount: rule?.deduction_amount ?? null,
+    notes,
+    created_by: null,
+    source: 'system',
+  })
+  if (error) {
+    console.error('[checkTardiness] insert disciplinary_event', error.message)
+    return
+  }
+  revalidatePath('/dashboard/disciplina')
 }

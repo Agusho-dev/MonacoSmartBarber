@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import { getLocalDayBounds } from '@/lib/time-utils'
 import { validateBranchAccess } from './org'
 import { getScopedBranchIds } from './branch-access'
+import { requireOrgAccessToEntity } from './guard'
 import type { TransferAccountState } from '@/lib/payment-accounts'
 
 /**
@@ -241,51 +242,51 @@ export async function deletePaymentAccount(id: string): Promise<DeleteAccountRes
 }
 
 export async function getAllAccountBalanceTotals(branchId?: string | null) {
-  const supabase = await createClient()
-
+  // Scope de sucursales UNA vez, aplicado a TODAS las queries. Con admin client (RLS bypass)
+  // las lecturas de efectivo tienen que scopearse explícitamente: sin branchId ("todas las
+  // sucursales") filtrarían plata de otras orgs. Con createClient() la RLS branch-scoped daba
+  // el problema inverso: un admin viendo otra sucursal recibía $0 (incidente 16/jul/2026).
+  let scopeBranchIds: string[]
   if (branchId) {
     const orgId = await validateBranchAccess(branchId)
     if (!orgId) return []
+    scopeBranchIds = [branchId]
+  } else {
+    scopeBranchIds = await getScopedBranchIds()
+    if (scopeBranchIds.length === 0) return []
   }
 
-  let accountsQuery = supabase
+  const supabase = createAdminClient()
+
+  const accountsQuery = supabase
     .from('payment_accounts')
     .select('id, name')
+    .in('branch_id', scopeBranchIds)
     .order('sort_order')
-
-  if (branchId) {
-    accountsQuery = accountsQuery.eq('branch_id', branchId)
-  } else {
-    const orgBranchIds = await getScopedBranchIds()
-    if (orgBranchIds.length === 0) return []
-    accountsQuery = accountsQuery.in('branch_id', orgBranchIds)
-  }
 
   // Cash balance histórico: estas queries acumulan filas indefinidamente (no
   // hay filtro temporal). Sin paginación, una vez que la org supera 1000
   // visitas en efectivo el saldo de caja queda truncado y mal calculado para
   // siempre. Paginar con range() drena todas las filas vía PostgREST.
-  const cashVisitsPromise = fetchAll<{ amount: number }>((from, to) => {
-    let q = supabase
+  const cashVisitsPromise = fetchAll<{ amount: number }>((from, to) =>
+    supabase
       .from('visits')
       .select('amount')
       .eq('payment_method', 'cash')
+      .in('branch_id', scopeBranchIds)
       .order('completed_at')
       .range(from, to)
-    if (branchId) q = q.eq('branch_id', branchId)
-    return q
-  })
+  )
 
-  const cashExpensesPromise = fetchAll<{ amount: number }>((from, to) => {
-    let q = supabase
+  const cashExpensesPromise = fetchAll<{ amount: number }>((from, to) =>
+    supabase
       .from('expense_tickets')
       .select('amount')
       .is('payment_account_id', null)
+      .in('branch_id', scopeBranchIds)
       .order('expense_date')
       .range(from, to)
-    if (branchId) q = q.eq('branch_id', branchId)
-    return q
-  })
+  )
 
   // Fetch cuentas + cash en paralelo
   const [{ data: accounts }, cashVisits, cashExpenses] = await Promise.all([
@@ -357,13 +358,29 @@ export async function getAccountBalanceSummary(
   accountId: string,
   range?: { from?: string; to?: string } // ISO datetimes; if omitted se usa el día actual
 ) {
-  const supabase = await createClient()
   const { start: todayStart, end: todayEnd } = getLocalDayBounds()
 
   const fromISO = range?.from ?? todayStart
   const toISO = range?.to ?? todayEnd
   const fromDate = fromISO.slice(0, 10) // YYYY-MM-DD
   const toDate = toISO.slice(0, 10)
+
+  // Gate: admin client saltea RLS → validamos que la cuenta sea de la org del caller.
+  // (Antes con createClient la RLS scopeaba las lecturas por sucursal del staff, así que un
+  // admin viendo una cuenta de otra sucursal recibía $0. Ahora admin + gate explícito.)
+  const access = await requireOrgAccessToEntity('payment_accounts', accountId)
+  if (!access.ok) {
+    return {
+      totalIncome: 0,
+      totalExpenses: 0,
+      estimatedBalance: 0,
+      transfers: [],
+      expenses: [],
+      range: { from: fromISO, to: toISO },
+    }
+  }
+
+  const supabase = createAdminClient()
 
   // Ingresos: cobro + propina transferida (las dos cosas entran en la misma
   // transferencia del cliente, a la misma cuenta).
