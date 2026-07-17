@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { validateBranchAccess } from './org'
 import { isValidUUID } from '@/lib/validation'
@@ -17,7 +17,10 @@ export async function updateRewardConfig(
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { error: 'No autorizado' }
 
-  const supabase = await createClient()
+  // Admin client + validateBranchAccess (arriba): la RLS de rewards_config es owner/admin
+  // vía la tabla `staff` y bloqueaba a admins cross-branch / owners de organization_members
+  // (bug expense_tickets, 16/jul/2026). El scope de org lo da el branch_id ya validado.
+  const supabase = createAdminClient()
 
   // Check if config exists
   const { data: existing } = await supabase

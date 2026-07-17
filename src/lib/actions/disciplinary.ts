@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { DisciplinaryEventType, ConsequenceType } from '@/lib/types/database'
 import { validateBranchAccess } from './org'
@@ -10,7 +10,7 @@ export async function getDisciplinaryRules(branchId: string) {
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { data: [], error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('disciplinary_rules')
     .select('*')
@@ -31,7 +31,7 @@ export async function upsertDisciplinaryRule(
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { error } = await supabase
     .from('disciplinary_rules')
     .upsert(
@@ -44,7 +44,7 @@ export async function upsertDisciplinaryRule(
 }
 
 export async function deleteDisciplinaryRule(id: string) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   // Obtener la regla para verificar ownership antes de borrar
   const { data: rule } = await supabase
     .from('disciplinary_rules')
@@ -65,7 +65,7 @@ export async function getDisciplinaryEvents(branchId: string, fromDate?: string)
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { data: [], error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   let query = supabase
     .from('disciplinary_events')
     .select('*, staff:staff(id, full_name)')
@@ -104,7 +104,10 @@ export async function createDisciplinaryEvent(
     }
   }
 
-  const supabase = source === 'system' ? createAdminClient() : await createClient()
+  // Siempre admin: las escrituras de disciplina van por service role + autorización en app
+  // (validateBranchAccess arriba). Con createClient() la RLS staff-only bloqueaba a admins
+  // cross-branch / owners de organization_members.
+  const supabase = createAdminClient()
 
   // Count previous occurrences this month
   const startOfMonth = eventDate.slice(0, 7) + '-01'
@@ -146,7 +149,7 @@ export async function getBarberDisciplinarySummary(branchId: string) {
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { summary: [], fromDate: '' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const startOfMonth = new Date()
   startOfMonth.setDate(1)
   const fromDate = startOfMonth.toISOString().slice(0, 10)

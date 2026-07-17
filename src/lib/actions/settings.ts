@@ -1,11 +1,18 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { getCurrentOrgId } from './org'
+import { getCurrentOrgId, validateBranchAccess } from './org'
+
+// Escrituras del dashboard: usan `createAdminClient()` (service role) + autorización en
+// app (`getCurrentOrgId` / `validateBranchAccess`). NO usar `createClient()`: la RLS de
+// app_settings/branches/rewards_config exige `is_admin_or_owner()`, que sólo mira la tabla
+// `staff`. Un admin que opera otra sucursal (staff.branch_id ≠ la del write) o un owner
+// resuelto vía organization_members se topaba con "row-level security policy" (mismo bug
+// que expense_tickets, 16/jul/2026). El scope de org lo garantizan los `.eq('organization_id', orgId)`.
 
 export async function updateAppSettings(formData: FormData) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Filtrar configuracion por organización
   const orgId = await getCurrentOrgId()
@@ -70,7 +77,7 @@ export async function updateAppSettings(formData: FormData) {
 }
 
 export async function updateBranchCheckinColor(branchId: string, color: string | null) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'Organización no encontrada' }
@@ -99,12 +106,9 @@ function validateHttpsUrl(url: string): boolean {
 }
 
 export async function updateWaApiUrl(waApiUrl: string) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'No autorizado' }
-
-  // Filtrar configuracion por organización
+  // Filtrar configuracion por organización (getCurrentOrgId ya exige sesión válida)
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'Organización no encontrada' }
 
@@ -146,12 +150,9 @@ export async function updateReviewAutoConfig(data: {
   reviewTemplateName: string
   waApiUrl: string
 }) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'No autorizado' }
-
-  // Filtrar configuracion por organización
+  // Filtrar configuracion por organización (getCurrentOrgId ya exige sesión válida)
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'Organización no encontrada' }
 
@@ -189,7 +190,7 @@ export async function updateReviewAutoConfig(data: {
 }
 
 export async function updateRewardsConfig(formData: FormData) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'No autorizado' }
@@ -199,7 +200,6 @@ export async function updateRewardsConfig(formData: FormData) {
 
   // Validar que la sucursal pertenece a esta organización
   if (branchId) {
-    const { validateBranchAccess } = await import('./org')
     const branchOrg = await validateBranchAccess(branchId)
     if (!branchOrg) return { error: 'Sucursal no pertenece a tu organización' }
   }
@@ -213,6 +213,19 @@ export async function updateRewardsConfig(formData: FormData) {
 
   let error
   if (id) {
+    // Con admin client la RLS ya no filtra: validamos la fila EXISTENTE (no el branch del
+    // form) antes de tocarla por id. rewards_config se scopea sólo por branch (no tiene
+    // organization_id), así que una fila sin branch no se puede atribuir a una org → se
+    // rechaza para no permitir editar por id la config de otra organización.
+    const { data: existingRow } = await supabase
+      .from('rewards_config')
+      .select('branch_id')
+      .eq('id', id)
+      .maybeSingle()
+    if (!existingRow) return { error: 'Configuración no encontrada' }
+    if (!existingRow.branch_id || !(await validateBranchAccess(existingRow.branch_id))) {
+      return { error: 'No autorizado' }
+    }
     ; ({ error } = await supabase
       .from('rewards_config')
       .update(data)

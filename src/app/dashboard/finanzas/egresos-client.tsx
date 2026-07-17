@@ -29,7 +29,10 @@ import {
 import {
     Select,
     SelectContent,
+    SelectGroup,
     SelectItem,
+    SelectLabel,
+    SelectSeparator,
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
@@ -50,6 +53,9 @@ import { es } from 'date-fns/locale'
 interface AccountWithBranch extends PaymentAccount {
     branch?: { name: string } | null
 }
+
+const sortByOrder = (a: AccountWithBranch, b: AccountWithBranch) =>
+    (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name)
 
 interface Props {
     expenseTickets: ExpenseTicket[]
@@ -123,10 +129,30 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
         ])
     ).sort()
 
-    // Cuentas activas filtradas por sucursal seleccionada en el form
-    const filteredAccounts = accounts.filter(a =>
-        a.is_active && (form.branch_id ? a.branch_id === form.branch_id : true)
+    // Cuentas seleccionables para pagar el egreso.
+    // Un egreso puede salir de CUALQUIER cuenta de la sucursal, no sólo de la que hoy
+    // recibe los cobros: a veces se paga desde otra cuenta (una inactiva que todavía
+    // tiene saldo de cobros pasados, la personal de otro barbero, etc.). Por eso
+    // mostramos activas + inactivas, agrupadas para que se distinga cuál es la de cobro.
+    const branchAccounts = useMemo(
+        () => accounts.filter(a => (form.branch_id ? a.branch_id === form.branch_id : true)),
+        [accounts, form.branch_id]
     )
+    const activeAccounts = useMemo(
+        () => branchAccounts.filter(a => a.is_active).sort(sortByOrder),
+        [branchAccounts]
+    )
+    const inactiveAccounts = useMemo(
+        () => branchAccounts.filter(a => !a.is_active).sort(sortByOrder),
+        [branchAccounts]
+    )
+    // Al editar un egreso viejo, la cuenta guardada puede estar inactiva o incluso ser de
+    // otra sucursal: garantizamos que siempre aparezca para no perder el valor seleccionado.
+    const orphanSelected = useMemo(() => {
+        if (!form.payment_account_id) return null
+        if (branchAccounts.some(a => a.id === form.payment_account_id)) return null
+        return accounts.find(a => a.id === form.payment_account_id) ?? null
+    }, [accounts, branchAccounts, form.payment_account_id])
 
     function openAdd() {
         setForm({
@@ -436,20 +462,63 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
                                 <Wallet className="size-3.5" />
                                 Medio de pago / Cuenta
                             </Label>
-                            <Select value={form.payment_account_id} onValueChange={(v) => setForm({ ...form, payment_account_id: v === '__none__' ? '' : v })}>
+                            <Select value={form.payment_account_id || '__none__'} onValueChange={(v) => setForm({ ...form, payment_account_id: v === '__none__' ? '' : v })}>
                                 <SelectTrigger>
                                     <SelectValue placeholder="Efectivo" />
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="__none__">Efectivo</SelectItem>
-                                    {filteredAccounts.map(acc => (
-                                        <SelectItem key={acc.id} value={acc.id}>
-                                            {acc.name}
-                                            {acc.alias_or_cbu ? ` · ${acc.alias_or_cbu}` : ''}
-                                        </SelectItem>
-                                    ))}
+
+                                    {activeAccounts.length > 0 && (
+                                        <>
+                                            <SelectSeparator />
+                                            <SelectGroup>
+                                                <SelectLabel>Cuentas de cobro</SelectLabel>
+                                                {activeAccounts.map(acc => (
+                                                    <SelectItem key={acc.id} value={acc.id}>
+                                                        <span>{acc.name}</span>
+                                                        {acc.alias_or_cbu && (
+                                                            <span className="text-muted-foreground">· {acc.alias_or_cbu}</span>
+                                                        )}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectGroup>
+                                        </>
+                                    )}
+
+                                    {inactiveAccounts.length > 0 && (
+                                        <>
+                                            <SelectSeparator />
+                                            <SelectGroup>
+                                                <SelectLabel>Otras cuentas (inactivas)</SelectLabel>
+                                                {inactiveAccounts.map(acc => (
+                                                    <SelectItem key={acc.id} value={acc.id}>
+                                                        <span>{acc.name}</span>
+                                                        {acc.alias_or_cbu && (
+                                                            <span className="text-muted-foreground">· {acc.alias_or_cbu}</span>
+                                                        )}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectGroup>
+                                        </>
+                                    )}
+
+                                    {orphanSelected && (
+                                        <>
+                                            <SelectSeparator />
+                                            <SelectItem value={orphanSelected.id}>
+                                                <span>{orphanSelected.name}</span>
+                                                {orphanSelected.branch?.name && (
+                                                    <span className="text-muted-foreground">· {orphanSelected.branch.name}</span>
+                                                )}
+                                            </SelectItem>
+                                        </>
+                                    )}
                                 </SelectContent>
                             </Select>
+                            <p className="text-[11px] text-muted-foreground">
+                                Elegí de dónde sale la plata. Podés pagar desde cualquier cuenta, no sólo la de cobro.
+                            </p>
                         </div>
 
                         <div className="grid gap-2">

@@ -1,15 +1,20 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { IncentiveMetric, IncentivePeriod } from '@/lib/types/database'
 import { validateBranchAccess } from './org'
+
+// Escrituras del dashboard: `createAdminClient()` + autorización en app (validateBranchAccess).
+// NO usar `createClient()`: la RLS de incentive_rules/incentive_achievements exige owner/admin
+// vía la tabla `staff`, así que bloqueaba a un admin operando otra sucursal o a un owner
+// resuelto por organization_members (mismo bug que expense_tickets, 16/jul/2026).
 
 export async function getIncentiveRules(branchId: string) {
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { data: [], error: 'No autorizado' }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('incentive_rules')
     .select('*')
@@ -19,7 +24,7 @@ export async function getIncentiveRules(branchId: string) {
 }
 
 export async function upsertIncentiveRule(formData: FormData) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const id = formData.get('id') as string | null
   const branchId = formData.get('branch_id') as string
   const name = (formData.get('name') as string).trim()
@@ -37,6 +42,16 @@ export async function upsertIncentiveRule(formData: FormData) {
   if (!orgId) return { error: 'No autorizado' }
 
   if (id) {
+    // Con admin client la RLS ya no filtra: validamos que la regla existente sea de esta
+    // org antes de tocarla por id (no confiar en el branch_id del form para el update).
+    const { data: existing } = await supabase
+      .from('incentive_rules')
+      .select('branch_id')
+      .eq('id', id)
+      .maybeSingle()
+    if (!existing) return { error: 'Regla no encontrada' }
+    if (!(await validateBranchAccess(existing.branch_id))) return { error: 'No autorizado' }
+
     const { error } = await supabase
       .from('incentive_rules')
       .update({ name, description, metric, threshold, reward_amount: rewardAmount, period })
@@ -54,7 +69,7 @@ export async function upsertIncentiveRule(formData: FormData) {
 }
 
 export async function toggleIncentiveRule(id: string, isActive: boolean) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { data: rule } = await supabase.from('incentive_rules').select('branch_id').eq('id', id).single()
   if (!rule) return { error: 'Regla no encontrada' }
   const orgId = await validateBranchAccess(rule.branch_id)
@@ -70,7 +85,7 @@ export async function toggleIncentiveRule(id: string, isActive: boolean) {
 }
 
 export async function deleteIncentiveRule(id: string) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { data: rule } = await supabase.from('incentive_rules').select('branch_id').eq('id', id).single()
   if (!rule) return { error: 'Regla no encontrada' }
   const orgId = await validateBranchAccess(rule.branch_id)
@@ -83,7 +98,7 @@ export async function deleteIncentiveRule(id: string) {
 }
 
 export async function logAchievement(staffId: string, ruleId: string, periodLabel: string, amountEarned: number, notes?: string) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   // Verificar que la regla pertenece a una branch de la org
   const { data: rule } = await supabase.from('incentive_rules').select('branch_id').eq('id', ruleId).single()
   if (!rule) return { error: 'Regla no encontrada' }
@@ -116,7 +131,7 @@ export async function getBarberProgress(branchId: string, periodLabel: string) {
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { barbers: [], achievements: [], rules: [] }
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const [barbersRes, rulesRes] = await Promise.all([
     supabase

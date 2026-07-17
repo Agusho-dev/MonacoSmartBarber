@@ -1,15 +1,26 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getLocalDateStr } from '@/lib/time-utils'
 import { validateBranchAccess } from './org'
+
+// IMPORTANTE: estas acciones usan `createAdminClient()` (service role), igual que el
+// resto de las escrituras financieras del dashboard (caja, fixed-expenses, paymentAccounts,
+// salary, tips). La autorización real la hace `validateBranchAccess()` a nivel app.
+//
+// NO volver a `createClient()`: la RLS de `expense_tickets` sólo reconoce usuarios que
+// están en la tabla `staff` con rol owner/admin (o un rol con `finances.create_expense`
+// scopeado a ese branch). El dueño/encargado que opera desde el dashboard puede resolverse
+// vía `organization_members` —que la policy NO consulta—, así que el INSERT fallaba con
+// "new row violates row-level security policy for table expense_tickets" aunque el usuario
+// estuviera perfectamente autorizado (incidente 16/jul/2026).
 
 export async function getExpenseTickets(branchId: string, startDate?: string, endDate?: string) {
     const orgId = await validateBranchAccess(branchId)
     if (!orgId) return { error: 'No autorizado' }
 
-    const supabase = await createClient()
+    const supabase = createAdminClient()
 
     let query = supabase
         .from('expense_tickets')
@@ -42,7 +53,7 @@ export async function createExpenseTicket(data: {
     const orgId = await validateBranchAccess(data.branch_id)
     if (!orgId) return { error: 'No autorizado' }
 
-    const supabase = await createClient()
+    const supabase = createAdminClient()
 
     const { error } = await supabase.from('expense_tickets').insert([
         {
@@ -64,7 +75,7 @@ export async function createExpenseTicket(data: {
 }
 
 export async function deleteExpenseTicket(id: string) {
-    const supabase = await createClient()
+    const supabase = createAdminClient()
 
     const { data: ticket } = await supabase.from('expense_tickets').select('branch_id').eq('id', id).single()
     if (!ticket) return { error: 'Gasto no encontrado' }
@@ -92,7 +103,7 @@ export async function updateExpenseTicket(
         payment_account_id?: string | null
     }
 ) {
-    const supabase = await createClient()
+    const supabase = createAdminClient()
 
     const { data: ticket } = await supabase.from('expense_tickets').select('branch_id').eq('id', id).single()
     if (!ticket) return { error: 'Gasto no encontrado' }

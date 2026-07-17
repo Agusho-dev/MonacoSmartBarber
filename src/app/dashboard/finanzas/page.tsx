@@ -113,7 +113,10 @@ export default async function FinanzasPage() {
       : Promise.resolve({ data: [] }),
     admin.from('salary_configs').select('*, staff!inner(organization_id, branch_id)').eq('staff.organization_id', orgId),
     branchIds.length > 0
-      ? supabase.from('expense_tickets').select('*, created_by_staff:created_by(full_name), payment_account:payment_accounts(name, alias_or_cbu)').in('branch_id', branchIds).order('expense_date', { ascending: false }).limit(100)
+      // admin (service role): la RLS de expense_tickets sólo deja ver filas a usuarios
+      // presentes en `staff` del branch. Un dueño/encargado resuelto vía organization_members
+      // veía la tabla vacía. El scope real ya lo da `.in('branch_id', branchIds)` (branches visibles).
+      ? admin.from('expense_tickets').select('*, created_by_staff:created_by(full_name), payment_account:payment_accounts(name, alias_or_cbu)').in('branch_id', branchIds).order('expense_date', { ascending: false }).limit(100)
       : Promise.resolve({ data: [] }),
     admin.from('organizations').select('slug, name').eq('id', orgId).maybeSingle(),
     // Acumulado real del mes por cuenta de cobro (transfer_logs: cobros + propinas).

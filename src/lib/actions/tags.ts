@@ -1,12 +1,15 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getCurrentOrgId } from './org'
 
+// service_tags: escrituras del dashboard vía `createAdminClient()` + `getCurrentOrgId` y
+// `.eq('organization_id', orgId)`. NO usar `createClient()`: la RLS es owner/admin vía la
+// tabla `staff` (bug expense_tickets, 16/jul/2026). Las conversation_tags de abajo ya usan admin.
+
 export async function getServiceTags() {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Filtrar etiquetas por organización
   const orgId = await getCurrentOrgId()
@@ -22,7 +25,7 @@ export async function getServiceTags() {
 }
 
 export async function upsertServiceTag(name: string, id?: string) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Filtrar etiquetas por organización
   const orgId = await getCurrentOrgId()
@@ -47,7 +50,7 @@ export async function upsertServiceTag(name: string, id?: string) {
 }
 
 export async function deleteServiceTag(id: string) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   // Filtrar etiquetas por organización
   const orgId = await getCurrentOrgId()
