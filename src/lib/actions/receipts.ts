@@ -174,6 +174,7 @@ export interface ReconReceipt {
   captureMethod: string
   engine: string | null
   reviewNote: string | null
+  reconciledAt: string | null
   createdAt: string
 }
 
@@ -188,6 +189,12 @@ export interface ReconRow {
   chargedAmount: number | null
   expectedAmount: number | null
   state: ReconState
+  /**
+   * Flag interno "revisar fecha": el cobro está conciliado por monto, pero la fecha
+   * leída parece de otro día y nadie la revisó todavía. Es un aviso suave para el
+   * admin — NO cuenta como brecha ni frenó el cobro en la caja.
+   */
+  dateReview: boolean
   receipt: ReconReceipt | null
 }
 
@@ -197,6 +204,8 @@ export interface ReconSummary {
   brecha: number
   pctConciliado: number
   scopeCount: number
+  /** Cobros conciliados pero con fecha a revisar (aviso interno, no es brecha). */
+  dateReview: number
   counts: Record<ReconState, number>
 }
 
@@ -211,7 +220,7 @@ const EMPTY_COUNTS: Record<ReconState, number> = {
 }
 const EMPTY_RESULT: ReconResult = {
   rows: [],
-  summary: { totalTransferido: 0, totalRespaldado: 0, brecha: 0, pctConciliado: 100, scopeCount: 0, counts: { ...EMPTY_COUNTS } },
+  summary: { totalTransferido: 0, totalRespaldado: 0, brecha: 0, pctConciliado: 100, scopeCount: 0, dateReview: 0, counts: { ...EMPTY_COUNTS } },
   truncated: false,
 }
 
@@ -259,21 +268,41 @@ function mapReceipt(r: Record<string, unknown> | null): ReconReceipt | null {
     captureMethod: (r.capture_method as string) ?? 'front_camera',
     engine: (r.extraction_engine as string) ?? null,
     reviewNote: (r.review_note as string) ?? null,
+    reconciledAt: (r.reconciled_at as string) ?? null,
     createdAt: r.created_at as string,
   }
 }
 
-function stateFromReceipt(status: ReceiptStatus): ReconState {
-  switch (status) {
+/**
+ * Estado de conciliación (del DINERO) a partir del comprobante. La fecha NO define
+ * el estado: desde que dejó de bloquear el escaneo, un cobro con monto correcto está
+ * respaldado aunque la fecha leída parezca vieja. La discrepancia de fecha se expone
+ * aparte como `dateReview` (ver dateReviewFor). El estado legacy `date_mismatch`
+ * (comprobantes viejos, antes de este cambio) se reinterpreta acá mismo.
+ */
+function stateFromReceipt(receipt: ReconReceipt): ReconState {
+  switch (receipt.status) {
     case 'verified':
     case 'manual_ok': return 'conciliado'
     case 'amount_mismatch': return 'monto'
-    case 'date_mismatch': return 'fecha'
     case 'duplicate': return 'duplicado'
+    case 'date_mismatch':
+      // Legacy: el dinero está respaldado si el monto coincidió; si no, es un
+      // problema de monto real (no de fecha).
+      return receipt.amountMatches === false ? 'monto' : 'conciliado'
     case 'needs_review':
     case 'overridden':
     default: return 'revision'
   }
+}
+
+/**
+ * Flag interno "revisar fecha": conciliado por monto pero la fecha leída parece de
+ * otro día, y todavía nadie lo revisó (`reconciled_at`). Se limpia solo cuando el
+ * admin actúa sobre el comprobante (dar por válido / guardar nota / marcar revisada).
+ */
+function dateReviewFor(receipt: ReconReceipt | null, state: ReconState): boolean {
+  return state === 'conciliado' && receipt?.dateOk === false && receipt?.reconciledAt == null
 }
 
 const RECON_LIMIT = 2000
@@ -314,7 +343,7 @@ export async function getReconciliation(params: {
       client:clients(name),
       barber:staff(full_name),
       account:payment_accounts(name),
-      receipt:payment_receipts(id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, created_at, expected_amount)`)
+      receipt:payment_receipts(id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, reconciled_at, created_at, expected_amount)`)
     .eq('organization_id', orgId)
     .eq('payment_method', 'transfer')
     .in('branch_id', branchIds)
@@ -328,7 +357,7 @@ export async function getReconciliation(params: {
 
   let oq = supabase
     .from('payment_receipts')
-    .select(`id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, created_at, expected_amount, payment_account_id, barber:staff(full_name), account:payment_accounts(name)`)
+    .select(`id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, reconciled_at, created_at, expected_amount, payment_account_id, barber:staff(full_name), account:payment_accounts(name)`)
     .eq('organization_id', orgId)
     .is('visit_id', null)
     .in('branch_id', branchIds)
@@ -352,7 +381,7 @@ export async function getReconciliation(params: {
       (v.tip_payment_method === 'transfer' ? Number(v.tip_amount ?? 0) : 0)
     let state: ReconState
     if (receipt) {
-      state = stateFromReceipt(receipt.status)
+      state = stateFromReceipt(receipt)
     } else {
       const ts = new Date(v.completed_at as string).getTime()
       state = requiredSince != null && ts >= requiredSince ? 'sin_comprobante' : 'historico'
@@ -368,6 +397,7 @@ export async function getReconciliation(params: {
       chargedAmount: charged,
       expectedAmount: rRaw?.expected_amount != null ? Number(rRaw.expected_amount) : charged,
       state,
+      dateReview: dateReviewFor(receipt, state),
       receipt,
     })
   }
@@ -385,14 +415,16 @@ export async function getReconciliation(params: {
       chargedAmount: null,
       expectedAmount: o.expected_amount != null ? Number(o.expected_amount) : null,
       state: 'huerfano',
+      dateReview: false,
       receipt,
     })
   }
 
   const counts: Record<ReconState, number> = { ...EMPTY_COUNTS }
-  let totalTransferido = 0, totalRespaldado = 0, brecha = 0, scopeCount = 0
+  let totalTransferido = 0, totalRespaldado = 0, brecha = 0, scopeCount = 0, dateReview = 0
   for (const row of rows) {
     counts[row.state]++
+    if (row.dateReview) dateReview++
     if (row.kind === 'payment') {
       const amt = row.chargedAmount ?? 0
       totalTransferido += amt
@@ -407,7 +439,7 @@ export async function getReconciliation(params: {
 
   return {
     rows,
-    summary: { totalTransferido, totalRespaldado, brecha, pctConciliado, scopeCount, counts },
+    summary: { totalTransferido, totalRespaldado, brecha, pctConciliado, scopeCount, dateReview, counts },
     truncated: (visits?.length ?? 0) >= RECON_LIMIT,
   }
 }

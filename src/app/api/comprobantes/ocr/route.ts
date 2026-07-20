@@ -183,17 +183,23 @@ export async function POST(req: NextRequest) {
       .select('id')
       .eq('organization_id', orgId)
       .eq('operation_number', extracted.operationNumber)
-      .in('status', ['verified', 'amount_mismatch', 'manual_ok', 'overridden'])
+      .in('status', ['verified', 'amount_mismatch', 'manual_ok', 'overridden', 'date_mismatch'])
       .limit(1)
       .maybeSingle()
     if (dup) isDuplicate = true
   }
 
+  // El GATE del escaneo es el MONTO (+ anti-duplicado). La FECHA ya NO bloquea ni
+  // alerta en la tablet: leer fecha/hora de una foto de la pantalla del cliente es
+  // ruidoso (reflejos, baja resolución, relojes desfasados) y marcaba "Comprobante
+  // viejo" en cobros legítimos con el monto correcto (≈75% de los date_mismatch en
+  // prod tenían el monto OK). Si el monto coincide y no es duplicado, el comprobante
+  // se da por VERIFICADO en la caja → el cobro se cierra solo, sin frenar al barbero
+  // delante del cliente. La discrepancia de fecha se sigue guardando en `date_ok` y
+  // se revisa de forma INTERNA en el dashboard (/dashboard/comprobantes).
   let status: ReceiptStatus
   if (!extracted || extracted.amount == null) status = 'needs_review'
   else if (isDuplicate) status = 'duplicate'
-  else if (dateOk === false) status = 'date_mismatch'       // comprobante viejo o futuro
-  else if (dateOk === null) status = 'needs_review'         // fecha ilegible → revisar (fail-closed)
   else if (amountMatches === false) status = 'amount_mismatch'
   else status = 'verified'
 

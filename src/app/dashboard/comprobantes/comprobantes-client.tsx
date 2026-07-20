@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition, type ComponentType } from 
 import {
   ScanLine, Settings, CheckCircle2, AlertTriangle, Copy, Clock, FileQuestion,
   ReceiptText, Download, Sparkles, Cpu, ShieldCheck, ExternalLink, X, ChevronRight,
-  Loader2, Building2, Wallet, CalendarX2,
+  Loader2, Building2, Wallet, CalendarX2, CalendarClock,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -41,7 +41,9 @@ const STATE_META: Record<ReconState, {
   historico:       { label: 'Histórico',         short: 'Histórico',       icon: Clock,         text: 'text-muted-foreground',                  bg: 'bg-muted',          ring: 'border-border' },
 }
 
-const TILE_ORDER: ReconState[] = ['conciliado', 'sin_comprobante', 'monto', 'fecha', 'duplicado', 'revision', 'huerfano']
+// La fecha ya no es un estado de conciliación: los cobros con monto correcto quedan
+// 'conciliado' y la discrepancia de fecha se muestra como aviso suave aparte (dateReview).
+const TILE_ORDER: ReconState[] = ['conciliado', 'sin_comprobante', 'monto', 'duplicado', 'revision', 'huerfano']
 
 function useCountUp(target: number, dur = 750): number {
   const [v, setV] = useState(0)
@@ -107,6 +109,15 @@ function StatusBadge({ state }: { state: ReconState }) {
   )
 }
 
+/** Aviso suave: cobro conciliado por monto, pero la fecha leída parece de otro día. */
+function DateReviewPill() {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-600 dark:text-amber-400">
+      <CalendarClock className="size-3.5" /> Revisar fecha
+    </span>
+  )
+}
+
 interface Props {
   initialRecon: ReconResult
   initialRange: { from: string; to: string }
@@ -133,6 +144,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
   const [branchId, setBranchId] = useState<string>('all')
   const [accountId, setAccountId] = useState<string>('all')
   const [stateFilter, setStateFilter] = useState<ReconState | null>(null)
+  const [dateFilter, setDateFilter] = useState(false)
   const [pending, startTransition] = useTransition()
 
   const [settings, setSettings] = useState(initialSettings)
@@ -176,13 +188,13 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
     }
   }
 
-  async function reviewDetail(action: 'manual_ok' | 'note') {
+  async function reviewDetail(action: 'manual_ok' | 'note', successMsg?: string) {
     if (!detail?.receipt) return
     setDetailSaving(true)
     const res = await reviewReceipt(detail.receipt.id, action, detailNote.trim() || undefined)
     setDetailSaving(false)
     if ('error' in res) { toast.error(res.error); return }
-    toast.success(action === 'manual_ok' ? 'Marcado como conciliado' : 'Nota guardada')
+    toast.success(successMsg ?? (action === 'manual_ok' ? 'Marcado como conciliado' : 'Nota guardada'))
     setDetail(null)
     refetch()
   }
@@ -206,10 +218,11 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
   }
 
   const summary = recon.summary
-  const visibleRows = useMemo(
-    () => (stateFilter ? recon.rows.filter((r) => r.state === stateFilter) : recon.rows),
-    [recon.rows, stateFilter],
-  )
+  const visibleRows = useMemo(() => {
+    if (dateFilter) return recon.rows.filter((r) => r.dateReview)
+    if (stateFilter) return recon.rows.filter((r) => r.state === stateFilter)
+    return recon.rows
+  }, [recon.rows, stateFilter, dateFilter])
   const cappedRows = visibleRows.slice(0, 400)
   const anomalies = summary.counts.sin_comprobante + summary.counts.monto + summary.counts.duplicado + summary.counts.huerfano
 
@@ -312,7 +325,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
             return (
               <button
                 key={s}
-                onClick={() => setStateFilter(active ? null : s)}
+                onClick={() => { setDateFilter(false); setStateFilter(active ? null : s) }}
                 className={cn('flex items-center gap-2.5 rounded-xl border p-2.5 text-left transition-all hover:shadow-sm',
                   active ? cn(m.ring, m.bg) : 'border-border bg-background hover:bg-muted/50',
                   count === 0 && 'opacity-55')}
@@ -330,6 +343,32 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
         </div>
       </div>
 
+      {/* Aviso interno de fecha: cobros conciliados por monto, con fecha a revisar.
+          NO frena al barbero — el aviso vive acá, en el dashboard. */}
+      {settings.isEnabled && summary.dateReview > 0 && (
+        <button
+          onClick={() => { setStateFilter(null); setDateFilter((v) => !v) }}
+          className={cn('flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-all hover:shadow-sm',
+            dateFilter ? 'border-amber-500/40 bg-amber-500/10 ring-1 ring-amber-500/20' : 'border-amber-500/25 bg-amber-500/[0.06]')}
+        >
+          <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-amber-500/15">
+            <CalendarClock className="size-5 text-amber-600 dark:text-amber-400" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">
+              {summary.dateReview} {summary.dateReview === 1 ? 'comprobante con fecha a revisar' : 'comprobantes con fecha a revisar'}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              El monto coincide y el cobro está conciliado. Confirmá que la fecha del comprobante sea correcta.
+            </p>
+          </div>
+          <span className="shrink-0 text-xs font-medium text-amber-600/80 dark:text-amber-400/80">
+            {dateFilter ? 'Ver todo' : 'Revisar'}
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-amber-600/60" />
+        </button>
+      )}
+
       {/* Aviso salud / filtro activo */}
       {settings.isEnabled && anomalies === 0 && summary.scopeCount > 0 && (
         <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm font-medium text-emerald-700 dark:text-emerald-300">
@@ -339,6 +378,11 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
       {stateFilter && (
         <button onClick={() => setStateFilter(null)} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <X className="size-3.5" /> Quitar filtro: {STATE_META[stateFilter].label}
+        </button>
+      )}
+      {dateFilter && (
+        <button onClick={() => setDateFilter(false)} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+          <X className="size-3.5" /> Quitar filtro: Fecha a revisar
         </button>
       )}
 
@@ -374,7 +418,12 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
                   <td className="whitespace-nowrap px-4 py-3 text-right font-bold tabular-nums">
                     {row.chargedAmount != null ? formatCurrency(row.chargedAmount) : (row.receipt?.extractedAmount != null ? formatCurrency(row.receipt.extractedAmount) : '—')}
                   </td>
-                  <td className="px-4 py-3"><StatusBadge state={row.state} /></td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <StatusBadge state={row.state} />
+                      {row.dateReview && <DateReviewPill />}
+                    </div>
+                  </td>
                   <td className="px-2 py-3 text-muted-foreground"><ChevronRight className="size-4" /></td>
                 </tr>
               ))}
@@ -399,7 +448,10 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
           {detail && (
             <>
               <SheetHeader>
-                <SheetTitle className="flex items-center gap-2"><StatusBadge state={detail.state} /></SheetTitle>
+                <SheetTitle className="flex flex-wrap items-center gap-2">
+                  <StatusBadge state={detail.state} />
+                  {detail.dateReview && <DateReviewPill />}
+                </SheetTitle>
                 <SheetDescription>{formatDateTime(detail.datetime)} · {detail.barberName ?? 'Sin barbero'}</SheetDescription>
               </SheetHeader>
               <div className="space-y-4 px-4 pb-8">
@@ -439,6 +491,27 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
                     <CompareRow label="Leído por" value={detail.receipt.engine === 'ai' ? 'IA' : detail.receipt.engine === 'ocr' ? 'Motor OCR' : '—'} />
                   )}
                 </div>
+
+                {detail.dateReview && (
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                    <p className="flex items-center gap-1.5 text-sm font-semibold text-amber-700 dark:text-amber-300">
+                      <CalendarClock className="size-4" /> La fecha leída parece de otro día
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      El cobro ya está conciliado por monto — la plata entró. Mirá la imagen: si la fecha es correcta (o no importa), marcala como revisada y este aviso desaparece.
+                    </p>
+                    {canManage && detail.receipt && (
+                      <Button
+                        variant="outline"
+                        className="mt-3 w-full border-amber-500/40 text-amber-700 hover:bg-amber-500/10 dark:text-amber-300"
+                        disabled={detailSaving}
+                        onClick={() => reviewDetail('note', 'Fecha marcada como revisada')}
+                      >
+                        {detailSaving ? <Loader2 className="size-4 animate-spin" /> : <><CheckCircle2 className="mr-1.5 size-4" /> Marcar fecha como revisada</>}
+                      </Button>
+                    )}
+                  </div>
+                )}
 
                 {canManage && detail.receipt && (
                   <div className="space-y-2">
@@ -508,7 +581,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
                 </SelectContent>
               </Select>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                Se marca <span className="font-semibold text-rose-600 dark:text-rose-400">“Fecha vieja”</span> si el comprobante es de <b>otro día</b>. Esta ventana tolera además transferencias hechas un rato antes (útil cerca de medianoche).
+                Si el comprobante es de <b>otro día</b>, se marca para <span className="font-semibold text-amber-600 dark:text-amber-400">revisar la fecha</span> acá en el dashboard — el cobro igual se cierra en la caja, sin frenar al barbero delante del cliente. Esta ventana tolera transferencias hechas un rato antes (útil cerca de medianoche).
               </p>
             </div>
 
@@ -571,10 +644,10 @@ function exportCsv(rows: ReconRow[]) {
     const s = v == null ? '' : String(v)
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
   }
-  const header = ['Fecha', 'Barbero', 'Cliente', 'Cuenta', 'Monto cobrado', 'Estado', 'Monto leido', 'Nro operacion', 'Motor']
+  const header = ['Fecha', 'Barbero', 'Cliente', 'Cuenta', 'Monto cobrado', 'Estado', 'Revisar fecha', 'Monto leido', 'Nro operacion', 'Motor']
   const lines = rows.map((r) => [
     formatDateTime(r.datetime), r.barberName ?? '', r.clientName ?? '', r.accountName ?? '',
-    r.chargedAmount ?? '', STATE_META[r.state].label, r.receipt?.extractedAmount ?? '',
+    r.chargedAmount ?? '', STATE_META[r.state].label, r.dateReview ? 'Si' : '', r.receipt?.extractedAmount ?? '',
     r.receipt?.operationNumber ?? '', r.receipt?.engine ?? '',
   ].map(cell).join(','))
   const csv = '﻿' + [header.join(','), ...lines].join('\n')
