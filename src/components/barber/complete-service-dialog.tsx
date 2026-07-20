@@ -714,7 +714,6 @@ export function CompleteServiceDialog({
                           <p className="text-sm font-semibold">
                             {receiptScan.status === 'duplicate' && 'Comprobante ya usado'}
                             {receiptScan.status === 'amount_mismatch' && 'El monto no coincide'}
-                            {receiptScan.status === 'date_mismatch' && 'Comprobante viejo'}
                             {receiptScan.status === 'needs_review' && 'Comprobante en revisión'}
                           </p>
                           <p className="text-xs opacity-90">Se registrará igual para conciliar.</p>

@@ -606,14 +606,12 @@ export function ReceiptScanDialog({
                     <p className="mt-4 text-lg font-bold text-white">
                       {result.status === 'duplicate' && 'Comprobante ya usado'}
                       {result.status === 'amount_mismatch' && 'El monto no coincide'}
-                      {result.status === 'date_mismatch' && 'Comprobante viejo'}
                       {result.status === 'needs_review' && 'No pudimos leerlo'}
                     </p>
                     <p className="mt-1 max-w-[16rem] text-sm text-white/80">
                       {result.status === 'duplicate' && 'Este número de operación ya se registró en otro cobro.'}
                       {result.status === 'amount_mismatch' && extracted?.amount != null &&
                         `Leído ${formatCurrency(extracted.amount)} · esperado ${formatCurrency(expectedAmount)}.`}
-                      {result.status === 'date_mismatch' && 'La fecha no corresponde a este cobro (es viejo o de otro día).'}
                       {result.status === 'needs_review' && 'La imagen quedó guardada para que un admin la revise.'}
                     </p>
                   </>

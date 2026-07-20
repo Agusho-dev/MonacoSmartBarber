@@ -188,13 +188,17 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
     }
   }
 
-  async function reviewDetail(action: 'manual_ok' | 'note', successMsg?: string) {
+  async function reviewDetail(action: 'manual_ok' | 'note' | 'date_reviewed', successMsg?: string) {
     if (!detail?.receipt) return
     setDetailSaving(true)
     const res = await reviewReceipt(detail.receipt.id, action, detailNote.trim() || undefined)
     setDetailSaving(false)
     if ('error' in res) { toast.error(res.error); return }
-    toast.success(successMsg ?? (action === 'manual_ok' ? 'Marcado como conciliado' : 'Nota guardada'))
+    toast.success(successMsg ?? (
+      action === 'manual_ok' ? 'Marcado como conciliado'
+      : action === 'date_reviewed' ? 'Fecha marcada como revisada'
+      : 'Nota guardada'
+    ))
     setDetail(null)
     refetch()
   }
@@ -369,8 +373,9 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
         </button>
       )}
 
-      {/* Aviso salud / filtro activo */}
-      {settings.isEnabled && anomalies === 0 && summary.scopeCount > 0 && (
+      {/* Aviso salud / filtro activo. Sólo cuando NO hay filtro activo: si no, se
+          mostraría "Todo cuadra" encima de una tabla filtrada (posiblemente vacía). */}
+      {settings.isEnabled && anomalies === 0 && summary.scopeCount > 0 && !stateFilter && !dateFilter && (
         <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm font-medium text-emerald-700 dark:text-emerald-300">
           <CheckCircle2 className="size-4" /> Todo cuadra: cada transferencia del período tiene su comprobante.
         </div>
@@ -403,7 +408,11 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
             <tbody>
               {cappedRows.length === 0 && (
                 <tr><td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
-                  No hay movimientos por transferencia en este período.
+                  {dateFilter
+                    ? 'No hay comprobantes con fecha a revisar en este período.'
+                    : stateFilter
+                      ? `No hay movimientos en estado “${STATE_META[stateFilter].label}” en este período.`
+                      : 'No hay movimientos por transferencia en este período.'}
                 </td></tr>
               )}
               {cappedRows.map((row) => (
@@ -498,14 +507,16 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
                       <CalendarClock className="size-4" /> La fecha leída parece de otro día
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      El cobro ya está conciliado por monto — la plata entró. Mirá la imagen: si la fecha es correcta (o no importa), marcala como revisada y este aviso desaparece.
+                      El cobro ya está conciliado por monto — la plata entró.{canManage
+                        ? ' Mirá la imagen: si la fecha es correcta (o no importa), marcala como revisada y este aviso desaparece.'
+                        : ' Revisá la imagen para confirmar que la fecha del comprobante sea correcta.'}
                     </p>
                     {canManage && detail.receipt && (
                       <Button
                         variant="outline"
                         className="mt-3 w-full border-amber-500/40 text-amber-700 hover:bg-amber-500/10 dark:text-amber-300"
                         disabled={detailSaving}
-                        onClick={() => reviewDetail('note', 'Fecha marcada como revisada')}
+                        onClick={() => reviewDetail('date_reviewed', 'Fecha marcada como revisada')}
                       >
                         {detailSaving ? <Loader2 className="size-4 animate-spin" /> : <><CheckCircle2 className="mr-1.5 size-4" /> Marcar fecha como revisada</>}
                       </Button>

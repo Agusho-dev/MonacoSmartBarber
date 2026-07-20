@@ -453,10 +453,17 @@ export async function getReceiptSignedUrl(imagePath: string): Promise<string | n
   return data?.signedUrl ?? null
 }
 
-/** Acción manual del admin: dar por válido a mano, o marcar/anotar un problema. */
+/**
+ * Acción manual del admin sobre un comprobante:
+ *  - `manual_ok`     → dar por válido a mano (sella + status manual_ok).
+ *  - `date_reviewed` → confirmar la fecha marcada "a revisar" (sella, sin tocar status).
+ *  - `note`          → sólo guardar una nota, SIN sellar.
+ * Sólo las acciones de RESOLUCIÓN explícita setean `reconciled_at`: guardar una nota
+ * no da el comprobante por revisado, así el aviso "revisar fecha" no se limpia sin querer.
+ */
 export async function reviewReceipt(
   receiptId: string,
-  action: 'manual_ok' | 'note',
+  action: 'manual_ok' | 'note' | 'date_reviewed',
   note?: string,
 ): Promise<{ ok: true } | { error: string }> {
   const perms = await getDashboardPerms()
@@ -473,9 +480,11 @@ export async function reviewReceipt(
   }
 
   const patch: Record<string, unknown> = {
-    reconciled_at: new Date().toISOString(),
-    reconciled_by: staffId,
     review_note: note ?? null,
+  }
+  if (action === 'manual_ok' || action === 'date_reviewed') {
+    patch.reconciled_at = new Date().toISOString()
+    patch.reconciled_by = staffId
   }
   if (action === 'manual_ok') patch.status = 'manual_ok'
 
