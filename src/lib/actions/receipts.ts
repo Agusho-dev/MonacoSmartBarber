@@ -72,17 +72,95 @@ export async function linkReceiptToVisit(
     .eq('visit_id', visitId)
     .maybeSingle()
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from('payment_receipts')
     .update({ visit_id: visitId, transfer_log_id: log?.id ?? null })
     .eq('id', receiptId)
     .eq('organization_id', ctx.organizationId)
+    .select('covers_group')
+    .maybeSingle()
 
   if (error) {
     console.error('[linkReceiptToVisit]', error.message)
     return { error: 'No se pudo vincular el comprobante' }
   }
+
+  // Pago conjunto (mig 164): el corte que escaneó el comprobante-ancla también entra
+  // al grupo vía covering_receipt_id, para que la conciliación sume SU monto (junto con
+  // los cortes colgados) contra el total del comprobante.
+  if (updated?.covers_group) {
+    const { error: cvErr } = await supabase
+      .from('visits')
+      .update({ covering_receipt_id: receiptId })
+      .eq('id', visitId)
+    if (cvErr) console.error('[linkReceiptToVisit] covering_receipt_id:', cvErr.message)
+  }
   return { ok: true }
+}
+
+export interface OpenJointReceipt {
+  id: string
+  amount: number            // total transferido (monto del comprobante ancla)
+  assigned: number          // ya repartido en cortes del grupo
+  remaining: number         // amount - assigned (lo que queda por cubrir)
+  accountName: string | null
+  barberName: string | null
+  createdAt: string
+}
+
+/**
+ * Comprobantes-ancla de pago conjunto ABIERTOS de una sucursal (últimas ~6h) que
+ * todavía tienen monto sin asignar. Es la lista que ve el 2º barbero para colgar su
+ * corte del pago que ya hizo el cliente, sin volver a escanear. Corre con sesión de
+ * barbero (PIN) o admin, vía resolveReceiptContext.
+ */
+export async function getOpenJointReceipts(branchId: string): Promise<OpenJointReceipt[]> {
+  const ctx = await resolveReceiptContext()
+  if (!ctx) return []
+  const supabase = createAdminClient()
+
+  const sinceIso = new Date(Date.now() - 6 * 3600_000).toISOString()
+  const { data: anchors } = await supabase
+    .from('payment_receipts')
+    .select('id, extracted_amount, created_at, payment_account_id, account:payment_accounts(name), barber:staff(full_name)')
+    .eq('organization_id', ctx.organizationId)
+    .eq('branch_id', branchId)
+    .eq('covers_group', true)
+    .gte('created_at', sinceIso)
+    .order('created_at', { ascending: false })
+    .limit(20)
+  if (!anchors || anchors.length === 0) return []
+
+  const ids = (anchors as { id: string }[]).map((a) => a.id)
+  const { data: covered } = await supabase
+    .from('visits')
+    .select('covering_receipt_id, amount, tip_amount, tip_payment_method')
+    .in('covering_receipt_id', ids)
+
+  const assignedById = new Map<string, number>()
+  for (const v of covered ?? []) {
+    const key = v.covering_receipt_id as string
+    const charge = Number(v.amount ?? 0) + (v.tip_payment_method === 'transfer' ? Number(v.tip_amount ?? 0) : 0)
+    assignedById.set(key, (assignedById.get(key) ?? 0) + charge)
+  }
+
+  const out: OpenJointReceipt[] = []
+  for (const a of anchors as unknown as Record<string, unknown>[]) {
+    const amount = a.extracted_amount != null ? Number(a.extracted_amount) : 0
+    const assigned = assignedById.get(a.id as string) ?? 0
+    const remaining = Math.round((amount - assigned) * 100) / 100
+    if (remaining <= 0) continue
+    out.push({
+      id: a.id as string,
+      amount,
+      assigned,
+      remaining,
+      accountName: (firstOf(a.account as never) as { name?: string } | null)?.name ?? null,
+      barberName: (firstOf(a.barber as never) as { full_name?: string } | null)?.full_name ?? null,
+      createdAt: a.created_at as string,
+    })
+  }
+  return out
 }
 
 // ============================================================
@@ -175,6 +253,7 @@ export interface ReconReceipt {
   engine: string | null
   reviewNote: string | null
   reconciledAt: string | null
+  coversGroup: boolean
   createdAt: string
 }
 
@@ -195,6 +274,14 @@ export interface ReconRow {
    * admin — NO cuenta como brecha ni frenó el cobro en la caja.
    */
   dateReview: boolean
+  /**
+   * Flag interno "cobro conjunto" (mig 164): este corte se pagó dentro de una
+   * transferencia que cubre varios cortes. Es un aviso para que el admin verifique
+   * que el comprobante-ancla cubre la suma. Se limpia al revisar el ancla.
+   */
+  jointReview: boolean
+  /** Detalle del grupo cuando el corte es cobro conjunto. */
+  jointInfo: { receiptAmount: number; groupTotal: number; count: number } | null
   receipt: ReconReceipt | null
 }
 
@@ -206,6 +293,8 @@ export interface ReconSummary {
   scopeCount: number
   /** Cobros conciliados pero con fecha a revisar (aviso interno, no es brecha). */
   dateReview: number
+  /** Cortes cobrados en conjunto pendientes de revisar (aviso interno). */
+  jointReview: number
   counts: Record<ReconState, number>
 }
 
@@ -220,7 +309,7 @@ const EMPTY_COUNTS: Record<ReconState, number> = {
 }
 const EMPTY_RESULT: ReconResult = {
   rows: [],
-  summary: { totalTransferido: 0, totalRespaldado: 0, brecha: 0, pctConciliado: 100, scopeCount: 0, dateReview: 0, counts: { ...EMPTY_COUNTS } },
+  summary: { totalTransferido: 0, totalRespaldado: 0, brecha: 0, pctConciliado: 100, scopeCount: 0, dateReview: 0, jointReview: 0, counts: { ...EMPTY_COUNTS } },
   truncated: false,
 }
 
@@ -269,6 +358,7 @@ function mapReceipt(r: Record<string, unknown> | null): ReconReceipt | null {
     engine: (r.extraction_engine as string) ?? null,
     reviewNote: (r.review_note as string) ?? null,
     reconciledAt: (r.reconciled_at as string) ?? null,
+    coversGroup: (r.covers_group as boolean) ?? false,
     createdAt: r.created_at as string,
   }
 }
@@ -332,18 +422,19 @@ export async function getReconciliation(params: {
 
   const { data: settings } = await supabase
     .from('transfer_receipt_settings')
-    .select('required_since')
+    .select('required_since, amount_tolerance')
     .eq('organization_id', orgId)
     .maybeSingle()
   const requiredSince = settings?.required_since ? new Date(settings.required_since).getTime() : null
+  const amountTolerance = Number(settings?.amount_tolerance ?? 1)
 
   let vq = supabase
     .from('visits')
-    .select(`id, amount, tip_amount, tip_payment_method, completed_at, payment_account_id,
+    .select(`id, amount, tip_amount, tip_payment_method, completed_at, payment_account_id, covering_receipt_id,
       client:clients(name),
       barber:staff(full_name),
       account:payment_accounts(name),
-      receipt:payment_receipts(id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, reconciled_at, created_at, expected_amount)`)
+      receipt:payment_receipts(id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, reconciled_at, covers_group, created_at, expected_amount)`)
     .eq('organization_id', orgId)
     .eq('payment_method', 'transfer')
     .in('branch_id', branchIds)
@@ -368,24 +459,86 @@ export async function getReconciliation(params: {
   if (params.accountId) oq = oq.eq('payment_account_id', params.accountId)
   const { data: orphans } = await oq
 
+  // Cobro conjunto (mig 164): los cortes con covering_receipt_id se respaldan con un
+  // comprobante-ancla (uno cubre varios cortes). Resolvemos las anclas y el total de
+  // cada grupo (sumando TODOS sus cortes, aun fuera del rango, para validar la cobertura).
+  const coveringIds = Array.from(new Set(
+    (visits ?? [])
+      .map((v) => (v as Record<string, unknown>).covering_receipt_id as string | null)
+      .filter((x): x is string => !!x),
+  ))
+  const anchorById = new Map<string, ReconReceipt>()
+  const groupTotalById = new Map<string, number>()
+  const groupCountById = new Map<string, number>()
+  if (coveringIds.length > 0) {
+    const [{ data: anchors }, { data: groupCuts }] = await Promise.all([
+      supabase
+        .from('payment_receipts')
+        .select('id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, reconciled_at, covers_group, created_at, expected_amount')
+        .in('id', coveringIds),
+      supabase
+        .from('visits')
+        .select('covering_receipt_id, amount, tip_amount, tip_payment_method')
+        .in('covering_receipt_id', coveringIds),
+    ])
+    for (const a of anchors ?? []) {
+      const rec = mapReceipt(a as Record<string, unknown>)
+      if (rec) anchorById.set(rec.id, rec)
+    }
+    for (const gc of groupCuts ?? []) {
+      const key = gc.covering_receipt_id as string
+      const charge = Number(gc.amount ?? 0) + (gc.tip_payment_method === 'transfer' ? Number(gc.tip_amount ?? 0) : 0)
+      groupTotalById.set(key, (groupTotalById.get(key) ?? 0) + charge)
+      groupCountById.set(key, (groupCountById.get(key) ?? 0) + 1)
+    }
+  }
+
   const rows: ReconRow[] = []
 
   for (const v of (visits ?? []) as unknown as Record<string, unknown>[]) {
-    const rRaw = firstOf(v.receipt as Record<string, unknown> | Record<string, unknown>[] | null)
-    const receipt = mapReceipt(rRaw)
     // Lo que el cliente transfirió de verdad = cobro + propina, cuando la propina también
     // fue por transferencia (el alias de la tablet pide el total junto). Comparar sólo
     // contra visits.amount marcaba como "monto no coincide" comprobantes que estaban bien.
     const charged =
       Number(v.amount ?? 0) +
       (v.tip_payment_method === 'transfer' ? Number(v.tip_amount ?? 0) : 0)
+
+    const coveringId = (v.covering_receipt_id as string | null) ?? null
+    let receipt: ReconReceipt | null
     let state: ReconState
-    if (receipt) {
-      state = stateFromReceipt(receipt)
+    let dateReview = false
+    let jointReview = false
+    let jointInfo: { receiptAmount: number; groupTotal: number; count: number } | null = null
+    let expectedAmount = charged
+
+    if (coveringId && anchorById.has(coveringId)) {
+      // ── Cobro conjunto: respaldado por el comprobante-ancla ──
+      const anchor = anchorById.get(coveringId)!
+      receipt = anchor
+      const receiptAmount = anchor.extractedAmount ?? 0
+      const groupTotal = groupTotalById.get(coveringId) ?? charged
+      const count = groupCountById.get(coveringId) ?? 1
+      jointInfo = { receiptAmount, groupTotal, count }
+      expectedAmount = receiptAmount
+      // El grupo está respaldado si la suma de sus cortes NO supera el comprobante.
+      // Si lo supera, el comprobante "no alcanza" → problema de monto real.
+      const covered = receiptAmount > 0 && groupTotal <= receiptAmount + amountTolerance
+      state = covered ? 'conciliado' : 'monto'
+      // Alerta interna hasta que el admin revise el ancla (reconciled_at).
+      jointReview = anchor.reconciledAt == null
     } else {
-      const ts = new Date(v.completed_at as string).getTime()
-      state = requiredSince != null && ts >= requiredSince ? 'sin_comprobante' : 'historico'
+      const rRaw = firstOf(v.receipt as Record<string, unknown> | Record<string, unknown>[] | null)
+      receipt = mapReceipt(rRaw)
+      if (receipt) {
+        state = stateFromReceipt(receipt)
+      } else {
+        const ts = new Date(v.completed_at as string).getTime()
+        state = requiredSince != null && ts >= requiredSince ? 'sin_comprobante' : 'historico'
+      }
+      dateReview = dateReviewFor(receipt, state)
+      if (rRaw?.expected_amount != null) expectedAmount = Number(rRaw.expected_amount)
     }
+
     rows.push({
       kind: 'payment',
       id: v.id as string,
@@ -395,9 +548,11 @@ export async function getReconciliation(params: {
       clientName: (firstOf(v.client as never) as { name?: string } | null)?.name ?? null,
       accountName: (firstOf(v.account as never) as { name?: string } | null)?.name ?? null,
       chargedAmount: charged,
-      expectedAmount: rRaw?.expected_amount != null ? Number(rRaw.expected_amount) : charged,
+      expectedAmount,
       state,
-      dateReview: dateReviewFor(receipt, state),
+      dateReview,
+      jointReview,
+      jointInfo,
       receipt,
     })
   }
@@ -416,15 +571,18 @@ export async function getReconciliation(params: {
       expectedAmount: o.expected_amount != null ? Number(o.expected_amount) : null,
       state: 'huerfano',
       dateReview: false,
+      jointReview: false,
+      jointInfo: null,
       receipt,
     })
   }
 
   const counts: Record<ReconState, number> = { ...EMPTY_COUNTS }
-  let totalTransferido = 0, totalRespaldado = 0, brecha = 0, scopeCount = 0, dateReview = 0
+  let totalTransferido = 0, totalRespaldado = 0, brecha = 0, scopeCount = 0, dateReview = 0, jointReview = 0
   for (const row of rows) {
     counts[row.state]++
     if (row.dateReview) dateReview++
+    if (row.jointReview) jointReview++
     if (row.kind === 'payment') {
       const amt = row.chargedAmount ?? 0
       totalTransferido += amt
@@ -439,7 +597,7 @@ export async function getReconciliation(params: {
 
   return {
     rows,
-    summary: { totalTransferido, totalRespaldado, brecha, pctConciliado, scopeCount, dateReview, counts },
+    summary: { totalTransferido, totalRespaldado, brecha, pctConciliado, scopeCount, dateReview, jointReview, counts },
     truncated: (visits?.length ?? 0) >= RECON_LIMIT,
   }
 }
@@ -463,7 +621,7 @@ export async function getReceiptSignedUrl(imagePath: string): Promise<string | n
  */
 export async function reviewReceipt(
   receiptId: string,
-  action: 'manual_ok' | 'note' | 'date_reviewed',
+  action: 'manual_ok' | 'note' | 'date_reviewed' | 'joint_reviewed',
   note?: string,
 ): Promise<{ ok: true } | { error: string }> {
   const perms = await getDashboardPerms()
@@ -482,7 +640,7 @@ export async function reviewReceipt(
   const patch: Record<string, unknown> = {
     review_note: note ?? null,
   }
-  if (action === 'manual_ok' || action === 'date_reviewed') {
+  if (action === 'manual_ok' || action === 'date_reviewed' || action === 'joint_reviewed') {
     patch.reconciled_at = new Date().toISOString()
     patch.reconciled_by = staffId
   }

@@ -304,10 +304,15 @@ export async function completeService(
   // Cupón de descuento (client_rewards.qr_code) escaneado en el cobro. Se valida
   // sin consumir al escanear; acá se consume atómicamente al confirmar la venta.
   couponQrCode: string | null = null,
+  // Cobro conjunto (mig 164): id del comprobante-ancla con el que se pagó ESTE corte
+  // junto con otro(s) en una sola transferencia. Cuando viene, el corte no escanea su
+  // propio comprobante: se cuelga del ancla y su transfer_log acredita la cuenta del ancla.
+  coveringReceiptId: string | null = null,
 ) {
   if (!isValidUUID(queueEntryId)) return { error: 'queueEntryId inválido' }
   if (serviceId && !isValidUUID(serviceId)) return { error: 'serviceId inválido' }
   if (paymentAccountId && !isValidUUID(paymentAccountId)) return { error: 'paymentAccountId inválido' }
+  if (coveringReceiptId && !isValidUUID(coveringReceiptId)) return { error: 'coveringReceiptId inválido' }
   if (!Number.isFinite(tipAmount) || tipAmount < 0) return { error: 'tipAmount inválido' }
   if (tipPaymentMethod && !['cash','card','transfer'].includes(tipPaymentMethod)) {
     return { error: 'tipPaymentMethod inválido' }
@@ -517,6 +522,26 @@ export async function completeService(
   }
   if (barberNote && barberNote.trim().length > 0) {
     visitUpdate.barber_note = barberNote.trim().slice(0, 500)
+  }
+
+  // Cobro conjunto (mig 164): este corte se pagó dentro de una transferencia que cubre
+  // varios cortes. Lo colgamos del comprobante-ancla y —clave— acreditamos su transfer_log
+  // a la cuenta DONDE ENTRÓ la plata (la del ancla), no a la cuenta rotada de este barbero.
+  // Así la suma de los cortes del grupo = depósito real, sin doble conteo. Validamos que el
+  // ancla sea de la MISMA sucursal y esté marcado como pago conjunto; si no cuadra, logueamos
+  // y seguimos como cobro normal (nunca bloqueamos el cierre por esto).
+  if (coveringReceiptId) {
+    const { data: anchor } = await supabase
+      .from('payment_receipts')
+      .select('id, branch_id, payment_account_id, covers_group')
+      .eq('id', coveringReceiptId)
+      .maybeSingle()
+    if (anchor && anchor.covers_group && anchor.branch_id === entryForValidation.branch_id) {
+      visitUpdate.covering_receipt_id = coveringReceiptId
+      if (anchor.payment_account_id) visitUpdate.payment_account_id = anchor.payment_account_id
+    } else {
+      console.error('[completeService] covering receipt inválido (no es pago conjunto o de otra sucursal):', coveringReceiptId)
+    }
   }
 
   const { error: visitUpdateError } = await supabase

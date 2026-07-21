@@ -36,6 +36,8 @@ interface ReceiptScanDialogProps {
   barberId: string | null
   paymentAccountId: string | null
   clientId: string | null
+  /** Pago conjunto: este comprobante cubre varios cortes → no se valida el monto contra este corte. */
+  coversGroup?: boolean
   onClose: () => void
   /** El barbero acepta el comprobante (verificado, o "cobrar igual" pese a un problema). */
   onAccept: (result: ReceiptScanResult) => void
@@ -154,7 +156,7 @@ function frameToWebp(video: HTMLVideoElement, maxW: number, quality: number): Pr
 }
 
 export function ReceiptScanDialog({
-  open, engine, expectedAmount, branchId, barberId, paymentAccountId, clientId, onClose, onAccept,
+  open, engine, expectedAmount, branchId, barberId, paymentAccountId, clientId, coversGroup, onClose, onAccept,
 }: ReceiptScanDialogProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -246,6 +248,7 @@ export function ReceiptScanDialog({
             captureMethod: method,
             parsed,
             priorReceiptId: priorReceiptId.current,
+            coversGroup: coversGroup === true,
           }),
         })
 
@@ -271,7 +274,7 @@ export function ReceiptScanDialog({
         setPhase('invite')
       }
     },
-    [engine, expectedAmount, branchId, barberId, paymentAccountId, clientId, stopStream, stopLoop],
+    [engine, expectedAmount, branchId, barberId, paymentAccountId, clientId, coversGroup, stopStream, stopLoop],
   )
 
   const capture = useCallback(async () => {

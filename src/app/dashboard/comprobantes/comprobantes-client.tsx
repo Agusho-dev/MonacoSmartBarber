@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition, type ComponentType } from 
 import {
   ScanLine, Settings, CheckCircle2, AlertTriangle, Copy, Clock, FileQuestion,
   ReceiptText, Download, Sparkles, Cpu, ShieldCheck, ExternalLink, X, ChevronRight,
-  Loader2, Building2, Wallet, CalendarX2, CalendarClock,
+  Loader2, Building2, Wallet, CalendarX2, CalendarClock, Users, Link2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -118,6 +118,15 @@ function DateReviewPill() {
   )
 }
 
+/** Aviso: este corte se pagó junto con otro(s) en una sola transferencia. */
+function JointPill() {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-xs font-semibold text-sky-600 dark:text-sky-400">
+      <Users className="size-3.5" /> Cobro conjunto
+    </span>
+  )
+}
+
 interface Props {
   initialRecon: ReconResult
   initialRange: { from: string; to: string }
@@ -145,6 +154,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
   const [accountId, setAccountId] = useState<string>('all')
   const [stateFilter, setStateFilter] = useState<ReconState | null>(null)
   const [dateFilter, setDateFilter] = useState(false)
+  const [jointFilter, setJointFilter] = useState(false)
   const [pending, startTransition] = useTransition()
 
   const [settings, setSettings] = useState(initialSettings)
@@ -188,7 +198,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
     }
   }
 
-  async function reviewDetail(action: 'manual_ok' | 'note' | 'date_reviewed', successMsg?: string) {
+  async function reviewDetail(action: 'manual_ok' | 'note' | 'date_reviewed' | 'joint_reviewed', successMsg?: string) {
     if (!detail?.receipt) return
     setDetailSaving(true)
     const res = await reviewReceipt(detail.receipt.id, action, detailNote.trim() || undefined)
@@ -197,6 +207,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
     toast.success(successMsg ?? (
       action === 'manual_ok' ? 'Marcado como conciliado'
       : action === 'date_reviewed' ? 'Fecha marcada como revisada'
+      : action === 'joint_reviewed' ? 'Cobro conjunto revisado'
       : 'Nota guardada'
     ))
     setDetail(null)
@@ -223,10 +234,11 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
 
   const summary = recon.summary
   const visibleRows = useMemo(() => {
+    if (jointFilter) return recon.rows.filter((r) => r.jointReview)
     if (dateFilter) return recon.rows.filter((r) => r.dateReview)
     if (stateFilter) return recon.rows.filter((r) => r.state === stateFilter)
     return recon.rows
-  }, [recon.rows, stateFilter, dateFilter])
+  }, [recon.rows, stateFilter, dateFilter, jointFilter])
   const cappedRows = visibleRows.slice(0, 400)
   const anomalies = summary.counts.sin_comprobante + summary.counts.monto + summary.counts.duplicado + summary.counts.huerfano
 
@@ -329,7 +341,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
             return (
               <button
                 key={s}
-                onClick={() => { setDateFilter(false); setStateFilter(active ? null : s) }}
+                onClick={() => { setDateFilter(false); setJointFilter(false); setStateFilter(active ? null : s) }}
                 className={cn('flex items-center gap-2.5 rounded-xl border p-2.5 text-left transition-all hover:shadow-sm',
                   active ? cn(m.ring, m.bg) : 'border-border bg-background hover:bg-muted/50',
                   count === 0 && 'opacity-55')}
@@ -351,7 +363,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
           NO frena al barbero — el aviso vive acá, en el dashboard. */}
       {settings.isEnabled && summary.dateReview > 0 && (
         <button
-          onClick={() => { setStateFilter(null); setDateFilter((v) => !v) }}
+          onClick={() => { setStateFilter(null); setJointFilter(false); setDateFilter((v) => !v) }}
           className={cn('flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-all hover:shadow-sm',
             dateFilter ? 'border-amber-500/40 bg-amber-500/10 ring-1 ring-amber-500/20' : 'border-amber-500/25 bg-amber-500/[0.06]')}
         >
@@ -373,9 +385,35 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
         </button>
       )}
 
+      {/* Aviso interno de cobro conjunto: una transferencia pagó varios cortes.
+          El admin verifica que el comprobante-ancla cubra la suma del grupo. */}
+      {settings.isEnabled && summary.jointReview > 0 && (
+        <button
+          onClick={() => { setStateFilter(null); setDateFilter(false); setJointFilter((v) => !v) }}
+          className={cn('flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-all hover:shadow-sm',
+            jointFilter ? 'border-sky-500/40 bg-sky-500/10 ring-1 ring-sky-500/20' : 'border-sky-500/25 bg-sky-500/[0.06]')}
+        >
+          <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-sky-500/15">
+            <Users className="size-5 text-sky-600 dark:text-sky-400" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-sky-700 dark:text-sky-300">
+              {summary.jointReview} {summary.jointReview === 1 ? 'corte cobrado en conjunto' : 'cortes cobrados en conjunto'}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Se pagaron con una transferencia que cubre varios cortes. Verificá que el comprobante cubra la suma.
+            </p>
+          </div>
+          <span className="shrink-0 text-xs font-medium text-sky-600/80 dark:text-sky-400/80">
+            {jointFilter ? 'Ver todo' : 'Revisar'}
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-sky-600/60" />
+        </button>
+      )}
+
       {/* Aviso salud / filtro activo. Sólo cuando NO hay filtro activo: si no, se
           mostraría "Todo cuadra" encima de una tabla filtrada (posiblemente vacía). */}
-      {settings.isEnabled && anomalies === 0 && summary.scopeCount > 0 && !stateFilter && !dateFilter && (
+      {settings.isEnabled && anomalies === 0 && summary.scopeCount > 0 && !stateFilter && !dateFilter && !jointFilter && (
         <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm font-medium text-emerald-700 dark:text-emerald-300">
           <CheckCircle2 className="size-4" /> Todo cuadra: cada transferencia del período tiene su comprobante.
         </div>
@@ -388,6 +426,11 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
       {dateFilter && (
         <button onClick={() => setDateFilter(false)} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <X className="size-3.5" /> Quitar filtro: Fecha a revisar
+        </button>
+      )}
+      {jointFilter && (
+        <button onClick={() => setJointFilter(false)} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+          <X className="size-3.5" /> Quitar filtro: Cobro conjunto
         </button>
       )}
 
@@ -408,11 +451,13 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
             <tbody>
               {cappedRows.length === 0 && (
                 <tr><td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
-                  {dateFilter
-                    ? 'No hay comprobantes con fecha a revisar en este período.'
-                    : stateFilter
-                      ? `No hay movimientos en estado “${STATE_META[stateFilter].label}” en este período.`
-                      : 'No hay movimientos por transferencia en este período.'}
+                  {jointFilter
+                    ? 'No hay cortes cobrados en conjunto pendientes de revisar en este período.'
+                    : dateFilter
+                      ? 'No hay comprobantes con fecha a revisar en este período.'
+                      : stateFilter
+                        ? `No hay movimientos en estado “${STATE_META[stateFilter].label}” en este período.`
+                        : 'No hay movimientos por transferencia en este período.'}
                 </td></tr>
               )}
               {cappedRows.map((row) => (
@@ -430,6 +475,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <StatusBadge state={row.state} />
+                      {row.jointReview && <JointPill />}
                       {row.dateReview && <DateReviewPill />}
                     </div>
                   </td>
@@ -459,6 +505,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
               <SheetHeader>
                 <SheetTitle className="flex flex-wrap items-center gap-2">
                   <StatusBadge state={detail.state} />
+                  {detail.jointReview && <JointPill />}
                   {detail.dateReview && <DateReviewPill />}
                 </SheetTitle>
                 <SheetDescription>{formatDateTime(detail.datetime)} · {detail.barberName ?? 'Sin barbero'}</SheetDescription>
@@ -500,6 +547,50 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
                     <CompareRow label="Leído por" value={detail.receipt.engine === 'ai' ? 'IA' : detail.receipt.engine === 'ocr' ? 'Motor OCR' : '—'} />
                   )}
                 </div>
+
+                {detail.jointInfo && (() => {
+                  const j = detail.jointInfo
+                  const overspent = j.groupTotal > j.receiptAmount + 1
+                  return (
+                    <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-4">
+                      <p className="flex items-center gap-1.5 text-sm font-semibold text-sky-700 dark:text-sky-300">
+                        <Users className="size-4" /> Cobro conjunto
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Este corte se pagó dentro de una transferencia que cubre {j.count} {j.count === 1 ? 'corte' : 'cortes'}. El respaldo es el comprobante del grupo (la imagen de arriba).
+                      </p>
+                      <div className="mt-3 space-y-1.5 text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Comprobante (total transferido)</span>
+                          <span className="font-semibold tabular-nums">{formatCurrency(j.receiptAmount)}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Suma de los {j.count} {j.count === 1 ? 'corte' : 'cortes'}</span>
+                          <span className={cn('flex items-center gap-1.5 font-semibold tabular-nums',
+                            overspent ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400')}>
+                            {formatCurrency(j.groupTotal)}
+                            {overspent ? <AlertTriangle className="size-4" /> : <CheckCircle2 className="size-4" />}
+                          </span>
+                        </div>
+                      </div>
+                      {overspent && (
+                        <p className="mt-2 text-xs font-medium text-red-600 dark:text-red-400">
+                          La suma de los cortes supera el comprobante: no alcanza para cubrir el grupo. Revisá los cortes.
+                        </p>
+                      )}
+                      {canManage && detail.receipt && detail.jointReview && (
+                        <Button
+                          variant="outline"
+                          className="mt-3 w-full border-sky-500/40 text-sky-700 hover:bg-sky-500/10 dark:text-sky-300"
+                          disabled={detailSaving}
+                          onClick={() => reviewDetail('joint_reviewed', 'Cobro conjunto revisado')}
+                        >
+                          {detailSaving ? <Loader2 className="size-4 animate-spin" /> : <><CheckCircle2 className="mr-1.5 size-4" /> Marcar cobro conjunto como revisado</>}
+                        </Button>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {detail.dateReview && (
                   <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
@@ -655,10 +746,10 @@ function exportCsv(rows: ReconRow[]) {
     const s = v == null ? '' : String(v)
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
   }
-  const header = ['Fecha', 'Barbero', 'Cliente', 'Cuenta', 'Monto cobrado', 'Estado', 'Revisar fecha', 'Monto leido', 'Nro operacion', 'Motor']
+  const header = ['Fecha', 'Barbero', 'Cliente', 'Cuenta', 'Monto cobrado', 'Estado', 'Revisar fecha', 'Cobro conjunto', 'Monto leido', 'Nro operacion', 'Motor']
   const lines = rows.map((r) => [
     formatDateTime(r.datetime), r.barberName ?? '', r.clientName ?? '', r.accountName ?? '',
-    r.chargedAmount ?? '', STATE_META[r.state].label, r.dateReview ? 'Si' : '', r.receipt?.extractedAmount ?? '',
+    r.chargedAmount ?? '', STATE_META[r.state].label, r.dateReview ? 'Si' : '', r.jointInfo ? 'Si' : '', r.receipt?.extractedAmount ?? '',
     r.receipt?.operationNumber ?? '', r.receipt?.engine ?? '',
   ].map(cell).join(','))
   const csv = '﻿' + [header.join(','), ...lines].join('\n')

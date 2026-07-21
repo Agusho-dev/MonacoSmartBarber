@@ -38,15 +38,19 @@ import {
   ScanLine,
   Check,
   AlertTriangle,
+  Users,
+  Loader2,
+  Link2,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
 import { formatCurrency } from '@/lib/format'
 import { TransferAccountPicker } from './transfer-account-picker'
 import { PaymentMethodButtons, type PaymentOptionValue } from './payment-method-buttons'
 import { TipSelector } from './tip-selector'
 import { CouponScanDialog, type AppliedCoupon } from './coupon-scan-dialog'
 import { ReceiptScanDialog, type ReceiptScanResult } from './receipt-scan-dialog'
-import { getTransferReceiptSettings, linkReceiptToVisit, type TransferReceiptSettingsView } from '@/lib/actions/receipts'
+import { getTransferReceiptSettings, linkReceiptToVisit, getOpenJointReceipts, type TransferReceiptSettingsView, type OpenJointReceipt } from '@/lib/actions/receipts'
 
 interface CompleteServiceDialogProps {
   entry: QueueEntry | null
@@ -104,6 +108,15 @@ export function CompleteServiceDialog({
   const [receiptScan, setReceiptScan] = useState<ReceiptScanResult | null>(null)
   const [scanOpen, setScanOpen] = useState(false)
 
+  // Cobro conjunto (mig 164): una transferencia paga varios cortes.
+  //  • scanAsGroup: el barbero que RECIBIÓ la transferencia escanea el comprobante-ancla.
+  //  • jointCovering: el 2º barbero cuelga su corte de un ancla ya existente (sin escanear).
+  const [scanAsGroup, setScanAsGroup] = useState(false)
+  const [jointMode, setJointMode] = useState(false)
+  const [jointOptions, setJointOptions] = useState<OpenJointReceipt[]>([])
+  const [jointLoading, setJointLoading] = useState(false)
+  const [jointCovering, setJointCovering] = useState<OpenJointReceipt | null>(null)
+
   useEffect(() => {
     if (!entry) {
       setStep(1)
@@ -127,6 +140,10 @@ export function CompleteServiceDialog({
       setCouponScanOpen(false)
       setReceiptScan(null)
       setScanOpen(false)
+      setScanAsGroup(false)
+      setJointMode(false)
+      setJointOptions([])
+      setJointCovering(null)
       return
     }
 
@@ -212,6 +229,28 @@ export function CompleteServiceDialog({
     setPhotoPreviews((prev) => prev.filter((_, i) => i !== index))
   }
 
+  // Cobro conjunto — el 2º barbero carga las transferencias-ancla abiertas de la sucursal.
+  async function loadJointOptions() {
+    setJointLoading(true)
+    const opts = await getOpenJointReceipts(branchId)
+    setJointLoading(false)
+    setJointOptions(opts)
+    if (opts.length === 0) {
+      toast.info('No hay transferencias conjuntas abiertas. El barbero que recibió la plata tiene que cerrar su corte primero marcando “pago conjunto”.')
+    }
+  }
+
+  function pickJointCovering(o: OpenJointReceipt) {
+    // El comprobante-ancla tiene que alcanzar para cubrir este corte.
+    if (o.remaining + 1 < chargeAmount) {
+      toast.error(`Ese comprobante ya casi no tiene saldo (quedan ${formatCurrency(o.remaining)}). No alcanza para este corte.`)
+      return
+    }
+    setReceiptScan(null)
+    setJointCovering(o)
+    setJointMode(false)
+  }
+
   async function finishService(receiptForLink?: ReceiptScanResult | null) {
     if (!entry || !selectedPayment || loading) return
     setLoading(true)
@@ -231,6 +270,8 @@ export function CompleteServiceDialog({
         // No mandamos el cupón si no aplica (canje por puntos, o sin servicio para descontar):
         // así el chip oculto y el valor transmitido nunca divergen.
         (selectedPayment === 'points' || !canUseCoupon) ? null : (appliedCoupon?.qrCode ?? null),
+        // Cobro conjunto: si este corte se cuelga de otro pago, mandamos el comprobante-ancla.
+        jointCovering?.id ?? null,
       )
 
       if ('error' in result) {
@@ -333,8 +374,12 @@ export function CompleteServiceDialog({
   // Comprobante obligatorio al cobrar por transferencia (si la org lo activó). El monto
   // esperado del comprobante = exactamente lo que el cliente transfiere.
   const chargeAmount = transferAmount
-  const needsReceipt =
+  // Cobro conjunto: si este corte se cuelga de un pago que ya hizo otro (jointCovering),
+  // NO exige comprobante propio → deja de estar bloqueado. El respaldo es el comprobante-ancla.
+  const isJointCovered = !!jointCovering
+  const showTransferReceipt =
     !!receiptSettings?.isEnabled && selectedPayment === 'transfer' && !entry?.reward_claimed
+  const needsReceipt = showTransferReceipt && !isJointCovered
 
   return (
     <>
@@ -677,7 +722,14 @@ export function CompleteServiceDialog({
                 </p>
                 <PaymentMethodButtons
                   value={selectedPayment}
-                  onChange={setSelectedPayment}
+                  onChange={(m) => {
+                    // Cambiar de método descarta cualquier estado de comprobante/cobro conjunto
+                    // (no arrastramos un comprobante ni un ancla a un cobro de otro método).
+                    if (m !== 'transfer') {
+                      setReceiptScan(null); setJointCovering(null); setJointMode(false); setScanAsGroup(false)
+                    }
+                    setSelectedPayment(m)
+                  }}
                   allowPoints={!!entry?.reward_claimed}
                 />
               </div>
@@ -695,16 +747,36 @@ export function CompleteServiceDialog({
               )}
 
               {/* Comprobante de transferencia (obligatorio si la org lo activó) */}
-              {needsReceipt && (
+              {showTransferReceipt && (
                 <div className="space-y-2">
-                  {receiptScan ? (
+                  {isJointCovered ? (
+                    /* El corte se cuelga de una transferencia que pagó otro → sin escaneo. */
+                    <div className="flex items-center gap-3 rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-sky-700 dark:text-sky-300">
+                      <Link2 className="size-5 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold">Cobrado junto a otra transferencia</p>
+                        <p className="truncate text-xs opacity-90">
+                          {formatCurrency(jointCovering!.amount)}
+                          {jointCovering!.barberName ? ` · ${jointCovering!.barberName}` : ''}
+                          {jointCovering!.accountName ? ` · ${jointCovering!.accountName}` : ''}
+                        </p>
+                      </div>
+                      <button type="button" onClick={() => setJointCovering(null)} className="shrink-0 text-xs underline opacity-80">
+                        Cambiar
+                      </button>
+                    </div>
+                  ) : receiptScan ? (
                     receiptScan.status === 'verified' ? (
                       <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-700 dark:text-emerald-300">
                         <Check className="size-5 shrink-0" />
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold">Comprobante verificado</p>
+                          <p className="text-sm font-semibold">
+                            {scanAsGroup ? 'Comprobante conjunto verificado' : 'Comprobante verificado'}
+                          </p>
                           {receiptScan.extracted?.amount != null && (
-                            <p className="text-xs opacity-90">{formatCurrency(receiptScan.extracted.amount)} leído</p>
+                            <p className="text-xs opacity-90">
+                              {formatCurrency(receiptScan.extracted.amount)} leído{scanAsGroup ? ' · cubre varios cortes' : ''}
+                            </p>
                           )}
                         </div>
                         <button type="button" onClick={() => setScanOpen(true)} className="shrink-0 text-xs underline opacity-80">
@@ -728,18 +800,105 @@ export function CompleteServiceDialog({
                       </div>
                     )
                   ) : (
-                    <Button
-                      type="button"
-                      onClick={() => setScanOpen(true)}
-                      size="lg"
-                      className="h-14 w-full bg-emerald-600 font-bold text-white hover:bg-emerald-700"
-                    >
-                      <ScanLine className="mr-2 size-5" /> Confirmar con escaneo
-                    </Button>
+                    <>
+                      <Button
+                        type="button"
+                        onClick={() => { setScanAsGroup(false); setScanOpen(true) }}
+                        size="lg"
+                        className="h-14 w-full bg-emerald-600 font-bold text-white hover:bg-emerald-700"
+                      >
+                        <ScanLine className="mr-2 size-5" /> Confirmar con escaneo
+                      </Button>
+
+                      {/* Cobro conjunto: una transferencia paga varios cortes */}
+                      {!jointMode ? (
+                        <button
+                          type="button"
+                          onClick={() => { setJointMode(true); void loadJointOptions() }}
+                          className="mx-auto flex items-center gap-1.5 py-0.5 text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                        >
+                          <Users className="size-3.5" /> Se pagó junto a otro corte
+                        </button>
+                      ) : (
+                        <div className="space-y-2.5 rounded-xl border border-sky-500/25 bg-sky-500/[0.04] p-3">
+                          <p className="text-xs font-semibold text-sky-700 dark:text-sky-300">
+                            Una transferencia, varios cortes
+                          </p>
+
+                          {/* Rol A: este barbero recibió la transferencia */}
+                          <Button
+                            type="button" variant="outline"
+                            className="h-auto w-full justify-start gap-2 py-2.5"
+                            onClick={() => { setScanAsGroup(true); setScanOpen(true) }}
+                          >
+                            <ScanLine className="size-4 shrink-0 text-emerald-600" />
+                            <span className="text-left text-[13px] font-semibold leading-tight">
+                              Recibí yo la transferencia
+                              <span className="block text-[11px] font-normal text-muted-foreground">
+                                Escaneo el comprobante (cubre los dos cortes)
+                              </span>
+                            </span>
+                          </Button>
+
+                          {/* Rol B: lo pagó otro corte → elegir de la lista */}
+                          <div className="space-y-1.5">
+                            <p className="px-0.5 text-[11px] font-medium text-muted-foreground">…o ya lo pagó otro corte:</p>
+                            {jointLoading ? (
+                              <div className="flex items-center gap-2 px-1 py-2 text-xs text-muted-foreground">
+                                <Loader2 className="size-3.5 animate-spin" /> Buscando transferencias…
+                              </div>
+                            ) : jointOptions.length === 0 ? (
+                              <p className="px-1 py-1 text-[11px] text-muted-foreground">
+                                No hay transferencias conjuntas abiertas. El que recibió la plata tiene que cerrar su corte primero.
+                              </p>
+                            ) : (
+                              jointOptions.map((o) => {
+                                const enough = o.remaining + 1 >= chargeAmount
+                                return (
+                                  <button
+                                    key={o.id} type="button" disabled={!enough}
+                                    onClick={() => pickJointCovering(o)}
+                                    className={cn(
+                                      'flex w-full items-center gap-2 rounded-lg border border-border p-2.5 text-left transition-colors',
+                                      enough ? 'hover:bg-sky-500/10' : 'cursor-not-allowed opacity-50',
+                                    )}
+                                  >
+                                    <Link2 className="size-4 shrink-0 text-sky-600" />
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-[13px] font-semibold tabular-nums">
+                                        {formatCurrency(o.amount)}{' '}
+                                        <span className="font-normal text-muted-foreground">· quedan {formatCurrency(o.remaining)}</span>
+                                      </p>
+                                      <p className="truncate text-[11px] text-muted-foreground">
+                                        {o.barberName ?? 'Barbero'}{o.accountName ? ` · ${o.accountName}` : ''}
+                                      </p>
+                                    </div>
+                                    {enough
+                                      ? <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+                                      : <span className="shrink-0 text-[10px] text-muted-foreground">no alcanza</span>}
+                                  </button>
+                                )
+                              })
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-between">
+                            <button type="button" onClick={loadJointOptions} className="text-[11px] text-muted-foreground underline underline-offset-2">
+                              Actualizar
+                            </button>
+                            <button type="button" onClick={() => setJointMode(false)} className="text-[11px] text-muted-foreground">
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
-                  <p className="text-center text-xs text-muted-foreground">
-                    Obligatorio para cobrar por transferencia
-                  </p>
+                  {!isJointCovered && (
+                    <p className="text-center text-xs text-muted-foreground">
+                      Obligatorio para cobrar por transferencia
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -820,6 +979,7 @@ export function CompleteServiceDialog({
       barberId={entry?.barber_id ?? null}
       paymentAccountId={selectedAccountId || null}
       clientId={entry?.client_id ?? null}
+      coversGroup={scanAsGroup}
       onClose={() => setScanOpen(false)}
       onAccept={(r) => { setReceiptScan(r); setScanOpen(false); finishService(r) }}
     />

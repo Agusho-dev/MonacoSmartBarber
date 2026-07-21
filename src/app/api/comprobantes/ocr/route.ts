@@ -23,6 +23,9 @@ interface OcrBody {
   parsed?: ExtractedReceipt | null
   // Reintento: si viene, se ACTUALIZA ese comprobante (aún sin visita) en vez de crear uno nuevo.
   priorReceiptId?: string | null
+  // Pago conjunto (mig 164): este comprobante cubre VARIOS cortes (una transferencia por
+  // los dos). No se valida el monto contra un solo corte y se marca covers_group=true.
+  coversGroup?: boolean
 }
 
 /** Normaliza alias/CBU para comparar (minúsculas, sin puntos/espacios/guiones). */
@@ -197,10 +200,15 @@ export async function POST(req: NextRequest) {
   // se da por VERIFICADO en la caja → el cobro se cierra solo, sin frenar al barbero
   // delante del cliente. La discrepancia de fecha se sigue guardando en `date_ok` y
   // se revisa de forma INTERNA en el dashboard (/dashboard/comprobantes).
+  // Pago conjunto: el comprobante cubre varios cortes, así que su monto (total transferido)
+  // es MAYOR que el de este corte → NO aplica "monto no coincide". La conciliación valida el
+  // total contra la SUMA de los cortes del grupo (dashboard), no acá.
+  const coversGroup = body.coversGroup === true
+
   let status: ReceiptStatus
   if (!extracted || extracted.amount == null) status = 'needs_review'
   else if (isDuplicate) status = 'duplicate'
-  else if (amountMatches === false) status = 'amount_mismatch'
+  else if (!coversGroup && amountMatches === false) status = 'amount_mismatch'
   else status = 'verified'
 
   // ── 5) Persistir: UPDATE si es reintento (evita huérfanos), INSERT si es nuevo ──
@@ -228,9 +236,11 @@ export async function POST(req: NextRequest) {
     confidence: extracted?.confidence ?? null,
     raw_extraction: extracted?.raw ?? null,
     expected_amount: expectedAmount,
-    amount_matches: amountMatches,
+    // En pago conjunto el match monto-a-corte no aplica (el comprobante cubre varios) → null.
+    amount_matches: coversGroup ? null : amountMatches,
     alias_matches: aliasMatches,
     date_ok: dateOk,
+    covers_group: coversGroup,
   }
 
   let savedId: string | null = null
