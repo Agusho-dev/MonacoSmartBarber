@@ -327,6 +327,8 @@ export interface Visit {
   tip_payment_method: PaymentMethod | null
   /** Migración 101: nota corta del barbero sobre esta visita. */
   barber_note: string | null
+  /** Migración 164: comprobante-ancla cuando este corte se cobró junto con otros (pago conjunto). */
+  covering_receipt_id: string | null
   started_at: string
   completed_at: string
   created_at: string
@@ -450,6 +452,8 @@ export interface PaymentReceipt {
   reconciled_at: string | null
   reconciled_by: string | null
   review_note: string | null
+  /** Migración 164: comprobante-ancla de un pago conjunto (cubre varios cortes). */
+  covers_group: boolean
   created_at: string
 }
 
