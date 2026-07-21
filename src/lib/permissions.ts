@@ -168,13 +168,6 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
             'roles.manage': 'Gestionar roles y permisos',
         },
     },
-    prode: {
-        label: 'Prode Mundial',
-        permissions: {
-            'prode.view': 'Ver Prode Mundial',
-            'prode.manage': 'Gestionar torneo: resultados, premios, recordatorios',
-        },
-    },
 }
 
 /**
@@ -256,9 +249,6 @@ export const PERMISSION_DESCRIPTIONS: Record<string, string> = {
     'settings.manage': 'Permite modificar la configuración del sistema, datos del negocio y preferencias.',
 
     'roles.manage': 'Permite crear, editar y eliminar roles, y asignar permisos a cada uno. Solo para dueños.',
-
-    'prode.view': 'Permite ver el panel del Prode Mundial: resultados, participantes y premios.',
-    'prode.manage': 'Permite cargar resultados, resolver la quiniela, premiar ganadores, enviar recordatorios y canjear premios.',
 }
 
 /**

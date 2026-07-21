@@ -316,7 +316,11 @@ export function CompleteServiceDialog({
   const totalAfterDiscount = Math.max(0, totalPrice - couponDiscount)
   // El cupón se vincula a un cliente; sin cliente no se puede ofrecer. Tampoco
   // coexiste con el canje por puntos (reward_claimed), que ya lleva el corte a $0.
-  const canUseCoupon = !!entry?.client_id && !entry?.reward_claimed && serviceSubtotal > 0
+  // Prode finalizado (jul-2026): se oculta el canje de cupones en el cobro (todos los
+  // cupones fueron anulados). La infra genérica de cupón queda intacta y reversible:
+  // reactivar poniendo COUPONS_ENABLED = true.
+  const COUPONS_ENABLED: boolean = false
+  const canUseCoupon = COUPONS_ENABLED && !!entry?.client_id && !entry?.reward_claimed && serviceSubtotal > 0
 
   // La propina hereda el método del cobro salvo que el barbero elija otro
   // (TipSelector permite propina en efectivo aunque el servicio se cobre por transferencia).

@@ -24,7 +24,6 @@ import {
   ScanLine,
   Handshake,
   CalendarClock,
-  Trophy,
   Bot,
 } from 'lucide-react'
 import {
@@ -88,7 +87,6 @@ const navItems = [
   { href: '/dashboard/mensajeria', label: 'Mensajería', icon: MessageSquare, requiredPermissions: ['clients.view'] },
   { href: '/dashboard/asistente', label: 'Asistente IA', icon: Bot, requiredPermissions: ['stats.view', 'settings.view'] },
   { href: '/dashboard/app-movil', label: 'APP Móvil', icon: Smartphone, requiredPermissions: ['rewards.view'] },
-  { href: '/dashboard/prode', label: 'Prode Mundial', icon: Trophy, requiredPermissions: ['prode.view'] },
   { href: '/dashboard/convenios', label: 'Convenios', icon: Handshake, requiredPermissions: ['agreements.view'] },
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3, requiredPermissions: ['stats.view'] },
   { href: '/dashboard/caja', label: 'Caja', icon: Receipt, requiredPermissions: ['caja.view'] },
