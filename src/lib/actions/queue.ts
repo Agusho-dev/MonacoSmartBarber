@@ -523,26 +523,10 @@ export async function completeService(
   if (barberNote && barberNote.trim().length > 0) {
     visitUpdate.barber_note = barberNote.trim().slice(0, 500)
   }
-
-  // Cobro conjunto (mig 164): este corte se pagó dentro de una transferencia que cubre
-  // varios cortes. Lo colgamos del comprobante-ancla y —clave— acreditamos su transfer_log
-  // a la cuenta DONDE ENTRÓ la plata (la del ancla), no a la cuenta rotada de este barbero.
-  // Así la suma de los cortes del grupo = depósito real, sin doble conteo. Validamos que el
-  // ancla sea de la MISMA sucursal y esté marcado como pago conjunto; si no cuadra, logueamos
-  // y seguimos como cobro normal (nunca bloqueamos el cierre por esto).
-  if (coveringReceiptId) {
-    const { data: anchor } = await supabase
-      .from('payment_receipts')
-      .select('id, branch_id, payment_account_id, covers_group')
-      .eq('id', coveringReceiptId)
-      .maybeSingle()
-    if (anchor && anchor.covers_group && anchor.branch_id === entryForValidation.branch_id) {
-      visitUpdate.covering_receipt_id = coveringReceiptId
-      if (anchor.payment_account_id) visitUpdate.payment_account_id = anchor.payment_account_id
-    } else {
-      console.error('[completeService] covering receipt inválido (no es pago conjunto o de otra sucursal):', coveringReceiptId)
-    }
-  }
+  // OJO: el cobro conjunto (covering_receipt_id + cuenta del ancla) NO se setea acá.
+  // Se cuelga en un write APARTE más abajo, después del cupón, para que: (a) el monto que
+  // valida el guard de cobertura sea el neto final, y (b) si el guard (mig 165) rechaza por
+  // falta de saldo, el corte quede como transfer normal (no se rompe el cierre).
 
   const { error: visitUpdateError } = await supabase
     .from('visits')
@@ -603,6 +587,39 @@ export async function completeService(
   // acá: lo mantiene el trigger trg_visits_sync_transfer_log a partir de la visita
   // (mig 160), con el monto YA neto de cupón y con la propina transferida incluida.
   // Así ningún camino que toque una visita puede olvidarse de actualizar el ledger.
+
+  // 4.6 Cobro conjunto (mig 164/165): colgar el corte del comprobante-ancla en un write
+  //     APARTE, ya con el monto neto. La cuenta pasa a ser la del ancla (donde entró la
+  //     plata) → el transfer_log de este corte acredita esa cuenta. El guard de cobertura
+  //     (mig 165, con lock del ancla) rechaza si la suma del grupo supera el comprobante:
+  //     en ese caso el corte queda como transfer normal a su cuenta y se avisa (no se rompe
+  //     el cierre). Exigimos que el ancla tenga visita propia (el que recibió la plata ya
+  //     cerró su corte) y sea de la misma sucursal.
+  let jointWarning: string | null = null
+  if (coveringReceiptId && !visitUpdateError) {
+    const { data: anchor } = await supabase
+      .from('payment_receipts')
+      .select('id, branch_id, payment_account_id, covers_group, visit_id')
+      .eq('id', coveringReceiptId)
+      .maybeSingle()
+    if (
+      anchor && anchor.covers_group && anchor.visit_id &&
+      anchor.branch_id === entryForValidation.branch_id && anchor.payment_account_id
+    ) {
+      const { error: attachErr } = await supabase
+        .from('visits')
+        .update({ covering_receipt_id: coveringReceiptId, payment_account_id: anchor.payment_account_id })
+        .eq('id', visit.id)
+      if (attachErr) {
+        // Guard de cobertura (mig 165) u otro error → NO se cuelga; queda transfer normal.
+        console.error('[completeService] no pude colgar el corte del comprobante conjunto:', attachErr.message)
+        jointWarning = 'El comprobante conjunto ya no alcanzaba para este corte; se registró como transferencia normal. Escaneá el comprobante de este cobro.'
+      }
+    } else {
+      console.error('[completeService] covering receipt inválido (no es pago conjunto, sin visita propia, o de otra sucursal):', coveringReceiptId)
+      jointWarning = 'No se pudo vincular al cobro conjunto; se registró como transferencia normal.'
+    }
+  }
 
   // 5. Handle reward redemption (deduct points)
   if (isRewardClaim && visit.client_id && visit.branch_id) {
@@ -1120,6 +1137,7 @@ export async function completeService(
     couponApplied: couponClientRewardId != null,
     couponDiscountAmount,
     couponWarning,
+    jointWarning,
   }
 }
 

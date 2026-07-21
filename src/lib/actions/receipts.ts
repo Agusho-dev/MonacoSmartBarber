@@ -126,6 +126,10 @@ export async function getOpenJointReceipts(branchId: string): Promise<OpenJointR
     .eq('organization_id', ctx.organizationId)
     .eq('branch_id', branchId)
     .eq('covers_group', true)
+    // Sólo anclas cuyo dueño YA cerró su corte (visit_id) y con lectura válida: si no,
+    // ofreceríamos comprobantes abandonados/ilegibles y aparecerían duplicados en la conciliación.
+    .not('visit_id', 'is', null)
+    .in('status', ['verified', 'manual_ok'])
     .gte('created_at', sinceIso)
     .order('created_at', { ascending: false })
     .limit(20)
@@ -451,6 +455,9 @@ export async function getReconciliation(params: {
     .select(`id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, reconciled_at, created_at, expected_amount, payment_account_id, barber:staff(full_name), account:payment_accounts(name)`)
     .eq('organization_id', orgId)
     .is('visit_id', null)
+    // Un comprobante-ancla de cobro conjunto NUNCA es "huérfano": respalda cortes vía
+    // covering_receipt_id. Excluirlo evita que aparezca dos veces (huérfano + respaldo).
+    .eq('covers_group', false)
     .in('branch_id', branchIds)
     .gte('created_at', params.from)
     .lte('created_at', params.to)
@@ -521,9 +528,11 @@ export async function getReconciliation(params: {
       jointInfo = { receiptAmount, groupTotal, count }
       expectedAmount = receiptAmount
       // El grupo está respaldado si la suma de sus cortes NO supera el comprobante.
-      // Si lo supera, el comprobante "no alcanza" → problema de monto real.
-      const covered = receiptAmount > 0 && groupTotal <= receiptAmount + amountTolerance
-      state = covered ? 'conciliado' : 'monto'
+      // Si lo supera, el comprobante "no alcanza" → problema de monto real, PERO el admin
+      // puede darlo por válido a mano (manual_ok) — ej. cuando la IA leyó mal el monto del
+      // ancla — y ahí queda conciliado (si no, el grupo quedaría trabado en 'monto' sin salida).
+      const coveredByAmount = receiptAmount > 0 && groupTotal <= receiptAmount + amountTolerance
+      state = (coveredByAmount || anchor.status === 'manual_ok') ? 'conciliado' : 'monto'
       // Alerta interna hasta que el admin revise el ancla (reconciled_at).
       jointReview = anchor.reconciledAt == null
     } else {

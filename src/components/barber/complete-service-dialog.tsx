@@ -235,9 +235,8 @@ export function CompleteServiceDialog({
     const opts = await getOpenJointReceipts(branchId)
     setJointLoading(false)
     setJointOptions(opts)
-    if (opts.length === 0) {
-      toast.info('No hay transferencias conjuntas abiertas. El barbero que recibió la plata tiene que cerrar su corte primero marcando “pago conjunto”.')
-    }
+    // El estado vacío se comunica inline en el picker (no disparamos toast: se apilaba
+    // al refrescar y duplicaba el mensaje ya visible).
   }
 
   function pickJointCovering(o: OpenJointReceipt) {
@@ -286,6 +285,12 @@ export function CompleteServiceDialog({
         toast.warning(result.couponWarning)
       } else if ('couponApplied' in result && result.couponApplied) {
         toast.success(`Cupón aplicado: ${formatCurrency(result.couponDiscountAmount ?? 0)} de descuento`)
+      }
+
+      // Aviso de cobro conjunto: si el guard de cobertura rechazó el cuelgue (el comprobante
+      // ya no alcanzaba), el corte quedó como transfer normal y hay que respaldarlo aparte.
+      if ('jointWarning' in result && result.jointWarning) {
+        toast.warning(result.jointWarning)
       }
 
       if (result.visitId) {
@@ -377,6 +382,10 @@ export function CompleteServiceDialog({
   // Cobro conjunto: si este corte se cuelga de un pago que ya hizo otro (jointCovering),
   // NO exige comprobante propio → deja de estar bloqueado. El respaldo es el comprobante-ancla.
   const isJointCovered = !!jointCovering
+  // El comprobante-ancla elegido puede quedar corto si el monto crece DESPUÉS de elegirlo
+  // (agregar un servicio/producto desde "Atrás", o sumar propina por transferencia). Lo
+  // re-chequeamos contra el chargeAmount actual (el server igual lo valida en mig 165).
+  const jointOverAssigned = isJointCovered && (jointCovering!.remaining + 1 < chargeAmount)
   const showTransferReceipt =
     !!receiptSettings?.isEnabled && selectedPayment === 'transfer' && !entry?.reward_claimed
   const needsReceipt = showTransferReceipt && !isJointCovered
@@ -735,7 +744,7 @@ export function CompleteServiceDialog({
               </div>
 
               {/* Transfer: rotación + alias gigante (componente compartido con venta directa) */}
-              {selectedPayment === 'transfer' && paymentAccounts.length > 0 && (
+              {selectedPayment === 'transfer' && paymentAccounts.length > 0 && !isJointCovered && (
                 <TransferAccountPicker
                   accounts={paymentAccounts}
                   selectedAccountId={selectedAccountId}
@@ -751,19 +760,30 @@ export function CompleteServiceDialog({
                 <div className="space-y-2">
                   {isJointCovered ? (
                     /* El corte se cuelga de una transferencia que pagó otro → sin escaneo. */
-                    <div className="flex items-center gap-3 rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-sky-700 dark:text-sky-300">
-                      <Link2 className="size-5 shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold">Cobrado junto a otra transferencia</p>
-                        <p className="truncate text-xs opacity-90">
-                          {formatCurrency(jointCovering!.amount)}
-                          {jointCovering!.barberName ? ` · ${jointCovering!.barberName}` : ''}
-                          {jointCovering!.accountName ? ` · ${jointCovering!.accountName}` : ''}
-                        </p>
+                    <div className={cn('rounded-xl border p-3',
+                      jointOverAssigned
+                        ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                        : 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300')}>
+                      <div className="flex items-center gap-3">
+                        <Link2 className="size-5 shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold">Cobrado junto a otra transferencia</p>
+                          <p className="truncate text-xs opacity-90">
+                            {formatCurrency(jointCovering!.amount)}
+                            {jointCovering!.barberName ? ` · ${jointCovering!.barberName}` : ''}
+                            {jointCovering!.accountName ? ` · ${jointCovering!.accountName}` : ''}
+                          </p>
+                        </div>
+                        <button type="button" onClick={() => setJointCovering(null)} className="shrink-0 text-xs underline opacity-80">
+                          Cambiar
+                        </button>
                       </div>
-                      <button type="button" onClick={() => setJointCovering(null)} className="shrink-0 text-xs underline opacity-80">
-                        Cambiar
-                      </button>
+                      {jointOverAssigned && (
+                        <p className="mt-2 flex items-center gap-1.5 text-xs font-medium">
+                          <AlertTriangle className="size-3.5 shrink-0" />
+                          Ese comprobante ya no alcanza para {formatCurrency(chargeAmount)} (quedan {formatCurrency(jointCovering!.remaining)}). Cambiá de comprobante o escaneá el de este cobro.
+                        </p>
+                      )}
                     </div>
                   ) : receiptScan ? (
                     receiptScan.status === 'verified' ? (
@@ -945,7 +965,7 @@ export function CompleteServiceDialog({
                   className="h-14 sm:h-16 flex-1 text-base sm:text-lg font-black uppercase tracking-wide min-w-0"
                   size="lg"
                   onClick={() => finishService()}
-                  disabled={loading || !selectedPayment || (needsReceipt && !receiptScan)}
+                  disabled={loading || !selectedPayment || (needsReceipt && !receiptScan) || jointOverAssigned}
                 >
                   <span className="truncate">
                     {loading
