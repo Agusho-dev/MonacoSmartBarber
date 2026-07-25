@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition, type ComponentType } from 
 import {
   ScanLine, Settings, CheckCircle2, AlertTriangle, Copy, Clock, FileQuestion,
   ReceiptText, Download, Sparkles, Cpu, ShieldCheck, ExternalLink, X, ChevronRight,
-  Loader2, Building2, Wallet, CalendarX2, CalendarClock, Users, Link2,
+  Loader2, Building2, Wallet, CalendarX2, CalendarClock, Users, RefreshCw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -61,25 +61,36 @@ function useCountUp(target: number, dur = 750): number {
   return v
 }
 
-function ConciliationRing({ pct }: { pct: number }) {
+/**
+ * Anillo de conciliación. `empty` = no hay nada en alcance (o la lectura falló): el
+ * anillo queda neutro con “—” en vez de un 100% verde. Un tablero de plata no puede
+ * felicitar por un período que no pudo leer.
+ */
+function ConciliationRing({ pct, empty }: { pct: number; empty?: boolean }) {
   const r = 54
   const circ = 2 * Math.PI * r
-  const offset = circ * (1 - Math.max(0, Math.min(100, pct)) / 100)
+  const offset = empty ? circ : circ * (1 - Math.max(0, Math.min(100, pct)) / 100)
   const stroke = pct >= 95 ? 'oklch(0.72 0.17 152)' : pct >= 75 ? 'oklch(0.78 0.16 75)' : 'oklch(0.63 0.22 25)'
   const shown = useCountUp(pct, 900)
   return (
     <div className="relative grid size-40 shrink-0 place-items-center">
       <svg viewBox="0 0 128 128" className="size-40 -rotate-90">
         <circle cx="64" cy="64" r={r} fill="none" stroke="currentColor" strokeWidth="9" className="text-muted/50" />
-        <circle
-          cx="64" cy="64" r={r} fill="none" stroke={stroke} strokeWidth="9" strokeLinecap="round"
-          strokeDasharray={circ} strokeDashoffset={offset}
-          style={{ transition: 'stroke-dashoffset 1s cubic-bezier(0.22,1,0.36,1)' }}
-        />
+        {!empty && (
+          <circle
+            cx="64" cy="64" r={r} fill="none" stroke={stroke} strokeWidth="9" strokeLinecap="round"
+            strokeDasharray={circ} strokeDashoffset={offset}
+            style={{ transition: 'stroke-dashoffset 1s cubic-bezier(0.22,1,0.36,1)' }}
+          />
+        )}
       </svg>
       <div className="absolute flex flex-col items-center">
-        <span className="text-4xl font-black tabular-nums leading-none">{shown}%</span>
-        <span className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">conciliado</span>
+        <span className={cn('text-4xl font-black tabular-nums leading-none', empty && 'text-muted-foreground')}>
+          {empty ? '—' : `${shown}%`}
+        </span>
+        <span className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {empty ? 'sin datos' : 'conciliado'}
+        </span>
       </div>
     </div>
   )
@@ -181,6 +192,9 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
     startTransition(async () => {
       const res = await getReconciliation({ from, to, branchId: b === 'all' ? null : b, accountId: a === 'all' ? null : a })
       setRecon(res)
+      // El banner queda fijo arriba, pero el toast confirma que el reintento/filtro corrió
+      // y volvió a fallar (si no, el click parece no hacer nada).
+      if (res.error) toast.error(res.error)
     })
   }
 
@@ -259,6 +273,29 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
         </Button>
       </div>
 
+      {/* Banner: la lectura falló. Va PRIMERO porque invalida todo lo de abajo. */}
+      {recon.error && (
+        <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-red-500/30 bg-red-500/[0.07] p-4 sm:p-5">
+          <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-red-500/15">
+            <AlertTriangle className="size-6 text-red-500" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-red-700 dark:text-red-300">No pudimos leer la conciliación completa</p>
+            <p className="text-sm text-muted-foreground">
+              {recon.error} Los números de abajo pueden estar incompletos: no los tomes como cerrados.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => refetch()}
+            disabled={pending}
+            className="gap-2 border-red-500/40 text-red-700 hover:bg-red-500/10 dark:text-red-300"
+          >
+            {pending ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} Reintentar
+          </Button>
+        </div>
+      )}
+
       {/* Banner: feature apagada */}
       {!settings.isEnabled && (
         <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-transparent p-4 sm:p-5">
@@ -324,7 +361,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
       {/* Hero */}
       <div className="grid gap-4 rounded-2xl border bg-card p-5 sm:p-6 lg:grid-cols-[auto_1fr]">
         <div className="flex items-center gap-5 sm:gap-6">
-          <ConciliationRing pct={summary.pctConciliado} />
+          <ConciliationRing pct={summary.pctConciliado} empty={summary.scopeCount === 0} />
           <div className="space-y-3">
             <BigFigure label="Total transferido" amount={summary.totalTransferido} />
             <BigFigure label="Respaldado con comprobante" amount={summary.totalRespaldado} tone="good" />
@@ -451,13 +488,15 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
             <tbody>
               {cappedRows.length === 0 && (
                 <tr><td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
-                  {jointFilter
-                    ? 'No hay cortes cobrados en conjunto pendientes de revisar en este período.'
-                    : dateFilter
-                      ? 'No hay comprobantes con fecha a revisar en este período.'
-                      : stateFilter
-                        ? `No hay movimientos en estado “${STATE_META[stateFilter].label}” en este período.`
-                        : 'No hay movimientos por transferencia en este período.'}
+                  {recon.error
+                    ? 'No pudimos cargar los movimientos. Probá de nuevo con “Reintentar”.'
+                    : jointFilter
+                      ? 'No hay cortes cobrados en conjunto pendientes de revisar en este período.'
+                      : dateFilter
+                        ? 'No hay comprobantes con fecha a revisar en este período.'
+                        : stateFilter
+                          ? `No hay movimientos en estado “${STATE_META[stateFilter].label}” en este período.`
+                          : 'No hay movimientos por transferencia en este período.'}
                 </td></tr>
               )}
               {cappedRows.map((row) => (

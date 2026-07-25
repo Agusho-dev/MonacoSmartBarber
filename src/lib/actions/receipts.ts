@@ -120,9 +120,9 @@ export async function getOpenJointReceipts(branchId: string): Promise<OpenJointR
   const supabase = createAdminClient()
 
   const sinceIso = new Date(Date.now() - 6 * 3600_000).toISOString()
-  const { data: anchors } = await supabase
+  const { data: anchors, error: anchorsErr } = await supabase
     .from('payment_receipts')
-    .select('id, extracted_amount, created_at, payment_account_id, account:payment_accounts(name), barber:staff(full_name)')
+    .select(`id, extracted_amount, created_at, payment_account_id, account:payment_accounts(name), barber:${REL_RECEIPT_BARBER}(full_name)`)
     .eq('organization_id', ctx.organizationId)
     .eq('branch_id', branchId)
     .eq('covers_group', true)
@@ -133,13 +133,17 @@ export async function getOpenJointReceipts(branchId: string): Promise<OpenJointR
     .gte('created_at', sinceIso)
     .order('created_at', { ascending: false })
     .limit(20)
+  if (anchorsErr) { console.error('[getOpenJointReceipts anchors]', anchorsErr.message); return [] }
   if (!anchors || anchors.length === 0) return []
 
   const ids = (anchors as { id: string }[]).map((a) => a.id)
-  const { data: covered } = await supabase
+  const { data: covered, error: coveredErr } = await supabase
     .from('visits')
     .select('covering_receipt_id, amount, tip_amount, tip_payment_method')
     .in('covering_receipt_id', ids)
+  // Si no podemos leer lo ya asignado, NO ofrecemos las anclas: mostrarlas con
+  // `assigned = 0` invitaría a colgar cortes sobre un comprobante ya consumido.
+  if (coveredErr) { console.error('[getOpenJointReceipts covered]', coveredErr.message); return [] }
 
   const assignedById = new Map<string, number>()
   for (const v of covered ?? []) {
@@ -306,6 +310,12 @@ export interface ReconResult {
   rows: ReconRow[]
   summary: ReconSummary
   truncated: boolean
+  /**
+   * Falla técnica al cruzar los datos (no "no hay movimientos"). Es la diferencia entre
+   * «no hay nada que conciliar» y «no pudimos leer la caja»: un tablero de plata que
+   * muestra $0 y 100% cuando la query murió le miente al dueño. La UI lo pinta como error.
+   */
+  error?: string
 }
 
 const EMPTY_COUNTS: Record<ReconState, number> = {
@@ -341,6 +351,16 @@ function firstOf<T>(v: T | T[] | null | undefined): T | null {
   if (Array.isArray(v)) return v[0] ?? null
   return v ?? null
 }
+
+// ── Relaciones desambiguadas (PostgREST) ────────────────────
+// Cuando hay MÁS DE UNA FK entre dos tablas, PostgREST no adivina el camino y responde
+// PGRST201 ("Could not embed…"), dejando la query entera en error. Acá pasa dos veces:
+//   • visits ↔ payment_receipts → payment_receipts.visit_id + visits.covering_receipt_id (mig 164)
+//   • payment_receipts ↔ staff  → barber_id + reconciled_by (mig 157)
+// Por eso todos los embeds entre estas tablas van con el nombre del constraint. Si una
+// migración futura agrega otra FK hacia clients/payment_accounts, hay que hacer lo mismo.
+const REL_RECEIPT_OF_VISIT = 'payment_receipts!payment_receipts_visit_id_fkey'
+const REL_RECEIPT_BARBER = 'staff!payment_receipts_barber_id_fkey'
 
 function mapReceipt(r: Record<string, unknown> | null): ReconReceipt | null {
   if (!r) return null
@@ -438,7 +458,7 @@ export async function getReconciliation(params: {
       client:clients(name),
       barber:staff(full_name),
       account:payment_accounts(name),
-      receipt:payment_receipts(id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, reconciled_at, covers_group, created_at, expected_amount)`)
+      receipt:${REL_RECEIPT_OF_VISIT}(id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, reconciled_at, covers_group, created_at, expected_amount)`)
     .eq('organization_id', orgId)
     .eq('payment_method', 'transfer')
     .in('branch_id', branchIds)
@@ -448,11 +468,14 @@ export async function getReconciliation(params: {
     .limit(RECON_LIMIT)
   if (params.accountId) vq = vq.eq('payment_account_id', params.accountId)
   const { data: visits, error: vErr } = await vq
-  if (vErr) { console.error('[getReconciliation visits]', vErr.message); return EMPTY_RESULT }
+  if (vErr) {
+    console.error('[getReconciliation visits]', vErr.message)
+    return { ...EMPTY_RESULT, error: 'No pudimos cruzar los cobros con sus comprobantes.' }
+  }
 
   let oq = supabase
     .from('payment_receipts')
-    .select(`id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, reconciled_at, created_at, expected_amount, payment_account_id, barber:staff(full_name), account:payment_accounts(name)`)
+    .select(`id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, reconciled_at, created_at, expected_amount, payment_account_id, barber:${REL_RECEIPT_BARBER}(full_name), account:payment_accounts(name)`)
     .eq('organization_id', orgId)
     .is('visit_id', null)
     // Un comprobante-ancla de cobro conjunto NUNCA es "huérfano": respalda cortes vía
@@ -464,7 +487,15 @@ export async function getReconciliation(params: {
     .order('created_at', { ascending: false })
     .limit(500)
   if (params.accountId) oq = oq.eq('payment_account_id', params.accountId)
-  const { data: orphans } = await oq
+  const { data: orphans, error: oErr } = await oq
+
+  // Falla parcial: los cobros sí se pudieron cruzar. Mostramos lo que hay y avisamos
+  // qué falta, en lugar de tirar el tablero entero (o peor: fingir que está completo).
+  let partialError: string | null = null
+  if (oErr) {
+    console.error('[getReconciliation orphans]', oErr.message)
+    partialError = 'No pudimos listar los comprobantes sin cobro asociado (“Sin cobro”).'
+  }
 
   // Cobro conjunto (mig 164): los cortes con covering_receipt_id se respaldan con un
   // comprobante-ancla (uno cubre varios cortes). Resolvemos las anclas y el total de
@@ -478,7 +509,7 @@ export async function getReconciliation(params: {
   const groupTotalById = new Map<string, number>()
   const groupCountById = new Map<string, number>()
   if (coveringIds.length > 0) {
-    const [{ data: anchors }, { data: groupCuts }] = await Promise.all([
+    const [{ data: anchors, error: aErr }, { data: groupCuts, error: gErr }] = await Promise.all([
       supabase
         .from('payment_receipts')
         .select('id, status, extracted_amount, operation_number, sender_name, recipient_cbu_alias, bank_or_wallet, confidence, image_path, amount_matches, alias_matches, date_ok, extracted_datetime, capture_method, extraction_engine, review_note, reconciled_at, covers_group, created_at, expected_amount')
@@ -488,6 +519,12 @@ export async function getReconciliation(params: {
         .select('covering_receipt_id, amount, tip_amount, tip_payment_method')
         .in('covering_receipt_id', coveringIds),
     ])
+    // Sin el ancla o sin la suma del grupo, un cobro conjunto se vería como
+    // "sin comprobante" (falso negativo alarmante). Preferimos decir que falta el dato.
+    if (aErr || gErr) {
+      console.error('[getReconciliation joint]', aErr?.message ?? gErr?.message)
+      partialError = 'No pudimos resolver los cobros conjuntos: puede que algún corte se vea sin respaldo.'
+    }
     for (const a of anchors ?? []) {
       const rec = mapReceipt(a as Record<string, unknown>)
       if (rec) anchorById.set(rec.id, rec)
@@ -608,6 +645,7 @@ export async function getReconciliation(params: {
     rows,
     summary: { totalTransferido, totalRespaldado, brecha, pctConciliado, scopeCount, dateReview, jointReview, counts },
     truncated: (visits?.length ?? 0) >= RECON_LIMIT,
+    ...(partialError ? { error: partialError } : {}),
   }
 }
 
