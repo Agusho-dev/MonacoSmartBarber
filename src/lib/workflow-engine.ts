@@ -406,11 +406,42 @@ export async function evaluateIncomingMessage(params: {
           .order('priority', { ascending: false })
 
         if (templateWorkflows && templateWorkflows.length > 0) {
+          // Último template que le mandamos a esta conversación. Se resuelve
+          // perezosamente: sólo si algún workflow declara scope por template.
+          // `undefined` = todavía no consultado, `null` = no hay ninguno.
+          let lastTemplateName: string | null | undefined
+
           for (const wf of templateWorkflows) {
             // Chequear branch
             if (!matchesBranch(wf, branchId)) continue
             const channels = wf.channels as string[]
             if (!channels.includes('all') && !channels.includes(platform)) continue
+
+            // Scope por template: el editor deja elegir a qué template responde
+            // este trigger, pero el motor ignoraba ese `template_name` y el
+            // workflow se quedaba con CUALQUIER botón de CUALQUIER plantilla
+            // (ej: una campaña se comía las respuestas 1-5★ de reseñas cuando
+            // la execution de la reseña ya había vencido). Si el trigger
+            // declara un template, exigimos que el botón venga de ése.
+            const wantedTemplate = (
+              (wf.trigger_config as Record<string, unknown> | null)?.template_name as string | undefined
+            )?.trim()
+
+            if (wantedTemplate) {
+              if (lastTemplateName === undefined) {
+                const { data: lastTpl } = await supabase
+                  .from('messages')
+                  .select('template_name')
+                  .eq('conversation_id', conversationId)
+                  .eq('direction', 'outbound')
+                  .not('template_name', 'is', null)
+                  .order('created_at', { ascending: false })
+                  .limit(1)
+                  .maybeSingle()
+                lastTemplateName = lastTpl?.template_name ?? null
+              }
+              if (lastTemplateName !== wantedTemplate) continue
+            }
 
             // Iniciar workflow con contexto del botón
             const initialContext: ExecutionContext = {
