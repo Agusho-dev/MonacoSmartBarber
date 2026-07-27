@@ -55,40 +55,62 @@ const NAME_HEADERS = [
 
 /**
  * Normaliza un teléfono del CSV al formato en que está guardado `clients.phone`
- * (local argentino de 10 dígitos: `3512247164`). El `54` se lo agrega el sender
- * al mandar a Meta (`normalizeArgentinePhoneForMeta`), así que guardarlo local
- * mantiene la convención del resto de la tabla y hace funcionar el UNIQUE
- * (organization_id, phone) como dedupe.
+ * (local argentino de 10 dígitos: `3512247164`). El `54` se lo vuelve a agregar
+ * el sender al mandar a Meta (`normalizeArgentinePhoneForMeta`), así que
+ * guardarlo local mantiene la convención del resto de la tabla y hace funcionar
+ * el UNIQUE (organization_id, phone) como dedupe.
  *
- * Devuelve `null` si no parece un teléfono.
+ * Devuelve el motivo del rechazo en vez de `null` para poder mostrarle al
+ * usuario exactamente qué fila se cayó y por qué.
+ *
+ * IMPORTANTE — sólo Argentina: el sender (`process-scheduled-messages →
+ * normalizePhone`) le antepone `54` a cualquier número que no empiece con `54`,
+ * así que un número de otro país guardado en E.164 terminaría saliendo como
+ * `54` + número extranjero, o sea a un destinatario equivocado. Preferimos
+ * rechazarlo y que quede a la vista antes que mandar el mensaje a cualquiera.
  */
-export function normalizeCsvPhone(input: string): string | null {
-  let digits = input.replace(/\D/g, '')
-  if (!digits) return null
+export function classifyCsvPhone(input: string): { phone: string } | { reason: string } {
+  const trimmed = input.trim().replace(/^'/, '')
+  let digits = trimmed.replace(/\D/g, '')
+  if (!digits) return { reason: 'Sin teléfono' }
+  if (digits.length > 15) return { reason: 'Demasiados dígitos' }
 
-  // Prefijo internacional marcado como 00 (00 54 351 ...)
-  if (digits.startsWith('00')) digits = digits.slice(2)
-  // Prefijo de larga distancia nacional (0351 ...)
-  while (digits.startsWith('0')) digits = digits.slice(1)
+  // ¿Trae código de país explícito? (`+…` o el `00` internacional)
+  let hasCountryCode = trimmed.startsWith('+')
+  if (digits.startsWith('00')) { digits = digits.slice(2); hasCountryCode = true }
 
-  if (digits.length < 8) return null
-  if (digits.length > 15) return null // E.164 no admite más de 15
-
-  let e164 = digits
-  if (!e164.startsWith('54')) {
-    // 9 + 10 dígitos = celular sin país
-    if (e164.startsWith('9') && e164.length === 11) e164 = '54' + e164.slice(1)
-    else e164 = '54' + e164
-  } else if (e164.startsWith('549') && e164.length === 13) {
-    // 54 9 351 ... → Meta no quiere el 9 intermedio
-    e164 = '54' + e164.slice(3)
+  if (!hasCountryCode) {
+    // Prefijo de larga distancia nacional (0351 …)
+    while (digits.startsWith('0')) digits = digits.slice(1)
+    // 9 + 10 dígitos = celular argentino sin país
+    if (digits.startsWith('9') && digits.length === 11) digits = '54' + digits.slice(1)
+    else if (!digits.startsWith('54')) digits = '54' + digits
+    hasCountryCode = true
   }
 
-  // Argentina: 54 + 10 dígitos locales. Guardamos los 10 locales.
-  if (e164.startsWith('54') && e164.length === 12) return e164.slice(2)
+  // 54 9 351 … → Meta no quiere el 9 intermedio
+  if (digits.startsWith('549') && digits.length === 13) digits = '54' + digits.slice(3)
 
-  // Cualquier otro país / largo raro: guardamos los dígitos completos.
-  return e164
+  if (!digits.startsWith('54')) {
+    return { reason: `Número de otro país (+${digits.slice(0, 3)}…)` }
+  }
+  if (digits.length !== 12) {
+    return { reason: 'Largo inválido para Argentina' }
+  }
+
+  const local = digits.slice(2)
+  // Códigos de área argentinos: 11, 2XX(X), 3XX(X). Nada más empieza con 1.
+  if (!/^(11|[23])/.test(local)) {
+    return { reason: 'Código de área inválido' }
+  }
+
+  return { phone: local }
+}
+
+/** Igual que `classifyCsvPhone` pero devuelve `null` en vez del motivo. */
+export function normalizeCsvPhone(input: string): string | null {
+  const r = classifyCsvPhone(input)
+  return 'phone' in r ? r.phone : null
 }
 
 /**
