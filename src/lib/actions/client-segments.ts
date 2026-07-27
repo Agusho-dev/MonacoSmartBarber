@@ -53,6 +53,53 @@ function computeSegment(
   return 'nuevo'
 }
 
+/**
+ * Audiencia explícita: la lista ya viene resuelta a client_ids (import de CSV o
+ * selección manual) y no hay ningún otro filtro que aplicar. En ese caso no
+ * tiene sentido traer toda la base + visitas + conversaciones para calcular
+ * segmentos que nadie va a mirar: alcanza con leer esos ids.
+ */
+function isExplicitAudience(f: AudienceFilters): boolean {
+  if (!f.manualClientIds || f.manualClientIds.length === 0) return false
+  return (
+    !f.segments?.length &&
+    !f.tagIds?.length &&
+    !f.branchIds?.length &&
+    f.lastContactDays == null &&
+    f.lastContactMin == null &&
+    f.lastVisitMaxDays == null &&
+    f.lastVisitMinDays == null &&
+    f.minVisits == null &&
+    f.maxVisits == null
+  )
+}
+
+async function getExplicitAudience(
+  orgId: string,
+  ids: string[],
+  requirePhone: boolean,
+): Promise<ClientWithSegment[]> {
+  const supabase = createAdminClient()
+  const rows = await batchIn<{ id: string; name: string; phone: string | null; instagram: string | null }>(
+    supabase, 'clients', 'id, name, phone, instagram', 'id', ids,
+    (q) => q.eq('organization_id', orgId)
+  )
+  const byId = new Map(rows.map(r => [r.id, r]))
+  // Respetamos el orden del CSV/selección, no el que devuelva Postgres.
+  return ids
+    .map(id => byId.get(id))
+    .filter((r): r is NonNullable<typeof r> => !!r && (!requirePhone || !!r.phone))
+    .map(r => ({
+      id: r.id,
+      name: r.name,
+      phone: r.phone,
+      instagram: r.instagram,
+      segment: 'nuevo',
+      lastContactDate: null,
+      totalVisits: 0,
+    }))
+}
+
 // Retorna la audiencia preview con count y muestra de clientes
 export async function previewAudience(filters: AudienceFilters): Promise<{
   count: number
@@ -62,7 +109,9 @@ export async function previewAudience(filters: AudienceFilters): Promise<{
   const orgId = await getCurrentOrgId()
   if (!orgId) return { count: 0, sample: [], error: 'No autorizado' }
 
-  const clients = await getFilteredClients(orgId, filters)
+  const clients = isExplicitAudience(filters)
+    ? await getExplicitAudience(orgId, filters.manualClientIds!, filters.hasPhone !== false)
+    : await getFilteredClients(orgId, filters)
   return {
     count: clients.length,
     sample: clients.slice(0, 20).map(c => ({
@@ -82,7 +131,9 @@ export async function getFilteredClientIds(filters: AudienceFilters): Promise<{
   const orgId = await getCurrentOrgId()
   if (!orgId) return { clients: [], error: 'No autorizado' }
 
-  const all = await getFilteredClients(orgId, filters)
+  const all = isExplicitAudience(filters)
+    ? await getExplicitAudience(orgId, filters.manualClientIds!, filters.hasPhone !== false)
+    : await getFilteredClients(orgId, filters)
   return {
     clients: all
       .filter(c => c.phone)

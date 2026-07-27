@@ -458,7 +458,15 @@ function SendTemplateConfig({ config, onUpdateConfig }: { config: Record<string,
   return (
     <div className="space-y-3">
       <div className="space-y-1.5">
-        <Label className="text-xs text-muted-foreground">Template de Meta</Label>
+        <div className="flex items-center justify-between gap-2">
+          <Label className="text-xs text-muted-foreground">Template de Meta</Label>
+          <button type="button" onClick={handleSyncTemplates} disabled={syncingTemplates}
+            title="Traer los templates nuevos aprobados en Meta"
+            className="flex items-center gap-1 text-[10px] text-muted-foreground transition-colors hover:text-green-400 disabled:opacity-50">
+            <RefreshCw className={`size-3 ${syncingTemplates ? 'animate-spin' : ''}`} />
+            Actualizar
+          </button>
+        </div>
         {syncingTemplates ? (
           <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-lg">
             <div className="size-4 animate-spin rounded-full border-2 border-muted-foreground border-t-green-400" />
@@ -797,7 +805,15 @@ function TriggerConfig({
 
       {triggerType === 'template_reply' && (
         <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Template de Meta</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label className="text-xs text-muted-foreground">Template de Meta</Label>
+            <button type="button" onClick={handleSyncTemplates} disabled={syncingTemplates}
+              title="Traer los templates nuevos aprobados en Meta"
+              className="flex items-center gap-1 text-[10px] text-muted-foreground transition-colors hover:text-green-400 disabled:opacity-50">
+              <RefreshCw className={`size-3 ${syncingTemplates ? 'animate-spin' : ''}`} />
+              Actualizar
+            </button>
+          </div>
           {syncingTemplates ? (
             <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-lg">
               <div className="size-4 animate-spin rounded-full border-2 border-muted-foreground border-t-green-400" />

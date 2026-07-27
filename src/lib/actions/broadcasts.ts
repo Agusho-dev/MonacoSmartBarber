@@ -5,6 +5,7 @@ import { getCurrentOrgId } from './org'
 import { requireOrgAccessToEntity } from './guard'
 import { revalidatePath } from 'next/cache'
 import type { AudienceFilters } from './client-segments'
+import { normalizeCsvPhone, CSV_MAX_CONTACTS } from '@/lib/csv/contacts'
 
 // Estructura de variables por componente de template (Meta Cloud API format)
 export interface TemplateVariable {
@@ -45,12 +46,148 @@ export async function getBroadcasts() {
   return { data: data ?? [], error: null }
 }
 
+// ===========================================================================
+// Audiencia desde CSV
+// ===========================================================================
+
+export interface CsvContactInput {
+  name: string
+  phone: string
+}
+
+/**
+ * Deduplica y normaliza los contactos que llegan del wizard. El teléfono se
+ * vuelve a normalizar en el servidor (nunca confiar en el que armó el browser).
+ */
+function sanitizeCsvContacts(contacts: CsvContactInput[]): Array<{ name: string; phone: string }> {
+  const seen = new Set<string>()
+  const out: Array<{ name: string; phone: string }> = []
+  for (const c of contacts) {
+    const phone = normalizeCsvPhone(String(c?.phone ?? ''))
+    if (!phone || seen.has(phone)) continue
+    seen.add(phone)
+    out.push({ phone, name: String(c?.name ?? '').trim().slice(0, 120) })
+  }
+  return out
+}
+
+/**
+ * Cuenta cuántos contactos del CSV ya existen como clientes de la org y cuántos
+ * se van a crear. Es solo lectura: no escribe nada hasta que se crea la difusión.
+ */
+export async function previewCsvAudience(contacts: CsvContactInput[]): Promise<{
+  total: number
+  existing: number
+  nuevos: number
+  error?: string
+}> {
+  const result = await requireOrgId()
+  if ('error' in result) return { total: 0, existing: 0, nuevos: 0, error: result.error }
+
+  const clean = sanitizeCsvContacts(contacts ?? [])
+  if (clean.length === 0) return { total: 0, existing: 0, nuevos: 0 }
+
+  const supabase = createAdminClient()
+  const phones = clean.map(c => c.phone)
+  const found = new Set<string>()
+
+  const CHUNK = 300
+  for (let i = 0; i < phones.length; i += CHUNK) {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('phone')
+      .eq('organization_id', result.orgId)
+      .in('phone', phones.slice(i, i + CHUNK))
+    if (error) return { total: clean.length, existing: 0, nuevos: 0, error: error.message }
+    for (const row of data ?? []) if (row.phone) found.add(row.phone)
+  }
+
+  return { total: clean.length, existing: found.size, nuevos: clean.length - found.size }
+}
+
+/**
+ * Find-or-create de los contactos del CSV como `clients` de la org.
+ *
+ * Por qué crear clientes en vez de mandar a teléfonos sueltos: todo el pipeline
+ * de envío está clavado en `client_id` (`scheduled_messages.client_id` y
+ * `broadcast_recipients.client_id` son NOT NULL, y el cron arma la conversación
+ * del inbox con ese id). Creándolos acá, cuando el contacto responde el mensaje
+ * cae en la misma ficha y los workflows `message_received` lo agarran.
+ *
+ * NUNCA pisa el nombre de un cliente existente: el CSV solo aporta nombre a los
+ * que se crean nuevos.
+ */
+async function resolveCsvClientIds(
+  supabase: ReturnType<typeof createAdminClient>,
+  orgId: string,
+  contacts: Array<{ name: string; phone: string }>,
+  broadcastName: string,
+): Promise<{ clientIds: string[]; created: number } | { error: string }> {
+  const phones = contacts.map(c => c.phone)
+  const idByPhone = new Map<string, string>()
+  const CHUNK = 300
+
+  const fetchExisting = async (list: string[]) => {
+    for (let i = 0; i < list.length; i += CHUNK) {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('id, phone')
+        .eq('organization_id', orgId)
+        .in('phone', list.slice(i, i + CHUNK))
+      if (error) return error.message
+      for (const row of data ?? []) if (row.phone) idByPhone.set(row.phone, row.id)
+    }
+    return null
+  }
+
+  const readErr = await fetchExisting(phones)
+  if (readErr) return { error: 'No se pudo leer la base de clientes: ' + readErr }
+
+  const missing = contacts.filter(c => !idByPhone.has(c.phone))
+  let created = 0
+
+  if (missing.length > 0) {
+    const note = `Importado desde CSV — difusión "${broadcastName}"`
+    for (let i = 0; i < missing.length; i += CHUNK) {
+      const batch = missing.slice(i, i + CHUNK).map(c => ({
+        organization_id: orgId,
+        phone: c.phone,
+        name: c.name || `+54${c.phone}`,
+        notes: note,
+      }))
+      // ignoreDuplicates: si otro import creó el mismo teléfono en paralelo, el
+      // UNIQUE (organization_id, phone) lo absorbe en vez de tirar la operación.
+      const { data, error } = await supabase
+        .from('clients')
+        .upsert(batch, { onConflict: 'organization_id,phone', ignoreDuplicates: true })
+        .select('id, phone')
+      if (error) return { error: 'No se pudieron crear los contactos: ' + error.message }
+      created += data?.length ?? 0
+      for (const row of data ?? []) if (row.phone) idByPhone.set(row.phone, row.id)
+    }
+
+    // Releer los que el upsert no devolvió (conflictos ignorados).
+    const stillMissing = phones.filter(p => !idByPhone.has(p))
+    if (stillMissing.length > 0) {
+      const retryErr = await fetchExisting(stillMissing)
+      if (retryErr) return { error: 'No se pudo resolver los contactos: ' + retryErr }
+    }
+  }
+
+  const clientIds = phones.map(p => idByPhone.get(p)).filter((id): id is string => !!id)
+  if (clientIds.length === 0) return { error: 'No se pudo resolver ningún contacto del CSV' }
+
+  return { clientIds, created }
+}
+
 export async function createBroadcast(input: {
   name: string
   templateName: string
   templateLanguage?: string
   templateComponents?: TemplateVariable[]
   audienceFilters: AudienceFilters
+  /** Audiencia explícita importada de un CSV. Si viene, reemplaza a los filtros. */
+  csvContacts?: CsvContactInput[]
   scheduledFor?: string
 }) {
   const result = await requireOrgId()
@@ -71,6 +208,27 @@ export async function createBroadcast(input: {
   }
 
   const supabase = createAdminClient()
+
+  // Audiencia por CSV: resolvemos los contactos a client_ids y los congelamos en
+  // `manualClientIds`. Así `sendBroadcast` no necesita saber de dónde salió la
+  // lista y la difusión queda reproducible aunque después cambien los clientes.
+  let audienceFilters = input.audienceFilters
+  let csvCreated = 0
+
+  if (input.csvContacts && input.csvContacts.length > 0) {
+    const clean = sanitizeCsvContacts(input.csvContacts)
+    if (clean.length === 0) return { error: 'El CSV no tiene teléfonos válidos' }
+    if (clean.length > CSV_MAX_CONTACTS) {
+      return { error: `El CSV tiene ${clean.length} contactos y el máximo por difusión es ${CSV_MAX_CONTACTS}` }
+    }
+
+    const resolved = await resolveCsvClientIds(supabase, orgId, clean, input.name.trim())
+    if ('error' in resolved) return { error: resolved.error }
+
+    csvCreated = resolved.created
+    audienceFilters = { manualClientIds: resolved.clientIds, hasPhone: true }
+  }
+
   const { data, error } = await supabase
     .from('broadcasts')
     .insert({
@@ -81,7 +239,8 @@ export async function createBroadcast(input: {
       template_name: input.templateName,
       template_language: input.templateLanguage || 'es_AR',
       template_components: input.templateComponents ?? null,
-      audience_filters: input.audienceFilters,
+      audience_filters: audienceFilters,
+      audience_count: audienceFilters.manualClientIds?.length ?? 0,
       scheduled_for: input.scheduledFor || null,
     })
     .select('*')
@@ -89,7 +248,7 @@ export async function createBroadcast(input: {
 
   if (error) return { error: error.message }
   revalidatePath('/dashboard/mensajeria')
-  return { data, error: null }
+  return { data, error: null, csvCreated }
 }
 
 export async function sendBroadcast(broadcastId: string) {
