@@ -307,6 +307,69 @@ export async function evaluateIncomingMessage(params: {
       activeExec = null
     }
 
+    // 1d. Un template nuevo con botones le gana a un flujo colgado esperando respuesta.
+    //
+    // Escenario real (27/jul/2026): la conversación tenía "Bienvenida" en
+    // waiting_reply desde las 21:18 con la pregunta "¿Tenés alguna otra
+    // consulta? Sí/No". A las 22:00 salió el template `peluqueros` con su botón
+    // UNIRME; el cliente lo tocó y este bloque se lo tragaba como si fuera la
+    // respuesta a la pregunta vieja: no matcheaba ninguna rama, la ejecución
+    // moría y el workflow del template nunca se evaluaba.
+    //
+    // Si le mandamos una plantilla DESPUÉS de que el flujo quedó esperando, el
+    // botón es de la plantilla nueva. Sólo cedemos el paso cuando existe un
+    // workflow `template_reply` para esa plantilla puntual — si no hay ninguno,
+    // se mantiene el comportamiento de siempre.
+    if (activeExec && (messageType === 'interactive' || messageType === 'button')) {
+      const buttonReply = interactivePayload?.button_reply ?? interactivePayload?.list_reply
+      if (buttonReply && activeExec.updated_at) {
+        const { data: lastTpl } = await supabase
+          .from('messages')
+          .select('template_name, created_at')
+          .eq('conversation_id', conversationId)
+          .eq('direction', 'outbound')
+          .not('template_name', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        const tplName = lastTpl?.template_name as string | undefined
+        const tplIsNewerThanWait =
+          !!lastTpl?.created_at &&
+          new Date(lastTpl.created_at as string).getTime() > new Date(activeExec.updated_at as string).getTime()
+
+        if (tplName && tplIsNewerThanWait) {
+          const { data: tplWorkflows } = await supabase
+            .from('automation_workflows')
+            .select('id, trigger_config')
+            .eq('organization_id', orgId)
+            .eq('is_active', true)
+            .eq('trigger_type', 'template_reply')
+
+          const claims = (tplWorkflows ?? []).some(w =>
+            ((w.trigger_config as Record<string, unknown> | null)?.template_name as string | undefined)?.trim() === tplName
+          )
+
+          if (claims) {
+            // Cerramos la ejecución vieja: la pregunta quedó abandonada y si la
+            // dejamos en waiting_reply se come también el mensaje siguiente.
+            await supabase
+              .from('workflow_executions')
+              .update({
+                status: 'completed',
+                completed_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', activeExec.id)
+            console.warn(
+              `[WorkflowEngine] Botón de template "${tplName}" — se cierra la ejecución colgada ${activeExec.id} y se cede al trigger template_reply`
+            )
+            activeExec = null
+          }
+        }
+      }
+    }
+
     if (activeExec) {
       // Hay un workflow esperando respuesta — procesar
       const node = activeExec.current_node as WorkflowNode | null
