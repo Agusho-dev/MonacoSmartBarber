@@ -104,6 +104,7 @@ export function BroadcastSection() {
   const [csvDragging, setCsvDragging] = useState(false)
   const [showCsvInvalid, setShowCsvInvalid] = useState(false)
   const csvInputRef = useRef<HTMLInputElement>(null)
+  const csvContacts = csvResult?.contacts ?? []
 
   // Template variables
   const [templateVarValues, setTemplateVarValues] = useState<Record<string, Record<string, string>>>({})
@@ -335,7 +336,6 @@ export function BroadcastSection() {
     }
   }
 
-  const csvContacts = csvResult?.contacts ?? []
   const canAdvanceFromStep1 = !!name.trim() && (audienceMode === 'filters' || csvContacts.length > 0)
   const canAdvanceFromStep2 = !!selectedTemplate
   const canAdvanceFromStep3 = !hasVariables || templateVars.body.every(v => templateVarValues.body?.[v]?.trim()) &&

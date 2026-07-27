@@ -337,12 +337,14 @@ export async function sendMetaWhatsAppTemplate(
 
 /**
  * Sincroniza templates (todos, no sólo approved) desde Meta con paginación cursor-based.
- * Up/dates por (channel_id, name).
+ * Upsert por (channel_id, name) + borra los que ya no existen en Meta.
  */
 export async function syncWhatsAppTemplates(): Promise<{
   data?: Array<{ name: string; language: string; category: string; status: string; components: unknown }>
   error?: string
   count?: number
+  /** Templates que estaban en la base pero Meta ya no devuelve (borrados allá). */
+  removed?: number
 }> {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'No autorizado' }
@@ -368,6 +370,7 @@ export async function syncWhatsAppTemplates(): Promise<{
     `https://graph.facebook.com/${META_API_VERSION}/${waConfig.whatsapp_business_id}/message_templates?limit=${PAGE_SIZE}`
 
   const allTemplates: Array<{ name: string; language: string; category: string; status: string; components: unknown }> = []
+  let truncated = false
 
   for (let page = 0; page < MAX_PAGES && next; page++) {
     const res: Response = await fetch(next, {
@@ -397,12 +400,14 @@ export async function syncWhatsAppTemplates(): Promise<{
     }
 
     next = json?.paging?.next ?? null
+    // Nos quedamos sin páginas permitidas pero Meta sigue teniendo más.
+    if (next && page === MAX_PAGES - 1) truncated = true
   }
 
   // Upsert por (channel_id, name). Guardamos todos los status (approved, pending, rejected)
   // así el picker puede mostrar solo los approved pero el admin ve el resto.
   for (const tpl of allTemplates) {
-    await supabase
+    const { error: upsertErr } = await supabase
       .from('message_templates')
       .upsert(
         {
@@ -415,11 +420,41 @@ export async function syncWhatsAppTemplates(): Promise<{
         },
         { onConflict: 'channel_id, name' }
       )
+    if (upsertErr) console.error('[syncWhatsAppTemplates] upsert', tpl.name, upsertErr.message)
+  }
+
+  // Borrar los que Meta ya no tiene: el sync era sólo-upsert, así que un template
+  // eliminado en Meta seguía apareciendo como "approved" en los pickers y recién
+  // fallaba al enviar (error 132001). Las FKs que lo referencian son ON DELETE
+  // SET NULL, así que borrar la fila es seguro.
+  // Si nos comimos el tope de páginas la lista está incompleta → no borramos nada.
+  let removed = 0
+  if (!truncated && allTemplates.length > 0) {
+    const live = new Set(allTemplates.map(t => t.name))
+    const { data: stored, error: readErr } = await supabase
+      .from('message_templates')
+      .select('name')
+      .eq('channel_id', channel.id)
+
+    if (readErr) {
+      console.error('[syncWhatsAppTemplates] read para limpieza', readErr.message)
+    } else {
+      const obsoletos = (stored ?? []).map(r => r.name).filter(n => !live.has(n))
+      if (obsoletos.length > 0) {
+        const { error: delErr } = await supabase
+          .from('message_templates')
+          .delete()
+          .eq('channel_id', channel.id)
+          .in('name', obsoletos)
+        if (delErr) console.error('[syncWhatsAppTemplates] delete obsoletos', delErr.message)
+        else removed = obsoletos.length
+      }
+    }
   }
 
   revalidatePath('/dashboard/mensajeria')
   revalidatePath('/dashboard/turnos/configuracion')
-  return { data: allTemplates, count: allTemplates.length }
+  return { data: allTemplates, count: allTemplates.length, removed }
 }
 
 // ===========================================================================

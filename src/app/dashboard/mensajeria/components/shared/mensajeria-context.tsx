@@ -641,7 +641,10 @@ export function MensajeriaProvider({
       if (result.error) { toast.error(result.error); return }
       if (result.data) {
         setWaTemplates(result.data.map((t, i) => ({ id: `tpl-${i}`, ...t })) as WaTemplate[])
-        toast.success(`${result.data.length} template(s) sincronizado(s)`)
+        toast.success(
+          `${result.data.length} template(s) sincronizado(s)` +
+          (result.removed ? ` · ${result.removed} eliminado(s) en Meta` : '')
+        )
       }
     })
   }

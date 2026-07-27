@@ -92,7 +92,7 @@ export function classifyCsvPhone(input: string): { phone: string } | { reason: s
   if (digits.startsWith('549') && digits.length === 13) digits = '54' + digits.slice(3)
 
   if (!digits.startsWith('54')) {
-    return { reason: `Número de otro país (+${digits.slice(0, 3)}…)` }
+    return { reason: 'Número de otro país' }
   }
   if (digits.length !== 12) {
     return { reason: 'Largo inválido para Argentina' }
@@ -241,12 +241,13 @@ export function parseContactsCsv(text: string): CsvParseResult {
       return
     }
 
-    const phone = normalizeCsvPhone(rawPhone)
-    if (!phone) {
-      invalid.push({ row: rowNumber, name, raw: rawPhone, reason: 'Teléfono inválido' })
+    const classified = classifyCsvPhone(rawPhone)
+    if ('reason' in classified) {
+      invalid.push({ row: rowNumber, name, raw: rawPhone, reason: classified.reason })
       return
     }
 
+    const { phone } = classified
     if (seen.has(phone)) { duplicates++; return }
     seen.add(phone)
     contacts.push({ name, phone, raw: rawPhone })
