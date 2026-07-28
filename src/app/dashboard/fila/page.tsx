@@ -4,6 +4,7 @@ import { getCurrentOrgId } from '@/lib/actions/org'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { getAppointmentsForDateMultiBranch, getAppointmentSettings } from '@/lib/actions/appointments'
 import { getActiveTimezone } from '@/lib/i18n'
+import { getLocalDateStr } from '@/lib/time-utils'
 import { redirect } from 'next/navigation'
 import { FilaClient } from './fila-client'
 import { FilaTabsWrapper } from './fila-tabs-wrapper'
@@ -22,7 +23,9 @@ export default async function FilaAdminPage() {
 
   const supabase = createAdminClient()
 
-  const today = new Date().toISOString().split('T')[0]
+  // Fecha en la TZ activa: con la fecha UTC, después de las 21:00 la pestaña
+  // de turnos del día mostraba la agenda de mañana.
+  const today = getLocalDateStr(timezone)
 
   const [
     { data: entries },

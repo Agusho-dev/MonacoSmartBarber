@@ -39,8 +39,24 @@ type SubRoute = 'default' | 'walkin' | 'booking'
 
 export function ModeRouter({ branchId, operationMode, isLightBg = false }: ModeRouterProps) {
   const [subRoute, setSubRoute] = useState<SubRoute>('default')
+  const [resetKey, setResetKey] = useState(0)
   const [services, setServices] = useState<Service[]>([])
   const [barbers, setBarbers] = useState<Staff[]>([])
+
+  /**
+   * Vuelve el kiosko a cero para el próximo cliente.
+   *
+   * El `setSubRoute('default')` solo no alcanzaba: cuando la sub-ruta YA era
+   * 'default' (el caso de `appointments` y `hybrid`) React descartaba el
+   * update, el sub-flujo no se re-renderizaba y su step interno se quedaba en
+   * 'confirmed'. La tablet quedaba clavada en "¡Llegada registrada!" desde el
+   * primer cliente del día. Bumpear la key fuerza el remount, así el reset no
+   * depende de que cada sub-flujo se acuerde de limpiarse.
+   */
+  const resetKiosko = () => {
+    setSubRoute('default')
+    setResetKey(k => k + 1)
+  }
 
   // Cargar servicios y barberos solo para los modos que los necesitan
   useEffect(() => {
@@ -83,12 +99,13 @@ export function ModeRouter({ branchId, operationMode, isLightBg = false }: ModeR
   if (subRoute === 'booking') {
     return (
       <InlineQuickBookFlow
+        key={`booking-${resetKey}`}
         branchId={branchId}
         services={services}
         barbers={barbers}
         isLightBg={isLightBg}
-        onBack={() => setSubRoute('default')}
-        onReset={() => setSubRoute('default')}
+        onBack={resetKiosko}
+        onReset={resetKiosko}
       />
     )
   }
@@ -102,10 +119,11 @@ export function ModeRouter({ branchId, operationMode, isLightBg = false }: ModeR
   if (operationMode === 'appointments') {
     return (
       <AppointmentLookupFlow
+        key={`lookup-${resetKey}`}
         branchId={branchId}
         isLightBg={isLightBg}
         onNoAppointmentBook={() => setSubRoute('booking')}
-        onReset={() => setSubRoute('default')}
+        onReset={resetKiosko}
       />
     )
   }
@@ -114,13 +132,14 @@ export function ModeRouter({ branchId, operationMode, isLightBg = false }: ModeR
   if (operationMode === 'hybrid') {
     return (
       <HybridRouter
+        key={`hybrid-${resetKey}`}
         branchId={branchId}
         services={services}
         barbers={barbers}
         isLightBg={isLightBg}
         clientName=""
         onWalkIn={() => setSubRoute('walkin')}
-        onReset={() => setSubRoute('default')}
+        onReset={resetKiosko}
       />
     )
   }

@@ -254,13 +254,17 @@ export async function notifyNextWaitlistCandidate(ctx: NotifyContext) {
     if (settings?.waitlist_template_id) {
       const { data: tpl } = await supabase
         .from('message_templates')
-        .select('name')
+        .select('name, language')
         .eq('id', settings.waitlist_template_id)
         .maybeSingle()
 
       if (tpl?.name) {
         row.template_id = settings.waitlist_template_id
         row.template_name = tpl.name
+        // El idioma tiene que ser el REGISTRADO en Meta: mandar es_AR (el
+        // default de la columna) contra un template aprobado como `es` da
+        // 132001 y el mensaje muere sin reintento.
+        if (tpl.language) row.template_language = tpl.language
         row.template_params = [
           {
             type: 'body',
@@ -279,7 +283,10 @@ export async function notifyNextWaitlistCandidate(ctx: NotifyContext) {
       row.content = `Se liberó un turno en ${branchName} para el ${ctx.date}. Reservalo acá: ${bookUrl}`
     }
 
-    await supabase.from('scheduled_messages').insert(row)
+    const { error: insertError } = await supabase.from('scheduled_messages').insert(row)
+    if (insertError) {
+      console.error('[Waitlist] insert scheduled_message:', insertError.message)
+    }
   } catch (e) {
     console.error('[Waitlist] Error notificando candidato:', e)
   }

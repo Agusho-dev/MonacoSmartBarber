@@ -66,7 +66,11 @@ export function ConfirmationStep({
     year: 'numeric',
   })
 
-  const cancelUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/turnos/cancelar/${cancellationToken}`
+  // /gestionar y no /cancelar: es la ruta que ya circula por WhatsApp
+  // (confirmación, recordatorio, reprogramación) y permite además de cancelar
+  // ver el detalle del turno. Dos UIs distintas sobre el mismo token sólo
+  // confundían.
+  const cancelUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/turnos/gestionar/${cancellationToken}`
 
   const calendarUrl = service
     ? buildGoogleCalendarUrl({
@@ -172,10 +176,10 @@ export function ConfirmationStep({
             style={{ color: branding.text, opacity: 0.5 }}
           >
             <Link className="h-3 w-3" />
-            Para cancelar tu turno
+            Para ver o cancelar tu turno
           </p>
           <p className="text-xs" style={{ color: branding.text, opacity: 0.6 }}>
-            Usá este link (válido hasta 2h antes):
+            Guardá este link, te sirve para gestionarlo:
           </p>
           <a
             href={cancelUrl}

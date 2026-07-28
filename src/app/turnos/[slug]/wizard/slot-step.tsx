@@ -10,7 +10,8 @@ import type { PublicSlotGroup } from '@/lib/actions/public-booking'
 
 interface Props {
   branchId: string
-  serviceId: string
+  /** Todos los servicios elegidos: la disponibilidad usa la duración TOTAL. */
+  serviceIds: string[]
   staffId: string | null
   slotIntervalMinutes: number
   maxAdvanceDays: number
@@ -31,7 +32,7 @@ function formatDateISO(d: Date): string {
 
 export function SlotStep({
   branchId,
-  serviceId,
+  serviceIds,
   staffId,
   maxAdvanceDays,
   appointmentDays,
@@ -52,9 +53,13 @@ export function SlotStep({
   maxDate.setDate(maxDate.getDate() + maxAdvanceDays)
   maxDate.setHours(23, 59, 59, 999)
 
+  // `serviceIds` es un array nuevo en cada render del padre: sin esta clave
+  // estable el efecto se re-dispararía en loop.
+  const serviceKey = serviceIds.join(',')
+
   // Cargar slots cuando cambia la fecha
   useEffect(() => {
-    if (!selectedDate || !serviceId) return
+    if (!selectedDate || !serviceKey) return
     let cancelled = false
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -63,7 +68,7 @@ export function SlotStep({
     setSlotGroups([])
 
     const dateStr = formatDateISO(selectedDate)
-    publicGetAvailableSlots(branchId, dateStr, serviceId, staffId ?? undefined).then(result => {
+    publicGetAvailableSlots(branchId, dateStr, serviceKey.split(','), staffId ?? undefined).then(result => {
       if (cancelled) return
       setSlotGroups(result.slots)
       if (result.error) setError(result.error)
@@ -71,7 +76,7 @@ export function SlotStep({
     })
 
     return () => { cancelled = true }
-  }, [selectedDate, serviceId, staffId, branchId])
+  }, [selectedDate, serviceKey, staffId, branchId])
 
   const disabledDays = [
     { before: today },

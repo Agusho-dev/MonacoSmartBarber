@@ -21,12 +21,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { Clock, User, Scissors, Play, Check, XCircle, Bell, CheckCircle2 } from 'lucide-react'
+import { Clock, User, Scissors, Play, Check, XCircle, Bell, CheckCircle2, LogIn } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   markAppointmentInProgress,
   markAppointmentNoShow,
   notifyClientArrival,
+  checkInAppointmentFromPanel,
 } from '@/lib/actions/barber-turnos'
 import type { Appointment } from '@/lib/types/database'
 
@@ -79,6 +80,19 @@ export function AppointmentDetailSheet({
       onActionDone()
       onClose()
     }
+  }
+
+  async function handleCheckIn() {
+    setLoadingAction('checkin')
+    const result = await checkInAppointmentFromPanel(appointment!.id, staffId, branchId)
+    setLoadingAction(null)
+    if ('error' in result) {
+      toast.error(result.error)
+      return
+    }
+    toast.success('Llegada registrada. El cliente entró a la fila.')
+    onActionDone()
+    onClose()
   }
 
   async function handleInProgress() {
@@ -184,6 +198,21 @@ export function AppointmentDetailSheet({
               >
                 <Bell className="size-4" />
                 Avisar al cliente que puede pasar
+              </Button>
+            )}
+
+            {/* Registrar llegada (confirmado → en espera).
+                Sin esta acción el turno sólo podía arrancar desde la tablet
+                del kiosko: en una sucursal sin tablet quedaba en 'confirmado'
+                para siempre, sin queue_entry, y nunca se podía cobrar. */}
+            {appointment.status === 'confirmed' && (
+              <Button
+                className="w-full justify-start gap-2"
+                onClick={handleCheckIn}
+                disabled={isLoading}
+              >
+                <LogIn className="size-4" />
+                {loadingAction === 'checkin' ? 'Registrando...' : 'Registrar llegada'}
               </Button>
             )}
 

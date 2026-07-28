@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useTransition } from 'react'
 import Link from 'next/link'
 import {
   Building2, Calendar, CalendarClock, CalendarPlus, ChevronLeft, ChevronRight,
-  DollarSign, Loader2, Phone, Scissors, Settings, User, X, Layers,
+  DollarSign, Loader2, Phone, Scissors, Settings, User, X, Layers, AlertCircle,
 } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
 import {
@@ -18,6 +18,7 @@ import {
   updateAppointmentDuration,
   startAppointmentService,
   getAppointmentQueueEntry,
+  getAppointmentSettings,
 } from '@/lib/actions/appointments'
 import { CompleteServiceDialog } from '@/components/barber/complete-service-dialog'
 import { listAppointmentBlocksForDate } from '@/lib/actions/appointment-blocks'
@@ -73,6 +74,7 @@ import type {
   AppointmentWaitlist,
   QueueEntry,
 } from '@/lib/types/database'
+import { toDateStr, todayDateStr } from '@/lib/time-utils'
 
 interface Branch {
   id: string
@@ -112,8 +114,15 @@ function calcPrepaymentDefault(settings: AppointmentSettings | null, appt: Appoi
   return Math.round((price * pct) / 100)
 }
 
-export function AgendaClient({ settings, branches }: Props) {
+export function AgendaClient({ settings: orgSettings, branches }: Props) {
   const { selectedBranchId, setSelectedBranchId, allowedBranchIds } = useBranchStore()
+
+  // Configuración EFECTIVA de la sucursal elegida. La página sólo trae el
+  // default de la org, pero `appointment_settings` admite override por
+  // sucursal y de ahí salen el horario de la grilla y el intervalo de slots:
+  // con dos sucursales de horarios distintos, una de las dos se dibujaba mal.
+  const [branchSettings, setBranchSettings] = useState<AppointmentSettings | null>(orgSettings)
+  const settings = branchSettings ?? orgSettings
   const visibleBranches = useMemo(
     () => allowedBranchIds
       ? branches.filter(b => allowedBranchIds.includes(b.id))
@@ -122,7 +131,7 @@ export function AgendaClient({ settings, branches }: Props) {
   )
   const resolvedBranchId = selectedBranchId ?? visibleBranches[0]?.id ?? null
 
-  const [date, setDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [date, setDate] = useState(() => todayDateStr())
   const [loading, setLoading] = useState(false)
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [barbers, setBarbers] = useState<GridBarber[]>([])
@@ -144,6 +153,15 @@ export function AgendaClient({ settings, branches }: Props) {
   const [prepayAppt, setPrepayAppt] = useState<Appointment | null>(null)
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
   const [isActing, startTransition] = useTransition()
+
+  // Turnos activos sin barbero: sólo llegan por la reserva "con cualquiera
+  // disponible" que no resolvió barbero al crearse.
+  const unassigned = useMemo(
+    () => appointments.filter(
+      a => !a.barber_id && !['cancelled', 'no_show', 'completed'].includes(a.status)
+    ),
+    [appointments],
+  )
 
   // Refetch rápido: solo turnos del día (no barberos/bloqueos/espera)
   const refreshAppointments = useCallback(async () => {
@@ -179,16 +197,18 @@ export function AgendaClient({ settings, branches }: Props) {
       return
     }
     setLoading(true)
-    const [apts, staffList, blocksList, waitlistEntries] = await Promise.all([
+    const [apts, staffList, blocksList, waitlistEntries, effectiveSettings] = await Promise.all([
       getAppointmentsForDate(resolvedBranchId, date),
       getBranchAppointmentStaff(resolvedBranchId),
       listAppointmentBlocksForDate(resolvedBranchId, date),
       listWaitlist(resolvedBranchId),
+      getAppointmentSettings(undefined, resolvedBranchId),
     ])
     setAppointments(apts)
     setBarbers(staffList)
     setBlocks(blocksList)
     setWaitlist(waitlistEntries)
+    setBranchSettings(effectiveSettings)
     setLoading(false)
   }, [resolvedBranchId, date, viewMode, visibleBranches])
 
@@ -253,7 +273,7 @@ export function AgendaClient({ settings, branches }: Props) {
   function shiftDate(days: number) {
     const d = new Date(date + 'T12:00:00')
     d.setDate(d.getDate() + days)
-    setDate(d.toISOString().split('T')[0])
+    setDate(toDateStr(d))
   }
 
   const kpis = useMemo(() => {
@@ -474,7 +494,7 @@ export function AgendaClient({ settings, branches }: Props) {
           <Button variant="outline" size="icon" onClick={() => shiftDate(1)} aria-label="Día siguiente">
             <ChevronRight className="size-4" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setDate(new Date().toISOString().split('T')[0])}>Hoy</Button>
+          <Button variant="ghost" size="sm" onClick={() => setDate(todayDateStr())}>Hoy</Button>
           <span className="ml-1 hidden text-sm capitalize text-muted-foreground sm:inline">{dateLabel}</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -555,6 +575,32 @@ export function AgendaClient({ settings, branches }: Props) {
               </CardContent>
             </Card>
           ) : (
+            <>
+              {/* Turnos sin barbero: la grilla dibuja una columna por barbero,
+                  así que un turno con barber_id NULL no aparecía en ningún
+                  lado — existía, ocupaba el horario y era invisible. */}
+              {unassigned.length > 0 && (
+                <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+                  <p className="mb-2 flex items-center gap-2 text-sm font-medium">
+                    <AlertCircle className="size-4 text-amber-500" />
+                    {unassigned.length === 1
+                      ? '1 turno sin barbero asignado'
+                      : `${unassigned.length} turnos sin barbero asignado`}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {unassigned.map(a => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => setSelectedId(a.id)}
+                        className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium transition-colors hover:border-amber-500/50"
+                      >
+                        {a.start_time.slice(0, 5)} · {a.client?.name ?? 'Sin nombre'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             <AppointmentsGridView
               date={date}
               barbers={barbers}
@@ -570,6 +616,7 @@ export function AgendaClient({ settings, branches }: Props) {
               selected={{ appointmentId: selectedId ?? undefined }}
               className="h-[min(72vh,720px)]"
             />
+            </>
           )}
         </div>
 

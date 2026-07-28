@@ -25,6 +25,7 @@ import type { AppointmentWaitlist } from '@/lib/types/database'
 import type { GridBarber } from './appointments-grid-view'
 import type { BookingServiceOption } from './appointment-booking-dialog'
 import { toast } from 'sonner'
+import { toDateStr, todayDateStr } from '@/lib/time-utils'
 
 interface Props {
   branchId: string
@@ -130,11 +131,11 @@ function CreateWaitlistDialog({
   const [phone, setPhone] = useState('')
   const [serviceId, setServiceId] = useState<string>('__any__')
   const [barberId, setBarberId] = useState<string>('__any__')
-  const [dateFrom, setDateFrom] = useState(() => new Date().toISOString().split('T')[0])
+  const [dateFrom, setDateFrom] = useState(() => todayDateStr())
   const [dateTo, setDateTo] = useState(() => {
     const d = new Date()
     d.setDate(d.getDate() + 7)
-    return d.toISOString().split('T')[0]
+    return toDateStr(d)
   })
   const [notes, setNotes] = useState('')
   const [isPending, startTransition] = useTransition()

@@ -49,7 +49,11 @@ interface StaffRow {
   walkinMode: AppointmentStaffWalkinMode
 }
 
-interface Branch { id: string; name: string }
+interface Branch {
+  id: string
+  name: string
+  operation_mode?: 'walk_in' | 'appointments' | 'hybrid' | null
+}
 
 interface Props {
   settings: AppointmentSettings | null
@@ -254,6 +258,9 @@ export function TurnosConfigClient({ settings, allStaff, branches, templates, ha
 
   const branchName = (id: string) => branches.find(b => b.id === id)?.name ?? 'Sin sucursal'
 
+  // Sucursales que realmente aceptan reservas (modo != walk_in).
+  const branchesConTurnos = branches.filter(b => b.operation_mode && b.operation_mode !== 'walk_in')
+
   return (
     <div className="relative space-y-6 pb-24">
       {/* Banner principal del sistema */}
@@ -274,13 +281,26 @@ export function TurnosConfigClient({ settings, allStaff, branches, templates, ha
             <div>
               <p className="font-semibold leading-tight">Sistema de Turnos</p>
               <p className="mt-0.5 text-sm text-muted-foreground">
-                {isEnabled
-                  ? 'El turnero público está activo. Los clientes pueden reservar online.'
-                  : 'El turnero está deshabilitado. Los clientes no pueden reservar hasta que lo actives.'}
+                {!isEnabled
+                  ? 'El turnero está deshabilitado. Los clientes no pueden reservar hasta que lo actives.'
+                  : branchesConTurnos.length === 0
+                    ? 'El turnero está prendido, pero ninguna sucursal acepta turnos todavía.'
+                    : branchesConTurnos.length === branches.length
+                      ? 'El turnero público está activo. Los clientes pueden reservar online.'
+                      : `Reservas activas en ${branchesConTurnos.map(b => b.name).join(', ')}.`}
               </p>
               {!isEnabled && (
                 <p className="mt-2 text-xs font-medium text-amber-500">
                   Activa el sistema para que el link publico acepte reservas.
+                </p>
+              )}
+              {/* El switch de arriba es sólo UNA de las dos puertas: el turnero
+                  público también exige branches.operation_mode != walk_in. Decir
+                  "activo" mirando sólo is_enabled hacía que el dueño creyera que
+                  aceptaba reservas mientras el cliente veía "sin turno previo". */}
+              {isEnabled && branchesConTurnos.length === 0 && (
+                <p className="mt-2 text-xs font-medium text-amber-500">
+                  Elegí arriba, en &ldquo;Modo de operación&rdquo;, qué sucursal trabaja con turnos.
                 </p>
               )}
             </div>
@@ -375,9 +395,15 @@ export function TurnosConfigClient({ settings, allStaff, branches, templates, ha
                   <SelectTrigger className="w-full sm:w-64"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="postpago">Pago posterior al servicio</SelectItem>
-                    <SelectItem value="prepago">Pago previo al servicio</SelectItem>
+                    <SelectItem value="prepago" disabled>
+                      Pago previo al servicio (no disponible)
+                    </SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  El prepago está deshabilitado: el cobro anticipado todavía no impacta en
+                  caja y dejaría los turnos trabados en &ldquo;Esperando pago&rdquo;.
+                </p>
               </div>
 
               {paymentMode === 'prepago' && (
@@ -385,10 +411,13 @@ export function TurnosConfigClient({ settings, allStaff, branches, templates, ha
                   <div className="flex items-start gap-2">
                     <AlertCircle className="mt-0.5 size-4 text-amber-500" />
                     <div className="space-y-0.5">
-                      <p className="text-sm font-medium">Prepago activo</p>
+                      <p className="text-sm font-medium">Prepago activo — revisar</p>
                       <p className="text-xs text-muted-foreground">
-                        Los turnos nuevos quedan en &ldquo;Esperando pago&rdquo; hasta que confirmes manualmente el cobro.
-                        Se envía al cliente un mensaje con las instrucciones de pago.
+                        Esta sucursal quedó configurada en prepago, pero el circuito de cobro
+                        anticipado no está operativo: los turnos nuevos nacen en
+                        &ldquo;Esperando pago&rdquo; y confirmar el cobro falla, así que quedan
+                        trabados y sin confirmación al cliente. Pasalo a
+                        &ldquo;Pago posterior al servicio&rdquo; y guardá.
                       </p>
                     </div>
                   </div>

@@ -7,6 +7,8 @@ import { assertBranchAccess, getAllowedBranchIds, filterBranchesByAccess } from 
 import { RateLimits } from '@/lib/rate-limit'
 import { absoluteUrl } from '@/lib/app-url'
 import { isValidUUID } from '@/lib/validation'
+import { getLocalNow, getLocalDateStr, getTzOffsetISO } from '@/lib/time-utils'
+import { currentUserCan } from './permissions-gate'
 import type { Appointment, AppointmentSettings, AppointmentStaff, AppointmentStatus, AppointmentPaymentMethod } from '@/lib/types/database'
 
 // ─── Tipos de filas de relaciones inline ──────────────────────────────
@@ -65,6 +67,12 @@ export async function updateAppointmentSettings(
 ) {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'Organización no encontrada' }
+
+  // El permiso se chequea también acá, no sólo en la página: una server action
+  // es un endpoint público y el gate de la UI no protege nada por sí solo.
+  if (!(await currentUserCan('appointments.configure'))) {
+    return { error: 'No tenés permiso para configurar turnos' }
+  }
 
   if (branchId) {
     const access = await assertBranchAccess(branchId)
@@ -230,11 +238,25 @@ export interface BarberAvailability {
   slots: AvailableSlot[]
 }
 
+/**
+ * Motor de disponibilidad.
+ *
+ * `service` acepta uno o varios servicios: cuando el cliente elige "Corte +
+ * Barba" la duración a reservar es la SUMA, no la del primero. `durationOverride`
+ * gana sobre los servicios y existe para las superficies que ya calcularon el
+ * total (wizard de la agenda).
+ *
+ * La grilla se dibuja cada `slot_interval_minutes` (el snap configurado), pero
+ * la ocupación se chequea contra la duración completa. Espaciar la grilla por
+ * la duración del servicio —como hacía antes— dejaba huecos invendibles: un
+ * servicio de 40' sólo ofrecía 9:00, 9:40, 10:20 y perdía el 9:15 libre.
+ */
 export async function getAvailableSlots(
   branchId: string,
   date: string,
-  serviceId?: string,
-  barberId?: string
+  service?: string | string[] | null,
+  barberId?: string,
+  durationOverride?: number
 ): Promise<{ slots: BarberAvailability[]; error?: string }> {
   // Rate-limit: endpoint público, sin auth
   const gate = await RateLimits.publicBookingList(branchId)
@@ -273,16 +295,24 @@ export async function getAvailableSlots(
     return { slots: [], error: 'Fecha fuera del rango permitido' }
   }
 
+  const serviceIds = (Array.isArray(service) ? service : service ? [service] : [])
+    .filter(id => isValidUUID(id))
+
   let serviceDuration = settings.slot_interval_minutes
-  if (serviceId) {
-    const { data: service } = await supabase
+  if (durationOverride && durationOverride > 0) {
+    serviceDuration = durationOverride
+  } else if (serviceIds.length) {
+    const { data: rows } = await supabase
       .from('services')
-      .select('duration_minutes')
-      .eq('id', serviceId)
-      .single()
-    if (service?.duration_minutes) {
-      serviceDuration = service.duration_minutes
-    }
+      .select('id, duration_minutes')
+      .in('id', serviceIds)
+
+    // Suma de duraciones; un servicio sin duración cargada cuenta como un slot.
+    const total = serviceIds.reduce((acc, id) => {
+      const row = rows?.find(r => r.id === id)
+      return acc + (row?.duration_minutes ?? settings.slot_interval_minutes)
+    }, 0)
+    if (total > 0) serviceDuration = total
   }
 
   // Staff habilitado para turnos en esta sucursal
@@ -310,7 +340,7 @@ export async function getAvailableSlots(
   if (!staffIds.length) return { slots: [] }
 
   // Horarios de trabajo para ese día
-  const { data: schedules } = await supabase
+  const { data: schedules, error: schedulesError } = await supabase
     .from('staff_schedules')
     .select('staff_id, start_time, end_time')
     .in('staff_id', staffIds)
@@ -318,7 +348,7 @@ export async function getAvailableSlots(
     .eq('is_active', true)
 
   // Excepciones (ausencias)
-  const { data: exceptions } = await supabase
+  const { data: exceptions, error: exceptionsError } = await supabase
     .from('staff_schedule_exceptions')
     .select('staff_id')
     .in('staff_id', staffIds)
@@ -328,17 +358,20 @@ export async function getAvailableSlots(
   const absentStaff = new Set(exceptions?.map(e => e.staff_id) ?? [])
 
   // Turnos existentes para ese día
-  const { data: existingAppointments } = await supabase
+  const { data: existingAppointments, error: appointmentsError } = await supabase
     .from('appointments')
     .select('barber_id, start_time, end_time')
     .eq('branch_id', branchId)
     .eq('appointment_date', date)
     .not('status', 'in', '("cancelled","no_show")')
 
-  // Bloqueos para ese día
-  const dayStart = new Date(date + 'T00:00:00').toISOString()
-  const dayEnd = new Date(date + 'T23:59:59').toISOString()
-  const { data: blocks } = await supabase
+  // Bloqueos para ese día, acotados en la TZ de la sucursal (sin el offset
+  // dinámico, en un server UTC la ventana se corría 3h y traía bloqueos del
+  // día equivocado).
+  const tzOffset = getTzOffsetISO(new Date(`${date}T12:00:00Z`), tz)
+  const dayStart = `${date}T00:00:00${tzOffset}`
+  const dayEnd = `${date}T23:59:59${tzOffset}`
+  const { data: blocks, error: blocksError } = await supabase
     .from('appointment_blocks')
     .select('branch_id, barber_id, start_at, end_at')
     .eq('organization_id', branch.organization_id)
@@ -346,15 +379,26 @@ export async function getAvailableSlots(
     .lt('start_at', dayEnd)
     .gt('end_at', dayStart)
 
+  // Fallar CERRADO. Estas cuatro queries son las que determinan la ocupación:
+  // si una falla y se ignora el error, `?? []` la convierte en "nadie ocupado"
+  // y el motor ofrece como libre toda la agenda. Un timeout de DB (el fetch de
+  // createAdminClient corta a los 8s) terminaría en doble booking real.
+  const readError = schedulesError || exceptionsError || appointmentsError || blocksError
+  if (readError) {
+    console.error('[getAvailableSlots] lectura de disponibilidad:', readError.message)
+    return { slots: [], error: 'No pudimos leer la disponibilidad. Reintentá en un momento.' }
+  }
+
   const openMinutes = timeToMinutes(settings.appointment_hours_open)
   const closeMinutes = timeToMinutes(settings.appointment_hours_close)
   const buffer = settings.buffer_minutes ?? 0
 
-  // "Ahora" en timezone de la sucursal
-  const nowInTz = new Date(new Date().toLocaleString('en-US', { timeZone: tz }))
-  const todayStr = nowInTz.toISOString().split('T')[0]
+  // "Ahora" en timezone de la sucursal. getLocalNow devuelve un Date cuyos
+  // campos UTC son la hora de pared del TZ pedido, así que se lee con getUTC*.
+  const nowInTz = getLocalNow(tz)
+  const todayStr = getLocalDateStr(tz)
   const isToday = date === todayStr
-  const nowMinutesInTz = nowInTz.getHours() * 60 + nowInTz.getMinutes()
+  const nowMinutesInTz = nowInTz.getUTCHours() * 60 + nowInTz.getUTCMinutes()
   const earliestBookableMinute = nowMinutesInTz + (settings.lead_time_minutes ?? 0)
 
   const result: BarberAvailability[] = []
@@ -379,9 +423,11 @@ export async function getAvailableSlots(
 
     const slots: AvailableSlot[] = []
 
-    // Slot step: usamos la duración del servicio para que los horarios no se superpongan.
-    // Fallback al slot_interval de settings si no hay servicio seleccionado.
-    const slotStep = serviceDuration > 0 ? serviceDuration : settings.slot_interval_minutes
+    // La grilla avanza cada slot_interval_minutes (el snap real de inicio);
+    // el solapamiento se evalúa contra serviceDuration más abajo.
+    const slotStep = settings.slot_interval_minutes > 0
+      ? settings.slot_interval_minutes
+      : 15
     for (let m = openMinutes; m + serviceDuration <= closeMinutes; m += slotStep) {
       const slotStart = minutesToTime(m)
       const slotEnd = minutesToTime(m + serviceDuration)
@@ -402,9 +448,11 @@ export async function getAvailableSlots(
         return m < apptEnd && (m + serviceDuration) > apptStart
       })
 
-      // Overlap con bloqueos (vacaciones, descansos, feriados)
-      const slotStartMs = new Date(`${date}T${slotStart}:00`).getTime()
-      const slotEndMs = new Date(`${date}T${slotEnd}:00`).getTime()
+      // Overlap con bloqueos (vacaciones, descansos, feriados). El slot es hora
+      // de pared de la sucursal: sin el offset se comparaba contra un instante
+      // distinto al que guarda el bloqueo (timestamptz).
+      const slotStartMs = new Date(`${date}T${slotStart}:00${tzOffset}`).getTime()
+      const slotEndMs = new Date(`${date}T${slotEnd}:00${tzOffset}`).getTime()
       const isBlocked = staffBlocks.some(b => {
         const bStart = new Date(b.start_at).getTime()
         const bEnd = new Date(b.end_at).getTime()
@@ -434,6 +482,35 @@ function minutesToTime(minutes: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
+/**
+ * Instante real del turno.
+ *
+ * `appointment_date` + `start_time` son hora de PARED de la sucursal. Parsear
+ * `new Date('2026-07-29T18:00:00')` los interpreta en la zona del proceso —
+ * UTC en Vercel—, así que un turno de las 18:00 en Argentina se leía como las
+ * 15:00 reales: la ventana de cancelación se corría 3 horas y el server
+ * rechazaba cancelaciones que la UI mostraba como permitidas.
+ *
+ * También tolera `start_time` en formato 'HH:MM:SS' (lo que devuelve la DB) y
+ * 'HH:MM'; concatenar 'HH:MM:SS' + ':00' daba Invalid Date.
+ */
+function appointmentInstant(
+  date: string,
+  startTime: string,
+  timezone?: string | null
+): Date {
+  const tz = timezone || 'America/Argentina/Buenos_Aires'
+  const hhmmss = startTime.length === 5 ? `${startTime}:00` : startTime.substring(0, 8)
+  const offset = getTzOffsetISO(new Date(`${date}T12:00:00Z`), tz)
+  return new Date(`${date}T${hhmmss}${offset}`)
+}
+
+/** El embed de PostgREST puede venir como objeto o como array de un elemento. */
+function unwrapRel<T>(rel: T | T[] | null | undefined): T | null {
+  if (!rel) return null
+  return Array.isArray(rel) ? (rel[0] ?? null) : rel
+}
+
 // ─── Messaging helpers ──────────────────────────────────────────────
 
 /**
@@ -454,15 +531,28 @@ async function resolveOrgWhatsAppChannelId(orgId: string): Promise<string | null
   return data?.id ?? null
 }
 
-async function getTemplateNameById(templateId: string | null): Promise<string | null> {
+/**
+ * Nombre + idioma REGISTRADO del template en Meta.
+ *
+ * El idioma no es cosmético: si el template está aprobado como `es` y se envía
+ * como `es_AR`, Meta responde 132001 "Template name does not exist in the
+ * translation" y el mensaje muere sin reintento. La columna
+ * `scheduled_messages.template_language` tiene default `es_AR` y nadie la
+ * seteaba, así que TODOS los mensajes de turnos fallaban: los templates
+ * `monaco_turno_*` están aprobados como `es`.
+ */
+async function getTemplateById(
+  templateId: string | null
+): Promise<{ name: string; language: string | null } | null> {
   if (!templateId) return null
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('message_templates')
-    .select('name')
+    .select('name, language')
     .eq('id', templateId)
     .maybeSingle()
-  return data?.name ?? null
+  if (!data?.name) return null
+  return { name: data.name, language: data.language ?? null }
 }
 
 function buildAppointmentTemplateParams(vars: {
@@ -521,7 +611,8 @@ async function scheduleAppointmentMessages(
       ? (settings.reschedule_template_id ?? settings.confirmation_template_id)
       : settings.confirmation_template_id
 
-    const confirmationTplName = await getTemplateNameById(confirmationTplId)
+    const confirmationTpl = await getTemplateById(confirmationTplId)
+    const confirmationTplName = confirmationTpl?.name
       ?? (kind === 'reschedule' ? null : settings.confirmation_template_name)
 
     const confirmationRow: Record<string, unknown> = {
@@ -546,6 +637,7 @@ async function scheduleAppointmentMessages(
       confirmationRow.template_id = confirmationTplId
       confirmationRow.template_name = confirmationTplName
       confirmationRow.template_params = params
+      if (confirmationTpl?.language) confirmationRow.template_language = confirmationTpl.language
     } else if (confirmationTplName) {
       confirmationRow.template_name = confirmationTplName
       confirmationRow.template_params = params
@@ -554,7 +646,12 @@ async function scheduleAppointmentMessages(
       confirmationRow.content = `${prefix}${ctx.serviceName} el ${ctx.dateFormatted} a las ${ctx.startTime} en ${ctx.branchName}. Gestionalo acá: ${ctx.managementUrl}`
     }
 
-    await supabase.from('scheduled_messages').insert(confirmationRow)
+    const { error: confirmationError } = await supabase
+      .from('scheduled_messages')
+      .insert(confirmationRow)
+    if (confirmationError) {
+      console.error('[Appointments] insert confirmación:', confirmationError.message)
+    }
 
     // ── Recordatorios (lista configurable) ──────────────────────────
     const reminderHours = Array.isArray(settings.reminder_hours_before_list)
@@ -563,8 +660,8 @@ async function scheduleAppointmentMessages(
         : (settings.reminder_hours_before > 0 ? [settings.reminder_hours_before] : [])
 
     const reminderTplId = settings.reminder_template_id
-    const reminderTplName = await getTemplateNameById(reminderTplId)
-      ?? settings.reminder_template_name
+    const reminderTpl = await getTemplateById(reminderTplId)
+    const reminderTplName = reminderTpl?.name ?? settings.reminder_template_name
 
     const now = Date.now()
     const reminderRows: Record<string, unknown>[] = []
@@ -587,6 +684,7 @@ async function scheduleAppointmentMessages(
         row.template_id = reminderTplId
         row.template_name = reminderTplName
         row.template_params = params
+        if (reminderTpl?.language) row.template_language = reminderTpl.language
       } else if (reminderTplName) {
         row.template_name = reminderTplName
         row.template_params = params
@@ -598,7 +696,12 @@ async function scheduleAppointmentMessages(
     }
 
     if (reminderRows.length) {
-      await supabase.from('scheduled_messages').insert(reminderRows)
+      const { error: remindersError } = await supabase
+        .from('scheduled_messages')
+        .insert(reminderRows)
+      if (remindersError) {
+        console.error('[Appointments] insert recordatorios:', remindersError.message)
+      }
     }
   } catch (e) {
     console.error('[Appointments] Error programando mensajes:', e)
@@ -632,6 +735,12 @@ interface CreateAppointmentInput {
   clientName: string
   barberId?: string | null
   serviceId: string
+  /**
+   * Servicios adicionales cuando el cliente reserva más de uno (ej. corte +
+   * barba). `serviceId` sigue siendo el principal —es la FK de la fila— y acá
+   * va el detalle completo que se persiste en `appointment_services`.
+   */
+  serviceIds?: string[]
   appointmentDate: string
   startTime: string
   durationMinutes: number
@@ -728,15 +837,41 @@ export async function createAppointment(input: CreateAppointmentInput) {
 
   const endTime = minutesToTime(rawEndMinutes)
 
+  // Disponibilidad server-side. Se calcula SIEMPRE, también cuando el cliente
+  // eligió barbero: el turnero público manda branch/staff/fecha/hora desde el
+  // navegador y antes esa rama salteaba toda la validación (día habilitado,
+  // lead time, agenda del barbero, bloqueos, fecha pasada). Sólo quedaba la
+  // exclusión de la DB, que no cubre nada de eso.
+  const { slots, error: availabilityError } = await getAvailableSlots(
+    input.branchId,
+    input.appointmentDate,
+    undefined,
+    input.barberId || undefined,
+    input.durationMinutes
+  )
+
+  if (availabilityError) return { error: availabilityError }
+
+  const available = slots.filter(b =>
+    b.slots.some(s => s.time === input.startTime && s.available)
+  )
+
+  if (!available.length) {
+    if (!input.barberId) return { error: 'No hay barberos disponibles en ese horario' }
+    // Distinguir "el hueco se ocupó" de "ese barbero no trabaja ese día":
+    // sin esto el dashboard mostraba "elegí otro horario" cuando el problema
+    // real era que al barbero no le cargaron el horario semanal.
+    const tieneAgenda = slots.some(b => b.barberId === input.barberId && b.slots.length > 0)
+    return {
+      error: tieneAgenda
+        ? 'Ese horario ya no está disponible, elegí otro'
+        : 'Ese barbero no tiene horario cargado para ese día',
+    }
+  }
+
   // Auto-asignar barbero si no se especificó
   let barberId = input.barberId || null
   if (!barberId) {
-    const { slots } = await getAvailableSlots(input.branchId, input.appointmentDate, input.serviceId)
-    const available = slots.filter(b =>
-      b.slots.some(s => s.time === input.startTime && s.available)
-    )
-    if (!available.length) return { error: 'No hay barberos disponibles en ese horario' }
-
     // Elegir el que tiene menos turnos ese día
     const { data: counts } = await supabase
       .from('appointments')
@@ -757,8 +892,10 @@ export async function createAppointment(input: CreateAppointmentInput) {
 
   // Generar token de cancelación + expiración (turno + 24h, mitiga replay)
   const cancellationToken = crypto.randomUUID().replace(/-/g, '').substring(0, 24)
-  const tokenExpiresAt = new Date(`${input.appointmentDate}T${input.startTime}:00`)
-  tokenExpiresAt.setHours(tokenExpiresAt.getHours() + 24)
+  const tokenExpiresAt = new Date(
+    appointmentInstant(input.appointmentDate, input.startTime, branch.timezone).getTime()
+      + 24 * 60 * 60 * 1000
+  )
 
   // Obtener nombre y precio del servicio (precio necesario para prepago)
   let serviceName = ''
@@ -803,10 +940,42 @@ export async function createAppointment(input: CreateAppointmentInput) {
     .single()
 
   if (insertError) {
-    if (insertError.code === '23505') {
+    // 23P01 = exclusion_violation: lo tira `appointments_no_overlap_excl`, que
+    // es el guardián real del overbooking. Sin este caso el cliente veía el
+    // mensaje crudo de Postgres.
+    if (insertError.code === '23505' || insertError.code === '23P01') {
       return { error: 'Ya existe un turno en ese horario para ese barbero' }
     }
     return { error: 'Error al crear turno: ' + insertError.message }
+  }
+
+  // Detalle multi-servicio. La fila de `appointments` sólo guarda el servicio
+  // principal, así que sin esto un "corte + barba" se registraba como corte.
+  const detalleIds = (input.serviceIds?.length ? input.serviceIds : [input.serviceId])
+    .filter(id => isValidUUID(id))
+
+  if (detalleIds.length > 1) {
+    const { data: serviceRows } = await supabase
+      .from('services')
+      .select('id, price, duration_minutes')
+      .in('id', detalleIds)
+
+    const rows = detalleIds.map((id, idx) => {
+      const svc = serviceRows?.find(s => s.id === id)
+      return {
+        appointment_id: appointment.id,
+        organization_id: orgId,
+        service_id: id,
+        sort_order: idx,
+        duration_snapshot: svc?.duration_minutes ?? settings.slot_interval_minutes,
+        price_snapshot: Number(svc?.price ?? 0),
+      }
+    })
+
+    const { error: detalleError } = await supabase.from('appointment_services').insert(rows)
+    if (detalleError) {
+      console.error('[createAppointment] appointment_services:', detalleError.message)
+    }
   }
 
   // Programar mensajes (graceful — si no hay WA configurado, no falla)
@@ -845,7 +1014,7 @@ export async function createAppointment(input: CreateAppointmentInput) {
         branchName: branch.name,
         dateFormatted,
         startTime: input.startTime,
-        appointmentDateTime: new Date(`${input.appointmentDate}T${input.startTime}:00`),
+        appointmentDateTime: appointmentInstant(input.appointmentDate, input.startTime, branch.timezone),
         managementUrl,
       },
       settings,
@@ -899,7 +1068,8 @@ async function schedulePaymentRequestMessage(ctx: PaymentRequestContext) {
     const supabase = createAdminClient()
     const channelId = await resolveOrgWhatsAppChannelId(ctx.orgId)
 
-    const templateName = await getTemplateNameById(ctx.templateId)
+    const tpl = await getTemplateById(ctx.templateId)
+    const templateName = tpl?.name ?? null
 
     const row: Record<string, unknown> = {
       organization_id: ctx.orgId,
@@ -914,6 +1084,7 @@ async function schedulePaymentRequestMessage(ctx: PaymentRequestContext) {
     if (ctx.templateId && templateName) {
       row.template_id = ctx.templateId
       row.template_name = templateName
+      if (tpl?.language) row.template_language = tpl.language
       row.template_params = [
         {
           type: 'body',
@@ -1008,10 +1179,14 @@ export async function rescheduleAppointment(input: RescheduleAppointmentInput) {
     .eq('id', input.appointmentId)
 
   if (updateError) {
-    if (updateError.code === '23505') {
+    // 23P01 = exclusion_violation (appointments_no_overlap_excl), el guardián
+    // real del overbooking. Sin este caso, arrastrar un turno a un hueco
+    // ocupado devolvía el texto crudo de Postgres en inglés.
+    if (updateError.code === '23505' || updateError.code === '23P01') {
       return { error: 'Ya existe un turno en ese horario para ese barbero' }
     }
-    return { error: updateError.message }
+    console.error('[rescheduleAppointment]', updateError.message)
+    return { error: 'No pudimos reprogramar el turno' }
   }
 
   // Cancelar mensajes pendientes del turno anterior
@@ -1050,7 +1225,11 @@ export async function rescheduleAppointment(input: RescheduleAppointmentInput) {
         branchName: (existing.branch as { name?: string } | null)?.name ?? '',
         dateFormatted,
         startTime: input.newStartTime,
-        appointmentDateTime: new Date(`${input.newDate}T${input.newStartTime}:00`),
+        appointmentDateTime: appointmentInstant(
+          input.newDate,
+          input.newStartTime,
+          (existing.branch as { timezone?: string } | null)?.timezone
+        ),
         managementUrl,
       },
       settings,
@@ -1093,10 +1272,11 @@ export async function updateAppointmentDuration(appointmentId: string, newDurati
     .eq('id', appointmentId)
 
   if (error) {
-    if (error.code === '23505') {
+    if (error.code === '23505' || error.code === '23P01') {
       return { error: 'La nueva duración solapa con otro turno' }
     }
-    return { error: error.message }
+    console.error('[updateAppointmentDuration]', error.message)
+    return { error: 'No pudimos actualizar la duración' }
   }
 
   revalidatePath('/dashboard/turnos/agenda')
@@ -1131,7 +1311,12 @@ export async function cancelAppointment(
   if (cancelledBy === 'client') {
     const settings = await getAppointmentSettings(appointment.organization_id, appointment.branch_id)
     if (settings?.cancellation_min_hours) {
-      const appointmentDateTime = new Date(`${appointment.appointment_date}T${appointment.start_time}`)
+      const branchRel = unwrapRel(appointment.branch as { timezone?: string } | { timezone?: string }[] | null)
+      const appointmentDateTime = appointmentInstant(
+        appointment.appointment_date,
+        appointment.start_time,
+        branchRel?.timezone
+      )
       const hoursUntil = (appointmentDateTime.getTime() - Date.now()) / (1000 * 60 * 60)
       if (hoursUntil < settings.cancellation_min_hours) {
         return { error: `No se puede cancelar con menos de ${settings.cancellation_min_hours} horas de antelación` }
@@ -1166,7 +1351,8 @@ export async function cancelAppointment(
   try {
     const settings = await getAppointmentSettings(appointment.organization_id, appointment.branch_id)
     if (settings?.cancellation_template_id) {
-      const tplName = await getTemplateNameById(settings.cancellation_template_id)
+      const cancelTpl = await getTemplateById(settings.cancellation_template_id)
+      const tplName = cancelTpl?.name ?? null
       if (tplName) {
         const { data: client } = await supabase
           .from('clients')
@@ -1186,6 +1372,7 @@ export async function cancelAppointment(
             channel_id: channelId,
             template_id: settings.cancellation_template_id,
             template_name: tplName,
+            ...(cancelTpl?.language ? { template_language: cancelTpl.language } : {}),
             template_params: buildAppointmentTemplateParams({
               clientName: client.name ?? '',
               serviceName: '',
@@ -1631,7 +1818,13 @@ export async function confirmAppointmentPrepayment(input: ConfirmPrepaymentInput
       branchName: branch.name,
       dateFormatted,
       startTime: appointment.start_time,
-      appointmentDateTime: new Date(`${appointment.appointment_date}T${appointment.start_time}:00`),
+      // start_time viene 'HH:MM:SS' de la DB: concatenarle ':00' daba Invalid
+      // Date y ningún recordatorio se encolaba.
+      appointmentDateTime: appointmentInstant(
+        appointment.appointment_date,
+        appointment.start_time,
+        branch.timezone
+      ),
       managementUrl,
     },
     settings,
@@ -1689,8 +1882,25 @@ export async function getPublicBranchAppointmentStaff(branchId: string) {
     .eq('organization_id', branch.organization_id)
     .eq('is_active', true)
 
-  return (data as unknown as AppointmentStaffWithStaff[] ?? [])
+  const candidatos = (data as unknown as AppointmentStaffWithStaff[] ?? [])
     .filter((as) => as.staff?.branch_id === branchId && as.staff?.is_active)
+
+  if (!candidatos.length) return []
+
+  // Un barbero sin horario semanal cargado nunca va a tener slots: el motor de
+  // disponibilidad lo descarta en silencio. Ofrecerlo en el wizard llevaba al
+  // cliente a elegirlo y encontrarse "no hay turnos disponibles" cualquier día
+  // que probara, sin ninguna explicación.
+  const { data: conHorario } = await supabase
+    .from('staff_schedules')
+    .select('staff_id')
+    .in('staff_id', candidatos.map(as => as.staff_id))
+    .eq('is_active', true)
+
+  const disponibles = new Set((conHorario ?? []).map(s => s.staff_id))
+
+  return candidatos
+    .filter((as) => disponibles.has(as.staff_id))
     .map((as) => ({
       id: as.staff!.id,
       full_name: as.staff!.full_name,

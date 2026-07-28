@@ -3,22 +3,99 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { isValidUUID } from '@/lib/validation'
+import { getLocalDateStr } from '@/lib/time-utils'
+import { getBarberSession } from '@/lib/actions/auth'
 import type { Appointment } from '@/lib/types/database'
 
 // Barber panel usa PIN auth (no JWT), por lo que todas las llamadas usan createAdminClient()
 // y el scope se valida por staffId + branchId del barber_session cookie.
 
 /**
- * Valida que el staffId pertenece a la misma organización que el branchId.
+ * Valida el scope contra la COOKIE de sesión del barbero, no contra lo que
+ * manda el componente cliente.
+ *
+ * Antes sólo se chequeaba que staffId y branchId pertenecieran a la misma
+ * organización: cualquiera que llamara la server action con un par válido de
+ * OTRA barbería podía marcar no-show o completar turnos ajenos. Los params se
+ * siguen aceptando por compatibilidad de firma, pero la fuente de verdad es
+ * la sesión.
  */
 async function validateScope(staffId: string, branchId: string): Promise<boolean> {
+  const session = await getBarberSession()
+  if (!session) return false
+  if (staffId && session.staff_id !== staffId) return false
+  if (branchId && session.branch_id !== branchId) return false
+
   const supabase = createAdminClient()
-  const [{ data: staff }, { data: branch }] = await Promise.all([
-    supabase.from('staff').select('organization_id').eq('id', staffId).eq('is_active', true).maybeSingle(),
-    supabase.from('branches').select('organization_id').eq('id', branchId).eq('is_active', true).maybeSingle(),
-  ])
-  if (!staff?.organization_id || !branch?.organization_id) return false
-  return staff.organization_id === branch.organization_id
+  const { data: branch } = await supabase
+    .from('branches')
+    .select('organization_id')
+    .eq('id', session.branch_id)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  return branch?.organization_id === session.organization_id
+}
+
+/**
+ * Registra la llegada del cliente desde el panel del barbero.
+ *
+ * Sin esto un turno sólo podía arrancar desde la tablet del kiosko: si la
+ * barbería no tiene tablet (o el cliente entra directo), el turno se quedaba
+ * en `confirmed` para siempre, nunca generaba `queue_entry` y por lo tanto
+ * nunca se podía cobrar. Delega en el RPC `check_in_appointment`, que es el
+ * único lugar donde se crea la entrada de fila vinculada al turno.
+ */
+export async function checkInAppointmentFromPanel(
+  appointmentId: string,
+  staffId: string,
+  branchId: string
+): Promise<{ ok: true; queueEntryId: string } | { error: string }> {
+  if (!isValidUUID(appointmentId)) return { error: 'ID inválido' }
+
+  const valid = await validateScope(staffId, branchId)
+  if (!valid) return { error: 'No autorizado' }
+
+  const supabase = createAdminClient()
+
+  const { data: appointment } = await supabase
+    .from('appointments')
+    .select('id, branch_id, barber_id, status')
+    .eq('id', appointmentId)
+    .eq('branch_id', branchId)
+    .maybeSingle()
+
+  if (!appointment) return { error: 'Turno no encontrado' }
+
+  const { data, error } = await supabase.rpc('check_in_appointment', {
+    p_appointment_id: appointmentId,
+    // Turno "con cualquiera disponible": lo toma el barbero que registra la
+    // llegada. Si ya tiene barbero asignado, el RPC ignora este parámetro.
+    p_staff_id_assign: appointment.barber_id ?? staffId,
+  })
+
+  if (error) {
+    console.error('[checkInAppointmentFromPanel] rpc:', error.message)
+    return { error: 'No pudimos registrar la llegada. Reintentá.' }
+  }
+
+  const result = data as { success?: boolean; error?: string; queue_entry_id?: string } | null
+
+  if (!result?.success) {
+    const map: Record<string, string> = {
+      NOT_FOUND: 'Turno no encontrado',
+      INVALID_STATUS: 'Este turno ya no está pendiente',
+      STAFF_REQUIRED: 'El turno no tiene barbero asignado',
+      TOO_EARLY: 'Todavía falta más de una hora para el turno',
+      TOO_LATE: 'Pasó la tolerancia del turno. Marcalo como ausente o reprogramalo.',
+    }
+    return { error: map[result?.error ?? ''] ?? 'No pudimos registrar la llegada' }
+  }
+
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
+  revalidatePath('/dashboard/turnos/agenda')
+  return { ok: true, queueEntryId: result.queue_entry_id! }
 }
 
 /**
@@ -247,7 +324,15 @@ export async function getTodayAppointmentsForStaff(
   if (!valid) return []
 
   const supabase = createAdminClient()
-  const today = new Date().toISOString().split('T')[0]
+
+  // Fecha en la TZ de la sucursal. Con toISOString() (UTC) el panel perdía los
+  // turnos de la tarde a partir de las 21:00 hora local: pedía los de mañana.
+  const { data: branch } = await supabase
+    .from('branches')
+    .select('timezone')
+    .eq('id', branchId)
+    .maybeSingle()
+  const today = getLocalDateStr(branch?.timezone || undefined)
 
   const { data } = await supabase
     .from('appointments')

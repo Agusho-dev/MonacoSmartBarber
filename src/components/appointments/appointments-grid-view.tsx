@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils'
 import { Loader2 } from 'lucide-react'
 import type { Appointment, AppointmentStatus, AppointmentBlock } from '@/lib/types/database'
+import { todayDateStr } from '@/lib/time-utils'
 
 export interface GridBarber {
   id: string
@@ -271,7 +272,7 @@ export function AppointmentsGridView({
   const [nowOffset, setNowOffset] = useState<number | null>(null)
   useEffect(() => {
     const update = () => {
-      const todayStr = new Date().toISOString().split('T')[0]
+      const todayStr = todayDateStr()
       if (date !== todayStr) {
         setNowOffset(null)
         return

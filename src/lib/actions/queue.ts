@@ -1151,7 +1151,7 @@ export async function cancelQueueEntry(
   // Obtener la entrada para validar la sucursal y decidir qué estados son cancelables.
   const { data: entry } = await supabase
     .from('queue_entries')
-    .select('branch_id, is_break, break_request_id')
+    .select('branch_id, is_break, break_request_id, appointment_id')
     .eq('id', queueEntryId)
     .maybeSingle()
 
@@ -1215,6 +1215,27 @@ export async function cancelQueueEntry(
       .from('break_requests')
       .update({ status: 'completed', actual_completed_at: new Date().toISOString() })
       .eq('id', entry.break_request_id)
+  }
+
+  // Sincronizar el turno de origen. La X de "no se presentó" cancelaba sólo la
+  // entrada de fila: el turno quedaba en `checked_in` para siempre, seguía
+  // ocupando su rango en la exclusión de solapamiento (nadie podía reservar ese
+  // horario) y no contaba como ausente en ninguna métrica.
+  if (entry.appointment_id) {
+    const { error: apptError } = await supabase
+      .from('appointments')
+      .update({
+        status: 'no_show',
+        no_show_marked_at: new Date().toISOString(),
+        queue_entry_id: null,
+      })
+      .eq('id', entry.appointment_id)
+      .in('status', ['checked_in', 'in_progress'])
+
+    if (apptError) {
+      console.error('[cancelQueueEntry] sync turno:', apptError.message)
+    }
+    revalidatePath('/dashboard/turnos/agenda')
   }
 
   revalidatePath('/barbero/fila')

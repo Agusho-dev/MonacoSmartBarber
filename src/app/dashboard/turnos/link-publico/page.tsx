@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { getCurrentOrgId } from '@/lib/actions/org'
+import { currentUserCan } from '@/lib/actions/permissions-gate'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { getAppointmentSettings } from '@/lib/actions/appointments'
 import { buildAppUrl } from '@/lib/app-url'
@@ -17,6 +18,10 @@ export default async function LinkPublicoPage() {
   const orgId = await getCurrentOrgId()
   if (!orgId) redirect('/login')
 
+  // Guard de permiso: hasta ahora `appointments.view` sólo escondía el ítem
+  // del sidebar, pero entrar por URL directa mostraba todo igual.
+  if (!(await currentUserCan('appointments.view'))) redirect('/dashboard')
+
   const supabase = createAdminClient()
   const branchIds = await getScopedBranchIds()
 
@@ -27,7 +32,7 @@ export default async function LinkPublicoPage() {
     branchIds.length > 0
       ? supabase
           .from('branches')
-          .select('id, name, address')
+          .select('id, name, address, slug, operation_mode')
           .eq('organization_id', orgId)
           .in('id', branchIds)
           .eq('is_active', true)

@@ -15,6 +15,7 @@ import {
 import { getAvailableSlots, createAppointment } from '@/lib/actions/appointments'
 import { markWaitlistBooked } from '@/lib/actions/waitlist'
 import type { AppointmentWaitlist } from '@/lib/types/database'
+import { toDateStr } from '@/lib/time-utils'
 
 interface AvailableOption {
   date: string
@@ -38,7 +39,7 @@ export function EsperaClient({ entry }: { entry: AppointmentWaitlist }) {
       const to = new Date(entry.preferred_date_to + 'T12:00:00')
       const dates: string[] = []
       for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
-        dates.push(d.toISOString().split('T')[0])
+        dates.push(toDateStr(d))
       }
 
       const found: AvailableOption[] = []

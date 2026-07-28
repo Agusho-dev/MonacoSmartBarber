@@ -4,6 +4,7 @@ import { getBarberSession } from '@/lib/actions/auth'
 import { createAdminClient } from '@/lib/supabase/server'
 import { QueuePanel } from '@/components/barber/queue-panel'
 import { getAppointmentsForBarber, getAppointmentSettings } from '@/lib/actions/appointments'
+import { getLocalDateStr } from '@/lib/time-utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,14 +17,18 @@ export default async function FilaPage() {
   if (!session) redirect('/barbero/login')
 
   const supabase = createAdminClient()
-  const today = new Date().toISOString().split('T')[0]
 
-  const [{ data: branch }, { data: breakConfigs }, appointments, settings] = await Promise.all([
-    supabase
-      .from('branches')
-      .select('name, operation_mode')
-      .eq('id', session.branch_id)
-      .single(),
+  const { data: branch } = await supabase
+    .from('branches')
+    .select('name, operation_mode, timezone')
+    .eq('id', session.branch_id)
+    .single()
+
+  // Día en la TZ de la sucursal: con la fecha UTC, después de las 21:00 el
+  // panel mostraba la agenda de mañana y los turnos pendientes desaparecían.
+  const today = getLocalDateStr(branch?.timezone || undefined)
+
+  const [{ data: breakConfigs }, appointments, settings] = await Promise.all([
     supabase
       .from('break_configs')
       .select('*')
@@ -31,7 +36,9 @@ export default async function FilaPage() {
       .eq('is_active', true)
       .order('name'),
     getAppointmentsForBarber(session.staff_id, today),
-    getAppointmentSettings(session.organization_id),
+    // Settings efectivos de ESTA sucursal (antes tomaba siempre el default de
+    // la org e ignoraba el override por sucursal).
+    getAppointmentSettings(session.organization_id, session.branch_id),
   ])
 
   const operationMode = (branch?.operation_mode as 'walk_in' | 'appointments' | 'hybrid' | null) ?? 'walk_in'

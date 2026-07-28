@@ -31,6 +31,7 @@ import {
 import type { GridBarber } from './appointments-grid-view'
 import type { BarberAvailability } from '@/lib/actions/appointments'
 import type { Appointment, AppointmentSettings } from '@/lib/types/database'
+import { toDateStr, todayDateStr } from '@/lib/time-utils'
 
 export interface BookingServiceOption {
   id: string
@@ -78,7 +79,7 @@ export function AppointmentBookingDialog({
   const [phone, setPhone] = useState(clientPhone ?? '')
   const [serviceId, setServiceId] = useState<string>('')
   const [barberId, setBarberId] = useState<string>('')
-  const [date, setDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [date, setDate] = useState(() => todayDateStr())
   const [selectedTime, setSelectedTime] = useState<string | null>(null)
 
   const [settings, setSettings] = useState<AppointmentSettings | null>(null)
@@ -160,7 +161,7 @@ export function AppointmentBookingDialog({
   function shiftDate(days: number) {
     const d = new Date(date + 'T12:00:00')
     d.setDate(d.getDate() + days)
-    setDate(d.toISOString().split('T')[0])
+    setDate(toDateStr(d))
   }
 
   function handleBook() {

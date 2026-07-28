@@ -86,13 +86,16 @@ function StaffCard({ id, name, avatarUrl, isSelected, onSelect, branding, isAny 
         }}
       >
         {avatarUrl ? (
+          // Tamaño fijo, no `fill`: el contenedor no es `relative`, así que con
+          // fill la imagen se posicionaba contra el <button> y tapaba la tarjeta
+          // entera en vez de quedar dentro del círculo.
           <Image
             src={avatarUrl}
             alt={name}
-            fill
-            sizes="64px"
+            width={56}
+            height={56}
             unoptimized
-            className="object-cover"
+            className="h-full w-full object-cover"
           />
         ) : (
           <User

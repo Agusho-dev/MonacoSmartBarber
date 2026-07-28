@@ -4,6 +4,8 @@ import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/server'
 import { isValidUUID } from '@/lib/validation'
 import { RateLimits } from '@/lib/rate-limit'
+import { getAvailableSlots, getAppointmentSettings } from '@/lib/actions/appointments'
+import { getTzOffsetISO } from '@/lib/time-utils'
 import type { BranchOperationMode } from '@/lib/actions/turnos-mode'
 
 // ─── Schemas de validación ────────────────────────────────────────────────────
@@ -121,32 +123,71 @@ export async function lookupAppointmentByPhone(
   }
 
   // El RPC retorna jsonb: { found: bool, appointment?: {...} }
+  // `services` viene como array de OBJETOS ({id, name, duration}); la UI espera
+  // nombres. Sin este mapeo la tarjeta mostraba "[object Object]".
   const result = data as {
     found: boolean
     appointment?: {
       id: string
       starts_at: string
-      ends_at: string
+      ends_at: string | null
       barber_name: string | null
       barber_id: string | null
-      services: string[]
+      services: Array<{ name?: string }> | string[] | null
       client_name: string
       client_phone: string
       status: string
+      duration_minutes?: number | null
       no_show_tolerance_minutes?: number
     }
   }
 
+  const appt = result.appointment
+
+  if (!result.found || !appt) {
+    return { ok: true, data: { found: false, appointment: null } }
+  }
+
+  const serviceNames = (appt.services ?? [])
+    .map(s => (typeof s === 'string' ? s : s?.name ?? ''))
+    .filter(Boolean)
+
+  // El RPC no devuelve la tolerancia; se lee de los settings efectivos.
+  const { data: branchRow } = await supabase
+    .from('branches')
+    .select('organization_id')
+    .eq('id', branchId)
+    .maybeSingle()
+
+  let tolerance = appt.no_show_tolerance_minutes ?? null
+  if (tolerance == null && branchRow?.organization_id) {
+    const settings = await getAppointmentSettings(branchRow.organization_id, branchId)
+    tolerance = settings?.no_show_tolerance_minutes ?? null
+  }
+
+  // ends_at puede faltar en turnos viejos: se deriva de la duración.
+  const endsAt =
+    appt.ends_at ??
+    new Date(
+      new Date(appt.starts_at).getTime() + (appt.duration_minutes ?? 30) * 60_000
+    ).toISOString()
+
   return {
     ok: true,
     data: {
-      found: result.found,
-      appointment: result.appointment
-        ? {
-            ...result.appointment,
-            no_show_tolerance_minutes: result.appointment.no_show_tolerance_minutes ?? 15,
-          }
-        : null,
+      found: true,
+      appointment: {
+        id: appt.id,
+        starts_at: appt.starts_at,
+        ends_at: endsAt,
+        barber_name: appt.barber_name,
+        barber_id: appt.barber_id,
+        services: serviceNames,
+        client_name: appt.client_name,
+        client_phone: appt.client_phone,
+        status: appt.status,
+        no_show_tolerance_minutes: tolerance ?? 15,
+      },
     },
   }
 }
@@ -159,7 +200,8 @@ export async function lookupAppointmentByPhone(
  * Errores posibles del RPC: NOT_FOUND, INVALID_STATUS, STAFF_REQUIRED, TOO_EARLY, TOO_LATE.
  */
 export async function confirmAppointmentArrival(
-  appointmentId: string
+  appointmentId: string,
+  staffIdAssign?: string
 ): Promise<
   | { ok: true; queueEntryId: string; staffId: string | null }
   | { error: string; code?: string }
@@ -168,8 +210,34 @@ export async function confirmAppointmentArrival(
 
   const supabase = createAdminClient()
 
+  // Turnos reservados "con cualquiera disponible" tienen barber_id NULL y el
+  // RPC responde STAFF_REQUIRED: el cliente quedaba trabado en la tablet sin
+  // ninguna salida. Se resuelve acá con el mismo repartidor justo que usa el
+  // walk-in, para que la asignación siga el orden de la casa.
+  let assign = staffIdAssign && isValidUUID(staffIdAssign) ? staffIdAssign : undefined
+
+  if (!assign) {
+    const { data: appt } = await supabase
+      .from('appointments')
+      .select('barber_id, branch_id')
+      .eq('id', appointmentId)
+      .maybeSingle()
+
+    if (appt && !appt.barber_id) {
+      const { data: fair, error: fairError } = await supabase.rpc('get_fair_barber', {
+        p_branch_id: appt.branch_id,
+      })
+      if (fairError) {
+        console.error('[confirmAppointmentArrival] get_fair_barber:', fairError.message)
+      } else if (fair) {
+        assign = fair as string
+      }
+    }
+  }
+
   const { data, error } = await supabase.rpc('check_in_appointment', {
     p_appointment_id: appointmentId,
+    ...(assign ? { p_staff_id_assign: assign } : {}),
   })
 
   if (error) {
@@ -310,7 +378,14 @@ export async function quickBookFromKiosk(params: {
 
 /**
  * Obtiene slots disponibles para una fecha y duración dadas.
- * Wrappea el RPC `get_available_slots`.
+ *
+ * Usa el MISMO motor que la agenda del dashboard y el turnero público
+ * (`getAvailableSlots` en appointments.ts). Antes llamaba al RPC
+ * `get_available_slots`, que era un segundo motor divergente y encima estaba
+ * caído en prod (42703 por `ab.staff_id`): el kiosko no podía ofrecer ni un
+ * horario. Además el RPC devuelve `{slot_start, available_staff_ids}` y acá se
+ * casteaba a `{starts_at, ends_at, barber_id, barber_name}` sin mapear, así que
+ * aun arreglando el SQL la pantalla habría explotado al parsear.
  */
 export async function getAvailableSlotsForKiosk(params: {
   branchId: string
@@ -324,22 +399,40 @@ export async function getAvailableSlotsForKiosk(params: {
   if (params.totalDurationMinutes <= 0) return { error: 'Duración inválida' }
 
   const supabase = createAdminClient()
+  const { data: branch } = await supabase
+    .from('branches')
+    .select('timezone')
+    .eq('id', params.branchId)
+    .maybeSingle()
 
-  const rpcParams: Record<string, unknown> = {
-    p_branch_id: params.branchId,
-    p_date: params.date,
-    p_total_duration_minutes: params.totalDurationMinutes,
+  const tz = branch?.timezone || 'America/Argentina/Buenos_Aires'
+  const offset = getTzOffsetISO(new Date(`${params.date}T12:00:00Z`), tz)
+
+  const result = await getAvailableSlots(
+    params.branchId,
+    params.date,
+    undefined,
+    params.staffId && isValidUUID(params.staffId) ? params.staffId : undefined,
+    params.totalDurationMinutes
+  )
+
+  if (result.error) return { error: result.error }
+
+  const slots: AvailableSlot[] = []
+  for (const barber of result.slots) {
+    for (const slot of barber.slots) {
+      if (!slot.available) continue
+      const start = new Date(`${params.date}T${slot.time}:00${offset}`)
+      const end = new Date(start.getTime() + params.totalDurationMinutes * 60_000)
+      slots.push({
+        starts_at: start.toISOString(),
+        ends_at: end.toISOString(),
+        barber_id: barber.barberId,
+        barber_name: barber.barberName,
+      })
+    }
   }
-  if (params.staffId && isValidUUID(params.staffId)) {
-    rpcParams.p_staff_id = params.staffId
-  }
 
-  const { data, error } = await supabase.rpc('get_available_slots', rpcParams)
-
-  if (error) {
-    console.error('[getAvailableSlotsForKiosk] RPC error:', error.message)
-    return { error: 'Error al cargar slots disponibles.' }
-  }
-
-  return { ok: true, slots: (data ?? []) as AvailableSlot[] }
+  slots.sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+  return { ok: true, slots }
 }

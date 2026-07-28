@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
+import { getLocalDateStr } from '@/lib/time-utils'
+import { currentUserCan } from '@/lib/actions/permissions-gate'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -116,6 +118,12 @@ export async function changeBranchOperationMode(
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'UNAUTHORIZED' }
 
+  // Cambiar el modo de operación reconfigura cómo trabaja toda la sucursal
+  // (kiosko, panel del barbero, turnero público): exige appointments.configure.
+  if (!(await currentUserCan('appointments.configure'))) {
+    return { error: 'FORBIDDEN' }
+  }
+
   const supabase = createAdminClient()
 
   // Pre-check de pertenencia
@@ -151,7 +159,19 @@ export async function changeBranchOperationMode(
     return { error: code, count: result?.count }
   }
 
+  // Activación en un solo acto. Para que un cliente pueda reservar hacen falta
+  // TRES cosas independientes y ninguna pantalla las conectaba:
+  //   a) branches.operation_mode != 'walk_in'   (esto)
+  //   b) appointment_settings.is_enabled = true (default FALSE)
+  //   c) al menos un barbero en appointment_staff
+  // El dueño prendía el modo, veía "Activo" en el dashboard y el turnero
+  // seguía mostrando "esta sucursal trabaja sin turno previo".
+  if (newMode !== 'walk_in') {
+    await enableAppointmentsFor(orgId, branchId)
+  }
+
   revalidatePath('/dashboard/turnos/configuracion')
+  revalidatePath('/dashboard/turnos/link-publico')
   revalidatePath('/dashboard/sucursales')
   revalidatePath('/dashboard/turnos/agenda')
 
@@ -159,6 +179,72 @@ export async function changeBranchOperationMode(
     ok: true,
     previousMode: (result.previous_mode ?? branch.operation_mode) as BranchOperationMode,
     newMode: (result.new_mode ?? newMode) as BranchOperationMode,
+  }
+}
+
+/**
+ * Deja la sucursal en condiciones de recibir reservas: prende el turnero y da
+ * de alta a los barberos activos que todavía no estén habilitados. Best-effort:
+ * si algo falla se loguea, pero el cambio de modo ya se aplicó.
+ */
+async function enableAppointmentsFor(orgId: string, branchId: string) {
+  const supabase = createAdminClient()
+
+  // (b) Settings efectivos: si la org no tiene ni el default creado, se crea.
+  const { data: existing } = await supabase
+    .from('appointment_settings')
+    .select('id, is_enabled, branch_id')
+    .eq('organization_id', orgId)
+    .or(`branch_id.eq.${branchId},branch_id.is.null`)
+    .order('branch_id', { nullsFirst: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!existing) {
+    const { error } = await supabase
+      .from('appointment_settings')
+      .insert({ organization_id: orgId, branch_id: null, is_enabled: true })
+    if (error) console.error('[enableAppointmentsFor] insert settings:', error.message)
+  } else if (!existing.is_enabled) {
+    const { error } = await supabase
+      .from('appointment_settings')
+      .update({ is_enabled: true })
+      .eq('id', existing.id)
+    if (error) console.error('[enableAppointmentsFor] enable settings:', error.message)
+  }
+
+  // (c) Barberos de la sucursal habilitados para turnos.
+  const { data: staff, error: staffError } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('branch_id', branchId)
+    .eq('is_active', true)
+    .or('role.eq.barber,is_also_barber.eq.true')
+
+  if (staffError) {
+    console.error('[enableAppointmentsFor] staff:', staffError.message)
+    return
+  }
+  if (!staff?.length) return
+
+  const { data: yaHabilitados } = await supabase
+    .from('appointment_staff')
+    .select('staff_id')
+    .eq('organization_id', orgId)
+    .in('staff_id', staff.map(s => s.id))
+
+  const habilitados = new Set((yaHabilitados ?? []).map(r => r.staff_id))
+  const faltantes = staff.filter(s => !habilitados.has(s.id))
+
+  if (faltantes.length) {
+    const { error } = await supabase
+      .from('appointment_staff')
+      .insert(faltantes.map(s => ({
+        organization_id: orgId,
+        staff_id: s.id,
+        is_active: true,
+      })))
+    if (error) console.error('[enableAppointmentsFor] insert staff:', error.message)
   }
 }
 
@@ -190,7 +276,7 @@ export async function getBranchOperationStatus(
 
   if (!branch) return { error: 'BRANCH_NOT_FOUND' }
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = getLocalDateStr()
 
   const [futureRes, queueRes, servicesRes] = await Promise.all([
     supabase

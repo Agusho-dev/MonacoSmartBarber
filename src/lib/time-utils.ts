@@ -49,6 +49,25 @@ export function getLocalDateStr(timeZone = DEFAULT_TZ): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date())
 }
 
+/**
+ * YYYY-MM-DD leyendo los campos LOCALES del Date (no UTC).
+ *
+ * Para componentes de cliente: `d.toISOString().split('T')[0]` devuelve la
+ * fecha UTC, así que en Argentina (UTC-3) a partir de las 21:00 ya adelanta un
+ * día — la agenda abría en "Hoy" pero mostraba mañana, vacío.
+ */
+export function toDateStr(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** YYYY-MM-DD de hoy según el reloj del dispositivo. Ver `toDateStr`. */
+export function todayDateStr(): string {
+  return toDateStr(new Date())
+}
+
 /** Rango ISO del día local en la TZ dada. Usa offset dinámico (no hardcoded). */
 export function getLocalDayBounds(timeZone = DEFAULT_TZ): { start: string; end: string } {
   const now = new Date()

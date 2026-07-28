@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { getCurrentOrgId } from '@/lib/actions/org'
+import { currentUserCan } from '@/lib/actions/permissions-gate'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { getAppointmentSettings, getAppointmentStaff } from '@/lib/actions/appointments'
 import { listTemplatesForPicker } from '@/lib/actions/messaging'
@@ -17,6 +18,10 @@ export const metadata: Metadata = {
 export default async function TurnosConfigPage() {
   const orgId = await getCurrentOrgId()
   if (!orgId) redirect('/login')
+
+  // Guard de permiso: hasta ahora `appointments.configure` sólo escondía el ítem
+  // del sidebar, pero entrar por URL directa mostraba todo igual.
+  if (!(await currentUserCan('appointments.configure'))) redirect('/dashboard')
 
   const supabase = createAdminClient()
   const branchIds = await getScopedBranchIds()
@@ -68,7 +73,12 @@ export default async function TurnosConfigPage() {
             walkinMode: cfg?.walkin_mode ?? 'both',
           }
         })}
-        branches={(branches ?? []).map((b) => ({ id: b.id, name: b.name }))}
+        branches={(branches ?? []).map((b) => ({
+          id: b.id,
+          name: b.name,
+          operation_mode:
+            (b as { operation_mode?: 'walk_in' | 'appointments' | 'hybrid' | null }).operation_mode ?? 'walk_in',
+        }))}
         templates={templatesResult.data}
         hasWhatsAppChannel={templatesResult.hasChannel}
       />

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { getCurrentOrgId } from '@/lib/actions/org'
+import { currentUserCan } from '@/lib/actions/permissions-gate'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { getAppointmentSettings } from '@/lib/actions/appointments'
 import { createAdminClient } from '@/lib/supabase/server'
@@ -15,6 +16,10 @@ export const metadata: Metadata = {
 export default async function AgendaPage() {
   const orgId = await getCurrentOrgId()
   if (!orgId) redirect('/login')
+
+  // Guard de permiso: hasta ahora `appointments.view` sólo escondía el ítem
+  // del sidebar, pero entrar por URL directa mostraba todo igual.
+  if (!(await currentUserCan('appointments.view'))) redirect('/dashboard')
 
   const supabase = createAdminClient()
   const branchIds = await getScopedBranchIds()

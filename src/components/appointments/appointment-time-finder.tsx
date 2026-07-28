@@ -15,6 +15,7 @@ import {
 import { getAvailableSlots } from '@/lib/actions/appointments'
 import type { BookingServiceOption } from './appointment-booking-dialog'
 import type { GridBarber } from './appointments-grid-view'
+import { toDateStr, todayDateStr } from '@/lib/time-utils'
 
 interface Props {
   branchId: string
@@ -33,7 +34,7 @@ interface FoundSlot {
 export function AppointmentTimeFinder({ branchId, services, barbers, onPickSlot }: Props) {
   const [serviceId, setServiceId] = useState<string>('')
   const [barberId, setBarberId] = useState<string>('__any__')
-  const [fromDate, setFromDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [fromDate, setFromDate] = useState(() => todayDateStr())
   const [daysAhead, setDaysAhead] = useState(7)
   const [results, setResults] = useState<FoundSlot[]>([])
   const [isPending, startTransition] = useTransition()
@@ -51,7 +52,7 @@ export function AppointmentTimeFinder({ branchId, services, barbers, onPickSlot 
       for (let i = 0; i < daysAhead; i++) {
         const d = new Date(fromDate + 'T12:00:00')
         d.setDate(d.getDate() + i)
-        const dateStr = d.toISOString().split('T')[0]
+        const dateStr = toDateStr(d)
         const { slots, error: slotsError } = await getAvailableSlots(
           branchId,
           dateStr,

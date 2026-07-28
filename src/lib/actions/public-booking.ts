@@ -137,10 +137,10 @@ export async function publicGetAvailableStaff(branchId: string): Promise<PublicS
 export async function publicGetAvailableSlots(
   branchId: string,
   date: string,
-  serviceId: string,
+  serviceIds: string | string[],
   staffId?: string
 ): Promise<{ slots: PublicSlotGroup[]; error?: string }> {
-  const result = await getAvailableSlots(branchId, date, serviceId, staffId)
+  const result = await getAvailableSlots(branchId, date, serviceIds, staffId)
   return {
     slots: result.slots.map(b => ({
       staff_id: b.barberId,
@@ -189,7 +189,8 @@ export async function publicBookAppointment(
     return { error: 'Seleccioná al menos un servicio' }
   }
 
-  // Usar el primer servicio para el flujo de booking (multi-servicio como extensión futura)
+  // El primero es el servicio principal (FK de la fila); el resto se persiste
+  // en `appointment_services`.
   const primaryServiceId = input.service_ids[0]
 
   const result = await createAppointment({
@@ -198,6 +199,7 @@ export async function publicBookAppointment(
     clientName: nameClean,
     barberId: input.staff_id,
     serviceId: primaryServiceId,
+    serviceIds: input.service_ids,
     appointmentDate: input.starts_at,
     startTime: input.start_time,
     durationMinutes: input.duration_minutes,
@@ -205,18 +207,24 @@ export async function publicBookAppointment(
   })
 
   if ('error' in result && result.error) {
-    // Mapear errores internos a códigos públicos comprensibles
+    // Mapear errores internos a códigos públicos comprensibles.
+    // Comparar en minúsculas: antes "Ya existe un turno..." no matcheaba
+    // 'ya existe' y el cliente terminaba viendo el texto interno.
     const msg = result.error
-    if (msg.includes('teléfono') || msg.toLowerCase().includes('phone')) {
+    const low = msg.toLowerCase()
+    if (low.includes('teléfono') || low.includes('phone')) {
       return { error: 'INVALID_PHONE' }
     }
-    if (msg.includes('varios turnos') || msg.includes('Quota') || msg.includes('límite')) {
+    if (low.includes('varios turnos') || low.includes('quota') || low.includes('límite')) {
       return { error: 'PHONE_QUOTA_EXCEEDED' }
     }
-    if (msg.includes('no existe un turno en ese horario') || msg.includes('ya existe')) {
+    if (low.includes('ya existe') || low.includes('no hay barberos disponibles')) {
       return { error: 'SLOT_TAKEN' }
     }
-    if (msg.includes('no está dentro del horario') || msg.includes('cerrado')) {
+    if (low.includes('ya tenés un turno activo')) {
+      return { error: 'ALREADY_BOOKED_TODAY' }
+    }
+    if (low.includes('no está dentro del horario') || low.includes('no termina dentro') || low.includes('cerrado')) {
       return { error: 'TOO_LATE' }
     }
     return { error: msg }

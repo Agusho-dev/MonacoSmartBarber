@@ -43,12 +43,48 @@ interface Branding {
   branch_phone: string | null
 }
 
+interface Prefill {
+  name: string
+  phone: string
+  /** true = el turnero corre dentro del WebView de la app mobile. */
+  embedded: boolean
+}
+
 interface Props {
   branch: Branch
   services: PublicService[]
   staff: PublicStaff[]
   settings: Settings
   branding: Branding
+  prefill?: Prefill
+}
+
+/**
+ * Avisa a la app mobile que la reserva se confirmó.
+ *
+ * El wizard es una SPA: al confirmar no navega, sólo cambia de step, así que
+ * el WebView no tenía forma de enterarse. Se emiten dos señales redundantes —
+ * el canal JS que inyecta la app y un cambio de query que el WebView polea.
+ */
+function notificarAppMobile(appointmentId: string) {
+  if (typeof window === 'undefined') return
+
+  try {
+    const bridge = (window as unknown as {
+      BookingBridge?: { postMessage: (msg: string) => void }
+    }).BookingBridge
+    bridge?.postMessage(JSON.stringify({ type: 'booking_confirmed', id: appointmentId }))
+  } catch {
+    // Fuera del WebView el canal no existe: no es un error.
+  }
+
+  try {
+    const url = new URL(window.location.href)
+    url.searchParams.set('booking', 'success')
+    window.history.replaceState(null, '', url.toString())
+  } catch {
+    // No-op
+  }
 }
 
 // ─── Steps del wizard ────────────────────────────────────────────────
@@ -88,6 +124,7 @@ function mapErrorCode(code: string): string {
     PHONE_QUOTA_EXCEEDED: 'Ya tenés varios turnos reservados. Si necesitás ayuda, comunicate con la sucursal.',
     SLOT_TAKEN: 'Ese horario ya fue tomado por alguien más. Elegí otro.',
     TOO_LATE: 'El horario seleccionado ya no está disponible. Elegí otro.',
+    ALREADY_BOOKED_TODAY: 'Ya tenés un turno reservado para ese día. Si querés cambiarlo, gestionalo desde el link que te enviamos.',
     NOT_FOUND_OR_NOT_CANCELLABLE: 'No se pudo cancelar el turno.',
   }
   return map[code] ?? code
@@ -95,7 +132,7 @@ function mapErrorCode(code: string): string {
 
 // ─── Componente principal ────────────────────────────────────────────
 
-export function BookingWizard({ branch, services, staff, settings, branding }: Props) {
+export function BookingWizard({ branch, services, staff, settings, branding, prefill }: Props) {
   const [step, setStep] = useState<WizardStep>('services')
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([])
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null)
@@ -103,9 +140,13 @@ export function BookingWizard({ branch, services, staff, settings, branding }: P
   const [selectedTime, setSelectedTime] = useState('')
   const [selectedSlotStaffId, setSelectedSlotStaffId] = useState<string>('')
   const [selectedSlotStaffName, setSelectedSlotStaffName] = useState('')
-  const [clientName, setClientName] = useState('')
-  const [clientPhone, setClientPhone] = useState('')
+  // Prefill desde la app mobile: el cliente ya se identificó ahí, re-tipear el
+  // teléfono con otro formato creaba un cliente duplicado.
+  const [clientName, setClientName] = useState(prefill?.name ?? '')
+  const [clientPhone, setClientPhone] = useState(prefill?.phone ?? '')
   const [policyAccepted, setPolicyAccepted] = useState(false)
+  // Bumpear esta key fuerza a SlotStep a re-pedir la disponibilidad.
+  const [slotRefreshKey, setSlotRefreshKey] = useState(0)
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
   const [bookingResult, setBookingResult] = useState<PublicBookingResult | null>(null)
@@ -201,6 +242,17 @@ export function BookingWizard({ branch, services, staff, settings, branding }: P
 
         if ('error' in result) {
           setError(mapErrorCode(result.error))
+          // Si el hueco se ocupó mientras completaba sus datos, el cartel de
+          // error quedaba arriba de todo, fuera de pantalla, con la grilla
+          // vieja intacta: el cliente reintentaba el mismo horario en loop.
+          // Lo devolvemos al paso de horarios con la grilla recargada.
+          if (result.error === 'SLOT_TAKEN' || result.error === 'TOO_LATE') {
+            setSelectedTime('')
+            setSelectedSlotStaffId('')
+            setSelectedSlotStaffName('')
+            setSlotRefreshKey(k => k + 1)
+            setStep('slot')
+          }
           return
         }
 
@@ -209,6 +261,7 @@ export function BookingWizard({ branch, services, staff, settings, branding }: P
           barber_name: selectedSlotStaffName || null,
         })
         setStep('confirmation')
+        notificarAppMobile(result.data.appointment_id)
       })
     }
   }
@@ -413,8 +466,9 @@ export function BookingWizard({ branch, services, staff, settings, branding }: P
 
         {step === 'slot' && (
           <SlotStep
+            key={slotRefreshKey}
             branchId={branch.id}
-            serviceId={selectedServiceIds[0] ?? ''}
+            serviceIds={selectedServiceIds}
             staffId={effectiveStaffForSlot}
             slotIntervalMinutes={settings.slot_interval_minutes}
             maxAdvanceDays={settings.max_advance_days}

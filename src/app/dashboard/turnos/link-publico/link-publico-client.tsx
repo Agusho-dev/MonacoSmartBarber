@@ -10,7 +10,13 @@ import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
-interface Branch { id: string; name: string; address: string | null }
+interface Branch {
+  id: string
+  name: string
+  address: string | null
+  slug: string | null
+  operation_mode: string | null
+}
 
 interface Props {
   isEnabled: boolean
@@ -70,17 +76,27 @@ function ShareChip({ label, text }: { label: string; text: string }) {
   )
 }
 
-function BranchCard({ branch, publicUrl, orgSlug }: { branch: Branch; publicUrl: string; orgSlug: string }) {
-  const url = `${publicUrl}?branch=${branch.id}`
+function BranchCard({ branch, baseUrl, publicUrl, orgSlug }: { branch: Branch; baseUrl: string; publicUrl: string; orgSlug: string }) {
+  // Link legible por sucursal. Sin slug cargado caemos al deep-link por id,
+  // que /turnos/[slug] sigue resolviendo.
+  const url = branch.slug ? `${baseUrl}/turnos/${branch.slug}` : `${publicUrl}?branch=${branch.id}`
   const { copied, copy } = useCopy(url)
   const [expanded, setExpanded] = useState(false)
   const qrId = `qr-branch-${branch.id}`
+  const isWalkIn = branch.operation_mode === 'walk_in'
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 space-y-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="font-semibold truncate">{branch.name}</p>
+          <div className="flex items-center gap-2">
+            <p className="font-semibold truncate">{branch.name}</p>
+            {isWalkIn && (
+              <Badge variant="outline" className="shrink-0 text-[10px] text-muted-foreground">
+                Sin turnos
+              </Badge>
+            )}
+          </div>
           {branch.address && (
             <p className="mt-0.5 text-xs text-muted-foreground truncate">{branch.address}</p>
           )}
@@ -140,6 +156,14 @@ export function LinkPublicoClient({ isEnabled, baseUrl, orgSlug, orgName, branch
   const publicUrl = useMemo(() => `${baseUrl}/turnos/${orgSlug}`, [baseUrl, orgSlug])
   const { copied: copiedMain, copy: copyMain } = useCopy(publicUrl)
 
+  // El link acepta reservas sólo si además hay al menos una sucursal fuera de
+  // walk_in. Pintar "Activo" mirando sólo `is_enabled` hacía que el dueño
+  // compartiera un QR que lleva a "esta sucursal trabaja sin turno previo".
+  const branchesConTurnos = branches.filter(
+    b => b.operation_mode && b.operation_mode !== 'walk_in'
+  )
+  const aceptaReservas = isEnabled && branchesConTurnos.length > 0
+
   if (!orgSlug) {
     return (
       <Card>
@@ -171,15 +195,28 @@ export function LinkPublicoClient({ isEnabled, baseUrl, orgSlug, orgName, branch
 
   return (
     <div className="space-y-6">
-      {!isEnabled && (
+      {!aceptaReservas && (
         <div className="flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm">
           <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
           <p className="text-muted-foreground">
-            El turnero está deshabilitado. Los clientes no podrán reservar hasta que lo actives desde{' '}
-            <a href="/dashboard/turnos/configuracion" className="font-medium text-foreground underline underline-offset-2 hover:no-underline">
-              Configuración
-            </a>
-            .
+            {!isEnabled ? (
+              <>
+                El turnero está deshabilitado. Los clientes no podrán reservar hasta que lo actives desde{' '}
+                <a href="/dashboard/turnos/configuracion" className="font-medium text-foreground underline underline-offset-2 hover:no-underline">
+                  Configuración
+                </a>
+                .
+              </>
+            ) : (
+              <>
+                Ninguna sucursal acepta turnos todavía: quien abra este link va a ver
+                &ldquo;trabajamos sin turno previo&rdquo;. Elegí el modo de operación en{' '}
+                <a href="/dashboard/turnos/configuracion" className="font-medium text-foreground underline underline-offset-2 hover:no-underline">
+                  Configuración
+                </a>
+                .
+              </>
+            )}
           </p>
         </div>
       )}
@@ -190,7 +227,7 @@ export function LinkPublicoClient({ isEnabled, baseUrl, orgSlug, orgName, branch
           <div className="flex items-center gap-2">
             <Link2 className="h-5 w-5" />
             <CardTitle>Link público de {orgName}</CardTitle>
-            {isEnabled ? (
+            {aceptaReservas ? (
               <Badge variant="secondary" className="ml-auto text-xs">Activo</Badge>
             ) : (
               <Badge variant="outline" className="ml-auto text-xs text-muted-foreground">Inactivo</Badge>
@@ -271,7 +308,7 @@ export function LinkPublicoClient({ isEnabled, baseUrl, orgSlug, orgName, branch
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             {branches.map(b => (
-              <BranchCard key={b.id} branch={b} publicUrl={publicUrl} orgSlug={orgSlug} />
+              <BranchCard key={b.id} branch={b} baseUrl={baseUrl} publicUrl={publicUrl} orgSlug={orgSlug} />
             ))}
           </div>
         </div>

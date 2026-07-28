@@ -27,6 +27,7 @@ import {
 } from '@/lib/actions/appointments'
 import { AppointmentsGridView, type GridBarber } from './appointments-grid-view'
 import type { Appointment, AppointmentSettings } from '@/lib/types/database'
+import { toDateStr, todayDateStr } from '@/lib/time-utils'
 
 interface Branch {
   id: string
@@ -60,7 +61,7 @@ export function AppointmentAvailabilityDialog({
   const [branchId, setBranchId] = useState<string>(
     defaultBranchId ?? (branches.length === 1 ? branches[0].id : '')
   )
-  const [date, setDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [date, setDate] = useState(() => todayDateStr())
   const [settings, setSettings] = useState<AppointmentSettings | null>(null)
   const [barbers, setBarbers] = useState<GridBarber[]>([])
   const [appointments, setAppointments] = useState<Appointment[]>([])
@@ -98,7 +99,7 @@ export function AppointmentAvailabilityDialog({
   function shiftDate(days: number) {
     const d = new Date(date + 'T12:00:00')
     d.setDate(d.getDate() + days)
-    setDate(d.toISOString().split('T')[0])
+    setDate(toDateStr(d))
   }
 
   function handleInsert() {
