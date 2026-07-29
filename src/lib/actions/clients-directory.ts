@@ -120,6 +120,14 @@ export interface ClientsDirectoryResult {
   total: number
   /** Conteo por segmento con los mismos filtros, menos el de segmento. */
   counts: SegmentCount[]
+  /**
+   * Tamaño real de la base, SIN búsqueda ni toggles: es el denominador honesto
+   * ("312 resultados en los 5.541 clientes"). Usar la suma de `counts` acá estaría
+   * mal, porque esa suma ya viene filtrada por la búsqueda.
+   */
+  baseTotal: number
+  /** De `baseTotal`, cuántos tienen al menos una visita en el scope elegido. */
+  baseWithVisits: number
   thresholds: SegmentThresholds
   page: number
   pageSize: number
@@ -129,16 +137,24 @@ export interface ClientsDirectoryResult {
    * base vacía (Known Risk #15).
    */
   error: string | null
+  /**
+   * Los conteos son secundarios (si fallan, la lista igual sirve), pero la UI tiene
+   * que poder mostrar "—" en vez de un 0 inventado.
+   */
+  countsError: string | null
 }
 
 const EMPTY_RESULT = (page: number, pageSize: number, error: string): ClientsDirectoryResult => ({
   clients: [],
   total: 0,
   counts: [],
+  baseTotal: 0,
+  baseWithVisits: 0,
   thresholds: { riskDays: DEFAULT_RISK_DAYS, lostDays: DEFAULT_LOST_DAYS, vipVisits: VIP_VISITS },
   page,
   pageSize,
   error,
+  countsError: error,
 })
 
 interface RawRow {
@@ -223,7 +239,12 @@ async function resolveBranchScope(
   if (allowed === null) return { ok: true, branchIds: null }
   if (allowed.length === 0) return { ok: false }
   const scoped = await getScopedBranchIds()
-  return { ok: true, branchIds: scoped.length > 0 ? scoped : null }
+  // Falla CERRADO: `p_branch_ids = null` significa "toda la organización" para la RPC,
+  // y `getScopedBranchIds()` devuelve [] tanto cuando el usuario no tiene sucursales
+  // como cuando la query a `branches` falló. Mandar null acá le mostraría a un
+  // encargado restringido la facturación de toda la cadena.
+  if (scoped.length === 0) return { ok: false }
+  return { ok: true, branchIds: scoped }
 }
 
 async function getThresholds(orgId: string): Promise<SegmentThresholds> {
@@ -293,18 +314,35 @@ export async function fetchClientsDirectory(
     p_offset: (page - 1) * pageSize,
   }
 
-  const [listRes, countsRes] = await Promise.all([
+  const countsArgs = {
+    p_organization_id: orgId,
+    p_branch_ids: scope.branchIds,
+    p_risk_days: thresholds.riskDays,
+    p_lost_days: thresholds.lostDays,
+    p_vip_visits: thresholds.vipVisits,
+  }
+
+  const hayFiltrosDeBase = Boolean(search) || onlyWithVisits || hideWalkins
+
+  const [listRes, countsRes, baseRes] = await Promise.all([
     supabase.rpc('search_clients_page', listArgs),
+    // Conteos por segmento CON los filtros actuales: es lo que muestran los chips.
     supabase.rpc('client_segment_counts', {
-      p_organization_id: orgId,
-      p_branch_ids: scope.branchIds,
+      ...countsArgs,
       p_query: search || null,
       p_only_with_visits: onlyWithVisits,
       p_hide_walkins: hideWalkins,
-      p_risk_days: thresholds.riskDays,
-      p_lost_days: thresholds.lostDays,
-      p_vip_visits: thresholds.vipVisits,
     }),
+    // Tamaño de la base SIN filtros: el denominador. Si no hay filtros es la misma
+    // consulta, así que no la repetimos.
+    hayFiltrosDeBase
+      ? supabase.rpc('client_segment_counts', {
+          ...countsArgs,
+          p_query: null,
+          p_only_with_visits: false,
+          p_hide_walkins: false,
+        })
+      : Promise.resolve(null),
   ])
 
   if (listRes.error) {
@@ -314,31 +352,46 @@ export async function fetchClientsDirectory(
 
   const rows = (listRes.data ?? []) as RawRow[]
 
-  // Los conteos son secundarios: si fallan, la lista igual sirve. Pero lo decimos.
+  type CountRow = { segment: string; client_count: number; total_spent: string | number }
+  const parseCounts = (data: unknown): SegmentCount[] =>
+    ((data ?? []) as CountRow[])
+      .filter((c) => (CLIENT_SEGMENTS as string[]).includes(c.segment))
+      .map((c) => ({
+        segment: c.segment as ClientSegment,
+        count: Number(c.client_count) || 0,
+        totalSpent: num(c.total_spent),
+      }))
+
+  let countsError: string | null = null
   if (countsRes.error) {
     console.error('[clients-directory] client_segment_counts:', countsRes.error.message)
+    countsError = 'No pudimos calcular los segmentos'
+  }
+  if (baseRes && baseRes.error) {
+    console.error('[clients-directory] client_segment_counts (base):', baseRes.error.message)
+    countsError = countsError ?? 'No pudimos calcular el total de la base'
   }
 
-  const counts: SegmentCount[] = ((countsRes.data ?? []) as Array<{
-    segment: string
-    client_count: number
-    total_spent: string | number
-  }>)
-    .filter((c) => (CLIENT_SEGMENTS as string[]).includes(c.segment))
-    .map((c) => ({
-      segment: c.segment as ClientSegment,
-      count: Number(c.client_count) || 0,
-      totalSpent: num(c.total_spent),
-    }))
+  const counts = parseCounts(countsRes.data)
+  const baseCounts = baseRes ? parseCounts(baseRes.data) : counts
+
+  const baseTotal = baseCounts.reduce((acc, c) => acc + c.count, 0)
+  const sinVisitas = baseCounts.find((c) => c.segment === 'sin_visitas')?.count ?? 0
 
   return {
     clients: rows.map(mapRow),
-    total: rows.length > 0 ? Number(rows[0].total_rows) || 0 : 0,
+    // `total_rows` viaja en las filas, así que una página fuera de rango no lo trae.
+    // En ese caso devolvemos -1 para que el llamador sepa que hay que reencuadrar,
+    // en vez de reportar "0 clientes" (que sería el cero silencioso otra vez).
+    total: rows.length > 0 ? Number(rows[0].total_rows) || 0 : page > 1 ? -1 : 0,
     counts,
+    baseTotal,
+    baseWithVisits: Math.max(0, baseTotal - sinVisitas),
     thresholds,
     page,
     pageSize,
     error: null,
+    countsError,
   }
 }
 

@@ -11,6 +11,23 @@ export async function updateClientNotes(
   notes: string | null,
   instagram: string | null
 ) {
+  // El gate visual (`canEdit` en la pantalla de clientes) no alcanza: el id del
+  // server action viaja en el bundle del browser y se puede invocar directo.
+  //
+  // OJO: esta acción también la llama el panel del barbero al cerrar un servicio
+  // (`complete-service-dialog.tsx`), que se autentica por PIN y NO tiene sesión de
+  // Supabase Auth. Ahí `currentUserCan` devolvería false y le comería las
+  // observaciones al barbero en silencio. Para ese camino alcanza con la sesión de
+  // barbero + el filtro por organización de abajo.
+  const { cookies } = await import('next/headers')
+  const esSesionDeBarbero = Boolean((await cookies()).get('barber_session')?.value)
+  if (!esSesionDeBarbero) {
+    const { currentUserCan } = await import('./permissions-gate')
+    if (!(await currentUserCan('clients.edit'))) {
+      return { error: 'No tenés permiso para editar clientes' }
+    }
+  }
+
   const supabase = createAdminClient()
 
   // Filtrar por organización para evitar modificar clientes de otra org

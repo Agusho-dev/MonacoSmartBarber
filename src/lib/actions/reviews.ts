@@ -13,6 +13,26 @@ export async function createReviewRequest(
     const orgAccess = await validateBranchAccess(branchId)
     if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
 
+    // La visita tiene que ser DE ese cliente. Sin este chequeo, una UI que mezcle
+    // datos (por ejemplo un panel de detalle que resuelve dos clientes fuera de
+    // orden) genera un token de reseña de la visita de A y se lo manda por WhatsApp
+    // a B, que termina calificando un servicio que no recibió.
+    const admin = createAdminClient()
+    const { data: visita, error: visitaError } = await admin
+        .from('visits')
+        .select('client_id, branch_id')
+        .eq('id', visitId)
+        .maybeSingle()
+
+    if (visitaError) {
+        console.error('[createReviewRequest] error leyendo la visita:', visitaError.message)
+        return { error: 'No pudimos verificar la visita' }
+    }
+    if (!visita) return { error: 'La visita no existe' }
+    if (visita.client_id !== clientId || visita.branch_id !== branchId) {
+        return { error: 'La visita no corresponde a ese cliente' }
+    }
+
     const supabase = await createClient()
 
     const { data: existing } = await supabase

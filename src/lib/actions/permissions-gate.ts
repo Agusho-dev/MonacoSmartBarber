@@ -26,7 +26,31 @@ export async function getCurrentUserPermissions(): Promise<Record<string, boolea
       .eq('is_active', true)
       .maybeSingle()
 
-    const isOwnerOrAdmin = ['owner', 'admin'].includes(currentStaff?.role ?? '')
+    let isOwnerOrAdmin = ['owner', 'admin'].includes(currentStaff?.role ?? '')
+
+    // Un owner/admin puede no tener fila en `staff` y existir sólo en
+    // `organization_members` (en prod hay al menos dos así). Sin este fallback
+    // `getEffectivePermissions` le devuelve {} y cualquier página con guard lo
+    // rebota al dashboard. `getAllowedBranchIds` ya contempla este caso.
+    if (!currentStaff) {
+      const { createAdminClient } = await import('@/lib/supabase/server')
+      const { getCurrentOrgId } = await import('./org')
+      const orgId = await getCurrentOrgId()
+      if (orgId) {
+        const { data: member, error: memberErr } = await createAdminClient()
+          .from('organization_members')
+          .select('role')
+          .eq('user_id', user.id)
+          .eq('organization_id', orgId)
+          .maybeSingle()
+        if (memberErr) {
+          console.error('[permissions-gate] organization_members:', memberErr.message)
+        }
+        if (['owner', 'admin'].includes(member?.role ?? '')) {
+          isOwnerOrAdmin = true
+        }
+      }
+    }
 
     let rolePerms: Record<string, boolean> | null = null
     if (currentStaff?.role_id) {

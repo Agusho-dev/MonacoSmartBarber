@@ -247,20 +247,17 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
     return () => clearTimeout(t)
   }, [searchInput])
 
-  // Al empezar a buscar, ordenar por relevancia; al limpiar, volver a alfabético.
-  // Si el usuario eligió otro orden a mano, se respeta.
   useEffect(() => {
     setPage(1)
-    if (search && (sort === 'name' || sort === 'last_visit')) {
-      setSort('relevance')
-      setDir('desc')
-    } else if (!search && sort === 'relevance') {
-      setSort('last_visit')
-      setDir('desc')
-    }
-    // Sólo debe correr cuando cambia la búsqueda.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search])
+
+  // Al buscar se ordena por relevancia; al limpiar se vuelve al default. Se DERIVA
+  // en vez de sincronizarse con un useEffect: si no, el efecto de carga ya estaba
+  // agendado con el sort viejo y cada transición disparaba dos pares de RPCs.
+  // Si el usuario eligió otro orden a mano (gastado, visitas...), se respeta.
+  const sortEfectivo: ClientSortKey =
+    search && (sort === 'last_visit' || sort === 'name') ? 'relevance' : sort
+  const dirEfectiva: 'asc' | 'desc' = sortEfectivo === sort ? dir : 'desc'
 
   const segmentKey = segments.join(',')
 
@@ -271,13 +268,25 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
       segments: segmentKey ? (segmentKey.split(',') as ClientSegment[]) : [],
       onlyWithVisits,
       hideWalkins,
-      sort,
-      dir,
+      sort: sortEfectivo,
+      dir: dirEfectiva,
       page,
       pageSize: PAGE_SIZE,
     }),
-    [selectedBranchId, search, segmentKey, onlyWithVisits, hideWalkins, sort, dir, page]
+    [selectedBranchId, search, segmentKey, onlyWithVisits, hideWalkins, sortEfectivo, dirEfectiva, page]
   )
+
+  // El BranchSelector escribe directo al store, así que el reset de página que
+  // hacen los demás filtros hay que hacerlo acá. Sin esto: estar en la página 20 de
+  // Parana y cambiar a una sucursal con 9 clientes pide offset=950, devuelve una
+  // página vacía y no hay forma de volver.
+  const prevBranchRef = useRef(selectedBranchId)
+  useEffect(() => {
+    if (prevBranchRef.current !== selectedBranchId) {
+      prevBranchRef.current = selectedBranchId
+      setPage(1)
+    }
+  }, [selectedBranchId])
 
   // Descarta respuestas viejas: con búsqueda debounced, una respuesta lenta de
   // "ag" no puede pisar la de "agustin".
@@ -290,6 +299,13 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
     try {
       const res = await fetchClientsDirectory(q)
       if (reqIdRef.current !== myId) return
+      // total = -1 ⇒ la página pedida quedó fuera de rango (la RPC manda el total
+      // dentro de las filas, así que una página vacía no lo trae). Volvemos a la
+      // primera en vez de mostrar "0 clientes", que sería mentira.
+      if (res.total < 0) {
+        setPage(1)
+        return
+      }
       setResult(res)
       if (res.error) toast.error(res.error)
     } catch {
@@ -302,13 +318,18 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
   }, [])
 
   useEffect(() => {
-    // La primera página ya vino del server component.
+    // La primera página ya vino del server component... pero SÓLO si el estado
+    // coincide. `useBranchStore` es un singleton de módulo que no se resetea al
+    // navegar, así que entrar a Clientes desde otra pantalla con una sucursal
+    // elegida monta este componente con `selectedBranchId` ya seteado mientras
+    // `initial` trae métricas de toda la organización. Saltear ese fetch dejaba la
+    // pantalla rotulada "en Parana" con los números de las cuatro sucursales.
     if (firstRunRef.current) {
       firstRunRef.current = false
-      return
+      if (!selectedBranchId) return
     }
     load(query)
-  }, [query, load])
+  }, [query, load, selectedBranchId])
 
   // --- Derivados ----------------------------------------------------------
   const countsMap = useMemo(() => {
@@ -317,15 +338,18 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
     return m
   }, [result.counts])
 
-  const totalSinFiltroDeSegmento = useMemo(
-    () => result.counts.reduce((acc, c) => acc + c.count, 0),
-    [result.counts]
-  )
+  const hayError = Boolean(result.error)
+  const hayErrorDeConteos = hayError || Boolean(result.countsError)
 
-  // Con una sucursal elegida, "sin visitas" significa "sin visitas ACÁ", así que el
-  // resto es exactamente la cantidad de clientes que sí pasaron por esa sucursal.
-  const conVisitasEnScope =
-    totalSinFiltroDeSegmento - (countsMap.get('sin_visitas')?.count ?? 0)
+  // Denominador honesto: el tamaño de la base SIN búsqueda ni toggles. Usar la suma
+  // de los chips daría "181 resultados en los 181 clientes de la base".
+  const baseTotal = result.baseTotal
+  // Con una sucursal elegida, "sin visitas" significa "sin visitas ACÁ", así que
+  // baseWithVisits es exactamente cuántos clientes pasaron por esa sucursal.
+  const conVisitasEnScope = result.baseWithVisits
+
+  // Ante un fallo de lectura se muestra "—", nunca un 0 inventado.
+  const numero = (n: number) => (hayErrorDeConteos ? '—' : n.toLocaleString('es-AR'))
 
   const hayFiltros =
     search !== '' || segments.length > 0 || onlyWithVisits || hideWalkins
@@ -551,12 +575,12 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
               {/* Los dos números, siempre visibles: es lo que mata la sospecha de
                   que "faltan clientes" al elegir una sucursal. */}
               <span className="text-xs text-muted-foreground tabular-nums">
-                {totalSinFiltroDeSegmento.toLocaleString('es-AR')} en la base
+                {numero(baseTotal)} en la base
                 {branchName && (
                   <>
                     {' · '}
                     <span className="text-zinc-300">
-                      {conVisitasEnScope.toLocaleString('es-AR')} con visitas en {branchName}
+                      {numero(conVisitasEnScope)} con visitas en {branchName}
                     </span>
                   </>
                 )}
@@ -660,7 +684,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                 </span>{' '}
                 {result.total === 1 ? 'resultado' : 'resultados'} para{' '}
                 <span className="text-zinc-300">«{search}»</span> en los{' '}
-                {totalSinFiltroDeSegmento.toLocaleString('es-AR')} clientes de la base
+                {numero(baseTotal)} clientes de la base
               </>
             ) : (
               <>
@@ -704,7 +728,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
               active={segments.length === 0}
               icon={Users}
               label="Todos"
-              count={totalSinFiltroDeSegmento}
+              count={baseTotal}
               text="text-zinc-200"
               bg="bg-white/[0.05]"
               ring="border-white/25"
