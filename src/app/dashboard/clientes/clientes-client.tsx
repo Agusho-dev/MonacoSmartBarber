@@ -1,58 +1,63 @@
 'use client'
 
-import { useMemo, useState, useEffect, useTransition } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { Search, Eye, Star, Tag, Camera, Save, MessageCircle, MessagesSquare, Instagram, Plus, ArrowUpDown, ArrowUp, ArrowDown, Loader2 } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Camera,
+  ChevronLeft,
+  ChevronRight,
+  CircleDashed,
+  Crown,
+  DoorOpen,
+  Eye,
+  FileDown,
+  Instagram,
+  Loader2,
+  MessageCircle,
+  MessagesSquare,
+  Plus,
+  Repeat2,
+  Save,
+  Search,
+  Sparkles,
+  Star,
+  Tag,
+  Users,
+  UserX,
+  X,
+} from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
+import { exportCSV } from '@/lib/export'
 import { createClient } from '@/lib/supabase/client'
 import { updateClientNotes } from '@/lib/actions/clients'
 import { checkinClient } from '@/lib/actions/queue'
 import { createReviewRequest } from '@/lib/actions/reviews'
 import { getClientVisits } from '@/lib/actions/visit-history'
 import type { ClientProfileVisit } from '@/lib/actions/visit-history'
-import type { Client } from '@/lib/types/database'
+import {
+  fetchClientsDirectory,
+  fetchClientsForExport,
+  type ClientSegment,
+  type ClientSortKey,
+  type ClientsDirectoryQuery,
+  type ClientsDirectoryResult,
+  type DirectoryClient,
+} from '@/lib/actions/clients-directory'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
-  Sheet,
-  SheetContent,
-} from '@/components/ui/sheet'
-import {
-  Dialog,
-  DialogContent,
-} from '@/components/ui/dialog'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
-
-interface VisitRow {
-  id: string
-  client_id: string
-  branch_id: string
-  barber_id: string
-  amount: number
-  completed_at: string
-  notes: string | null
-  tags: string[] | null
-  service: { name: string } | null
-  barber: { full_name: string } | null
-}
-
-interface PointsRow {
-  client_id: string
-  points_balance: number
-}
 
 interface PhotoRow {
   id: string
@@ -61,55 +66,358 @@ interface PhotoRow {
   order_index: number
 }
 
-type Segment = 'nuevo' | 'regular' | 'vip' | 'en_riesgo' | 'perdido'
-
-const THIRTY_DAYS_MS = 30 * 86400000
-
-const segmentConfig: Record<Segment, { label: string; className: string }> = {
-  nuevo: {
-    label: 'Nuevo',
-    className: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-  },
-  regular: {
-    label: 'Regular',
-    className: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-  },
+/**
+ * Vocabulario de segmentos. Antes había TRES reglas distintas en el repo
+ * (`clientes-client`, `client-segments`, `stats`); ahora la calcula la RPC y acá
+ * sólo se pinta. El corte que faltaba y más valor tiene es "Probó y no volvió":
+ * son ~2.000 personas que estaban escondidas dentro de "Perdido" y son el
+ * segmento más accionable del negocio.
+ */
+const SEGMENT_META: Record<
+  ClientSegment,
+  {
+    label: string
+    short: string
+    hint: (t: { riskDays: number; lostDays: number; vipVisits: number }) => string
+    icon: typeof Users
+    text: string
+    bg: string
+    ring: string
+    badge: string
+  }
+> = {
   vip: {
     label: 'VIP',
-    className: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
+    short: 'VIP',
+    hint: (t) => `${t.vipVisits}+ visitas y activo`,
+    icon: Crown,
+    text: 'text-violet-400',
+    bg: 'bg-violet-500/10',
+    ring: 'border-violet-500/40',
+    badge: 'bg-violet-500/15 text-violet-300 border-violet-500/30',
+  },
+  activo: {
+    label: 'Activo',
+    short: 'Activos',
+    hint: (t) => `2+ visitas, vino hace menos de ${t.riskDays} días`,
+    icon: Repeat2,
+    text: 'text-emerald-400',
+    bg: 'bg-emerald-500/10',
+    ring: 'border-emerald-500/40',
+    badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  },
+  nuevo: {
+    label: 'Nuevo',
+    short: 'Nuevos',
+    hint: (t) => `1ª visita hace menos de ${t.riskDays} días`,
+    icon: Sparkles,
+    text: 'text-sky-400',
+    bg: 'bg-sky-500/10',
+    ring: 'border-sky-500/40',
+    badge: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
   },
   en_riesgo: {
     label: 'En riesgo',
-    className: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+    short: 'En riesgo',
+    hint: (t) => `Cliente fiel sin venir hace ${t.riskDays}–${t.lostDays} días`,
+    icon: AlertTriangle,
+    text: 'text-amber-400',
+    bg: 'bg-amber-500/10',
+    ring: 'border-amber-500/40',
+    badge: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+  },
+  probo_no_volvio: {
+    label: 'Probó y no volvió',
+    short: 'No volvió',
+    hint: (t) => `Vino una sola vez, hace más de ${t.riskDays} días`,
+    icon: DoorOpen,
+    text: 'text-orange-400',
+    bg: 'bg-orange-500/10',
+    ring: 'border-orange-500/40',
+    badge: 'bg-orange-500/15 text-orange-300 border-orange-500/30',
   },
   perdido: {
     label: 'Perdido',
-    className: 'bg-red-500/15 text-red-400 border-red-500/30',
+    short: 'Perdidos',
+    hint: (t) => `Era cliente y no vuelve hace más de ${t.lostDays} días`,
+    icon: UserX,
+    text: 'text-rose-400',
+    bg: 'bg-rose-500/10',
+    ring: 'border-rose-500/40',
+    badge: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+  },
+  sin_visitas: {
+    label: 'Sin visitas',
+    short: 'Sin visitas',
+    hint: () => 'Está en la base pero nunca se atendió',
+    icon: CircleDashed,
+    text: 'text-zinc-400',
+    bg: 'bg-white/[0.04]',
+    ring: 'border-white/20',
+    badge: 'bg-white/[0.06] text-zinc-300 border-white/15',
   },
 }
 
-interface Props {
-  clients: Client[]
-  visits: VisitRow[]
-  points: PointsRow[]
-  branches: { id: string; name: string }[]
-  orgName?: string
+const SEGMENT_ORDER: ClientSegment[] = [
+  'activo',
+  'vip',
+  'nuevo',
+  'en_riesgo',
+  'probo_no_volvio',
+  'perdido',
+  'sin_visitas',
+]
+
+const PAGE_SIZE = 50
+
+function diasDesde(iso: string | null): number | null {
+  if (!iso) return null
+  const ms = Date.now() - new Date(iso).getTime()
+  if (!Number.isFinite(ms)) return null
+  return Math.max(0, Math.floor(ms / 86400000))
 }
 
-export function ClientesClient({ clients, visits, points, branches, orgName = 'BarberOS' }: Props) {
-  const { selectedBranchId } = useBranchStore()
+function textoRelativo(dias: number | null): string {
+  if (dias === null) return 'nunca'
+  if (dias === 0) return 'hoy'
+  if (dias === 1) return 'ayer'
+  if (dias < 30) return `hace ${dias} d`
+  const meses = Math.floor(dias / 30)
+  if (meses < 12) return `hace ${meses} ${meses === 1 ? 'mes' : 'meses'}`
+  const anios = Math.floor(dias / 365)
+  return `hace ${anios} ${anios === 1 ? 'año' : 'años'}`
+}
+
+/**
+ * En la base hay filas con nombre "." o vacío: son walk-ins que se cargaron sin
+ * datos desde la fila. Mostrar "." en una lista parece un error de la app.
+ */
+function nombreVisible(nombre: string): string {
+  const limpio = (nombre ?? '').trim()
+  if (limpio.length === 0 || !/[a-záéíóúüñ0-9]/i.test(limpio)) return 'Sin nombre'
+  return limpio
+}
+
+function iniciales(nombre: string): string {
+  const limpio = nombreVisible(nombre)
+  if (limpio === 'Sin nombre') return '?'
+  const partes = limpio.split(/\s+/).filter(Boolean)
+  if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase()
+  return (partes[0][0] + partes[1][0]).toUpperCase()
+}
+
+function telefonoLegible(phone: string, isWalkin: boolean): string {
+  if (isWalkin) return 'Sin teléfono'
+  const d = phone.replace(/\D/g, '')
+  if (d.length === 10) return `${d.slice(0, 3)} ${d.slice(3, 6)}-${d.slice(6)}`
+  return phone
+}
+
+interface Props {
+  initial: ClientsDirectoryResult
+  branches: { id: string; name: string }[]
+  orgName?: string
+  canEdit: boolean
+}
+
+export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdit }: Props) {
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
+  const selectedBranchId = useBranchStore((s) => s.selectedBranchId)
 
-  function openCrmChat(clientId: string) {
-    router.push(`/dashboard/mensajeria?clientId=${clientId}`)
-  }
+  // --- Estado de consulta -------------------------------------------------
+  const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
-  const [segmentFilter, setSegmentFilter] = useState<Segment | 'all'>('all')
-  const [sortBy, setSortBy] = useState<'lastVisit' | 'totalVisits' | null>(null)
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-  const [detailClient, setDetailClient] = useState<Client | null>(null)
-  // Historial lazy — se carga al abrir el sheet, no viene del prop inicial
+  const [segments, setSegments] = useState<ClientSegment[]>([])
+  const [onlyWithVisits, setOnlyWithVisits] = useState(false)
+  const [hideWalkins, setHideWalkins] = useState(false)
+  // Debe coincidir con el fetch inicial de page.tsx (el primer refetch se omite).
+  const [sort, setSort] = useState<ClientSortKey>('last_visit')
+  const [dir, setDir] = useState<'asc' | 'desc'>('desc')
+  const [page, setPage] = useState(1)
+
+  const [result, setResult] = useState<ClientsDirectoryResult>(initial)
+  const [loading, setLoading] = useState(false)
+  const [exporting, setExporting] = useState(false)
+
+  // Debounce del input. 250 ms: suficiente para no disparar por tecla y no tanto
+  // como para que se sienta lento.
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput.trim()), 250)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
+  // Al empezar a buscar, ordenar por relevancia; al limpiar, volver a alfabético.
+  // Si el usuario eligió otro orden a mano, se respeta.
+  useEffect(() => {
+    setPage(1)
+    if (search && (sort === 'name' || sort === 'last_visit')) {
+      setSort('relevance')
+      setDir('desc')
+    } else if (!search && sort === 'relevance') {
+      setSort('last_visit')
+      setDir('desc')
+    }
+    // Sólo debe correr cuando cambia la búsqueda.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search])
+
+  const segmentKey = segments.join(',')
+
+  const query = useMemo<ClientsDirectoryQuery>(
+    () => ({
+      branchId: selectedBranchId,
+      search,
+      segments: segmentKey ? (segmentKey.split(',') as ClientSegment[]) : [],
+      onlyWithVisits,
+      hideWalkins,
+      sort,
+      dir,
+      page,
+      pageSize: PAGE_SIZE,
+    }),
+    [selectedBranchId, search, segmentKey, onlyWithVisits, hideWalkins, sort, dir, page]
+  )
+
+  // Descarta respuestas viejas: con búsqueda debounced, una respuesta lenta de
+  // "ag" no puede pisar la de "agustin".
+  const reqIdRef = useRef(0)
+  const firstRunRef = useRef(true)
+
+  const load = useCallback(async (q: ClientsDirectoryQuery) => {
+    const myId = ++reqIdRef.current
+    setLoading(true)
+    try {
+      const res = await fetchClientsDirectory(q)
+      if (reqIdRef.current !== myId) return
+      setResult(res)
+      if (res.error) toast.error(res.error)
+    } catch {
+      if (reqIdRef.current !== myId) return
+      setResult((prev) => ({ ...prev, error: 'No pudimos leer la base de clientes' }))
+      toast.error('No pudimos leer la base de clientes')
+    } finally {
+      if (reqIdRef.current === myId) setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    // La primera página ya vino del server component.
+    if (firstRunRef.current) {
+      firstRunRef.current = false
+      return
+    }
+    load(query)
+  }, [query, load])
+
+  // --- Derivados ----------------------------------------------------------
+  const countsMap = useMemo(() => {
+    const m = new Map<ClientSegment, { count: number; totalSpent: number }>()
+    for (const c of result.counts) m.set(c.segment, { count: c.count, totalSpent: c.totalSpent })
+    return m
+  }, [result.counts])
+
+  const totalSinFiltroDeSegmento = useMemo(
+    () => result.counts.reduce((acc, c) => acc + c.count, 0),
+    [result.counts]
+  )
+
+  // Con una sucursal elegida, "sin visitas" significa "sin visitas ACÁ", así que el
+  // resto es exactamente la cantidad de clientes que sí pasaron por esa sucursal.
+  const conVisitasEnScope =
+    totalSinFiltroDeSegmento - (countsMap.get('sin_visitas')?.count ?? 0)
+
+  const hayFiltros =
+    search !== '' || segments.length > 0 || onlyWithVisits || hideWalkins
+
+  const branchName = selectedBranchId
+    ? (branches.find((b) => b.id === selectedBranchId)?.name ?? 'esta sucursal')
+    : null
+
+  const totalPages = Math.max(1, Math.ceil(result.total / PAGE_SIZE))
+  const desde = result.total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1
+  const hasta = Math.min(page * PAGE_SIZE, result.total)
+
+  function toggleSegment(seg: ClientSegment) {
+    setPage(1)
+    setSegments((prev) => (prev.includes(seg) ? prev.filter((s) => s !== seg) : [...prev, seg]))
+  }
+
+  function toggleSort(field: ClientSortKey) {
+    setPage(1)
+    if (sort === field) {
+      setDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSort(field)
+      setDir(field === 'name' ? 'asc' : 'desc')
+    }
+  }
+
+  function limpiarFiltros() {
+    setSearchInput('')
+    setSegments([])
+    setOnlyWithVisits(false)
+    setHideWalkins(false)
+    setPage(1)
+  }
+
+  async function handleExport() {
+    setExporting(true)
+    try {
+      const res = await fetchClientsForExport(query)
+      if (res.error) {
+        toast.error(res.error)
+        return
+      }
+      if (res.rows.length === 0) {
+        toast.error('No hay clientes para exportar con estos filtros')
+        return
+      }
+      exportCSV(
+        [
+          'Nombre',
+          'Teléfono',
+          'Segmento',
+          branchName ? `Visitas en ${branchName}` : 'Visitas',
+          'Visitas totales',
+          branchName ? `Gastado en ${branchName}` : 'Gastado',
+          'Ticket promedio',
+          'Cada (días)',
+          'Última visita',
+          'Barbero habitual',
+          'Sucursal habitual',
+          'Cliente desde',
+          'Observaciones',
+        ],
+        res.rows.map((c) => [
+          c.name,
+          c.isWalkin ? '' : c.phone,
+          SEGMENT_META[c.segment].label,
+          c.visitCount,
+          c.globalVisitCount,
+          c.totalSpent,
+          c.avgTicket ?? '',
+          c.cadenceDays ?? '',
+          c.lastVisitAt ? formatDate(c.lastVisitAt) : '',
+          c.topBarberName ?? '',
+          c.topBranchName ?? '',
+          formatDate(c.createdAt),
+          c.notes ?? '',
+        ]),
+        `clientes-${new Date().toISOString().slice(0, 10)}`
+      )
+      if (res.truncated) {
+        toast.warning(`Exportamos las primeras ${res.rows.length} filas. Afiná los filtros para el resto.`)
+      } else {
+        toast.success(`${res.rows.length} clientes exportados`)
+      }
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  // --- Sheet de detalle ---------------------------------------------------
+  const [detailClient, setDetailClient] = useState<DirectoryClient | null>(null)
   const [lazyVisits, setLazyVisits] = useState<ClientProfileVisit[]>([])
   const [lazyTotalCount, setLazyTotalCount] = useState(0)
   const [lazyHasMore, setLazyHasMore] = useState(false)
@@ -123,166 +431,6 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
   const [isSavingNotes, startSavingNotes] = useTransition()
   const [requestingReview, setRequestingReview] = useState<string | null>(null)
 
-  const now = Date.now()
-
-  const pointsMap = useMemo(() => {
-    const m = new Map<string, number>()
-    points.forEach((p) => m.set(p.client_id, p.points_balance))
-    return m
-  }, [points])
-
-  const branchVisits = useMemo(
-    () =>
-      selectedBranchId
-        ? visits.filter((v) => v.branch_id === selectedBranchId)
-        : visits,
-    [visits, selectedBranchId]
-  )
-
-  const globalClientStats = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        totalVisits: number
-        last30Visits: number
-        lastVisitDate: string | null
-      }
-    >()
-
-    visits.forEach((v) => {
-      const existing = map.get(v.client_id) ?? {
-        totalVisits: 0,
-        last30Visits: 0,
-        lastVisitDate: null,
-      }
-      existing.totalVisits++
-      if (now - new Date(v.completed_at).getTime() <= THIRTY_DAYS_MS) {
-        existing.last30Visits++
-      }
-      if (!existing.lastVisitDate || v.completed_at > existing.lastVisitDate) {
-        existing.lastVisitDate = v.completed_at
-      }
-      map.set(v.client_id, existing)
-    })
-
-    return map
-  }, [visits, now])
-
-  const branchClientStats = useMemo(() => {
-    if (!selectedBranchId) return globalClientStats
-    const map = new Map<
-      string,
-      {
-        totalVisits: number
-        last30Visits: number
-        lastVisitDate: string | null
-      }
-    >()
-
-    branchVisits.forEach((v) => {
-      const existing = map.get(v.client_id) ?? {
-        totalVisits: 0,
-        last30Visits: 0,
-        lastVisitDate: null,
-      }
-      existing.totalVisits++
-      if (now - new Date(v.completed_at).getTime() <= THIRTY_DAYS_MS) {
-        existing.last30Visits++
-      }
-      if (!existing.lastVisitDate || v.completed_at > existing.lastVisitDate) {
-        existing.lastVisitDate = v.completed_at
-      }
-      map.set(v.client_id, existing)
-    })
-
-    return map
-  }, [branchVisits, globalClientStats, selectedBranchId, now])
-
-  function getSegment(client: Client): Segment {
-    const stats = globalClientStats.get(client.id)
-    if (!stats || !stats.lastVisitDate) {
-      const createdDaysAgo = Math.floor(
-        (now - new Date(client.created_at).getTime()) / 86400000
-      )
-      return createdDaysAgo <= 30 ? 'nuevo' : 'perdido'
-    }
-
-    const daysSinceLastVisit = Math.floor(
-      (now - new Date(stats.lastVisitDate).getTime()) / 86400000
-    )
-
-    if (daysSinceLastVisit >= 40) return 'perdido'
-    if (daysSinceLastVisit >= 25) return 'en_riesgo'
-    if (stats.last30Visits >= 4) return 'vip'
-    if (stats.totalVisits >= 2) return 'regular'
-    return 'nuevo'
-  }
-
-  const searchLower = search.toLowerCase()
-
-  function toggleSort(field: 'lastVisit' | 'totalVisits') {
-    if (sortBy === field) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-    } else {
-      setSortBy(field)
-      setSortDir('desc')
-    }
-  }
-
-  function SortIcon({ field }: { field: 'lastVisit' | 'totalVisits' }) {
-    if (sortBy !== field) return <ArrowUpDown className="ml-1.5 size-3 opacity-40" />
-    return sortDir === 'asc'
-      ? <ArrowUp className="ml-1.5 size-3" />
-      : <ArrowDown className="ml-1.5 size-3" />
-  }
-
-  const filteredClients = useMemo(() => {
-    let list = clients.filter((c) => {
-      if (searchLower && !c.name.toLowerCase().includes(searchLower) && !c.phone.includes(searchLower)) return false
-      if (segmentFilter !== 'all' && getSegment(c) !== segmentFilter) return false
-      // Si hay sucursal seleccionada, mostrar solo clientes con visitas en esa sucursal
-      if (selectedBranchId && !branchClientStats.has(c.id)) return false
-      return true
-    })
-
-    if (sortBy) {
-      list = [...list].sort((a, b) => {
-        let valA: number, valB: number
-        if (sortBy === 'lastVisit') {
-          const dA = branchClientStats.get(a.id)?.lastVisitDate
-          const dB = branchClientStats.get(b.id)?.lastVisitDate
-          valA = dA ? new Date(dA).getTime() : 0
-          valB = dB ? new Date(dB).getTime() : 0
-        } else {
-          valA = branchClientStats.get(a.id)?.totalVisits ?? 0
-          valB = branchClientStats.get(b.id)?.totalVisits ?? 0
-        }
-        return sortDir === 'asc' ? valA - valB : valB - valA
-      })
-    }
-
-    return list
-    // getSegment usa globalClientStats que ya está en deps via branchClientStats; selectedBranchId también
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clients, searchLower, segmentFilter, sortBy, sortDir, branchClientStats])
-
-  // frequentBarber derivado del historial lazy
-  const frequentBarber = useMemo(() => {
-    if (!lazyVisits.length) return null
-    const counts = new Map<string, { name: string; count: number }>()
-    for (const v of lazyVisits) {
-      const existing = counts.get(v.barber_id) ?? { name: v.barber_name, count: 0 }
-      existing.count++
-      counts.set(v.barber_id, existing)
-    }
-    let best: { name: string; count: number } | null = null
-    for (const [, data] of counts) {
-      if (!best || data.count > best.count) best = data
-    }
-    return best
-  }, [lazyVisits])
-
-  // Al abrir el sheet: reiniciar estado y disparar fetch lazy
   useEffect(() => {
     if (!detailClient) {
       setLazyVisits([])
@@ -301,12 +449,12 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
     setLazyHasMore(false)
     setLazyOffset(0)
     startLoadingVisits(async () => {
-      const result = await getClientVisits(detailClient.id, { limit: 50, offset: 0 })
-      setLazyVisits(result.visits)
-      setLazyTotalCount(result.totalCount)
-      setLazyHasMore(result.hasMore)
+      const res = await getClientVisits(detailClient.id, { limit: 50, offset: 0 })
+      setLazyVisits(res.visits)
+      setLazyTotalCount(res.totalCount)
+      setLazyHasMore(res.hasMore)
       setLazyOffset(50)
-      const ids = result.visits.map((v) => v.id)
+      const ids = res.visits.map((v) => v.id)
       if (ids.length > 0) {
         const { data } = await supabase
           .from('visit_photos')
@@ -318,577 +466,927 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
         setPhotos([])
       }
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailClient?.id])
 
   const photosByVisit = useMemo(() => {
     const m = new Map<string, PhotoRow[]>()
     for (const p of photos) {
-      const arr = m.get(p.visit_id) || []
+      const arr = m.get(p.visit_id) ?? []
       arr.push(p)
       m.set(p.visit_id, arr)
     }
     return m
   }, [photos])
 
+  const frequentBarber = useMemo(() => {
+    if (!lazyVisits.length) return null
+    const counts = new Map<string, { name: string; count: number }>()
+    for (const v of lazyVisits) {
+      const e = counts.get(v.barber_id) ?? { name: v.barber_name, count: 0 }
+      e.count++
+      counts.set(v.barber_id, e)
+    }
+    let best: { name: string; count: number } | null = null
+    for (const [, d] of counts) if (!best || d.count > best.count) best = d
+    return best
+  }, [lazyVisits])
+
   function getUrl(path: string) {
-    const { data } = supabase.storage.from('visit-photos').getPublicUrl(path)
-    return data.publicUrl
+    return supabase.storage.from('visit-photos').getPublicUrl(path).data.publicUrl
   }
 
+  function openCrmChat(clientId: string) {
+    router.push(`/dashboard/mensajeria?clientId=${clientId}`)
+  }
+
+  // --- Render -------------------------------------------------------------
+  const SortIcon = ({ field }: { field: ClientSortKey }) => {
+    if (sort !== field) return <ArrowUpDown className="ml-1 size-3 opacity-30" />
+    return dir === 'asc' ? <ArrowUp className="ml-1 size-3" /> : <ArrowDown className="ml-1 size-3" />
+  }
+
+  const Th = ({
+    field,
+    children,
+    className,
+    align = 'left',
+  }: {
+    field?: ClientSortKey
+    children: React.ReactNode
+    className?: string
+    align?: 'left' | 'right'
+  }) => (
+    <th
+      className={cn(
+        'px-3 py-2.5 font-semibold',
+        align === 'right' ? 'text-right' : 'text-left',
+        className
+      )}
+    >
+      {field ? (
+        <button
+          onClick={() => toggleSort(field)}
+          className="inline-flex items-center whitespace-nowrap transition-colors hover:text-foreground"
+        >
+          {children}
+          <SortIcon field={field} />
+        </button>
+      ) : (
+        <span className="whitespace-nowrap">{children}</span>
+      )}
+    </th>
+  )
+
   return (
-    <div className="space-y-4 lg:space-y-6">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-xl lg:text-2xl font-bold tracking-tight">Clientes</h2>
-          <p className="text-sm text-muted-foreground hidden sm:block">
-            Base de datos y segmentación de clientes
-          </p>
-        </div>
-        <BranchSelector branches={branches} allowAll />
-      </div>
-
-      <div className="flex flex-col gap-2 sm:gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            placeholder="Buscar por nombre o teléfono..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-
-        <div className="flex flex-wrap gap-1.5 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 pb-1 sm:pb-0">
-          {(['all', 'nuevo', 'regular', 'vip', 'en_riesgo', 'perdido'] as const).map((seg) => {
-            const isActive = segmentFilter === seg
-            if (seg === 'all') {
-              return (
-                <button
-                  key="all"
-                  onClick={() => setSegmentFilter('all')}
-                  className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                    isActive
-                      ? 'border-foreground/30 bg-foreground/10 text-foreground'
-                      : 'border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground'
-                  }`}
-                >
-                  Todos
-                </button>
-              )
-            }
-            const cfg = segmentConfig[seg]
-            return (
-              <button
-                key={seg}
-                onClick={() => setSegmentFilter(seg)}
-                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                  isActive ? cfg.className : 'border-border text-muted-foreground hover:border-foreground/20 hover:text-foreground'
-                }`}
-              >
-                {cfg.label}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Vista desktop: tabla */}
-      <div className="hidden md:block rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Nombre</TableHead>
-              <TableHead>Teléfono</TableHead>
-              <TableHead className="text-right">
-                <button
-                  onClick={() => toggleSort('totalVisits')}
-                  className="inline-flex items-center justify-end w-full hover:text-foreground transition-colors"
-                >
-                  Total visitas
-                  <SortIcon field="totalVisits" />
-                </button>
-              </TableHead>
-              <TableHead>
-                <button
-                  onClick={() => toggleSort('lastVisit')}
-                  className="inline-flex items-center hover:text-foreground transition-colors"
-                >
-                  Última visita
-                  <SortIcon field="lastVisit" />
-                </button>
-              </TableHead>
-              <TableHead className="hidden lg:table-cell">Segmento</TableHead>
-              <TableHead className="text-right">Puntos</TableHead>
-              <TableHead className="text-right">Acciones</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredClients.length === 0 && (
-              <TableRow>
-                <TableCell
-                  colSpan={7}
-                  className="h-24 text-center text-muted-foreground"
-                >
-                  {search
-                    ? 'No se encontraron clientes'
-                    : 'No hay clientes registrados'}
-                </TableCell>
-              </TableRow>
-            )}
-            {filteredClients.map((client) => {
-              const displayStats = branchClientStats.get(client.id)
-              const segment = getSegment(client)
-              const segCfg = segmentConfig[segment]
-              const pts = pointsMap.get(client.id) ?? 0
-
-              return (
-                <TableRow key={client.id}>
-                  <TableCell className="font-medium">{client.name}</TableCell>
-                  <TableCell className="font-mono text-sm">
-                    {client.phone}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {displayStats?.totalVisits ?? 0}
-                  </TableCell>
-                  <TableCell>
-                    {displayStats?.lastVisitDate
-                      ? formatDate(displayStats.lastVisitDate)
-                      : <span className="text-xs italic text-muted-foreground/60">Sin visitas recientes</span>}
-                  </TableCell>
-                  <TableCell className="hidden lg:table-cell">
-                    <Badge variant="outline" className={segCfg.className}>
-                      {segCfg.label}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">{pts}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        title="Abrir chat en CRM"
-                        onClick={() => openCrmChat(client.id)}
-                      >
-                        <MessagesSquare className="size-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        title="Ver detalle"
-                        onClick={() => setDetailClient(client)}
-                      >
-                        <Eye className="size-3" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* Vista mobile: cards */}
-      <div className="md:hidden space-y-2">
-        {filteredClients.length === 0 && (
-          <div className="py-10 text-center text-sm text-muted-foreground">
-            {search ? 'No se encontraron clientes' : 'No hay clientes registrados'}
-          </div>
-        )}
-        {filteredClients.map((client) => {
-          const displayStats = branchClientStats.get(client.id)
-          const segment = getSegment(client)
-          const segCfg = segmentConfig[segment]
-          const pts = pointsMap.get(client.id) ?? 0
-
-          return (
-            <div
-              key={client.id}
-              className="rounded-lg border p-3"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium leading-tight truncate">{client.name}</p>
-                  <p className="mt-0.5 font-mono text-xs text-muted-foreground">{client.phone}</p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Badge variant="outline" className={`text-xs ${segCfg.className}`}>
-                    {segCfg.label}
-                  </Badge>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    title="Abrir chat en CRM"
-                    onClick={() => openCrmChat(client.id)}
-                  >
-                    <MessagesSquare className="size-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    onClick={() => setDetailClient(client)}
-                  >
-                    <Eye className="size-3.5" />
-                  </Button>
-                </div>
-              </div>
-              <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
-                <span>{displayStats?.totalVisits ?? 0} visitas</span>
-                <span>
-                  {pts} {pts === 1 ? 'punto' : 'puntos'}
-                </span>
-                {displayStats?.lastVisitDate && (
-                  <span className="truncate">{formatDate(displayStats.lastVisitDate)}</span>
+    <div className="flex h-[calc(100dvh-7.5rem)] flex-col overflow-hidden lg:h-[calc(100dvh-5rem)]">
+      {/* ---------- Header sticky ---------- */}
+      <div className="shrink-0 border-b border-white/[0.06] bg-zinc-950/80 backdrop-blur-xl">
+        <div className="mx-auto max-w-[100rem] space-y-2.5 px-4 pt-3 pb-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-baseline gap-2.5">
+              <h2 className="bg-gradient-to-b from-zinc-50 to-zinc-300 bg-clip-text text-lg font-bold tracking-tight text-transparent lg:text-xl">
+                Clientes
+              </h2>
+              {/* Los dos números, siempre visibles: es lo que mata la sospecha de
+                  que "faltan clientes" al elegir una sucursal. */}
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {totalSinFiltroDeSegmento.toLocaleString('es-AR')} en la base
+                {branchName && (
+                  <>
+                    {' · '}
+                    <span className="text-zinc-300">
+                      {conVisitasEnScope.toLocaleString('es-AR')} con visitas en {branchName}
+                    </span>
+                  </>
                 )}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 border-white/[0.08] bg-zinc-900/40 text-xs"
+                onClick={handleExport}
+                disabled={exporting || result.total === 0}
+              >
+                {exporting ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <FileDown className="size-3.5" />
+                )}
+                Exportar
+              </Button>
+              <div className="flex items-center gap-1.5">
+                <span className="hidden text-[11px] text-muted-foreground sm:inline">
+                  Métricas de:
+                </span>
+                <BranchSelector
+                  branches={branches}
+                  allowAll
+                  className="h-8 w-[170px] border-white/[0.08] bg-zinc-900/40 text-xs"
+                />
               </div>
             </div>
-          )
-        })}
+          </div>
+
+          {/* Buscador + toggles */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="h-9 border-white/[0.08] bg-zinc-900/40 pl-9 pr-9"
+                placeholder="Buscar por nombre, teléfono u observación en toda la base..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+              />
+              {loading ? (
+                <Loader2 className="absolute right-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+              ) : (
+                searchInput && (
+                  <button
+                    onClick={() => setSearchInput('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+                    aria-label="Limpiar búsqueda"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )
+              )}
+            </div>
+
+            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+              {selectedBranchId && (
+                <FilterToggle
+                  active={onlyWithVisits}
+                  onClick={() => {
+                    setPage(1)
+                    setOnlyWithVisits((v) => !v)
+                  }}
+                >
+                  Sólo con visitas acá
+                </FilterToggle>
+              )}
+              <FilterToggle
+                active={hideWalkins}
+                onClick={() => {
+                  setPage(1)
+                  setHideWalkins((v) => !v)
+                }}
+              >
+                Ocultar sin teléfono
+              </FilterToggle>
+              {hayFiltros && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+                  onClick={limpiarFiltros}
+                >
+                  <X className="size-3" />
+                  Limpiar
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Contador honesto: siempre se ve sobre cuántos se buscó */}
+          <p className="text-[11px] text-muted-foreground">
+            {search ? (
+              <>
+                <span className="font-semibold text-zinc-200 tabular-nums">
+                  {result.total.toLocaleString('es-AR')}
+                </span>{' '}
+                {result.total === 1 ? 'resultado' : 'resultados'} para{' '}
+                <span className="text-zinc-300">«{search}»</span> en los{' '}
+                {totalSinFiltroDeSegmento.toLocaleString('es-AR')} clientes de la base
+              </>
+            ) : (
+              <>
+                Mostrando{' '}
+                <span className="font-semibold text-zinc-200 tabular-nums">
+                  {result.total.toLocaleString('es-AR')}
+                </span>{' '}
+                {result.total === 1 ? 'cliente' : 'clientes'}
+                {branchName && (
+                  <>
+                    {' '}
+                    · métricas de <span className="text-zinc-300">{branchName}</span>
+                    {!onlyWithVisits && ' (la lista sigue siendo toda la base)'}
+                  </>
+                )}
+              </>
+            )}
+          </p>
+        </div>
       </div>
 
-      {/* Client profile sheet */}
-      <Sheet
-        open={!!detailClient}
-        onOpenChange={(open) => !open && setDetailClient(null)}
-      >
-        <SheetContent className="w-full sm:!max-w-[480px] overflow-y-auto p-0">
-          {detailClient && (() => {
-            const segment = getSegment(detailClient)
-            const segCfg = segmentConfig[segment]
-            const pts = pointsMap.get(detailClient.id) ?? 0
-            const stats = branchClientStats.get(detailClient.id)
+      {/* ---------- Cuerpo scrolleable ---------- */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-[100rem] space-y-4 px-4 py-4">
+          {result.error && (
+            <div className="flex items-center gap-3 rounded-2xl border border-red-500/30 bg-red-500/[0.07] p-4">
+              <AlertTriangle className="size-5 shrink-0 text-red-400" />
+              <div className="text-sm">
+                <p className="font-semibold text-red-200">{result.error}</p>
+                <p className="text-red-200/70">
+                  Esto no significa que no tengas clientes: no pudimos leer la base. Reintentá en
+                  unos segundos.
+                </p>
+              </div>
+            </div>
+          )}
 
-            return (
-              <>
-                {/* Header with gradient accent */}
-                <div className="relative border-b bg-gradient-to-b from-white/[0.03] to-transparent px-4 pb-4 pt-5 sm:px-6 sm:pb-5 sm:pt-6">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h2 className="truncate text-xl font-bold tracking-tight">
-                        {detailClient.name}
-                      </h2>
-                      <p className="mt-0.5 font-mono text-sm text-muted-foreground">
-                        {detailClient.phone}
-                      </p>
-                    </div>
-                    <Badge variant="outline" className={`shrink-0 ${segCfg.className}`}>
-                      {segCfg.label}
-                    </Badge>
-                  </div>
+          {/* Segmentos: son las tarjetas Y el filtro */}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
+            <SegmentTile
+              active={segments.length === 0}
+              icon={Users}
+              label="Todos"
+              count={totalSinFiltroDeSegmento}
+              text="text-zinc-200"
+              bg="bg-white/[0.05]"
+              ring="border-white/25"
+              onClick={() => {
+                setPage(1)
+                setSegments([])
+              }}
+            />
+            {SEGMENT_ORDER.map((seg) => {
+              const meta = SEGMENT_META[seg]
+              const c = countsMap.get(seg)
+              return (
+                <SegmentTile
+                  key={seg}
+                  active={segments.includes(seg)}
+                  icon={meta.icon}
+                  label={meta.short}
+                  hint={meta.hint(result.thresholds)}
+                  count={c?.count ?? 0}
+                  money={seg === 'en_riesgo' || seg === 'probo_no_volvio' ? c?.totalSpent : undefined}
+                  text={meta.text}
+                  bg={meta.bg}
+                  ring={meta.ring}
+                  onClick={() => toggleSegment(seg)}
+                />
+              )
+            })}
+          </div>
 
-                  {/* Stats row */}
-                  <div className="mt-4 grid grid-cols-3 gap-3">
-                    <div className="rounded-lg border bg-card/50 px-3 py-2.5 text-center">
-                      <p className="text-xs text-muted-foreground">Visitas</p>
-                      <p className="text-lg font-semibold tabular-nums">
-                        {isLoadingVisits
-                          ? (stats?.totalVisits ?? 0)
-                          : (lazyTotalCount || stats?.totalVisits || 0)}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border bg-card/50 px-3 py-2.5 text-center">
-                      <p className="text-xs text-muted-foreground">Puntos</p>
-                      <p className="text-lg font-semibold tabular-nums">{pts}</p>
-                    </div>
-                    <div className="rounded-lg border bg-card/50 px-3 py-2.5 text-center">
-                      <p className="text-xs text-muted-foreground">Cliente desde</p>
-                      <p className="text-sm font-medium">{formatDate(detailClient.created_at)}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Content */}
-                <div className="space-y-4 sm:space-y-5 px-4 py-4 sm:px-6 sm:py-5">
-                  {/* Action buttons */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-9 bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500/20 hover:text-green-400 transition-colors"
-                      onClick={() => window.open(`https://wa.me/${detailClient.phone.replace(/\D/g, '')}`, '_blank')}
-                    >
-                      <MessageCircle className="mr-2 size-4" />
-                      WhatsApp
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-9 transition-colors"
-                      onClick={async () => {
-                        if (!selectedBranchId) {
-                          toast.error('Seleccioná una sucursal para añadir a la fila.')
-                          return
-                        }
-                        const formData = new FormData()
-                        formData.append('name', detailClient.name)
-                        formData.append('phone', detailClient.phone)
-                        formData.append('branch_id', selectedBranchId!)
-                        const res = await checkinClient(formData)
-                        if (res?.error) {
-                          toast.error(res.error)
-                        } else {
-                          toast.success(`${detailClient.name} añadido a la fila`)
-                        }
-                      }}
-                    >
-                      <Plus className="mr-2 size-4" />
-                      Añadir a fila
-                    </Button>
-                  </div>
-
-                  {/* Frequent barber */}
-                  {frequentBarber && (
-                    <div className="flex items-center gap-2.5 rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-3 py-2.5 text-sm">
-                      <Star className="size-4 shrink-0 text-yellow-400" />
-                      <span className="text-muted-foreground">
-                        Barbero habitual:{' '}
-                        <strong className="text-foreground">
-                          {frequentBarber.name}
-                        </strong>{' '}
-                        ({frequentBarber.count} visitas)
-                      </span>
-                    </div>
+          {/* Tabla desktop */}
+          <div className="hidden overflow-hidden rounded-2xl border border-white/[0.06] bg-zinc-900/40 md:block">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-white/[0.06] bg-white/[0.02]">
+                  <tr className="text-xs uppercase tracking-wider text-muted-foreground">
+                    <Th field="name">Cliente</Th>
+                    <Th field="last_visit">Estado</Th>
+                    <Th field="visits" align="right">
+                      {branchName ? 'Visitas acá' : 'Visitas'}
+                    </Th>
+                    <Th field="spent" align="right">
+                      Gastado
+                    </Th>
+                    <Th field="ticket" align="right" className="hidden xl:table-cell">
+                      Ticket
+                    </Th>
+                    <Th align="right" className="hidden xl:table-cell">
+                      Cada
+                    </Th>
+                    <Th className="hidden lg:table-cell">Barbero</Th>
+                    <th className="px-3 py-2.5 text-right font-semibold">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/[0.04]">
+                  {loading && result.clients.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="py-16 text-center text-muted-foreground">
+                        <Loader2 className="mx-auto mb-2 size-6 animate-spin opacity-50" />
+                        Buscando...
+                      </td>
+                    </tr>
                   )}
+                  {!loading && result.clients.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="py-16 text-center">
+                        <Users className="mx-auto mb-2 size-10 opacity-20" />
+                        <p className="text-sm text-muted-foreground">
+                          {search
+                            ? `Sin resultados para «${search}» en toda la base`
+                            : hayFiltros
+                              ? 'Ningún cliente coincide con estos filtros'
+                              : 'Todavía no hay clientes registrados'}
+                        </p>
+                        {hayFiltros && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="mt-2 h-7 text-xs"
+                            onClick={limpiarFiltros}
+                          >
+                            Limpiar filtros
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  {result.clients.map((c) => {
+                    const meta = SEGMENT_META[c.segment]
+                    const dias = diasDesde(c.lastVisitAt)
+                    const sinVisitasAca = !!branchName && c.visitCount === 0
+                    return (
+                      <tr
+                        key={c.id}
+                        className="cursor-pointer transition-colors hover:bg-white/[0.03]"
+                        onClick={() => setDetailClient(c)}
+                      >
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-2.5">
+                            <div
+                              className={cn(
+                                'grid size-8 shrink-0 place-items-center rounded-full text-[11px] font-bold',
+                                meta.bg,
+                                meta.text
+                              )}
+                            >
+                              {iniciales(c.name)}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="truncate font-medium leading-tight">{nombreVisible(c.name)}</p>
+                              <p
+                                className={cn(
+                                  'truncate font-mono text-[11px]',
+                                  c.isWalkin ? 'italic text-muted-foreground/60' : 'text-muted-foreground'
+                                )}
+                              >
+                                {telefonoLegible(c.phone, c.isWalkin)}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className={cn('shrink-0 text-[10px]', meta.badge)}>
+                              {meta.label}
+                            </Badge>
+                            <span className="whitespace-nowrap text-[11px] text-muted-foreground">
+                              {textoRelativo(dias)}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">
+                          {sinVisitasAca ? (
+                            <span className="text-[11px] italic text-muted-foreground/50">
+                              {c.globalVisitCount > 0 ? `0 · ${c.globalVisitCount} en otra` : '0'}
+                            </span>
+                          ) : (
+                            <>
+                              {c.visitCount}
+                              {branchName && c.globalVisitCount > c.visitCount && (
+                                <span className="ml-1 text-[10px] text-muted-foreground">
+                                  /{c.globalVisitCount}
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-semibold tabular-nums">
+                          {c.totalSpent > 0 ? (
+                            formatCurrency(c.totalSpent)
+                          ) : (
+                            <span className="text-muted-foreground/40">—</span>
+                          )}
+                        </td>
+                        <td className="hidden px-3 py-2.5 text-right tabular-nums text-muted-foreground xl:table-cell">
+                          {c.avgTicket ? formatCurrency(c.avgTicket) : '—'}
+                        </td>
+                        <td className="hidden px-3 py-2.5 text-right tabular-nums text-muted-foreground xl:table-cell">
+                          {c.cadenceDays ? `${c.cadenceDays} d` : '—'}
+                        </td>
+                        <td className="hidden max-w-[9rem] px-3 py-2.5 lg:table-cell">
+                          <span className="block truncate text-muted-foreground">
+                            {c.topBarberName ?? '—'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex justify-end gap-0.5">
+                            {!c.isWalkin && (
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                title="Abrir WhatsApp"
+                                onClick={() =>
+                                  window.open(
+                                    `https://wa.me/${c.phone.replace(/\D/g, '')}`,
+                                    '_blank'
+                                  )
+                                }
+                              >
+                                <MessageCircle className="size-3 text-green-500" />
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              title="Abrir chat en CRM"
+                              onClick={() => openCrmChat(c.id)}
+                            >
+                              <MessagesSquare className="size-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              title="Ver detalle"
+                              onClick={() => setDetailClient(c)}
+                            >
+                              <Eye className="size-3" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <Paginacion
+              desde={desde}
+              hasta={hasta}
+              total={result.total}
+              page={page}
+              totalPages={totalPages}
+              loading={loading}
+              onPage={setPage}
+            />
+          </div>
 
-                  {/* Instagram & Notes section */}
-                  <div className="space-y-3 rounded-lg border bg-card/30 p-4">
-                    <div>
-                      <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                        <Instagram className="size-3" />
-                        Instagram
-                      </label>
-                      <Input
-                        value={editableInstagram}
-                        onChange={(e) => setEditableInstagram(e.target.value)}
-                        placeholder="@usuario"
-                        className="h-9"
-                      />
+          {/* Cards mobile */}
+          <div className="space-y-2 md:hidden">
+            {loading && result.clients.length === 0 && (
+              <div className="py-12 text-center text-muted-foreground">
+                <Loader2 className="mx-auto mb-2 size-6 animate-spin opacity-50" />
+                Buscando...
+              </div>
+            )}
+            {!loading && result.clients.length === 0 && (
+              <div className="rounded-2xl border border-white/[0.06] bg-zinc-900/40 py-12 text-center">
+                <Users className="mx-auto mb-2 size-10 opacity-20" />
+                <p className="text-sm text-muted-foreground">
+                  {search ? `Sin resultados para «${search}»` : 'Ningún cliente coincide'}
+                </p>
+              </div>
+            )}
+            {result.clients.map((c) => {
+              const meta = SEGMENT_META[c.segment]
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => setDetailClient(c)}
+                  className="w-full rounded-xl border border-white/[0.06] bg-zinc-900/40 p-3 text-left transition-colors active:bg-white/[0.04]"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <div
+                      className={cn(
+                        'grid size-9 shrink-0 place-items-center rounded-full text-xs font-bold',
+                        meta.bg,
+                        meta.text
+                      )}
+                    >
+                      {iniciales(c.name)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="truncate font-medium leading-tight">{nombreVisible(c.name)}</p>
+                        <Badge variant="outline" className={cn('shrink-0 text-[10px]', meta.badge)}>
+                          {meta.label}
+                        </Badge>
+                      </div>
+                      <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+                        {telefonoLegible(c.phone, c.isWalkin)}
+                      </p>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                        <span className="tabular-nums">
+                          {c.visitCount} {c.visitCount === 1 ? 'visita' : 'visitas'}
+                        </span>
+                        {c.totalSpent > 0 && (
+                          <span className="font-semibold tabular-nums text-zinc-300">
+                            {formatCurrency(c.totalSpent)}
+                          </span>
+                        )}
+                        <span>{textoRelativo(diasDesde(c.lastVisitAt))}</span>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+            {result.clients.length > 0 && (
+              <div className="rounded-xl border border-white/[0.06] bg-zinc-900/40">
+                <Paginacion
+                  desde={desde}
+                  hasta={hasta}
+                  total={result.total}
+                  page={page}
+                  totalPages={totalPages}
+                  loading={loading}
+                  onPage={setPage}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ---------- Sheet de detalle ---------- */}
+      <Sheet open={!!detailClient} onOpenChange={(open) => !open && setDetailClient(null)}>
+        <SheetContent className="w-full overflow-y-auto p-0 sm:!max-w-[480px]">
+          {detailClient &&
+            (() => {
+              const c = detailClient
+              const meta = SEGMENT_META[c.segment]
+              const dias = diasDesde(c.lastVisitAt)
+              // Si el cliente tiene visitas pero el historial vino vacío, es un fallo
+              // de lectura, no "sin visitas". Decirlo evita el cero silencioso.
+              const historialSospechoso =
+                !isLoadingVisits && lazyVisits.length === 0 && c.globalVisitCount > 0
+
+              return (
+                <>
+                  <div className="relative border-b border-white/[0.06] bg-gradient-to-b from-white/[0.03] to-transparent px-4 pb-4 pt-5 sm:px-6 sm:pb-5 sm:pt-6">
+                    <div className="flex items-start gap-3">
+                      <div
+                        className={cn(
+                          'grid size-12 shrink-0 place-items-center rounded-full text-sm font-bold',
+                          meta.bg,
+                          meta.text
+                        )}
+                      >
+                        {iniciales(c.name)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h2 className="truncate text-xl font-bold tracking-tight">{nombreVisible(c.name)}</h2>
+                        <p className="mt-0.5 font-mono text-sm text-muted-foreground">
+                          {telefonoLegible(c.phone, c.isWalkin)}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className={cn('shrink-0', meta.badge)}>
+                        {meta.label}
+                      </Badge>
                     </div>
 
-                    <div>
-                      <label className="mb-1.5 text-xs font-medium text-muted-foreground block">
-                        Observaciones internas
-                      </label>
-                      <textarea
-                        value={editableNotes}
-                        onChange={(e) => setEditableNotes(e.target.value)}
-                        placeholder="Ej: Prefiere degradé bajo, alérgico a ciertos productos..."
-                        rows={2}
-                        className="w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {meta.hint(result.thresholds)}
+                      {dias !== null && ` · última visita ${textoRelativo(dias)}`}
+                    </p>
+
+                    <div className="mt-4 grid grid-cols-3 gap-2">
+                      <StatBox
+                        label={branchName ? `Visitas en ${branchName}` : 'Visitas'}
+                        value={String(c.visitCount)}
+                        sub={
+                          branchName && c.globalVisitCount !== c.visitCount
+                            ? `${c.globalVisitCount} en total`
+                            : undefined
+                        }
+                      />
+                      <StatBox
+                        label="Gastado"
+                        value={c.totalSpent > 0 ? formatCurrency(c.totalSpent) : '—'}
+                        sub={c.avgTicket ? `${formatCurrency(c.avgTicket)} promedio` : undefined}
+                      />
+                      <StatBox
+                        label="Frecuencia"
+                        value={c.cadenceDays ? `${c.cadenceDays} d` : '—'}
+                        sub={c.cadenceDays ? 'entre visitas' : 'pocas visitas'}
                       />
                     </div>
+                  </div>
 
-                    <div className="flex justify-end">
+                  <div className="space-y-4 px-4 py-4 sm:space-y-5 sm:px-6 sm:py-5">
+                    <div className="grid grid-cols-2 gap-2">
                       <Button
                         size="sm"
-                        variant="default"
-                        className="h-8"
-                        disabled={isSavingNotes || (editableNotes === (detailClient.notes ?? '') && editableInstagram === (detailClient.instagram ?? ''))}
-                        onClick={() => {
-                          startSavingNotes(async () => {
-                            const result = await updateClientNotes(
-                              detailClient.id,
-                              editableNotes.trim() || null,
-                              editableInstagram.trim() || null
-                            )
-                            if (result.error) {
-                              toast.error(result.error)
-                            } else {
-                              toast.success('Datos actualizados')
-                              detailClient.notes = editableNotes.trim() || null
-                              detailClient.instagram = editableInstagram.trim() || null
-                            }
-                          })
+                        variant="outline"
+                        disabled={c.isWalkin}
+                        className="h-9 border-green-500/20 bg-green-500/10 text-green-500 transition-colors hover:bg-green-500/20 hover:text-green-400 disabled:opacity-40"
+                        onClick={() =>
+                          window.open(`https://wa.me/${c.phone.replace(/\D/g, '')}`, '_blank')
+                        }
+                      >
+                        <MessageCircle className="mr-2 size-4" />
+                        WhatsApp
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-9 transition-colors"
+                        onClick={async () => {
+                          if (!selectedBranchId) {
+                            toast.error('Elegí una sucursal para añadir a la fila.')
+                            return
+                          }
+                          const fd = new FormData()
+                          fd.append('name', c.name)
+                          fd.append('phone', c.phone)
+                          fd.append('branch_id', selectedBranchId)
+                          const res = await checkinClient(fd)
+                          if (res?.error) toast.error(res.error)
+                          else toast.success(`${c.name} añadido a la fila`)
                         }}
                       >
-                        <Save className="mr-1.5 size-3.5" />
-                        {isSavingNotes ? 'Guardando...' : 'Guardar'}
+                        <Plus className="mr-2 size-4" />
+                        Añadir a fila
                       </Button>
                     </div>
-                  </div>
 
-                  {/* Historial de visitas — carga lazy al abrir el sheet */}
-                  <div>
-                    <div className="mb-3 flex items-center gap-2">
-                      <h3 className="text-sm font-semibold">Historial de visitas</h3>
-                      {isLoadingVisits ? (
-                        <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-                      ) : (
-                        <Badge variant="secondary" className="text-xs tabular-nums">
-                          {lazyTotalCount > 0 ? lazyTotalCount : lazyVisits.length}
-                        </Badge>
-                      )}
-                    </div>
-                    <ScrollArea className="h-[320px]">
-                      {isLoadingVisits && lazyVisits.length === 0 && (
-                        <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
-                          <Loader2 className="mb-2 size-6 animate-spin opacity-50" />
-                          <p className="text-sm">Cargando historial...</p>
-                        </div>
-                      )}
-                      {!isLoadingVisits && lazyVisits.length === 0 && (
-                        <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
-                          <Camera className="mb-2 size-8 opacity-30" />
-                          <p className="text-sm">Sin visitas registradas</p>
-                        </div>
-                      )}
-                      <div className="space-y-2 pr-2">
-                        {lazyVisits.map((visit) => {
-                          const visitPhotos = photosByVisit.get(visit.id) ?? []
-                          return (
-                            <div
-                              key={visit.id}
-                              className="space-y-2 rounded-lg border bg-card/30 p-3 transition-colors hover:bg-card/60"
-                            >
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <p className="text-sm font-medium">
-                                    {visit.service_name ?? 'Servicio'}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {visit.barber_name}{' '}
-                                    &middot; {formatDateTime(visit.completed_at)}
-                                  </p>
-                                </div>
-                                <div className="text-right">
-                                  <p className="text-sm font-semibold tabular-nums">
-                                    {formatCurrency(visit.amount)}
-                                  </p>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 mt-1 px-2 text-[10px] text-muted-foreground hover:text-amber-500 hover:bg-amber-500/10 border border-transparent hover:border-amber-500/20"
-                                    disabled={requestingReview === visit.id}
-                                    onClick={async () => {
-                                      setRequestingReview(visit.id)
-                                      try {
-                                        const res = await createReviewRequest(
-                                          detailClient!.id,
-                                          visit.branch_id,
-                                          visit.id,
-                                          visit.barber_id
-                                        )
-                                        if (res.error) {
-                                          toast.error(res.error)
-                                          return
-                                        }
-                                        const url = `${window.location.origin}/review/${res.token}`
-                                        const msg = `¡Hola ${detailClient?.name}! Gracias por visitarnos en ${orgName}. Podés contarnos qué te pareció el servicio acá: ${url}`
-                                        window.open(`https://wa.me/${detailClient?.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`, '_blank')
-                                      } finally {
-                                        setRequestingReview(null)
-                                      }
-                                    }}
-                                  >
-                                    <Star className="mr-1 size-3" />
-                                    Pedir Reseña
-                                  </Button>
-                                </div>
-                              </div>
-
-                              {visit.notes && (
-                                <p className="text-xs text-muted-foreground">
-                                  {visit.notes}
-                                </p>
-                              )}
-
-                              {visit.tags && visit.tags.length > 0 && (
-                                <div className="flex flex-wrap gap-1">
-                                  {visit.tags.map((tag: string) => (
-                                    <Badge
-                                      key={tag}
-                                      variant="secondary"
-                                      className="gap-1 text-xs"
-                                    >
-                                      <Tag className="size-2.5" />
-                                      {tag}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              )}
-
-                              {visitPhotos.length > 0 && (
-                                <div className="flex gap-2 overflow-x-auto pt-1">
-                                  {visitPhotos.map((photo) => {
-                                    const url = getUrl(photo.storage_path)
-                                    return (
-                                      <button
-                                        key={photo.id}
-                                        type="button"
-                                        onClick={() => setEnlargedPhoto(url)}
-                                        className="shrink-0"
-                                      >
-                                        <Image
-                                          src={url}
-                                          alt="Corte"
-                                          width={80}
-                                          height={80}
-                                          className="size-20 rounded-md border object-cover transition-opacity hover:opacity-80"
-                                          unoptimized
-                                        />
-                                      </button>
-                                    )
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })}
-
-                        {/* Paginación: ver más */}
-                        {lazyHasMore && (
-                          <button
-                            type="button"
-                            disabled={isLoadingMore}
-                            onClick={() => {
-                              if (!detailClient) return
-                              startLoadingMore(async () => {
-                                const result = await getClientVisits(detailClient.id, {
-                                  limit: 50,
-                                  offset: lazyOffset,
-                                })
-                                setLazyVisits((prev) => [...prev, ...result.visits])
-                                setLazyHasMore(result.hasMore)
-                                setLazyOffset((prev) => prev + 50)
-                                const newIds = result.visits.map((v) => v.id)
-                                if (newIds.length > 0) {
-                                  const { data } = await supabase
-                                    .from('visit_photos')
-                                    .select('id, visit_id, storage_path, order_index')
-                                    .in('visit_id', newIds)
-                                    .order('order_index')
-                                  setPhotos((prev) => [...prev, ...(data ?? [])])
-                                }
-                              })
-                            }}
-                            className="w-full rounded-lg border border-dashed py-2.5 text-xs text-muted-foreground transition-colors hover:border-border hover:text-foreground disabled:opacity-50"
-                          >
-                            {isLoadingMore ? (
-                              <span className="flex items-center justify-center gap-1.5">
-                                <Loader2 className="size-3 animate-spin" />
-                                Cargando...
+                    {(c.topBarberName || c.topBranchName) && (
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        {(frequentBarber?.name ?? c.topBarberName) && (
+                          <span className="inline-flex items-center gap-1.5 rounded-full border border-yellow-500/20 bg-yellow-500/5 px-2.5 py-1">
+                            <Star className="size-3 shrink-0 text-yellow-400" />
+                            <span className="text-muted-foreground">
+                              Barbero habitual:{' '}
+                              <strong className="text-foreground">
+                                {frequentBarber?.name ?? c.topBarberName}
+                              </strong>
+                            </span>
+                          </span>
+                        )}
+                        {c.topBranchName && (
+                          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-muted-foreground">
+                            {c.topBranchName}
+                            {c.branchCount > 1 && (
+                              <span className="text-[10px] text-zinc-400">
+                                +{c.branchCount - 1} suc.
                               </span>
-                            ) : (
-                              `Ver más (${lazyTotalCount - lazyVisits.length} restantes)`
                             )}
-                          </button>
+                          </span>
                         )}
                       </div>
-                    </ScrollArea>
+                    )}
+
+                    <div className="space-y-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+                      <div>
+                        <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                          <Instagram className="size-3" />
+                          Instagram
+                        </label>
+                        <Input
+                          value={editableInstagram}
+                          onChange={(e) => setEditableInstagram(e.target.value)}
+                          placeholder="@usuario"
+                          className="h-9"
+                          disabled={!canEdit}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                          Observaciones internas
+                        </label>
+                        <textarea
+                          value={editableNotes}
+                          onChange={(e) => setEditableNotes(e.target.value)}
+                          placeholder="Ej: prefiere degradé bajo, alérgico a ciertos productos..."
+                          rows={2}
+                          disabled={!canEdit}
+                          className="w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+                        />
+                        <p className="mt-1 text-[10px] text-muted-foreground/70">
+                          Las observaciones también se buscan desde el buscador de arriba.
+                        </p>
+                      </div>
+                      {canEdit && (
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            className="h-8"
+                            disabled={
+                              isSavingNotes ||
+                              (editableNotes === (c.notes ?? '') &&
+                                editableInstagram === (c.instagram ?? ''))
+                            }
+                            onClick={() => {
+                              startSavingNotes(async () => {
+                                const res = await updateClientNotes(
+                                  c.id,
+                                  editableNotes.trim() || null,
+                                  editableInstagram.trim() || null
+                                )
+                                if (res.error) {
+                                  toast.error(res.error)
+                                  return
+                                }
+                                toast.success('Datos actualizados')
+                                const notes = editableNotes.trim() || null
+                                const instagram = editableInstagram.trim() || null
+                                setDetailClient((prev) =>
+                                  prev ? { ...prev, notes, instagram } : prev
+                                )
+                                setResult((prev) => ({
+                                  ...prev,
+                                  clients: prev.clients.map((x) =>
+                                    x.id === c.id ? { ...x, notes, instagram } : x
+                                  ),
+                                }))
+                              })
+                            }}
+                          >
+                            <Save className="mr-1.5 size-3.5" />
+                            {isSavingNotes ? 'Guardando...' : 'Guardar'}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="mb-3 flex items-center gap-2">
+                        <h3 className="text-sm font-semibold">Historial de visitas</h3>
+                        {isLoadingVisits ? (
+                          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                        ) : (
+                          <Badge variant="secondary" className="text-xs tabular-nums">
+                            {lazyTotalCount > 0 ? lazyTotalCount : lazyVisits.length}
+                          </Badge>
+                        )}
+                      </div>
+                      <ScrollArea className="h-[320px]">
+                        {isLoadingVisits && lazyVisits.length === 0 && (
+                          <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+                            <Loader2 className="mb-2 size-6 animate-spin opacity-50" />
+                            <p className="text-sm">Cargando historial...</p>
+                          </div>
+                        )}
+                        {historialSospechoso && (
+                          <div className="flex flex-col items-center justify-center gap-1 py-10 text-center">
+                            <AlertTriangle className="mb-1 size-7 text-amber-400/70" />
+                            <p className="text-sm text-amber-200/90">
+                              No pudimos cargar el historial
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Este cliente tiene {c.globalVisitCount} visitas registradas.
+                            </p>
+                          </div>
+                        )}
+                        {!isLoadingVisits && lazyVisits.length === 0 && !historialSospechoso && (
+                          <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+                            <Camera className="mb-2 size-8 opacity-30" />
+                            <p className="text-sm">Sin visitas registradas</p>
+                          </div>
+                        )}
+                        <div className="space-y-2 pr-2">
+                          {lazyVisits.map((visit) => {
+                            const visitPhotos = photosByVisit.get(visit.id) ?? []
+                            return (
+                              <div
+                                key={visit.id}
+                                className="space-y-2 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3 transition-colors hover:bg-white/[0.04]"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <p className="text-sm font-medium">
+                                      {visit.service_name ?? 'Servicio'}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {visit.barber_name} &middot;{' '}
+                                      {formatDateTime(visit.completed_at)}
+                                    </p>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-sm font-semibold tabular-nums">
+                                      {formatCurrency(visit.amount)}
+                                    </p>
+                                    {!c.isWalkin && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="mt-1 h-6 border border-transparent px-2 text-[10px] text-muted-foreground hover:border-amber-500/20 hover:bg-amber-500/10 hover:text-amber-500"
+                                        disabled={requestingReview === visit.id}
+                                        onClick={async () => {
+                                          setRequestingReview(visit.id)
+                                          try {
+                                            const res = await createReviewRequest(
+                                              c.id,
+                                              visit.branch_id,
+                                              visit.id,
+                                              visit.barber_id
+                                            )
+                                            if (res.error) {
+                                              toast.error(res.error)
+                                              return
+                                            }
+                                            const url = `${window.location.origin}/review/${res.token}`
+                                            const msg = `¡Hola ${c.name}! Gracias por visitarnos en ${orgName}. Podés contarnos qué te pareció el servicio acá: ${url}`
+                                            window.open(
+                                              `https://wa.me/${c.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`,
+                                              '_blank'
+                                            )
+                                          } finally {
+                                            setRequestingReview(null)
+                                          }
+                                        }}
+                                      >
+                                        <Star className="mr-1 size-3" />
+                                        Pedir reseña
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {visit.notes && (
+                                  <p className="text-xs text-muted-foreground">{visit.notes}</p>
+                                )}
+
+                                {visit.tags && visit.tags.length > 0 && (
+                                  <div className="flex flex-wrap gap-1">
+                                    {visit.tags.map((tag: string) => (
+                                      <Badge key={tag} variant="secondary" className="gap-1 text-xs">
+                                        <Tag className="size-2.5" />
+                                        {tag}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {visitPhotos.length > 0 && (
+                                  <div className="flex gap-2 overflow-x-auto pt-1">
+                                    {visitPhotos.map((photo) => {
+                                      const url = getUrl(photo.storage_path)
+                                      return (
+                                        <button
+                                          key={photo.id}
+                                          type="button"
+                                          onClick={() => setEnlargedPhoto(url)}
+                                          className="shrink-0"
+                                        >
+                                          <Image
+                                            src={url}
+                                            alt="Corte"
+                                            width={80}
+                                            height={80}
+                                            className="size-20 rounded-md border object-cover transition-opacity hover:opacity-80"
+                                            unoptimized
+                                          />
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+
+                          {lazyHasMore && (
+                            <button
+                              type="button"
+                              disabled={isLoadingMore}
+                              onClick={() => {
+                                startLoadingMore(async () => {
+                                  const res = await getClientVisits(c.id, {
+                                    limit: 50,
+                                    offset: lazyOffset,
+                                  })
+                                  setLazyVisits((prev) => [...prev, ...res.visits])
+                                  setLazyHasMore(res.hasMore)
+                                  setLazyOffset((prev) => prev + 50)
+                                  const newIds = res.visits.map((v) => v.id)
+                                  if (newIds.length > 0) {
+                                    const { data } = await supabase
+                                      .from('visit_photos')
+                                      .select('id, visit_id, storage_path, order_index')
+                                      .in('visit_id', newIds)
+                                      .order('order_index')
+                                    setPhotos((prev) => [...prev, ...(data ?? [])])
+                                  }
+                                })
+                              }}
+                              className="w-full rounded-lg border border-dashed py-2.5 text-xs text-muted-foreground transition-colors hover:border-border hover:text-foreground disabled:opacity-50"
+                            >
+                              {isLoadingMore ? (
+                                <span className="flex items-center justify-center gap-1.5">
+                                  <Loader2 className="size-3 animate-spin" />
+                                  Cargando...
+                                </span>
+                              ) : (
+                                `Ver más (${lazyTotalCount - lazyVisits.length} restantes)`
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </ScrollArea>
+                    </div>
+
+                    <p className="text-center text-[11px] text-muted-foreground/70">
+                      Cliente desde {formatDate(c.createdAt)}
+                    </p>
                   </div>
-                </div>
-              </>
-            )
-          })()}
+                </>
+              )
+            })()}
         </SheetContent>
       </Sheet>
 
-      {/* Enlarged photo overlay */}
-      <Dialog
-        open={!!enlargedPhoto}
-        onOpenChange={(open) => !open && setEnlargedPhoto(null)}
-      >
+      <Dialog open={!!enlargedPhoto} onOpenChange={(open) => !open && setEnlargedPhoto(null)}>
         <DialogContent className="max-w-lg p-2">
           {enlargedPhoto && (
             <Image
@@ -902,6 +1400,144 @@ export function ClientesClient({ clients, visits, points, branches, orgName = 'B
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+
+function FilterToggle({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+        active
+          ? 'border-sky-500/40 bg-sky-500/10 text-sky-300'
+          : 'border-white/[0.08] text-muted-foreground hover:border-white/20 hover:text-foreground'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function SegmentTile({
+  active,
+  icon: Icon,
+  label,
+  hint,
+  count,
+  money,
+  text,
+  bg,
+  ring,
+  onClick,
+}: {
+  active: boolean
+  icon: typeof Users
+  label: string
+  hint?: string
+  count: number
+  money?: number
+  text: string
+  bg: string
+  ring: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={hint}
+      className={cn(
+        'flex items-center gap-2.5 rounded-xl border p-2.5 text-left transition-all',
+        active ? cn(ring, bg) : 'border-white/[0.06] bg-zinc-900/40 hover:bg-white/[0.04]',
+        count === 0 && !active && 'opacity-50'
+      )}
+    >
+      <div className={cn('grid size-8 shrink-0 place-items-center rounded-lg', bg)}>
+        <Icon className={cn('size-4', text)} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-base font-black leading-none tabular-nums">
+          {count.toLocaleString('es-AR')}
+        </p>
+        <p className="truncate text-[11px] font-medium text-muted-foreground">{label}</p>
+        {money !== undefined && money > 0 && (
+          <p className="truncate text-[10px] tabular-nums text-muted-foreground/70">
+            {formatCurrency(money)}
+          </p>
+        )}
+      </div>
+    </button>
+  )
+}
+
+function StatBox({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-2.5 text-center">
+      <p className="truncate text-[10px] text-muted-foreground">{label}</p>
+      <p className="mt-0.5 truncate text-base font-semibold tabular-nums">{value}</p>
+      {sub && <p className="truncate text-[10px] text-muted-foreground/70">{sub}</p>}
+    </div>
+  )
+}
+
+function Paginacion({
+  desde,
+  hasta,
+  total,
+  page,
+  totalPages,
+  loading,
+  onPage,
+}: {
+  desde: number
+  hasta: number
+  total: number
+  page: number
+  totalPages: number
+  loading: boolean
+  onPage: (p: number) => void
+}) {
+  if (total === 0) return null
+  return (
+    <div className="flex items-center justify-between gap-2 border-t border-white/[0.06] px-3 py-2.5">
+      <p className="text-[11px] text-muted-foreground tabular-nums">
+        {desde.toLocaleString('es-AR')}–{hasta.toLocaleString('es-AR')} de{' '}
+        <span className="font-semibold text-zinc-300">{total.toLocaleString('es-AR')}</span>
+      </p>
+      <div className="flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          disabled={page <= 1 || loading}
+          onClick={() => onPage(page - 1)}
+          aria-label="Página anterior"
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        <span className="min-w-[5.5rem] text-center text-[11px] text-muted-foreground tabular-nums">
+          Pág. {page} de {totalPages}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          disabled={page >= totalPages || loading}
+          onClick={() => onPage(page + 1)}
+          aria-label="Página siguiente"
+        >
+          <ChevronRight className="size-4" />
+        </Button>
+      </div>
     </div>
   )
 }

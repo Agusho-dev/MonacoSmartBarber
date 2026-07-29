@@ -44,40 +44,22 @@ export async function searchClients(query: string) {
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'Organización no encontrada' }
 
-  // Dos queries separadas para evitar interpolación de input en .or()
-  const [byName, byPhone] = await Promise.all([
-    supabase
-      .from('clients')
-      .select('id, name, phone')
-      .eq('organization_id', orgId)
-      .ilike('name', `%${trimmed}%`)
-      .order('name')
-      .limit(10),
-    supabase
-      .from('clients')
-      .select('id, name, phone')
-      .eq('organization_id', orgId)
-      .ilike('phone', `%${trimmed}%`)
-      .order('name')
-      .limit(10),
-  ])
+  // `quick_search_clients` (mig 167) resuelve lo que el doble ILIKE no podía:
+  // pliega acentos (el 17% de los nombres de la base tiene tilde: "agustin" no
+  // encontraba a "Agustín"), acepta los tokens del nombre en cualquier orden y
+  // normaliza el teléfono, así "+54 9 351 212-5249" y "2125249" dan lo mismo.
+  const { data, error } = await supabase.rpc('quick_search_clients', {
+    p_organization_id: orgId,
+    p_query: trimmed,
+    p_limit: 10,
+  })
 
-  if (byName.error || byPhone.error) {
-    console.error('searchClients error:', byName.error ?? byPhone.error)
+  if (error) {
+    console.error('searchClients error:', error.message)
     return { error: 'Error al buscar clientes' }
   }
 
-  // Merge por id eliminando duplicados
-  const seen = new Set<string>()
-  const merged: { id: string; name: string; phone: string }[] = []
-  for (const row of [...(byName.data ?? []), ...(byPhone.data ?? [])]) {
-    if (!seen.has(row.id)) {
-      seen.add(row.id)
-      merged.push(row)
-    }
-  }
-
-  return { data: merged.slice(0, 10) }
+  return { data: (data ?? []) as { id: string; name: string; phone: string }[] }
 }
 
 export async function lookupClientByPhone(phone: string, branchId: string) {

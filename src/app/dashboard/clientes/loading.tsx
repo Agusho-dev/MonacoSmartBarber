@@ -6,7 +6,7 @@ export default function ClientesLoading() {
     <div className="flex h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-5rem)] flex-col overflow-hidden">
       {/* Header sticky */}
       <div className="shrink-0 border-b border-white/[0.06] bg-zinc-950/80 backdrop-blur-xl">
-        <div className="mx-auto max-w-7xl space-y-2.5 px-4 pt-3 pb-2.5">
+        <div className="mx-auto max-w-[100rem] space-y-2.5 px-4 pt-3 pb-2.5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2.5">
               <Skeleton className="h-6 w-28 rounded-md" />
@@ -23,9 +23,9 @@ export default function ClientesLoading() {
       </div>
 
       {/* KPIs por segmento */}
-      <div className="mx-auto w-full max-w-7xl px-4 pt-4">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, i) => (
+      <div className="mx-auto w-full max-w-[100rem] px-4 pt-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
+          {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="rounded-xl border border-white/[0.06] bg-zinc-900/40 px-3 py-3">
               <Skeleton className="h-2.5 w-16 rounded" />
               <Skeleton className="mt-2 h-6 w-12 rounded" />
@@ -36,7 +36,7 @@ export default function ClientesLoading() {
 
       {/* Tabla */}
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-7xl px-4 py-4">
+        <div className="mx-auto max-w-[100rem] px-4 py-4">
           <div className="overflow-hidden rounded-2xl border border-white/[0.06] bg-zinc-900/40">
             {/* Table head — desktop */}
             <div className="hidden border-b border-white/[0.05] bg-zinc-950/40 px-4 py-2.5 md:grid md:grid-cols-[1.5fr_1fr_0.8fr_0.8fr_0.8fr_0.8fr_auto] md:gap-3">
