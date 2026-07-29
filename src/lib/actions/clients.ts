@@ -19,6 +19,10 @@ export async function updateClientNotes(
   // Supabase Auth. Ahí `currentUserCan` devolvería false y le comería las
   // observaciones al barbero en silencio. Para ese camino alcanza con la sesión de
   // barbero + el filtro por organización de abajo.
+  // La cookie es httpOnly y sólo la escribe un login por PIN válido (auth.ts:138);
+  // además el UPDATE de abajo filtra por la org de esa misma sesión. O sea: el
+  // "bypass" sólo alcanza a quien ya es staff de la organización y podría editar la
+  // misma nota desde el panel del barbero. No hay escalada de privilegios.
   const { cookies } = await import('next/headers')
   const esSesionDeBarbero = Boolean((await cookies()).get('barber_session')?.value)
   if (!esSesionDeBarbero) {
