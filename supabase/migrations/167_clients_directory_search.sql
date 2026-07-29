@@ -44,7 +44,7 @@ AS $$
 $$;
 
 COMMENT ON FUNCTION public.norm_text(text) IS
-  'Minúsculas + sin acentos. IMMUTABLE para poder indexarla (ver idx_clients_name_trgm).';
+  'Minúsculas + sin acentos. IMMUTABLE para que se la pueda usar en un índice.';
 
 -- Últimos 10 dígitos del teléfono. Es la forma canónica de comparar teléfonos en la
 -- base: conviven "3512125249", "+54 9 351 212-5249" y "5493512125249" para la misma
@@ -80,10 +80,15 @@ $$;
 CREATE INDEX IF NOT EXISTS idx_clients_org_name
   ON public.clients (organization_id, name);
 
--- Búsqueda por nombre tolerante a acentos. La expresión indexada tiene que ser
--- EXACTAMENTE la misma que usan las funciones de abajo o el índice no se usa.
-CREATE INDEX IF NOT EXISTS idx_clients_name_trgm
-  ON public.clients USING gin (public.norm_text(name) extensions.gin_trgm_ops);
+-- NO se crea índice GIN trigram sobre el nombre, aunque parezca la jugada obvia.
+-- Medido contra prod: el predicado de búsqueda es un OR de cuatro formas (nombre,
+-- teléfono, notas, instagram) y sólo una es indexable, así que el planner resuelve
+-- todo con un Seq Scan igual y el índice queda con idx_scan = 0 mientras se paga en
+-- cada INSERT/UPDATE de `clients`. Sobre 5.541 clientes el scan cuesta ~40 ms, que
+-- para una búsqueda debounced está bien. Si una organización crece a decenas de
+-- miles, el arreglo NO es agregar el índice sino reescribir el filtro como UNION de
+-- las cuatro formas (una rama por índice) — recién ahí el GIN sirve.
+-- `unaccent` sí es necesaria: la usa public.norm_text.
 
 -- Match exacto por teléfono normalizado (el `idx_clients_org_phone_last10` que ya
 -- existe indexa la misma expresión inline, pero el planner no la reconoce a través
@@ -157,7 +162,10 @@ BEGIN
   END IF;
 
   v_q      := btrim(coalesce(p_query, ''));
-  v_norm   := public.norm_text(v_q);
+  -- Se escapan los comodines de LIKE: buscar "100%" tiene que buscar "100%", no
+  -- "cualquier cosa que empiece con 100". Sin esto, escribir "%%" o "_" en el
+  -- buscador devolvía la base entera como si todo matcheara.
+  v_norm   := replace(replace(replace(public.norm_text(v_q), '\', '\\'), '%', '\%'), '_', '\_');
   v_digits := regexp_replace(v_q, '\D', '', 'g');
   -- Si el usuario pegó el número con prefijo internacional ("+54 9 351…"), los
   -- últimos 10 dígitos son los que comparan contra la base.
@@ -438,7 +446,10 @@ BEGIN
   END IF;
 
   v_q      := btrim(coalesce(p_query, ''));
-  v_norm   := public.norm_text(v_q);
+  -- Se escapan los comodines de LIKE: buscar "100%" tiene que buscar "100%", no
+  -- "cualquier cosa que empiece con 100". Sin esto, escribir "%%" o "_" en el
+  -- buscador devolvía la base entera como si todo matcheara.
+  v_norm   := replace(replace(replace(public.norm_text(v_q), '\', '\\'), '%', '\%'), '_', '\_');
   v_digits := regexp_replace(v_q, '\D', '', 'g');
   v_tail   := right(v_digits, 10);
   v_tokens := ARRAY(
@@ -557,7 +568,10 @@ BEGIN
     RETURN;
   END IF;
 
-  v_norm   := public.norm_text(v_q);
+  -- Se escapan los comodines de LIKE: buscar "100%" tiene que buscar "100%", no
+  -- "cualquier cosa que empiece con 100". Sin esto, escribir "%%" o "_" en el
+  -- buscador devolvía la base entera como si todo matcheara.
+  v_norm   := replace(replace(replace(public.norm_text(v_q), '\', '\\'), '%', '\%'), '_', '\_');
   v_digits := regexp_replace(v_q, '\D', '', 'g');
   v_tail   := right(v_digits, 10);
   v_tokens := ARRAY(
