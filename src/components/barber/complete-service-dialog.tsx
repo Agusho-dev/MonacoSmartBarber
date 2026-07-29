@@ -319,7 +319,9 @@ export function CompleteServiceDialog({
       }
 
       if (entry.client_id && clientNotes.trim() !== originalClientNotes) {
-        await updateClientNotes(entry.client_id, clientNotes.trim(), '')
+        // Sin tercer argumento: el Instagram del cliente NO se toca. Antes se
+        // mandaba '' y se lo borraba en cada cierre de servicio.
+        await updateClientNotes(entry.client_id, clientNotes.trim())
       }
 
       onCompleted?.()

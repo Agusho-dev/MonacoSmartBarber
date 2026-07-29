@@ -6,10 +6,18 @@ import { getCurrentOrgId } from './org'
 import { requireOrgAccessToEntity } from './guard'
 import { isValidUUID } from '@/lib/validation'
 
+/**
+ * Actualiza observaciones internas y/o Instagram de un cliente.
+ *
+ * `instagram` es opcional a propósito: `undefined` significa "no lo toques".
+ * El panel del barbero llamaba con `''` al cerrar cada servicio, lo que dejaba el
+ * Instagram en NULL. Hoy no se nota (no hay ninguno cargado en toda la base), pero
+ * la pantalla de clientes ahora invita a cargarlo y el próximo corte lo borraría.
+ */
 export async function updateClientNotes(
   clientId: string,
   notes: string | null,
-  instagram: string | null
+  instagram?: string | null
 ) {
   // El gate visual (`canEdit` en la pantalla de clientes) no alcanza: el id del
   // server action viaja en el bundle del browser y se puede invocar directo.
@@ -17,15 +25,14 @@ export async function updateClientNotes(
   // OJO: esta acción también la llama el panel del barbero al cerrar un servicio
   // (`complete-service-dialog.tsx`), que se autentica por PIN y NO tiene sesión de
   // Supabase Auth. Ahí `currentUserCan` devolvería false y le comería las
-  // observaciones al barbero en silencio. Para ese camino alcanza con la sesión de
-  // barbero + el filtro por organización de abajo.
-  // La cookie es httpOnly y sólo la escribe un login por PIN válido (auth.ts:138);
-  // además el UPDATE de abajo filtra por la org de esa misma sesión. O sea: el
-  // "bypass" sólo alcanza a quien ya es staff de la organización y podría editar la
-  // misma nota desde el panel del barbero. No hay escalada de privilegios.
-  const { cookies } = await import('next/headers')
-  const esSesionDeBarbero = Boolean((await cookies()).get('barber_session')?.value)
-  if (!esSesionDeBarbero) {
+  // observaciones al barbero en silencio.
+  // Se valida la SESIÓN, no la presencia de la cookie: `barber_session` es JSON sin
+  // firmar, así que chequear que exista dejaría entrar a cualquiera que la mande a
+  // mano. `getBarberSession()` verifica el staff contra la base (existe, activo y
+  // con fichada abierta).
+  const { getBarberSession } = await import('./auth')
+  const barbero = await getBarberSession()
+  if (!barbero) {
     const { currentUserCan } = await import('./permissions-gate')
     if (!(await currentUserCan('clients.edit'))) {
       return { error: 'No tenés permiso para editar clientes' }
@@ -38,12 +45,14 @@ export async function updateClientNotes(
   const orgId = await getCurrentOrgId()
   if (!orgId) return { error: 'Organización no encontrada' }
 
+  const cambios: { notes: string | null; instagram?: string | null } = {
+    notes: notes || null,
+  }
+  if (instagram !== undefined) cambios.instagram = instagram || null
+
   const { error } = await supabase
     .from('clients')
-    .update({
-      notes: notes || null,
-      instagram: instagram || null
-    })
+    .update(cambios)
     .eq('id', clientId)
     .eq('organization_id', orgId)
 

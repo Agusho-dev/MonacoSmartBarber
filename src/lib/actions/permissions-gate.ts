@@ -37,17 +37,32 @@ export async function getCurrentUserPermissions(): Promise<Record<string, boolea
       const { getCurrentOrgId } = await import('./org')
       const orgId = await getCurrentOrgId()
       if (orgId) {
-        const { data: member, error: memberErr } = await createAdminClient()
-          .from('organization_members')
-          .select('role')
-          .eq('user_id', user.id)
+        const admin = createAdminClient()
+
+        // La query de arriba filtra `is_active = true`, así que un empleado DADO DE
+        // BAJA es indistinguible de "nunca tuvo fila en staff". Sin este chequeo, un
+        // ex-empleado que quedó en `organization_members` recuperaría permisos
+        // totales — en prod hay exactamente un caso así.
+        const { data: staffDeLaOrg } = await admin
+          .from('staff')
+          .select('id, is_active')
+          .eq('auth_user_id', user.id)
           .eq('organization_id', orgId)
           .maybeSingle()
-        if (memberErr) {
-          console.error('[permissions-gate] organization_members:', memberErr.message)
-        }
-        if (['owner', 'admin'].includes(member?.role ?? '')) {
-          isOwnerOrAdmin = true
+
+        if (!staffDeLaOrg) {
+          const { data: member, error: memberErr } = await admin
+            .from('organization_members')
+            .select('role')
+            .eq('user_id', user.id)
+            .eq('organization_id', orgId)
+            .maybeSingle()
+          if (memberErr) {
+            console.error('[permissions-gate] organization_members:', memberErr.message)
+          }
+          if (['owner', 'admin'].includes(member?.role ?? '')) {
+            isOwnerOrAdmin = true
+          }
         }
       }
     }

@@ -234,6 +234,8 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
   // Debe coincidir con el fetch inicial de page.tsx (el primer refetch se omite).
   const [sort, setSort] = useState<ClientSortKey>('last_visit')
   const [dir, setDir] = useState<'asc' | 'desc'>('desc')
+  /** El usuario tocó un encabezado: a partir de ahí su elección gana sobre el default. */
+  const [sortManual, setSortManual] = useState(false)
   const [page, setPage] = useState(1)
 
   const [result, setResult] = useState<ClientsDirectoryResult>(initial)
@@ -247,19 +249,28 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
     return () => clearTimeout(t)
   }, [searchInput])
 
-  useEffect(() => {
-    setPage(1)
-  }, [search])
-
-  // Al buscar se ordena por relevancia; al limpiar se vuelve al default. Se DERIVA
-  // en vez de sincronizarse con un useEffect: si no, el efecto de carga ya estaba
-  // agendado con el sort viejo y cada transición disparaba dos pares de RPCs.
-  // Si el usuario eligió otro orden a mano (gastado, visitas...), se respeta.
+  // Al buscar se ordena por relevancia y al limpiar se vuelve al default, PERO sólo
+  // mientras el usuario no haya elegido un orden a mano. Sin `sortManual`, hacer clic
+  // en "Cliente" con el buscador lleno no hacía nada y la flechita mentía.
+  // Se DERIVA en vez de sincronizarse con un useEffect: así el efecto de carga nunca
+  // corre con el sort viejo.
   const sortEfectivo: ClientSortKey =
-    search && (sort === 'last_visit' || sort === 'name') ? 'relevance' : sort
+    !sortManual && search && (sort === 'last_visit' || sort === 'name') ? 'relevance' : sort
   const dirEfectiva: 'asc' | 'desc' = sortEfectivo === sort ? dir : 'desc'
 
   const segmentKey = segments.join(',')
+
+  // Cualquier cambio de filtro vuelve a la página 1. Se ajusta DURANTE el render
+  // (patrón soportado por React: re-renderiza sin commitear), no en un useEffect:
+  // así el efecto de carga nunca llega a dispararse con la página vieja. Cubre
+  // también al BranchSelector, que escribe directo al store Zustand y no pasa por
+  // ningún handler de esta pantalla.
+  const filtroKey = [selectedBranchId ?? '', search, segmentKey, onlyWithVisits, hideWalkins].join('|')
+  const [prevFiltroKey, setPrevFiltroKey] = useState(filtroKey)
+  if (prevFiltroKey !== filtroKey) {
+    setPrevFiltroKey(filtroKey)
+    setPage(1)
+  }
 
   const query = useMemo<ClientsDirectoryQuery>(
     () => ({
@@ -276,17 +287,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
     [selectedBranchId, search, segmentKey, onlyWithVisits, hideWalkins, sortEfectivo, dirEfectiva, page]
   )
 
-  // El BranchSelector escribe directo al store, así que el reset de página que
-  // hacen los demás filtros hay que hacerlo acá. Sin esto: estar en la página 20 de
-  // Parana y cambiar a una sucursal con 9 clientes pide offset=950, devuelve una
-  // página vacía y no hay forma de volver.
-  const prevBranchRef = useRef(selectedBranchId)
-  useEffect(() => {
-    if (prevBranchRef.current !== selectedBranchId) {
-      prevBranchRef.current = selectedBranchId
-      setPage(1)
-    }
-  }, [selectedBranchId])
+
 
   // Descarta respuestas viejas: con búsqueda debounced, una respuesta lenta de
   // "ag" no puede pisar la de "agustin".
@@ -344,6 +345,10 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
   // Denominador honesto: el tamaño de la base SIN búsqueda ni toggles. Usar la suma
   // de los chips daría "181 resultados en los 181 clientes de la base".
   const baseTotal = result.baseTotal
+  // Suma de los chips: la población que matchea la búsqueda y los toggles actuales.
+  // El tile "Todos" tiene que usar ESTO (si no, dice 5.541 arriba de siete chips que
+  // suman 312 y parece un desglose roto). El tamaño real de la base va en el header.
+  const totalDeLosChips = result.counts.reduce((acc, c) => acc + c.count, 0)
   // Con una sucursal elegida, "sin visitas" significa "sin visitas ACÁ", así que
   // baseWithVisits es exactamente cuántos clientes pasaron por esa sucursal.
   const conVisitasEnScope = result.baseWithVisits
@@ -369,6 +374,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
 
   function toggleSort(field: ClientSortKey) {
     setPage(1)
+    setSortManual(true)
     if (sort === field) {
       setDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     } else {
@@ -382,6 +388,9 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
     setSegments([])
     setOnlyWithVisits(false)
     setHideWalkins(false)
+    setSortManual(false)
+    setSort('last_visit')
+    setDir('desc')
     setPage(1)
   }
 
@@ -454,6 +463,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
   const [lazyOffset, setLazyOffset] = useState(0)
   const [isLoadingVisits, startLoadingVisits] = useTransition()
   const [visitsFetched, setVisitsFetched] = useState(false)
+  const [visitsError, setVisitsError] = useState(false)
   // Mismo patrón que `load`: sin esto, abrir un cliente lento y después otro rápido
   // pisaba el historial del segundo con las visitas del primero — y "Pedir reseña"
   // generaba el token de una visita ajena.
@@ -477,6 +487,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
       setEditableNotes('')
       setEditableInstagram('')
       setVisitsFetched(false)
+      setVisitsError(false)
       return
     }
     const myId = visitsReqRef.current
@@ -488,23 +499,33 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
     setLazyOffset(0)
     setPhotos([])
     setVisitsFetched(false)
+    setVisitsError(false)
     startLoadingVisits(async () => {
-      const res = await getClientVisits(detailClient.id, { limit: 50, offset: 0 })
-      if (visitsReqRef.current !== myId) return
-      setLazyVisits(res.visits)
-      setLazyTotalCount(res.totalCount)
-      setLazyHasMore(res.hasMore)
-      setLazyOffset(50)
-      setVisitsFetched(true)
-      const ids = res.visits.map((v) => v.id)
-      if (ids.length > 0) {
-        const { data } = await supabase
-          .from('visit_photos')
-          .select('id, visit_id, storage_path, order_index')
-          .in('visit_id', ids)
-          .order('order_index')
+      try {
+        const res = await getClientVisits(detailClient.id, { limit: 50, offset: 0 })
         if (visitsReqRef.current !== myId) return
-        setPhotos(data ?? [])
+        setLazyVisits(res.visits)
+        setLazyTotalCount(res.totalCount)
+        setLazyHasMore(res.hasMore)
+        setLazyOffset(50)
+        const ids = res.visits.map((v) => v.id)
+        if (ids.length > 0) {
+          const { data } = await supabase
+            .from('visit_photos')
+            .select('id, visit_id, storage_path, order_index')
+            .in('visit_id', ids)
+            .order('order_index')
+          if (visitsReqRef.current !== myId) return
+          setPhotos(data ?? [])
+        }
+      } catch {
+        // Si la promesa RECHAZA (red caída, AbortError del timeout de 8s) hay que
+        // dejar rastro igual: sin esto el sheet dibujaba "Sin visitas registradas",
+        // que es exactamente el cero silencioso que queremos evitar.
+        if (visitsReqRef.current !== myId) return
+        setVisitsError(true)
+      } finally {
+        if (visitsReqRef.current === myId) setVisitsFetched(true)
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -529,9 +550,15 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
   }
 
   // --- Render -------------------------------------------------------------
+  // Lee el orden EFECTIVO, no el pedido: si no, con el buscador lleno la flecha
+  // marcaba "Cliente" mientras la lista venía por relevancia.
   const SortIcon = ({ field }: { field: ClientSortKey }) => {
-    if (sort !== field) return <ArrowUpDown className="ml-1 size-3 opacity-30" />
-    return dir === 'asc' ? <ArrowUp className="ml-1 size-3" /> : <ArrowDown className="ml-1 size-3" />
+    if (sortEfectivo !== field) return <ArrowUpDown className="ml-1 size-3 opacity-30" />
+    return dirEfectiva === 'asc' ? (
+      <ArrowUp className="ml-1 size-3" />
+    ) : (
+      <ArrowDown className="ml-1 size-3" />
+    )
   }
 
   const Th = ({
@@ -684,7 +711,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
             {search ? (
               <>
                 <span className="font-semibold text-zinc-200 tabular-nums">
-                  {result.total.toLocaleString('es-AR')}
+                  {numero(result.total)}
                 </span>{' '}
                 {result.total === 1 ? 'resultado' : 'resultados'} para{' '}
                 <span className="text-zinc-300">«{search}»</span> en los{' '}
@@ -694,7 +721,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
               <>
                 Mostrando{' '}
                 <span className="font-semibold text-zinc-200 tabular-nums">
-                  {result.total.toLocaleString('es-AR')}
+                  {numero(result.total)}
                 </span>{' '}
                 {result.total === 1 ? 'cliente' : 'clientes'}
                 {branchName && (
@@ -732,7 +759,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
               active={segments.length === 0}
               icon={Users}
               label="Todos"
-              count={baseTotal}
+              count={totalDeLosChips}
               unknown={hayErrorDeConteos}
               text="text-zinc-200"
               bg="bg-white/[0.05]"
@@ -1039,7 +1066,10 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
               // Si el cliente tiene visitas pero el historial vino vacío, es un fallo
               // de lectura, no "sin visitas". Decirlo evita el cero silencioso.
               const historialSospechoso =
-                visitsFetched && !isLoadingVisits && lazyVisits.length === 0 && c.globalVisitCount > 0
+                visitsFetched &&
+                !isLoadingVisits &&
+                lazyVisits.length === 0 &&
+                (visitsError || c.globalVisitCount > 0)
 
               return (
                 <>
@@ -1252,7 +1282,9 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                               No pudimos cargar el historial
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              Este cliente tiene {c.globalVisitCount} visitas registradas.
+                              {c.globalVisitCount > 0
+                                ? `Este cliente tiene ${c.globalVisitCount} ${c.globalVisitCount === 1 ? 'visita registrada' : 'visitas registradas'}.`
+                                : 'Reintentá abriendo el cliente de nuevo.'}
                             </p>
                           </div>
                         )}
@@ -1371,23 +1403,30 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                               onClick={() => {
                                 const myId = visitsReqRef.current
                                 startLoadingMore(async () => {
-                                  const res = await getClientVisits(c.id, {
-                                    limit: 50,
-                                    offset: lazyOffset,
-                                  })
-                                  if (visitsReqRef.current !== myId) return
-                                  setLazyVisits((prev) => [...prev, ...res.visits])
-                                  setLazyHasMore(res.hasMore)
-                                  setLazyOffset((prev) => prev + 50)
-                                  const newIds = res.visits.map((v) => v.id)
-                                  if (newIds.length > 0) {
-                                    const { data } = await supabase
-                                      .from('visit_photos')
-                                      .select('id, visit_id, storage_path, order_index')
-                                      .in('visit_id', newIds)
-                                      .order('order_index')
+                                  try {
+                                    const res = await getClientVisits(c.id, {
+                                      limit: 50,
+                                      offset: lazyOffset,
+                                    })
                                     if (visitsReqRef.current !== myId) return
-                                    setPhotos((prev) => [...prev, ...(data ?? [])])
+                                    setLazyVisits((prev) => [...prev, ...res.visits])
+                                    setLazyHasMore(res.hasMore)
+                                    setLazyOffset((prev) => prev + 50)
+                                    const newIds = res.visits.map((v) => v.id)
+                                    if (newIds.length > 0) {
+                                      const { data } = await supabase
+                                        .from('visit_photos')
+                                        .select('id, visit_id, storage_path, order_index')
+                                        .in('visit_id', newIds)
+                                        .order('order_index')
+                                      if (visitsReqRef.current !== myId) return
+                                      setPhotos((prev) => [...prev, ...(data ?? [])])
+                                    }
+                                  } catch {
+                                    // Sin esto el botón volvía a su estado normal y el
+                                    // usuario creía que ya no había más visitas.
+                                    if (visitsReqRef.current !== myId) return
+                                    toast.error('No pudimos cargar más visitas')
                                   }
                                 })
                               }}
