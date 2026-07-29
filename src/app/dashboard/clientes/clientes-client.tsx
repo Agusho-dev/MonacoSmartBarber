@@ -431,10 +431,16 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
         `clientes-${new Date().toISOString().slice(0, 10)}`
       )
       if (res.truncated) {
-        toast.warning(`Exportamos las primeras ${res.rows.length} filas. Afiná los filtros para el resto.`)
+        toast.warning(
+          `Exportamos las primeras ${res.rows.length} filas. Afiná los filtros para el resto.`
+        )
       } else {
         toast.success(`${res.rows.length} clientes exportados`)
       }
+    } catch {
+      // Sin este catch el spinner se apagaba, no bajaba ningún CSV y no había
+      // ningún aviso: el usuario concluye "el botón no anda".
+      toast.error('No pudimos exportar la lista. Probá de nuevo.')
     } finally {
       setExporting(false)
     }
@@ -447,6 +453,11 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
   const [lazyHasMore, setLazyHasMore] = useState(false)
   const [lazyOffset, setLazyOffset] = useState(0)
   const [isLoadingVisits, startLoadingVisits] = useTransition()
+  const [visitsFetched, setVisitsFetched] = useState(false)
+  // Mismo patrón que `load`: sin esto, abrir un cliente lento y después otro rápido
+  // pisaba el historial del segundo con las visitas del primero — y "Pedir reseña"
+  // generaba el token de una visita ajena.
+  const visitsReqRef = useRef(0)
   const [isLoadingMore, startLoadingMore] = useTransition()
   const [photos, setPhotos] = useState<PhotoRow[]>([])
   const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null)
@@ -456,6 +467,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
   const [requestingReview, setRequestingReview] = useState<string | null>(null)
 
   useEffect(() => {
+    visitsReqRef.current++
     if (!detailClient) {
       setLazyVisits([])
       setLazyTotalCount(0)
@@ -464,20 +476,26 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
       setPhotos([])
       setEditableNotes('')
       setEditableInstagram('')
+      setVisitsFetched(false)
       return
     }
+    const myId = visitsReqRef.current
     setEditableNotes(detailClient.notes ?? '')
     setEditableInstagram(detailClient.instagram ?? '')
     setLazyVisits([])
     setLazyTotalCount(0)
     setLazyHasMore(false)
     setLazyOffset(0)
+    setPhotos([])
+    setVisitsFetched(false)
     startLoadingVisits(async () => {
       const res = await getClientVisits(detailClient.id, { limit: 50, offset: 0 })
+      if (visitsReqRef.current !== myId) return
       setLazyVisits(res.visits)
       setLazyTotalCount(res.totalCount)
       setLazyHasMore(res.hasMore)
       setLazyOffset(50)
+      setVisitsFetched(true)
       const ids = res.visits.map((v) => v.id)
       if (ids.length > 0) {
         const { data } = await supabase
@@ -485,9 +503,8 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
           .select('id, visit_id, storage_path, order_index')
           .in('visit_id', ids)
           .order('order_index')
+        if (visitsReqRef.current !== myId) return
         setPhotos(data ?? [])
-      } else {
-        setPhotos([])
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -502,19 +519,6 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
     }
     return m
   }, [photos])
-
-  const frequentBarber = useMemo(() => {
-    if (!lazyVisits.length) return null
-    const counts = new Map<string, { name: string; count: number }>()
-    for (const v of lazyVisits) {
-      const e = counts.get(v.barber_id) ?? { name: v.barber_name, count: 0 }
-      e.count++
-      counts.set(v.barber_id, e)
-    }
-    let best: { name: string; count: number } | null = null
-    for (const [, d] of counts) if (!best || d.count > best.count) best = d
-    return best
-  }, [lazyVisits])
 
   function getUrl(path: string) {
     return supabase.storage.from('visit-photos').getPublicUrl(path).data.publicUrl
@@ -729,6 +733,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
               icon={Users}
               label="Todos"
               count={baseTotal}
+              unknown={hayErrorDeConteos}
               text="text-zinc-200"
               bg="bg-white/[0.05]"
               ring="border-white/25"
@@ -749,6 +754,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                   hint={meta.hint(result.thresholds)}
                   count={c?.count ?? 0}
                   money={seg === 'en_riesgo' || seg === 'probo_no_volvio' ? c?.totalSpent : undefined}
+                  unknown={hayErrorDeConteos}
                   text={meta.text}
                   bg={meta.bg}
                   ring={meta.ring}
@@ -791,7 +797,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                       </td>
                     </tr>
                   )}
-                  {!loading && result.clients.length === 0 && (
+                  {!loading && !hayError && result.clients.length === 0 && (
                     <tr>
                       <td colSpan={8} className="py-16 text-center">
                         <Users className="mx-auto mb-2 size-10 opacity-20" />
@@ -953,7 +959,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                 Buscando...
               </div>
             )}
-            {!loading && result.clients.length === 0 && (
+            {!loading && !hayError && result.clients.length === 0 && (
               <div className="rounded-2xl border border-white/[0.06] bg-zinc-900/40 py-12 text-center">
                 <Users className="mx-auto mb-2 size-10 opacity-20" />
                 <p className="text-sm text-muted-foreground">
@@ -1033,7 +1039,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
               // Si el cliente tiene visitas pero el historial vino vacío, es un fallo
               // de lectura, no "sin visitas". Decirlo evita el cero silencioso.
               const historialSospechoso =
-                !isLoadingVisits && lazyVisits.length === 0 && c.globalVisitCount > 0
+                visitsFetched && !isLoadingVisits && lazyVisits.length === 0 && c.globalVisitCount > 0
 
               return (
                 <>
@@ -1116,7 +1122,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                           fd.append('branch_id', selectedBranchId)
                           const res = await checkinClient(fd)
                           if (res?.error) toast.error(res.error)
-                          else toast.success(`${c.name} añadido a la fila`)
+                          else toast.success(`${nombreVisible(c.name)} añadido a la fila`)
                         }}
                       >
                         <Plus className="mr-2 size-4" />
@@ -1126,14 +1132,12 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
 
                     {(c.topBarberName || c.topBranchName) && (
                       <div className="flex flex-wrap items-center gap-2 text-xs">
-                        {(frequentBarber?.name ?? c.topBarberName) && (
+                        {c.topBarberName && (
                           <span className="inline-flex items-center gap-1.5 rounded-full border border-yellow-500/20 bg-yellow-500/5 px-2.5 py-1">
                             <Star className="size-3 shrink-0 text-yellow-400" />
                             <span className="text-muted-foreground">
                               Barbero habitual:{' '}
-                              <strong className="text-foreground">
-                                {frequentBarber?.name ?? c.topBarberName}
-                              </strong>
+                              <strong className="text-foreground">{c.topBarberName}</strong>
                             </span>
                           </span>
                         )}
@@ -1300,7 +1304,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                                               return
                                             }
                                             const url = `${window.location.origin}/review/${res.token}`
-                                            const msg = `¡Hola ${c.name}! Gracias por visitarnos en ${orgName}. Podés contarnos qué te pareció el servicio acá: ${url}`
+                                            const msg = `¡Hola ${nombreVisible(c.name)}! Gracias por visitarnos en ${orgName}. Podés contarnos qué te pareció el servicio acá: ${url}`
                                             window.open(
                                               `https://wa.me/${c.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`,
                                               '_blank'
@@ -1365,11 +1369,13 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                               type="button"
                               disabled={isLoadingMore}
                               onClick={() => {
+                                const myId = visitsReqRef.current
                                 startLoadingMore(async () => {
                                   const res = await getClientVisits(c.id, {
                                     limit: 50,
                                     offset: lazyOffset,
                                   })
+                                  if (visitsReqRef.current !== myId) return
                                   setLazyVisits((prev) => [...prev, ...res.visits])
                                   setLazyHasMore(res.hasMore)
                                   setLazyOffset((prev) => prev + 50)
@@ -1380,6 +1386,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                                       .select('id, visit_id, storage_path, order_index')
                                       .in('visit_id', newIds)
                                       .order('order_index')
+                                    if (visitsReqRef.current !== myId) return
                                     setPhotos((prev) => [...prev, ...(data ?? [])])
                                   }
                                 })
@@ -1461,6 +1468,7 @@ function SegmentTile({
   hint,
   count,
   money,
+  unknown,
   text,
   bg,
   ring,
@@ -1472,6 +1480,8 @@ function SegmentTile({
   hint?: string
   count: number
   money?: number
+  /** No pudimos leer los conteos: mostrar "—", nunca un 0 que parece un dato. */
+  unknown?: boolean
   text: string
   bg: string
   ring: string
@@ -1484,7 +1494,7 @@ function SegmentTile({
       className={cn(
         'flex items-center gap-2.5 rounded-xl border p-2.5 text-left transition-all',
         active ? cn(ring, bg) : 'border-white/[0.06] bg-zinc-900/40 hover:bg-white/[0.04]',
-        count === 0 && !active && 'opacity-50'
+        count === 0 && !active && !unknown && 'opacity-50'
       )}
     >
       <div className={cn('grid size-8 shrink-0 place-items-center rounded-lg', bg)}>
@@ -1492,10 +1502,10 @@ function SegmentTile({
       </div>
       <div className="min-w-0">
         <p className="text-base font-black leading-none tabular-nums">
-          {count.toLocaleString('es-AR')}
+          {unknown ? '—' : count.toLocaleString('es-AR')}
         </p>
         <p className="truncate text-[11px] font-medium text-muted-foreground">{label}</p>
-        {money !== undefined && money > 0 && (
+        {!unknown && money !== undefined && money > 0 && (
           <p className="truncate text-[10px] tabular-nums text-muted-foreground/70">
             {formatCurrency(money)}
           </p>
