@@ -21,11 +21,16 @@ import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import {
   fetchFinancialData,
+  fetchExpensesByCategory,
   type FinancialSummary,
+  type PeriodExpenseRow,
 } from '@/lib/actions/finances'
-import { getAllAccountBalanceTotals } from '@/lib/actions/paymentAccounts'
+import {
+  getAllAccountBalanceTotals,
+  type AccountPeriodTotals,
+} from '@/lib/actions/paymentAccounts'
 import { formatCurrency } from '@/lib/format'
-import type { Branch, PaymentAccount, ExpenseTicket } from '@/lib/types/database'
+import type { Branch, PaymentAccount } from '@/lib/types/database'
 import {
   Card,
   CardContent,
@@ -126,18 +131,22 @@ interface Props {
   initialData: FinancialSummary
   branches: Branch[]
   accounts: AccountWithBranch[]
-  expenseTickets: ExpenseTicket[]
+  /** Movimiento por cuenta del período inicial (mes en curso), calculado en el servidor. */
+  initialAccountBalances: AccountPeriodTotals[]
+  /** Egresos del período inicial (mes en curso), calculados en el servidor. */
+  initialPeriodExpenses: PeriodExpenseRow[]
   commissionSummary: CommissionSummaryData
   orgSlug?: string
 }
 
-type AccountBalance = { id: string; name: string; balance: number; income: number; expenses: number }
+type AccountBalance = AccountPeriodTotals
 
 export function FinanzasClient({
   initialData,
   branches,
   accounts,
-  expenseTickets,
+  initialAccountBalances,
+  initialPeriodExpenses,
   commissionSummary,
   orgSlug = 'barberos',
 }: Props) {
@@ -146,7 +155,8 @@ export function FinanzasClient({
   const [period, setPeriod] = useState('1')
   const [monthOffset, setMonthOffset] = useState(0) // 0 = mes actual, 1 = mes pasado, etc.
   const [isPending, startTransition] = useTransition()
-  const [accountBalances, setAccountBalances] = useState<AccountBalance[]>([])
+  const [accountBalances, setAccountBalances] = useState<AccountBalance[]>(initialAccountBalances)
+  const [periodExpenses, setPeriodExpenses] = useState<PeriodExpenseRow[]>(initialPeriodExpenses)
   const [expenseAccountFilter, setExpenseAccountFilter] = useState<string>('__all__')
 
   // Estado de visibilidad de series del gráfico principal
@@ -170,12 +180,17 @@ export function FinanzasClient({
       // Solo pasar endMonth cuando estamos en modo 1 mes y hay offset
       const endMonth = months === 1 ? getMonthFromOffset(currentOffset) : null
       startTransition(async () => {
-        const [newData, newBalances] = await Promise.all([
+        // Las tres fuentes reciben EXACTAMENTE el mismo período. Antes los saldos por
+        // cuenta y los egresos ignoraban `months`/`endMonth` y devolvían el histórico
+        // completo, así que cambiar de mes no movía esas dos tarjetas.
+        const [newData, newBalances, newExpenses] = await Promise.all([
           fetchFinancialData(months, selectedBranchId, endMonth),
-          getAllAccountBalanceTotals(selectedBranchId),
+          getAllAccountBalanceTotals(selectedBranchId, { monthsBack: months, endMonth }),
+          fetchExpensesByCategory(months, selectedBranchId, endMonth),
         ])
         setData(newData)
         setAccountBalances(newBalances)
+        setPeriodExpenses(newExpenses)
       })
     },
     [period, monthOffset, selectedBranchId]
@@ -205,8 +220,10 @@ export function FinanzasClient({
     refresh('1', newOffset)
   }
 
+  // `periodExpenses` ya viene acotado al período y a la sucursal desde el servidor;
+  // acá sólo queda el filtro por cuenta, que es puramente de UI.
   const expensesByCategory = useMemo(() => {
-    let filtered = expenseTickets
+    let filtered = periodExpenses
     if (expenseAccountFilter !== '__all__') {
       if (expenseAccountFilter === '__cash__') {
         filtered = filtered.filter(t => !t.payment_account_id)
@@ -215,18 +232,14 @@ export function FinanzasClient({
       }
     }
 
-    const branchFiltered = selectedBranchId
-      ? filtered.filter(t => t.branch_id === selectedBranchId)
-      : filtered
-
     const map = new Map<string, number>()
-    for (const t of branchFiltered) {
+    for (const t of filtered) {
       map.set(t.category, (map.get(t.category) ?? 0) + Number(t.amount))
     }
     return Array.from(map.entries())
       .map(([category, amount]) => ({ category, amount }))
       .sort((a, b) => b.amount - a.amount)
-  }, [expenseTickets, expenseAccountFilter, selectedBranchId])
+  }, [periodExpenses, expenseAccountFilter])
 
   const filteredAccounts = useMemo(() => {
     if (!selectedBranchId) return accounts
@@ -251,7 +264,18 @@ export function FinanzasClient({
     }
   })
 
+  // El donut sólo puede dibujar valores positivos, pero la lista de abajo tiene que
+  // mostrar TODA cuenta con movimiento: si en el mes sólo salió plata (un sueldo
+  // pagado desde la cuenta, sin cobros), el neto queda negativo y filtrar por
+  // `balance > 0` la borraba de la pantalla como si no hubiera pasado nada.
   const balancePieData = accountBalances.filter(a => a.balance > 0)
+  const balanceListData = accountBalances.filter(a => a.income !== 0 || a.expenses !== 0)
+  // El color se indexa por cuenta, no por posición en la lista: si no, una cuenta en
+  // negativo (que va en la lista pero no en el donut) corría los colores y la leyenda
+  // dejaba de coincidir con las porciones.
+  const pieColorById = new Map(
+    balancePieData.map((a, i) => [a.id, PIE_COLORS[i % PIE_COLORS.length]])
+  )
   const totalExpensesPie = expensesByCategory.reduce((s, e) => s + e.amount, 0)
 
   // Cálculo de progreso del mes actual hacia el break-even
@@ -344,8 +368,8 @@ export function FinanzasClient({
 
     // Saldos por cuenta
     if (accountBalances.length > 0) {
-      row('SALDOS POR CUENTA')
-      row('Cuenta', 'Ingresos', 'Egresos', 'Saldo')
+      row('INGRESOS POR CUENTA')
+      row('Cuenta', 'Ingresos', 'Egresos', 'Neto')
       for (const a of accountBalances) {
         row(a.name, formatAmountCSV(a.income), formatAmountCSV(a.expenses), formatAmountCSV(a.balance))
       }
@@ -473,10 +497,10 @@ export function FinanzasClient({
     // Saldos por cuenta
     if (accountBalances.length > 0) {
       doc.setFontSize(12)
-      doc.text('Saldos por cuenta', 14, y)
+      doc.text('Ingresos por cuenta', 14, y)
       autoTable(doc, {
         startY: y + 2,
-        head: [['Cuenta', 'Ingresos', 'Egresos', 'Saldo']],
+        head: [['Cuenta', 'Ingresos', 'Egresos', 'Neto']],
         body: accountBalances.map(a => [
           a.name,
           formatCurrency(a.income),
@@ -871,14 +895,16 @@ export function FinanzasClient({
           {/* Pie Chart 1: Saldo por cuenta */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Saldo por cuenta</CardTitle>
-              <CardDescription>Dinero acumulado en cada cuenta</CardDescription>
+              <CardTitle className="text-base">Ingresos por cuenta</CardTitle>
+              <CardDescription>
+                Cobros menos gastos de cada cuenta · {reportPeriodLabel}
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              {balancePieData.length === 0 ? (
+              {balanceListData.length === 0 ? (
                 <div className="flex h-[220px] items-center justify-center">
                   <p className="text-sm text-muted-foreground text-center">
-                    Sin saldo disponible
+                    Sin movimientos en {reportPeriodLabel}
                   </p>
                 </div>
               ) : (
@@ -919,16 +945,20 @@ export function FinanzasClient({
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="mt-3 space-y-1.5">
-                    {balancePieData.map((item, i) => (
+                    {balanceListData.map((item) => (
                       <div key={item.id} className="flex items-center justify-between text-sm">
                         <div className="flex items-center gap-2 min-w-0">
                           <span
                             className="size-2.5 rounded-full shrink-0"
-                            style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
+                            style={{ backgroundColor: pieColorById.get(item.id) ?? COLORS.axis }}
                           />
                           <span className="truncate">{item.name}</span>
                         </div>
-                        <span className="font-medium shrink-0 ml-2">{formatCurrency(item.balance)}</span>
+                        <span
+                          className={`font-medium shrink-0 ml-2 ${item.balance < 0 ? 'text-red-400' : ''}`}
+                        >
+                          {formatCurrency(item.balance)}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -944,7 +974,9 @@ export function FinanzasClient({
                 <div>
                   <CardTitle className="text-base">Egresos por categoría</CardTitle>
                   <CardDescription>
-                    {totalExpensesPie > 0 ? `Total: ${formatCurrency(totalExpensesPie)}` : 'Sin egresos'}
+                    {totalExpensesPie > 0
+                      ? `${formatCurrency(totalExpensesPie)} · ${reportPeriodLabel}`
+                      : `Sin egresos en ${reportPeriodLabel}`}
                   </CardDescription>
                 </div>
               </div>

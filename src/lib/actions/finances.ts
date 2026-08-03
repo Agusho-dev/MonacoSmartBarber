@@ -3,7 +3,7 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { revalidatePath } from 'next/cache'
-import { getMonthBoundsStr, getLocalNow } from '@/lib/time-utils'
+import { getMonthBoundsStr, getLocalNow, getPeriodBoundsStr } from '@/lib/time-utils'
 import { getActiveTimezone } from '@/lib/i18n'
 import { validateBranchAccess } from './org'
 import { getScopedBranchIds } from './branch-access'
@@ -101,6 +101,55 @@ function monthLabel(ym: string): string {
   return `${MONTH_SHORT[m] ?? m} '${y.slice(2)}`
 }
 
+/** Fila mínima que necesita el gráfico "Egresos por categoría". */
+export interface PeriodExpenseRow {
+  category: string
+  amount: number
+  payment_account_id: string | null
+  branch_id: string
+}
+
+/**
+ * Egresos del período, para el gráfico por categoría del resumen.
+ *
+ * Existe porque ese gráfico se alimentaba de la lista de la pestaña "Egresos":
+ * `.limit(100)` y SIN filtro de fecha. Sumaba todos los gastos desde el primer día
+ * (en agosto seguía mostrando el alquiler de julio) y, pasados 100 tickets, los más
+ * viejos desaparecían sin aviso. Acá el rango es el mismo del resto de la pantalla
+ * y `fetchAll` drena todas las filas.
+ */
+export async function fetchExpensesByCategory(
+  monthsBack: number,
+  branchId?: string | null,
+  endMonth?: string | null,
+): Promise<PeriodExpenseRow[]> {
+  const supabase = createAdminClient()
+
+  let scopeBranchIds: string[]
+  if (branchId) {
+    const orgId = await validateBranchAccess(branchId)
+    if (!orgId) return []
+    scopeBranchIds = [branchId]
+  } else {
+    scopeBranchIds = await getScopedBranchIds()
+    if (scopeBranchIds.length === 0) return []
+  }
+
+  const tz = await getActiveTimezone()
+  const range = getPeriodBoundsStr(monthsBack, tz, endMonth)
+
+  return fetchAll<PeriodExpenseRow>((from, to) => {
+    let q = supabase
+      .from('expense_tickets')
+      .select('category, amount, payment_account_id, branch_id')
+      .in('branch_id', scopeBranchIds)
+    if (range) {
+      q = q.gte('expense_date', range.start.slice(0, 10)).lte('expense_date', range.end.slice(0, 10))
+    }
+    return q.order('expense_date').range(from, to)
+  })
+}
+
 export async function fetchFinancialData(
   monthsBack: number,   // 0 = desde el primer registro histórico
   branchId?: string | null,
@@ -148,7 +197,11 @@ export async function fetchFinancialData(
   }
 
   const tz = await getActiveTimezone()
-  const { start: startDateStr, end: endDateStr } = getMonthBoundsStr(actualMonthsBack, tz, localNow)
+  // Misma ventana que piden "Saldo por cuenta" y "Egresos por categoría": una sola
+  // definición de período para toda la pantalla (`getPeriodBoundsStr`).
+  const { start: startDateStr, end: endDateStr } =
+    getPeriodBoundsStr(actualMonthsBack, tz, endMonth) ??
+    getMonthBoundsStr(actualMonthsBack, tz, localNow)
 
   // ── Queries paralelas: todas las fuentes de datos del rango ──
   const branchFilter = <T extends { eq: (col: string, val: string) => T; in: (col: string, vals: string[]) => T }>(q: T, col = 'branch_id') =>

@@ -106,6 +106,37 @@ export function getMonthBoundsStr(
   }
 }
 
+/**
+ * Ventana temporal de un período del panel de Finanzas: "los últimos N meses,
+ * terminando en el mes `endMonth`".
+ *
+ * Es la ÚNICA definición de período de esa pantalla y toda tarjeta tiene que
+ * pedirla acá. Cuando cada tarjeta resolvía su propio rango, "Saldo por cuenta"
+ * y "Egresos por categoría" quedaron sin filtro de fecha: mostraban el acumulado
+ * desde el primer día de la app mientras el resto de la pantalla hablaba de un
+ * mes, así que julio y agosto imprimían exactamente el mismo número.
+ *
+ * `monthsBack = 0` significa "todo el historial" → devuelve null (sin filtro).
+ */
+export function getPeriodBoundsStr(
+  monthsBack: number,
+  timeZone = DEFAULT_TZ,
+  endMonth?: string | null,
+): { start: string; end: string } | null {
+  if (!monthsBack || monthsBack <= 0) return null
+
+  // Mismo anclaje que `fetchFinancialData`: el día 15 del mes final evita que un
+  // corrimiento de TZ empuje la referencia al mes vecino.
+  let reference = getLocalNow(timeZone)
+  if (endMonth) {
+    const [ey, em] = endMonth.split('-').map(Number)
+    if (Number.isFinite(ey) && Number.isFinite(em)) {
+      reference = new Date(Date.UTC(ey, em - 1, 15))
+    }
+  }
+  return getMonthBoundsStr(monthsBack, timeZone, reference)
+}
+
 /** Rango ISO de un día específico YYYY-MM-DD en la TZ dada. */
 export function getDayBounds(dateStr: string, timeZone = DEFAULT_TZ): { start: string; end: string } {
   const offset = getTzOffsetISO(new Date(), timeZone)

@@ -31,6 +31,8 @@ interface FinanzasTabsClientProps {
     branches: Parameters<typeof FinanzasClient>[0]['branches']
     accounts: Parameters<typeof CuentasClient>[0]['accounts']
     accountsMonthIncome: Parameters<typeof CuentasClient>[0]['monthIncome']
+    initialAccountBalances: Parameters<typeof FinanzasClient>[0]['initialAccountBalances']
+    initialPeriodExpenses: Parameters<typeof FinanzasClient>[0]['initialPeriodExpenses']
     staffMembers: Parameters<typeof SueldosClient>[0]['staffMembers']
     paymentAccounts: Parameters<typeof SueldosClient>[0]['paymentAccounts']
     expenseTickets: Parameters<typeof EgresosClient>[0]['expenseTickets']
@@ -55,6 +57,8 @@ export function FinanzasTabsClient({
     branches,
     accounts,
     accountsMonthIncome,
+    initialAccountBalances,
+    initialPeriodExpenses,
     staffMembers,
     paymentAccounts,
     expenseTickets,
@@ -138,7 +142,8 @@ export function FinanzasTabsClient({
                         initialData={initialData}
                         branches={branches}
                         accounts={accounts}
-                        expenseTickets={expenseTickets}
+                        initialAccountBalances={initialAccountBalances}
+                        initialPeriodExpenses={initialPeriodExpenses}
                         commissionSummary={commissionSummary}
                         orgSlug={orgSlug}
                     />

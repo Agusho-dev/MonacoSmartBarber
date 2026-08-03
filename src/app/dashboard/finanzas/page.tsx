@@ -1,8 +1,10 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { fetchAll } from '@/lib/supabase/fetch-all'
+import type { ExpenseTicket } from '@/lib/types/database'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { redirect } from 'next/navigation'
-import { fetchFinancialData } from '@/lib/actions/finances'
+import { fetchFinancialData, fetchExpensesByCategory } from '@/lib/actions/finances'
 import { getCommissionSummary } from '@/lib/actions/salary'
 import { getOrgTipsSummary, getTipsMonthlyTrend, getTipsCoverageRange } from '@/lib/actions/tips'
 import {
@@ -10,7 +12,7 @@ import {
   getFixedExpensePeriods,
   getFixedExpensePeriodsSummary,
 } from '@/lib/actions/fixed-expenses'
-import { getPaymentAccountsMonthIncome } from '@/lib/actions/paymentAccounts'
+import { getPaymentAccountsMonthIncome, getAllAccountBalanceTotals } from '@/lib/actions/paymentAccounts'
 import { getLocalDateStr, getLocalNow } from '@/lib/time-utils'
 import { getActiveTimezone } from '@/lib/i18n'
 import { FinanzasTabsClient } from './finanzas-tabs-client'
@@ -84,6 +86,8 @@ export default async function FinanzasPage() {
     { data: expenseTickets },
     { data: orgRow },
     accountsMonthIncome,
+    initialAccountBalances,
+    initialPeriodExpenses,
   ] = await Promise.all([
     fetchFinancialData(1),
     getFixedExpensesCatalog(),
@@ -116,11 +120,27 @@ export default async function FinanzasPage() {
       // admin (service role): la RLS de expense_tickets sólo deja ver filas a usuarios
       // presentes en `staff` del branch. Un dueño/encargado resuelto vía organization_members
       // veía la tabla vacía. El scope real ya lo da `.in('branch_id', branchIds)` (branches visibles).
-      ? admin.from('expense_tickets').select('*, created_by_staff:created_by(full_name), payment_account:payment_accounts(name, alias_or_cbu)').in('branch_id', branchIds).order('expense_date', { ascending: false }).limit(100)
-      : Promise.resolve({ data: [] }),
+      //
+      // Paginado en vez de `.limit(100)`: la pestaña Egresos filtra por rango de fechas
+      // LIBRE sobre este array. Con un tope fijo, apenas la org pasa las 100 filas los
+      // tickets más viejos dejan de existir para la pantalla y el total de un mes pasado
+      // sale corto sin ningún aviso. Hoy hay 86 — faltaban 14 para empezar a mentir.
+      ? fetchAll<ExpenseTicket>((from, to) =>
+          admin
+            .from('expense_tickets')
+            .select('*, created_by_staff:created_by(full_name), payment_account:payment_accounts(name, alias_or_cbu)')
+            .in('branch_id', branchIds)
+            .order('expense_date', { ascending: false })
+            .range(from, to)
+        ).then(data => ({ data }))
+      : Promise.resolve({ data: [] as ExpenseTicket[] }),
     admin.from('organizations').select('slug, name').eq('id', orgId).maybeSingle(),
     // Acumulado real del mes por cuenta de cobro (transfer_logs: cobros + propinas).
     getPaymentAccountsMonthIncome(),
+    // Mismo período inicial que `fetchFinancialData(1)`: el mes en curso. Se resuelven
+    // en el servidor para que las tarjetas no arranquen vacías esperando un efecto.
+    getAllAccountBalanceTotals(null, { monthsBack: 1 }),
+    fetchExpensesByCategory(1),
   ])
 
   // Mergear salary_configs con staff manualmente (evita problemas con el embedded select de PostgREST)
@@ -152,6 +172,8 @@ export default async function FinanzasPage() {
       branches={branches ?? []}
       accounts={accounts ?? []}
       accountsMonthIncome={accountsMonthIncome}
+      initialAccountBalances={initialAccountBalances}
+      initialPeriodExpenses={initialPeriodExpenses}
       staffMembers={staffMembers}
       paymentAccounts={paymentAccountsForSalary}
       expenseTickets={expenseTickets ?? []}

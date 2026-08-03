@@ -3,7 +3,8 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { revalidatePath } from 'next/cache'
-import { getLocalDayBounds } from '@/lib/time-utils'
+import { getLocalDayBounds, getPeriodBoundsStr } from '@/lib/time-utils'
+import { getActiveTimezone } from '@/lib/i18n'
 import { validateBranchAccess } from './org'
 import { getScopedBranchIds } from './branch-access'
 import { requireOrgAccessToEntity } from './guard'
@@ -241,7 +242,37 @@ export async function deletePaymentAccount(id: string): Promise<DeleteAccountRes
   return { success: true as const }
 }
 
-export async function getAllAccountBalanceTotals(branchId?: string | null) {
+/** Período del panel de Finanzas: "últimos `monthsBack` meses terminando en `endMonth`". */
+export interface AccountBalancePeriod {
+  /** Meses hacia atrás incluyendo el final. 0 = todo el historial. */
+  monthsBack: number
+  /** "YYYY-MM" del mes final. null = mes en curso. */
+  endMonth?: string | null
+}
+
+export interface AccountPeriodTotals {
+  id: string
+  name: string
+  balance: number
+  income: number
+  expenses: number
+}
+
+export async function getAllAccountBalanceTotals(
+  branchId?: string | null,
+  period?: AccountBalancePeriod,
+): Promise<AccountPeriodTotals[]> {
+  // Movimiento del PERÍODO, no de toda la vida de la cuenta. Sin este filtro el card
+  // sumaba desde el primer cobro registrado: la cuenta de un barbero que dejó de
+  // cobrar en julio seguía mostrando sus ~$10M en agosto, y cambiar de mes no movía
+  // el número (mismo bug en "Egresos por categoría"). El rango sale del mismo helper
+  // que usa `fetchFinancialData`, así las dos mitades de la pantalla no pueden
+  // discrepar. Sin `period` → all-time (compatibilidad con callers viejos).
+  const tz = await getActiveTimezone()
+  const range = period
+    ? getPeriodBoundsStr(period.monthsBack, tz, period.endMonth)
+    : null
+
   // Scope de sucursales UNA vez, aplicado a TODAS las queries. Con admin client (RLS bypass)
   // las lecturas de efectivo tienen que scopearse explícitamente: sin branchId ("todas las
   // sucursales") filtrarían plata de otras orgs. Con createClient() la RLS branch-scoped daba
@@ -264,26 +295,42 @@ export async function getAllAccountBalanceTotals(branchId?: string | null) {
     .in('branch_id', scopeBranchIds)
     .order('sort_order')
 
-  // Cash balance histórico: estas queries acumulan filas indefinidamente (no
-  // hay filtro temporal). Sin paginación, una vez que la org supera 1000
-  // visitas en efectivo el saldo de caja queda truncado y mal calculado para
-  // siempre. Paginar con range() drena todas las filas vía PostgREST.
+  // Acota una query al período. `timestamptz` usa el rango ISO completo; las columnas
+  // `date` (expense_tickets.expense_date) sólo la parte YYYY-MM-DD.
+  type Rangeable = { gte: (c: string, v: string) => Rangeable; lte: (c: string, v: string) => Rangeable }
+  const withRange = <T extends Rangeable>(q: T, col: string, dateOnly = false): T => {
+    if (!range) return q
+    const from = dateOnly ? range.start.slice(0, 10) : range.start
+    const to = dateOnly ? range.end.slice(0, 10) : range.end
+    return q.gte(col, from).lte(col, to) as T
+  }
+
+  // Aun acotadas al período, estas queries pueden superar el cap de 1000 filas de
+  // PostgREST (Rondeau hace ~700 cobros/mes). Paginar con range() drena todo:
+  // truncar acá devolvería un saldo silenciosamente bajo.
   const cashVisitsPromise = fetchAll<{ amount: number }>((from, to) =>
-    supabase
-      .from('visits')
-      .select('amount')
-      .eq('payment_method', 'cash')
-      .in('branch_id', scopeBranchIds)
+    withRange(
+      supabase
+        .from('visits')
+        .select('amount')
+        .eq('payment_method', 'cash')
+        .in('branch_id', scopeBranchIds),
+      'completed_at'
+    )
       .order('completed_at')
       .range(from, to)
   )
 
   const cashExpensesPromise = fetchAll<{ amount: number }>((from, to) =>
-    supabase
-      .from('expense_tickets')
-      .select('amount')
-      .is('payment_account_id', null)
-      .in('branch_id', scopeBranchIds)
+    withRange(
+      supabase
+        .from('expense_tickets')
+        .select('amount')
+        .is('payment_account_id', null)
+        .in('branch_id', scopeBranchIds),
+      'expense_date',
+      true
+    )
       .order('expense_date')
       .range(from, to)
   )
@@ -297,28 +344,34 @@ export async function getAllAccountBalanceTotals(branchId?: string | null) {
 
   const accountIds = accounts?.map(a => a.id) || []
 
-  // Transfers + expenses de cuentas en paralelo (también sin filtro temporal:
-  // mismo riesgo de truncado a 1000 cuando crece el historial).
+  // Transfers + expenses de cuentas en paralelo.
   // OJO: el order() tiene que ser por una columna que exista. transfer_logs NO tiene
   // `created_at`: ordenar por ahí hacía fallar la query, fetchAll se comía el error y
   // TODAS las cuentas mostraban $0 de ingresos.
   const [allTransfers, allExpenses] = await Promise.all([
     accountIds.length > 0
       ? fetchAll<AccountAmountRow>((from, to) =>
-          supabase
-            .from('transfer_logs')
-            .select(TRANSFER_INCOME_COLUMNS)
-            .in('payment_account_id', accountIds)
+          withRange(
+            supabase
+              .from('transfer_logs')
+              .select(TRANSFER_INCOME_COLUMNS)
+              .in('payment_account_id', accountIds),
+            'transferred_at'
+          )
             .order('transferred_at')
             .range(from, to)
         )
       : Promise.resolve([] as AccountAmountRow[]),
     accountIds.length > 0
       ? fetchAll<{ payment_account_id: string; amount: number }>((from, to) =>
-          supabase
-            .from('expense_tickets')
-            .select('payment_account_id, amount')
-            .in('payment_account_id', accountIds)
+          withRange(
+            supabase
+              .from('expense_tickets')
+              .select('payment_account_id, amount')
+              .in('payment_account_id', accountIds),
+            'expense_date',
+            true
+          )
             .order('expense_date')
             .range(from, to)
         )
@@ -342,10 +395,13 @@ export async function getAllAccountBalanceTotals(branchId?: string | null) {
     }
   })
 
-  // Add virtual cash account
+  // Cuenta virtual de efectivo. Con período se llama "Efectivo" a secas: es lo
+  // cobrado en mano menos lo gastado en mano ESE mes, no lo que hay hoy en el cajón
+  // (nadie registra los retiros, así que "en caja" era una promesa que el dato no
+  // cumple: Caseros llegó a mostrar $5.383.015 "en caja" sin un solo cierre de turno).
   balances.push({
     id: 'cash_virtual_id',
-    name: 'Efectivo en caja',
+    name: range ? 'Efectivo' : 'Efectivo en caja',
     balance: cashIncome - cashTotalExpenses,
     income: cashIncome,
     expenses: cashTotalExpenses
