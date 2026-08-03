@@ -28,12 +28,6 @@ const TRANSFER_INCOME_COLUMNS = 'payment_account_id, amount, tip_amount'
 
 type AccountAmountRow = { payment_account_id: string; amount: number; tip_amount: number | null }
 
-function incomeOf(rows: AccountAmountRow[], accountId: string): number {
-  return rows
-    .filter((t) => t.payment_account_id === accountId)
-    .reduce((sum, t) => sum + Number(t.amount) + Number(t.tip_amount ?? 0), 0)
-}
-
 export async function getPaymentAccounts(branchId: string) {
   const orgId = await validateBranchAccess(branchId)
   if (!orgId) return { error: 'No autorizado', data: null }
@@ -250,13 +244,35 @@ export interface AccountBalancePeriod {
   endMonth?: string | null
 }
 
+/**
+ * Movimiento de un destino de cobro en el período.
+ *
+ * `charges` es la pieza que reconcilia: la suma de los `charges` de todos los destinos
+ * es EXACTAMENTE el ingreso del período que informa /dashboard/estadisticas ("Ingresos
+ * por método de pago"). Las propinas y los gastos van aparte a propósito — netearlos
+ * dentro del mismo número hacía que Efectivo mostrara $308.315 en julio contra los
+ * $1.666.000 de Estadísticas, y que el gráfico comparara cuentas en bruto contra
+ * efectivo en neto.
+ */
 export interface AccountPeriodTotals {
   id: string
   name: string
-  balance: number
-  income: number
+  /** Cobros del período (sin propina). Es lo que ata con Estadísticas. */
+  charges: number
+  /** Propinas acreditadas en ese destino. */
+  tips: number
+  /** Gastos pagados DESDE ese destino (0 en tarjeta). */
   expenses: number
+  /** charges + tips: todo lo que entró. */
+  income: number
+  /** income - expenses. */
+  balance: number
 }
+
+// IDs de los destinos que no son una `payment_accounts` real. Sin `export`: en un
+// archivo 'use server' sólo se pueden exportar funciones async.
+const CASH_ACCOUNT_ID = 'cash_virtual_id'
+const CARD_ACCOUNT_ID = 'card_virtual_id'
 
 export async function getAllAccountBalanceTotals(
   branchId?: string | null,
@@ -308,12 +324,21 @@ export async function getAllAccountBalanceTotals(
   // Aun acotadas al período, estas queries pueden superar el cap de 1000 filas de
   // PostgREST (Rondeau hace ~700 cobros/mes). Paginar con range() drena todo:
   // truncar acá devolvería un saldo silenciosamente bajo.
-  const cashVisitsPromise = fetchAll<{ amount: number }>((from, to) =>
+  //
+  // Efectivo y tarjeta salen de la MISMA query que usa Estadísticas (`visits`), para
+  // que los dos tableros no puedan divergir. La tarjeta faltaba por completo: en julio
+  // eran $626.000 de Caseros que no aparecían en ningún destino del gráfico.
+  const cashCardVisitsPromise = fetchAll<{
+    amount: number
+    payment_method: string
+    tip_amount: number | null
+    tip_payment_method: string | null
+  }>((from, to) =>
     withRange(
       supabase
         .from('visits')
-        .select('amount')
-        .eq('payment_method', 'cash')
+        .select('amount, payment_method, tip_amount, tip_payment_method')
+        .in('payment_method', ['cash', 'card'])
         .in('branch_id', scopeBranchIds),
       'completed_at'
     )
@@ -335,10 +360,10 @@ export async function getAllAccountBalanceTotals(
       .range(from, to)
   )
 
-  // Fetch cuentas + cash en paralelo
-  const [{ data: accounts }, cashVisits, cashExpenses] = await Promise.all([
+  // Fetch cuentas + cash/tarjeta en paralelo
+  const [{ data: accounts }, cashCardVisits, cashExpenses] = await Promise.all([
     accountsQuery,
-    cashVisitsPromise,
+    cashCardVisitsPromise,
     cashExpensesPromise,
   ])
 
@@ -378,33 +403,62 @@ export async function getAllAccountBalanceTotals(
       : Promise.resolve([] as { payment_account_id: string; amount: number }[]),
   ])
 
-  const cashIncome = cashVisits.reduce((s, v) => s + Number(v.amount), 0)
+  // La propina se atribuye por `tip_payment_method`, no por `payment_method`: existe el
+  // caso (raro pero real) de un corte pagado en efectivo con la propina transferida.
+  const sumBy = (method: 'cash' | 'card') => ({
+    charges: cashCardVisits
+      .filter(v => v.payment_method === method)
+      .reduce((s, v) => s + Number(v.amount), 0),
+    tips: cashCardVisits
+      .filter(v => v.tip_payment_method === method)
+      .reduce((s, v) => s + Number(v.tip_amount ?? 0), 0),
+  })
+  const cash = sumBy('cash')
+  const card = sumBy('card')
   const cashTotalExpenses = cashExpenses.reduce((s, e) => s + Number(e.amount), 0)
 
-  const balances = (accounts || []).map(acc => {
-    const income = incomeOf(allTransfers ?? [], acc.id)
+  const balances: AccountPeriodTotals[] = (accounts || []).map(acc => {
+    const rows = (allTransfers ?? []).filter(t => t.payment_account_id === acc.id)
+    const charges = rows.reduce((s, t) => s + Number(t.amount), 0)
+    const tips = rows.reduce((s, t) => s + Number(t.tip_amount ?? 0), 0)
     const expenses = (allExpenses ?? [])
       .filter(e => e.payment_account_id === acc.id)
       .reduce((s, e) => s + Number(e.amount), 0)
     return {
       id: acc.id,
       name: acc.name,
-      balance: income - expenses,
-      income,
+      charges,
+      tips,
       expenses,
+      income: charges + tips,
+      balance: charges + tips - expenses,
     }
   })
 
-  // Cuenta virtual de efectivo. Con período se llama "Efectivo" a secas: es lo
-  // cobrado en mano menos lo gastado en mano ESE mes, no lo que hay hoy en el cajón
-  // (nadie registra los retiros, así que "en caja" era una promesa que el dato no
-  // cumple: Caseros llegó a mostrar $5.383.015 "en caja" sin un solo cierre de turno).
+  // Destinos virtuales. "Efectivo" a secas y no "Efectivo en caja": nadie registra los
+  // retiros, así que esto es lo que pasó por la caja en el período, no lo que hay hoy
+  // en el cajón (Caseros llegó a mostrar $5.383.015 "en caja" sin un solo cierre de turno).
   balances.push({
-    id: 'cash_virtual_id',
-    name: range ? 'Efectivo' : 'Efectivo en caja',
-    balance: cashIncome - cashTotalExpenses,
-    income: cashIncome,
-    expenses: cashTotalExpenses
+    id: CASH_ACCOUNT_ID,
+    name: 'Efectivo',
+    charges: cash.charges,
+    tips: cash.tips,
+    expenses: cashTotalExpenses,
+    income: cash.charges + cash.tips,
+    balance: cash.charges + cash.tips - cashTotalExpenses,
+  })
+
+  // Tarjeta no es una `payment_accounts` y por eso faltaba, pero es plata cobrada que
+  // tiene que estar: sin ella el gráfico no sumaba el ingreso del período y no había
+  // forma de cuadrarlo contra Estadísticas.
+  balances.push({
+    id: CARD_ACCOUNT_ID,
+    name: 'Tarjeta',
+    charges: card.charges,
+    tips: card.tips,
+    expenses: 0,
+    income: card.charges + card.tips,
+    balance: card.charges + card.tips,
   })
 
   return balances

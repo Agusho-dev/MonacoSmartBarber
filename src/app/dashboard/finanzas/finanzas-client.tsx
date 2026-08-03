@@ -264,14 +264,19 @@ export function FinanzasClient({
     }
   })
 
-  // El donut sólo puede dibujar valores positivos, pero la lista de abajo tiene que
-  // mostrar TODA cuenta con movimiento: si en el mes sólo salió plata (un sueldo
-  // pagado desde la cuenta, sin cobros), el neto queda negativo y filtrar por
-  // `balance > 0` la borraba de la pantalla como si no hubiera pasado nada.
-  const balancePieData = accountBalances.filter(a => a.balance > 0)
-  const balanceListData = accountBalances.filter(a => a.income !== 0 || a.expenses !== 0)
-  // El color se indexa por cuenta, no por posición en la lista: si no, una cuenta en
-  // negativo (que va en la lista pero no en el donut) corría los colores y la leyenda
+  // El donut reparte COBROS, no netos. Netear los gastos adentro de la porción hacía
+  // que efectivo se comparara en neto contra cuentas en bruto (julio: Efectivo $308.315
+  // en esta pantalla contra $1.666.000 en Estadísticas). Los gastos y las propinas se
+  // muestran aparte, y así `totalCharges` cuadra exacto con "Ingresos por método de pago".
+  const balancePieData = accountBalances.filter(a => a.charges > 0)
+  const balanceListData = accountBalances.filter(
+    a => a.charges !== 0 || a.tips !== 0 || a.expenses !== 0
+  )
+  const totalCharges = accountBalances.reduce((s, a) => s + a.charges, 0)
+  const totalTips = accountBalances.reduce((s, a) => s + a.tips, 0)
+  const totalAccountExpenses = accountBalances.reduce((s, a) => s + a.expenses, 0)
+  // El color se indexa por cuenta, no por posición en la lista: si no, una cuenta sin
+  // cobros (que va en la lista pero no en el donut) corría los colores y la leyenda
   // dejaba de coincidir con las porciones.
   const pieColorById = new Map(
     balancePieData.map((a, i) => [a.id, PIE_COLORS[i % PIE_COLORS.length]])
@@ -368,11 +373,18 @@ export function FinanzasClient({
 
     // Saldos por cuenta
     if (accountBalances.length > 0) {
-      row('INGRESOS POR CUENTA')
-      row('Cuenta', 'Ingresos', 'Egresos', 'Neto')
+      row('COBROS POR DESTINO')
+      row('Destino', 'Cobros', 'Propinas', 'Gastos pagados', 'Neto')
       for (const a of accountBalances) {
-        row(a.name, formatAmountCSV(a.income), formatAmountCSV(a.expenses), formatAmountCSV(a.balance))
+        row(
+          a.name,
+          formatAmountCSV(a.charges),
+          formatAmountCSV(a.tips),
+          formatAmountCSV(a.expenses),
+          formatAmountCSV(a.balance),
+        )
       }
+      row('TOTAL', formatAmountCSV(totalCharges), formatAmountCSV(totalTips), formatAmountCSV(totalAccountExpenses), '')
       lines.push('')
     }
 
@@ -497,16 +509,20 @@ export function FinanzasClient({
     // Saldos por cuenta
     if (accountBalances.length > 0) {
       doc.setFontSize(12)
-      doc.text('Ingresos por cuenta', 14, y)
+      doc.text('Cobros por destino', 14, y)
       autoTable(doc, {
         startY: y + 2,
-        head: [['Cuenta', 'Ingresos', 'Egresos', 'Neto']],
-        body: accountBalances.map(a => [
-          a.name,
-          formatCurrency(a.income),
-          formatCurrency(a.expenses),
-          formatCurrency(a.balance),
-        ]),
+        head: [['Destino', 'Cobros', 'Propinas', 'Gastos pagados', 'Neto']],
+        body: [
+          ...accountBalances.map(a => [
+            a.name,
+            formatCurrency(a.charges),
+            formatCurrency(a.tips),
+            formatCurrency(a.expenses),
+            formatCurrency(a.balance),
+          ]),
+          ['TOTAL', formatCurrency(totalCharges), formatCurrency(totalTips), formatCurrency(totalAccountExpenses), ''],
+        ],
         theme: 'grid',
         styles: { fontSize: 9 },
         headStyles: { fillColor: [40, 40, 40] },
@@ -892,12 +908,12 @@ export function FinanzasClient({
 
         {/* Sección inferior: Pie Charts + Break-Even */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {/* Pie Chart 1: Saldo por cuenta */}
+          {/* Pie Chart 1: Cobros por destino */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Ingresos por cuenta</CardTitle>
+              <CardTitle className="text-base">Cobros por destino</CardTitle>
               <CardDescription>
-                Cobros menos gastos de cada cuenta · {reportPeriodLabel}
+                Dónde entró la plata · {reportPeriodLabel}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -913,7 +929,7 @@ export function FinanzasClient({
                     <PieChart>
                       <Pie
                         data={balancePieData}
-                        dataKey="balance"
+                        dataKey="charges"
                         nameKey="name"
                         cx="50%"
                         cy="50%"
@@ -941,7 +957,7 @@ export function FinanzasClient({
                           <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip content={<PieTooltip />} />
+                      <Tooltip content={<DestinationTooltip />} />
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="mt-3 space-y-1.5">
@@ -954,13 +970,36 @@ export function FinanzasClient({
                           />
                           <span className="truncate">{item.name}</span>
                         </div>
-                        <span
-                          className={`font-medium shrink-0 ml-2 ${item.balance < 0 ? 'text-red-400' : ''}`}
-                        >
-                          {formatCurrency(item.balance)}
+                        <span className="font-medium shrink-0 ml-2">
+                          {formatCurrency(item.charges)}
                         </span>
                       </div>
                     ))}
+                  </div>
+
+                  {/* Reconciliación explícita: este total es el mismo "Ingresos" que
+                      informa /dashboard/estadisticas para el período. Imprimirlo evita
+                      la pregunta "¿por qué las dos pantallas no dicen lo mismo?" —
+                      propinas y gastos van debajo, sin mezclarse con los cobros. */}
+                  <div className="mt-3 border-t pt-3 space-y-1.5 text-sm">
+                    <div className="flex items-center justify-between font-medium">
+                      <span>Total cobrado</span>
+                      <span>{formatCurrency(totalCharges)}</span>
+                    </div>
+                    {totalTips > 0 && (
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>Propinas</span>
+                        <span>{formatCurrency(totalTips)}</span>
+                      </div>
+                    )}
+                    {totalAccountExpenses > 0 && (
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>Gastos pagados desde estos destinos</span>
+                        <span className="text-red-400">
+                          −{formatCurrency(totalAccountExpenses)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -1437,6 +1476,35 @@ function FinanceTooltip({
           }`}
         >
           Ingresos {momPct >= 0 ? '+' : ''}{momPct}% vs mes anterior
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Tooltip del donut de destinos. La porción vale COBROS; propina y gastos se muestran
+ * acá para que la información siga disponible sin contaminar el número que reconcilia
+ * con Estadísticas.
+ */
+function DestinationTooltip({ active, payload }: Record<string, unknown>) {
+  if (!active || !Array.isArray(payload) || payload.length === 0) return null
+  const entry = payload[0] as Record<string, unknown>
+  const row = entry.payload as AccountPeriodTotals | undefined
+  return (
+    <div className="rounded-lg border bg-card px-3 py-2 shadow-md">
+      <p className="text-sm font-medium text-foreground">{String(entry.name)}</p>
+      <p className="text-sm text-muted-foreground">
+        Cobros: {formatCurrency(Number(entry.value))}
+      </p>
+      {!!row?.tips && (
+        <p className="text-xs text-muted-foreground">
+          Propinas: {formatCurrency(row.tips)}
+        </p>
+      )}
+      {!!row?.expenses && (
+        <p className="text-xs text-muted-foreground">
+          Gastos pagados: −{formatCurrency(row.expenses)}
         </p>
       )}
     </div>
