@@ -44,8 +44,11 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
-import type { QueueEntry, StaffStatus, StaffSchedule, Staff, BreakConfig, Service } from '@/lib/types/database'
+import { TurnoBadge } from '@/components/appointments/turno-badge'
+import type { Appointment, QueueEntry, StaffStatus, StaffSchedule, Staff, BreakConfig, Service } from '@/lib/types/database'
 import { isBarberBlockedByShiftEnd } from '@/lib/barber-utils'
+import { appointmentTimeLabel, findNextAppointment, type NextAppointmentInfo } from '@/lib/queue-appointments'
+import { getLocalDateStr } from '@/lib/time-utils'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -69,7 +72,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Clock, User, Scissors, X, Pause, GripVertical, Zap, UserPlus, Play, Check, ChevronDown, Search, FileEdit, ExternalLink, Sparkles, Info } from 'lucide-react'
+import { Clock, User, Scissors, X, Pause, GripVertical, Zap, UserPlus, Play, Check, ChevronDown, Search, FileEdit, ExternalLink, Sparkles, Info, CalendarClock } from 'lucide-react'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -129,6 +132,7 @@ interface QueueCardProps {
   actionLoading: string | null
   selectedBranchId: string | null
   getBranchName: (id: string) => string
+  timezone: string
 }
 
 function QueueCard({
@@ -139,7 +143,15 @@ function QueueCard({
   actionLoading,
   selectedBranchId,
   getBranchName,
+  timezone,
 }: QueueCardProps) {
+  // Los turnos no se arrastran. `handleDragEnd` renumera y reescribe
+  // `priority_order` (que en un turno es su hora reservada, la clave de toda la
+  // convivencia con la fila) y, al soltar en otra columna, le cambiaría el
+  // barbero sin tocar `appointments.barber_id`: fila y agenda quedarían
+  // diciendo cosas distintas. Se reprograman desde la agenda.
+  const isAppointment = entry.is_appointment
+
   const {
     attributes,
     listeners,
@@ -150,6 +162,9 @@ function QueueCard({
   } = useSortable({
     id: entry.id,
     data: { entry },
+    // Sólo `draggable`: la tarjeta sigue siendo droppable para que un walk-in
+    // se pueda soltar antes o después del turno sin perder el punto de inserción.
+    disabled: { draggable: isAppointment },
   })
 
   // Evitar error visual de dnd-kit origin
@@ -161,24 +176,71 @@ function QueueCard({
   const isBreak = entry.is_break
   const displayName = isBreak ? 'Descanso' : (entry.client?.name ?? 'Cliente')
 
+  function explainNoDrag() {
+    toast.info('Los turnos se mueven desde la agenda, no desde la fila', {
+      description: 'Ahí se reprograma la hora o el barbero y la fila se actualiza sola.',
+      action: {
+        label: 'Ir a la agenda',
+        onClick: () => { window.location.href = '/dashboard/turnos/agenda' },
+      },
+    })
+  }
+
+  /**
+   * Avisa sólo si REALMENTE intentó arrastrar: mismo umbral de 5px que usa el
+   * MouseSensor. Con un `onPointerDown` pelado, cualquier toque para scrollear
+   * el kanban en la tablet levantaba el cartel y se volvía ruido.
+   */
+  function handleAppointmentPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    const startX = e.clientX
+    const startY = e.clientY
+
+    function cleanup() {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', cleanup)
+      window.removeEventListener('pointercancel', cleanup)
+    }
+
+    function onMove(ev: PointerEvent) {
+      if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 5) return
+      cleanup()
+      explainNoDrag()
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', cleanup)
+    window.addEventListener('pointercancel', cleanup)
+  }
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
+      {...(isAppointment ? {} : attributes)}
+      {...(isAppointment ? {} : listeners)}
+      onPointerDown={isAppointment ? handleAppointmentPointerDown : undefined}
+      title={isAppointment ? 'Los turnos se mueven desde la agenda, no desde la fila' : undefined}
       className={[
-        'w-full cursor-grab active:cursor-grabbing group relative rounded-xl border transition-colors duration-150 overflow-hidden',
+        'w-full group relative rounded-xl border transition-colors duration-150 overflow-hidden',
+        isAppointment ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
         isDragging ? 'opacity-40 scale-[0.98] z-50' : 'bg-zinc-900/80',
         isBreak
           ? 'border-amber-900/50 bg-amber-950/30'
-          : 'border-zinc-800 hover:border-zinc-700',
+          : isAppointment
+            ? 'border-violet-500/40 bg-violet-950/25'
+            : 'border-zinc-800 hover:border-zinc-700',
       ].join(' ')}
     >
       <div className="flex items-center gap-2.5 px-3 py-2.5">
-        {/* Handle visual */}
-        <div className="shrink-0 text-zinc-700/50 group-hover:text-zinc-500 transition-colors">
-          <GripVertical className="size-4" />
+        {/* Handle visual (en un turno pasa a ser el ícono de reservado: no arrastra) */}
+        <div
+          className={
+            isAppointment
+              ? 'shrink-0 text-violet-400'
+              : 'shrink-0 text-zinc-700/50 group-hover:text-zinc-500 transition-colors'
+          }
+        >
+          {isAppointment ? <CalendarClock className="size-4" /> : <GripVertical className="size-4" />}
         </div>
 
         {/* Badge */}
@@ -187,7 +249,9 @@ function QueueCard({
             'flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold',
             isBreak
               ? 'bg-amber-500/20 text-amber-400'
-              : 'bg-zinc-800 text-zinc-300',
+              : isAppointment
+                ? 'bg-violet-500/20 text-violet-300'
+                : 'bg-zinc-800 text-zinc-300',
           ].join(' ')}
         >
           {isBreak ? <Pause className="size-3.5" /> : `#${entry.position}`}
@@ -203,7 +267,15 @@ function QueueCard({
             {displayName}
           </p>
           <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 mt-0.5 min-w-0 overflow-hidden">
-            {!isBreak && entry.client?.phone && (
+            {/* La hora sale de `priority_order`: en un turno es la HORA RESERVADA,
+                no la de llegada, y es la que define su precedencia en la fila. */}
+            {isAppointment && (
+              <TurnoBadge
+                time={appointmentTimeLabel(entry, timezone)}
+                className="text-violet-300 dark:text-violet-300"
+              />
+            )}
+            {!isBreak && !isAppointment && entry.client?.phone && (
               <span className="truncate shrink-0 max-w-[80px]">{entry.client.phone}</span>
             )}
             {!selectedBranchId && (
@@ -222,6 +294,16 @@ function QueueCard({
               <span className="truncate">{formatElapsed(entry.checked_in_at)}</span>
             </span>
           </div>
+          {isAppointment && (
+            <a
+              href="/dashboard/turnos/agenda"
+              onPointerDown={(e) => e.stopPropagation()}
+              className="mt-1 inline-flex w-fit items-center gap-1 text-[10px] text-violet-400/80 transition-colors hover:text-violet-300"
+            >
+              <ExternalLink className="size-2.5 shrink-0" />
+              Se mueve desde la agenda
+            </a>
+          )}
         </div>
 
         {/* Acciones */}
@@ -392,6 +474,7 @@ interface KanbanColumnProps {
   actionLoading: string | null
   selectedBranchId: string | null
   getBranchName: (id: string) => string
+  timezone: string
   children?: React.ReactNode
 }
 
@@ -414,6 +497,7 @@ function KanbanColumn({
   actionLoading,
   selectedBranchId,
   getBranchName,
+  timezone,
   children,
 }: KanbanColumnProps) {
   const { setNodeRef } = useSortable({
@@ -541,10 +625,11 @@ function KanbanColumn({
               actionLoading={actionLoading}
               selectedBranchId={selectedBranchId}
               getBranchName={getBranchName}
+              timezone={timezone}
             />
           ))}
         </SortableContext>
-        
+
         {entries.length === 0 && !inProgressEntry && !children && (
           <div className="flex flex-1 items-center justify-center h-24 border-2 border-dashed border-zinc-800/50 rounded-xl text-zinc-600">
             <p className="text-xs font-medium">Arrastrar aquí</p>
@@ -592,6 +677,7 @@ function DynamicColumn({
   actionLoading,
   selectedBranchId,
   getBranchName,
+  timezone,
 }: {
   id: ColumnId
   entries: QueueEntry[]
@@ -600,6 +686,7 @@ function DynamicColumn({
   actionLoading: string | null
   selectedBranchId: string | null
   getBranchName: (id: string) => string
+  timezone: string
 }) {
   const { setNodeRef } = useSortable({
     id,
@@ -630,6 +717,7 @@ function DynamicColumn({
               actionLoading={actionLoading}
               selectedBranchId={selectedBranchId}
               getBranchName={getBranchName}
+              timezone={timezone}
             />
           ))}
         </SortableContext>
@@ -660,6 +748,8 @@ function BarberRow({
   actionLoading,
   selectedBranchId,
   getBranchName,
+  timezone,
+  nextAppointment,
 }: {
   barber: BarberRow
   entries: QueueEntry[]
@@ -675,6 +765,8 @@ function BarberRow({
   actionLoading: string | null
   selectedBranchId: string | null
   getBranchName: (id: string) => string
+  timezone: string
+  nextAppointment?: NextAppointmentInfo | null
 }) {
   const { setNodeRef } = useSortable({
     id: barber.id,
@@ -752,6 +844,24 @@ function BarberRow({
           <div className="min-w-0 flex-1">
             <h3 className="truncate font-bold text-zinc-100 text-sm">{barber.full_name}</h3>
             <p className={`truncate text-xs mt-0.5 font-medium ${statusClass}`}>{statusText}</p>
+            {/* Próximo turno del día: hasta acá el dashboard no tenía forma de
+                saber que a este barbero le entra alguien con hora reservada. */}
+            {nextAppointment && (
+              <p
+                className="mt-1 flex items-center gap-1 text-[11px] font-medium text-violet-400"
+                title={`Próximo turno ${nextAppointment.timeLabel} · ${nextAppointment.appointment.client?.name ?? 'Cliente'}`}
+              >
+                <CalendarClock className="size-3 shrink-0" />
+                <span className="truncate">
+                  Turno {nextAppointment.timeLabel} · {nextAppointment.appointment.client?.name ?? 'Cliente'}
+                </span>
+                {nextAppointment.minutesUntil <= 60 && (
+                  <span className="shrink-0 rounded bg-violet-500/15 px-1 py-px text-[10px] tabular-nums text-violet-300">
+                    {nextAppointment.minutesUntil <= 1 ? 'ahora' : `${nextAppointment.minutesUntil}m`}
+                  </span>
+                )}
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -788,6 +898,7 @@ function BarberRow({
                 actionLoading={actionLoading}
                 selectedBranchId={selectedBranchId}
                 getBranchName={getBranchName}
+                timezone={timezone}
               />
             </div>
           ))}
@@ -820,6 +931,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
   const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
   const [latestAttendance, setLatestAttendance] = useState<Record<string, string>>({})
+  // Turnos del día, sólo lectura: alimentan el "próximo turno" de cada barbero.
+  const [todayAppointments, setTodayAppointments] = useState<Appointment[]>([])
   
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
   // Confirmación para cancelar un corte ya iniciado (in_progress) desde el dashboard.
@@ -941,6 +1054,31 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       setLatestAttendance(latest)
     }
   }, [supabase, timezone])
+
+  /**
+   * Agenda del día de las sucursales visibles. Se usa sólo para anunciar el
+   * próximo turno de cada barbero — la fila no cambia por esto.
+   */
+  const fetchAppointments = useCallback(async () => {
+    const branchIds = selectedBranchId ? [selectedBranchId] : branches.map((b) => b.id)
+    if (branchIds.length === 0) {
+      setTodayAppointments([])
+      return
+    }
+    const { getAppointmentsForDateMultiBranch } = await import('@/lib/actions/appointments')
+    const rows = await getAppointmentsForDateMultiBranch(branchIds, getLocalDateStr(timezone))
+    setTodayAppointments(rows)
+  }, [selectedBranchId, branches, timezone])
+
+  // Un fetch al montar (y al cambiar de sucursal) + el refresco de 60s de más
+  // abajo. Sin realtime ni polling corto: es dato de baja frecuencia y la DB ya
+  // se ahogó una vez por escuchar de más (mig 124).
+  useEffect(() => {
+    const apptId = setTimeout(() => { fetchAppointments() }, 0)
+    return () => clearTimeout(apptId)
+  }, [fetchAppointments])
+
+  useVisibilityRefresh(fetchAppointments, 60_000)
 
   useEffect(() => {
     // Diferimos las primeras llamadas para no disparar setState dentro del
@@ -1161,6 +1299,24 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     return cols
   }, [branchEntries, filteredBarbers, getEntryColumnId])
 
+  const nextAppointmentByBarber = useMemo(() => {
+    // Los turnos "con cualquiera disponible" (barber_id NULL) no se anuncian en
+    // ninguna columna: recién se sabe quién los atiende al hacer el check-in.
+    const byBarber: Record<string, Appointment[]> = {}
+    for (const appointment of todayAppointments) {
+      if (!appointment.barber_id) continue
+      if (selectedBranchId && appointment.branch_id !== selectedBranchId) continue
+      ;(byBarber[appointment.barber_id] ??= []).push(appointment)
+    }
+
+    const map: Record<string, NextAppointmentInfo> = {}
+    for (const [barberId, list] of Object.entries(byBarber)) {
+      const next = findNextAppointment(list, now, timezone)
+      if (next) map[barberId] = next
+    }
+    return map
+  }, [todayAppointments, selectedBranchId, now, timezone])
+
   const inProgressData = useMemo(() => {
     const map: Record<string, QueueEntry> = {}
     for (const e of branchEntries) {
@@ -1311,19 +1467,38 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     // Lista de updates para Supabase
     const updates: { id: string; position: number; barber_id?: string | null; is_dynamic?: boolean; priority_order?: string }[] = []
 
-    // Calcular priority_order sintéticos: tomar el más antiguo como base y espaciar 1s entre cada uno
-    const sortedByPriority = [...waitingItems].sort((a, b) =>
-      new Date(a.priority_order).getTime() - new Date(b.priority_order).getTime()
-    )
-    const basePriority = sortedByPriority.length > 0
-      ? new Date(sortedByPriority[0].priority_order).getTime()
+    // Calcular priority_order sintéticos: tomar el más antiguo como base y espaciar 1s entre cada uno.
+    // La base sale SÓLO de los walk-ins: el priority_order de un turno es su hora
+    // reservada (puede ser de la mañana o de dentro de dos horas), así que
+    // meterlo acá corría la base y reescribía el orden de llegada de toda la fila.
+    const walkInPriorities = waitingItems
+      .filter(e => !e.is_appointment)
+      .map(e => new Date(e.priority_order).getTime())
+      .filter(t => !isNaN(t))
+    const basePriority = walkInPriorities.length > 0
+      ? Math.min(...walkInPriorities)
       : Date.now()
 
+    let walkInIndex = 0
     waitingItems.forEach((entry, index) => {
       const newPos = index + 1
-      const newPriorityOrder = new Date(basePriority + index * 1000).toISOString()
-
       const dbEntry = confirmedEntriesRef.current.find(e => e.id === entry.id) || entry
+
+      // Un turno sólo puede recibir `position` (que es orden de dibujo, y hay que
+      // renumerarlo o quedarían posiciones repetidas). Su `priority_order` es la
+      // hora reservada —la clave de toda la convivencia con la fila— y su barbero
+      // vive en `appointments`: tocarlos desde acá dejaría fila y agenda
+      // desincronizadas. Se reprograma desde /dashboard/turnos/agenda.
+      if (entry.is_appointment) {
+        if (entry.position !== newPos) {
+          updates.push({ id: entry.id, position: newPos })
+        }
+        return
+      }
+
+      const newPriorityOrder = new Date(basePriority + walkInIndex * 1000).toISOString()
+      walkInIndex++
+
       const wasChanged = entry.position !== newPos || entry.barber_id !== dbEntry.barber_id || entry.is_dynamic !== dbEntry.is_dynamic
 
       if (wasChanged) {
@@ -1796,6 +1971,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
                 actionLoading={actionLoading}
                 selectedBranchId={selectedBranchId}
                 getBranchName={getBranchName}
+                timezone={timezone}
               />
             </div>
 
@@ -1818,6 +1994,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
                   actionLoading={actionLoading}
                   selectedBranchId={selectedBranchId}
                   getBranchName={getBranchName}
+                  timezone={timezone}
+                  nextAppointment={nextAppointmentByBarber[barber.id]}
                 />
               ))}
             </div>

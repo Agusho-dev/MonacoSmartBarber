@@ -24,16 +24,19 @@ function useWaveform(src: string) {
   return useMemo(() => {
     let seed = 0
     for (let i = 0; i < src.length; i++) seed = (seed * 31 + src.charCodeAt(i)) >>> 0
-    const rand = () => {
+    // LCG inline (sin closure `rand()`): el React Compiler no puede probar que una
+    // función que reasigna `seed` no escape del render y lo marca como error.
+    // La secuencia de valores es idéntica a la versión con closure.
+    const bars: number[] = []
+    for (let i = 0; i < BAR_COUNT; i++) {
       seed = (seed * 1103515245 + 12345) & 0x7fffffff
-      return seed / 0x7fffffff
-    }
-    return Array.from({ length: BAR_COUNT }, (_, i) => {
+      const rand = seed / 0x7fffffff
       // Perfil tipo "voz": más energía al centro, algo de variación aleatoria.
       const centerBias = 1 - Math.abs(i - BAR_COUNT / 2) / (BAR_COUNT / 2)
-      const h = 0.28 + rand() * 0.72 * (0.5 + centerBias * 0.5)
-      return Math.max(0.18, Math.min(1, h))
-    })
+      const h = 0.28 + rand * 0.72 * (0.5 + centerBias * 0.5)
+      bars.push(Math.max(0.18, Math.min(1, h)))
+    }
+    return bars
   }, [src])
 }
 

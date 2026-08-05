@@ -6,6 +6,8 @@ import { useBranchStore } from '@/stores/branch-store'
 import type { QueueEntry, StaffStatus, StaffSchedule, Staff } from '@/lib/types/database'
 import { assignDynamicBarbers, calculateEffectiveAhead, countActiveDynamicCapableBarbers } from '@/lib/barber-utils'
 import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
+import { TurnoBadge } from '@/components/appointments/turno-badge'
+import { appointmentTimeLabel } from '@/lib/queue-appointments'
 import {
   Select,
   SelectContent,
@@ -191,6 +193,7 @@ interface BarberRow {
 interface BranchRow {
   id: string
   name: string
+  timezone?: string | null
 }
 
 interface TvClientProps {
@@ -359,6 +362,12 @@ export function TvClient({
     () => dynamicEntries.filter((e) => e.status === 'waiting'),
     [dynamicEntries]
   )
+
+  const branchTimezones = useMemo(
+    () => Object.fromEntries(branches.map((b) => [b.id, b.timezone ?? null])),
+    [branches]
+  ) as Record<string, string | null>
+
   const inProgressEntries = useMemo(
     () => dynamicEntries.filter((e) => e.status === 'in_progress'),
     [dynamicEntries]
@@ -438,6 +447,15 @@ export function TvClient({
             {entry.client?.name ?? 'Cliente'}
           </p>
           <div className="flex items-center gap-2">
+            {/* Turno: la hora viene de `priority_order`, que acá es la HORA
+                RESERVADA y no la de llegada (mig 168). */}
+            {entry.is_appointment && (
+              <TurnoBadge
+                time={appointmentTimeLabel(entry, branchTimezones[entry.branch_id])}
+                className="border-violet-400/50 bg-violet-400/15 px-2 py-0.5 text-sm text-violet-300 lg:text-base 2xl:text-xl"
+                iconClassName="size-4 lg:size-5 2xl:size-7"
+              />
+            )}
             {(() => {
               // Predicción client-side (assignDynamicBarbers) cuando entry.barber_id es NULL.
               const isClientPredicted = (entry as { _is_dynamically_assigned?: boolean })._is_dynamically_assigned

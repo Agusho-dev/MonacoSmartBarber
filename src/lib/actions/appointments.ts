@@ -235,6 +235,8 @@ export interface AvailableSlot {
 export interface BarberAvailability {
   barberId: string
   barberName: string
+  /** Para que el turnero pueda mostrar quién atiende sin pedir otro fetch. */
+  barberAvatarUrl: string | null
   slots: AvailableSlot[]
 }
 
@@ -256,7 +258,24 @@ export async function getAvailableSlots(
   date: string,
   service?: string | string[] | null,
   barberId?: string,
-  durationOverride?: number
+  durationOverride?: number,
+  options?: {
+    /**
+     * Turno a ignorar al calcular la ocupación. Lo necesita el reschedule: al
+     * revalidar el destino, el propio turno que se está moviendo figura como
+     * ocupando su horario y bloqueaba cualquier movimiento que lo solapara
+     * (mover 15 minutos, cambiarle la duración, cambiarle el barbero).
+     */
+    excludeAppointmentId?: string
+    /**
+     * `lead_time_minutes` es una regla del turnero PÚBLICO ("no reservar con
+     * menos de una hora de anticipación"), no del mostrador. Con los 60 minutos
+     * de Monaco, aplicarla al arrastre de la agenda hacía imposible el caso más
+     * común: son las 15:20, el barbero viene demorado y la recepcionista quiere
+     * correr el turno de las 15:00 a las 15:45.
+     */
+    ignoreLeadTime?: boolean
+  }
 ): Promise<{ slots: BarberAvailability[]; error?: string }> {
   // Rate-limit: endpoint público, sin auth
   const gate = await RateLimits.publicBookingList(branchId)
@@ -339,13 +358,16 @@ export async function getAvailableSlots(
 
   if (!staffIds.length) return { slots: [] }
 
-  // Horarios de trabajo para ese día
+  // Horarios de trabajo para ese día. `branch_id` NULL = aplica a todas las
+  // sucursales del staff; con valor, sólo a esa (si no, un barbero con jornada
+  // cargada para otra sucursal aparecía disponible acá).
   const { data: schedules, error: schedulesError } = await supabase
     .from('staff_schedules')
     .select('staff_id, start_time, end_time')
     .in('staff_id', staffIds)
     .eq('day_of_week', dayOfWeek)
     .eq('is_active', true)
+    .or(`branch_id.is.null,branch_id.eq.${branchId}`)
 
   // Excepciones (ausencias)
   const { data: exceptions, error: exceptionsError } = await supabase
@@ -358,12 +380,18 @@ export async function getAvailableSlots(
   const absentStaff = new Set(exceptions?.map(e => e.staff_id) ?? [])
 
   // Turnos existentes para ese día
-  const { data: existingAppointments, error: appointmentsError } = await supabase
+  let appointmentsQuery = supabase
     .from('appointments')
     .select('barber_id, start_time, end_time')
     .eq('branch_id', branchId)
     .eq('appointment_date', date)
     .not('status', 'in', '("cancelled","no_show")')
+
+  if (options?.excludeAppointmentId && isValidUUID(options.excludeAppointmentId)) {
+    appointmentsQuery = appointmentsQuery.neq('id', options.excludeAppointmentId)
+  }
+
+  const { data: existingAppointments, error: appointmentsError } = await appointmentsQuery
 
   // Bloqueos para ese día, acotados en la TZ de la sucursal (sin el offset
   // dinámico, en un server UTC la ventana se corría 3h y traía bloqueos del
@@ -399,7 +427,9 @@ export async function getAvailableSlots(
   const todayStr = getLocalDateStr(tz)
   const isToday = date === todayStr
   const nowMinutesInTz = nowInTz.getUTCHours() * 60 + nowInTz.getUTCMinutes()
-  const earliestBookableMinute = nowMinutesInTz + (settings.lead_time_minutes ?? 0)
+  const earliestBookableMinute = options?.ignoreLeadTime
+    ? nowMinutesInTz
+    : nowMinutesInTz + (settings.lead_time_minutes ?? 0)
 
   const result: BarberAvailability[] = []
 
@@ -465,7 +495,12 @@ export async function getAvailableSlots(
       slots.push({ time: slotStart, available: !overlaps && !isBlocked && !tooSoon })
     }
 
-    result.push({ barberId: staffId, barberName: staffName, slots })
+    result.push({
+      barberId: staffId,
+      barberName: staffName,
+      barberAvatarUrl: staffRecord?.staff?.avatar_url ?? null,
+      slots,
+    })
   }
 
   return { slots: result }
@@ -747,11 +782,19 @@ interface CreateAppointmentInput {
   source: 'public' | 'manual'
   notes?: string
   createdByStaffId?: string
+  /**
+   * Reserva hecha desde la tablet del local. Se persiste como `public` (la
+   * hace el cliente), pero salteando el rate-limit por IP: todos los clientes
+   * del local comparten la IP de la tablet y a partir del tercero del día el
+   * kiosko empezaría a rechazar reservas legítimas. El límite por teléfono y
+   * el de `kioskCheckin` por sucursal siguen aplicando.
+   */
+  viaKiosk?: boolean
 }
 
 export async function createAppointment(input: CreateAppointmentInput) {
   // Rate-limit por IP antes de tocar DB (solo para creación vía turnero público).
-  if (input.source === 'public') {
+  if (input.source === 'public' && !input.viaKiosk) {
     const ipGate = await RateLimits.publicBookingCreateByIp()
     if (!ipGate.allowed) {
       return { error: 'Demasiadas reservas desde esta dirección, esperá un minuto' }
@@ -772,10 +815,13 @@ export async function createAppointment(input: CreateAppointmentInput) {
   if (!branch) return { error: 'Sucursal no encontrada' }
   const orgId = branch.organization_id
 
-  // Para origen 'manual' (dashboard), enforcear scope server-side
+  // Para origen 'manual' (dashboard), enforcear scope y permiso server-side
   if (input.source === 'manual') {
     const access = await assertBranchAccess(input.branchId)
     if (!access.ok) return { error: 'Sin acceso a esta sucursal' }
+    if (!(await currentUserCan('appointments.manage'))) {
+      return { error: 'No tenés permiso para crear turnos' }
+    }
   }
 
   const settings = await getAppointmentSettings(orgId, input.branchId)
@@ -1127,6 +1173,11 @@ interface RescheduleAppointmentInput {
   newStartTime: string
   newBarberId?: string | null
   newDurationMinutes?: number
+  /**
+   * `false` para movimientos internos de la agenda que no cambian nada de lo
+   * que el cliente ya sabe. Si el horario cambia, se avisa igual.
+   */
+  notifyClient?: boolean
 }
 
 export async function rescheduleAppointment(input: RescheduleAppointmentInput) {
@@ -1146,6 +1197,10 @@ export async function rescheduleAppointment(input: RescheduleAppointmentInput) {
   const access = await assertBranchAccess(existing.branch_id)
   if (!access.ok) return { error: 'Sin acceso a esta sucursal' }
 
+  if (!(await currentUserCan('appointments.manage'))) {
+    return { error: 'No tenés permiso para mover turnos' }
+  }
+
   const orgId = existing.organization_id
   const settings = await getAppointmentSettings(orgId, existing.branch_id)
   if (!settings) return { error: 'Settings no encontrados' }
@@ -1160,10 +1215,55 @@ export async function rescheduleAppointment(input: RescheduleAppointmentInput) {
 
   const barberId = input.newBarberId !== undefined ? input.newBarberId : existing.barber_id
 
-  // Regenerar token (invalida el anterior)
+  // Revalidar contra el motor de disponibilidad, igual que createAppointment.
+  // Antes el único guardián era la EXCLUSION GiST, que sólo detecta choques
+  // entre turnos: se podía arrastrar un turno al día libre del barbero, a un
+  // bloqueo (que la propia grilla dibuja rayado), a un día no habilitado o
+  // fuera de su jornada, y se guardaba sin chistar.
+  if (barberId) {
+    const { slots, error: slotsError } = await getAvailableSlots(
+      existing.branch_id,
+      input.newDate,
+      null,
+      barberId,
+      duration,
+      { excludeAppointmentId: input.appointmentId, ignoreLeadTime: true }
+    )
+
+    if (slotsError) return { error: slotsError }
+
+    const grupo = slots.find(s => s.barberId === barberId)
+    if (!grupo) {
+      return { error: 'Ese barbero no trabaja ese día' }
+    }
+
+    // El destino puede no coincidir con la grilla de inicios (el snap es
+    // slot_interval_minutes): lo que importa es que el rango quede libre, así
+    // que se valida contra el slot que lo contiene.
+    const libre = grupo.slots.some(s => s.time === input.newStartTime && s.available)
+    if (!libre) {
+      const dentroDeAlguno = grupo.slots.some(s => {
+        const ini = timeToMinutes(s.time)
+        return s.available && startMinutes >= ini && startMinutes + duration <= ini + duration
+      })
+      if (!dentroDeAlguno) {
+        return { error: 'Ese horario no está disponible para ese barbero' }
+      }
+    }
+  }
+
+  // Regenerar token (invalida el anterior).
+  // La expiración se calcula en la TZ de la SUCURSAL: `new Date('YYYY-MM-DDTHH:MM')`
+  // se parsea con el reloj del proceso (UTC en Vercel) y el token de gestión
+  // vencía 3 horas antes de lo previsto.
   const cancellationToken = crypto.randomUUID().replace(/-/g, '').substring(0, 24)
-  const tokenExpiresAt = new Date(`${input.newDate}T${input.newStartTime}:00`)
-  tokenExpiresAt.setHours(tokenExpiresAt.getHours() + 24)
+  const tokenExpiresAt = new Date(
+    appointmentInstant(
+      input.newDate,
+      input.newStartTime,
+      (existing.branch as { timezone?: string } | null)?.timezone
+    ).getTime() + 24 * 60 * 60 * 1000
+  )
 
   const { error: updateError } = await supabase
     .from('appointments')
@@ -1187,6 +1287,20 @@ export async function rescheduleAppointment(input: RescheduleAppointmentInput) {
     }
     console.error('[rescheduleAppointment]', updateError.message)
     return { error: 'No pudimos reprogramar el turno' }
+  }
+
+  // Sólo se le escribe al cliente si cambió algo que él sabe: la fecha o la
+  // hora. Acomodar la agenda arrastrando cuatro turnos disparaba cuatro
+  // "monaco_turno_reprogramado", y mover el mismo turno tres veces, tres.
+  const horarioCambio =
+    existing.appointment_date !== input.newDate ||
+    existing.start_time.slice(0, 5) !== input.newStartTime
+  const debeAvisar = input.notifyClient ?? horarioCambio
+
+  if (!debeAvisar) {
+    revalidatePath('/dashboard/turnos/agenda')
+    revalidatePath('/dashboard/fila')
+    return { success: true }
   }
 
   // Cancelar mensajes pendientes del turno anterior
@@ -1260,6 +1374,10 @@ export async function updateAppointmentDuration(appointmentId: string, newDurati
   const access = await assertBranchAccess(existing.branch_id)
   if (!access.ok) return { error: 'Sin acceso a esta sucursal' }
 
+  if (!(await currentUserCan('appointments.manage'))) {
+    return { error: 'No tenés permiso para editar turnos' }
+  }
+
   const startMinutes = timeToMinutes(existing.start_time.substring(0, 5))
   const endTime = minutesToTime(startMinutes + newDurationMinutes)
 
@@ -1306,6 +1424,9 @@ export async function cancelAppointment(
   if (cancelledBy === 'staff') {
     const access = await assertBranchAccess(appointment.branch_id)
     if (!access.ok) return { error: 'Sin acceso a esta sucursal' }
+    if (!(await currentUserCan('appointments.manage'))) {
+      return { error: 'No tenés permiso para cancelar turnos' }
+    }
   }
 
   if (cancelledBy === 'client') {
@@ -1335,12 +1456,17 @@ export async function cancelAppointment(
 
   if (error) return { error: error.message }
 
-  // Cancelar queue entry si existe
+  // Cancelar queue entry si existe.
+  // `.eq('status','waiting')` no es cosmético: si el corte YA arrancó, cancelar
+  // la entrada impide que dispare `on_queue_completed`, así que no se crea la
+  // visita y la plata no entra a caja. La fila protege exactamente este caso en
+  // `cancelQueueEntry` (queue.ts) y el lado de turnos lo esquivaba.
   if (appointment.queue_entry_id) {
     await supabase
       .from('queue_entries')
       .update({ status: 'cancelled' })
       .eq('id', appointment.queue_entry_id)
+      .eq('status', 'waiting')
   }
 
   // Cancelar solo los mensajes programados de este turno (por appointment_id,
@@ -1449,6 +1575,10 @@ export async function markNoShow(appointmentId: string, staffId: string) {
   const access = await assertBranchAccess(appointment.branch_id)
   if (!access.ok) return { error: 'Sin acceso a esta sucursal' }
 
+  if (!(await currentUserCan('appointments.manage'))) {
+    return { error: 'No tenés permiso para marcar ausentes' }
+  }
+
   if (!['confirmed', 'checked_in'].includes(appointment.status)) {
     return { error: 'El turno no está en un estado válido para marcar ausente' }
   }
@@ -1476,12 +1606,17 @@ export async function markNoShow(appointmentId: string, staffId: string) {
   // Cancelar mensajes pendientes (no tiene sentido enviar recordatorios si ya faltó)
   await cancelScheduledMessagesForAppointment(appointmentId)
 
-  // Cancelar queue entry si existe
+  // Cancelar queue entry si existe.
+  // `.eq('status','waiting')` no es cosmético: si el corte YA arrancó, cancelar
+  // la entrada impide que dispare `on_queue_completed`, así que no se crea la
+  // visita y la plata no entra a caja. La fila protege exactamente este caso en
+  // `cancelQueueEntry` (queue.ts) y el lado de turnos lo esquivaba.
   if (appointment.queue_entry_id) {
     await supabase
       .from('queue_entries')
       .update({ status: 'cancelled' })
       .eq('id', appointment.queue_entry_id)
+      .eq('status', 'waiting')
   }
 
   // Aplicar tag "Ausente" a la conversación del cliente
@@ -1519,56 +1654,88 @@ export async function markNoShow(appointmentId: string, staffId: string) {
 
 // ─── Check-in Appointment (create queue entry) ─────────────────────
 
-export async function checkinAppointment(appointmentId: string) {
+/**
+ * Registra la llegada de un turno: lo mete en la fila.
+ *
+ * Delega en la RPC `check_in_appointment`, que es la ÚNICA puerta. Antes había
+ * dos implementaciones —ésta en TS y la RPC que usan kiosko y panel— con
+ * semánticas distintas de `priority_order`: la de acá ponía la hora de LLEGADA
+ * y la RPC la hora del TURNO. Como priority_order es la clave de orden real de
+ * la fila, el mismo turno terminaba en un lugar distinto según por qué puerta
+ * hubiera entrado. Además ésta no validaba tolerancia, no era idempotente y no
+ * manejaba el caso del cliente que ya estaba en la fila.
+ *
+ * `allowEarly` existe porque el staff sí puede registrar una llegada muy
+ * anticipada desde el dashboard; el cliente solo, desde la tablet, no.
+ */
+export async function checkinAppointment(
+  appointmentId: string,
+  options?: { staffIdAssign?: string | null; allowEarly?: boolean }
+) {
+  if (!isValidUUID(appointmentId)) return { error: 'ID inválido' }
+
   const supabase = createAdminClient()
 
   const { data: appointment } = await supabase
     .from('appointments')
-    .select('*')
+    .select('branch_id')
     .eq('id', appointmentId)
-    .eq('status', 'confirmed')
     .single()
 
-  if (!appointment) return { error: 'Turno no encontrado o no está confirmado' }
+  if (!appointment) return { error: 'Turno no encontrado' }
 
   const access = await assertBranchAccess(appointment.branch_id)
   if (!access.ok) return { error: 'Sin acceso a esta sucursal' }
 
-  const { data: position } = await supabase.rpc('next_queue_position', {
-    p_branch_id: appointment.branch_id,
+  if (!(await currentUserCan('appointments.manage'))) {
+    return { error: 'No tenés permiso para registrar llegadas' }
+  }
+
+  const { data, error } = await supabase.rpc('check_in_appointment', {
+    p_appointment_id: appointmentId,
+    p_staff_id_assign: options?.staffIdAssign ?? null,
+    p_allow_early: options?.allowEarly ?? true,
   })
 
-  const now = new Date().toISOString()
-  const { data: queueEntry, error: queueError } = await supabase
-    .from('queue_entries')
-    .insert({
-      branch_id: appointment.branch_id,
-      client_id: appointment.client_id,
-      barber_id: appointment.barber_id,
-      service_id: appointment.service_id,
-      position: position ?? 1,
-      status: 'waiting',
-      is_dynamic: false,
-      is_appointment: true,
-      appointment_id: appointmentId,
-      priority_order: now,
-    })
-    .select('id')
-    .single()
-
-  if (queueError || !queueEntry) {
+  if (error) {
+    console.error('[checkinAppointment] rpc:', error.message)
     return { error: 'Error al agregar a la fila de turnos' }
   }
 
-  await supabase
-    .from('appointments')
-    .update({ status: 'checked_in', queue_entry_id: queueEntry.id })
-    .eq('id', appointmentId)
+  const result = data as {
+    success: boolean
+    error?: string
+    queue_entry_id?: string
+    adopted_existing_entry?: boolean
+  } | null
+
+  if (!result?.success) {
+    return { error: mapCheckInError(result?.error) }
+  }
 
   revalidatePath('/dashboard/fila')
   revalidatePath('/dashboard/turnos/agenda')
   revalidatePath('/barbero/fila')
-  return { success: true, queueEntryId: queueEntry.id }
+  return {
+    success: true as const,
+    queueEntryId: result.queue_entry_id!,
+    adoptedExistingEntry: !!result.adopted_existing_entry,
+  }
+}
+
+// No se exporta: en un módulo 'use server' todo lo exportado tiene que ser una
+// función async (si no, el build de Next falla).
+/** Traduce los códigos de `check_in_appointment` a algo que se pueda mostrar. */
+function mapCheckInError(code?: string): string {
+  switch (code) {
+    case 'NOT_FOUND': return 'No encontramos el turno'
+    case 'INVALID_STATUS': return 'El turno ya no está activo'
+    case 'STAFF_REQUIRED': return 'Falta asignar un barbero al turno'
+    case 'TOO_EARLY': return 'Todavía es muy temprano para registrar la llegada'
+    case 'TOO_LATE': return 'Pasó la tolerancia de espera del turno'
+    case 'QUEUE_CONFLICT': return 'El cliente ya está en la fila con otra entrada'
+    default: return 'No pudimos registrar la llegada'
+  }
 }
 
 /**
@@ -1594,6 +1761,10 @@ export async function startAppointmentService(appointmentId: string) {
 
   const access = await assertBranchAccess(appointment.branch_id)
   if (!access.ok) return { error: 'Sin acceso a esta sucursal' }
+
+  if (!(await currentUserCan('appointments.manage'))) {
+    return { error: 'No tenés permiso para iniciar servicios' }
+  }
 
   const { error: updateError } = await supabase
     .from('queue_entries')
@@ -1669,6 +1840,10 @@ export async function markAppointmentPayment(input: MarkPaymentInput) {
 
   const access = await assertBranchAccess(existing.branch_id)
   if (!access.ok) return { error: 'Sin acceso a esta sucursal' }
+
+  if (!(await currentUserCan('appointments.manage'))) {
+    return { error: 'No tenés permiso para registrar pagos' }
+  }
 
   if (existing.payment_status === 'refunded') {
     return { error: 'El turno ya fue reembolsado' }
@@ -1891,30 +2066,54 @@ export async function getPublicBranchAppointmentStaff(branchId: string) {
   // disponibilidad lo descarta en silencio. Ofrecerlo en el wizard llevaba al
   // cliente a elegirlo y encontrarse "no hay turnos disponibles" cualquier día
   // que probara, sin ninguna explicación.
-  const { data: conHorario } = await supabase
+  //
+  // Además devolvemos QUÉ DÍAS trabaja cada uno. En Monaco la agenda es de un
+  // barbero por día (Fabri los martes, Simón los miércoles…): con eso el
+  // turnero puede resolver el barbero solo, sin pedirle al cliente que elija
+  // entre gente que ese día no atiende.
+  const staffIds = candidatos.map(as => as.staff_id)
+  const { data: horarios } = await supabase
     .from('staff_schedules')
-    .select('staff_id')
-    .in('staff_id', candidatos.map(as => as.staff_id))
+    .select('staff_id, day_of_week, branch_id')
+    .in('staff_id', staffIds)
     .eq('is_active', true)
 
-  const disponibles = new Set((conHorario ?? []).map(s => s.staff_id))
+  // `staff_schedules` no tiene UNIQUE(staff_id, day_of_week): hay barberos con
+  // la misma jornada cargada dos veces. El Set deduplica.
+  const diasPorStaff = new Map<string, Set<number>>()
+  for (const h of horarios ?? []) {
+    if (h.branch_id && h.branch_id !== branchId) continue
+    if (!diasPorStaff.has(h.staff_id)) diasPorStaff.set(h.staff_id, new Set())
+    diasPorStaff.get(h.staff_id)!.add(h.day_of_week)
+  }
 
   return candidatos
-    .filter((as) => disponibles.has(as.staff_id))
+    .filter((as) => (diasPorStaff.get(as.staff_id)?.size ?? 0) > 0)
     .map((as) => ({
       id: as.staff!.id,
       full_name: as.staff!.full_name,
       avatar_url: as.staff!.avatar_url,
+      days: [...diasPorStaff.get(as.staff_id)!].sort((a, b) => a - b),
     }))
 }
 
 /**
  * Listado interno (sin rate-limit) de barberos habilitados para turnos en una
  * sucursal. Uso: dashboard/agenda, dialogs de mensajería.
+ *
+ * `onlyWithSchedule` (default true) descarta a los que no tienen jornada
+ * cargada: el motor de disponibilidad los saltea en silencio, así que dibujar
+ * su columna en la agenda es prometer huecos que nunca se van a poder reservar.
+ * Rondeau tenía 6 barberos habilitados y 4 con horario; Parana, 1 y 0.
  */
-export async function getBranchAppointmentStaff(branchId: string) {
+export async function getBranchAppointmentStaff(
+  branchId: string,
+  options?: { onlyWithSchedule?: boolean; forDayOfWeek?: number }
+) {
   const access = await assertBranchAccess(branchId)
   if (!access.ok) return []
+
+  const onlyWithSchedule = options?.onlyWithSchedule ?? true
 
   const supabase = createAdminClient()
   const { data } = await supabase
@@ -1923,13 +2122,45 @@ export async function getBranchAppointmentStaff(branchId: string) {
     .eq('organization_id', access.orgId)
     .eq('is_active', true)
 
-  return (data as unknown as AppointmentStaffWithStaff[] ?? [])
+  const candidatos = (data as unknown as AppointmentStaffWithStaff[] ?? [])
     .filter((as) => as.staff?.branch_id === branchId && as.staff?.is_active)
-    .map((as) => ({
-      id: as.staff!.id,
-      full_name: as.staff!.full_name,
-      avatar_url: as.staff!.avatar_url,
-    }))
+
+  if (!candidatos.length) return []
+
+  const { data: horarios } = await supabase
+    .from('staff_schedules')
+    .select('staff_id, day_of_week, start_time, end_time, branch_id')
+    .in('staff_id', candidatos.map(as => as.staff_id))
+    .eq('is_active', true)
+
+  const porStaff = new Map<string, { days: Set<number>; open: string; close: string }>()
+  for (const h of horarios ?? []) {
+    if (h.branch_id && h.branch_id !== branchId) continue
+    const prev = porStaff.get(h.staff_id) ?? { days: new Set<number>(), open: '23:59', close: '00:00' }
+    prev.days.add(h.day_of_week)
+    if (h.start_time < prev.open) prev.open = h.start_time
+    if (h.end_time > prev.close) prev.close = h.end_time
+    porStaff.set(h.staff_id, prev)
+  }
+
+  return candidatos
+    .filter((as) => {
+      const info = porStaff.get(as.staff_id)
+      if (onlyWithSchedule && !info?.days.size) return false
+      if (options?.forDayOfWeek !== undefined && info && !info.days.has(options.forDayOfWeek)) return false
+      return true
+    })
+    .map((as) => {
+      const info = porStaff.get(as.staff_id)
+      return {
+        id: as.staff!.id,
+        full_name: as.staff!.full_name,
+        avatar_url: as.staff!.avatar_url,
+        days: info ? [...info.days].sort((a, b) => a - b) : [],
+        works_from: info && info.open !== '23:59' ? info.open.slice(0, 5) : null,
+        works_to: info && info.close !== '00:00' ? info.close.slice(0, 5) : null,
+      }
+    })
 }
 
 export async function getAppointmentsForDate(branchId: string, date: string) {

@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import Image from 'next/image'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { checkinClient, checkinClientByFace, reassignMyBarber } from '@/lib/actions/queue'
 import { registerBarberClockIn, registerBarberClockOut } from '@/lib/actions/attendance'
@@ -36,6 +36,7 @@ import {
   Check,
   X,
   UserPlus,
+  Hand,
 } from 'lucide-react'
 import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule } from '@/lib/types/database'
 import {
@@ -73,6 +74,11 @@ import {
   terminalProgressFill,
   terminalProgressTrack,
 } from '@/components/checkin/terminal-theme'
+import {
+  useIdleReset,
+  IDLE_MS_NEUTRAL,
+  IDLE_MS_PERSONAL,
+} from '@/components/checkin/use-idle-reset'
 import type { FaceMatchResult } from '@/lib/face-recognition'
 import { saveFacePhoto, enrollFaceDescriptor, enrollStaffFaceDescriptor, saveStaffFacePhoto } from '@/lib/face-recognition'
 import { cn } from '@/lib/utils'
@@ -103,6 +109,41 @@ const PHONE_LENGTH = 10
 const RESET_DELAY_MS = 5_000
 const KEYPAD = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const
 
+/**
+ * Ventana de inactividad por pantalla (0 = sin timeout).
+ *
+ * Las pantallas terminales vuelven solas con `RESET_DELAY_MS`, pero el resto no
+ * tenía NINGÚN timeout: si el cliente abandonaba a mitad del flujo (teléfono,
+ * nombre, servicio, barbero) la tablet se quedaba ahí para siempre, con sus
+ * datos a la vista. Y en el kiosko híbrido, donde la fila es un desvío desde el
+ * flujo de turnos, además nunca volvía — la puerta era de una sola dirección.
+ *
+ * Los valores salen del mismo criterio que el flujo de turnos: corto en las
+ * pantallas que muestran datos de una persona, largo en las neutras (donde
+ * cortar rápido molesta al que está tipeando y no expone nada).
+ *
+ * `success` y `manage_turn` llevan valor igualmente: su auto-reset de 5s se
+ * cancela mientras el cliente está eligiendo barbero, y ese sub-estado se
+ * quedaba sin ninguna red.
+ */
+const IDLE_MS_POR_PASO: Record<Step, number> = {
+  branch: 0,   // selector de sucursal: reposo, no muestra datos de nadie
+  home: 0,     // ídem (en el desvío híbrido se maneja aparte, ver abajo)
+  face_scan: IDLE_MS_NEUTRAL,
+  face_confirm: IDLE_MS_PERSONAL,
+  phone: IDLE_MS_NEUTRAL,
+  name: IDLE_MS_PERSONAL,
+  face_enroll: IDLE_MS_NEUTRAL,
+  service_selection: IDLE_MS_PERSONAL,
+  barber: IDLE_MS_PERSONAL,
+  success: IDLE_MS_PERSONAL,
+  manage_turn: IDLE_MS_PERSONAL,
+  staff_face_scan: IDLE_MS_NEUTRAL,
+  staff_action_confirm: IDLE_MS_PERSONAL,
+  staff_pin: IDLE_MS_PERSONAL,
+  staff_face_enroll: IDLE_MS_NEUTRAL,
+}
+
 function formatPhone(digits: string): string {
   if (!digits) return ''
   if (digits.length <= 2) return digits
@@ -110,7 +151,19 @@ function formatPhone(digits: string): string {
   return `${digits.slice(0, 2)} ${digits.slice(2, 6)} ${digits.slice(6)}`
 }
 
-export function CheckinWalkIn() {
+interface CheckinWalkInProps {
+  /**
+   * Salida del flujo walk-in. La usa el kiosko en modo híbrido: cuando el
+   * cliente termina (o el auto-reset dispara), el control vuelve al flujo de
+   * turnos en lugar de quedarse en el home del walk-in. Sin esto, el primero
+   * que elegía "entrar a la fila" dejaba la tablet en walk-in puro para todos
+   * los siguientes hasta que alguien la recargara a mano.
+   */
+  onExit?: () => void
+}
+
+export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const [step, setStep] = useState<Step>('branch')
   const [branches, setBranches] = useState<Branch[]>([])
@@ -482,9 +535,16 @@ export function CheckinWalkIn() {
     setStaffEnrollId(null)
     setStaffEnrollName('')
     setBarberNextArrival({})
+
+    // En el kiosko híbrido la fila es un desvío: al terminar, el control vuelve
+    // al flujo de turnos. Sin `onExit` (kiosko walk-in puro) se queda en home.
+    if (onExit) {
+      onExit()
+      return
+    }
     // Keep selectedBranch — go back to home, not branch
     goTo('home')
-  }, [goTo])
+  }, [goTo, onExit])
 
   // ── Auto-reset declarativo ──
   // Único dueño del timer de "Volviendo al inicio". Antes esto se programaba con
@@ -504,6 +564,29 @@ export function CheckinWalkIn() {
     return () => clearTimeout(t)
   }, [step, changingBarberInSuccess, changingBarberInManage, staffActionDone, reset])
 
+  // ── Timeout de inactividad en las pantallas intermedias ──
+  // El auto-reset de arriba sólo cubre las pantallas terminales, así que un
+  // cliente que abandonaba antes dejaba la tablet clavada. Montado como desvío
+  // del kiosko híbrido (`onExit`) eso era peor todavía: ninguna pantalla
+  // intermedia devolvía el control al flujo de turnos, y el primero que elegía
+  // "entrar a la fila" y se arrepentía dejaba la tablet en walk-in para todos
+  // los que venían atrás. `reset()` ya sabe salir por `onExit` cuando existe.
+  //
+  // En modo desvío `home` tampoco es reposo: el reposo del kiosko híbrido es la
+  // pantalla de turnos, no ésta.
+  const idleMs = onExit && (step === 'home' || step === 'branch')
+    ? IDLE_MS_NEUTRAL
+    : IDLE_MS_POR_PASO[step]
+
+  useIdleReset({
+    // Nunca cortar en medio de una operación en vuelo (check-in, lookup, PIN):
+    // el timer se reprograma solo cuando termina.
+    enabled: idleMs > 0 && !submitting && !lookingUp && !staffPinSubmitting,
+    timeoutMs: idleMs,
+    resetKey: step,
+    onIdle: reset,
+  })
+
   // ── Branch ──
 
   const selectBranch = (branch: Branch) => {
@@ -515,6 +598,11 @@ export function CheckinWalkIn() {
     import('@/lib/actions/org').then(({ setActiveOrgFromBranch }) => {
       setActiveOrgFromBranch(branch.id)
     })
+    // El modo de operación (walk_in / appointments / hybrid) lo resuelve el
+    // server component leyendo ?branch=. Elegir la sucursal sólo en estado
+    // local dejaba a una sucursal con turnos atascada para siempre en el flujo
+    // walk-in, porque el server nunca volvía a correr.
+    router.replace(`/checkin?branch=${branch.id}`)
     goTo('home')
   }
 
@@ -523,6 +611,9 @@ export function CheckinWalkIn() {
     try {
       localStorage.removeItem(LOCALSTORAGE_KEY)
     } catch { /* ignore */ }
+    // Sacar ?branch de la URL: si queda, el server sigue resolviendo la
+    // sucursal vieja en el próximo render.
+    router.replace('/checkin')
     goTo('branch')
   }
 
@@ -569,14 +660,14 @@ export function CheckinWalkIn() {
            setFaceDescriptor(null)
         }
 
-        const supabase = createClient()
-        const { data: faceData } = await supabase
-          .from('client_face_descriptors')
-          .select('id')
-          .eq('client_id', data.id)
-          .limit(1)
-        setHasExistingFace(!!(faceData && faceData.length > 0))
+        // Por server action: `client_face_descriptors` no tiene grants para
+        // `anon` (única policy: service_role), así que esta misma consulta desde
+        // la tablet respondía 42501 y devolvía siempre "no tiene cara" — al
+        // cliente ya enrolado se le volvía a ofrecer el registro en cada visita.
+        const { clientHasFaceEnrolled } = await import('@/lib/actions/kiosk-face')
+        setHasExistingFace(await clientHasFaceEnrolled(data.id, selectedBranch.id))
 
+        const supabase = createClient()
         const { data: activeEntry } = await supabase
           .from('queue_entries')
           .select('*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)')
@@ -713,7 +804,7 @@ export function CheckinWalkIn() {
       setHasExistingFace(true)
       goTo('face_confirm')
     },
-    []
+    [goTo]
   )
 
   const handleFaceConfirmYes = useCallback(async () => {
@@ -754,7 +845,7 @@ export function CheckinWalkIn() {
     setIsReturning(false)
     setHasExistingFace(false)
     goTo('phone')
-  }, [])
+  }, [goTo])
 
   const handleFaceNoMatch = useCallback(
     (descriptor: Float32Array, photoBlob: Blob | null) => {
@@ -764,14 +855,14 @@ export function CheckinWalkIn() {
       setName('')
       goTo('phone')
     },
-    []
+    [goTo]
   )
 
   const handleFaceManualEntry = useCallback(() => {
     setPhone('')
     setName('')
     goTo('phone')
-  }, [])
+  }, [goTo])
 
   const handleFaceConfirmBarber = useCallback(
     async (chosenBarberId: string | null) => {
@@ -1923,7 +2014,10 @@ export function CheckinWalkIn() {
                   ? 'border-cyan-300 bg-cyan-100 shadow-md'
                   : 'border-cyan-500/25 bg-cyan-500/10 shadow-[0_0_28px_rgba(34,211,238,0.15)]'
               )}>
-                <span className="text-4xl md:text-5xl">👋</span>
+                <Hand
+                  className={cn('size-10 md:size-12', isLightBg ? 'text-cyan-600' : 'text-cyan-300')}
+                  strokeWidth={1.5}
+                />
               </div>
               <div className="text-center">
                 <h2 className={cn(terminalH2, isLightBg && 'text-zinc-900')}>¡Bienvenido de vuelta!</h2>
@@ -2356,9 +2450,12 @@ export function CheckinWalkIn() {
                 </button>
               </div>
 
+              {/* Cancelar el fichaje vuelve al home, no al selector de sucursal:
+                  el barbero se arrepintió de marcar entrada/salida, no de estar
+                  en esta sucursal — y dejaba la tablet pidiendo elegirla otra vez. */}
               <button
                 type="button"
-                onClick={() => goTo('branch')}
+                onClick={() => goTo('home')}
                 className={cn(
                   'mt-2 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.02] px-4 py-2 text-sm text-white/60 hover:bg-white/[0.05] hover:text-white transition-colors',
                   isLightBg && 'border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900'

@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/server'
 import { isValidUUID } from '@/lib/validation'
 import { RateLimits } from '@/lib/rate-limit'
-import { getAvailableSlots, getAppointmentSettings } from '@/lib/actions/appointments'
+import { getAvailableSlots, getAppointmentSettings, createAppointment } from '@/lib/actions/appointments'
 import { getTzOffsetISO } from '@/lib/time-utils'
 import type { BranchOperationMode } from '@/lib/actions/turnos-mode'
 
@@ -25,7 +25,9 @@ export interface AppointmentInfo {
   ends_at: string
   barber_name: string | null
   barber_id: string | null
+  barber_avatar_url: string | null
   services: string[]
+  client_id: string | null
   client_name: string
   client_phone: string
   status: string
@@ -133,7 +135,9 @@ export async function lookupAppointmentByPhone(
       ends_at: string | null
       barber_name: string | null
       barber_id: string | null
+      barber_avatar_url?: string | null
       services: Array<{ name?: string }> | string[] | null
+      client_id?: string | null
       client_name: string
       client_phone: string
       status: string
@@ -182,11 +186,115 @@ export async function lookupAppointmentByPhone(
         ends_at: endsAt,
         barber_name: appt.barber_name,
         barber_id: appt.barber_id,
+        barber_avatar_url: appt.barber_avatar_url ?? null,
         services: serviceNames,
+        client_id: appt.client_id ?? null,
         client_name: appt.client_name,
         client_phone: appt.client_phone,
         status: appt.status,
         no_show_tolerance_minutes: tolerance ?? 15,
+      },
+    },
+  }
+}
+
+// ─── lookupAppointmentForClient ───────────────────────────────────────────────
+
+/**
+ * Igual que `lookupAppointmentByPhone` pero partiendo del `client_id`, que es
+ * lo que devuelve el reconocimiento facial. Sin esto, después de reconocer la
+ * cara había que pedirle igual el teléfono al cliente, que es justo lo que el
+ * Face ID viene a evitar.
+ *
+ * No pasa por el RPC (que resuelve por teléfono): consulta directo, en la TZ de
+ * la sucursal — con `CURRENT_DATE` (UTC), después de las 21:00 en Argentina se
+ * buscarían los turnos de mañana.
+ */
+export async function lookupAppointmentForClient(
+  branchId: string,
+  clientId: string
+): Promise<{ ok: true; data: LookupAppointmentResult } | { error: string }> {
+  if (!isValidUUID(branchId)) return { error: 'branch_id inválido' }
+  if (!isValidUUID(clientId)) return { error: 'client_id inválido' }
+
+  const gate = await RateLimits.kioskCheckin(branchId)
+  if (!gate.allowed) return { error: 'Demasiados intentos. Esperá un momento.' }
+
+  const supabase = createAdminClient()
+
+  const { data: branch } = await supabase
+    .from('branches')
+    .select('organization_id, timezone')
+    .eq('id', branchId)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!branch) return { error: 'Sucursal no encontrada' }
+
+  const tz = branch.timezone || 'America/Argentina/Buenos_Aires'
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: tz })
+
+  const { data: appt, error } = await supabase
+    .from('appointments')
+    .select(`
+      id, start_time, end_time, duration_minutes, status, barber_id, client_id,
+      barber:barber_id(full_name, avatar_url),
+      client:client_id(name, phone),
+      appointment_services(sort_order, service:service_id(name))
+    `)
+    .eq('branch_id', branchId)
+    .eq('client_id', clientId)
+    .eq('appointment_date', hoy)
+    .in('status', ['scheduled', 'confirmed', 'checked_in'])
+    .order('start_time')
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[lookupAppointmentForClient]', error.message)
+    return { error: 'Error al buscar turno. Intentá de nuevo.' }
+  }
+
+  if (!appt) return { ok: true, data: { found: false, appointment: null } }
+
+  const tzOffset = getTzOffsetISO(new Date(`${hoy}T12:00:00Z`), tz)
+  const startsAt = new Date(`${hoy}T${appt.start_time.slice(0, 8)}${tzOffset}`)
+  const endsAt = new Date(startsAt.getTime() + (appt.duration_minutes ?? 30) * 60_000)
+
+  const settings = await getAppointmentSettings(branch.organization_id, branchId)
+  const barber = (Array.isArray(appt.barber) ? appt.barber[0] : appt.barber) as
+    { full_name?: string; avatar_url?: string | null } | null
+  const client = (Array.isArray(appt.client) ? appt.client[0] : appt.client) as
+    { name?: string; phone?: string } | null
+
+  const servicios = ((appt.appointment_services ?? []) as Array<{
+    sort_order: number
+    service: { name?: string } | { name?: string }[] | null
+  }>)
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map(row => {
+      const s = Array.isArray(row.service) ? row.service[0] : row.service
+      return s?.name ?? ''
+    })
+    .filter(Boolean)
+
+  return {
+    ok: true,
+    data: {
+      found: true,
+      appointment: {
+        id: appt.id,
+        starts_at: startsAt.toISOString(),
+        ends_at: endsAt.toISOString(),
+        barber_name: barber?.full_name ?? null,
+        barber_id: appt.barber_id,
+        barber_avatar_url: barber?.avatar_url ?? null,
+        services: servicios,
+        client_id: appt.client_id,
+        client_name: client?.name ?? '',
+        client_phone: client?.phone ?? '',
+        status: appt.status,
+        no_show_tolerance_minutes: settings?.no_show_tolerance_minutes ?? 15,
       },
     },
   }
@@ -203,8 +311,8 @@ export async function confirmAppointmentArrival(
   appointmentId: string,
   staffIdAssign?: string
 ): Promise<
-  | { ok: true; queueEntryId: string; staffId: string | null }
-  | { error: string; code?: string }
+  | { ok: true; queueEntryId: string; staffId: string | null; adoptedExistingEntry: boolean }
+  | { error: string; code?: string; startsAt?: string }
 > {
   if (!isValidUUID(appointmentId)) return { error: 'ID de turno inválido' }
 
@@ -250,20 +358,24 @@ export async function confirmAppointmentArrival(
     queue_entry_id?: string
     staff_id?: string
     error?: string
+    starts_at?: string
+    adopted_existing_entry?: boolean
   }
 
   if (!result.success) {
     const code = result.error ?? 'UNKNOWN'
     const mensajes: Record<string, string> = {
-      NOT_FOUND: 'No se encontró el turno.',
+      NOT_FOUND: 'No encontramos el turno.',
       INVALID_STATUS: 'Este turno ya fue procesado o cancelado.',
-      STAFF_REQUIRED: 'Se requiere asignación de barbero antes de confirmar.',
-      TOO_EARLY: 'Llegaste muy temprano para este turno. Volvé más cerca de la hora.',
-      TOO_LATE: 'El tiempo límite para confirmar este turno ya pasó.',
+      STAFF_REQUIRED: 'Falta asignarle un barbero al turno. Avisá en el mostrador.',
+      TOO_EARLY: 'Llegaste bastante antes de tu turno. Volvé más cerca de la hora.',
+      TOO_LATE: 'Pasó la tolerancia de tu turno. Avisá en el mostrador.',
+      QUEUE_CONFLICT: 'Ya estás anotado. Avisá en el mostrador.',
     }
     return {
-      error: mensajes[code] ?? 'No se pudo confirmar la llegada.',
+      error: mensajes[code] ?? 'No pudimos confirmar la llegada.',
       code,
+      startsAt: result.starts_at,
     }
   }
 
@@ -271,6 +383,7 @@ export async function confirmAppointmentArrival(
     ok: true,
     queueEntryId: result.queue_entry_id ?? '',
     staffId: result.staff_id ?? null,
+    adoptedExistingEntry: !!result.adopted_existing_entry,
   }
 }
 
@@ -308,70 +421,64 @@ export async function quickBookFromKiosk(params: {
 
   const supabase = createAdminClient()
 
-  // Buscar o crear cliente por teléfono
   const { data: branchData } = await supabase
     .from('branches')
-    .select('organization_id')
+    .select('organization_id, timezone')
     .eq('id', params.branchId)
     .eq('is_active', true)
     .maybeSingle()
 
   if (!branchData) return { error: 'Sucursal no encontrada' }
 
-  let clientId: string
-  const { data: existingClient } = await supabase
-    .from('clients')
-    .select('id')
-    .eq('phone', phoneParsed.data)
-    .eq('organization_id', branchData.organization_id)
-    .maybeSingle()
-
-  if (existingClient) {
-    clientId = existingClient.id
-  } else {
-    const { data: newClient, error: clientError } = await supabase
-      .from('clients')
-      .insert({
-        name: params.clientName.trim(),
-        phone: phoneParsed.data,
-        organization_id: branchData.organization_id,
-      })
-      .select('id')
-      .single()
-
-    if (clientError || !newClient) {
-      console.error('[quickBookFromKiosk] client insert error:', clientError?.message)
-      return { error: 'Error al registrar cliente' }
-    }
-    clientId = newClient.id
-  }
-
-  const { data, error } = await supabase.rpc('book_appointment', {
-    p_branch_id: params.branchId,
-    p_service_ids: params.serviceIds,
-    p_staff_id: params.staffId,
-    p_starts_at: params.startsAt,
-    p_client_id: clientId,
-    p_created_via: 'kiosk',
+  // La reserva va por `createAppointment`, el mismo camino que el turnero
+  // público y la agenda. Antes llamaba al RPC `book_appointment`, que era un
+  // tercer motor con tres problemas propios: buscaba el cliente por teléfono
+  // EXACTO (mientras todo el resto del sistema matchea por los últimos 10
+  // dígitos, así que un cliente guardado como "+54 9 351 …" se duplicaba y el
+  // turno quedaba colgado del duplicado), usaba EXTRACT(ISODOW) contra
+  // `business_days` —que en este proyecto es 0=Domingo— así que una sucursal
+  // abierta los domingos siempre daba BRANCH_CLOSED_DAY, y sumaba
+  // `buffer_minutes` dentro de `duration_minutes`, haciendo que el turno
+  // mintiera sobre cuánto dura. Además devolvía sus códigos crudos
+  // (SLOT_TAKEN, BELOW_LEAD_TIME…) a la pantalla del cliente.
+  const tz = branchData.timezone || 'America/Argentina/Buenos_Aires'
+  const inicio = new Date(params.startsAt)
+  const fecha = inicio.toLocaleDateString('en-CA', { timeZone: tz })
+  const hora = inicio.toLocaleTimeString('es-AR', {
+    timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false,
   })
 
-  if (error) {
-    console.error('[quickBookFromKiosk] RPC error:', error.message)
+  const { data: servicios } = await supabase
+    .from('services')
+    .select('id, duration_minutes')
+    .in('id', params.serviceIds)
+
+  const settings = await getAppointmentSettings(branchData.organization_id, params.branchId)
+  const duracion = params.serviceIds.reduce((acc, id) => {
+    const s = servicios?.find(r => r.id === id)
+    return acc + (s?.duration_minutes ?? settings?.slot_interval_minutes ?? 30)
+  }, 0)
+
+  const result = await createAppointment({
+    branchId: params.branchId,
+    clientPhone: phoneParsed.data,
+    clientName: params.clientName.trim(),
+    barberId: params.staffId,
+    serviceId: params.serviceIds[0],
+    serviceIds: params.serviceIds,
+    appointmentDate: fecha,
+    startTime: hora,
+    durationMinutes: duracion || (settings?.slot_interval_minutes ?? 30),
+    source: 'public',
+    viaKiosk: true,
+  })
+
+  if ('error' in result && result.error) return { error: result.error }
+  if (!('success' in result) || !result.appointment) {
     return { error: 'No se pudo crear el turno. Intentá de nuevo.' }
   }
 
-  const result = data as { id?: string; appointment_id?: string; error?: string }
-
-  if (result.error) {
-    return { error: result.error }
-  }
-
-  const appointmentId = result.id ?? result.appointment_id
-  if (!appointmentId) {
-    return { error: 'Respuesta inesperada del servidor' }
-  }
-
-  return { ok: true, appointmentId }
+  return { ok: true, appointmentId: result.appointment.id }
 }
 
 // ─── getAvailableSlotsForKiosk ────────────────────────────────────────────────

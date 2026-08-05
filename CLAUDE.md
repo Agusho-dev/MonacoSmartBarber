@@ -78,7 +78,7 @@ Los webhooks inbound de Meta (WhatsApp Cloud API + Instagram) los manejan los **
 
 ### Post-service automation flow
 
-Cuando una visita se completa (`queue.ts → completeVisit`), el sistema busca `automation_workflows` con `trigger_type='post_service'` activos para esa org+sucursal y programa un `scheduled_messages` por workflow matching. El cron `process-scheduled-messages` (corre cada minuto vía pg_cron) hace 3 cosas: envía el template a Meta Cloud API, inserta el mensaje en `messages` (para el inbox), y crea la `workflow_execution` apuntando al siguiente nodo del workflow (status `waiting_reply`). Cuando el cliente responde al template, `/api/webhooks/whatsapp` resuelve la execution activa y avanza al nodo según `condition_value`.
+Cuando una visita se completa (`queue.ts → completeService`; **`completeVisit()` no existe** — la visita la inserta el trigger `on_queue_completed` y `completeService` la UPDATE-a), el sistema busca `automation_workflows` con `trigger_type='post_service'` activos para esa org+sucursal y programa un `scheduled_messages` por workflow matching. El cron `process-scheduled-messages` (corre cada minuto vía pg_cron) hace 3 cosas: envía el template a Meta Cloud API, inserta el mensaje en `messages` (para el inbox), y crea la `workflow_execution` apuntando al siguiente nodo del workflow (status `waiting_reply`). Cuando el cliente responde al template, `/api/webhooks/whatsapp` resuelve la execution activa y avanza al nodo según `condition_value`.
 
 `overlap_policy='skip_if_active'` en `automation_workflows`: `queue.ts` chequea antes de encolar si ya hay un `scheduled_message` pending o una `workflow_execution` activa para ese cliente+workflow, y si hay, no re-encola.
 
@@ -87,6 +87,15 @@ Patrón obligatorio en edge functions: siempre chequear `error` de cada `.insert
 ### Realtime
 
 Supabase Realtime WebSocket subscriptions on `queue_entries` and `staff` power the live queue in the barber panel and TV display.
+
+### Turnos ↔ fila
+
+El sistema de turnos y su convivencia con la fila están documentados en detalle en el `CLAUDE.md` de la raíz del monorepo (`../CLAUDE.md`), sección "Sistema de turnos (migración 119+, refundado en la 168)". Lo mínimo que hay que saber antes de tocar cualquiera de los dos:
+
+- Al hacer check-in, el turno entra a la fila con **`priority_order` = la hora del turno**, no la de llegada. Es la clave de toda la precedencia.
+- `claim_next_for_barber` tiene dos caminos propios para turnos; el FIFO walk-in quedó intacto (sigue filtrando `is_appointment = false`).
+- `position` **no ordena nada** (no es único, se recicla, tiene carrera). Todo lo que ordena de verdad usa `priority_order`.
+- Las tarjetas de turno no se arrastran desde `/dashboard/fila`: el drag reescribe `priority_order` sintético y le pisaría la hora reservada.
 
 ### Cuentas de cobro: tope mensual y rotación (migración 160+)
 

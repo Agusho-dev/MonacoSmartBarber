@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Scissors, Clock } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { CheckCircle2, Scissors, Clock, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   TerminalSectionGlow,
@@ -13,6 +14,18 @@ interface AppointmentConfirmationProps {
   barberName: string | null
   onReset: () => void
   isLightBg: boolean
+  /** Título grande. Default: "¡Llegada registrada!". */
+  title?: string
+  /** Línea principal. Default: "<barbero> ya sabe que llegaste.". */
+  message?: ReactNode
+  /**
+   * Avisos secundarios de una línea (enrolamiento facial hecho, turno sumado a
+   * una entrada de fila existente…). Son parte del cierre, no errores.
+   */
+  notes?: string[]
+  /** Hora del turno "HH:MM" — se muestra junto al barbero cuando hay. */
+  appointmentTime?: string | null
+  autoResetSeconds?: number
 }
 
 const AUTO_REDIRECT_SECONDS = 10
@@ -21,8 +34,13 @@ export function AppointmentConfirmation({
   barberName,
   onReset,
   isLightBg,
+  title = '¡Llegada registrada!',
+  message,
+  notes,
+  appointmentTime = null,
+  autoResetSeconds = AUTO_REDIRECT_SECONDS,
 }: AppointmentConfirmationProps) {
-  const [secondsLeft, setSecondsLeft] = useState(AUTO_REDIRECT_SECONDS)
+  const [secondsLeft, setSecondsLeft] = useState(autoResetSeconds)
 
   useEffect(() => {
     if (secondsLeft <= 0) {
@@ -33,12 +51,25 @@ export function AppointmentConfirmation({
     return () => clearTimeout(timer)
   }, [secondsLeft, onReset])
 
-  const progress = ((AUTO_REDIRECT_SECONDS - secondsLeft) / AUTO_REDIRECT_SECONDS) * 100
+  const progress = ((autoResetSeconds - secondsLeft) / autoResetSeconds) * 100
+
+  const mensajePrincipal =
+    message ??
+    (barberName ? (
+      <>
+        <span className={cn('font-bold', isLightBg ? 'text-zinc-900' : 'text-white')}>
+          {barberName}
+        </span>{' '}
+        ya sabe que llegaste.
+      </>
+    ) : (
+      'Estás en la fila. ¡Ya vamos!'
+    ))
 
   return (
     <div
       key="appointment-confirmation"
-      className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-8 md:gap-10 px-6 pt-16 md:pt-20 pb-10 my-auto animate-in fade-in zoom-in-95 duration-500"
+      className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-6 md:gap-8 px-6 pt-12 md:pt-16 pb-10 my-auto animate-in fade-in zoom-in-95 duration-500"
     >
       <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
 
@@ -70,39 +101,20 @@ export function AppointmentConfirmation({
               isLightBg ? 'text-zinc-900' : terminalH1Gradient
             )}
           >
-            ¡Llegada registrada!
+            {title}
           </h2>
-          {barberName ? (
-            <p
-              className={cn(
-                'text-lg md:text-2xl mt-2',
-                isLightBg ? 'text-zinc-700' : terminalBodyMuted
-              )}
-            >
-              <span
-                className={cn(
-                  'font-bold',
-                  isLightBg ? 'text-zinc-900' : 'text-white'
-                )}
-              >
-                {barberName}
-              </span>{' '}
-              ya sabe que llegaste.
-            </p>
-          ) : (
-            <p
-              className={cn(
-                'text-lg md:text-2xl mt-2',
-                isLightBg ? 'text-zinc-700' : terminalBodyMuted
-              )}
-            >
-              Estás en la fila. ¡Ya vamos!
-            </p>
-          )}
+          <p
+            className={cn(
+              'text-lg md:text-2xl mt-2',
+              isLightBg ? 'text-zinc-700' : terminalBodyMuted
+            )}
+          >
+            {mensajePrincipal}
+          </p>
         </div>
       </div>
 
-      {/* Detalle barbero */}
+      {/* Detalle barbero + hora */}
       {barberName && (
         <div
           className={cn(
@@ -129,7 +141,35 @@ export function AppointmentConfirmation({
             <span className={cn('font-bold', isLightBg ? 'text-zinc-900' : 'text-white')}>
               {barberName}
             </span>
+            {appointmentTime && (
+              <>
+                {' · '}
+                <span className={cn('font-bold', isLightBg ? 'text-zinc-900' : 'text-white')}>
+                  {appointmentTime}
+                </span>
+              </>
+            )}
           </p>
+        </div>
+      )}
+
+      {/* Avisos del cierre */}
+      {notes && notes.length > 0 && (
+        <div className="w-full flex flex-col gap-2">
+          {notes.map((note) => (
+            <div
+              key={note}
+              className={cn(
+                'flex items-start gap-2.5 px-4 py-3 rounded-2xl border text-base md:text-lg',
+                isLightBg
+                  ? 'bg-cyan-50 border-cyan-200 text-cyan-900'
+                  : 'bg-cyan-500/10 border-cyan-400/25 text-cyan-100'
+              )}
+            >
+              <Info className="size-5 shrink-0 mt-0.5" strokeWidth={1.75} />
+              <span>{note}</span>
+            </div>
+          ))}
         </div>
       )}
 
@@ -156,7 +196,7 @@ export function AppointmentConfirmation({
           )}
         >
           <Clock className="size-4" />
-          <span>Volviendo al inicio en {secondsLeft}s...</span>
+          <span>Volviendo al inicio en {secondsLeft}s…</span>
         </div>
       </div>
 
@@ -164,7 +204,7 @@ export function AppointmentConfirmation({
       <button
         onClick={onReset}
         className={cn(
-          'text-sm md:text-base underline underline-offset-4 transition-colors',
+          'text-base md:text-lg underline underline-offset-4 transition-colors',
           isLightBg
             ? 'text-zinc-500 hover:text-zinc-800'
             : 'text-white/35 hover:text-white/65'

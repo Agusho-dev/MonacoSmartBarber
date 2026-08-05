@@ -1,18 +1,19 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import Image from 'next/image'
-import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
 import { ChevronLeft, Loader2, MapPin, Phone, Scissors } from 'lucide-react'
 import { publicBookAppointment } from '@/lib/actions/public-booking'
 import { ServicesStep } from './wizard/services-step'
-import { StaffStep } from './wizard/staff-step'
-import { SlotStep } from './wizard/slot-step'
+import { SlotStep, Avatar, type SlotSelection } from './wizard/slot-step'
 import { ContactStep } from './wizard/contact-step'
 import { ConfirmationStep } from './wizard/confirmation-step'
+import { StepProgress } from './wizard/step-progress'
+import { buildTurneroTheme, themeVars } from './theme'
+import { diasDeVentana } from './ventana'
 import { formatCurrency } from '@/lib/format'
-import type { PublicService, PublicStaff, PublicBookingResult } from '@/lib/actions/public-booking'
+import { toDateStr } from '@/lib/time-utils'
+import type { PublicService, PublicStaff } from '@/lib/actions/public-booking'
 
 // ─── Tipos de props ──────────────────────────────────────────────────
 
@@ -89,22 +90,29 @@ function notificarAppMobile(appointmentId: string) {
 
 // ─── Steps del wizard ────────────────────────────────────────────────
 
-type WizardStep = 'services' | 'staff' | 'slot' | 'contact' | 'confirmation'
+/**
+ * TRES pasos, no cuatro: el paso "Elegí tu barbero" desapareció.
+ *
+ * La agenda real de Monaco es de un barbero por día (Fabri los martes, Simón
+ * los miércoles, Nico los jueves), así que preguntarle al cliente por el
+ * barbero era pedirle que resolviera algo que el sistema ya sabe. Cuando de
+ * verdad hay varios disponibles el mismo día, aparece un filtro opcional
+ * ADENTRO del paso de horario.
+ */
+type WizardStep = 'services' | 'slot' | 'contact' | 'confirmation'
 
-const STEP_ORDER: WizardStep[] = ['services', 'staff', 'slot', 'contact', 'confirmation']
+const STEP_ORDER: WizardStep[] = ['services', 'slot', 'contact']
 const STEP_LABELS: Record<WizardStep, string> = {
   services: 'Servicio',
-  staff: 'Barbero',
-  slot: 'Horario',
-  contact: 'Datos',
+  slot: 'Día y horario',
+  contact: 'Tus datos',
   confirmation: 'Confirmación',
 }
-const STEP_NUMBERS: Record<WizardStep, number> = {
-  services: 1,
-  staff: 2,
-  slot: 3,
-  contact: 4,
-  confirmation: 5,
+const STEP_TITLES: Record<WizardStep, string> = {
+  services: '¿Qué te hacés?',
+  slot: '¿Cuándo te viene bien?',
+  contact: 'Tus datos',
+  confirmation: '',
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -135,11 +143,8 @@ function mapErrorCode(code: string): string {
 export function BookingWizard({ branch, services, staff, settings, branding, prefill }: Props) {
   const [step, setStep] = useState<WizardStep>('services')
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([])
-  const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined)
-  const [selectedTime, setSelectedTime] = useState('')
-  const [selectedSlotStaffId, setSelectedSlotStaffId] = useState<string>('')
-  const [selectedSlotStaffName, setSelectedSlotStaffName] = useState('')
+  const [selectedSlot, setSelectedSlot] = useState<SlotSelection | null>(null)
   // Prefill desde la app mobile: el cliente ya se identificó ahí, re-tipear el
   // teléfono con otro formato creaba un cliente duplicado.
   const [clientName, setClientName] = useState(prefill?.name ?? '')
@@ -149,20 +154,51 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
   const [slotRefreshKey, setSlotRefreshKey] = useState(0)
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
-  const [bookingResult, setBookingResult] = useState<PublicBookingResult | null>(null)
+  const [appointmentToken, setAppointmentToken] = useState('')
+
+  const theme = useMemo(
+    () => buildTurneroTheme({ bg: branding.bg, primary: branding.primary, text: branding.text }),
+    [branding.bg, branding.primary, branding.text]
+  )
 
   const currentStepIndex = STEP_ORDER.indexOf(step)
-  const isFirstStep = currentStepIndex === 0
+  const isFirstStep = currentStepIndex <= 0
   const isLastContentStep = step === 'contact'
 
-  // Servicio y staff derivados para mostrar en resumen
-  const primaryService = services.find(s => selectedServiceIds[0] === s.id)
-  const primaryDuration = selectedServiceIds.reduce((acc, id) => {
-    const svc = services.find(s => s.id === id)
-    return acc + (svc?.duration_minutes ?? settings.slot_interval_minutes)
-  }, 0)
+  const selectedServices = useMemo(
+    () =>
+      selectedServiceIds
+        .map(id => services.find(s => s.id === id))
+        .filter((s): s is PublicService => !!s),
+    [selectedServiceIds, services]
+  )
 
-  const effectiveStaffForSlot = selectedStaffId  // null = cualquiera
+  const totalPrice = selectedServices.reduce((acc, s) => acc + s.price, 0)
+  const totalDuration = selectedServices.reduce(
+    (acc, s) => acc + (s.duration_minutes ?? settings.slot_interval_minutes),
+    0
+  )
+
+  /**
+   * Días que se pueden reservar de verdad: los configurados para la sucursal
+   * que además tengan al menos un barbero con horario cargado. Ofrecer un
+   * miércoles donde no atiende nadie sólo lleva a "no hay turnos disponibles".
+   */
+  const enabledDays = useMemo(() => {
+    const trabajados = new Set(staff.flatMap(s => s.days))
+    const cruce = settings.appointment_days.filter(d => trabajados.has(d))
+    // Sin cruce (config incompleta) preferimos mostrar los días configurados
+    // antes que una tira entera deshabilitada.
+    return cruce.length ? cruce : settings.appointment_days
+  }, [staff, settings.appointment_days])
+
+  function primerDiaHabilitado(): Date | undefined {
+    // Misma ventana que la tira: si el motor no acepta el último día, tampoco
+    // hay que preseleccionarlo (ver `ventana.ts`).
+    return diasDeVentana(settings.max_advance_days).find(d =>
+      enabledDays.includes(d.getDay())
+    )
+  }
 
   // ─── Navegación ─────────────────────────────────────────────────
 
@@ -182,18 +218,16 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
         setError('Seleccioná al menos un servicio para continuar.')
         return
       }
-      setStep('staff')
-      return
-    }
-
-    if (step === 'staff') {
+      // Entrar al paso con un día ya elegido: la grilla se ve de una, sin el
+      // "seleccioná un día" que antes obligaba a un click extra.
+      if (!selectedDate) setSelectedDate(primerDiaHabilitado())
       setStep('slot')
       return
     }
 
     if (step === 'slot') {
-      if (!selectedDate || !selectedTime) {
-        setError('Seleccioná un día y horario para continuar.')
+      if (!selectedDate || !selectedSlot) {
+        setError('Elegí un horario para continuar.')
         return
       }
       setStep('contact')
@@ -214,30 +248,24 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
         return
       }
 
-      // Confirmar turno
       startTransition(async () => {
-        if (!selectedDate || !selectedTime) {
+        if (!selectedDate || !selectedSlot) {
           setError('Falta fecha u horario. Volvé al paso anterior.')
           return
         }
-
-        const dateStr = (() => {
-          const y = selectedDate.getFullYear()
-          const m = String(selectedDate.getMonth() + 1).padStart(2, '0')
-          const d = String(selectedDate.getDate()).padStart(2, '0')
-          return `${y}-${m}-${d}`
-        })()
 
         const result = await publicBookAppointment({
           branch_slug: branch.slug,
           branch_id: branch.id,
           client_phone: clientPhone,
           client_name: clientName,
-          staff_id: selectedSlotStaffId || effectiveStaffForSlot,
-          starts_at: dateStr,
-          start_time: selectedTime,
+          // El barbero sale del slot elegido: el motor devuelve un grupo por
+          // barbero, así que la hora ya viene con dueño.
+          staff_id: selectedSlot.staffId,
+          starts_at: toDateStr(selectedDate),
+          start_time: selectedSlot.time,
           service_ids: selectedServiceIds,
-          duration_minutes: primaryDuration,
+          duration_minutes: totalDuration,
         })
 
         if ('error' in result) {
@@ -247,19 +275,14 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
           // vieja intacta: el cliente reintentaba el mismo horario en loop.
           // Lo devolvemos al paso de horarios con la grilla recargada.
           if (result.error === 'SLOT_TAKEN' || result.error === 'TOO_LATE') {
-            setSelectedTime('')
-            setSelectedSlotStaffId('')
-            setSelectedSlotStaffName('')
+            setSelectedSlot(null)
             setSlotRefreshKey(k => k + 1)
             setStep('slot')
           }
           return
         }
 
-        setBookingResult({
-          ...result.data,
-          barber_name: selectedSlotStaffName || null,
-        })
+        setAppointmentToken(result.data.cancellation_token)
         setStep('confirmation')
         notificarAppMobile(result.data.appointment_id)
       })
@@ -272,6 +295,9 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
     setSelectedServiceIds(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     )
+    // La duración total cambia y con ella la grilla: cualquier hora ya elegida
+    // deja de ser válida.
+    setSelectedSlot(null)
     setError('')
   }
 
@@ -282,36 +308,26 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
     setError('')
   }
 
-  function handleSlotSelect(time: string, staffId: string, staffName: string) {
-    setSelectedTime(time)
-    setSelectedSlotStaffId(staffId)
-    setSelectedSlotStaffName(staffName)
-    setError('')
-  }
-
-  // ─── Helpers visuales ───────────────────────────────────────────
-
   function canProceed(): boolean {
     if (step === 'services') return selectedServiceIds.length > 0
-    if (step === 'staff') return true
-    if (step === 'slot') return !!selectedDate && !!selectedTime
+    if (step === 'slot') return !!selectedDate && !!selectedSlot
     if (step === 'contact') return isValidName(clientName) && isValidPhone(clientPhone) && policyAccepted
     return false
   }
 
+  const habilitado = canProceed() && !isPending
   const ctaLabel = isLastContentStep ? 'Confirmar turno' : 'Continuar'
 
   // ─── Render ─────────────────────────────────────────────────────
 
   return (
     <div
-      className="min-h-screen"
-      style={{ backgroundColor: branding.bg }}
+      className="min-h-screen bg-[var(--t-bg)] text-[var(--t-text)]"
+      style={themeVars(theme)}
     >
       {/* Header sticky con nombre + dirección + tel */}
       <header
-        className="sticky top-0 z-20 border-b"
-        style={{ backgroundColor: branding.bg, borderColor: 'rgba(0,0,0,0.08)' }}
+        className="sticky top-0 z-20 border-b border-[var(--t-border)] bg-[var(--t-bg)]"
       >
         <div className="mx-auto max-w-2xl px-4 py-3">
           <div className="flex items-center gap-3">
@@ -319,43 +335,36 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
               <Image
                 src={branding.logo_url}
                 alt={branch.name}
-                width={36}
-                height={36}
+                width={40}
+                height={40}
                 unoptimized
-                className="h-9 w-9 shrink-0 rounded-full object-cover shadow-sm"
+                className="h-10 w-10 shrink-0 rounded-full object-cover"
               />
             ) : (
               <div
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white"
-                style={{ backgroundColor: branding.primary }}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold"
+                style={{ backgroundColor: 'var(--t-primary)', color: 'var(--t-on-primary)' }}
               >
                 {branch.name.charAt(0).toUpperCase()}
               </div>
             )}
             <div className="min-w-0 flex-1">
-              <p
-                className="truncate text-sm font-bold leading-tight"
-                style={{ color: branding.text }}
-              >
+              <p className="truncate text-sm font-bold leading-tight text-[var(--t-text)]">
                 {branch.name}
               </p>
-              <div className="flex items-center gap-2 overflow-hidden">
+              <div className="flex items-center gap-2.5 overflow-hidden">
                 {branch.address && (
-                  <span
-                    className="flex items-center gap-0.5 truncate text-[11px]"
-                    style={{ color: branding.text, opacity: 0.55 }}
-                  >
-                    <MapPin className="h-2.5 w-2.5 shrink-0" />
+                  <span className="flex items-center gap-1 truncate text-[11px] text-[var(--t-text-muted)]">
+                    <MapPin className="h-3 w-3 shrink-0" />
                     {branch.address}
                   </span>
                 )}
                 {branch.phone && (
                   <a
                     href={`tel:${branch.phone}`}
-                    className="flex shrink-0 items-center gap-0.5 text-[11px] hover:underline"
-                    style={{ color: branding.primary }}
+                    className="flex shrink-0 items-center gap-1 text-[11px] font-semibold text-[var(--t-accent)] hover:underline"
                   >
-                    <Phone className="h-2.5 w-2.5" />
+                    <Phone className="h-3 w-3" />
                     {branch.phone}
                   </a>
                 )}
@@ -365,102 +374,48 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
         </div>
       </header>
 
-      <div className="mx-auto max-w-2xl px-4 pb-40 pt-5">
-        {/* Stepper */}
+      <div className="mx-auto max-w-2xl px-4 pb-44 pt-5">
         {step !== 'confirmation' && (
-          <div className="mb-6">
-            <div className="flex items-center justify-between">
-              {STEP_ORDER.filter(s => s !== 'confirmation').map((s, idx) => {
-                const isCompleted = STEP_NUMBERS[s] < STEP_NUMBERS[step]
-                const isCurrent = s === step
-                return (
-                  <div key={s} className="flex flex-1 items-center">
-                    <div className="flex flex-col items-center gap-1">
-                      <div
-                        className={cn(
-                          'flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold transition-all',
-                        )}
-                        style={{
-                          backgroundColor: isCompleted || isCurrent
-                            ? branding.primary
-                            : `${branding.primary}15`,
-                          color: isCompleted || isCurrent
-                            ? '#ffffff'
-                            : `${branding.text}60`,
-                        }}
-                      >
-                        {idx + 1}
-                      </div>
-                      <span
-                        className="hidden text-[10px] font-medium sm:block"
-                        style={{
-                          color: isCurrent ? branding.primary : branding.text,
-                          opacity: isCurrent ? 1 : 0.4,
-                        }}
-                      >
-                        {STEP_LABELS[s]}
-                      </span>
-                    </div>
-                    {idx < STEP_ORDER.filter(x => x !== 'confirmation').length - 1 && (
-                      <div
-                        className="mx-1 h-0.5 flex-1 rounded-full transition-all"
-                        style={{
-                          backgroundColor: isCompleted
-                            ? branding.primary
-                            : `${branding.primary}20`,
-                        }}
-                      />
-                    )}
-                  </div>
-                )
-              })}
+          <>
+            <StepProgress
+              current={currentStepIndex + 1}
+              total={STEP_ORDER.length}
+              label={STEP_LABELS[step]}
+            />
+
+            <div className="mb-5 mt-5">
+              <h1 className="text-[26px] font-bold leading-tight tracking-tight text-[var(--t-text)]">
+                {STEP_TITLES[step]}
+              </h1>
+              {step === 'services' && branding.welcome_message && (
+                <p className="mt-1.5 text-sm text-[var(--t-text-muted)]">
+                  {branding.welcome_message}
+                </p>
+              )}
+              {step === 'contact' && (
+                <p className="mt-1.5 text-sm text-[var(--t-text-muted)]">
+                  Sólo para confirmarte el turno y avisarte si algo cambia.
+                </p>
+              )}
             </div>
-          </div>
+          </>
         )}
 
-        {/* Título del step */}
-        {step !== 'confirmation' && (
-          <div className="mb-4">
-            <h1 className="text-lg font-bold" style={{ color: branding.text }}>
-              {step === 'services' && 'Elegí tu servicio'}
-              {step === 'staff' && 'Elegí tu barbero'}
-              {step === 'slot' && 'Elegí día y horario'}
-              {step === 'contact' && 'Tus datos de contacto'}
-            </h1>
-            {step === 'services' && branding.welcome_message && (
-              <p className="mt-1 text-sm" style={{ color: branding.text, opacity: 0.6 }}>
-                {branding.welcome_message}
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Mensaje de error global */}
         {error && (
           <div
-            className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            className="mb-4 rounded-2xl p-3.5 text-sm font-medium"
+            style={{ backgroundColor: 'var(--t-danger-bg)', color: 'var(--t-danger-text)' }}
             role="alert"
           >
             {error}
           </div>
         )}
 
-        {/* Contenido del step */}
         {step === 'services' && (
           <ServicesStep
             services={services}
             selected={selectedServiceIds}
             onToggle={toggleService}
-            branding={branding}
-          />
-        )}
-
-        {step === 'staff' && (
-          <StaffStep
-            staff={staff}
-            selected={selectedStaffId}
-            onSelect={id => { setSelectedStaffId(id); setSelectedTime(''); setSelectedSlotStaffId('') }}
-            branding={branding}
           />
         )}
 
@@ -469,15 +424,15 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
             key={slotRefreshKey}
             branchId={branch.id}
             serviceIds={selectedServiceIds}
-            staffId={effectiveStaffForSlot}
-            slotIntervalMinutes={settings.slot_interval_minutes}
+            staff={staff}
             maxAdvanceDays={settings.max_advance_days}
-            appointmentDays={settings.appointment_days}
+            enabledDays={enabledDays}
             selectedDate={selectedDate}
-            selectedTime={selectedTime}
-            onDateChange={d => { setSelectedDate(d); setSelectedTime('') }}
-            onSlotSelect={handleSlotSelect}
-            branding={branding}
+            selectedTime={selectedSlot?.time ?? ''}
+            selectedStaffId={selectedSlot?.staffId ?? ''}
+            onDateChange={d => { setSelectedDate(d); setSelectedSlot(null) }}
+            onSlotSelect={slot => { setSelectedSlot(slot); setError('') }}
+            onClearSlot={() => setSelectedSlot(null)}
           />
         )}
 
@@ -488,90 +443,95 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
             accepted={policyAccepted}
             cancellationHours={settings.cancellation_min_hours}
             onChange={handleContactChange}
-            branding={branding}
           />
         )}
 
-        {step === 'confirmation' && bookingResult && (
+        {step === 'confirmation' && (
           <ConfirmationStep
-            appointmentId={bookingResult.appointment_id}
-            cancellationToken={bookingResult.cancellation_token}
+            cancellationToken={appointmentToken}
             branch={branch}
-            service={primaryService}
-            staff={staff.find(s => s.id === selectedSlotStaffId) ?? null}
-            staffName={selectedSlotStaffName || 'Por asignar'}
+            services={selectedServices}
+            totalPrice={totalPrice}
+            durationMinutes={totalDuration}
+            staffName={selectedSlot?.staffName ?? 'Por asignar'}
+            staffAvatarUrl={selectedSlot?.staffAvatarUrl ?? null}
             date={selectedDate!}
-            time={selectedTime}
+            time={selectedSlot?.time ?? ''}
             clientName={clientName}
             clientPhone={clientPhone}
-            branding={branding}
           />
         )}
       </div>
 
-      {/* Footer sticky con resumen + botones */}
+      {/* Footer sticky con resumen + acciones */}
       {step !== 'confirmation' && (
-        <div
-          className="fixed bottom-0 left-0 right-0 z-20 border-t"
-          style={{ backgroundColor: branding.bg, borderColor: 'rgba(0,0,0,0.08)' }}
-        >
+        <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-[var(--t-border)] bg-[var(--t-bg)] pb-[env(safe-area-inset-bottom)]">
           <div className="mx-auto max-w-2xl px-4 py-3">
-            {/* Resumen mini */}
-            {selectedServiceIds.length > 0 && step !== 'services' && (
+            {selectedServices.length > 0 && step !== 'services' && (
               <div
-                className="mb-2.5 flex items-center gap-2 rounded-lg p-2.5 text-xs"
-                style={{ backgroundColor: `${branding.primary}08` }}
+                className="mb-2.5 flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs"
+                style={{ backgroundColor: 'var(--t-surface)', borderColor: 'var(--t-border)' }}
               >
-                <Scissors className="h-3 w-3 shrink-0" style={{ color: branding.primary }} />
-                <span className="truncate font-medium" style={{ color: branding.text }}>
-                  {services
-                    .filter(s => selectedServiceIds.includes(s.id))
-                    .map(s => s.name)
-                    .join(', ')}
-                </span>
-                {primaryService && (
-                  <span className="ml-auto shrink-0 font-bold" style={{ color: branding.primary }}>
-                    {formatCurrency(
-                      services
-                        .filter(s => selectedServiceIds.includes(s.id))
-                        .reduce((acc, s) => acc + s.price, 0)
-                    )}
-                  </span>
+                {selectedSlot ? (
+                  <Avatar
+                    url={selectedSlot.staffAvatarUrl}
+                    name={selectedSlot.staffName}
+                    size={22}
+                  />
+                ) : (
+                  <Scissors className="h-4 w-4 shrink-0 text-[var(--t-text-muted)]" />
                 )}
+                <span className="min-w-0 flex-1 truncate font-semibold text-[var(--t-text)]">
+                  {selectedServices.map(s => s.name).join(' + ')}
+                  {selectedSlot && (
+                    <span className="font-normal text-[var(--t-text-muted)]">
+                      {' · '}
+                      {selectedSlot.time} con {selectedSlot.staffName}
+                    </span>
+                  )}
+                </span>
+                <span className="shrink-0 font-bold text-[var(--t-accent)]">
+                  {formatCurrency(totalPrice)}
+                </span>
               </div>
             )}
 
             <div className="flex gap-2">
               {!isFirstStep && (
-                <Button
-                  variant="outline"
+                <button
+                  type="button"
                   onClick={goBack}
                   disabled={isPending}
-                  className="h-12 px-4"
                   aria-label="Volver al paso anterior"
+                  className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border transition-opacity disabled:opacity-50"
+                  style={{
+                    backgroundColor: 'var(--t-surface)',
+                    borderColor: 'var(--t-border)',
+                    color: 'var(--t-text)',
+                  }}
                 >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
               )}
-              <Button
-                className="h-12 flex-1 text-base font-bold"
+              <button
+                type="button"
+                className="flex h-14 flex-1 items-center justify-center gap-2 rounded-xl text-base font-bold transition-[opacity,transform] duration-150 active:scale-[0.99] disabled:cursor-not-allowed"
                 onClick={goNext}
-                disabled={isPending || !canProceed()}
+                disabled={!habilitado}
                 style={{
-                  backgroundColor: canProceed() && !isPending ? branding.primary : undefined,
-                  color: canProceed() && !isPending ? '#ffffff' : undefined,
-                  opacity: (!canProceed() || isPending) ? 0.5 : 1,
+                  backgroundColor: habilitado ? 'var(--t-primary)' : 'var(--t-surface-alt)',
+                  color: habilitado ? 'var(--t-on-primary)' : 'var(--t-text-faint)',
                 }}
               >
                 {isPending ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                     Confirmando…
                   </>
                 ) : (
                   ctaLabel
                 )}
-              </Button>
+              </button>
             </div>
           </div>
         </div>

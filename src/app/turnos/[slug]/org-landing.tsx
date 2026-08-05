@@ -14,7 +14,7 @@ import {
   Search,
   Users,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { buildTurneroTheme, themeVars, type TurneroTheme } from './theme'
 
 // ─── Tipos ───────────────────────────────────────────────────────────
 
@@ -90,6 +90,14 @@ export function OrgLanding({ orgName, branches, branding }: Props) {
   const [locating, setLocating] = useState(false)
   const [geoError, setGeoError] = useState('')
 
+  // Mismo tema derivado que el wizard: las tarjetas eran `bg-white/80` con el
+  // texto de marca encima, así que con fondo gris y texto blanco el nombre de
+  // la sucursal quedaba blanco sobre blanco.
+  const theme = useMemo(
+    () => buildTurneroTheme({ bg: branding.bg, primary: branding.primary, text: branding.text }),
+    [branding.bg, branding.primary, branding.text]
+  )
+
   // Ordenar por cercanía sólo tiene sentido si al menos 2 sucursales
   // tienen coordenadas cargadas.
   const geoCapable =
@@ -151,34 +159,31 @@ export function OrgLanding({ orgName, branches, branding }: Props) {
   }
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: branding.bg }}>
+    <div
+      className="min-h-screen bg-[var(--t-bg)] text-[var(--t-text)]"
+      style={themeVars(theme)}
+    >
       {/* Header */}
-      <header
-        className="sticky top-0 z-20 border-b"
-        style={{ backgroundColor: branding.bg, borderColor: 'rgba(0,0,0,0.08)' }}
-      >
+      <header className="sticky top-0 z-20 border-b border-[var(--t-border)] bg-[var(--t-bg)]">
         <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
           {branding.logo_url ? (
             <Image
               src={branding.logo_url}
               alt={orgName}
-              width={36}
-              height={36}
+              width={40}
+              height={40}
               unoptimized
-              className="h-9 w-9 shrink-0 rounded-full object-cover shadow-sm"
+              className="h-10 w-10 shrink-0 rounded-full object-cover"
             />
           ) : (
             <div
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white"
-              style={{ backgroundColor: branding.primary }}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold"
+              style={{ backgroundColor: 'var(--t-primary)', color: 'var(--t-on-primary)' }}
             >
               {orgName.charAt(0).toUpperCase()}
             </div>
           )}
-          <p
-            className="truncate text-sm font-bold leading-tight"
-            style={{ color: branding.text }}
-          >
+          <p className="truncate text-sm font-bold leading-tight text-[var(--t-text)]">
             {orgName}
           </p>
         </div>
@@ -187,13 +192,10 @@ export function OrgLanding({ orgName, branches, branding }: Props) {
       <div className="mx-auto max-w-2xl px-4 pb-16 pt-6">
         {/* Título */}
         <div className="mb-5">
-          <h1 className="text-xl font-bold" style={{ color: branding.text }}>
+          <h1 className="text-[26px] font-bold leading-tight tracking-tight text-[var(--t-text)]">
             {bookableCount > 0 ? 'Elegí tu sucursal' : 'Nuestras sucursales'}
           </h1>
-          <p
-            className="mt-1 text-sm"
-            style={{ color: branding.text, opacity: 0.6 }}
-          >
+          <p className="mt-1.5 text-sm text-[var(--t-text-muted)]">
             {branding.welcome_message ??
               (bookableCount > 0
                 ? 'Reservá tu turno online en el local que te quede más cómodo.'
@@ -206,21 +208,15 @@ export function OrgLanding({ orgName, branches, branding }: Props) {
           <div className="mb-4 flex flex-col gap-2 sm:flex-row">
             {showSearch && (
               <div className="relative flex-1">
-                <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
-                  style={{ color: branding.text, opacity: 0.4 }}
-                />
+                <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--t-text-faint)]" />
                 <input
                   type="search"
                   value={query}
                   onChange={e => setQuery(e.target.value)}
                   placeholder="Buscar por nombre o dirección"
                   aria-label="Buscar sucursal"
-                  className="h-11 w-full rounded-xl border bg-white/70 pl-9 pr-3 text-sm outline-none transition-colors focus:border-current"
-                  style={{
-                    borderColor: 'rgba(0,0,0,0.12)',
-                    color: branding.text,
-                  }}
+                  className="h-12 w-full rounded-xl border bg-[var(--t-surface)] pl-10 pr-3 text-sm text-[var(--t-text)] outline-none transition-colors placeholder:text-[var(--t-text-faint)] focus:border-[var(--t-accent)]"
+                  style={{ borderColor: 'var(--t-text-faint)' }}
                 />
               </div>
             )}
@@ -229,11 +225,11 @@ export function OrgLanding({ orgName, branches, branding }: Props) {
                 type="button"
                 onClick={locate}
                 disabled={locating}
-                className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold transition-opacity disabled:opacity-60"
+                className="flex h-12 shrink-0 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold transition-opacity disabled:opacity-60"
                 style={{
-                  borderColor: coords ? branding.primary : 'rgba(0,0,0,0.12)',
-                  color: coords ? '#ffffff' : branding.primary,
-                  backgroundColor: coords ? branding.primary : 'transparent',
+                  backgroundColor: coords ? 'var(--t-primary)' : 'var(--t-surface)',
+                  borderColor: coords ? 'var(--t-primary)' : 'var(--t-border)',
+                  color: coords ? 'var(--t-on-primary)' : 'var(--t-text)',
                 }}
               >
                 {locating ? (
@@ -248,19 +244,23 @@ export function OrgLanding({ orgName, branches, branding }: Props) {
         )}
 
         {geoError && (
-          <p className="mb-3 text-xs" style={{ color: '#b91c1c' }}>
+          <div
+            className="mb-3 rounded-xl px-3 py-2 text-xs font-medium"
+            style={{ backgroundColor: 'var(--t-danger-bg)', color: 'var(--t-danger-text)' }}
+            role="alert"
+          >
             {geoError}
-          </p>
+          </div>
         )}
 
         {/* Lista de sucursales */}
         {decorated.length === 0 ? (
           <div
-            className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed p-8 text-center"
-            style={{ borderColor: 'rgba(0,0,0,0.10)' }}
+            className="flex flex-col items-center gap-2 rounded-2xl border p-8 text-center"
+            style={{ backgroundColor: 'var(--t-surface)', borderColor: 'var(--t-border)' }}
           >
-            <Search className="h-7 w-7 opacity-30" style={{ color: branding.text }} />
-            <p className="text-sm font-medium" style={{ color: branding.text }}>
+            <Search className="h-7 w-7 text-[var(--t-text-faint)]" />
+            <p className="text-sm font-semibold text-[var(--t-text)]">
               No encontramos ninguna sucursal con ese nombre
             </p>
           </div>
@@ -271,7 +271,7 @@ export function OrgLanding({ orgName, branches, branding }: Props) {
                 key={branch.id}
                 branch={branch}
                 distance={distance}
-                branding={branding}
+                theme={theme}
               />
             ))}
           </div>
@@ -286,41 +286,41 @@ export function OrgLanding({ orgName, branches, branding }: Props) {
 function BranchCard({
   branch,
   distance,
-  branding,
+  theme,
 }: {
   branch: LandingBranch
   distance: number | null
-  branding: Branding
+  theme: TurneroTheme
 }) {
   const maps = mapsUrlFor(branch)
+
+  // Sobre un fondo de luminancia media ningún verde llega a 4.5:1, así que el
+  // estado NO se comunica con el color del texto: el texto va a contraste
+  // pleno y el color queda sólo en el punto, que como elemento gráfico se
+  // conforma con 3:1.
+  const colorAbierto = theme.isDark ? '#4ade80' : '#15803d'
 
   // Card entera como contenedor (no como <a>): las acciones secundarias tienen
   // que quedar DENTRO de su tarjeta. Colgadas afuera se leían como si
   // pertenecieran a la sucursal siguiente. Además evita anidar anchors.
   return (
     <div
-      className={cn(
-        'w-full overflow-hidden rounded-2xl border bg-white/80 transition-shadow',
-        branch.bookable && 'hover:shadow-md'
-      )}
-      style={{ borderColor: 'rgba(0,0,0,0.08)' }}
+      className="w-full overflow-hidden rounded-2xl border"
+      style={{ backgroundColor: 'var(--t-surface)', borderColor: 'var(--t-border)' }}
     >
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <p
-                className="truncate text-base font-bold leading-tight"
-                style={{ color: branding.text }}
-              >
+              <p className="truncate text-lg font-bold leading-tight text-[var(--t-text)]">
                 {branch.name}
               </p>
               {distance != null && (
                 <span
                   className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold"
                   style={{
-                    backgroundColor: `${branding.primary}12`,
-                    color: branding.primary,
+                    backgroundColor: 'var(--t-surface-alt)',
+                    color: 'var(--t-text-muted)',
                   }}
                 >
                   {formatDistance(distance)}
@@ -329,34 +329,36 @@ function BranchCard({
             </div>
 
             {branch.address && (
-              <p
-                className="mt-1 flex items-center gap-1 truncate text-xs"
-                style={{ color: branding.text, opacity: 0.6 }}
-              >
+              <p className="mt-1 flex items-center gap-1 truncate text-xs text-[var(--t-text-muted)]">
                 <MapPin className="h-3 w-3 shrink-0" />
                 {branch.address}
               </p>
             )}
 
             <p
-              className="mt-1.5 flex items-center gap-1 text-xs font-medium"
-              style={{
-                color: branch.openNow ? '#15803d' : branding.text,
-                opacity: branch.openNow ? 1 : 0.55,
-              }}
+              className="mt-1.5 flex items-center gap-1.5 text-xs font-semibold"
+              style={{ color: branch.openNow ? 'var(--t-text)' : 'var(--t-text-muted)' }}
             >
-              <Clock className="h-3 w-3 shrink-0" />
+              {branch.openNow ? (
+                <span
+                  className="h-2 w-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: colorAbierto }}
+                  aria-hidden
+                />
+              ) : (
+                <Clock className="h-3 w-3 shrink-0" />
+              )}
               {branch.hoursLabel}
             </p>
           </div>
 
           {!branch.bookable && (
             <span
-              className="inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold"
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide"
               style={{
-                backgroundColor: `${branding.text}0d`,
-                color: branding.text,
-                opacity: 0.7,
+                backgroundColor: 'var(--t-surface-alt)',
+                borderColor: 'var(--t-border)',
+                color: 'var(--t-text-muted)',
               }}
             >
               <Users className="h-3 w-3" />
@@ -365,47 +367,43 @@ function BranchCard({
           )}
         </div>
 
-        {branch.bookable && (
+        {branch.bookable ? (
           <Link
             href={`/turnos/${branch.slug}`}
-            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white transition-opacity hover:opacity-90 active:scale-[0.99]"
-            style={{ backgroundColor: branding.primary }}
+            className="mt-3.5 flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl text-sm font-bold transition-opacity hover:opacity-90 active:scale-[0.99]"
+            style={{ backgroundColor: 'var(--t-primary)', color: 'var(--t-on-primary)' }}
           >
             <CalendarCheck className="h-4 w-4" />
             Reservar turno
             <ChevronRight className="h-4 w-4" />
           </Link>
-        )}
-
-        {!branch.bookable && (
-          <p className="mt-2 text-xs" style={{ color: branding.text, opacity: 0.55 }}>
+        ) : (
+          <p className="mt-2.5 text-xs text-[var(--t-text-muted)]">
             Acercate cuando quieras, se atiende por orden de llegada.
           </p>
         )}
       </div>
 
       {(maps || branch.phone) && (
-        <div
-          className="flex divide-x border-t"
-          style={{ borderColor: 'rgba(0,0,0,0.06)' }}
-        >
+        <div className="flex border-t" style={{ borderColor: 'var(--t-border)' }}>
           {maps && (
             <a
               href={maps}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition-colors hover:bg-black/[0.03]"
-              style={{ color: branding.primary, borderColor: 'rgba(0,0,0,0.06)' }}
+              className="flex min-h-[46px] flex-1 items-center justify-center gap-1.5 text-xs font-semibold text-[var(--t-accent)]"
             >
               <MapPin className="h-3.5 w-3.5" />
               Cómo llegar
             </a>
           )}
+          {maps && branch.phone && (
+            <span className="w-px" style={{ backgroundColor: 'var(--t-border)' }} />
+          )}
           {branch.phone && (
             <a
               href={`tel:${branch.phone}`}
-              className="flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition-colors hover:bg-black/[0.03]"
-              style={{ color: branding.primary, borderColor: 'rgba(0,0,0,0.06)' }}
+              className="flex min-h-[46px] flex-1 items-center justify-center gap-1.5 text-xs font-semibold text-[var(--t-accent)]"
             >
               <Phone className="h-3.5 w-3.5" />
               Llamar

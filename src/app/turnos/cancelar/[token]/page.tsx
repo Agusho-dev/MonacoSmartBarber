@@ -1,11 +1,18 @@
 import { notFound } from 'next/navigation'
 import { getAppointmentByToken, getAppointmentSettings } from '@/lib/actions/appointments'
+import { buildTurneroTheme } from '../../[slug]/theme'
 import { CancelForm } from './cancel-form'
 
 export const dynamic = 'force-dynamic'
 
 export const metadata = { title: 'Cancelar turno' }
 
+/**
+ * Ruta HUÉRFANA: nada del código ni de los mensajes de WhatsApp la enlaza —
+ * todo apunta a `/turnos/gestionar/[token]`, que hace lo mismo y además muestra
+ * el detalle. Se mantiene viva por si algún link viejo sigue circulando, pero
+ * comparte el tema para no verse de otro sistema. Candidata a borrarse.
+ */
 export default async function CancelarTurnoPage({
   params,
 }: {
@@ -18,19 +25,21 @@ export default async function CancelarTurnoPage({
   const appointment = await getAppointmentByToken(token)
   if (!appointment) notFound()
 
-  // Cargar settings para obtener cancellation_min_hours
   const settings = await getAppointmentSettings(
     appointment.organization_id,
     appointment.branch_id
   )
 
-  const cancellationMinHours = settings?.cancellation_min_hours ?? 2
-
   return (
     <CancelForm
       appointment={appointment}
       token={token}
-      cancellationMinHours={cancellationMinHours}
+      cancellationMinHours={settings?.cancellation_min_hours ?? 2}
+      theme={buildTurneroTheme({
+        bg: settings?.brand_bg_color,
+        primary: settings?.brand_primary_color,
+        text: settings?.brand_text_color,
+      })}
     />
   )
 }

@@ -1,85 +1,77 @@
 'use client'
 
-import { cn } from '@/lib/utils'
 import { formatCurrency } from '@/lib/format'
-import { Clock, Check } from 'lucide-react'
+import { Clock, Check, Scissors } from 'lucide-react'
 import type { PublicService } from '@/lib/actions/public-booking'
 
 interface Props {
   services: PublicService[]
   selected: string[]
   onToggle: (id: string) => void
-  branding: { primary: string; bg: string; text: string }
 }
 
-export function ServicesStep({ services, selected, onToggle, branding }: Props) {
+export function ServicesStep({ services, selected, onToggle }: Props) {
   if (services.length === 0) {
     return (
       <div
-        className="rounded-xl border-2 border-dashed p-10 text-center"
-        style={{ borderColor: 'rgba(0,0,0,0.12)', color: branding.text }}
+        className="rounded-2xl border p-10 text-center"
+        style={{ backgroundColor: 'var(--t-surface)', borderColor: 'var(--t-border)' }}
       >
-        <p className="text-sm opacity-60">No hay servicios disponibles en esta sucursal.</p>
+        <Scissors className="mx-auto h-8 w-8 text-[var(--t-text-faint)]" />
+        <p className="mt-3 text-sm text-[var(--t-text-muted)]">
+          No hay servicios disponibles en esta sucursal.
+        </p>
       </div>
     )
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       {services.map(service => {
-        const isSelected = selected.includes(service.id)
+        const elegido = selected.includes(service.id)
         return (
           <button
             key={service.id}
             type="button"
             onClick={() => onToggle(service.id)}
-            className={cn(
-              'relative w-full rounded-xl border-2 p-4 text-left transition-all active:scale-[0.99]',
-              'min-h-[56px]'
-            )}
+            aria-pressed={elegido}
+            className="w-full rounded-2xl border p-4 text-left transition-[background-color,border-color,transform] duration-150 active:scale-[0.99]"
             style={{
-              borderColor: isSelected ? branding.primary : 'rgba(0,0,0,0.10)',
-              backgroundColor: isSelected ? `${branding.primary}10` : 'transparent',
+              backgroundColor: 'var(--t-surface)',
+              // El único refuerzo del estado elegido es el borde de acento + el
+              // check: teñir el fondo con el primario a baja opacidad no se veía
+              // sobre un fondo de luminancia parecida.
+              borderColor: elegido ? 'var(--t-accent)' : 'var(--t-border)',
+              boxShadow: elegido ? 'inset 0 0 0 1px var(--t-accent)' : undefined,
             }}
-            aria-pressed={isSelected}
           >
             <div className="flex items-center justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <p
-                  className="font-semibold leading-tight"
-                  style={{ color: branding.text }}
-                >
+              <div className="min-w-0 flex-1">
+                <p className="text-base font-bold leading-tight text-[var(--t-text)]">
                   {service.name}
                 </p>
-                {service.duration_minutes && (
-                  <p
-                    className="mt-0.5 flex items-center gap-1 text-xs"
-                    style={{ color: branding.text, opacity: 0.6 }}
-                  >
+                {service.duration_minutes ? (
+                  <p className="mt-1 flex items-center gap-1 text-xs text-[var(--t-text-muted)]">
                     <Clock className="h-3 w-3" />
                     {service.duration_minutes} min
                   </p>
-                )}
+                ) : null}
               </div>
 
               <div className="flex shrink-0 items-center gap-3">
-                <span
-                  className="text-base font-bold"
-                  style={{ color: branding.primary }}
-                >
+                <span className="text-base font-bold text-[var(--t-accent)]">
                   {formatCurrency(service.price)}
                 </span>
-                <div
-                  className={cn(
-                    'flex h-6 w-6 items-center justify-center rounded-full border-2 transition-all',
-                  )}
+                <span
+                  className="flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors duration-150"
                   style={{
-                    borderColor: isSelected ? branding.primary : 'rgba(0,0,0,0.20)',
-                    backgroundColor: isSelected ? branding.primary : 'transparent',
+                    borderColor: elegido ? 'var(--t-primary)' : 'var(--t-text-faint)',
+                    backgroundColor: elegido ? 'var(--t-primary)' : 'transparent',
+                    color: 'var(--t-on-primary)',
                   }}
                 >
-                  {isSelected && <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />}
-                </div>
+                  {elegido && <Check className="h-4 w-4" strokeWidth={3} />}
+                </span>
               </div>
             </div>
           </button>

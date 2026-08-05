@@ -27,9 +27,11 @@ export default async function TvPage({
   }
 
   // Obtener branches filtradas por org
+  // `timezone` viaja al cliente porque la hora de un turno es hora de PARED de
+  // la sucursal: sin ella, la TV la formatearía en la TZ del navegador.
   const { data: branches } = await supabase
     .from('branches')
-    .select('id, name, organization_id')
+    .select('id, name, organization_id, timezone')
     .eq('is_active', true)
     .eq('organization_id', orgId)
 
@@ -70,7 +72,7 @@ export default async function TvPage({
     <TvClient
       initialEntries={entriesRes.data || []}
       barbers={barbersRes.data || []}
-      branches={(branches ?? []).map(b => ({ id: b.id, name: b.name }))}
+      branches={(branches ?? []).map(b => ({ id: b.id, name: b.name, timezone: b.timezone }))}
       orgBranchIds={branchIds}
       orgId={orgId}
       orgName={orgInfo?.name ?? 'BarberOS'}

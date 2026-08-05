@@ -29,17 +29,22 @@ export interface PublicService {
   price: number
   duration_minutes: number | null
   booking_mode: string
+  /** `checkin | upsell | both`. El kiosko esconde los `upsell` (adicionales). */
+  availability: string | null
 }
 
 export interface PublicStaff {
   id: string
   full_name: string
   avatar_url: string | null
+  /** Días de la semana que trabaja (0=domingo … 6=sábado). */
+  days: number[]
 }
 
 export interface PublicSlotGroup {
   staff_id: string
   staff_name: string
+  staff_avatar_url: string | null
   slots: Array<{ time: string; available: boolean }>
 }
 
@@ -117,7 +122,7 @@ export async function publicGetBranchServices(branchId: string): Promise<PublicS
 
   const { data } = await supabase
     .from('services')
-    .select('id, name, price, duration_minutes, booking_mode, branch_id')
+    .select('id, name, price, duration_minutes, booking_mode, availability, branch_id')
     .eq('is_active', true)
     .in('booking_mode', ['self_service', 'both'])
     .or(`branch_id.is.null,branch_id.eq.${branchId}`)
@@ -145,6 +150,7 @@ export async function publicGetAvailableSlots(
     slots: result.slots.map(b => ({
       staff_id: b.barberId,
       staff_name: b.barberName,
+      staff_avatar_url: b.barberAvatarUrl,
       slots: b.slots,
     })),
     error: result.error,

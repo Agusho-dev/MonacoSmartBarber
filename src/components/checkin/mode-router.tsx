@@ -1,149 +1,224 @@
 'use client'
 
 /**
- * ModeRouter — decide qué sub-flujo renderizar según el operation_mode de la sucursal.
+ * ModeRouter — cascarón del kiosko para sucursales con turnos.
  *
- * Modos:
- *   walk_in       → CheckinWalkIn (flujo original, regresión 0)
- *   appointments  → AppointmentLookupFlow + InlineQuickBookFlow
- *   hybrid        → HybridRouter (pregunta "¿Tenés turno?" + ramificación)
+ * Rutea entre tres superficies y no hace nada más:
+ *   - `TurnosCheckinFlow`: el flujo del cliente con turno (appointments/hybrid).
+ *   - `InlineQuickBookFlow`: la reserva inline.
+ *   - `CheckinWalkIn`: la fila, sólo alcanzable desde hybrid.
  *
- * Este componente es client porque gestiona el sub-routing entre flujos
- * y carga los datos de servicios/barberos para los modos que los necesitan.
- * La sucursal ya fue resuelta por el server component (page.tsx) y llega
- * como prop para evitar un segundo fetch en el cliente.
+ * La sucursal y el modo los resuelve el server component (`page.tsx`), que ya
+ * verificó que el turnero esté REALMENTE activo (operation_mode + is_enabled).
+ *
+ * Los datos de reserva (servicios y barberos) se cargan acá, una sola vez por
+ * carga de página: este componente no se remonta con el reset del kiosko, y
+ * `getPublicBranchAppointmentStaff` está rate-limiteado por IP+sucursal —
+ * cargarlos dentro del sub-flujo gastaba una ficha por cliente.
  */
 
 import { useState, useEffect } from 'react'
+import { getPublicBranchAppointmentStaff } from '@/lib/actions/appointments'
+import { publicGetBranchServices } from '@/lib/actions/public-booking'
 import type { BranchOperationMode } from '@/lib/actions/turnos-mode'
-import type { Service, Staff } from '@/lib/types/database'
+import type { PublicStaff, PublicService } from '@/lib/actions/public-booking'
 import { CheckinWalkIn } from '@/app/(tablet)/checkin/checkin-walk-in'
-import { AppointmentLookupFlow } from '@/components/checkin/appointment-lookup-flow'
+import { TurnosCheckinFlow } from '@/components/checkin/turnos-flow'
+import type { NewClientPrefill } from '@/components/checkin/turnos-flow'
 import { InlineQuickBookFlow } from '@/components/checkin/inline-quickbook-flow'
-import { HybridRouter } from '@/components/checkin/hybrid-router'
+import { TerminalAmbient, TerminalGlobalStyles } from '@/components/checkin/terminal-theme'
+import { cn } from '@/lib/utils'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 export interface ModeRouterProps {
   branchId: string
+  branchName: string
+  branchTimezone: string
+  organizationId: string
+  orgName: string
+  orgLogoUrl: string | null
   operationMode: BranchOperationMode
-  /** isLightBg se puede derivar del branch.checkin_bg_color en el server y pasarse */
-  isLightBg?: boolean
+  /** Color de fondo ya resuelto (sucursal → app_settings). */
+  bgCss: string
+  isLightBg: boolean
 }
-
-// ─── Sub-rutas internas ───────────────────────────────────────────────────────
 
 type SubRoute = 'default' | 'walkin' | 'booking'
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export function ModeRouter({ branchId, operationMode, isLightBg = false }: ModeRouterProps) {
+export function ModeRouter({
+  branchId,
+  branchName,
+  branchTimezone,
+  organizationId,
+  orgName,
+  orgLogoUrl,
+  operationMode,
+  bgCss,
+  isLightBg,
+}: ModeRouterProps) {
   const [subRoute, setSubRoute] = useState<SubRoute>('default')
   const [resetKey, setResetKey] = useState(0)
-  const [services, setServices] = useState<Service[]>([])
-  const [barbers, setBarbers] = useState<Staff[]>([])
+  const [prefill, setPrefill] = useState<NewClientPrefill | undefined>(undefined)
+
+  const [services, setServices] = useState<PublicService[]>([])
+  const [staff, setStaff] = useState<PublicStaff[]>([])
+  const [loadingData, setLoadingData] = useState(true)
+  const [dataError, setDataError] = useState<string | null>(null)
 
   /**
    * Vuelve el kiosko a cero para el próximo cliente.
    *
-   * El `setSubRoute('default')` solo no alcanzaba: cuando la sub-ruta YA era
-   * 'default' (el caso de `appointments` y `hybrid`) React descartaba el
-   * update, el sub-flujo no se re-renderizaba y su step interno se quedaba en
-   * 'confirmed'. La tablet quedaba clavada en "¡Llegada registrada!" desde el
-   * primer cliente del día. Bumpear la key fuerza el remount, así el reset no
-   * depende de que cada sub-flujo se acuerde de limpiarse.
+   * `setSubRoute('default')` solo no alcanza: cuando la sub-ruta YA era
+   * 'default', React descarta el update, el sub-flujo no se re-renderiza y su
+   * step interno se queda donde estaba. Bumpear la key fuerza el remount, así
+   * el reset no depende de que cada sub-flujo se acuerde de limpiarse.
    */
   const resetKiosko = () => {
     setSubRoute('default')
-    setResetKey(k => k + 1)
+    setPrefill(undefined)
+    setResetKey((k) => k + 1)
   }
 
-  // Cargar servicios y barberos solo para los modos que los necesitan
+  const irAReservar = (datos?: NewClientPrefill) => {
+    setPrefill(datos)
+    setSubRoute('booking')
+  }
+
+  // ── Datos de reserva ──
   useEffect(() => {
-    if (operationMode === 'walk_in') return
+    let cancelado = false
 
-    const loadData = async () => {
-      const { createClient } = await import('@/lib/supabase/client')
-      const supabase = createClient()
+    const cargar = async () => {
+      setLoadingData(true)
+      setDataError(null)
 
-      const [servicesRes, staffRes] = await Promise.all([
-        supabase
-          .from('services')
-          .select('*')
-          .eq('is_active', true)
-          .in('availability', ['appointment', 'all', 'both'])
-          .or(`branch_id.eq.${branchId},branch_id.is.null`)
-          .order('name'),
-        supabase
-          .from('staff')
-          .select('*')
-          .eq('branch_id', branchId)
-          .or('role.eq.barber,is_also_barber.eq.true')
-          .eq('is_active', true)
-          .order('full_name'),
+      // Los servicios reservables salen de `publicGetBranchServices`, la misma
+      // fuente que usa el turnero público. Antes se consultaba `services`
+      // directo desde el browser con la anon key: (a) la política
+      // `services_anon_read` no filtra por organización, así que llegaban los
+      // servicios de las 7 orgs de la plataforma, y (b) el filtro
+      // `availability IN ('appointment','all','both')` usaba valores que NO
+      // existen en el enum `service_availability` (es `checkin | upsell | both`),
+      // con lo cual la query moría con 22P02 y el kiosko anunciaba "no hay
+      // servicios disponibles para reservar" en una sucursal perfectamente
+      // configurada.
+      const [serviciosRes, staffRows] = await Promise.all([
+        publicGetBranchServices(branchId),
+        getPublicBranchAppointmentStaff(branchId),
       ])
 
-      setServices((servicesRes.data ?? []) as Service[])
-      setBarbers((staffRes.data ?? []) as Staff[])
+      if (cancelado) return
+
+      // `publicGetBranchServices` ya descarta lo que no es autogestionable; acá
+      // sólo se sacan los adicionales (`upsell`), que se venden arriba de un
+      // corte y no son un turno en sí mismos.
+      const servicios = serviciosRes.filter(s => s.availability !== 'upsell')
+
+      // Las dos actions devuelven [] tanto por error de lectura como por "no hay
+      // nada configurado", así que no se pueden distinguir desde acá. Que falten
+      // LAS DOS cosas a la vez sí es señal de que algo no anda: una sucursal con
+      // el turnero activo tiene sí o sí servicios y al menos un barbero.
+      if (!servicios.length && !staffRows.length) {
+        setDataError('No pudimos cargar los datos para reservar. Avisá en el mostrador.')
+      }
+
+      setServices(servicios)
+      setStaff(staffRows as PublicStaff[])
+      setLoadingData(false)
     }
 
-    loadData()
-  }, [branchId, operationMode])
+    cargar()
+    return () => {
+      cancelado = true
+    }
+  }, [branchId])
 
-  // ─── Sub-ruta: walk-in completo (desde hybrid) ──────────────────────────────
-  if (subRoute === 'walkin') {
-    return <CheckinWalkIn />
+  // El flujo walk-in lista las sucursales con `getPublicBranches()`, que
+  // resuelve la org desde la cookie. Una tablet abierta directo en
+  // `/checkin?branch=…` (link del dashboard) no la tiene, y el cliente que
+  // elegía "entrar a la fila" se encontraba con el selector de sucursales
+  // vacío girando. La seteamos sólo si falta, para no pisar una org elegida.
+  useEffect(() => {
+    const yaHayOrg = document.cookie
+      .split(';')
+      .some((c) => /^\s*(public|active)_organization=/.test(c))
+    if (yaHayOrg) return
+
+    import('@/lib/actions/org').then(({ setActiveOrgFromBranch }) => {
+      setActiveOrgFromBranch(branchId)
+    })
+  }, [branchId])
+
+  const irACambiarSucursal = () => {
+    // Sin ?branch la página vuelve al selector de sucursales.
+    window.location.href = '/checkin'
   }
 
-  // ─── Sub-ruta: reserva inline (desde appointments o hybrid) ─────────────────
+  // ─── Sub-ruta: fila walk-in (sólo hybrid) ───────────────────────────────────
+  //
+  // La key remonta el flujo por cliente y `onExit` lo devuelve al kiosko de
+  // turnos cuando termina. Sin las dos cosas, el primero que elegía la fila
+  // dejaba la tablet en walk-in puro para todos los siguientes.
+  if (subRoute === 'walkin') {
+    return <CheckinWalkIn key={`walkin-${resetKey}`} onExit={resetKiosko} />
+  }
+
+  const shell = (children: React.ReactNode) => (
+    <div
+      className={cn(
+        'relative h-dvh flex flex-col items-center select-none overflow-y-auto overflow-x-hidden py-2 md:py-4',
+        !isLightBg && 'bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.03)_0%,transparent_60%)]'
+      )}
+      style={{ background: bgCss, color: isLightBg ? '#18181b' : '#f4f4f5' }}
+    >
+      <TerminalGlobalStyles />
+      <TerminalAmbient className={isLightBg ? 'hidden' : undefined} />
+      {children}
+    </div>
+  )
+
   if (subRoute === 'booking') {
-    return (
+    return shell(
       <InlineQuickBookFlow
         key={`booking-${resetKey}`}
         branchId={branchId}
+        branchTimezone={branchTimezone}
         services={services}
-        barbers={barbers}
+        staff={staff}
+        dataError={dataError}
+        loadingData={loadingData}
         isLightBg={isLightBg}
+        prefill={prefill}
         onBack={resetKiosko}
         onReset={resetKiosko}
       />
     )
   }
 
-  // ─── walk_in ─────────────────────────────────────────────────────────────────
+  // `walk_in` no debería llegar acá (page.tsx rutea al kiosko clásico), pero si
+  // llega, la fila es el fallback seguro.
   if (operationMode === 'walk_in') {
-    return <CheckinWalkIn />
+    return <CheckinWalkIn key={`walkin-fallback-${resetKey}`} />
   }
 
-  // ─── appointments ─────────────────────────────────────────────────────────────
-  if (operationMode === 'appointments') {
-    return (
-      <AppointmentLookupFlow
-        key={`lookup-${resetKey}`}
-        branchId={branchId}
-        isLightBg={isLightBg}
-        onNoAppointmentBook={() => setSubRoute('booking')}
-        onReset={resetKiosko}
-      />
-    )
-  }
-
-  // ─── hybrid ───────────────────────────────────────────────────────────────────
-  if (operationMode === 'hybrid') {
-    return (
-      <HybridRouter
-        key={`hybrid-${resetKey}`}
-        branchId={branchId}
-        services={services}
-        barbers={barbers}
-        isLightBg={isLightBg}
-        clientName=""
-        onWalkIn={() => setSubRoute('walkin')}
-        onReset={resetKiosko}
-      />
-    )
-  }
-
-  // Fallback seguro
-  return <CheckinWalkIn />
+  return shell(
+    <TurnosCheckinFlow
+      key={`turnos-${resetKey}`}
+      branchId={branchId}
+      branchName={branchName}
+      organizationId={organizationId}
+      orgName={orgName}
+      orgLogoUrl={orgLogoUrl}
+      operationMode={operationMode}
+      isLightBg={isLightBg}
+      canBook={!loadingData && !dataError && services.length > 0 && staff.length > 0}
+      onBook={irAReservar}
+      onWalkIn={() => setSubRoute('walkin')}
+      onReset={resetKiosko}
+      onChangeBranch={irACambiarSucursal}
+    />
+  )
 }

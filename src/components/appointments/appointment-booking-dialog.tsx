@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo, useTransition } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, useTransition } from 'react'
 import { CalendarPlus, ChevronLeft, ChevronRight, Clock, Loader2, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -47,6 +47,18 @@ interface Branch {
   name: string
 }
 
+/**
+ * Datos que el llamador ya conoce y no tiene sentido volver a pedir: la agenda
+ * abre este diálogo desde un hueco de la grilla o desde el buscador de horarios,
+ * donde fecha, barbero y hora ya están elegidos.
+ */
+export interface BookingPrefill {
+  date?: string
+  barberId?: string
+  serviceId?: string
+  time?: string
+}
+
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -57,6 +69,7 @@ interface Props {
   defaultBranchId?: string | null
   onBooked?: () => void
   staffId?: string
+  prefill?: BookingPrefill
 }
 
 function formatTimeHM(t: string) { return t.slice(0, 5) }
@@ -71,6 +84,7 @@ export function AppointmentBookingDialog({
   defaultBranchId,
   onBooked,
   staffId,
+  prefill,
 }: Props) {
   const [branchId, setBranchId] = useState<string>(
     defaultBranchId ?? (branches.length === 1 ? branches[0].id : '')
@@ -98,6 +112,25 @@ export function AppointmentBookingDialog({
     setPhone(clientPhone ?? '')
     setError('')
   }, [open, clientName, clientPhone])
+
+  // El horario del prefill no se puede aplicar acá: cada cambio de fecha,
+  // servicio o barbero limpia la selección. Se guarda y se re-aplica recién
+  // cuando llegan los slots, si el hueco sigue libre.
+  const prefillTimeRef = useRef<string | null>(null)
+  const prefillAplicadoRef = useRef(false)
+  useEffect(() => {
+    if (!open) {
+      prefillAplicadoRef.current = false
+      return
+    }
+    if (prefillAplicadoRef.current || !prefill) return
+    prefillAplicadoRef.current = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (prefill.date) setDate(prefill.date)
+    if (prefill.barberId) setBarberId(prefill.barberId)
+    if (prefill.serviceId) setServiceId(prefill.serviceId)
+    prefillTimeRef.current = prefill.time ?? null
+  }, [open, prefill])
 
   // Servicios disponibles para gestión manual (self_service y both también se pueden cargar manual)
   const availableServices = useMemo(
@@ -152,6 +185,16 @@ export function AppointmentBookingDialog({
     getAvailableSlots(branchId, date, serviceId, barberId).then(res => {
       if (cancelled) return
       setAvailability(res.slots)
+      const horaPedida = prefillTimeRef.current
+      if (horaPedida) {
+        prefillTimeRef.current = null
+        const grupo = res.slots.find(s => s.barberId === barberId)
+        // Si el hueco dejó de estar libre no se preselecciona nada: es preferible
+        // que el usuario vea la grilla real antes que un horario que va a fallar.
+        if (grupo?.slots.some(s => s.time === horaPedida && s.available)) {
+          setSelectedTime(horaPedida)
+        }
+      }
       if (res.error) setError(res.error)
       setLoadingSlots(false)
     })

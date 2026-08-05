@@ -490,10 +490,11 @@ export async function completeService(
       .eq('appointment_id', queueEntryData.appointment_id)
       .is('queue_entry_id', null)
 
-    // No degradar en silencio: hoy visits.appointment_id NO existe en prod (la mig 109
-    // nunca se aplicó → esta query FALLA siempre y `data` viene null). Si asumimos "null =
-    // sin prepagos" y el prepago se llega a activar, el cliente pagaría dos veces. Logueamos
-    // el error de schema para que sea visible en vez de restar $0 calladamente.
+    // No degradar en silencio: si asumimos "null = sin prepagos" ante un error de
+    // lectura, el cliente pagaría dos veces. Se loguea en vez de restar $0 calladamente.
+    // (Hasta la mig 168 esta query fallaba SIEMPRE con 42703: `visits.appointment_id`
+    // no existía porque la mig 109 nunca se aplicó. Ahora la columna existe y la
+    // completa el trigger `on_queue_completed` desde `queue_entries.appointment_id`.)
     if (prepayErr) {
       console.error('[completeService] no pude leer prepagos del turno:', prepayErr.message)
     } else {

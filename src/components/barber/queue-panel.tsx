@@ -16,10 +16,19 @@ import {
   getPendingBreakRequests,
   startPendingBreakIfReady,
 } from '@/lib/actions/breaks'
-import type { QueueEntry, Staff, Client, BreakConfig, StaffSchedule } from '@/lib/types/database'
+import { getTodayAppointmentsForStaff, markAppointmentInProgress } from '@/lib/actions/barber-turnos'
+import type { Appointment, QueueEntry, Staff, Client, BreakConfig, StaffSchedule } from '@/lib/types/database'
 import { assignDynamicBarbers } from '@/lib/barber-utils'
+import {
+  appointmentInstantMs,
+  findNextAppointment,
+  formatHourMinute,
+  protectionWindowMinutes,
+} from '@/lib/queue-appointments'
 import { BarberTimeline } from '@/components/barber/barber-timeline'
 import { UpcomingAppointmentBanner } from '@/components/barber/upcoming-appointment-banner'
+import { NextAppointmentNotice } from '@/components/barber/next-appointment-notice'
+import { TurnoBadge } from '@/components/appointments/turno-badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -55,6 +64,7 @@ import {
   X,
   Gift,
   Coffee,
+  CalendarClock,
   CheckCircle2,
   XCircle,
   Power,
@@ -98,10 +108,14 @@ interface QueuePanelProps {
   session: BarberSession
   branchName: string
   breakConfigs?: BreakConfig[]
-  appointments?: import('@/lib/types/database').Appointment[]
+  appointments?: Appointment[]
   noShowToleranceMinutes?: number
   /** Modo de operación de la sucursal: afecta el layout del panel */
   operationMode?: 'walk_in' | 'appointments' | 'hybrid'
+  /** TZ de la sucursal: las horas de turno son hora de pared, no del dispositivo. */
+  timezone?: string | null
+  /** `appointment_settings.buffer_minutes`: define la ventana de protección. */
+  bufferMinutes?: number | null
 }
 
 interface BreakRequestRow {
@@ -123,8 +137,15 @@ export function QueuePanel({
   appointments = [],
   noShowToleranceMinutes: _noShowToleranceMinutes = 15,
   operationMode = 'walk_in',
+  timezone,
+  bufferMinutes,
 }: QueuePanelProps) {
   const [entries, setEntries] = useState<QueueEntry[]>([])
+  // Turnos del día de este barbero. Arranca con el snapshot del server y se
+  // refresca al volver al tab / cada 60s: sin eso, un turno cargado después de
+  // abrir el panel no aparecía nunca. 60s (y no el ciclo de 30s de la cola)
+  // porque es dato de agenda, no de tiempo real — Known Risk #9.
+  const [todayAppointments, setTodayAppointments] = useState<Appointment[]>(appointments)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
@@ -197,6 +218,11 @@ export function QueuePanel({
   const refreshStats = useCallback(async () => {
     const stats = await fetchBarberDayStats(session.staff_id, session.branch_id)
     setDayStats(stats)
+  }, [session.staff_id, session.branch_id])
+
+  const refreshAppointments = useCallback(async () => {
+    const rows = await getTodayAppointmentsForStaff(session.staff_id, session.branch_id)
+    setTodayAppointments(rows)
   }, [session.staff_id, session.branch_id])
 
   // Ref espejo de allBarbers para que fetchAssignmentData pueda leerlo sin
@@ -427,6 +453,11 @@ export function QueuePanel({
     30_000
   )
 
+  // La agenda va por su propio carril y más lento: un turno nuevo no necesita
+  // llegar en tiempo real, y sumarlo al refresco de 30s de la cola duplicaba
+  // queries en cada tablet sin ganar nada.
+  useVisibilityRefresh(refreshAppointments, 60_000)
+
   useEffect(() => {
     // 5s en lugar de 1s: los textos "elapsed" no necesitan resolución de segundo,
     // y bajar la frecuencia ahorra 30-60% de CPU en tablets de gama baja.
@@ -489,6 +520,37 @@ export function QueuePanel({
 
   // Real waiting clients for this barber (non-break)
   const myRealWaitingEntries = myWaitingEntries.filter(e => !e.is_break)
+
+  // Un turno cuyo cliente YA está en la fila no deja al barbero frenado: la
+  // ventana de protección bloquea walk-ins, pero `claim_next_for_barber` sí le
+  // entrega al del turno. Por eso se cuentan aparte de los walk-ins.
+  const myWaitingAppointment = myRealWaitingEntries.find((e) => e.is_appointment)
+  const myWaitingWalkInsCount = myRealWaitingEntries.filter((e) => !e.is_appointment).length
+
+  // Hora RESERVADA de cada turno del día, indexada por id de turno.
+  //
+  // `priority_order` NO sirve para saber si a un turno "ya le llegó la hora":
+  // cuando la entrada fue ADOPTADA de un walk-in que ya estaba anotado,
+  // `check_in_appointment` guarda `LEAST(hora de llegada, hora del turno)`, así
+  // que puede ser mucho más temprana que la reservada. Por eso la mig 170
+  // reescribió los caminos [A]/[B] de `claim_next_for_barber` para que lean
+  // `lower(appointments.time_range)`; el panel tiene que mirar exactamente lo
+  // mismo o promete un botón que el motor no respalda.
+  const appointmentStartMsById = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const a of todayAppointments) {
+      map.set(a.id, appointmentInstantMs(a.appointment_date, a.start_time, timezone))
+    }
+    return map
+  }, [todayAppointments, timezone])
+
+  /** Hora reservada (ms) de una entrada de fila que entró por un turno. */
+  function appointmentStartMsOf(entry: QueueEntry): number {
+    const fromAgenda = entry.appointment_id ? appointmentStartMsById.get(entry.appointment_id) : undefined
+    // Fallback: si el turno todavía no está en la agenda cargada (lo registró
+    // el mostrador hace segundos), `priority_order` es la mejor aproximación.
+    return fromAgenda ?? new Date(entry.priority_order).getTime()
+  }
 
   // ── Auto-start de ghost de descanso "listo" (rescate de limbos) ──
   // Si el barbero tiene un ghost waiting y no hay nada que lo tape (ni corte
@@ -669,7 +731,13 @@ export function QueuePanel({
     const firstEntry = myRealWaitingEntries[0]
     if (!firstEntry || warningStarting) return
     setWarningStarting(true)
-    await handleStartService(firstEntry.id)
+    // El primero de la fila puede ser un TURNO, y los turnos no se reclaman por
+    // el camino del preferido (ver handleStartAppointment).
+    if (firstEntry.is_appointment) {
+      await handleStartAppointment(firstEntry)
+    } else {
+      await handleStartService(firstEntry.id)
+    }
     setShowWaitWarning(false)
     setIdleSince(null)
     setWarningStarting(false)
@@ -685,14 +753,47 @@ export function QueuePanel({
     if (operationMode !== 'hybrid') return null
     const nowDate = new Date()
     const nowMinutes = nowDate.getHours() * 60 + nowDate.getMinutes()
-    return appointments.find((a) => {
+    return todayAppointments.find((a) => {
       if (!['confirmed'].includes(a.status)) return false
       const [h, m] = a.start_time.split(':').map(Number)
       const apptMinutes = h * 60 + m
       const diff = apptMinutes - nowMinutes
       return diff >= 0 && diff <= 15
     }) ?? null
-  }, [appointments, operationMode])
+  }, [todayAppointments, operationMode])
+
+  /**
+   * Arranca un TURNO. NO pasa por `attendNextClient`.
+   *
+   * El camino `p_preferred_entry_id` de `claim_next_for_barber` filtra
+   * `is_appointment = false` (igual que el FIFO walk-in): pedirle un turno "como
+   * preferido" devolvía vacío SIEMPRE y la tarjeta contestaba "El cliente ya no
+   * está disponible" con la persona sentada enfrente. Los turnos tienen sus
+   * caminos propios [A]/[B] en el RPC, que deciden por la hora real y no aceptan
+   * un preferido.
+   *
+   * `markAppointmentInProgress` es el camino explícito del barbero: arranca
+   * EXACTAMENTE este turno (sin ruleta de "a quién me toca"), chequea que no
+   * tenga otro corte/descanso en curso y sincroniza `appointments`.
+   */
+  async function handleStartAppointment(entry: QueueEntry) {
+    if (!entry.appointment_id) {
+      toast.error('Este turno no está vinculado a la agenda. Avisá al mostrador.')
+      return
+    }
+    setActionLoading(entry.id)
+    const result = await markAppointmentInProgress(
+      entry.appointment_id,
+      session.staff_id,
+      session.branch_id
+    )
+    if ('error' in result) toast.error(result.error)
+    await fetchQueue()
+    // La agenda también cambia (el turno pasa a "en curso"): sin esto el
+    // timeline de los modos appointments/hybrid quedaba hasta 60s atrasado.
+    refreshAppointments()
+    setActionLoading(null)
+  }
 
   async function handleStartService(entryId: string) {
     setActionLoading(entryId)
@@ -708,10 +809,29 @@ export function QueuePanel({
       if (myActiveEntry || myActiveBreak) {
         toast.info('Terminá tu corte actual antes de tomar otro')
       } else {
-        toast.info('El cliente ya no está disponible')
+        // La otra causa habitual del vacío es la ventana de protección: cuando
+        // falta menos que `45 + buffer` para un turno, el motor deja de entregar
+        // walk-ins. Decirlo con nombre y hora evita el "está colgado" — es el
+        // mismo motivo que explica el cartel de NextAppointmentNotice.
+        const next = findNextAppointment(todayAppointments, Date.now(), timezone)
+        if (next && next.minutesUntil <= protectionWindowMinutes(bufferMinutes)) {
+          toast.info(`No entra otro corte antes de tu turno de las ${next.timeLabel}`)
+        } else {
+          toast.info('El cliente ya no está disponible')
+        }
       }
     } else if (result.entryId !== entryId) {
-      toast.info('El cliente fue tomado por otro barbero. Se asignó el siguiente.')
+      const claimed = entries.find((e) => e.id === result.entryId)
+      if (claimed?.is_appointment) {
+        // El motor entrega el TURNO en cuanto su hora llegó, aunque el barbero
+        // haya tocado Atender sobre un walk-in que lo precede en la lista. El
+        // mensaje viejo ("lo tomó otro barbero") era falso justo en ese caso.
+        toast.info(
+          `Arrancó el turno de las ${formatHourMinute(appointmentStartMsOf(claimed), timezone)} · ${claimed.client?.name ?? 'Cliente'}`
+        )
+      } else {
+        toast.info('El cliente fue tomado por otro barbero. Se asignó el siguiente.')
+      }
     }
     await fetchQueue()
     if (!('error' in result) && !result.entryId) {
@@ -878,6 +998,16 @@ export function QueuePanel({
                 <p className="truncate text-base sm:text-lg font-semibold">
                   {entry.client?.name ?? 'Cliente'}
                 </p>
+                {/* Hora RESERVADA, tomada de la agenda. No se lee de
+                    `priority_order`: en una entrada adoptada de un walk-in ése
+                    es `LEAST(llegada, hora del turno)` y el badge mostraba la
+                    hora en que el cliente entró al local, no la que reservó. */}
+                {entry.is_appointment && (
+                  <TurnoBadge
+                    time={formatHourMinute(appointmentStartMsOf(entry), timezone)}
+                    className="h-5"
+                  />
+                )}
                 {(() => {
                   const phone = entry.client?.phone ?? ''
                   const isKid = phone.startsWith('00') && phone.length === 10
@@ -939,6 +1069,49 @@ export function QueuePanel({
               {(() => {
                 if (myActiveEntry || myActiveBreak) return null
                 const isMyMainTap = entry.id === myWaitingEntries[0]?.id
+
+                // ── TURNOS ──
+                // Un turno NO se toma con "Atender": ese botón llama al claim con
+                // `preferredEntryId` y ese camino del RPC filtra `is_appointment =
+                // false`, así que devolvía vacío siempre y la tarjeta quedaba
+                // muerta ("El cliente ya no está disponible"). Va por su propio
+                // botón, que arranca ESE turno y nada más.
+                if (entry.is_appointment) {
+                  if (entry.barber_id !== session.staff_id) return null
+                  // Un descanso pendiente con prioridad anterior va primero:
+                  // misma regla que el RPC (`q.priority_order <
+                  // v_pending_break_priority` en los caminos [A]/[B]).
+                  if (
+                    myPendingGhost &&
+                    new Date(myPendingGhost.priority_order).getTime() <=
+                      new Date(entry.priority_order).getTime()
+                  ) {
+                    return null
+                  }
+                  const isDue = appointmentStartMsOf(entry) <= now
+                  // También se muestra cuando el turno NO es la primera tarjeta
+                  // pero su hora ya llegó: en ese momento el motor le da
+                  // precedencia absoluta sobre los walk-ins, así que la acción
+                  // tiene que estar sobre el turno y no sobre el walk-in que lo
+                  // precede en la lista. Antes de su hora el botón queda
+                  // secundario: adelantarlo es una decisión del barbero (el
+                  // cliente está ahí), no lo que haría la fila sola.
+                  if (!isMyMainTap && !isDue) return null
+                  return (
+                    <Button
+                      size="sm"
+                      variant={isDue ? 'default' : 'outline'}
+                      className="h-10 px-3 sm:h-14 sm:px-6 text-sm sm:text-lg"
+                      onClick={() => handleStartAppointment(entry)}
+                      disabled={actionLoading === entry.id}
+                      title={isDue ? undefined : 'Todavía no es la hora del turno'}
+                    >
+                      <CalendarClock className="size-4 sm:size-5 mr-1.5 sm:mr-2" />
+                      <span>Iniciar turno</span>
+                    </Button>
+                  )
+                }
+
                 // Rescate de limbos del hint divergente (mig 134 + commit 1cb1a41):
                 // en General, cualquier barbero libre puede reclamar un dinámico.
                 // El claim server es pool no bloqueante (FOR UPDATE SKIP LOCKED),
@@ -1244,6 +1417,22 @@ export function QueuePanel({
           appointment={upcomingAppointmentForBanner}
           staffId={session.staff_id}
           branchId={session.branch_id}
+        />
+      )}
+
+      {/* Próximo turno + por qué la fila no entrega walk-ins.
+          No se muestra en modo `appointments` (ahí el timeline ES el panel, no
+          hay cola que explicar) ni cuando el banner de 15 min ya está gritando
+          lo mismo en hybrid. */}
+      {operationMode !== 'appointments' && !upcomingAppointmentForBanner && (
+        <NextAppointmentNotice
+          appointments={todayAppointments}
+          nowMs={now}
+          timeZone={timezone}
+          bufferMinutes={bufferMinutes}
+          isIdle={!myActiveEntry && !myActiveBreak}
+          appointmentWaitingInQueue={!!myWaitingAppointment}
+          waitingWalkIns={myWaitingWalkInsCount}
         />
       )}
 

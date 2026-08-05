@@ -8,7 +8,8 @@ import { BookingWizard } from './booking-wizard'
 import { OrgLanding, type LandingBranch } from './org-landing'
 import { LinkInvalido } from './link-invalido'
 import { estadoHorario } from './horarios'
-import { MapPin, Phone } from 'lucide-react'
+import { buildTurneroTheme, themeVars } from './theme'
+import { MapPin, Phone, Users } from 'lucide-react'
 import type { AppointmentSettings } from '@/lib/types/database'
 
 export const dynamic = 'force-dynamic'
@@ -205,61 +206,79 @@ async function renderBranch(
 
   // Modo walk-in: página informativa sin wizard
   if (branch.operation_mode === 'walk_in' || !settings?.is_enabled) {
-    const bg = settings?.brand_bg_color ?? '#f8fafc'
-    const primary = settings?.brand_primary_color ?? '#0f172a'
-    const textColor = settings?.brand_text_color ?? '#0f172a'
+    // Mismo tema derivado que el wizard: la tarjeta era `bg-white/90` con el
+    // texto de marca encima, así que con texto blanco no se leía nada.
+    const theme = buildTurneroTheme({
+      bg: settings?.brand_bg_color,
+      primary: settings?.brand_primary_color,
+      text: settings?.brand_text_color,
+    })
     const mapsUrl = branch.address
       ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(branch.address)}`
       : null
 
     return (
       <div
-        className="flex min-h-screen flex-col items-center justify-center p-4"
-        style={{ backgroundColor: bg }}
+        className="flex min-h-screen flex-col items-center justify-center bg-[var(--t-bg)] p-4 text-[var(--t-text)]"
+        style={themeVars(theme)}
       >
         <div
-          className="w-full max-w-md rounded-2xl border bg-white/90 p-8 text-center shadow-lg"
-          style={{ borderColor: 'rgba(0,0,0,0.08)' }}
+          className="w-full max-w-md rounded-3xl border p-8 text-center"
+          style={{ backgroundColor: 'var(--t-surface)', borderColor: 'var(--t-border)' }}
         >
           {org?.logo_url ? (
             <Image
               src={org.logo_url}
               alt={branch.name}
-              width={64}
-              height={64}
+              width={72}
+              height={72}
               unoptimized
-              className="mx-auto mb-4 h-16 w-16 rounded-full object-cover shadow-sm"
+              className="mx-auto mb-4 h-18 w-18 rounded-full object-cover"
             />
           ) : (
             <div
-              className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full text-2xl font-bold text-white"
-              style={{ backgroundColor: primary }}
+              className="mx-auto mb-4 flex h-18 w-18 items-center justify-center rounded-full text-2xl font-bold"
+              style={{ backgroundColor: 'var(--t-primary)', color: 'var(--t-on-primary)' }}
             >
               {branch.name.charAt(0).toUpperCase()}
             </div>
           )}
 
-          <h1 className="mb-1 text-2xl font-bold" style={{ color: textColor }}>
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--t-text)]">
             {branch.name}
           </h1>
-          <p className="mb-6 text-sm font-medium text-amber-600">
-            Esta sucursal trabaja sin turno previo
-          </p>
-          <p className="mb-6 text-sm" style={{ color: textColor, opacity: 0.75 }}>
-            Podés acercarte directamente sin reserva. Te atendemos por orden de llegada.
+
+          <span
+            className="mt-3 inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold uppercase tracking-wide"
+            style={{
+              backgroundColor: 'var(--t-surface-alt)',
+              borderColor: 'var(--t-border)',
+              color: 'var(--t-text)',
+            }}
+          >
+            <Users className="h-3.5 w-3.5" />
+            Sin turno previo
+          </span>
+
+          <p className="mt-4 text-sm leading-relaxed text-[var(--t-text-muted)]">
+            Acá se atiende por orden de llegada. Acercate cuando quieras, no hace falta
+            reservar.
           </p>
 
-          <div className="space-y-3">
+          <div
+            className="mt-6 space-y-3 rounded-2xl border p-4 text-left"
+            style={{ backgroundColor: 'var(--t-surface-alt)', borderColor: 'var(--t-border)' }}
+          >
             {branch.address && (
-              <div className="flex items-start gap-2 text-sm" style={{ color: textColor }}>
-                <MapPin className="mt-0.5 h-4 w-4 shrink-0 opacity-60" />
+              <div className="flex items-start gap-2.5 text-sm text-[var(--t-text)]">
+                <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[var(--t-text-muted)]" />
                 <span>{branch.address}</span>
               </div>
             )}
             {branch.phone && (
-              <div className="flex items-center gap-2 text-sm" style={{ color: textColor }}>
-                <Phone className="h-4 w-4 shrink-0 opacity-60" />
-                <a href={`tel:${branch.phone}`} className="hover:underline">
+              <div className="flex items-center gap-2.5 text-sm text-[var(--t-text)]">
+                <Phone className="h-4 w-4 shrink-0 text-[var(--t-text-muted)]" />
+                <a href={`tel:${branch.phone}`} className="font-semibold text-[var(--t-accent)] hover:underline">
                   {branch.phone}
                 </a>
               </div>
@@ -271,11 +290,11 @@ async function renderBranch(
               href={mapsUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-6 inline-flex items-center gap-2 rounded-lg px-5 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-              style={{ backgroundColor: primary }}
+              className="mt-5 flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl text-sm font-bold transition-opacity hover:opacity-90"
+              style={{ backgroundColor: 'var(--t-primary)', color: 'var(--t-on-primary)' }}
             >
               <MapPin className="h-4 w-4" />
-              Ver en Google Maps
+              Cómo llegar
             </a>
           )}
         </div>

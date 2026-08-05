@@ -51,6 +51,10 @@ export default async function FilaPage() {
       appointments={appointments}
       noShowToleranceMinutes={settings?.no_show_tolerance_minutes ?? 15}
       operationMode={operationMode}
+      timezone={branch?.timezone ?? null}
+      // La ventana de protección de la fila es 45 min de corte promedio + este
+      // buffer: el panel la calcula con el mismo número que la DB.
+      bufferMinutes={settings?.buffer_minutes ?? null}
     />
   )
 }

@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo, useTransition } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef, useTransition } from 'react'
 import Link from 'next/link'
 import {
   Building2, Calendar, CalendarClock, CalendarPlus, ChevronLeft, ChevronRight,
   DollarSign, Loader2, Phone, Scissors, Settings, User, X, Layers, AlertCircle,
+  PanelRightClose, PanelRightOpen, CalendarOff, UserX,
 } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
 import {
@@ -30,6 +31,7 @@ import {
 } from '@/components/appointments/appointments-grid-view'
 import {
   AppointmentBookingDialog,
+  type BookingPrefill,
   type BookingServiceOption,
 } from '@/components/appointments/appointment-booking-dialog'
 import { AppointmentPaymentDialog } from '@/components/appointments/appointment-payment-dialog'
@@ -66,6 +68,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
 import type {
   Appointment,
   AppointmentBlock,
@@ -131,22 +134,33 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
   )
   const resolvedBranchId = selectedBranchId ?? visibleBranches[0]?.id ?? null
 
+  const visibleBranchIds = useMemo(() => visibleBranches.map(b => b.id), [visibleBranches])
+
   const [date, setDate] = useState(() => todayDateStr())
   const [loading, setLoading] = useState(false)
   const [appointments, setAppointments] = useState<Appointment[]>([])
-  const [barbers, setBarbers] = useState<GridBarber[]>([])
+  /** Todos los barberos habilitados para turnos, con o sin jornada cargada. */
+  const [staffTurnos, setStaffTurnos] = useState<GridBarber[]>([])
   const [services, setServices] = useState<BookingServiceOption[]>([])
   const [blocks, setBlocks] = useState<AppointmentBlock[]>([])
   const [waitlist, setWaitlist] = useState<AppointmentWaitlist[]>([])
 
   const [viewMode, setViewMode] = useState<'single' | 'multi'>('single')
-  const [zoom, setZoom] = useState<ZoomLevel>(() => {
-    const interval = settings?.slot_interval_minutes
-    return (interval === 15 || interval === 30 || interval === 60) ? interval as ZoomLevel : 30
-  })
+  const [zoom, setZoom] = useState<ZoomLevel>('normal')
+  const [panelAbierto, setPanelAbierto] = useState(false)
+
+  // El panel lateral fijo de 320px se comía la grilla: a 1024px de viewport
+  // quedaban ~388px para todas las columnas de barberos. Arranca cerrado en
+  // pantallas chicas y el dueño lo abre cuando lo necesita. Se resuelve en un
+  // efecto (y no en el inicializador del useState) porque el componente se
+  // renderiza también en el server, donde no hay `window`.
+  useEffect(() => {
+    setPanelAbierto(window.innerWidth >= 1280)
+  }, [])
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showBooking, setShowBooking] = useState(false)
+  const [bookingPrefill, setBookingPrefill] = useState<BookingPrefill | undefined>(undefined)
   const [confirmCancel, setConfirmCancel] = useState<Appointment | null>(null)
   const [confirmNoShow, setConfirmNoShow] = useState<Appointment | null>(null)
   const [paymentAppt, setPaymentAppt] = useState<Appointment | null>(null)
@@ -163,60 +177,138 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
     [appointments],
   )
 
-  // Refetch rápido: solo turnos del día (no barberos/bloqueos/espera)
-  const refreshAppointments = useCallback(async () => {
-    if (viewMode === 'multi') {
-      const branchIds = visibleBranches.map(b => b.id)
-      const apts = await getAppointmentsForDateMultiBranch(branchIds, date)
-      setAppointments(apts)
-      return
-    }
-    if (!resolvedBranchId) return
-    const apts = await getAppointmentsForDate(resolvedBranchId, date)
-    setAppointments(apts)
-  }, [resolvedBranchId, date, viewMode, visibleBranches])
+  /**
+   * Identidad de lo que la pantalla está mostrando ahora mismo. Toda carga
+   * asíncrona se sella con el scope que tenía al arrancar y se descarta si al
+   * volver ya no es el vigente.
+   *
+   * Sin esto, navegando rápido entre fechas (o cambiando de sucursal) la carga
+   * lenta terminaba DESPUÉS de la nueva y le pisaba el resultado: la grilla
+   * quedaba con los turnos de un día bajo el encabezado de otro. Y como el drag
+   * reprograma con la fecha del estado (`date`), arrastrar una de esas tarjetas
+   * mandaba el turno al día equivocado.
+   */
+  const scopeActual = `${viewMode}:${resolvedBranchId ?? ''}:${date}`
+  const scopeRef = useRef(scopeActual)
+  // Declarado ANTES de los efectos de carga a propósito: los efectos corren en
+  // orden de declaración, así que cuando `load` arranca el ref ya apunta al
+  // scope nuevo y no se auto-descarta.
+  useEffect(() => { scopeRef.current = scopeActual }, [scopeActual])
+  const sigueVigente = useCallback((scope: string) => scopeRef.current === scope, [])
 
-  const load = useCallback(async () => {
+  // Refetch rápido: solo turnos del día (no barberos/bloqueos/espera).
+  // Los errores se tragan a propósito (con log): es una relectura, y si falla
+  // conviene dejar lo último bueno en pantalla antes que romper el render. Lo
+  // que NO puede quedar sin aviso es una escritura fallida — eso lo maneja
+  // `ejecutarCambioOptimista`.
+  const refreshAppointments = useCallback(async () => {
+    const scope = scopeActual
+    try {
+      if (viewMode === 'multi') {
+        const branchIds = visibleBranches.map(b => b.id)
+        const apts = await getAppointmentsForDateMultiBranch(branchIds, date)
+        if (sigueVigente(scope)) setAppointments(apts)
+        return
+      }
+      if (!resolvedBranchId) return
+      const apts = await getAppointmentsForDate(resolvedBranchId, date)
+      if (sigueVigente(scope)) setAppointments(apts)
+    } catch (e) {
+      console.error('[agenda] refreshAppointments', e)
+    }
+  }, [resolvedBranchId, date, viewMode, visibleBranches, scopeActual, sigueVigente])
+
+  const refreshBlocks = useCallback(async () => {
+    if (!resolvedBranchId) return
+    const scope = scopeActual
+    try {
+      const data = await listAppointmentBlocksForDate(resolvedBranchId, date)
+      if (sigueVigente(scope)) setBlocks(data)
+    } catch (e) {
+      console.error('[agenda] refreshBlocks', e)
+    }
+  }, [resolvedBranchId, date, scopeActual, sigueVigente])
+
+  const refreshWaitlist = useCallback(async () => {
+    if (!resolvedBranchId) return
+    const scope = scopeActual
+    try {
+      const data = await listWaitlist(resolvedBranchId)
+      if (sigueVigente(scope)) setWaitlist(data)
+    } catch (e) {
+      console.error('[agenda] refreshWaitlist', e)
+    }
+  }, [resolvedBranchId, scopeActual, sigueVigente])
+
+  const load = useCallback(async (scope: string) => {
     if (viewMode === 'multi') {
       setLoading(true)
-      const branchIds = visibleBranches.map(b => b.id)
-      const apts = await getAppointmentsForDateMultiBranch(branchIds, date)
-      setAppointments(apts)
-      setBarbers([])
-      setBlocks([])
-      setWaitlist([])
-      setLoading(false)
+      try {
+        const apts = await getAppointmentsForDateMultiBranch(visibleBranchIds, date)
+        if (!sigueVigente(scope)) return
+        setAppointments(apts)
+        setStaffTurnos([])
+        setBlocks([])
+        setWaitlist([])
+      } catch (e) {
+        console.error('[agenda] load multi', e)
+        if (sigueVigente(scope)) toast.error('No pudimos cargar la agenda. Probá recargar la página.')
+      } finally {
+        if (sigueVigente(scope)) setLoading(false)
+      }
       return
     }
 
     if (!resolvedBranchId) {
       setAppointments([])
-      setBarbers([])
+      setStaffTurnos([])
       setBlocks([])
       setWaitlist([])
+      // Se apaga explícitamente: si la carga anterior quedó en vuelo, su
+      // `finally` se saltea por scope viejo y el spinner se quedaba para
+      // siempre al pasar a un estado sin sucursal.
+      setLoading(false)
       return
     }
     setLoading(true)
-    const [apts, staffList, blocksList, waitlistEntries, effectiveSettings] = await Promise.all([
-      getAppointmentsForDate(resolvedBranchId, date),
-      getBranchAppointmentStaff(resolvedBranchId),
-      listAppointmentBlocksForDate(resolvedBranchId, date),
-      listWaitlist(resolvedBranchId),
-      getAppointmentSettings(undefined, resolvedBranchId),
-    ])
-    setAppointments(apts)
-    setBarbers(staffList)
-    setBlocks(blocksList)
-    setWaitlist(waitlistEntries)
-    setBranchSettings(effectiveSettings)
-    setLoading(false)
-  }, [resolvedBranchId, date, viewMode, visibleBranches])
+    try {
+      const [apts, staffList, blocksList, waitlistEntries, effectiveSettings] = await Promise.all([
+        getAppointmentsForDate(resolvedBranchId, date),
+        // `onlyWithSchedule: false` a propósito: la grilla necesita saber también
+        // de los que NO tienen jornada cargada, porque si tienen turnos ese día
+        // hay que dibujarles la columna igual (con el rayado de "sin horario").
+        // Filtrar por día en el server los descartaría justo a ellos.
+        getBranchAppointmentStaff(resolvedBranchId, { onlyWithSchedule: false }),
+        listAppointmentBlocksForDate(resolvedBranchId, date),
+        listWaitlist(resolvedBranchId),
+        getAppointmentSettings(undefined, resolvedBranchId),
+      ])
+      if (!sigueVigente(scope)) return
+      setAppointments(apts)
+      setStaffTurnos(staffList)
+      setBlocks(blocksList)
+      setWaitlist(waitlistEntries)
+      setBranchSettings(effectiveSettings)
+    } catch (e) {
+      console.error('[agenda] load', e)
+      if (sigueVigente(scope)) toast.error('No pudimos cargar la agenda. Probá recargar la página.')
+    } finally {
+      if (sigueVigente(scope)) setLoading(false)
+    }
+  }, [resolvedBranchId, date, viewMode, visibleBranchIds, sigueVigente])
 
   useEffect(() => {
-    load()
-  }, [load])
+    void load(scopeActual)
+  }, [load, scopeActual])
 
+  // Catálogo de servicios: sin el filtro de sucursal llegaban los de las 7
+  // organizaciones (la tabla `services` no tiene `organization_id`; el scope
+  // es el `branch_id`), así que el selector del diálogo listaba servicios ajenos.
   useEffect(() => {
+    if (!visibleBranchIds.length) {
+      setServices([])
+      return
+    }
     let alive = true
     ;(async () => {
       const { createClient } = await import('@/lib/supabase/client')
@@ -225,10 +317,12 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
         .from('services')
         .select('id, name, price, duration_minutes, branch_id, booking_mode')
         .eq('is_active', true)
+        .in('branch_id', visibleBranchIds)
+        .order('name')
       if (alive) setServices((data ?? []) as BookingServiceOption[])
     })()
     return () => { alive = false }
-  }, [])
+  }, [visibleBranchIds])
 
   // Realtime subscription — refetch en cambios sobre appointments/blocks/waitlist
   useEffect(() => {
@@ -249,15 +343,21 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
           { event: '*', schema: 'public', table: 'appointments', filter: `branch_id=eq.${resolvedBranchId}` },
           () => { if (alive) refreshAppointments() },
         )
+        // Filtrado por sucursal como los otros dos canales: sin filtro, un
+        // bloqueo de cualquier sucursal de cualquier org despertaba a TODAS las
+        // agendas abiertas y su callback recargaba las 5 queries de la pantalla
+        // (el fan-out cross-branch que saturó la DB el 30/abr).
+        // Contrapartida asumida: un bloqueo org-wide (`branch_id` NULL) no
+        // dispara refresh en vivo; aparece al recargar o cambiar de día.
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'appointment_blocks' },
-          () => { if (alive) load() },
+          { event: '*', schema: 'public', table: 'appointment_blocks', filter: `branch_id=eq.${resolvedBranchId}` },
+          () => { if (alive) refreshBlocks() },
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'appointment_waitlist', filter: `branch_id=eq.${resolvedBranchId}` },
-          () => { if (alive) load() },
+          () => { if (alive) refreshWaitlist() },
         )
         .subscribe()
 
@@ -268,7 +368,7 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
       alive = false
       cleanup?.()
     }
-  }, [resolvedBranchId, date, viewMode, load, refreshAppointments])
+  }, [resolvedBranchId, date, viewMode, refreshAppointments, refreshBlocks, refreshWaitlist])
 
   function shiftDate(days: number) {
     const d = new Date(date + 'T12:00:00')
@@ -276,16 +376,68 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
     setDate(toDateStr(d))
   }
 
-  const kpis = useMemo(() => {
-    const total = appointments.length
-    const confirmed = appointments.filter(a => a.status === 'confirmed').length
-    const inProgress = appointments.filter(a => a.status === 'in_progress' || a.status === 'checked_in').length
-    const completed = appointments.filter(a => a.status === 'completed').length
-    const noShow = appointments.filter(a => a.status === 'no_show').length
-    const manual = appointments.filter(a => a.source === 'manual').length
-    const online = total - manual
-    return { total, confirmed, inProgress, completed, noShow, manual, online }
-  }, [appointments])
+  const kpis = useMemo(() => ({
+    // `getAppointmentsForDate` excluye los cancelados: este total es de turnos
+    // vivos, no de todo lo que se agendó alguna vez para el día.
+    total: appointments.length,
+    confirmed: appointments.filter(a => a.status === 'confirmed').length,
+    inProgress: appointments.filter(a => a.status === 'in_progress' || a.status === 'checked_in').length,
+    completed: appointments.filter(a => a.status === 'completed').length,
+    noShow: appointments.filter(a => a.status === 'no_show').length,
+  }), [appointments])
+
+  const diaSemana = useMemo(() => new Date(date + 'T12:00:00').getDay(), [date])
+
+  /**
+   * Columnas del día. Un barbero sin `staff_schedules` para esa fecha es
+   * invisible para el motor de disponibilidad: dibujarle una columna limpia era
+   * prometer huecos que nunca se iban a poder reservar. Pero si YA tiene turnos
+   * cargados hay que mostrarlo igual, rayado, o esos turnos desaparecen.
+   *
+   * Ojo: `works_from`/`works_to` son el mínimo y el máximo de TODA la semana,
+   * no los del día. El rayado de "fuera de horario" es por eso aproximado para
+   * quien trabaja en franjas distintas según el día.
+   *
+   * Tercer caso, el que faltaba: un turno cuyo barbero ya NO está en
+   * `staffTurnos` (se lo dio de baja —`staff.is_active = false`—, se lo sacó de
+   * `appointment_staff` o se lo pasó a otra sucursal). Esa columna NO se arma
+   * acá: la grilla es la que garantiza el invariante "todo turno que existe se
+   * ve" y agrega sola la columna `fueraDeAgenda` para cualquier barbero con
+   * turnos que no esté en la lista. Acá alcanza con avisarlo (ver
+   * `huerfanosPorBarbero`) y con no bloquear el render de la grilla.
+   */
+  const columnas = useMemo<GridBarber[]>(() => {
+    const conTurnos = new Set(
+      appointments.map(a => a.barber_id).filter((id): id is string => !!id),
+    )
+    return staffTurnos
+      .filter(s => (s.days ?? []).includes(diaSemana) || conTurnos.has(s.id))
+      .map(s => ({ ...s, sinHorario: !(s.days ?? []).includes(diaSemana) }))
+  }, [staffTurnos, appointments, diaSemana])
+
+  /**
+   * Turnos que quedaron colgando de un barbero que ya no está habilitado. Se
+   * avisan aparte de los "sin barbero" porque el problema es otro: acá hay que
+   * reasignar o cancelar, y la columna rayada al final de la grilla es fácil de
+   * no ver. Mientras tanto siguen ocupando el horario por la EXCLUSION GiST.
+   */
+  const huerfanosPorBarbero = useMemo(() => {
+    if (viewMode === 'multi') return []
+    const conocidos = new Set(staffTurnos.map(s => s.id))
+    return appointments.filter(
+      a => a.barber_id
+        && !conocidos.has(a.barber_id)
+        && !['cancelled', 'no_show', 'completed'].includes(a.status),
+    )
+  }, [appointments, staffTurnos, viewMode])
+
+  const diaHabilitado = !settings?.appointment_days
+    || settings.appointment_days.includes(diaSemana)
+
+  function abrirNuevoTurno(prefill?: BookingPrefill) {
+    setBookingPrefill(prefill)
+    setShowBooking(true)
+  }
 
   const selected = useMemo(
     () => appointments.find(a => a.id === selectedId) ?? null,
@@ -296,140 +448,198 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   })
 
-  function handleCheckIn(apt: Appointment) {
-    // Optimista: marcar en recepción al instante
-    setAppointments(prev => prev.map(a =>
-      a.id === apt.id ? { ...a, status: 'checked_in' as AppointmentStatus } : a
-    ))
-    startTransition(async () => {
-      const res = await checkinAppointment(apt.id)
-      if (res.error) {
+  /**
+   * Aplica un cambio optimista sobre UN turno, llama al server y revierte si el
+   * server dice que no.
+   *
+   * Por qué existe (y por qué no alcanza con mirar `res.error`): una server
+   * action puede fallar de dos maneras distintas. Puede DEVOLVER `{ error }`
+   * —lo esperado, y lo único que el código manejaba— o puede RECHAZAR: red
+   * caída a mitad del POST, un 500, o un action-id que ya no existe porque se
+   * deployó con la pestaña abierta. En ese segundo caso, sin `try/catch`, no
+   * corría ni el toast ni el refetch: la agenda quedaba mostrando el turno en
+   * un horario/estado que la DB no tiene y el dueño creía que lo había movido.
+   *
+   * La reversión restaura SÓLO la fila del turno tocado, no un snapshot del
+   * array entero: entre el optimismo y el error puede haber entrado un refetch
+   * de realtime, y volver al array viejo borraría cambios ajenos.
+   */
+  const ejecutarCambioOptimista = useCallback(async (opts: {
+    /**
+     * El turno TAL COMO SE VE AHORA. Se pide entero (y no sólo el id) porque el
+     * valor previo hay que capturarlo acá: leerlo adentro del updater de
+     * `setAppointments` no sirve — React ejecuta el updater en el render
+     * siguiente, así que para cuando hiciera falta revertir seguiría en null.
+     */
+    turno: Appointment
+    /** Cómo se ve el turno mientras el server responde. */
+    optimista: (a: Appointment) => Appointment
+    accion: () => Promise<{ error?: string } | void>
+    exito: string
+  }): Promise<{ error?: string } | void> => {
+    const previo = opts.turno
+    setAppointments(prev => prev.map(a => (a.id === previo.id ? opts.optimista(a) : a)))
+    const revertir = () => {
+      setAppointments(prev => prev.map(a => (a.id === previo.id ? previo : a)))
+    }
+
+    try {
+      const res = await opts.accion()
+      if (res && res.error) {
+        revertir()
         toast.error(res.error)
-        refreshAppointments()
-      } else {
-        toast.success('Cliente en recepción')
-        refreshAppointments()
+        void refreshAppointments()
+        return { error: res.error }
       }
+      toast.success(opts.exito)
+      void refreshAppointments()
+    } catch (e) {
+      console.error('[agenda] cambio optimista', e)
+      revertir()
+      const error = 'No pudimos guardar el cambio. Revisá la conexión y probá de nuevo.'
+      toast.error(error)
+      // Igual se pide el estado real: si el server sí llegó a aplicarlo, el
+      // refetch corrige la reversión que acabamos de hacer.
+      void refreshAppointments()
+      return { error }
+    }
+  }, [refreshAppointments])
+
+  function handleCheckIn(apt: Appointment) {
+    startTransition(async () => {
+      await ejecutarCambioOptimista({
+        turno: apt,
+        optimista: a => ({ ...a, status: 'checked_in' as AppointmentStatus }),
+        accion: async () => await checkinAppointment(apt.id),
+        exito: 'Cliente en recepción',
+      })
     })
   }
 
   function handleStart(apt: Appointment) {
-    setAppointments(prev => prev.map(a =>
-      a.id === apt.id ? { ...a, status: 'in_progress' as AppointmentStatus } : a
-    ))
     startTransition(async () => {
-      const res = await startAppointmentService(apt.id)
-      if ('error' in res && res.error) {
-        toast.error(res.error)
-        refreshAppointments()
-      } else {
-        toast.success('Servicio iniciado')
-        refreshAppointments()
-      }
+      await ejecutarCambioOptimista({
+        turno: apt,
+        optimista: a => ({ ...a, status: 'in_progress' as AppointmentStatus }),
+        accion: async () => await startAppointmentService(apt.id),
+        exito: 'Servicio iniciado',
+      })
     })
   }
 
   async function handleFinish(apt: Appointment) {
-    const entry = await getAppointmentQueueEntry(apt.id)
-    if (!entry) {
-      toast.error('No se encontró la entrada de fila del turno')
-      return
+    // Se llama desde un onClick: si la lectura rechaza y nadie la atrapa queda
+    // una unhandled rejection y el botón "Finalizar servicio" no hace nada,
+    // sin ningún aviso de por qué.
+    try {
+      const entry = await getAppointmentQueueEntry(apt.id)
+      if (!entry) {
+        toast.error('No se encontró la entrada de fila del turno')
+        return
+      }
+      setCompletingEntry(entry as unknown as QueueEntry)
+    } catch (e) {
+      console.error('[agenda] handleFinish', e)
+      toast.error('No pudimos abrir el cobro. Revisá la conexión y probá de nuevo.')
     }
-    setCompletingEntry(entry as unknown as QueueEntry)
   }
 
   function handleCancel(apt: Appointment) {
-    setAppointments(prev => prev.map(a =>
-      a.id === apt.id ? { ...a, status: 'cancelled' as AppointmentStatus } : a
-    ))
     setSelectedId(null)
     setConfirmCancel(null)
     startTransition(async () => {
-      const res = await cancelAppointment(apt.id, 'staff')
-      if (res.error) {
-        toast.error(res.error)
-        refreshAppointments()
-      } else {
-        toast.success('Turno cancelado')
-        refreshAppointments()
-      }
+      await ejecutarCambioOptimista({
+        turno: apt,
+        optimista: a => ({ ...a, status: 'cancelled' as AppointmentStatus }),
+        accion: async () => await cancelAppointment(apt.id, 'staff'),
+        exito: 'Turno cancelado',
+      })
     })
   }
 
   function handleNoShow(apt: Appointment) {
     if (!apt.barber_id) { toast.error('Turno sin barbero asignado'); return }
-    setAppointments(prev => prev.map(a =>
-      a.id === apt.id ? { ...a, status: 'no_show' as AppointmentStatus } : a
-    ))
     setSelectedId(null)
     setConfirmNoShow(null)
     startTransition(async () => {
-      const res = await markNoShow(apt.id, apt.barber_id!)
-      if (res.error) {
-        toast.error(res.error)
-        refreshAppointments()
-      } else {
-        toast.success('Marcado como no-show')
-        refreshAppointments()
-      }
+      await ejecutarCambioOptimista({
+        turno: apt,
+        optimista: a => ({ ...a, status: 'no_show' as AppointmentStatus }),
+        accion: async () => await markNoShow(apt.id, apt.barber_id!),
+        exito: 'Marcado como no-show',
+      })
     })
   }
 
   async function handleMove(args: { appointmentId: string; newBarberId: string; newTime: string }) {
-    // Optimista: mover el turno inmediatamente en el grid
-    setAppointments(prev => prev.map(a => {
-      if (a.id !== args.appointmentId) return a
-      const [h, m] = args.newTime.split(':').map(Number)
-      const startMin = h * 60 + m
-      const duration = a.duration_minutes ?? 30
-      const endMin = startMin + duration
-      const pad = (n: number) => String(n).padStart(2, '0')
-      return {
-        ...a,
-        barber_id: args.newBarberId,
-        start_time: `${pad(h)}:${pad(m)}:00`,
-        end_time: `${pad(Math.floor(endMin / 60))}:${pad(endMin % 60)}:00`,
-      }
-    }))
-
-    const res = await rescheduleAppointment({
-      appointmentId: args.appointmentId,
-      newDate: date,
-      newStartTime: args.newTime,
-      newBarberId: args.newBarberId,
-    })
-    if (res?.error) {
-      toast.error(res.error)
-      refreshAppointments()
-      return { error: res.error }
+    // El turno tiene que estar en el estado actual: si no está (llegó un
+    // refetch que lo sacó, o la propuesta quedó vieja) no hay nada que mover
+    // ni nada que revertir.
+    const turno = appointments.find(a => a.id === args.appointmentId)
+    if (!turno) {
+      const error = 'El turno ya no está en la agenda de este día'
+      toast.error(error)
+      void refreshAppointments()
+      return { error }
     }
-    toast.success('Turno reprogramado')
-    refreshAppointments()
+
+    return ejecutarCambioOptimista({
+      turno,
+      optimista: a => {
+        const [h, m] = args.newTime.split(':').map(Number)
+        const startMin = h * 60 + m
+        const duration = a.duration_minutes ?? 30
+        const endMin = startMin + duration
+        const pad = (n: number) => String(n).padStart(2, '0')
+        return {
+          ...a,
+          barber_id: args.newBarberId,
+          start_time: `${pad(h)}:${pad(m)}:00`,
+          end_time: `${pad(Math.floor(endMin / 60))}:${pad(endMin % 60)}:00`,
+        }
+      },
+      accion: async () => await rescheduleAppointment({
+        appointmentId: args.appointmentId,
+        // `date` es el día que la grilla está mostrando. Es seguro porque las
+        // cargas viejas se descartan por scope (ver `sigueVigente`): sin eso,
+        // una respuesta atrasada podía dejar turnos de otro día en pantalla y
+        // este reschedule los mandaba a la fecha equivocada.
+        newDate: date,
+        newStartTime: args.newTime,
+        newBarberId: args.newBarberId,
+      }),
+      exito: 'Turno reprogramado',
+    })
   }
 
   async function handleResize(args: { appointmentId: string; newDurationMinutes: number }) {
-    // Optimista: actualizar end_time inmediatamente
-    setAppointments(prev => prev.map(a => {
-      if (a.id !== args.appointmentId) return a
-      const [h, m] = a.start_time.split(':').map(Number)
-      const startMin = h * 60 + m
-      const endMin = startMin + args.newDurationMinutes
-      const pad = (n: number) => String(n).padStart(2, '0')
-      return {
-        ...a,
-        duration_minutes: args.newDurationMinutes,
-        end_time: `${pad(Math.floor(endMin / 60))}:${pad(endMin % 60)}:00`,
-      }
-    }))
-
-    const res = await updateAppointmentDuration(args.appointmentId, args.newDurationMinutes)
-    if (res?.error) {
-      toast.error(res.error)
-      refreshAppointments()
-      return { error: res.error }
+    const turno = appointments.find(a => a.id === args.appointmentId)
+    if (!turno) {
+      const error = 'El turno ya no está en la agenda de este día'
+      toast.error(error)
+      void refreshAppointments()
+      return { error }
     }
-    toast.success('Duración actualizada')
-    refreshAppointments()
+
+    return ejecutarCambioOptimista({
+      turno,
+      optimista: a => {
+        const [h, m] = a.start_time.split(':').map(Number)
+        const startMin = h * 60 + m
+        const endMin = startMin + args.newDurationMinutes
+        const pad = (n: number) => String(n).padStart(2, '0')
+        return {
+          ...a,
+          duration_minutes: args.newDurationMinutes,
+          end_time: `${pad(Math.floor(endMin / 60))}:${pad(endMin % 60)}:00`,
+        }
+      },
+      accion: async () => await updateAppointmentDuration(
+        args.appointmentId,
+        args.newDurationMinutes,
+      ),
+      exito: 'Duración actualizada',
+    })
   }
 
   // Sucursal seleccionada en modo walk_in — mostrar CTA para cambiar de modo
@@ -514,12 +724,14 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
               </SelectContent>
             </Select>
           )}
-          <Select value={String(zoom)} onValueChange={(v) => setZoom(Number(v) as ZoomLevel)}>
-            <SelectTrigger className="h-9 w-[100px]"><SelectValue /></SelectTrigger>
+          {/* Densidad de la grilla: el alto se calcula en píxeles por minuto,
+              así que cualquier intervalo de snap cae exacto. */}
+          <Select value={zoom} onValueChange={(v) => setZoom(v as ZoomLevel)}>
+            <SelectTrigger className="h-9 w-[120px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="15">15 min</SelectItem>
-              <SelectItem value="30">30 min</SelectItem>
-              <SelectItem value="60">60 min</SelectItem>
+              <SelectItem value="compacta">Compacta</SelectItem>
+              <SelectItem value="normal">Normal</SelectItem>
+              <SelectItem value="amplia">Amplia</SelectItem>
             </SelectContent>
           </Select>
           {visibleBranches.length > 1 && (
@@ -532,24 +744,38 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
               {viewMode === 'multi' ? 'Vista consolidada' : 'Por sucursal'}
             </Button>
           )}
-          <Button onClick={() => setShowBooking(true)}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPanelAbierto(v => !v)}
+            aria-pressed={panelAbierto}
+          >
+            {panelAbierto
+              ? <PanelRightClose className="mr-1 size-4" />
+              : <PanelRightOpen className="mr-1 size-4" />}
+            Panel
+          </Button>
+          <Button onClick={() => abrirNuevoTurno()}>
             <CalendarPlus className="mr-2 size-4" />
             Nuevo turno
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-        <KpiCard label="Total" value={kpis.total} />
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        <KpiCard label="Turnos activos" value={kpis.total} />
         <KpiCard label="Confirmados" value={kpis.confirmed} tone="blue" />
         <KpiCard label="En atención" value={kpis.inProgress} tone="amber" />
         <KpiCard label="Completados" value={kpis.completed} tone="slate" />
-        <KpiCard label="No-show" value={kpis.noShow} tone="red" />
-        <KpiCard label="Online" value={kpis.online} tone="emerald" />
-        <KpiCard label="Manuales" value={kpis.manual} tone="muted" />
+        <KpiCard label="Ausentes" value={kpis.noShow} tone="red" />
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div
+        className={cn(
+          'grid min-h-0 flex-1 grid-cols-1 gap-3',
+          panelAbierto && 'lg:grid-cols-[minmax(0,1fr)_320px]',
+        )}
+      >
         <div className="min-h-0">
           {loading ? (
             <Card className="h-full">
@@ -565,17 +791,39 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
               onAppointmentClick={(a) => setSelectedId(a.id)}
               selectedId={selectedId}
             />
-          ) : barbers.length === 0 ? (
+          ) : columnas.length === 0 && huerfanosPorBarbero.length === 0 ? (
+            // El estado vacío sólo se muestra si además NO quedaron turnos
+            // colgando de barberos dados de baja: en ese caso hay que dibujar
+            // la grilla igual (la grilla les arma la columna) o esos turnos
+            // volverían a ser invisibles, que es justo lo que se está evitando.
             <Card>
               <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
                 <Calendar className="size-10 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">
-                  No hay barberos habilitados para turnos en esta sucursal.
+                  {staffTurnos.length === 0
+                    ? 'No hay barberos habilitados para turnos en esta sucursal.'
+                    : 'Ningún barbero tiene horario cargado para este día.'}
                 </p>
+                {staffTurnos.length > 0 && (
+                  <Link
+                    href="/dashboard/turnos/configuracion"
+                    className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+                  >
+                    <Settings className="size-4" />
+                    Cargar horarios
+                  </Link>
+                )}
               </CardContent>
             </Card>
           ) : (
             <>
+              {!diaHabilitado && (
+                <div className="mb-3 flex items-center gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+                  <CalendarOff className="size-4 shrink-0" />
+                  La sucursal no toma turnos este día. Podés cargar uno a mano, pero
+                  el turnero público no lo va a ofrecer.
+                </div>
+              )}
               {/* Turnos sin barbero: la grilla dibuja una columna por barbero,
                   así que un turno con barber_id NULL no aparecía en ningún
                   lado — existía, ocupaba el horario y era invisible. */}
@@ -601,15 +849,48 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
                   </div>
                 </div>
               )}
+              {/* Turnos de barberos que ya no están habilitados para turnos.
+                  Su columna existe (rayada, al final de la grilla) pero es
+                  fácil no verla: siguen ocupando el horario, así que hay que
+                  reasignarlos o cancelarlos a mano. */}
+              {huerfanosPorBarbero.length > 0 && (
+                <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+                  <p className="mb-2 flex items-center gap-2 text-sm font-medium">
+                    <UserX className="size-4 text-amber-500" />
+                    {huerfanosPorBarbero.length === 1
+                      ? '1 turno de un barbero que ya no toma turnos'
+                      : `${huerfanosPorBarbero.length} turnos de barberos que ya no toman turnos`}
+                  </p>
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    Siguen ocupando el horario. Reasignalos a otro barbero o cancelalos.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {huerfanosPorBarbero.map(a => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => setSelectedId(a.id)}
+                        className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium transition-colors hover:border-amber-500/50"
+                      >
+                        {a.start_time.slice(0, 5)} · {a.client?.name ?? 'Sin nombre'}
+                        <span className="ml-1 text-muted-foreground">
+                          ({a.barber?.full_name ?? 'Barbero dado de baja'})
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             <AppointmentsGridView
               date={date}
-              barbers={barbers}
+              barbers={columnas}
               appointments={appointments}
               blocks={blocks}
               slotInterval={settings.slot_interval_minutes}
               hoursOpen={settings.appointment_hours_open}
               hoursClose={settings.appointment_hours_close}
               zoom={zoom}
+              onSlotClick={(barberId, time) => abrirNuevoTurno({ date, barberId, time })}
               onAppointmentClick={(a) => setSelectedId(a.id)}
               onAppointmentMove={handleMove}
               onAppointmentResize={handleResize}
@@ -620,6 +901,7 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
           )}
         </div>
 
+        {panelAbierto && (
         <aside className="min-h-0">
           <Card className="flex h-full flex-col">
             {viewMode === 'multi' ? (
@@ -640,8 +922,8 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
                       branchId={resolvedBranchId}
                       date={date}
                       blocks={blocks}
-                      barbers={barbers}
-                      onChanged={load}
+                      barbers={staffTurnos}
+                      onChanged={refreshBlocks}
                     />
                   )}
                 </TabsContent>
@@ -650,9 +932,9 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
                     <AppointmentWaitlistPanel
                       branchId={resolvedBranchId}
                       entries={waitlist}
-                      barbers={barbers}
+                      barbers={staffTurnos}
                       services={services}
-                      onChanged={load}
+                      onChanged={refreshWaitlist}
                     />
                   )}
                 </TabsContent>
@@ -661,10 +943,16 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
                     <AppointmentTimeFinder
                       branchId={resolvedBranchId}
                       services={services}
-                      barbers={barbers}
+                      barbers={staffTurnos}
                       onPickSlot={(slot) => {
+                        // El buscador ya resolvió día, hora y barbero: abrir el
+                        // diálogo en blanco obligaba a re-elegir las tres cosas.
                         setDate(slot.date)
-                        setShowBooking(true)
+                        abrirNuevoTurno({
+                          date: slot.date,
+                          barberId: slot.barberId,
+                          time: slot.time,
+                        })
                       }}
                     />
                   )}
@@ -673,6 +961,7 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
             )}
           </Card>
         </aside>
+        )}
       </div>
 
       {/* Detalle del turno como Sheet (drawer overlay) — no comprime el grid */}
@@ -704,6 +993,7 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
         branches={visibleBranches}
         services={services}
         defaultBranchId={resolvedBranchId}
+        prefill={bookingPrefill}
         onBooked={() => { toast.success('Turno creado'); refreshAppointments() }}
       />
 
@@ -993,11 +1283,15 @@ function KpiCard({
     emerald: 'text-emerald-500',
     muted: 'text-muted-foreground',
   }
+  // `min-w-0` + `truncate`: el main del dashboard tiene `overflow-x-hidden`, así
+  // que una etiqueta larga no ensancha la tarjeta, se recorta contra el borde.
   return (
-    <Card>
-      <CardContent className="p-3">
-        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className={`text-xl font-bold leading-tight ${toneMap[tone]}`}>{value}</p>
+    <Card className="min-w-0 gap-0 py-0">
+      <CardContent className="min-w-0 px-3 py-2.5">
+        <p className="truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {label}
+        </p>
+        <p className={`text-2xl font-bold leading-tight tabular-nums ${toneMap[tone]}`}>{value}</p>
       </CardContent>
     </Card>
   )

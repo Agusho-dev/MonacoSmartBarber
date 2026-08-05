@@ -72,6 +72,10 @@ export async function checkInAppointmentFromPanel(
     // Turno "con cualquiera disponible": lo toma el barbero que registra la
     // llegada. Si ya tiene barbero asignado, el RPC ignora este parámetro.
     p_staff_id_assign: appointment.barber_id ?? staffId,
+    // El límite de "una hora antes" existe para que el CLIENTE no se registre
+    // solo desde la tablet cuando todavía falta media tarde. Acá lo registra el
+    // barbero, que lo tiene enfrente: si lo está marcando es porque llegó.
+    p_allow_early: true,
   })
 
   if (error) {
@@ -122,16 +126,69 @@ export async function markAppointmentInProgress(
     .maybeSingle()
 
   if (!appointment) return { error: 'Turno no encontrado' }
-  if (!appointment.queue_entry_id) return { error: 'El turno todavía no fue chequeado. Verificá el check-in primero.' }
   if (appointment.status !== 'checked_in') return { error: 'El turno no está en espera' }
 
-  const { error: qError } = await supabase
+  // `appointments.queue_entry_id` se rompe solo: `cancelQueueEntry` lo NULLea al
+  // cancelar la entrada, y en prod 2 de cada 3 entradas de turno quedaron
+  // huérfanas. La fuente de verdad es `queue_entries.appointment_id`, que
+  // sobrevive; ésta es sólo el caché.
+  let queueEntryId = appointment.queue_entry_id as string | null
+  if (!queueEntryId) {
+    const { data: entry } = await supabase
+      .from('queue_entries')
+      .select('id')
+      .eq('appointment_id', appointmentId)
+      .in('status', ['waiting', 'in_progress'])
+      .maybeSingle()
+    queueEntryId = entry?.id ?? null
+    if (queueEntryId) {
+      await supabase.from('appointments').update({ queue_entry_id: queueEntryId }).eq('id', appointmentId)
+    }
+  }
+
+  if (!queueEntryId) return { error: 'El turno todavía no fue chequeado. Verificá el check-in primero.' }
+
+  // `idx_queue_one_in_progress_per_barber` es UNIQUE(barber_id) WHERE
+  // status='in_progress': si el barbero está atendiendo a otro (o en un
+  // descanso in_progress), el UPDATE revienta con 23505 y el usuario recibía
+  // "Error al iniciar el servicio" sin ninguna pista. Se chequea antes.
+  if (appointment.barber_id) {
+    const { data: enCurso } = await supabase
+      .from('queue_entries')
+      .select('id, is_break')
+      .eq('barber_id', appointment.barber_id)
+      .eq('branch_id', branchId)
+      .eq('status', 'in_progress')
+      .maybeSingle()
+
+    if (enCurso) {
+      return {
+        error: enCurso.is_break
+          ? 'Estás en un descanso. Terminalo antes de arrancar el turno.'
+          : 'Ya estás atendiendo a alguien. Terminá ese corte antes de arrancar el turno.',
+      }
+    }
+  }
+
+  // `.select('id')` no es cosmético: sin él, si la entrada ya no estaba en
+  // 'waiting' (otra tablet la tomó entre el render y el tap) el UPDATE matchea
+  // 0 filas, no devuelve error, y la action respondía ok — el barbero veía que
+  // "arrancó" un corte que en realidad está atendiendo otro.
+  const { data: actualizada, error: qError } = await supabase
     .from('queue_entries')
     .update({ status: 'in_progress', started_at: new Date().toISOString() })
-    .eq('id', appointment.queue_entry_id)
+    .eq('id', queueEntryId)
     .eq('status', 'waiting')
+    .select('id')
 
-  if (qError) return { error: 'Error al iniciar el servicio' }
+  if (qError) {
+    console.error('[markAppointmentInProgress]', qError.message)
+    return { error: 'Error al iniciar el servicio' }
+  }
+
+  if (!actualizada?.length) {
+    return { error: 'Ese turno ya fue tomado. Actualizá la pantalla.' }
+  }
 
   const { error: aError } = await supabase
     .from('appointments')
@@ -221,12 +278,17 @@ export async function markAppointmentNoShow(
 
   if (error) return { error: error.message }
 
-  // Cancelar queue entry asociada si existe
+  // Cancelar queue entry asociada si existe.
+  // `.eq('status','waiting')`: si el corte YA arrancó, cancelar la entrada
+  // impide que dispare `on_queue_completed`, así que no se crea la visita y la
+  // plata no entra a caja. (Marcar ausente a alguien que está en la silla no
+  // debería pasar, pero el botón está a un tap del de finalizar.)
   if (appointment.queue_entry_id) {
     const { error: qError } = await supabase
       .from('queue_entries')
       .update({ status: 'cancelled' })
       .eq('id', appointment.queue_entry_id)
+      .eq('status', 'waiting')
     if (qError) console.error('[markAppointmentNoShow] error cancelando queue_entry:', qError.message)
   }
 

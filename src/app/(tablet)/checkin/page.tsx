@@ -10,8 +10,11 @@
  *
  * Render según contexto:
  *   - Sin branch resuelto → CheckinWalkIn (selecciona branch, filtrado por org).
- *   - Con branch + walk_in → CheckinWalkIn.
- *   - Con branch + appointments/hybrid → ModeRouter.
+ *     Al elegirla navega a `?branch=<id>` para que ESTE componente vuelva a
+ *     correr y pueda resolver el modo: sin eso, una sucursal en modo turnos
+ *     atendida desde una tablet sin querystring nunca salía del walk-in.
+ *   - Con branch + turnero activo → ModeRouter.
+ *   - Con branch sin turnero activo → CheckinWalkIn.
  */
 
 import { Suspense } from 'react'
@@ -21,7 +24,9 @@ import { CheckinWalkIn } from '@/app/(tablet)/checkin/checkin-walk-in'
 import { PinGate } from '@/components/checkin/pin-gate'
 import { createAdminClient } from '@/lib/supabase/server'
 import { isValidUUID } from '@/lib/validation'
+import { resolveCheckinBackground } from '@/lib/checkin-bg'
 import type { BranchOperationMode } from '@/lib/actions/turnos-mode'
+import { getAppointmentSettings } from '@/lib/actions/appointments'
 import {
   hasValidCheckinSessionForOrg,
   orgRequiresCheckinPin,
@@ -35,6 +40,9 @@ interface CheckinPageProps {
 type ResolvedOrg = { slug: string; name: string; logo_url: string | null }
 type ResolvedBranch = {
   id: string
+  name: string
+  timezone: string | null
+  organization_id: string
   operation_mode: BranchOperationMode | null
   checkin_bg_color: string | null
 } | null
@@ -53,6 +61,8 @@ export default async function CheckinPage({ searchParams }: CheckinPageProps) {
       .from('branches')
       .select(`
         id,
+        name,
+        timezone,
         operation_mode,
         checkin_bg_color,
         organization_id,
@@ -65,6 +75,9 @@ export default async function CheckinPage({ searchParams }: CheckinPageProps) {
     if (data) {
       branch = {
         id: data.id,
+        name: data.name as string,
+        timezone: (data.timezone as string | null) ?? null,
+        organization_id: data.organization_id as string,
         operation_mode: data.operation_mode as BranchOperationMode | null,
         checkin_bg_color: data.checkin_bg_color as string | null,
       }
@@ -90,15 +103,7 @@ export default async function CheckinPage({ searchParams }: CheckinPageProps) {
   if (requiresPin) {
     const ok = await hasValidCheckinSessionForOrg(org.slug)
     if (!ok) {
-      return (
-        <PinGate
-          orgSlug={org.slug}
-          orgName={org.name}
-          orgLogoUrl={org.logo_url}
-        >
-          <div />
-        </PinGate>
-      )
+      return <PinGate orgSlug={org.slug} orgName={org.name} orgLogoUrl={org.logo_url} />
     }
   }
 
@@ -112,9 +117,19 @@ export default async function CheckinPage({ searchParams }: CheckinPageProps) {
     )
   }
 
+  // Tener turnos prendidos son DOS cosas, no una: `operation_mode` distinto de
+  // walk_in Y `appointment_settings.is_enabled`. Con is_enabled en false (que es
+  // el default de fábrica) la tablet anunciaba "trabajamos con turnos" pero el
+  // motor de disponibilidad devolvía "Turnos no habilitados": la sucursal
+  // quedaba sin fila y sin turnos a la vez.
   const operationMode = (branch.operation_mode ?? 'walk_in') as BranchOperationMode
+  const settings =
+    operationMode === 'walk_in'
+      ? null
+      : await getAppointmentSettings(branch.organization_id, branch.id)
+  const turneroActivo = operationMode !== 'walk_in' && settings?.is_enabled === true
 
-  if (operationMode === 'walk_in') {
+  if (!turneroActivo) {
     return (
       <Suspense>
         <CheckinWalkIn />
@@ -122,15 +137,22 @@ export default async function CheckinPage({ searchParams }: CheckinPageProps) {
     )
   }
 
-  const bgColor = branch.checkin_bg_color ?? '#27272a'
-  const isLightBg = isLightBackground(bgColor)
+  const { css: bgCss, isLight } = resolveCheckinBackground(
+    branch.checkin_bg_color?.trim() || (await getOrgCheckinBg(branch.organization_id))
+  )
 
   return (
     <Suspense>
       <ModeRouter
         branchId={branch.id}
+        branchName={branch.name}
+        branchTimezone={branch.timezone || 'America/Argentina/Buenos_Aires'}
+        organizationId={branch.organization_id}
+        orgName={org.name}
+        orgLogoUrl={org.logo_url}
         operationMode={operationMode}
-        isLightBg={isLightBg}
+        bgCss={bgCss}
+        isLightBg={isLight}
       />
     </Suspense>
   )
@@ -138,29 +160,15 @@ export default async function CheckinPage({ searchParams }: CheckinPageProps) {
 
 // ─── Helper local ─────────────────────────────────────────────────────────────
 
-/**
- * Heurística rápida para saber si el color de fondo es claro.
- * Soporta hex (#rrggbb, #rgb) y oklch (siempre oscuro en este contexto).
- */
-function isLightBackground(color: string): boolean {
-  if (!color || color.startsWith('oklch')) return false
+/** Fondo por defecto de la org, igual que el que usa el kiosko walk-in. */
+async function getOrgCheckinBg(orgId: string): Promise<string> {
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from('app_settings')
+    .select('checkin_bg_color')
+    .eq('organization_id', orgId)
+    .maybeSingle()
 
-  const hex = color.replace('#', '')
-  const full =
-    hex.length === 3
-      ? hex
-          .split('')
-          .map((c) => c + c)
-          .join('')
-      : hex
-
-  if (full.length !== 6) return false
-
-  const r = parseInt(full.slice(0, 2), 16)
-  const g = parseInt(full.slice(2, 4), 16)
-  const b = parseInt(full.slice(4, 6), 16)
-
-  // Luminancia relativa (fórmula simplificada)
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-  return luminance > 0.6
+  const color = data?.checkin_bg_color
+  return typeof color === 'string' && color.trim() ? color.trim() : '#3f3f46'
 }

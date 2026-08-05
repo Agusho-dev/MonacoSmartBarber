@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Lock, Delete, Loader2, ArrowRight } from 'lucide-react'
+import { Lock, Delete, Loader2, ArrowRight, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { validateCheckinPinForOrg } from '@/lib/actions/checkin-pin'
 
@@ -9,8 +9,6 @@ interface PinGateProps {
   orgSlug: string
   orgName: string
   orgLogoUrl?: string | null
-  /** Render que se monta una vez validado el PIN. */
-  children: React.ReactNode
 }
 
 const PIN_MAX = 8
@@ -22,9 +20,10 @@ const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const
  * Gate full-screen del kiosk: muestra keypad numérico y solo permite avanzar
  * cuando el PIN es correcto. Cuando se valida con éxito, el server setea la
  * cookie `checkin_session` y forzamos `location.reload()` para que el server
- * component re-evalúe y muestre el contenido protegido.
+ * component re-evalúe y muestre el contenido protegido — por eso el gate no
+ * recibe ningún `children`: nunca renderiza lo que protege.
  */
-export function PinGate({ orgSlug, orgName, orgLogoUrl, children: _children }: PinGateProps) {
+export function PinGate({ orgSlug, orgName, orgLogoUrl }: PinGateProps) {
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -55,7 +54,7 @@ export function PinGate({ orgSlug, orgName, orgLogoUrl, children: _children }: P
       const res = await validateCheckinPinForOrg(orgSlug, pin)
       if ('ok' in res) {
         setSuccess(true)
-        // Pequeño delay para que el usuario vea el ✓ antes del reload
+        // Pequeño delay para que el usuario vea el tilde antes del reload
         setTimeout(() => {
           window.location.reload()
         }, 300)
@@ -152,7 +151,10 @@ export function PinGate({ orgSlug, orgName, orgLogoUrl, children: _children }: P
           {isPending ? (
             <Loader2 className="h-5 w-5 animate-spin" />
           ) : success ? (
-            <>✓ Acceso concedido</>
+            <>
+              <Check className="h-5 w-5" />
+              Acceso concedido
+            </>
           ) : (
             <>
               Continuar
