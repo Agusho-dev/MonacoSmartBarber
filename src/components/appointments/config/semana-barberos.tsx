@@ -303,12 +303,16 @@ function FilaBarbero({
         <p className="truncate text-sm font-medium leading-tight" title={barbero.nombre}>
           {barbero.nombre}
         </p>
+        {/* `block w-full` no es decorativo: un <button> es inline-block y se
+            dimensiona con su texto, así que `truncate` (overflow-hidden +
+            ellipsis) no recorta nada — el subtítulo crecía más que su columna y
+            se montaba encima del Switch de la derecha. */}
         <button
           type="button"
           onClick={() => onCambiar(barbero.id, { soloTurnos: !barbero.soloTurnos })}
           disabled={!barbero.recibeTurnos}
           className={cn(
-            'truncate text-[10px] leading-tight transition-colors',
+            'block w-full max-w-full truncate text-left text-[10px] leading-tight transition-colors',
             barbero.recibeTurnos
               ? 'text-muted-foreground hover:text-foreground'
               : 'cursor-default text-muted-foreground/70'
@@ -325,10 +329,13 @@ function FilaBarbero({
         </button>
       </div>
 
+      {/* Sin className que toque el ancho o el alto: el thumb se desplaza con
+          `translate-x-[calc(100%-2px)]`, atado a las medidas del primitivo, y
+          cualquier ancho o alto propio lo deja a mitad de camino. El `shrink-0`
+          que estaba acá ya lo trae el Switch de base. */}
       <Switch
         checked={barbero.recibeTurnos}
         onCheckedChange={valor => onCambiar(barbero.id, { recibeTurnos: valor })}
-        className="shrink-0"
         aria-label={`${barbero.nombre} recibe turnos`}
       />
     </div>
@@ -435,21 +442,26 @@ function CeldaDia({
           <PopoverTrigger asChild>
             <button
               type="button"
+              // `inset-x-px bottom-px` en vez de pegarse al borde: si no, el chip
+              // tapa el borde redondeado de la celda y una celda activa parecía
+              // no tener borde abajo. `overflow-hidden` + el span que trunca son
+              // obligatorios: "10:30–19:30" no entra en una columna de 3.25rem y
+              // se derramaba sobre la celda de al lado.
               className={cn(
-                'absolute inset-x-0 bottom-0 flex h-6 items-center justify-center gap-0.5 rounded-b-lg border-t border-border/40 bg-background/40 text-[10px] font-medium tabular-nums transition-colors hover:bg-background/80 hover:text-foreground',
+                'absolute inset-x-px bottom-px flex h-6 items-center justify-center gap-0.5 overflow-hidden rounded-b-[7px] border-t border-border/40 bg-background/40 px-1 text-[10px] font-medium tabular-nums transition-colors hover:bg-background/80 hover:text-foreground',
                 sinEfecto ? 'text-amber-500' : entrada?.franja ? 'text-foreground' : 'text-muted-foreground'
               )}
               aria-label={`Editar la franja de turnos de ${barbero.nombre} el ${NOMBRES_DIAS[dia]}`}
             >
-              {entrada?.franja ? (
-                rangoCorto(entrada.franja)
-              ) : trabaja ? (
-                <>
-                  {rangoCorto(jornadaDelDia[0])}
-                  {jornadaDelDia.length > 1 && <span className="text-[9px]">+{jornadaDelDia.length - 1}</span>}
-                </>
-              ) : (
-                'sin horario'
+              <span className="min-w-0 truncate">
+                {entrada?.franja
+                  ? rangoCorto(entrada.franja)
+                  : trabaja
+                    ? rangoCorto(jornadaDelDia[0])
+                    : 'sin horario'}
+              </span>
+              {!entrada?.franja && trabaja && jornadaDelDia.length > 1 && (
+                <span className="shrink-0 text-[9px]">+{jornadaDelDia.length - 1}</span>
               )}
             </button>
           </PopoverTrigger>

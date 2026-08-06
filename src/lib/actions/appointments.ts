@@ -304,7 +304,36 @@ export async function getAvailableSlots(
   const targetDate = new Date(date + 'T12:00:00')
   const dayOfWeek = targetDate.getDay()
 
-  if (!settings.appointment_days.includes(dayOfWeek)) {
+  // Franjas horarias del turnero (mig 172). Permiten dar turnos sólo en las
+  // horas flojas y con tramos ("martes de 10 a 13 y de 16 a 19"), que es lo que
+  // el par único appointment_hours_open/close no podía expresar.
+  //
+  // Compatibilidad por sucursal, igual que la agenda por día: sin filas manda el
+  // modelo viejo (un rango para toda la semana + appointment_days).
+  const { data: franjasFilas, error: franjasError } = await supabase
+    .from('appointment_hours')
+    .select('day_of_week, start_time, end_time')
+    .eq('branch_id', branchId)
+
+  if (franjasError) {
+    console.error('[getAvailableSlots] franjas del turnero:', franjasError.message)
+    return { slots: [], error: 'No pudimos leer la disponibilidad. Reintentá en un momento.' }
+  }
+
+  const usaFranjas = (franjasFilas ?? []).length > 0
+  const ventanasDelDia = (franjasFilas ?? [])
+    .filter(f => f.day_of_week === dayOfWeek)
+    .map(f => ({
+      inicio: timeToMinutes(f.start_time.slice(0, 5)),
+      fin: timeToMinutes(f.end_time.slice(0, 5)),
+    }))
+    .sort((a, b) => a.inicio - b.inicio)
+
+  if (usaFranjas) {
+    if (!ventanasDelDia.length) {
+      return { slots: [], error: 'Día no habilitado para turnos' }
+    }
+  } else if (!settings.appointment_days.includes(dayOfWeek)) {
     return { slots: [], error: 'Día no habilitado para turnos' }
   }
 
@@ -456,8 +485,17 @@ export async function getAvailableSlots(
     return { slots: [], error: 'No pudimos leer la disponibilidad. Reintentá en un momento.' }
   }
 
-  const openMinutes = timeToMinutes(settings.appointment_hours_open)
-  const closeMinutes = timeToMinutes(settings.appointment_hours_close)
+  // Ventanas del turnero para ese día. Con franjas cargadas la grilla arranca en
+  // la primera y termina en la última; sin ellas, el rango único de siempre.
+  const ventanas = usaFranjas
+    ? ventanasDelDia
+    : [{
+        inicio: timeToMinutes(settings.appointment_hours_open),
+        fin: timeToMinutes(settings.appointment_hours_close),
+      }]
+
+  const openMinutes = ventanas[0].inicio
+  const closeMinutes = Math.max(...ventanas.map(v => v.fin))
   const buffer = settings.buffer_minutes ?? 0
 
   // "Ahora" en timezone de la sucursal. getLocalNow devuelve un Date cuyos
@@ -511,7 +549,12 @@ export async function getAvailableSlots(
       const slotStart = minutesToTime(m)
       const slotEnd = minutesToTime(m + serviceDuration)
 
-      const withinSchedule = staffSchedules.some(sch =>
+      // El turno tiene que entrar ENTERO en una franja del turnero: con un
+      // horario entrecortado (10–13 / 16–19) un servicio de 45' que arranque
+      // 12:45 se pasaría del corte del mediodía.
+      const dentroDeVentana = ventanas.some(v => m >= v.inicio && m + serviceDuration <= v.fin)
+
+      const withinSchedule = dentroDeVentana && staffSchedules.some(sch =>
         slotStart >= sch.start_time.substring(0, 5) && slotEnd <= sch.end_time.substring(0, 5)
       )
 

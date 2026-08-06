@@ -5,23 +5,34 @@ import { Clock, Eye, TriangleAlert, CalendarRange, Timer, Hourglass } from 'luci
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
+import { HorariosTurnero } from './horarios-turnero'
 import {
   NOMBRES_DIAS,
   NOMBRES_DIAS_CORTOS,
   ORDEN_SEMANA,
+  franjasATramos,
   horariosOfrecidos,
   normalizarTramos,
+  resumenFranjas,
   tramosDeTurnos,
   type AgendaTurnos,
   type BarberoConfig,
+  type FranjasSemana,
   type JornadaSemanal,
   type ServicioReservable,
   type Tramo,
 } from './tipos'
 
 export interface ValoresReglas {
+  /**
+   * Rango único del modelo viejo (`appointment_hours_open/close`). Ya no se
+   * edita en pantalla —lo reemplazaron las franjas— pero se sigue guardando tal
+   * cual porque la agenda del dashboard dibuja su timeline con ese rango y una
+   * sucursal sin franjas todavía depende de él.
+   */
   apertura: string
   cierre: string
+  /** `appointment_days`, ídem: sólo manda mientras no haya franjas. */
   dias: number[]
   paso: number
   descanso: number
@@ -41,9 +52,37 @@ interface Props {
   jornada: JornadaSemanal
   usaAgendaPorDia: boolean
   servicios: ServicioReservable[]
+  /** Franjas del turnero en edición (`appointment_hours`, mig 172). */
+  franjas: FranjasSemana
+  onCambiarFranjas: (actualizar: (previas: FranjasSemana) => FranjasSemana) => void
+  /** Horario comercial de la sucursal: acota la grilla de pintar. */
+  horarioComercial: Tramo
+  /** ¿La sucursal ya tenía franjas guardadas? */
+  usaFranjasGuardadas: boolean
+  /** Días en que el turnero acepta reservas hoy: franjas si las hay, si no `dias`. */
+  diasDelTurnero: number[]
+  /** ¿Lo que se ve en pantalla ya usa el modelo de franjas? */
+  usaFranjas: boolean
+  /** Error del último guardado de franjas (ej: solape). */
+  errorFranjas?: string | null
 }
 
-export function ReglasTurnero({ valores, onCambiar, barberos, agenda, jornada, usaAgendaPorDia, servicios }: Props) {
+export function ReglasTurnero({
+  valores,
+  onCambiar,
+  barberos,
+  agenda,
+  jornada,
+  usaAgendaPorDia,
+  servicios,
+  franjas,
+  onCambiarFranjas,
+  horarioComercial,
+  usaFranjasGuardadas,
+  diasDelTurnero,
+  usaFranjas,
+  errorFranjas,
+}: Props) {
   return (
     <div id="seccion-reglas" className="grid scroll-mt-24 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
       <Card>
@@ -55,46 +94,22 @@ export function ReglasTurnero({ valores, onCambiar, barberos, agenda, jornada, u
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* Horario del local */}
+          {/* Franjas en que se toman turnos */}
           <section className="space-y-3">
             <Encabezado
               Icono={Clock}
-              titulo="Horario en que se toman turnos"
-              ayuda="La primera y la última hora en que un cliente puede reservar."
+              titulo="Cuándo se toman turnos"
+              ayuda="Pintá las horas en que querés recibir turnos. Podés cortar el día al medio y usar horarios distintos según el día."
             />
-            <div className="flex flex-wrap items-center gap-3">
-              <CampoHora etiqueta="Desde" valor={valores.apertura} onChange={v => onCambiar({ apertura: v })} />
-              <CampoHora etiqueta="Hasta" valor={valores.cierre} onChange={v => onCambiar({ cierre: v })} />
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-xs text-muted-foreground">Días en que se aceptan reservas</p>
-              <div className="flex flex-wrap gap-1.5">
-                {ORDEN_SEMANA.map(dia => {
-                  const activo = valores.dias.includes(dia)
-                  return (
-                    <button
-                      key={dia}
-                      type="button"
-                      onClick={() =>
-                        onCambiar({
-                          dias: activo
-                            ? valores.dias.filter(d => d !== dia)
-                            : [...valores.dias, dia].sort(),
-                        })
-                      }
-                      className={cn(
-                        'h-9 min-w-11 rounded-lg border px-2 text-xs font-semibold transition-colors',
-                        activo
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-border bg-transparent text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-                      )}
-                    >
-                      {NOMBRES_DIAS_CORTOS[dia]}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
+            <HorariosTurnero
+              franjas={franjas}
+              onCambiar={onCambiarFranjas}
+              horarioComercial={horarioComercial}
+              horarioViejo={{ inicio: valores.apertura, fin: valores.cierre }}
+              diasViejos={valores.dias}
+              usaFranjasGuardadas={usaFranjasGuardadas}
+              error={errorFranjas}
+            />
           </section>
 
           <Separator />
@@ -190,6 +205,9 @@ export function ReglasTurnero({ valores, onCambiar, barberos, agenda, jornada, u
         jornada={jornada}
         usaAgendaPorDia={usaAgendaPorDia}
         servicios={servicios}
+        franjas={franjas}
+        usaFranjas={usaFranjas}
+        diasDelTurnero={diasDelTurnero}
       />
     </div>
   )
@@ -204,6 +222,9 @@ function VistaPrevia({
   jornada,
   usaAgendaPorDia,
   servicios,
+  franjas,
+  usaFranjas,
+  diasDelTurnero,
 }: {
   valores: ValoresReglas
   barberos: BarberoConfig[]
@@ -211,6 +232,9 @@ function VistaPrevia({
   jornada: JornadaSemanal
   usaAgendaPorDia: boolean
   servicios: ServicioReservable[]
+  franjas: FranjasSemana
+  usaFranjas: boolean
+  diasDelTurnero: number[]
 }) {
   const serviciosConDuracion = servicios.filter(s => s.duracionMinutos && s.duracionMinutos > 0)
   const [servicioId, setServicioId] = useState<string>(() => serviciosConDuracion[0]?.id ?? '')
@@ -219,18 +243,29 @@ function VistaPrevia({
     const atienden = barberos.filter(b => b.recibeTurnos)
     return ORDEN_SEMANA.filter(
       dia =>
-        valores.dias.includes(dia) &&
+        diasDelTurnero.includes(dia) &&
         atienden.some(
           b => tramosDeTurnos({ agenda, jornada, staffId: b.id, dia, usaAgendaPorDia }).length > 0
         )
     )
-  }, [agenda, barberos, jornada, usaAgendaPorDia, valores.dias])
+  }, [agenda, barberos, diasDelTurnero, jornada, usaAgendaPorDia])
 
   const [diaElegido, setDiaElegido] = useState<number | null>(null)
-  const dia = diaElegido !== null && valores.dias.includes(diaElegido) ? diaElegido : diasConGente[0] ?? valores.dias[0] ?? 2
+  const dia =
+    diaElegido !== null && diasDelTurnero.includes(diaElegido)
+      ? diaElegido
+      : diasConGente[0] ?? diasDelTurnero[0] ?? 2
 
   const servicio = serviciosConDuracion.find(s => s.id === servicioId) ?? serviciosConDuracion[0] ?? null
   const duracion = servicio?.duracionMinutos ?? valores.paso
+
+  // Las ventanas del día son las franjas cuando la sucursal las usa. Es el mismo
+  // criterio del motor y lo que hace visible el corte del mediodía: con
+  // 10–13 / 16–19 y un servicio de 45 min el último turno de la mañana es 12:15.
+  const ventanas = useMemo(
+    () => (usaFranjas ? franjasATramos(franjas[dia] ?? []) : [{ inicio: valores.apertura, fin: valores.cierre }]),
+    [dia, franjas, usaFranjas, valores.apertura, valores.cierre]
+  )
 
   const { horarios, tramos } = useMemo(() => {
     const atienden = barberos.filter(b => b.recibeTurnos)
@@ -242,14 +277,13 @@ function VistaPrevia({
     return {
       tramos: unificados,
       horarios: horariosOfrecidos({
-        apertura: valores.apertura,
-        cierre: valores.cierre,
+        ventanas,
         paso: valores.paso,
         duracion,
         tramos: unificados,
       }),
     }
-  }, [agenda, barberos, dia, duracion, jornada, usaAgendaPorDia, valores.apertura, valores.cierre, valores.paso])
+  }, [agenda, barberos, dia, duracion, jornada, usaAgendaPorDia, valores.paso, ventanas])
 
   const visibles = horarios.slice(0, 18)
 
@@ -266,21 +300,37 @@ function VistaPrevia({
       </CardHeader>
 
       <CardContent className="space-y-3">
-        <div className="flex flex-wrap gap-1">
-          {ORDEN_SEMANA.filter(d => valores.dias.includes(d)).map(d => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => setDiaElegido(d)}
-              className={cn(
-                'rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
-                d === dia ? 'bg-foreground text-background' : 'bg-muted/50 text-muted-foreground hover:text-foreground'
-              )}
-            >
-              {NOMBRES_DIAS_CORTOS[d]}
-            </button>
-          ))}
-        </div>
+        {diasDelTurnero.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {ORDEN_SEMANA.filter(d => diasDelTurnero.includes(d)).map(d => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setDiaElegido(d)}
+                aria-pressed={d === dia}
+                className={cn(
+                  'rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
+                  d === dia ? 'bg-foreground text-background' : 'bg-muted/50 text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {NOMBRES_DIAS_CORTOS[d]}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-md bg-muted/40 px-2 py-1.5 text-[11px] text-muted-foreground">
+            Todavía no hay ningún día abierto a reservas.
+          </p>
+        )}
+
+        {/* La ventana del día: es la prueba visual de que el corte del mediodía
+            quedó bien cargado. */}
+        {usaFranjas && (franjas[dia] ?? []).length > 0 && (
+          <p className="flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground">
+            <Clock className="mt-px size-3 shrink-0" />
+            <span className="tabular-nums">{resumenFranjas(franjas[dia] ?? [])}</span>
+          </p>
+        )}
 
         {serviciosConDuracion.length > 0 && (
           <select
@@ -324,9 +374,11 @@ function VistaPrevia({
           <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
             <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-500" />
             <p className="text-muted-foreground">
-              {!tramos.length
-                ? `Ningún barbero toma turnos los ${NOMBRES_DIAS[dia].toLowerCase()}. Marcá ese día en la grilla de arriba.`
-                : `Un turno de ${duracion} min no entra en el horario cargado para ese día. Ampliá el horario del local o el del barbero.`}
+              {!ventanas.length
+                ? `Los ${NOMBRES_DIAS[dia].toLowerCase()} no hay ninguna franja cargada, así que no se ofrece ningún horario. Pintala en la grilla de la izquierda.`
+                : !tramos.length
+                  ? `Ningún barbero toma turnos los ${NOMBRES_DIAS[dia].toLowerCase()}. Marcá ese día en la grilla de barberos.`
+                  : `Un turno de ${duracion} min no entra entero en ninguna franja de ese día (${ventanas.map(v => `${v.inicio}–${v.fin}`).join(' · ')}). Ampliá la franja o acortá el servicio.`}
             </p>
           </div>
         )}
@@ -366,28 +418,6 @@ function Encabezado({
         {ayuda && <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{ayuda}</p>}
       </div>
     </div>
-  )
-}
-
-function CampoHora({
-  etiqueta,
-  valor,
-  onChange,
-}: {
-  etiqueta: string
-  valor: string
-  onChange: (valor: string) => void
-}) {
-  return (
-    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-      {etiqueta}
-      <input
-        type="time"
-        value={valor}
-        onChange={e => onChange(e.target.value)}
-        className="h-9 rounded-md border border-input bg-transparent px-2 text-sm tabular-nums text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      />
-    </label>
   )
 }
 

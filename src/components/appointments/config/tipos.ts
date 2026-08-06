@@ -141,6 +141,123 @@ export function franjaValida(franja: Tramo): boolean {
   )
 }
 
+// ─── Franjas del turnero (mig 172) ───────────────────────────────────
+
+/**
+ * Una ventana de `appointment_hours`: en qué horas la SUCURSAL acepta turnos.
+ *
+ * Es un eje distinto de `Tramo` (que en esta pantalla habla del horario de un
+ * barbero) y a propósito comparte el shape exacto de la server action
+ * `appointment-hours.ts`, para pasarse de una a la otra sin traducir. Se declara
+ * acá y no se importa de ahí porque ese módulo es `'use server'`.
+ */
+export interface Franja {
+  start_time: string
+  end_time: string
+}
+
+/** Franjas por día (0=domingo … 6=sábado). Varias por día = día entrecortado. */
+export type FranjasSemana = Record<number, Franja[]>
+
+export function semanaSinFranjas(): FranjasSemana {
+  return { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] }
+}
+
+export function clonarFranjas(franjas: FranjasSemana): FranjasSemana {
+  const copia = semanaSinFranjas()
+  for (let dia = 0; dia <= 6; dia++) copia[dia] = (franjas[dia] ?? []).map(f => ({ ...f }))
+  return copia
+}
+
+/**
+ * Ordena, descarta lo inválido y FUSIONA lo que se toca o se pisa.
+ *
+ * `saveBranchAppointmentHours` rechaza los solapes, así que normalizar acá es lo
+ * que evita que el dueño se coma un error del servidor por agregar una franja
+ * que ya estaba cubierta. Y dos tramos pegados (10–13 y 13–16) son un solo
+ * horario: mostrarlos separados haría creer que hay un corte donde no lo hay.
+ */
+export function normalizarFranjasDia(franjas: Franja[]): Franja[] {
+  const limpias = franjas
+    .map(f => ({ start_time: normalizarHora(f.start_time), end_time: normalizarHora(f.end_time) }))
+    .filter(
+      f =>
+        /^\d{2}:\d{2}$/.test(f.start_time) &&
+        /^\d{2}:\d{2}$/.test(f.end_time) &&
+        aMinutos(f.end_time) > aMinutos(f.start_time)
+    )
+    .sort((a, b) => aMinutos(a.start_time) - aMinutos(b.start_time))
+
+  const salida: Franja[] = []
+  for (const f of limpias) {
+    const ultima = salida[salida.length - 1]
+    if (ultima && aMinutos(f.start_time) <= aMinutos(ultima.end_time)) {
+      if (aMinutos(f.end_time) > aMinutos(ultima.end_time)) ultima.end_time = f.end_time
+      continue
+    }
+    salida.push({ ...f })
+  }
+  return salida
+}
+
+export function normalizarFranjasSemana(franjas: FranjasSemana): FranjasSemana {
+  const copia = semanaSinFranjas()
+  for (let dia = 0; dia <= 6; dia++) copia[dia] = normalizarFranjasDia(franjas[dia] ?? [])
+  return copia
+}
+
+/** Días con al menos una franja, en orden de semana (lunes primero). */
+export function diasConFranjas(franjas: FranjasSemana): number[] {
+  return ORDEN_SEMANA.filter(dia => (franjas[dia] ?? []).length > 0)
+}
+
+export function franjasSemanaIguales(a: FranjasSemana, b: FranjasSemana): boolean {
+  return JSON.stringify(normalizarFranjasSemana(a)) === JSON.stringify(normalizarFranjasSemana(b))
+}
+
+/** Las franjas del turnero leídas como tramos, para el cálculo de la previa. */
+export function franjasATramos(franjas: Franja[]): Tramo[] {
+  return normalizarFranjasDia(franjas).map(f => ({ inicio: f.start_time, fin: f.end_time }))
+}
+
+/** Minutos totales que un día acepta turnos. */
+export function duracionFranjas(franjas: Franja[]): number {
+  return normalizarFranjasDia(franjas).reduce(
+    (total, f) => total + (aMinutos(f.end_time) - aMinutos(f.start_time)),
+    0
+  )
+}
+
+/** "10:00–13:00 · 16:00–19:00". */
+export function resumenFranjas(franjas: Franja[]): string {
+  return normalizarFranjasDia(franjas)
+    .map(f => `${f.start_time}–${f.end_time}`)
+    .join(' · ')
+}
+
+/**
+ * "lunes a sábado", "martes y jueves", "todos los días".
+ *
+ * Detecta el tramo corrido de lunes a X porque es cómo el dueño describe su
+ * semana; cualquier otra combinación se enumera.
+ */
+export function describirDias(dias: number[]): string {
+  const ordenados = ORDEN_SEMANA.filter(d => dias.includes(d))
+  if (!ordenados.length) return 'ningún día'
+  if (ordenados.length === 7) return 'todos los días'
+  if (ordenados.length === 1) return `los ${NOMBRES_DIAS[ordenados[0]].toLowerCase()}`
+
+  // "de lunes a martes" suena peor que "lunes y martes": el rango recién paga
+  // desde tres días.
+  const corrido = ordenados.length >= 3 && ordenados.every((d, i) => d === ORDEN_SEMANA[i])
+  if (corrido) {
+    return `de ${NOMBRES_DIAS[ordenados[0]].toLowerCase()} a ${NOMBRES_DIAS[ordenados[ordenados.length - 1]].toLowerCase()}`
+  }
+
+  const nombres = ordenados.map(d => NOMBRES_DIAS[d].toLowerCase())
+  return `${nombres.slice(0, -1).join(', ')} y ${nombres[nombres.length - 1]}`
+}
+
 // ─── Agenda de turnos ────────────────────────────────────────────────
 
 /** Compara dos celdas de la grilla, contando "no toma turnos" (undefined). */
@@ -208,13 +325,16 @@ export function tramosDeTurnos({
 // ─── Vista previa de horarios (espejo del motor) ─────────────────────
 
 export interface ParametrosPrevia {
-  apertura: string
-  cierre: string
+  /**
+   * Ventanas en que la SUCURSAL acepta turnos ese día. Con franjas cargadas
+   * (mig 172) son los tramos del día; sin ellas, el rango único de siempre.
+   */
+  ventanas: Tramo[]
   /** `slot_interval_minutes`: cada cuánto puede arrancar un turno. */
   paso: number
   /** Duración del servicio de referencia. */
   duracion: number
-  /** Franjas en que se toman turnos ese día (unión de los que atienden). */
+  /** Franjas en que los BARBEROS toman turnos ese día (unión de los que atienden). */
   tramos: Tramo[]
 }
 
@@ -222,17 +342,23 @@ export interface ParametrosPrevia {
  * Horarios que el cliente va a ver en el turnero para un día tipo.
  *
  * Igual que el motor: la grilla avanza cada `paso` y el turno tiene que entrar
- * COMPLETO (inicio + duración) tanto dentro del horario del local como dentro
- * de un tramo del barbero. No contempla turnos ya tomados ni bloqueos: es una
- * previa de la configuración, no de la agenda de un día real.
+ * COMPLETO (inicio + duración) tanto dentro de UNA ventana del turnero como
+ * dentro de un tramo del barbero. Que tenga que entrar entero en una sola
+ * ventana es lo que hace funcionar el corte del mediodía: con 10–13 / 16–19 y un
+ * servicio de 45 min, el último turno de la mañana es 12:15, no 12:45.
+ *
+ * No contempla turnos ya tomados ni bloqueos: es una previa de la configuración,
+ * no de la agenda de un día real.
  */
-export function horariosOfrecidos({ apertura, cierre, paso, duracion, tramos }: ParametrosPrevia): string[] {
-  const abre = aMinutos(apertura)
-  const cierra = aMinutos(cierre)
+export function horariosOfrecidos({ ventanas, paso, duracion, tramos }: ParametrosPrevia): string[] {
   const salto = paso > 0 ? paso : 15
   const dura = duracion > 0 ? duracion : salto
+  const limpias = ventanas.filter(v => franjaValida(v))
+  if (!limpias.length || !tramos.length) return []
+
+  const abre = Math.min(...limpias.map(v => aMinutos(v.inicio)))
+  const cierra = Math.max(...limpias.map(v => aMinutos(v.fin)))
   if (!Number.isFinite(abre) || !Number.isFinite(cierra) || cierra <= abre) return []
-  if (!tramos.length) return []
 
   const horarios: string[] = []
   // Techo defensivo: con parámetros absurdos (paso 1 sobre 24 h) el loop podría
@@ -240,8 +366,10 @@ export function horariosOfrecidos({ apertura, cierre, paso, duracion, tramos }: 
   for (let m = abre; m + dura <= cierra && horarios.length < 200; m += salto) {
     const inicio = m
     const fin = m + dura
-    const entra = tramos.some(t => inicio >= aMinutos(t.inicio) && fin <= aMinutos(t.fin))
-    if (entra) horarios.push(aHora(inicio))
+    const enVentana = limpias.some(v => inicio >= aMinutos(v.inicio) && fin <= aMinutos(v.fin))
+    if (!enVentana) continue
+    const enTramo = tramos.some(t => inicio >= aMinutos(t.inicio) && fin <= aMinutos(t.fin))
+    if (enTramo) horarios.push(aHora(inicio))
   }
   return horarios
 }

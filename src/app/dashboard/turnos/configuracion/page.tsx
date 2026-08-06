@@ -5,6 +5,7 @@ import { currentUserCan } from '@/lib/actions/permissions-gate'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { getAppointmentSettings, getAppointmentStaff } from '@/lib/actions/appointments'
 import { getBranchAppointmentDays } from '@/lib/actions/appointment-days'
+import { getBranchAppointmentHours } from '@/lib/actions/appointment-hours'
 import { listTemplatesForPicker } from '@/lib/actions/messaging'
 import { createAdminClient } from '@/lib/supabase/server'
 import { TurnosConfigClient } from './turnos-config-client'
@@ -15,7 +16,7 @@ import type {
   Tramo,
   ServicioReservable,
 } from '@/components/appointments/config/tipos'
-import { normalizarTramos } from '@/components/appointments/config/tipos'
+import { normalizarHora, normalizarTramos, semanaSinFranjas } from '@/components/appointments/config/tipos'
 import type { BranchOperationMode } from '@/lib/actions/turnos-mode'
 
 export const dynamic = 'force-dynamic'
@@ -42,7 +43,7 @@ export default async function TurnosConfigPage({ searchParams }: Props) {
   const { data: branchRows } = branchIds.length
     ? await supabase
         .from('branches')
-        .select('id, name, slug, operation_mode, timezone')
+        .select('id, name, slug, operation_mode, timezone, business_hours_open, business_hours_close')
         .eq('organization_id', orgId)
         .in('id', branchIds)
         .eq('is_active', true)
@@ -80,6 +81,9 @@ export default async function TurnosConfigPage({ searchParams }: Props) {
         jornada={{}}
         usaAgendaPorDia={false}
         hayDiasDeBarberosOcultos={false}
+        franjas={semanaSinFranjas()}
+        usaFranjasGuardadas={false}
+        horarioComercial={{ inicio: '08:00', fin: '22:00' }}
         servicios={[]}
         templates={[]}
         hasWhatsAppChannel={false}
@@ -92,6 +96,7 @@ export default async function TurnosConfigPage({ searchParams }: Props) {
     settings,
     staffTurnos,
     diasDeTurnos,
+    horarioTurnero,
     { data: staffRows },
     { data: servicioRows },
     templatesResult,
@@ -104,6 +109,9 @@ export default async function TurnosConfigPage({ searchParams }: Props) {
       // Agenda de turnos por día (mig 171). Es lo que edita la grilla semanal:
       // un eje distinto de `staff_schedules`, que acá es sólo contexto.
       getBranchAppointmentDays(sucursalActiva.id),
+      // Franjas en que la sucursal acepta turnos (mig 172). Con al menos una,
+      // el motor deja de mirar appointment_hours_open/close + appointment_days.
+      getBranchAppointmentHours(sucursalActiva.id),
       supabase
         .from('staff')
         .select('id, full_name, avatar_url')
@@ -199,6 +207,18 @@ export default async function TurnosConfigPage({ searchParams }: Props) {
   const servicios: ServicioReservable[] = ((servicioRows ?? []) as Array<{ id: string; name: string; duration_minutes: number | null }>)
     .map(s => ({ id: s.id, nombre: s.name, duracionMinutos: s.duration_minutes }))
 
+  // Horario comercial: acota la grilla de pintar a horas que existen. Sin dato
+  // cargado se usa 08:00–22:00, que cubre a cualquier barbería.
+  const filaSucursal = (branchRows ?? []).find(b => b.id === sucursalActiva.id) as
+    | { business_hours_open: string | null; business_hours_close: string | null }
+    | undefined
+  const horarioComercial: Tramo = {
+    inicio: normalizarHora(filaSucursal?.business_hours_open) || '08:00',
+    fin: normalizarHora(filaSucursal?.business_hours_close) || '22:00',
+  }
+
+  const totalFranjas = Object.values(horarioTurnero.franjas).reduce((n, f) => n + f.length, 0)
+
   return (
     <TurnosConfigClient
       // La `key` fuerza el remount cuando cambia la verdad del servidor:
@@ -207,10 +227,12 @@ export default async function TurnosConfigPage({ searchParams }: Props) {
       //  - modo de operación cambiado desde el diálogo, que además prende el
       //    turnero y da de alta barberos por debajo,
       //  - la sucursal pasó a tener (o dejó de tener) agenda por día, que
-      //    cambia el modelo entero de la grilla.
+      //    cambia el modelo entero de la grilla,
+      //  - cambió la cantidad de franjas del turnero, que cambia el otro modelo
+      //    (rango único vs. franjas).
       // Sin esto el formulario seguiría mostrando los valores viejos sobre
       // datos nuevos y el checklist mentiría.
-      key={`${sucursalActiva.id}:${settings?.updated_at ?? 'sin-settings'}:${sucursalActiva.modo}:${diasDeTurnos.dias.length}`}
+      key={`${sucursalActiva.id}:${settings?.updated_at ?? 'sin-settings'}:${sucursalActiva.modo}:${diasDeTurnos.dias.length}:${totalFranjas}`}
       sucursales={sucursales}
       sucursalActivaId={sucursalActiva.id}
       modoSucursal={sucursalActiva.modo}
@@ -222,6 +244,9 @@ export default async function TurnosConfigPage({ searchParams }: Props) {
       jornada={jornada}
       usaAgendaPorDia={diasDeTurnos.usaAgendaPorDia}
       hayDiasDeBarberosOcultos={hayDiasDeBarberosOcultos}
+      franjas={horarioTurnero.franjas}
+      usaFranjasGuardadas={horarioTurnero.usaFranjas}
+      horarioComercial={horarioComercial}
       servicios={servicios}
       templates={templatesResult.data}
       hasWhatsAppChannel={templatesResult.hasChannel}

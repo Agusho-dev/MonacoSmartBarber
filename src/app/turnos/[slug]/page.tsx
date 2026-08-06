@@ -3,6 +3,7 @@ import Image from 'next/image'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getAppointmentSettings } from '@/lib/actions/appointments'
 import { publicGetBranchServices, publicGetAvailableStaff } from '@/lib/actions/public-booking'
+import { getBranchAppointmentHours } from '@/lib/actions/appointment-hours'
 import { isValidUUID } from '@/lib/validation'
 import { BookingWizard } from './booking-wizard'
 import { OrgLanding, type LandingBranch } from './org-landing'
@@ -303,10 +304,20 @@ async function renderBranch(
   }
 
   // Cargar datos necesarios para el wizard en paralelo
-  const [services, staff] = await Promise.all([
+  const [services, staff, horario] = await Promise.all([
     publicGetBranchServices(branch.id),
     publicGetAvailableStaff(branch.id),
+    getBranchAppointmentHours(branch.id),
   ])
+
+  // Con franjas cargadas (mig 172), los días habilitados son los que tienen al
+  // menos una franja: `appointment_days` deja de mandar. Si no, la tira de días
+  // ofrecería días que el motor rechaza.
+  const diasHabilitados = horario.usaFranjas
+    ? Object.entries(horario.franjas)
+        .filter(([, franjas]) => franjas.length > 0)
+        .map(([dia]) => Number(dia))
+    : settings.appointment_days
 
   const branding = {
     bg: settings.brand_bg_color ?? '#ffffff',
@@ -333,7 +344,7 @@ async function renderBranch(
       staff={staff}
       settings={{
         max_advance_days: settings.max_advance_days,
-        appointment_days: settings.appointment_days,
+        appointment_days: diasHabilitados,
         slot_interval_minutes: settings.slot_interval_minutes,
         cancellation_min_hours: settings.cancellation_min_hours ?? 2,
       }}

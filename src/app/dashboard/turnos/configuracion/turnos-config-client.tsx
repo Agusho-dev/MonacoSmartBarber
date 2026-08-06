@@ -31,16 +31,24 @@ import {
   ORDEN_SEMANA,
   agendaTieneDias,
   clonarAgenda,
+  clonarFranjas,
+  describirDias,
+  diasConFranjas,
   diasConTurnos,
   franjasIguales,
+  franjasSemanaIguales,
   normalizarHora,
+  resumenFranjas,
   tramosDeTurnos,
   type AgendaTurnos,
   type BarberoConfig,
   type DiaDeAgenda,
+  type FranjasSemana,
   type JornadaSemanal,
   type ServicioReservable,
+  type Tramo,
 } from '@/components/appointments/config/tipos'
+import { saveBranchAppointmentHours } from '@/lib/actions/appointment-hours'
 import { guardarConfiguracionTurnos } from './actions'
 
 interface SucursalResumen {
@@ -71,6 +79,15 @@ interface Props {
    * sucursal en el modelo por día.
    */
   hayDiasDeBarberosOcultos: boolean
+  /**
+   * Franjas en que la sucursal acepta turnos (`appointment_hours`, mig 172).
+   * Reemplazan al rango único + días habilitados: con al menos una fila, el
+   * motor sólo ofrece esas horas.
+   */
+  franjas: FranjasSemana
+  usaFranjasGuardadas: boolean
+  /** Horario comercial de la sucursal: acota la grilla de pintar. */
+  horarioComercial: Tramo
   servicios: ServicioReservable[]
   templates: TemplateOption[]
   hasWhatsAppChannel: boolean
@@ -84,6 +101,7 @@ interface Estado {
   marca: ValoresMarca
   agenda: AgendaTurnos
   barberos: BarberoConfig[]
+  franjas: FranjasSemana
 }
 
 const DIAS_POR_DEFECTO = [1, 2, 3, 4, 5, 6]
@@ -121,6 +139,7 @@ function estadoInicial(props: Props): Estado {
     },
     agenda: clonarAgenda(props.agenda),
     barberos: props.barberos.map(b => ({ ...b })),
+    franjas: clonarFranjas(props.franjas),
   }
 }
 
@@ -135,6 +154,8 @@ export function TurnosConfigClient(props: Props) {
     jornada,
     usaAgendaPorDia: usaAgendaPorDiaGuardada,
     hayDiasDeBarberosOcultos,
+    usaFranjasGuardadas,
+    horarioComercial,
     servicios,
     templates,
     hasWhatsAppChannel,
@@ -146,6 +167,9 @@ export function TurnosConfigClient(props: Props) {
   const [estado, setEstado] = useState<Estado>(() => estadoInicial(props))
   const [guardado, setGuardado] = useState<Estado>(estado)
   const [forzarPagoPosterior, setForzarPagoPosterior] = useState(false)
+  // Error del guardado de franjas (solape rechazado por el servidor): se muestra
+  // pegado a la grilla, no sólo en un toast que se va solo.
+  const [errorFranjas, setErrorFranjas] = useState<string | null>(null)
   // El aviso de "esta sucursal cambia de modelo" se muestra una sola vez, al
   // prender la primera celda. Si el dueño lo cancela, no queda visto.
   const [avisoModeloVisto, setAvisoModeloVisto] = useState(false)
@@ -203,7 +227,28 @@ export function TurnosConfigClient(props: Props) {
     JSON.stringify(estado.mensajes) !== JSON.stringify(guardado.mensajes) ||
     JSON.stringify(estado.marca) !== JSON.stringify(guardado.marca)
 
-  const hayCambios = reglasCambiadas || cambiosAgenda.porBarbero.length > 0 || barberosCambiados.length > 0
+  const franjasCambiadas = !franjasSemanaIguales(estado.franjas, guardado.franjas)
+
+  const hayCambios =
+    reglasCambiadas ||
+    franjasCambiadas ||
+    cambiosAgenda.porBarbero.length > 0 ||
+    barberosCambiados.length > 0
+
+  /**
+   * Días en que el turnero acepta reservas, con el mismo criterio que el motor:
+   * si la sucursal tiene franjas mandan ellas (`appointment_days` deja de
+   * contar), y si no, el modelo viejo. Se mira lo que está EN PANTALLA: apenas
+   * el dueño pinta la primera celda, el checklist y la previa hablan del modelo
+   * nuevo — y si las borra todas, del viejo.
+   */
+  const diasDelTurnero = useMemo(() => {
+    const conFranja = diasConFranjas(estado.franjas)
+    if (conFranja.length) return conFranja
+    return ORDEN_SEMANA.filter(d => estado.reglas.dias.includes(d))
+  }, [estado.franjas, estado.reglas.dias])
+
+  const usaFranjas = diasConFranjas(estado.franjas).length > 0
 
   /**
    * ¿La sucursal va a trabajar con agenda por día? Se mira el estado EN
@@ -310,12 +355,14 @@ export function TurnosConfigClient(props: Props) {
         setEstado(guardado)
         setForzarPagoPosterior(false)
         setAvisoModeloVisto(false)
+        setErrorFranjas(null)
       },
     })
   }
 
   function guardar() {
     iniciarGuardado(async () => {
+      setErrorFranjas(null)
       const resultado = await guardarConfiguracionTurnos({
         branchId: sucursalActivaId ?? '',
         alcanceReglas: alcanceReglas === 'sucursal' ? 'sucursal' : 'org',
@@ -352,8 +399,20 @@ export function TurnosConfigClient(props: Props) {
         pasarAPagoPosterior: forzarPagoPosterior,
       })
 
-      if (!resultado.ok) {
-        toast.error(resultado.errores[0] ?? 'No pudimos guardar los cambios')
+      const errores = [...resultado.errores]
+
+      // Las franjas viven en su propia tabla y tienen su propia validación de
+      // solapes: van por su server action, pero con el mismo botón Guardar.
+      if (franjasCambiadas) {
+        const res = await saveBranchAppointmentHours(sucursalActivaId ?? '', estado.franjas)
+        if ('error' in res) {
+          setErrorFranjas(res.error)
+          errores.push(`Horarios del turnero: ${res.error}`)
+        }
+      }
+
+      if (errores.length > 0) {
+        toast.error(errores[0] ?? 'No pudimos guardar los cambios')
         // A propósito NO refrescamos: el refresh remonta la pantalla (ver la
         // `key` de la page) y se llevaría puestos los cambios que todavía no
         // entraron. Reintentar el guardado es idempotente.
@@ -387,13 +446,13 @@ export function TurnosConfigClient(props: Props) {
   // Días abiertos a reservas en los que el cliente no va a ver ni un horario.
   const diasSinNadie = ORDEN_SEMANA.filter(
     dia =>
-      estado.reglas.dias.includes(dia) &&
+      diasDelTurnero.includes(dia) &&
       !barberosQueAtienden.some(
         b =>
           tramosDeTurnos({ agenda: estado.agenda, jornada, staffId: b.id, dia, usaAgendaPorDia }).length > 0
       )
   )
-  const diasAbiertos = estado.reglas.dias.length
+  const diasAbiertos = diasDelTurnero.length
   const serviciosSinDuracion = servicios.filter(s => !s.duracionMinutos || s.duracionMinutos <= 0)
   const serviciosConDuracion = servicios.filter(s => s.duracionMinutos && s.duracionMinutos > 0)
 
@@ -415,6 +474,21 @@ export function TurnosConfigClient(props: Props) {
       pendiente: estado.prendido !== (settings?.is_enabled ?? false),
       detalle: estado.prendido ? undefined : 'El turnero está apagado: nadie puede reservar aunque el resto esté listo.',
       accion: { etiqueta: 'Prender', onClick: () => setEstado(prev => ({ ...prev, prendido: true })) },
+    },
+    {
+      id: 'horarios',
+      titulo: 'Hay horarios en que se toman turnos',
+      ok: diasAbiertos > 0,
+      pendiente: franjasCambiadas,
+      detalle:
+        diasAbiertos === 0
+          ? 'No quedó ninguna franja ni ningún día abierto: el turnero no muestra un solo horario.'
+          : usaFranjas
+            ? `Sólo en las franjas que definiste, ${describirDias(diasDelTurnero)}. Ej: ${resumenFranjas(
+                estado.franjas[diasDelTurnero[0]] ?? []
+              )} ${NOMBRES_DIAS[diasDelTurnero[0]].toLowerCase()}.`
+            : `De ${estado.reglas.apertura} a ${estado.reglas.cierre}, ${describirDias(diasDelTurnero)}. Definí franjas si querés dar turnos sólo en las horas flojas.`,
+      accion: { etiqueta: 'Definir', onClick: () => irASeccion('seccion-reglas') },
     },
     {
       id: 'barberos',
@@ -587,7 +661,7 @@ export function TurnosConfigClient(props: Props) {
         agenda={estado.agenda}
         jornada={jornada}
         usaAgendaPorDia={usaAgendaPorDia}
-        diasHabilitados={estado.reglas.dias}
+        diasHabilitados={diasDelTurnero}
         horarioLocal={{ inicio: estado.reglas.apertura, fin: estado.reglas.cierre }}
         celdasSucias={cambiosAgenda.sucias}
         onCambiarDia={cambiarDia}
@@ -602,6 +676,21 @@ export function TurnosConfigClient(props: Props) {
         jornada={jornada}
         usaAgendaPorDia={usaAgendaPorDia}
         servicios={servicios}
+        franjas={estado.franjas}
+        onCambiarFranjas={actualizar =>
+          // Devolver el mismo `prev` cuando nada cambió es lo que hace que
+          // arrastrar sobre una celda ya pintada no re-renderice la pantalla
+          // entera en cada movimiento del puntero.
+          setEstado(prev => {
+            const franjas = actualizar(prev.franjas)
+            return franjas === prev.franjas ? prev : { ...prev, franjas }
+          })
+        }
+        horarioComercial={horarioComercial}
+        usaFranjasGuardadas={usaFranjasGuardadas}
+        diasDelTurnero={diasDelTurnero}
+        usaFranjas={usaFranjas}
+        errorFranjas={errorFranjas}
       />
 
       <MensajesTurnero
@@ -625,7 +714,12 @@ export function TurnosConfigClient(props: Props) {
             <p className="flex items-center gap-2 text-sm">
               <span className="size-2 shrink-0 rounded-full bg-amber-500" />
               <span className="text-muted-foreground">
-                {describirCambios(cambiosAgenda.sucias.size, barberosCambiados.length, reglasCambiadas)}
+                {describirCambios(
+                  cambiosAgenda.sucias.size,
+                  barberosCambiados.length,
+                  reglasCambiadas,
+                  franjasCambiadas
+                )}
               </span>
             </p>
             <div className="flex items-center gap-2">
@@ -672,8 +766,9 @@ function listarDias(dias: number[]): string {
   return `${nombres.slice(0, -1).join(', ')} y ${nombres[nombres.length - 1]}`
 }
 
-function describirCambios(dias: number, barberos: number, reglas: boolean): string {
+function describirCambios(dias: number, barberos: number, reglas: boolean, franjas: boolean): string {
   const partes: string[] = []
+  if (franjas) partes.push('horarios del turnero')
   if (dias) partes.push(`${dias} ${dias === 1 ? 'día' : 'días'} de agenda`)
   if (barberos) partes.push(`${barberos} ${barberos === 1 ? 'barbero' : 'barberos'}`)
   if (reglas) partes.push('reglas del turnero')
