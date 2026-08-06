@@ -352,9 +352,48 @@ export async function getAvailableSlots(
     if (!found) return { slots: [], error: 'Barbero no disponible para turnos' }
   }
 
+  // Agenda de turnos POR DÍA (mig 171). Es un eje distinto de la jornada de
+  // trabajo: en Monaco los barberos trabajan casi todos los días atendiendo
+  // walk-in, pero los turnos rotan (Fabri martes, Simón miércoles, Nico jueves).
+  //
+  // Si la sucursal tiene aunque sea una fila, manda esta tabla y un día sin
+  // nadie asignado no ofrece NADA — que es el punto de una agenda rotativa. Si
+  // no tiene ninguna, se conserva el comportamiento anterior (candidatos = los
+  // que tengan jornada ese día), así ninguna sucursal cambia sola.
+  const { data: diasDeTurnos, error: diasError } = await supabase
+    .from('appointment_staff_days')
+    .select('staff_id, day_of_week, start_time, end_time')
+    .eq('branch_id', branchId)
+
+  if (diasError) {
+    console.error('[getAvailableSlots] agenda por día:', diasError.message)
+    return { slots: [], error: 'No pudimos leer la disponibilidad. Reintentá en un momento.' }
+  }
+
+  const usaAgendaPorDia = (diasDeTurnos ?? []).length > 0
+  const franjaDelDia = new Map<string, { start: string | null; end: string | null }>()
+
+  if (usaAgendaPorDia) {
+    for (const d of diasDeTurnos ?? []) {
+      if (d.day_of_week !== dayOfWeek) continue
+      franjaDelDia.set(d.staff_id, {
+        start: d.start_time ? d.start_time.slice(0, 5) : null,
+        end: d.end_time ? d.end_time.slice(0, 5) : null,
+      })
+    }
+  }
+
+  const habilitadosHoy = usaAgendaPorDia
+    ? branchStaff.filter((s) => franjaDelDia.has(s.staff_id))
+    : branchStaff
+
+  if (barberId && usaAgendaPorDia && !franjaDelDia.has(barberId)) {
+    return { slots: [], error: 'Ese barbero no toma turnos ese día' }
+  }
+
   const staffIds = barberId
     ? [barberId]
-    : branchStaff.map((s) => s.staff_id)
+    : habilitadosHoy.map((s) => s.staff_id)
 
   if (!staffIds.length) return { slots: [] }
 
@@ -436,7 +475,17 @@ export async function getAvailableSlots(
   for (const staffId of staffIds) {
     if (absentStaff.has(staffId)) continue
 
-    const staffSchedules = schedules?.filter(s => s.staff_id === staffId) ?? []
+    const franja = franjaDelDia.get(staffId)
+
+    // Ventana horaria del barbero para ese día. Por defecto es su jornada de
+    // trabajo (`staff_schedules`); si la agenda por día le puso una franja
+    // explícita, esa manda y no hace falta que tenga jornada cargada — un
+    // barbero puede tomar turnos en una franja acotada sin que eso sea su
+    // horario de fichaje.
+    const staffSchedules = franja?.start && franja.end
+      ? [{ staff_id: staffId, start_time: franja.start, end_time: franja.end }]
+      : (schedules?.filter(s => s.staff_id === staffId) ?? [])
+
     if (!staffSchedules.length) continue
 
     const staffRecord = branchStaff.find((s) => s.staff_id === staffId)
@@ -2072,19 +2121,53 @@ export async function getPublicBranchAppointmentStaff(branchId: string) {
   // turnero puede resolver el barbero solo, sin pedirle al cliente que elija
   // entre gente que ese día no atiende.
   const staffIds = candidatos.map(as => as.staff_id)
-  const { data: horarios } = await supabase
-    .from('staff_schedules')
-    .select('staff_id, day_of_week, branch_id')
-    .in('staff_id', staffIds)
-    .eq('is_active', true)
 
-  // `staff_schedules` no tiene UNIQUE(staff_id, day_of_week): hay barberos con
-  // la misma jornada cargada dos veces. El Set deduplica.
+  // La agenda de turnos por día (mig 171) manda sobre la jornada de trabajo si
+  // la sucursal la usa: en Monaco los tres barberos trabajan casi toda la
+  // semana, pero los turnos rotan y el cliente sólo puede reservar el día que
+  // cada uno tiene asignado.
+  const [{ data: horarios }, { data: diasTurnos }] = await Promise.all([
+    supabase
+      .from('staff_schedules')
+      .select('staff_id, day_of_week, branch_id')
+      .in('staff_id', staffIds)
+      .eq('is_active', true),
+    supabase
+      .from('appointment_staff_days')
+      .select('staff_id, day_of_week, start_time, end_time')
+      .eq('branch_id', branchId),
+  ])
+
   const diasPorStaff = new Map<string, Set<number>>()
-  for (const h of horarios ?? []) {
-    if (h.branch_id && h.branch_id !== branchId) continue
-    if (!diasPorStaff.has(h.staff_id)) diasPorStaff.set(h.staff_id, new Set())
-    diasPorStaff.get(h.staff_id)!.add(h.day_of_week)
+
+  if ((diasTurnos ?? []).length > 0) {
+    // Una fila SIN franja explícita significa "ese día toma turnos durante toda
+    // su jornada normal", y esa jornada se sigue leyendo de `staff_schedules`:
+    // si no tiene jornada cargada ese día no hay ninguna ventana y el motor lo
+    // saltea en silencio (`!staffSchedules.length → continue`). Ofrecerlo igual
+    // manda al cliente a "no hay turnos disponibles" — exactamente lo que este
+    // filtro existe para evitar. Con franja explícita se banca solo: el motor la
+    // usa como horario aunque no tenga jornada.
+    const conJornada = new Set<string>()
+    for (const h of horarios ?? []) {
+      if (h.branch_id && h.branch_id !== branchId) continue
+      conJornada.add(`${h.staff_id}|${h.day_of_week}`)
+    }
+
+    for (const d of diasTurnos ?? []) {
+      const tieneFranja = !!d.start_time && !!d.end_time
+      if (!tieneFranja && !conJornada.has(`${d.staff_id}|${d.day_of_week}`)) continue
+      if (!diasPorStaff.has(d.staff_id)) diasPorStaff.set(d.staff_id, new Set())
+      diasPorStaff.get(d.staff_id)!.add(d.day_of_week)
+    }
+  } else {
+    // `staff_schedules` no tiene UNIQUE(staff_id, day_of_week): hay barberos con
+    // la misma jornada cargada dos veces. El Set deduplica.
+    for (const h of horarios ?? []) {
+      if (h.branch_id && h.branch_id !== branchId) continue
+      if (!diasPorStaff.has(h.staff_id)) diasPorStaff.set(h.staff_id, new Set())
+      diasPorStaff.get(h.staff_id)!.add(h.day_of_week)
+    }
   }
 
   return candidatos
@@ -2127,13 +2210,24 @@ export async function getBranchAppointmentStaff(
 
   if (!candidatos.length) return []
 
-  const { data: horarios } = await supabase
-    .from('staff_schedules')
-    .select('staff_id, day_of_week, start_time, end_time, branch_id')
-    .in('staff_id', candidatos.map(as => as.staff_id))
-    .eq('is_active', true)
+  const [{ data: horarios }, { data: diasTurnos }] = await Promise.all([
+    supabase
+      .from('staff_schedules')
+      .select('staff_id, day_of_week, start_time, end_time, branch_id')
+      .in('staff_id', candidatos.map(as => as.staff_id))
+      .eq('is_active', true),
+    supabase
+      .from('appointment_staff_days')
+      .select('staff_id, day_of_week, start_time, end_time')
+      .eq('branch_id', branchId),
+  ])
 
   const porStaff = new Map<string, { days: Set<number>; open: string; close: string }>()
+  // Jornada del DÍA puntual, además del agregado semanal: la agenda por día
+  // necesita saber la franja de ese día para poder acotarla (el agregado de toda
+  // la semana sólo sirve para ensancharla).
+  const jornadaPorDia = new Map<string, { open: string; close: string }>()
+
   for (const h of horarios ?? []) {
     if (h.branch_id && h.branch_id !== branchId) continue
     const prev = porStaff.get(h.staff_id) ?? { days: new Set<number>(), open: '23:59', close: '00:00' }
@@ -2141,6 +2235,44 @@ export async function getBranchAppointmentStaff(
     if (h.start_time < prev.open) prev.open = h.start_time
     if (h.end_time > prev.close) prev.close = h.end_time
     porStaff.set(h.staff_id, prev)
+
+    const clave = `${h.staff_id}|${h.day_of_week}`
+    const dia = jornadaPorDia.get(clave) ?? { open: h.start_time, close: h.end_time }
+    if (h.start_time < dia.open) dia.open = h.start_time
+    if (h.end_time > dia.close) dia.close = h.end_time
+    jornadaPorDia.set(clave, dia)
+  }
+
+  // Si la sucursal usa agenda de turnos por día (mig 171), los días que importan
+  // para la AGENDA son ésos y no la jornada de trabajo: si el martes sólo toma
+  // turnos Fabri, la columna de los demás ese día es una promesa que el motor no
+  // va a cumplir.
+  //
+  // La ventana de cada día es la franja explícita si la hay, y si no la jornada
+  // de ESE día. Sembrar el acumulado con el agregado semanal (mín/máx de toda la
+  // semana) hacía que una franja acotada nunca acotara nada: con jornada
+  // 09:00–21:00 y agenda martes 14:00–18:00, ni `14:00 < 09:00` ni `18:00 > 21:00`
+  // se cumplen y la columna quedaba abierta de 09 a 21 mientras el motor sólo
+  // vendía de 14 a 18.
+  if ((diasTurnos ?? []).length > 0) {
+    const porDia = new Map<string, { days: Set<number>; open: string; close: string }>()
+    for (const d of diasTurnos ?? []) {
+      const jornada = jornadaPorDia.get(`${d.staff_id}|${d.day_of_week}`)
+      const desde = d.start_time || jornada?.open
+      const hasta = d.end_time || jornada?.close
+      // Sin franja explícita y sin jornada ese día no hay ninguna ventana: el
+      // motor saltea a ese barbero, así que dibujarle la columna limpia sería
+      // prometer huecos que nunca se van a poder reservar.
+      if (!desde || !hasta) continue
+
+      const prev = porDia.get(d.staff_id) ?? { days: new Set<number>(), open: desde, close: hasta }
+      prev.days.add(d.day_of_week)
+      if (desde < prev.open) prev.open = desde
+      if (hasta > prev.close) prev.close = hasta
+      porDia.set(d.staff_id, prev)
+    }
+    porStaff.clear()
+    for (const [k, v] of porDia) porStaff.set(k, v)
   }
 
   return candidatos

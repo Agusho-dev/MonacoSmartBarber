@@ -81,6 +81,7 @@ import {
 } from '@/components/checkin/use-idle-reset'
 import type { FaceMatchResult } from '@/lib/face-recognition'
 import { saveFacePhoto, enrollFaceDescriptor, enrollStaffFaceDescriptor, saveStaffFacePhoto } from '@/lib/face-recognition'
+import type { WalkInHandoff } from '@/components/checkin/turnos-flow'
 import { cn } from '@/lib/utils'
 import { resolveCheckinBackground } from '@/lib/checkin-bg'
 
@@ -108,6 +109,14 @@ const LOCALSTORAGE_KEY = 'checkin_branch'
 const PHONE_LENGTH = 10
 const RESET_DELAY_MS = 5_000
 const KEYPAD = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const
+
+/**
+ * Lectura del turno propio para la pantalla "ya estás en la fila".
+ * `queue_entries` tiene UNA sola FK a `staff` (`barber_id`), así que el embed
+ * por nombre de tabla no es ambiguo (ver riesgo #15 del CLAUDE.md raíz).
+ */
+const QUEUE_ENTRY_SELECT =
+  '*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)'
 
 /**
  * Ventana de inactividad por pantalla (0 = sin timeout).
@@ -160,18 +169,28 @@ interface CheckinWalkInProps {
    * los siguientes hasta que alguien la recargara a mano.
    */
   onExit?: () => void
+  /**
+   * Identidad que ya resolvió el flujo de turnos (kiosko híbrido). Con esto la
+   * fila arranca en "¿Qué te vas a hacer?" en vez de en su pantalla inicial:
+   * el cliente ya dio teléfono y nombre un segundo antes, y volver a pedírselos
+   * era el motivo por el que "entrar a la fila" no anotaba a nadie.
+   */
+  startWith?: WalkInHandoff
 }
 
-export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
+export function CheckinWalkIn({ onExit, startWith }: CheckinWalkInProps = {}) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [step, setStep] = useState<Step>('branch')
   const [branches, setBranches] = useState<Branch[]>([])
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null)
   const [wantsEnrollment, setWantsEnrollment] = useState(false)
-  const [phone, setPhone] = useState('')
-  const [name, setName] = useState('')
-  const [isReturning, setIsReturning] = useState(false)
+  // Precarga del handoff: `startWith` es fijo por montaje (el kiosko híbrido
+  // remonta este componente por cliente con una `key`), así que alcanza con
+  // sembrar el estado inicial — no hace falta sincronizarlo después.
+  const [phone, setPhone] = useState(startWith?.phone ?? '')
+  const [name, setName] = useState(startWith?.name ?? '')
+  const [isReturning, setIsReturning] = useState(startWith?.isReturning ?? false)
   const [, setPosition] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [lookingUp, setLookingUp] = useState(false)
@@ -203,10 +222,22 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
 
   const [myQueueEntry, setMyQueueEntry] = useState<QueueEntry | null>(null)
   const [changingBarberInManage, setChangingBarberInManage] = useState(false)
+  /**
+   * El cliente venía de tocar "confirmar" y el server respondió `alreadyInQueue`
+   * (índice único `idx_queue_unique_active_client`): ya tenía lugar, típicamente
+   * porque registró la llegada de su turno. Cambia el copy de `manage_turn` para
+   * que entienda que su toque no hizo falta y que igual está adentro.
+   */
+  const [yaEstabaEnFila, setYaEstabaEnFila] = useState(false)
+  /** Espera estimada ("Sos el siguiente" / "Aprox. N personas antes"). */
+  const [miEsperaEnFila, setMiEsperaEnFila] = useState('')
 
   const [faceMatch, setFaceMatch] = useState<FaceMatchResult | null>(null)
   const [faceDescriptor, setFaceDescriptor] = useState<Float32Array | null>(null)
-  const [faceClientId, setFaceClientId] = useState<string | null>(null)
+  // `faceClientId` es "la ficha del cliente ya identificado", venga de la cámara,
+  // del teléfono o del handoff de turnos: con él, el alta va por
+  // `checkinClientByFace` (por id) en vez de re-resolver por teléfono.
+  const [faceClientId, setFaceClientId] = useState<string | null>(startWith?.clientId ?? null)
   const [hasExistingFace, setHasExistingFace] = useState(false)
 
   const [capturedFaceDescriptors, setCapturedFaceDescriptors] = useState<Float32Array[]>([])
@@ -235,6 +266,17 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
 
   const nameInputRef = useRef<HTMLInputElement>(null)
 
+  /**
+   * Dónde empieza la fila una vez resuelta la sucursal.
+   *
+   * Con handoff el cliente ya está identificado (viene del flujo de turnos), así
+   * que entra directo a elegir servicio. Mandarlo a `home` era el bug: la tablet
+   * le volvía a preguntar "¿Estás registrado?" después de que había tipeado
+   * teléfono y nombre, nadie repetía el trámite y la entrada a la fila no se
+   * creaba nunca.
+   */
+  const pasoTrasResolverSucursal: Step = startWith ? 'service_selection' : 'home'
+
   useEffect(() => {
     // Cargar branches filtradas por org via server action
     const loadBranches = async () => {
@@ -250,7 +292,7 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
             const found = data.find((b: Branch) => b.id === branchParam)
             if (found) {
               setSelectedBranch(found as Branch)
-              setStep('home')
+              setStep(pasoTrasResolverSucursal)
               return
             }
           }
@@ -263,7 +305,7 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
               const found = data.find((b) => b.id === cachedBranch.id)
               if (found) {
                 setSelectedBranch(found)
-                setStep('home')
+                setStep(pasoTrasResolverSucursal)
               } else {
                 // Cached branch no longer exists — clear it
                 localStorage.removeItem(LOCALSTORAGE_KEY)
@@ -496,6 +538,47 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
     setShowBarberPreference(false)
   }, [])
 
+  /**
+   * Lleva a la pantalla del turno propio. Único camino a `manage_turn`, que
+   * siempre significa lo mismo: este cliente YA tiene lugar en la fila.
+   *
+   * `yaEstaba` marca los dos casos en que además había tocado "confirmar" y el
+   * server rebotó con `alreadyInQueue`; ahí el cartel tiene que decirle que no
+   * hace falta anotarse de nuevo, o vuelve a intentarlo.
+   *
+   * La espera sale de `get_client_queue_position`: una sola llamada, sin abrir
+   * realtime ni traer toda la data de barberos por una pantalla que dura 5s, y
+   * con la misma fórmula que el cartel de éxito (misma cuenta en las dos
+   * pantallas). Si algo de esto falla igual navegamos: la pantalla se banca no
+   * tener los datos, y quedarse callado era peor.
+   */
+  const irAMiTurno = useCallback(
+    async (entryId: string | null, yaEstaba: boolean) => {
+      setYaEstabaEnFila(yaEstaba)
+      setMiEsperaEnFila('')
+
+      if (entryId) {
+        try {
+          const supabase = createClient()
+          const [entryRes, posRes] = await Promise.all([
+            supabase.from('queue_entries').select(QUEUE_ENTRY_SELECT).eq('id', entryId).maybeSingle(),
+            supabase.rpc('get_client_queue_position', { p_queue_entry_id: entryId }),
+          ])
+          if (entryRes.data) setMyQueueEntry(entryRes.data as unknown as QueueEntry)
+          const lugar = Array.isArray(posRes.data) ? posRes.data[0] : posRes.data
+          if (lugar?.label) setMiEsperaEnFila(lugar.label as string)
+        } catch {
+          // Se navega igual: el dato duro (tiene lugar en la fila) ya lo sabemos
+          // por la respuesta del server, y tragarse la pantalla por un adorno
+          // caído sería mandarlo al mostrador sin motivo.
+        }
+      }
+
+      goTo('manage_turn')
+    },
+    [goTo]
+  )
+
   const reset = useCallback(() => {
     setPhone('')
     setName('')
@@ -515,6 +598,8 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
     setChangingBarberInSuccess(false)
     setMyQueueEntry(null)
     setChangingBarberInManage(false)
+    setYaEstabaEnFila(false)
+    setMiEsperaEnFila('')
     setWantsEnrollment(false)
     setFaceMatch(null)
     setFaceDescriptor(null)
@@ -603,7 +688,7 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
     // local dejaba a una sucursal con turnos atascada para siempre en el flujo
     // walk-in, porque el server nunca volvía a correr.
     router.replace(`/checkin?branch=${branch.id}`)
-    goTo('home')
+    goTo(pasoTrasResolverSucursal)
   }
 
   const changeBranch = () => {
@@ -670,7 +755,7 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
         const supabase = createClient()
         const { data: activeEntry } = await supabase
           .from('queue_entries')
-          .select('*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)')
+          .select('id')
           .eq('client_id', data.id)
           .in('status', ['waiting', 'in_progress'])
           .order('checked_in_at', { ascending: false })
@@ -678,9 +763,10 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
           .maybeSingle()
 
         if (activeEntry) {
-          setMyQueueEntry(activeEntry as unknown as QueueEntry)
+          // El teclado queda en "buscando" hasta que la pantalla cambia: apagarlo
+          // antes lo dejaba aceptando dígitos sobre un número ya resuelto.
+          await irAMiTurno(activeEntry.id as string, false)
           setLookingUp(false)
-          goTo('manage_turn')
           return
         }
       } else {
@@ -819,7 +905,7 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
     const supabase = createClient()
     const { data: activeEntry } = await supabase
       .from('queue_entries')
-      .select('*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)')
+      .select('id')
       .eq('client_id', faceClientId)
       .in('status', ['waiting', 'in_progress'])
       .order('checked_in_at', { ascending: false })
@@ -827,12 +913,11 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
       .maybeSingle()
 
     if (activeEntry) {
-      setMyQueueEntry(activeEntry as unknown as QueueEntry)
-      goTo('manage_turn')
+      await irAMiTurno(activeEntry.id as string, false)
     } else {
       goTo('service_selection')
     }
-    // goTo es estable (useCallback); el auto-reset lo maneja el effect declarativo
+    // goTo/irAMiTurno son estables (useCallback); el auto-reset lo maneja el effect declarativo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [faceClientId, faceDescriptor, capturedScanPhoto, selectedBranch])
 
@@ -885,15 +970,11 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
         }
 
         if ('alreadyInQueue' in result && result.alreadyInQueue) {
-          const supabase = createClient()
-          const { data: entry } = await supabase
-            .from('queue_entries')
-            .select('*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)')
-            .eq('id', result.queueEntryId)
-            .maybeSingle()
-          if (entry) setMyQueueEntry(entry as unknown as QueueEntry)
+          // El spinner se apaga recién al cambiar de pantalla: soltarlo antes
+          // dejaba el botón "vivo" mientras se leía el turno, invitando a un
+          // segundo toque.
+          await irAMiTurno(result.queueEntryId || null, true)
           setSubmitting(false)
-          goTo('manage_turn')
           return
         }
 
@@ -908,7 +989,7 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
         setSubmitting(false)
       }
     },
-    // goTo es estable (useCallback); el auto-reset lo maneja el effect declarativo
+    // goTo/irAMiTurno son estables (useCallback); el auto-reset lo maneja el effect declarativo
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selectedBranch, faceClientId, submitting, selectedServiceId]
   )
@@ -946,15 +1027,11 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
         }
 
         if ('alreadyInQueue' in result && result.alreadyInQueue) {
-          const supabase = createClient()
-          const { data: entry } = await supabase
-            .from('queue_entries')
-            .select('*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)')
-            .eq('id', result.queueEntryId)
-            .maybeSingle()
-          if (entry) setMyQueueEntry(entry as unknown as QueueEntry)
+          // El spinner se apaga recién al cambiar de pantalla: soltarlo antes
+          // dejaba el botón "vivo" mientras se leía el turno, invitando a un
+          // segundo toque.
+          await irAMiTurno(result.queueEntryId || null, true)
           setSubmitting(false)
-          goTo('manage_turn')
           return
         }
 
@@ -1017,7 +1094,7 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
             const supabase = createClient()
             const { data } = await supabase
               .from('queue_entries')
-              .select('*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)')
+              .select(QUEUE_ENTRY_SELECT)
               .eq('id', entryId)
               .maybeSingle()
             if (data) setMyQueueEntry(data as unknown as QueueEntry)
@@ -1071,7 +1148,10 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
         return () => { setPhone(''); setName(''); setIsReturning(false); goTo('phone') }
       case 'service_selection':
         return () => {
-          if (!isReturning && !hasExistingFace) goTo('face_enroll')
+          // Con handoff nunca pasó por el enrolamiento (entró directo acá): el
+          // "atrás" tiene que llevarlo a sus datos, no a una cámara que no pidió.
+          if (startWith) goTo('name')
+          else if (!isReturning && !hasExistingFace) goTo('face_enroll')
           else goTo('name')
         }
       case 'barber':
@@ -2125,9 +2205,42 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
             </p>
           </div>
 
+          {/* Los servicios llegan con `getCheckinData`, que recién arranca al
+              entrar acá. Sin este estado de carga la pantalla se veía vacía —
+              "no hay servicios" — justo el primer segundo, y con el handoff de
+              turnos ésta es la PRIMERA pantalla que ve el cliente. */}
+          {loadingBarbers && services.length === 0 && (
+            <div className="flex flex-1 items-center justify-center py-10">
+              <Loader2 className="size-8 animate-spin text-muted-foreground" />
+            </div>
+          )}
+
+          {/* Sucursal sin servicios cargados: sin salida, el cliente quedaba
+              atrapado en una grilla vacía. El servicio es opcional para la fila. */}
+          {!loadingBarbers && services.length === 0 && (
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 py-10 text-center">
+              <Scissors className={cn('size-10', isLightBg ? 'text-zinc-400' : 'text-white/30')} />
+              <p className={cn('text-lg md:text-xl', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
+                Todavía no hay servicios cargados
+              </p>
+              <Button
+                onClick={() => goTo('barber')}
+                className={cn(
+                  'h-14 px-8 rounded-2xl text-lg font-semibold',
+                  isLightBg
+                    ? 'bg-zinc-900 text-white hover:bg-zinc-800'
+                    : 'bg-white/10 text-white hover:bg-white/20'
+                )}
+              >
+                Continuar
+              </Button>
+            </div>
+          )}
+
           <div
             className={cn(
               'relative w-full grid gap-3 md:gap-4 mt-1 md:mt-2 min-h-0 flex-1 auto-rows-fr',
+              services.length === 0 && 'hidden',
               services.length <= 6 && 'grid-cols-1',
               services.length > 6 && services.length <= 12 && 'grid-cols-1 md:grid-cols-2',
               services.length > 12 && 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3',
@@ -2737,7 +2850,11 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
       )}
 
       {/* ═══════════════ MANAGE TURN ═══════════════ */}
-      {step === 'manage_turn' && myQueueEntry && (
+      {/* Se renderiza aunque la lectura del turno haya fallado: antes la pantalla
+          exigía `myQueueEntry` y, si la query no volvía, la tablet quedaba en
+          negro sobre un cliente que SÍ está en la fila. Lo que sabemos seguro es
+          que tiene lugar; el resto (barbero, espera) es decoración. */}
+      {step === 'manage_turn' && (
         <div
           key={`manage-turn-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-4 md:gap-5 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
@@ -2754,7 +2871,7 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
                     : terminalGlassCard
                 )}
               >
-                {myQueueEntry.status === 'in_progress' ? (
+                {myQueueEntry?.status === 'in_progress' ? (
                   <>
                     <div className={cn('size-12 md:size-16 rounded-full border flex items-center justify-center', isLightBg ? 'bg-emerald-50 border-emerald-300' : 'bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.12)]')}>
                       <CheckCircle2 className={cn('size-6 md:size-9', isLightBg ? 'text-emerald-600' : 'text-emerald-400')} strokeWidth={1.5} />
@@ -2774,19 +2891,29 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
                     <div className={cn('size-12 md:size-16 rounded-full border flex items-center justify-center', isLightBg ? 'bg-emerald-50 border-emerald-300' : 'bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.12)]')}>
                       <CheckCircle2 className={cn('size-6 md:size-9', isLightBg ? 'text-emerald-600' : 'text-emerald-400')} strokeWidth={1.5} />
                     </div>
-                    <h2 className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>¡Estás en la fila!</h2>
+                    <h2 className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
+                      {yaEstabaEnFila ? 'Ya estabas en la fila' : '¡Estás en la fila!'}
+                    </h2>
                     <div className="text-center">
                       <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
                         ¡Tomá asiento!
                       </p>
+                      {/* Misma cuenta que el cartel de éxito (RPC get_client_queue_position). */}
+                      {miEsperaEnFila && (
+                        <p className={cn('text-lg md:text-xl font-medium mt-3', isLightBg ? 'text-emerald-600' : 'text-emerald-400')}>
+                          {miEsperaEnFila}
+                        </p>
+                      )}
                       <p className={cn('text-base md:text-lg mt-2', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>
-                        Ya te llamamos cuando sea tu turno
+                        {yaEstabaEnFila
+                          ? 'No hace falta que te anotes de nuevo: ya te llamamos cuando sea tu turno'
+                          : 'Ya te llamamos cuando sea tu turno'}
                       </p>
                     </div>
                   </>
                 )}
 
-                {myQueueEntry.barber && (
+                {myQueueEntry?.barber && (
                   <div className={cn('w-full p-3 md:p-4 mt-1', isLightBg ? 'rounded-xl border border-zinc-200 bg-zinc-50' : terminalGlassCardInner)}>
                     <div className="flex items-center gap-3 justify-center">
                       <div className={cn('flex size-10 md:size-12 items-center justify-center rounded-full border text-sm md:text-base font-bold shrink-0', isLightBg ? 'border-cyan-300 bg-cyan-50 text-cyan-700' : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-100')}>
@@ -2804,7 +2931,7 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
               </div>
 
               <div className="w-full max-w-xl flex flex-col items-center gap-2">
-                {myQueueEntry.status === 'waiting' && (
+                {myQueueEntry?.status === 'waiting' && (
                   <Button
                     onClick={() => setChangingBarberInManage(true)}
                     variant="outline"
@@ -2836,7 +2963,7 @@ export function CheckinWalkIn({ onExit }: CheckinWalkInProps = {}) {
                 <h2 className={cn(terminalH2, isLightBg && 'text-zinc-900')}>Cambiar barbero</h2>
               </div>
 
-              {loadingBarbers ? (
+              {loadingBarbers || !myQueueEntry ? (
                 <div className="flex items-center justify-center py-10 md:py-16">
                   <Loader2 className="size-8 animate-spin text-muted-foreground" />
                 </div>

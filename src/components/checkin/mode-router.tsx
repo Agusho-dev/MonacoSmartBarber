@@ -24,7 +24,7 @@ import type { BranchOperationMode } from '@/lib/actions/turnos-mode'
 import type { PublicStaff, PublicService } from '@/lib/actions/public-booking'
 import { CheckinWalkIn } from '@/app/(tablet)/checkin/checkin-walk-in'
 import { TurnosCheckinFlow } from '@/components/checkin/turnos-flow'
-import type { NewClientPrefill } from '@/components/checkin/turnos-flow'
+import type { NewClientPrefill, WalkInHandoff } from '@/components/checkin/turnos-flow'
 import { InlineQuickBookFlow } from '@/components/checkin/inline-quickbook-flow'
 import { TerminalAmbient, TerminalGlobalStyles } from '@/components/checkin/terminal-theme'
 import { cn } from '@/lib/utils'
@@ -62,6 +62,7 @@ export function ModeRouter({
   const [subRoute, setSubRoute] = useState<SubRoute>('default')
   const [resetKey, setResetKey] = useState(0)
   const [prefill, setPrefill] = useState<NewClientPrefill | undefined>(undefined)
+  const [handoffFila, setHandoffFila] = useState<WalkInHandoff | undefined>(undefined)
 
   const [services, setServices] = useState<PublicService[]>([])
   const [staff, setStaff] = useState<PublicStaff[]>([])
@@ -79,12 +80,24 @@ export function ModeRouter({
   const resetKiosko = () => {
     setSubRoute('default')
     setPrefill(undefined)
+    setHandoffFila(undefined)
     setResetKey((k) => k + 1)
   }
 
   const irAReservar = (datos?: NewClientPrefill) => {
     setPrefill(datos)
     setSubRoute('booking')
+  }
+
+  /**
+   * "Entrar a la fila" desde el flujo de turnos. El handoff viaja como prop de
+   * arranque: montar la fila sin él la dejaba en su pantalla inicial
+   * ("¿Estás registrado?"), o sea pidiéndole el teléfono a alguien que lo acababa
+   * de tipear. Nadie repetía el trámite y el check-in nunca se creaba.
+   */
+  const irALaFila = (datos?: WalkInHandoff) => {
+    setHandoffFila(datos)
+    setSubRoute('walkin')
   }
 
   // ── Datos de reserva ──
@@ -163,7 +176,7 @@ export function ModeRouter({
   // turnos cuando termina. Sin las dos cosas, el primero que elegía la fila
   // dejaba la tablet en walk-in puro para todos los siguientes.
   if (subRoute === 'walkin') {
-    return <CheckinWalkIn key={`walkin-${resetKey}`} onExit={resetKiosko} />
+    return <CheckinWalkIn key={`walkin-${resetKey}`} onExit={resetKiosko} startWith={handoffFila} />
   }
 
   const shell = (children: React.ReactNode) => (
@@ -216,7 +229,7 @@ export function ModeRouter({
       isLightBg={isLightBg}
       canBook={!loadingData && !dataError && services.length > 0 && staff.length > 0}
       onBook={irAReservar}
-      onWalkIn={() => setSubRoute('walkin')}
+      onWalkIn={irALaFila}
       onReset={resetKiosko}
       onChangeBranch={irACambiarSucursal}
     />

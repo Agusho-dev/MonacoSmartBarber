@@ -20,6 +20,15 @@ interface NextAppointmentNoticeProps {
   appointmentWaitingInQueue: boolean
   /** Walk-ins esperando en su fila: sirve para explicar a quiénes frena la ventana. */
   waitingWalkIns: number
+  /**
+   * Mostrar SÓLO la variante que explica por qué la fila no entrega walk-ins.
+   *
+   * En modo hybrid la tira de turnos ya anuncia el próximo con su cuenta
+   * regresiva: repetirlo acá era una segunda banda diciendo lo mismo. Lo que la
+   * tira NO puede decir es que el motor dejó de entregar cortes, y eso sí vale
+   * una banda propia.
+   */
+  onlyWhenBlocking?: boolean
   className?: string
 }
 
@@ -40,6 +49,7 @@ export function NextAppointmentNotice({
   isIdle,
   appointmentWaitingInQueue,
   waitingWalkIns,
+  onlyWhenBlocking = false,
   className,
 }: NextAppointmentNoticeProps) {
   const next = useMemo(
@@ -54,6 +64,7 @@ export function NextAppointmentNotice({
   // `claim_next_for_barber` se lo entrega. El cartel entonces no debe decir
   // que no entra nadie.
   const isBlocked = isIdle && !appointmentWaitingInQueue && next.minutesUntil <= windowMinutes
+  if (onlyWhenBlocking && !isBlocked) return null
   const showCountdown = next.minutesUntil <= 60
 
   const clientName = next.appointment.client?.name ?? 'Cliente'

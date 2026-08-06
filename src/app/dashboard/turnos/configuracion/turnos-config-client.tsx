@@ -1,737 +1,682 @@
 'use client'
 
-import { useState, useTransition, useMemo } from 'react'
-import Image from 'next/image'
-import Link from 'next/link'
-import { Save, Loader2, CalendarClock, AlertCircle, MessageSquare, Plus, X } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Switch } from '@/components/ui/switch'
-import { Separator } from '@/components/ui/separator'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
-  updateAppointmentSettings,
-  toggleAppointmentStaff,
-  updateAppointmentStaffWalkinMode,
-} from '@/lib/actions/appointments'
-import type { AppointmentSettings, AppointmentStaffWalkinMode } from '@/lib/types/database'
+import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
+import { Save, Loader2, TriangleAlert, Undo2, Store, CalendarCheck } from 'lucide-react'
 import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
-import { TemplatePickerSelect, type TemplateOption } from '@/components/messaging/template-picker-select'
+import type { AppointmentSettings } from '@/lib/types/database'
+import type { TemplateOption } from '@/components/messaging/template-picker-select'
+import type { BranchOperationMode } from '@/lib/actions/turnos-mode'
+import { EstadoTurnero, type ItemEstado } from '@/components/appointments/config/estado-turnero'
+import { ModoOperacion } from '@/components/appointments/config/modo-operacion'
+import { SemanaBarberos } from '@/components/appointments/config/semana-barberos'
+import { ReglasTurnero, type ValoresReglas } from '@/components/appointments/config/reglas-turnero'
+import { MensajesTurnero, type ValoresMensajes } from '@/components/appointments/config/mensajes-turnero'
+import { MarcaTurnero, type ValoresMarca } from '@/components/appointments/config/marca-turnero'
+import {
+  NOMBRES_DIAS,
+  ORDEN_SEMANA,
+  agendaTieneDias,
+  clonarAgenda,
+  diasConTurnos,
+  franjasIguales,
+  normalizarHora,
+  tramosDeTurnos,
+  type AgendaTurnos,
+  type BarberoConfig,
+  type DiaDeAgenda,
+  type JornadaSemanal,
+  type ServicioReservable,
+} from '@/components/appointments/config/tipos'
+import { guardarConfiguracionTurnos } from './actions'
 
-const RECOMMENDED_TEMPLATES = {
-  confirmation: 'monaco_turno_confirmacion',
-  reminder: 'monaco_turno_recordatorio',
-  reschedule: 'monaco_turno_reprogramado',
-  cancellation: 'monaco_turno_cancelado',
-  waitlist: 'monaco_turno_waitlist_disponible',
-} as const
-
-const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
-
-interface StaffRow {
+interface SucursalResumen {
   id: string
-  full_name: string
-  branch_id: string | null
-  role: string
-  is_active: boolean
-  avatar_url?: string | null
-  enabledForAppointments: boolean
-  walkinMode: AppointmentStaffWalkinMode
-}
-
-interface Branch {
-  id: string
-  name: string
-  operation_mode?: 'walk_in' | 'appointments' | 'hybrid' | null
+  nombre: string
+  slug: string | null
+  modo: BranchOperationMode
 }
 
 interface Props {
+  sucursales: SucursalResumen[]
+  sucursalActivaId: string | null
+  modoSucursal: BranchOperationMode
+  slugSucursal: string | null
+  /** Dónde vive la fila de settings que se está editando. */
+  alcanceReglas: 'org' | 'sucursal'
   settings: AppointmentSettings | null
-  allStaff: StaffRow[]
-  branches: Branch[]
+  barberos: BarberoConfig[]
+  /** Quién toma turnos cada día (`appointment_staff_days`). Lo que se edita. */
+  agenda: AgendaTurnos
+  /** Jornada de trabajo (`staff_schedules`). Contexto de sólo lectura. */
+  jornada: JornadaSemanal
+  /** ¿La sucursal ya tiene agenda por día guardada? */
+  usaAgendaPorDia: boolean
+  /**
+   * Hay días cargados de barberos que no se dibujan en la grilla (dados de baja
+   * o movidos de sucursal). No se pueden editar acá, pero mantienen a la
+   * sucursal en el modelo por día.
+   */
+  hayDiasDeBarberosOcultos: boolean
+  servicios: ServicioReservable[]
   templates: TemplateOption[]
   hasWhatsAppChannel: boolean
+  org: { nombre: string; slug: string; logoUrl: string | null }
 }
 
-export function TurnosConfigClient({ settings, allStaff, branches, templates, hasWhatsAppChannel }: Props) {
-  const [isPending, startTransition] = useTransition()
-  const [isEnabled, setIsEnabled] = useState(settings?.is_enabled ?? false)
-  const [hoursOpen, setHoursOpen] = useState(settings?.appointment_hours_open ?? '09:00')
-  const [hoursClose, setHoursClose] = useState(settings?.appointment_hours_close ?? '20:00')
-  const [days, setDays] = useState<number[]>(settings?.appointment_days ?? [1, 2, 3, 4, 5, 6])
-  const [slotInterval, setSlotInterval] = useState(String(settings?.slot_interval_minutes ?? 30))
-  const [maxAdvanceDays, setMaxAdvanceDays] = useState(String(settings?.max_advance_days ?? 30))
-  const [noShowTolerance, setNoShowTolerance] = useState(String(settings?.no_show_tolerance_minutes ?? 15))
-  const [cancellationMinHours, setCancellationMinHours] = useState(String(settings?.cancellation_min_hours ?? 2))
-  const [reminderHoursList, setReminderHoursList] = useState<number[]>(
-    settings?.reminder_hours_before_list && settings.reminder_hours_before_list.length > 0
-      ? settings.reminder_hours_before_list
-      : [24, 2]
-  )
-  const [confirmationTemplateId, setConfirmationTemplateId] = useState<string | null>(settings?.confirmation_template_id ?? null)
-  const [reminderTemplateId, setReminderTemplateId] = useState<string | null>(settings?.reminder_template_id ?? null)
-  const [rescheduleTemplateId, setRescheduleTemplateId] = useState<string | null>(settings?.reschedule_template_id ?? null)
-  const [cancellationTemplateId, setCancellationTemplateId] = useState<string | null>(settings?.cancellation_template_id ?? null)
-  const [waitlistTemplateId, setWaitlistTemplateId] = useState<string | null>(settings?.waitlist_template_id ?? null)
-  const [paymentMode, setPaymentMode] = useState(settings?.payment_mode ?? 'postpago')
-  const [prepaymentType, setPrepaymentType] = useState<'fixed' | 'percentage'>(settings?.prepayment_type ?? 'fixed')
-  const [prepaymentPercentage, setPrepaymentPercentage] = useState(String(settings?.prepayment_percentage ?? 50))
-  const [paymentRequestTemplateId, setPaymentRequestTemplateId] = useState<string | null>(settings?.payment_request_template_id ?? null)
-  const [paymentInstructions, setPaymentInstructions] = useState(settings?.payment_instructions ?? '')
-  const [bufferMinutes, setBufferMinutes] = useState(String(settings?.buffer_minutes ?? 10))
-  const [leadTimeMinutes, setLeadTimeMinutes] = useState(String(settings?.lead_time_minutes ?? 30))
-  const [newReminderHours, setNewReminderHours] = useState('')
-  const [staffStates, setStaffStates] = useState<Record<string, { enabled: boolean; walkinMode: AppointmentStaffWalkinMode }>>(
-    Object.fromEntries(allStaff.map(s => [s.id, { enabled: s.enabledForAppointments, walkinMode: s.walkinMode }]))
-  )
+interface Estado {
+  prendido: boolean
+  reglas: ValoresReglas
+  mensajes: ValoresMensajes
+  marca: ValoresMarca
+  agenda: AgendaTurnos
+  barberos: BarberoConfig[]
+}
 
-  // Detectar cambios no guardados
-  const [savedSnapshot, setSavedSnapshot] = useState({
-    isEnabled: settings?.is_enabled ?? false,
-    hoursOpen: settings?.appointment_hours_open ?? '09:00',
-    hoursClose: settings?.appointment_hours_close ?? '20:00',
-    days: JSON.stringify(settings?.appointment_days ?? [1, 2, 3, 4, 5, 6]),
-    slotInterval: String(settings?.slot_interval_minutes ?? 30),
-    maxAdvanceDays: String(settings?.max_advance_days ?? 30),
-    noShowTolerance: String(settings?.no_show_tolerance_minutes ?? 15),
-    cancellationMinHours: String(settings?.cancellation_min_hours ?? 2),
-    reminderHoursList: JSON.stringify(
-      settings?.reminder_hours_before_list && settings.reminder_hours_before_list.length > 0
-        ? settings.reminder_hours_before_list
-        : [24, 2]
-    ),
-    confirmationTemplateId: settings?.confirmation_template_id ?? null,
-    reminderTemplateId: settings?.reminder_template_id ?? null,
-    rescheduleTemplateId: settings?.reschedule_template_id ?? null,
-    cancellationTemplateId: settings?.cancellation_template_id ?? null,
-    waitlistTemplateId: settings?.waitlist_template_id ?? null,
-    paymentMode: settings?.payment_mode ?? 'postpago',
-    prepaymentType: settings?.prepayment_type ?? 'fixed',
-    prepaymentPercentage: String(settings?.prepayment_percentage ?? 50),
-    paymentRequestTemplateId: settings?.payment_request_template_id ?? null,
-    paymentInstructions: settings?.payment_instructions ?? '',
-    bufferMinutes: String(settings?.buffer_minutes ?? 10),
-    leadTimeMinutes: String(settings?.lead_time_minutes ?? 30),
-  })
+const DIAS_POR_DEFECTO = [1, 2, 3, 4, 5, 6]
 
-  const isDirty =
-    isEnabled !== savedSnapshot.isEnabled ||
-    hoursOpen !== savedSnapshot.hoursOpen ||
-    hoursClose !== savedSnapshot.hoursClose ||
-    JSON.stringify(days) !== savedSnapshot.days ||
-    slotInterval !== savedSnapshot.slotInterval ||
-    maxAdvanceDays !== savedSnapshot.maxAdvanceDays ||
-    noShowTolerance !== savedSnapshot.noShowTolerance ||
-    cancellationMinHours !== savedSnapshot.cancellationMinHours ||
-    JSON.stringify(reminderHoursList) !== savedSnapshot.reminderHoursList ||
-    confirmationTemplateId !== savedSnapshot.confirmationTemplateId ||
-    reminderTemplateId !== savedSnapshot.reminderTemplateId ||
-    rescheduleTemplateId !== savedSnapshot.rescheduleTemplateId ||
-    cancellationTemplateId !== savedSnapshot.cancellationTemplateId ||
-    waitlistTemplateId !== savedSnapshot.waitlistTemplateId ||
-    paymentMode !== savedSnapshot.paymentMode ||
-    prepaymentType !== savedSnapshot.prepaymentType ||
-    prepaymentPercentage !== savedSnapshot.prepaymentPercentage ||
-    paymentRequestTemplateId !== savedSnapshot.paymentRequestTemplateId ||
-    paymentInstructions !== savedSnapshot.paymentInstructions ||
-    bufferMinutes !== savedSnapshot.bufferMinutes ||
-    leadTimeMinutes !== savedSnapshot.leadTimeMinutes
-
-  const branchGroups = useMemo(() => {
-    const map = new Map<string, StaffRow[]>()
-    allStaff.forEach(s => {
-      const key = s.branch_id ?? 'sin-sucursal'
-      if (!map.has(key)) map.set(key, [])
-      map.get(key)!.push(s)
-    })
-    return Array.from(map.entries())
-  }, [allStaff])
-
-  function toggleDay(day: number) {
-    setDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort())
+function estadoInicial(props: Props): Estado {
+  const s = props.settings
+  return {
+    prendido: s?.is_enabled ?? false,
+    reglas: {
+      // La DB devuelve `time` con segundos y `<input type="time">` no lo dibuja:
+      // sin normalizar, los campos de horario aparecían vacíos.
+      apertura: normalizarHora(s?.appointment_hours_open) || '09:00',
+      cierre: normalizarHora(s?.appointment_hours_close) || '21:00',
+      dias: s?.appointment_days?.length ? [...s.appointment_days].sort() : DIAS_POR_DEFECTO,
+      paso: s?.slot_interval_minutes ?? 15,
+      descanso: s?.buffer_minutes ?? 10,
+      anticipacionMinima: s?.lead_time_minutes ?? 60,
+      diasMaximos: s?.max_advance_days ?? 30,
+      toleranciaTardanza: s?.no_show_tolerance_minutes ?? 15,
+      horasParaCancelar: s?.cancellation_min_hours ?? 2,
+    },
+    mensajes: {
+      confirmacion: s?.confirmation_template_id ?? null,
+      recordatorio: s?.reminder_template_id ?? null,
+      reprogramacion: s?.reschedule_template_id ?? null,
+      cancelacion: s?.cancellation_template_id ?? null,
+      esperaLiberada: s?.waitlist_template_id ?? null,
+      recordatorios: s?.reminder_hours_before_list?.length ? [...s.reminder_hours_before_list].sort((a, b) => b - a) : [24, 2],
+    },
+    marca: {
+      primario: s?.brand_primary_color ?? '#0f172a',
+      fondo: s?.brand_bg_color ?? '#ffffff',
+      texto: s?.brand_text_color ?? '#0f172a',
+      bienvenida: s?.welcome_message ?? '',
+    },
+    agenda: clonarAgenda(props.agenda),
+    barberos: props.barberos.map(b => ({ ...b })),
   }
+}
 
-  function handleSave() {
-    startTransition(async () => {
-      const result = await updateAppointmentSettings({
-        is_enabled: isEnabled,
-        appointment_hours_open: hoursOpen,
-        appointment_hours_close: hoursClose,
-        appointment_days: days,
-        slot_interval_minutes: Number(slotInterval),
-        max_advance_days: Number(maxAdvanceDays),
-        no_show_tolerance_minutes: Number(noShowTolerance),
-        cancellation_min_hours: Number(cancellationMinHours),
-        reminder_hours_before: reminderHoursList[0] ?? 0, // legacy fallback
-        reminder_hours_before_list: reminderHoursList,
-        confirmation_template_id: confirmationTemplateId,
-        reminder_template_id: reminderTemplateId,
-        reschedule_template_id: rescheduleTemplateId,
-        cancellation_template_id: cancellationTemplateId,
-        waitlist_template_id: waitlistTemplateId,
-        payment_mode: paymentMode as 'prepago' | 'postpago',
-        prepayment_type: prepaymentType,
-        prepayment_percentage: Number(prepaymentPercentage),
-        payment_request_template_id: paymentRequestTemplateId,
-        payment_instructions: paymentInstructions.trim() || null,
-        buffer_minutes: Number(bufferMinutes),
-        lead_time_minutes: Number(leadTimeMinutes),
+export function TurnosConfigClient(props: Props) {
+  const {
+    sucursales,
+    sucursalActivaId,
+    modoSucursal,
+    slugSucursal,
+    alcanceReglas,
+    settings,
+    jornada,
+    usaAgendaPorDia: usaAgendaPorDiaGuardada,
+    hayDiasDeBarberosOcultos,
+    servicios,
+    templates,
+    hasWhatsAppChannel,
+    org,
+  } = props
+
+  const router = useRouter()
+  const [guardando, iniciarGuardado] = useTransition()
+  const [estado, setEstado] = useState<Estado>(() => estadoInicial(props))
+  const [guardado, setGuardado] = useState<Estado>(estado)
+  const [forzarPagoPosterior, setForzarPagoPosterior] = useState(false)
+  // El aviso de "esta sucursal cambia de modelo" se muestra una sola vez, al
+  // prender la primera celda. Si el dueño lo cancela, no queda visto.
+  const [avisoModeloVisto, setAvisoModeloVisto] = useState(false)
+  const [confirmacion, setConfirmacion] = useState<{
+    titulo: string
+    descripcion: string
+    etiqueta: string
+    accion: () => void
+  } | null>(null)
+
+  const sucursalActiva = sucursales.find(s => s.id === sucursalActivaId) ?? null
+
+  // ─── Diferencias contra lo último guardado ─────────────────────────
+
+  // La agenda se guarda por barbero (la action reemplaza todos sus días de una
+  // sola vez), pero se marca sucia por celda: la celda es la unidad que el dueño
+  // toca.
+  const cambiosAgenda = useMemo(() => {
+    const porBarbero: Array<{ staffId: string; dias: Array<{ dia: number; inicio: string | null; fin: string | null }> }> = []
+    const sucias = new Set<string>()
+
+    for (const barbero of estado.barberos) {
+      let cambio = false
+      for (let dia = 0; dia <= 6; dia++) {
+        if (!franjasIguales(estado.agenda[barbero.id]?.[dia], guardado.agenda[barbero.id]?.[dia])) {
+          sucias.add(`${barbero.id}:${dia}`)
+          cambio = true
+        }
+      }
+      if (!cambio) continue
+      porBarbero.push({
+        staffId: barbero.id,
+        dias: diasConTurnos(estado.agenda, barbero.id).map(dia => {
+          const franja = estado.agenda[barbero.id][dia].franja
+          return { dia, inicio: franja?.inicio ?? null, fin: franja?.fin ?? null }
+        }),
+      })
+    }
+
+    return { porBarbero, sucias }
+  }, [estado.agenda, estado.barberos, guardado.agenda])
+
+  const barberosCambiados = useMemo(() => {
+    return estado.barberos.filter(b => {
+      const antes = guardado.barberos.find(g => g.id === b.id)
+      if (!antes) return false
+      return antes.recibeTurnos !== b.recibeTurnos || antes.soloTurnos !== b.soloTurnos
+    })
+  }, [estado.barberos, guardado.barberos])
+
+  const reglasCambiadas =
+    forzarPagoPosterior ||
+    estado.prendido !== guardado.prendido ||
+    JSON.stringify(estado.reglas) !== JSON.stringify(guardado.reglas) ||
+    JSON.stringify(estado.mensajes) !== JSON.stringify(guardado.mensajes) ||
+    JSON.stringify(estado.marca) !== JSON.stringify(guardado.marca)
+
+  const hayCambios = reglasCambiadas || cambiosAgenda.porBarbero.length > 0 || barberosCambiados.length > 0
+
+  /**
+   * ¿La sucursal va a trabajar con agenda por día? Se mira el estado EN
+   * PANTALLA, no lo guardado: apenas el dueño prende la primera celda, la previa
+   * y el checklist tienen que hablar del modelo nuevo — y si las apaga todas,
+   * del viejo. Los días de barberos que ya no están en la grilla igual cuentan:
+   * el motor los ve.
+   */
+  const usaAgendaPorDia = hayDiasDeBarberosOcultos || agendaTieneDias(estado.agenda)
+
+  // Cerrar la pestaña con cambios sin guardar es la forma más silenciosa de
+  // perder media hora de configuración.
+  useEffect(() => {
+    if (!hayCambios) return
+    function avisar(e: BeforeUnloadEvent) {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', avisar)
+    return () => window.removeEventListener('beforeunload', avisar)
+  }, [hayCambios])
+
+  // ─── Mutadores ─────────────────────────────────────────────────────
+
+  function cambiarDia(staffId: string, dia: number, valor: DiaDeAgenda | null) {
+    const aplicar = () =>
+      setEstado(prev => {
+        const dias = { ...(prev.agenda[staffId] ?? {}) }
+        if (valor) dias[dia] = valor
+        else delete dias[dia]
+        return {
+          ...prev,
+          agenda: { ...prev.agenda, [staffId]: dias },
+          // Marcar un día ES decir "este barbero toma turnos": si el interruptor
+          // estaba apagado se prende solo, porque sin fila en `appointment_staff`
+          // el motor nunca lo ofrece y el día quedaría muerto.
+          barberos: valor
+            ? prev.barberos.map(b => (b.id === staffId ? { ...b, recibeTurnos: true } : b))
+            : prev.barberos,
+        }
       })
 
-      if (result.error) {
-        toast.error(result.error)
-      } else {
-        toast.success('Configuración de turnos guardada')
-        setSavedSnapshot({
-          isEnabled,
-          hoursOpen,
-          hoursClose,
-          days: JSON.stringify(days),
-          slotInterval,
-          maxAdvanceDays,
-          noShowTolerance,
-          cancellationMinHours,
-          reminderHoursList: JSON.stringify(reminderHoursList),
-          confirmationTemplateId,
-          reminderTemplateId,
-          rescheduleTemplateId,
-          cancellationTemplateId,
-          waitlistTemplateId,
-          paymentMode,
-          prepaymentType,
-          prepaymentPercentage,
-          paymentRequestTemplateId,
-          paymentInstructions,
-          bufferMinutes,
-          leadTimeMinutes,
-        })
-      }
+    // Primera celda de la sucursal: deja de valer "atiende cualquiera que
+    // trabaje" y pasa a valer sólo lo que esté marcado. Es un cambio de
+    // comportamiento real, no una preferencia visual.
+    const esLaPrimera =
+      !!valor && !usaAgendaPorDiaGuardada && !hayDiasDeBarberosOcultos && !agendaTieneDias(estado.agenda)
+
+    if (esLaPrimera && !avisoModeloVisto) {
+      setConfirmacion({
+        titulo: 'A partir de acá, la agenda la definís vos',
+        descripcion:
+          'Hoy esta sucursal ofrece turnos con cualquier barbero habilitado que trabaje ese día. ' +
+          'Al marcar el primer día pasa a ofrecer únicamente los días que marques: los que queden ' +
+          'en blanco no van a mostrar ningún horario, aunque el barbero trabaje. Su jornada de ' +
+          'trabajo, el fichaje y la asistencia no cambian.',
+        etiqueta: 'Marcar el día',
+        accion: () => {
+          setAvisoModeloVisto(true)
+          aplicar()
+        },
+      })
+      return
+    }
+
+    aplicar()
+  }
+
+  function cambiarBarbero(staffId: string, cambio: { recibeTurnos?: boolean; soloTurnos?: boolean }) {
+    setEstado(prev => ({
+      ...prev,
+      barberos: prev.barberos.map(b => (b.id === staffId ? { ...b, ...cambio } : b)),
+      // "No recibe turnos" y "tiene días de turnos cargados" no pueden convivir:
+      // apagar el interruptor le limpia la agenda (se ve en la grilla al toque, y
+      // Descartar lo revierte).
+      agenda: cambio.recibeTurnos === false ? { ...prev.agenda, [staffId]: {} } : prev.agenda,
+    }))
+  }
+
+  function irASeccion(id: string) {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  function cambiarSucursal(id: string) {
+    if (id === sucursalActivaId) return
+    const ir = () => router.push(`/dashboard/turnos/configuracion?sucursal=${id}`)
+    if (!hayCambios) {
+      ir()
+      return
+    }
+    setConfirmacion({
+      titulo: 'Tenés cambios sin guardar',
+      descripcion: 'Si cambiás de sucursal ahora, se pierden los cambios que hiciste en esta pantalla.',
+      etiqueta: 'Cambiar igual',
+      accion: ir,
     })
   }
 
-  function addReminderHour() {
-    const hours = Number(newReminderHours)
-    if (!Number.isFinite(hours) || hours <= 0 || hours > 168) {
-      toast.error('Ingresá un valor entre 1 y 168 horas')
-      return
-    }
-    if (reminderHoursList.includes(hours)) {
-      toast.error('Ese recordatorio ya está configurado')
-      return
-    }
-    setReminderHoursList(prev => [...prev, hours].sort((a, b) => b - a))
-    setNewReminderHours('')
+  function descartar() {
+    setConfirmacion({
+      titulo: '¿Descartar los cambios?',
+      descripcion: 'Vuelve todo a como estaba la última vez que guardaste.',
+      etiqueta: 'Descartar',
+      accion: () => {
+        setEstado(guardado)
+        setForzarPagoPosterior(false)
+        setAvisoModeloVisto(false)
+      },
+    })
   }
 
-  function removeReminderHour(hours: number) {
-    setReminderHoursList(prev => prev.filter(h => h !== hours))
+  function guardar() {
+    iniciarGuardado(async () => {
+      const resultado = await guardarConfiguracionTurnos({
+        branchId: sucursalActivaId ?? '',
+        alcanceReglas: alcanceReglas === 'sucursal' ? 'sucursal' : 'org',
+        reglas: reglasCambiadas
+          ? {
+              is_enabled: estado.prendido,
+              appointment_hours_open: estado.reglas.apertura,
+              appointment_hours_close: estado.reglas.cierre,
+              appointment_days: estado.reglas.dias,
+              slot_interval_minutes: estado.reglas.paso,
+              buffer_minutes: estado.reglas.descanso,
+              lead_time_minutes: estado.reglas.anticipacionMinima,
+              max_advance_days: estado.reglas.diasMaximos,
+              no_show_tolerance_minutes: estado.reglas.toleranciaTardanza,
+              cancellation_min_hours: estado.reglas.horasParaCancelar,
+              reminder_hours_before_list: estado.mensajes.recordatorios,
+              confirmation_template_id: estado.mensajes.confirmacion,
+              reminder_template_id: estado.mensajes.recordatorio,
+              reschedule_template_id: estado.mensajes.reprogramacion,
+              cancellation_template_id: estado.mensajes.cancelacion,
+              waitlist_template_id: estado.mensajes.esperaLiberada,
+              brand_primary_color: estado.marca.primario,
+              brand_bg_color: estado.marca.fondo,
+              brand_text_color: estado.marca.texto,
+              welcome_message: estado.marca.bienvenida,
+            }
+          : null,
+        agenda: cambiosAgenda.porBarbero,
+        barberos: barberosCambiados.map(b => ({
+          staffId: b.id,
+          recibeTurnos: b.recibeTurnos,
+          soloTurnos: b.soloTurnos,
+        })),
+        pasarAPagoPosterior: forzarPagoPosterior,
+      })
+
+      if (!resultado.ok) {
+        toast.error(resultado.errores[0] ?? 'No pudimos guardar los cambios')
+        // A propósito NO refrescamos: el refresh remonta la pantalla (ver la
+        // `key` de la page) y se llevaría puestos los cambios que todavía no
+        // entraron. Reintentar el guardado es idempotente.
+        return
+      }
+
+      setGuardado(estado)
+      setForzarPagoPosterior(false)
+      toast.success('Configuración guardada')
+      router.refresh()
+    })
   }
 
-  async function handleToggleStaff(staffId: string, enabled: boolean) {
-    setStaffStates(prev => ({ ...prev, [staffId]: { ...prev[staffId], enabled } }))
-    const result = await toggleAppointmentStaff(staffId, enabled)
-    if (result.error) {
-      setStaffStates(prev => ({ ...prev, [staffId]: { ...prev[staffId], enabled: !enabled } }))
-      toast.error(result.error)
-    }
+  // ─── Checklist ─────────────────────────────────────────────────────
+
+  const barberosQueAtienden = estado.barberos.filter(b => b.recibeTurnos)
+
+  /**
+   * Barberos habilitados que el turnero no va a ofrecer NINGÚN día. Se mide
+   * contra la agenda por día cuando la sucursal la usa, y contra la jornada de
+   * trabajo cuando sigue con el modelo viejo: es exactamente el criterio del
+   * motor en cada caso.
+   */
+  const sinDias = barberosQueAtienden.filter(
+    b =>
+      !ORDEN_SEMANA.some(
+        dia =>
+          tramosDeTurnos({ agenda: estado.agenda, jornada, staffId: b.id, dia, usaAgendaPorDia }).length > 0
+      )
+  )
+  // Días abiertos a reservas en los que el cliente no va a ver ni un horario.
+  const diasSinNadie = ORDEN_SEMANA.filter(
+    dia =>
+      estado.reglas.dias.includes(dia) &&
+      !barberosQueAtienden.some(
+        b =>
+          tramosDeTurnos({ agenda: estado.agenda, jornada, staffId: b.id, dia, usaAgendaPorDia }).length > 0
+      )
+  )
+  const diasAbiertos = estado.reglas.dias.length
+  const serviciosSinDuracion = servicios.filter(s => !s.duracionMinutos || s.duracionMinutos <= 0)
+  const serviciosConDuracion = servicios.filter(s => s.duracionMinutos && s.duracionMinutos > 0)
+
+  const items: ItemEstado[] = [
+    {
+      id: 'modo',
+      titulo: 'Esta sucursal acepta turnos',
+      ok: modoSucursal !== 'walk_in',
+      detalle:
+        modoSucursal === 'walk_in'
+          ? 'Hoy trabaja sólo por orden de llegada: el link de reservas avisa que no hace falta turno.'
+          : undefined,
+      accion: { etiqueta: 'Cambiar', onClick: () => irASeccion('seccion-modo') },
+    },
+    {
+      id: 'prendido',
+      titulo: 'Las reservas online están prendidas',
+      ok: estado.prendido,
+      pendiente: estado.prendido !== (settings?.is_enabled ?? false),
+      detalle: estado.prendido ? undefined : 'El turnero está apagado: nadie puede reservar aunque el resto esté listo.',
+      accion: { etiqueta: 'Prender', onClick: () => setEstado(prev => ({ ...prev, prendido: true })) },
+    },
+    {
+      id: 'barberos',
+      titulo: 'Hay barberos que reciben turnos',
+      ok: barberosQueAtienden.length > 0,
+      pendiente: barberosCambiados.length > 0,
+      detalle:
+        barberosQueAtienden.length > 0
+          ? `${barberosQueAtienden.length} de ${estado.barberos.length}: ${barberosQueAtienden.map(b => b.nombre).join(', ')}`
+          : 'Ninguno está habilitado, así que el turnero no muestra horarios.',
+      accion: { etiqueta: 'Elegir', onClick: () => irASeccion('seccion-semana') },
+    },
+    {
+      id: 'agenda',
+      titulo: 'Está definido quién atiende cada día',
+      // No bloquea: sin agenda por día el turnero funciona igual, ofreciendo a
+      // todos. Pero el dueño tiene que saber que la rotación que tiene en la
+      // cabeza todavía no está escrita en ningún lado.
+      ok: true,
+      aviso: !usaAgendaPorDia || diasSinNadie.length > 0,
+      pendiente: usaAgendaPorDia && !usaAgendaPorDiaGuardada,
+      detalle: !usaAgendaPorDia
+        ? 'Esta sucursal todavía no lo definió: por ahora el turnero ofrece a cualquier barbero habilitado que trabaje ese día. Si tu agenda rota (uno los martes, otro los miércoles), marcá los días en la grilla.'
+        : diasSinNadie.length
+          ? `Nadie toma turnos ${listarDias(diasSinNadie)}: esos días el cliente no va a ver ningún horario.`
+          : `Los ${diasAbiertos} días abiertos a reservas tienen a alguien asignado.`,
+      accion: { etiqueta: 'Definir', onClick: () => irASeccion('seccion-semana') },
+    },
+    {
+      id: 'dias',
+      titulo: usaAgendaPorDia
+        ? 'Cada barbero habilitado tiene al menos un día'
+        : 'Cada barbero habilitado tiene horario cargado',
+      ok: barberosQueAtienden.length > 0 && sinDias.length === 0,
+      pendiente: cambiosAgenda.porBarbero.length > 0,
+      detalle: sinDias.length
+        ? usaAgendaPorDia
+          ? `Sin ningún día de turnos: ${sinDias.map(b => b.nombre).join(', ')}. El turnero no los ofrece nunca.`
+          : `Sin horario de trabajo cargado: ${sinDias.map(b => b.nombre).join(', ')}. El motor los saltea en silencio.`
+        : barberosQueAtienden.length === 0
+          ? 'Primero marcá quién recibe turnos.'
+          : undefined,
+      accion: usaAgendaPorDia
+        ? { etiqueta: 'Cargar', onClick: () => irASeccion('seccion-semana') }
+        : { etiqueta: 'Horarios', href: '/dashboard/calendario' },
+    },
+    {
+      id: 'servicios',
+      titulo: 'Los servicios reservables tienen duración',
+      ok: serviciosConDuracion.length > 0 && serviciosSinDuracion.length === 0,
+      detalle: !servicios.length
+        ? 'No hay ningún servicio habilitado para reservar online.'
+        : serviciosSinDuracion.length
+          ? `Sin duración: ${serviciosSinDuracion.map(s => s.nombre).join(', ')}. Sin ese dato no se sabe cuánto ocupa el turno.`
+          : `${serviciosConDuracion.length} servicios listos para reservar.`,
+      accion: { etiqueta: 'Servicios', href: '/dashboard/servicios' },
+    },
+    {
+      id: 'whatsapp',
+      titulo: 'Se avisa por WhatsApp al reservar',
+      ok: hasWhatsAppChannel && !!estado.mensajes.confirmacion,
+      pendiente: estado.mensajes.confirmacion !== (settings?.confirmation_template_id ?? null),
+      detalle: !hasWhatsAppChannel
+        ? 'WhatsApp no está conectado. Los turnos funcionan igual, pero el cliente no recibe confirmación.'
+        : !estado.mensajes.confirmacion
+          ? 'Falta elegir el mensaje de confirmación.'
+          : undefined,
+      accion: hasWhatsAppChannel
+        ? { etiqueta: 'Elegir', onClick: () => irASeccion('seccion-mensajes') }
+        : { etiqueta: 'Conectar', href: '/dashboard/mensajeria?settings=1' },
+    },
+  ]
+
+  // ─── Sin sucursales accesibles ─────────────────────────────────────
+
+  if (!sucursalActiva || !sucursalActivaId) {
+    return (
+      <div className="rounded-xl border border-dashed border-border p-8 text-center">
+        <Store className="mx-auto mb-3 size-8 text-muted-foreground" />
+        <p className="font-medium">No hay sucursales para configurar</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Creá una sucursal desde Configuración y volvé a esta pantalla.
+        </p>
+      </div>
+    )
   }
-
-  async function handleWalkinModeChange(staffId: string, mode: AppointmentStaffWalkinMode) {
-    const prev = staffStates[staffId]?.walkinMode
-    setStaffStates(s => ({ ...s, [staffId]: { ...s[staffId], walkinMode: mode } }))
-    const result = await updateAppointmentStaffWalkinMode(staffId, mode)
-    if (result.error) {
-      setStaffStates(s => ({ ...s, [staffId]: { ...s[staffId], walkinMode: prev ?? 'both' } }))
-      toast.error(result.error)
-    }
-  }
-
-  const branchName = (id: string) => branches.find(b => b.id === id)?.name ?? 'Sin sucursal'
-
-  // Sucursales que realmente aceptan reservas (modo != walk_in).
-  const branchesConTurnos = branches.filter(b => b.operation_mode && b.operation_mode !== 'walk_in')
 
   return (
-    <div className="relative space-y-6 pb-24">
-      {/* Banner principal del sistema */}
-      <div className={cn(
-        'rounded-xl border p-5 transition-colors',
-        isEnabled
-          ? 'border-border bg-card'
-          : 'border-amber-500/30 bg-amber-500/5'
-      )}>
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className={cn(
-              'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
-              isEnabled ? 'bg-primary text-primary-foreground' : 'bg-amber-500/15 text-amber-500'
-            )}>
-              <CalendarClock className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="font-semibold leading-tight">Sistema de Turnos</p>
-              <p className="mt-0.5 text-sm text-muted-foreground">
-                {!isEnabled
-                  ? 'El turnero está deshabilitado. Los clientes no pueden reservar hasta que lo actives.'
-                  : branchesConTurnos.length === 0
-                    ? 'El turnero está prendido, pero ninguna sucursal acepta turnos todavía.'
-                    : branchesConTurnos.length === branches.length
-                      ? 'El turnero público está activo. Los clientes pueden reservar online.'
-                      : `Reservas activas en ${branchesConTurnos.map(b => b.name).join(', ')}.`}
-              </p>
-              {!isEnabled && (
-                <p className="mt-2 text-xs font-medium text-amber-500">
-                  Activa el sistema para que el link publico acepte reservas.
-                </p>
-              )}
-              {/* El switch de arriba es sólo UNA de las dos puertas: el turnero
-                  público también exige branches.operation_mode != walk_in. Decir
-                  "activo" mirando sólo is_enabled hacía que el dueño creyera que
-                  aceptaba reservas mientras el cliente veía "sin turno previo". */}
-              {isEnabled && branchesConTurnos.length === 0 && (
-                <p className="mt-2 text-xs font-medium text-amber-500">
-                  Elegí arriba, en &ldquo;Modo de operación&rdquo;, qué sucursal trabaja con turnos.
-                </p>
-              )}
-            </div>
+    <div className={cn('space-y-5', hayCambios && 'pb-24')}>
+      {/* Barra de contexto: sucursal + interruptor maestro */}
+      <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Configurando</p>
+          <div className="flex flex-wrap gap-1.5">
+            {sucursales.map(s => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => cambiarSucursal(s.id)}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
+                  s.id === sucursalActivaId
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+                )}
+              >
+                {s.nombre}
+                {s.modo !== 'walk_in' && (
+                  <CalendarCheck
+                    className={cn('size-3.5', s.id === sucursalActivaId ? 'opacity-80' : 'text-emerald-500')}
+                  />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-3 border-t border-border pt-3 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+          <div className="text-right">
+            <p className="text-sm font-medium leading-tight">Reservas online</p>
+            <p className="text-xs text-muted-foreground">
+              {alcanceReglas === 'org' ? 'Vale para todas tus sucursales' : 'Sólo para esta sucursal'}
+            </p>
           </div>
           <Switch
-            checked={isEnabled}
-            onCheckedChange={setIsEnabled}
-            className="shrink-0"
+            checked={estado.prendido}
+            onCheckedChange={valor => setEstado(prev => ({ ...prev, prendido: valor }))}
+            aria-label="Reservas online"
           />
         </div>
       </div>
 
-      {/* Grid 2 columnas en desktop */}
-      <div className="grid gap-6 lg:grid-cols-2">
-
-        {/* Scheduling: Horarios + Slots + Buffer/Lead agrupados */}
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Horarios y disponibilidad</CardTitle>
-            <CardDescription>Definí cuándo y cómo se pueden reservar turnos online.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-
-            {/* Subgrupo: Horarios y días */}
-            <div className="space-y-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Horarios y días</p>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="hours-open">Hora de apertura</Label>
-                  <Input id="hours-open" type="time" value={hoursOpen} onChange={e => setHoursOpen(e.target.value)} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="hours-close">Hora de cierre</Label>
-                  <Input id="hours-close" type="time" value={hoursClose} onChange={e => setHoursClose(e.target.value)} />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Días habilitados</Label>
-                <div className="flex flex-wrap gap-2">
-                  {DAY_NAMES.map((name, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => toggleDay(i)}
-                      className={cn(
-                        'flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold transition-colors',
-                        days.includes(i)
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                      )}
-                    >
-                      {name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Subgrupo: Slots */}
-            <div className="space-y-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Slots y reservas</p>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label>Intervalo de slots</Label>
-                  <Select value={slotInterval} onValueChange={setSlotInterval}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {[15, 20, 30, 45, 60].map(v => (
-                        <SelectItem key={v} value={String(v)}>{v} min</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="max-advance">Días de anticipación máxima</Label>
-                  <Input id="max-advance" type="number" min={1} max={90} value={maxAdvanceDays} onChange={e => setMaxAdvanceDays(e.target.value)} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="no-show">Tolerancia no-show (min)</Label>
-                  <Input id="no-show" type="number" min={5} max={60} value={noShowTolerance} onChange={e => setNoShowTolerance(e.target.value)} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="cancel-hours">Horas mín. para cancelar</Label>
-                  <Input id="cancel-hours" type="number" min={0} max={48} value={cancellationMinHours} onChange={e => setCancellationMinHours(e.target.value)} />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Modo de pago</Label>
-                <Select value={paymentMode} onValueChange={v => setPaymentMode(v as 'prepago' | 'postpago')}>
-                  <SelectTrigger className="w-full sm:w-64"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="postpago">Pago posterior al servicio</SelectItem>
-                    <SelectItem value="prepago" disabled>
-                      Pago previo al servicio (no disponible)
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  El prepago está deshabilitado: el cobro anticipado todavía no impacta en
-                  caja y dejaría los turnos trabados en &ldquo;Esperando pago&rdquo;.
-                </p>
-              </div>
-
-              {paymentMode === 'prepago' && (
-                <div className="space-y-4 rounded-md border border-amber-500/30 bg-amber-500/5 p-4">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="mt-0.5 size-4 text-amber-500" />
-                    <div className="space-y-0.5">
-                      <p className="text-sm font-medium">Prepago activo — revisar</p>
-                      <p className="text-xs text-muted-foreground">
-                        Esta sucursal quedó configurada en prepago, pero el circuito de cobro
-                        anticipado no está operativo: los turnos nuevos nacen en
-                        &ldquo;Esperando pago&rdquo; y confirmar el cobro falla, así que quedan
-                        trabados y sin confirmación al cliente. Pasalo a
-                        &ldquo;Pago posterior al servicio&rdquo; y guardá.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label>Tipo de prepago</Label>
-                      <Select value={prepaymentType} onValueChange={v => setPrepaymentType(v as 'fixed' | 'percentage')}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="fixed">100% del precio del servicio</SelectItem>
-                          <SelectItem value="percentage">Seña (porcentaje)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {prepaymentType === 'percentage' && (
-                      <div className="space-y-1.5">
-                        <Label htmlFor="prepay-pct">Porcentaje de seña (%)</Label>
-                        <Input
-                          id="prepay-pct"
-                          type="number"
-                          min={1}
-                          max={100}
-                          value={prepaymentPercentage}
-                          onChange={e => setPrepaymentPercentage(e.target.value)}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label>Template de solicitud de pago (opcional)</Label>
-                    <TemplatePickerSelect
-                      templates={templates}
-                      value={paymentRequestTemplateId}
-                      onChange={setPaymentRequestTemplateId}
-                      recommendedName={undefined}
-                      placeholder="Mensaje libre (usa instrucciones de abajo)"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Variables esperadas: nombre, servicio, fecha, hora, sucursal, monto, instrucciones.
-                    </p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label htmlFor="payment-instructions">Instrucciones de pago</Label>
-                    <Textarea
-                      id="payment-instructions"
-                      rows={3}
-                      placeholder="Ej: Transferí a CBU 000... / Alias: barberia.mp / Link MP: https://..."
-                      value={paymentInstructions}
-                      onChange={e => setPaymentInstructions(e.target.value)}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Se envía al cliente junto al monto. Incluí CBU, alias, link de MP, o lo que uses.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <Separator />
-
-            {/* Subgrupo: Buffer y lead time */}
-            <div className="space-y-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tiempos de protección</p>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="buffer">Buffer entre turnos (min)</Label>
-                  <Input id="buffer" type="number" min={0} max={120} value={bufferMinutes} onChange={e => setBufferMinutes(e.target.value)} />
-                  <p className="text-xs text-muted-foreground">Margen antes y después de cada turno.</p>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="lead-time">Anticipación mínima online (min)</Label>
-                  <Input id="lead-time" type="number" min={0} max={1440} value={leadTimeMinutes} onChange={e => setLeadTimeMinutes(e.target.value)} />
-                  <p className="text-xs text-muted-foreground">Tiempo mínimo para poder reservar un slot.</p>
-                </div>
-              </div>
-            </div>
-
-          </CardContent>
-        </Card>
-
-        {/* Mensajería automática */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Mensajería automática</CardTitle>
-            <CardDescription>
-              Templates de WhatsApp para cada etapa del turno. Si no hay canal configurado,
-              los turnos igual funcionan — los mensajes se omiten silenciosamente.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            {!hasWhatsAppChannel && (
-              <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-xs leading-relaxed">
-                <div className="flex items-start gap-2">
-                  <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-                  <div className="space-y-1.5">
-                    <p className="font-semibold text-foreground">WhatsApp no configurado</p>
-                    <p className="text-muted-foreground">
-                      Los turnos funcionan sin WhatsApp, pero no se enviarán confirmaciones
-                      ni recordatorios automáticos. Configurá el canal en mensajería para activarlos.
-                    </p>
-                    <Button asChild size="sm" variant="outline" className="h-7 text-xs">
-                      <Link href="/dashboard/mensajeria?settings=1">Configurar WhatsApp</Link>
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs leading-relaxed">
-              <p className="mb-1.5 font-semibold text-foreground">Variables disponibles en los templates</p>
-              <pre className="rounded bg-background px-3 py-2 font-mono text-[11px] text-foreground whitespace-pre-wrap">
-{`{{1}} → nombre del cliente
-{{2}} → servicio reservado
-{{3}} → fecha del turno
-{{4}} → hora del turno
-{{5}} → nombre de la sucursal`}
-              </pre>
-              <p className="mt-1.5 text-muted-foreground">
-                Los templates recomendados (prefijo <span className="font-mono">monaco_turno_*</span>) se crean
-                automáticamente al conectar WhatsApp.
-              </p>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Template de confirmación</Label>
-              <TemplatePickerSelect
-                templates={templates}
-                value={confirmationTemplateId}
-                onChange={setConfirmationTemplateId}
-                recommendedName={RECOMMENDED_TEMPLATES.confirmation}
-                disabled={!hasWhatsAppChannel}
-              />
-              <p className="text-xs text-muted-foreground">Se envía al crear el turno.</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Template de recordatorio</Label>
-              <TemplatePickerSelect
-                templates={templates}
-                value={reminderTemplateId}
-                onChange={setReminderTemplateId}
-                recommendedName={RECOMMENDED_TEMPLATES.reminder}
-                disabled={!hasWhatsAppChannel}
-              />
-              <p className="text-xs text-muted-foreground">Se envía para cada horario configurado abajo.</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Template de reprogramación</Label>
-                <TemplatePickerSelect
-                  templates={templates}
-                  value={rescheduleTemplateId}
-                  onChange={setRescheduleTemplateId}
-                  recommendedName={RECOMMENDED_TEMPLATES.reschedule}
-                  disabled={!hasWhatsAppChannel}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Template de cancelación</Label>
-                <TemplatePickerSelect
-                  templates={templates}
-                  value={cancellationTemplateId}
-                  onChange={setCancellationTemplateId}
-                  recommendedName={RECOMMENDED_TEMPLATES.cancellation}
-                  disabled={!hasWhatsAppChannel}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Template lista de espera</Label>
-              <TemplatePickerSelect
-                templates={templates}
-                value={waitlistTemplateId}
-                onChange={setWaitlistTemplateId}
-                recommendedName={RECOMMENDED_TEMPLATES.waitlist}
-                disabled={!hasWhatsAppChannel}
-              />
+      {/* Escotilla de salida: el prepago quedó fuera de la pantalla porque su
+          circuito de cobro no funciona, pero una org que ya lo tenía prendido
+          necesita poder salir de ahí. */}
+      {settings?.payment_mode === 'prepago' && (
+        <div className="flex flex-col gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-2.5">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-500" />
+            <div>
+              <p className="text-sm font-medium">Los turnos están pidiendo pago por adelantado</p>
               <p className="text-xs text-muted-foreground">
-                Se envía al primer cliente de la cola cuando se libera un turno.
+                Ese cobro no está operativo: los turnos quedan trabados en &ldquo;esperando pago&rdquo; y el
+                cliente nunca recibe la confirmación.
               </p>
             </div>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0"
+            disabled={forzarPagoPosterior}
+            onClick={() => setForzarPagoPosterior(true)}
+          >
+            {forzarPagoPosterior ? 'Listo, guardá los cambios' : 'Cobrar después del servicio'}
+          </Button>
+        </div>
+      )}
 
-            <Separator />
+      <EstadoTurnero
+        items={items}
+        linkPublico={slugSucursal ? `/turnos/${slugSucursal}` : null}
+        hayCambiosSinGuardar={hayCambios}
+      />
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Recordatorios programados</Label>
-                <span className="text-xs text-muted-foreground">
-                  {reminderHoursList.length} {reminderHoursList.length === 1 ? 'recordatorio' : 'recordatorios'}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Cada entrada envía un recordatorio X horas antes del turno.
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {reminderHoursList.length === 0 && (
-                  <span className="text-xs text-muted-foreground italic">Sin recordatorios configurados</span>
-                )}
-                {reminderHoursList.map(h => (
-                  <button
-                    key={h}
-                    type="button"
-                    onClick={() => removeReminderHour(h)}
-                    className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20"
-                  >
-                    {h}h antes
-                    <X className="h-3 w-3" />
-                  </button>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <Input
-                  type="number"
-                  min={1}
-                  max={168}
-                  placeholder="Ej: 24"
-                  value={newReminderHours}
-                  onChange={e => setNewReminderHours(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addReminderHour() } }}
-                  className="w-32"
-                />
-                <Button type="button" variant="outline" size="sm" onClick={addReminderHour}>
-                  <Plus className="mr-1 h-3.5 w-3.5" />
-                  Agregar
-                </Button>
-              </div>
+      <ModoOperacion sucursal={{ id: sucursalActiva.id, nombre: sucursalActiva.nombre }} modo={modoSucursal} />
+
+      <SemanaBarberos
+        barberos={estado.barberos}
+        agenda={estado.agenda}
+        jornada={jornada}
+        usaAgendaPorDia={usaAgendaPorDia}
+        diasHabilitados={estado.reglas.dias}
+        horarioLocal={{ inicio: estado.reglas.apertura, fin: estado.reglas.cierre }}
+        celdasSucias={cambiosAgenda.sucias}
+        onCambiarDia={cambiarDia}
+        onCambiarBarbero={cambiarBarbero}
+      />
+
+      <ReglasTurnero
+        valores={estado.reglas}
+        onCambiar={cambio => setEstado(prev => ({ ...prev, reglas: { ...prev.reglas, ...cambio } }))}
+        barberos={estado.barberos}
+        agenda={estado.agenda}
+        jornada={jornada}
+        usaAgendaPorDia={usaAgendaPorDia}
+        servicios={servicios}
+      />
+
+      <MensajesTurnero
+        valores={estado.mensajes}
+        onCambiar={cambio => setEstado(prev => ({ ...prev, mensajes: { ...prev.mensajes, ...cambio } }))}
+        templates={templates}
+        hayCanalWhatsApp={hasWhatsAppChannel}
+      />
+
+      <MarcaTurnero
+        valores={estado.marca}
+        onCambiar={cambio => setEstado(prev => ({ ...prev, marca: { ...prev.marca, ...cambio } }))}
+        org={org}
+        sucursales={sucursales.map(s => s.nombre)}
+      />
+
+      {/* Barra de guardado */}
+      {hayCambios && (
+        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-card/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
+            <p className="flex items-center gap-2 text-sm">
+              <span className="size-2 shrink-0 rounded-full bg-amber-500" />
+              <span className="text-muted-foreground">
+                {describirCambios(cambiosAgenda.sucias.size, barberosCambiados.length, reglasCambiadas)}
+              </span>
+            </p>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={descartar} disabled={guardando}>
+                <Undo2 className="mr-1.5 size-3.5" />
+                Descartar
+              </Button>
+              <Button onClick={guardar} disabled={guardando}>
+                {guardando ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />}
+                Guardar cambios
+              </Button>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Staff habilitado */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Staff habilitado</CardTitle>
-            <CardDescription>
-              Activá quiénes reciben turnos. &quot;Solo turnos&quot; oculta al barbero en la fila de walk-ins.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-5">
-              {branchGroups.map(([branchId, list]) => (
-                <div key={branchId} className="space-y-1">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    {branchName(branchId)}
-                  </p>
-                  <div className="space-y-1">
-                    {list.map(staff => {
-                      const state = staffStates[staff.id] ?? { enabled: false, walkinMode: 'both' as const }
-                      return (
-                        <div
-                          key={staff.id}
-                          className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-muted/50 transition-colors"
-                        >
-                          {staff.avatar_url ? (
-                            <Image src={staff.avatar_url} alt="" width={28} height={28} className="h-7 w-7 shrink-0 rounded-full object-cover" unoptimized />
-                          ) : (
-                            <div className="h-7 w-7 shrink-0 rounded-full bg-muted" />
-                          )}
-                          <span className="min-w-0 flex-1 truncate text-sm font-medium">{staff.full_name}</span>
-                          {state.enabled && (
-                            <Select
-                              value={state.walkinMode}
-                              onValueChange={(v) => handleWalkinModeChange(staff.id, v as AppointmentStaffWalkinMode)}
-                            >
-                              <SelectTrigger className="h-7 w-[150px] shrink-0 text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="both">Turnos + walk-in</SelectItem>
-                                <SelectItem value="appointments_only">Solo turnos</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          )}
-                          <Switch
-                            checked={state.enabled}
-                            onCheckedChange={(checked) => handleToggleStaff(staff.id, checked)}
-                            className="shrink-0"
-                          />
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
-              {allStaff.length === 0 && (
-                <p className="py-4 text-center text-sm text-muted-foreground">
-                  No hay barberos activos en la organización.
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Botón guardar sticky cuando hay cambios */}
-      {isDirty && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
-          <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <AlertCircle className="h-4 w-4 text-amber-500" />
-              Hay cambios sin guardar
-            </div>
-            <Button onClick={handleSave} disabled={isPending}>
-              {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-              Guardar cambios
-            </Button>
           </div>
         </div>
       )}
+
+      <AlertDialog open={!!confirmacion} onOpenChange={abierto => !abierto && setConfirmacion(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmacion?.titulo}</AlertDialogTitle>
+            <AlertDialogDescription>{confirmacion?.descripcion}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Volver</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                confirmacion?.accion()
+                setConfirmacion(null)
+              }}
+            >
+              {confirmacion?.etiqueta}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
+}
+
+/** "los martes", "los martes y los jueves", "los martes, los jueves y los sábados". */
+function listarDias(dias: number[]): string {
+  const nombres = dias.map(d => `los ${NOMBRES_DIAS[d].toLowerCase()}`)
+  if (nombres.length <= 1) return nombres[0] ?? ''
+  return `${nombres.slice(0, -1).join(', ')} y ${nombres[nombres.length - 1]}`
+}
+
+function describirCambios(dias: number, barberos: number, reglas: boolean): string {
+  const partes: string[] = []
+  if (dias) partes.push(`${dias} ${dias === 1 ? 'día' : 'días'} de agenda`)
+  if (barberos) partes.push(`${barberos} ${barberos === 1 ? 'barbero' : 'barberos'}`)
+  if (reglas) partes.push('reglas del turnero')
+  if (!partes.length) return 'Hay cambios sin guardar'
+  return `Sin guardar: ${partes.join(' · ')}`
 }

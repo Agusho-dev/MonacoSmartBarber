@@ -3,12 +3,13 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { CalendarDays, Cog, Palette, Link2 } from 'lucide-react'
+import { CalendarDays, Cog, Link2 } from 'lucide-react'
 
+// "Personalización" dejó de ser una pestaña: los colores del turnero son una
+// sección de Configuración (la ruta vieja redirige a ese ancla).
 const tabs = [
   { href: '/dashboard/turnos/agenda', label: 'Agenda', icon: CalendarDays },
   { href: '/dashboard/turnos/configuracion', label: 'Configuración', icon: Cog },
-  { href: '/dashboard/turnos/personalizacion', label: 'Personalización', icon: Palette },
   { href: '/dashboard/turnos/link-publico', label: 'Link público', icon: Link2 },
 ]
 

@@ -1,31 +1,13 @@
-import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
-import { getCurrentOrgId } from '@/lib/actions/org'
-import { currentUserCan } from '@/lib/actions/permissions-gate'
-import { getAppointmentSettings } from '@/lib/actions/appointments'
-import { createAdminClient } from '@/lib/supabase/server'
-import { PersonalizacionClient } from './personalizacion-client'
 
-export const dynamic = 'force-dynamic'
-
-export const metadata: Metadata = {
-  title: 'Personalización de Turnos | Monaco Smart Barber',
-}
-
-export default async function PersonalizacionPage() {
-  const orgId = await getCurrentOrgId()
-  if (!orgId) redirect('/login')
-
-  // Guard de permiso: hasta ahora `appointments.configure` sólo escondía el ítem
-  // del sidebar, pero entrar por URL directa mostraba todo igual.
-  if (!(await currentUserCan('appointments.configure'))) redirect('/dashboard')
-
-  const supabase = createAdminClient()
-
-  const [settings, { data: org }] = await Promise.all([
-    getAppointmentSettings(orgId),
-    supabase.from('organizations').select('name, slug, logo_url').eq('id', orgId).single(),
-  ])
-
-  return <PersonalizacionClient settings={settings} org={org ?? { name: '', slug: '', logo_url: null }} />
+/**
+ * La personalización del turnero (colores y saludo) pasó a ser una sección más
+ * de Configuración: eran dos campos en una pantalla propia y el dueño tenía que
+ * adivinar en cuál de las dos vivía cada cosa.
+ *
+ * La ruta se mantiene porque está linkeada desde el sub-nav y desde marcadores
+ * viejos; el ancla deja al visitante parado en la sección correspondiente.
+ */
+export default function PersonalizacionPage() {
+  redirect('/dashboard/turnos/configuracion#seccion-marca')
 }

@@ -17,6 +17,7 @@ import {
   startPendingBreakIfReady,
 } from '@/lib/actions/breaks'
 import { getTodayAppointmentsForStaff, markAppointmentInProgress } from '@/lib/actions/barber-turnos'
+import { getAppointmentQueueEntry } from '@/lib/actions/appointments'
 import type { Appointment, QueueEntry, Staff, Client, BreakConfig, StaffSchedule } from '@/lib/types/database'
 import { assignDynamicBarbers } from '@/lib/barber-utils'
 import {
@@ -26,6 +27,8 @@ import {
   protectionWindowMinutes,
 } from '@/lib/queue-appointments'
 import { BarberTimeline } from '@/components/barber/barber-timeline'
+import { AppointmentStrip } from '@/components/barber/appointment-strip'
+import { AppointmentDetailSheet } from '@/components/barber/appointment-detail-sheet'
 import { UpcomingAppointmentBanner } from '@/components/barber/upcoming-appointment-banner'
 import { NextAppointmentNotice } from '@/components/barber/next-appointment-notice'
 import { TurnoBadge } from '@/components/appointments/turno-badge'
@@ -71,6 +74,7 @@ import {
   EyeOff,
   Eye,
   MoreHorizontal,
+  CalendarDays,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
@@ -94,6 +98,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 
 interface BarberSession {
   staff_id: string
@@ -185,6 +195,14 @@ export function QueuePanel({
 
   const [directSaleOpen, setDirectSaleOpen] = useState(false)
   // (mobilePanelTab eliminado: no se usaba en el render)
+
+  // ── Turnos: tira compacta + agenda completa a demanda ──
+  // Turno abierto desde un chip de la tira (detalle + acciones).
+  const [stripAppointment, setStripAppointment] = useState<Appointment | null>(null)
+  // Agenda completa (el timeline) en una hoja a pantalla completa.
+  const [agendaSheetOpen, setAgendaSheetOpen] = useState(false)
+  // Turno cuyo `queue_entry` estamos cargando para poder cobrarlo.
+  const [loadingApptEntryId, setLoadingApptEntryId] = useState<string | null>(null)
 
   // Next client alert state
   const [nextClientAlertMinutes, setNextClientAlertMinutes] = useState(5)
@@ -747,20 +765,23 @@ export function QueuePanel({
     (e) => e.status === 'in_progress' && e.barber_id !== session.staff_id && !e.is_break
   )
 
-  // Turno próximo para el banner de conflicto (modo hybrid): dentro de los próximos 15 min
-  // y no está checked_in todavía.
+  // Turno próximo para el banner de alerta (modo hybrid): dentro de los próximos
+  // 15 min y sin registrar la llegada todavía.
+  //
+  // Va por `findNextAppointment` y no por `getHours()` del dispositivo: la hora
+  // del turno es hora de PARED de la sucursal. Y depende de `now` (el reloj de
+  // 5s del panel) porque antes sólo se recalculaba cuando cambiaba la lista de
+  // turnos — o sea cada 60s: el banner llegaba tarde a su propia alerta.
   const upcomingAppointmentForBanner = useMemo(() => {
     if (operationMode !== 'hybrid') return null
-    const nowDate = new Date()
-    const nowMinutes = nowDate.getHours() * 60 + nowDate.getMinutes()
-    return todayAppointments.find((a) => {
-      if (!['confirmed'].includes(a.status)) return false
-      const [h, m] = a.start_time.split(':').map(Number)
-      const apptMinutes = h * 60 + m
-      const diff = apptMinutes - nowMinutes
-      return diff >= 0 && diff <= 15
-    }) ?? null
-  }, [todayAppointments, operationMode])
+    const next = findNextAppointment(todayAppointments, now, timezone)
+    if (!next || next.appointment.status !== 'confirmed') return null
+    return next.minutesUntil <= 15 ? next.appointment : null
+  }, [todayAppointments, operationMode, now, timezone])
+
+  // La tira de turnos reemplaza al timeline dentro del panel en modo hybrid.
+  // Sin turnos hoy no ocupa un solo píxel: la cola walk-in es la pantalla.
+  const showAppointmentStrip = operationMode === 'hybrid' && todayAppointments.length > 0
 
   /**
    * Arranca un TURNO. NO pasa por `attendNextClient`.
@@ -793,6 +814,26 @@ export function QueuePanel({
     // timeline de los modos appointments/hybrid quedaba hasta 60s atrasado.
     refreshAppointments()
     setActionLoading(null)
+  }
+
+  /**
+   * Cobrar un turno desde la hoja de detalle: el cobro es el MISMO flujo que el
+   * walk-in (`CompleteServiceDialog`), así que sólo hay que resolver la entrada
+   * de fila que `check_in_appointment` creó para ese turno.
+   */
+  async function handleCompleteAppointment(appointment: Appointment) {
+    if (!appointment.queue_entry_id) {
+      toast.error('Este turno todavía no entró a la fila. Registrá la llegada primero.')
+      return
+    }
+    setLoadingApptEntryId(appointment.id)
+    const entry = await getAppointmentQueueEntry(appointment.id)
+    setLoadingApptEntryId(null)
+    if (!entry) {
+      toast.error('No se pudo cargar la entrada de fila de este turno')
+      return
+    }
+    setCompletingEntry(entry as QueueEntry)
   }
 
   async function handleStartService(entryId: string) {
@@ -1247,8 +1288,12 @@ export function QueuePanel({
     )
   }
   return (
+    // 5rem = el `pb-20` de `/barbero/layout.tsx`, que reserva el lugar de la nav
+    // fija. Con 4rem el documento medía 1rem más que la ventana: la página
+    // scrolleaba sola y el contenido se metía debajo del header sticky (así se
+    // veía cortado el resumen de turnos contra el borde de arriba).
     <div
-      className="flex h-[calc(100dvh-4rem)] flex-col bg-background"
+      className="flex h-[calc(100dvh-5rem)] flex-col bg-background"
       onPointerDown={primeAudioContext}
     >
       {/* Top bar */}
@@ -1433,6 +1478,23 @@ export function QueuePanel({
           isIdle={!myActiveEntry && !myActiveBreak}
           appointmentWaitingInQueue={!!myWaitingAppointment}
           waitingWalkIns={myWaitingWalkInsCount}
+          // Con la tira a la vista, el próximo turno ya está anunciado: acá sólo
+          // queda el aviso que la tira no puede dar (la fila dejó de entregar).
+          onlyWhenBlocking={showAppointmentStrip}
+        />
+      )}
+
+      {/* ── MODO HYBRID: los turnos son una franja de 72px, no medio panel ──
+          Va afuera del <main> a propósito: en `sm:` el main pasa a `flex-row`
+          (fila + cliente actual, lado a lado) y la tira tiene que cruzar el
+          ancho completo por encima de los dos. */}
+      {showAppointmentStrip && (
+        <AppointmentStrip
+          appointments={todayAppointments}
+          nowMs={now}
+          timeZone={timezone}
+          onSelectAppointment={setStripAppointment}
+          onOpenAgenda={() => setAgendaSheetOpen(true)}
         />
       )}
 
@@ -1448,63 +1510,12 @@ export function QueuePanel({
           </div>
         )}
 
-        {/* ── MODO HYBRID: timeline (60%) + cola walk-in (40%) ── */}
-        {operationMode === 'hybrid' && (
-          <>
-            {/* Timeline de turnos */}
-            <div className="flex flex-col overflow-hidden sm:flex-[3]">
-              <BarberTimeline
-                session={session}
-                initialAppointments={appointments}
-              />
-            </div>
-
-            {/* Cola walk-in lateral */}
-            <div className="flex flex-col overflow-hidden border-t sm:border-t-0 sm:border-l sm:flex-[2]">
-              <div className="shrink-0 border-b px-3 py-2 bg-card/60">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  Cola walk-in
-                </p>
-              </div>
-              <div className="flex-1 overflow-y-auto">
-                <div className="space-y-2 p-3">
-                  {loading ? (
-                    Array.from({ length: 2 }).map((_, i) => (
-                      <div key={i} className="h-16 rounded-xl bg-muted animate-pulse" />
-                    ))
-                  ) : myWaitingEntries.length === 0 ? (
-                    renderEmptyQueue()
-                  ) : (
-                    myWaitingEntries.map((e) => renderQueueEntry(e, false))
-                  )}
-                  {!loading && renderInProgressOthers()}
-                </div>
-              </div>
-              {(myActiveEntry || myActiveBreak) && (
-                <div className="shrink-0 border-t p-3">
-                  {myActiveBreak ? (
-                    <ActiveBreakCard
-                      startedAt={myActiveBreak.started_at}
-                      durationMinutes={breakDurationMinutes}
-                      onComplete={handleCompleteBreak}
-                      actionLoading={actionLoading === myActiveBreak.id}
-                    />
-                  ) : myActiveEntry ? (
-                    <ActiveClientCard
-                      entry={myActiveEntry}
-                      variant="mobile"
-                      onComplete={() => setCompletingEntry(myActiveEntry)}
-                      actionLoading={actionLoading === myActiveEntry.id}
-                    />
-                  ) : null}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* ── MODO WALK_IN: layout original sin cambios ── */}
-        {operationMode === 'walk_in' && (
+        {/* ── MODO WALK_IN e HYBRID: la cola ES la pantalla ──
+            Hybrid usa exactamente el mismo layout que walk_in (el que las tres
+            sucursales productivas usan todo el día) y suma los turnos arriba en
+            la tira. El split 60/40 anterior le daba al timeline dos tercios del
+            alto de una tablet vertical incluso con la agenda vacía. */}
+        {operationMode !== 'appointments' && (
           <>
         {/* ── MOBILE: unified layout ── */}
         <div className="flex flex-1 flex-col overflow-hidden sm:hidden bg-background">
@@ -1532,7 +1543,9 @@ export function QueuePanel({
                     {allWaitingEntries.filter((e) => !e.is_break).length}
                   </Badge>
                 </TabsTrigger>
-                {appointments.length > 0 && (
+                {/* En hybrid los turnos viven en la tira de arriba: una pestaña
+                    más diciendo lo mismo sólo roba ancho a "Mi fila". */}
+                {operationMode === 'walk_in' && appointments.length > 0 && (
                   <TabsTrigger value="appointments" className="flex-1 text-sm h-9">
                     Turnos
                     <Badge variant="secondary" className="ml-2 px-1.5 py-0 min-w-5 h-5 flex items-center justify-center text-[11px] font-bold shadow-sm bg-background">
@@ -1575,7 +1588,7 @@ export function QueuePanel({
                 </div>
               </ScrollArea>
             </TabsContent>
-            {appointments.length > 0 && (
+            {operationMode === 'walk_in' && appointments.length > 0 && (
               <TabsContent value="appointments" className="mt-0 flex-1 overflow-hidden bg-muted/10">
                 <div className="h-full overflow-hidden">
                   <BarberTimeline
@@ -1720,7 +1733,7 @@ export function QueuePanel({
         </section>
           </>
         )}
-        {/* ── FIN MODO WALK_IN ── */}
+        {/* ── FIN MODO WALK_IN / HYBRID ── */}
       </main>
 
       {/* Next client waiting warning overlay */}
@@ -1744,8 +1757,54 @@ export function QueuePanel({
           // en la silla (incidente Fabrizio/Santino vela, 2026-05-09).
           await fetchQueue()
           await refreshStats()
+          // El cobro puede haber cerrado un TURNO: sin esto la tira seguía
+          // mostrándolo "En curso" hasta el refresco de 60s. En walk_in no hay
+          // agenda que refrescar, así que no gastamos la query.
+          if (operationMode !== 'walk_in') refreshAppointments()
         }}
       />
+
+      {/* Detalle del turno tocado en la tira: registrar llegada, iniciar,
+          avisar, marcar ausente y cobrar. Es la MISMA hoja que usa el timeline. */}
+      <AppointmentDetailSheet
+        appointment={stripAppointment}
+        staffId={session.staff_id}
+        branchId={session.branch_id}
+        onClose={() => setStripAppointment(null)}
+        onOpenCompleteDialog={handleCompleteAppointment}
+        onActionDone={() => {
+          refreshAppointments()
+          // "Registrar llegada" crea la entrada de fila: la cola tiene que
+          // reflejarlo sin esperar al evento de Realtime.
+          fetchQueue()
+        }}
+      />
+
+      {/* Agenda completa a demanda. El timeline no se borró: se dejó de tener
+          medio panel reservado para él y se abre cuando el barbero lo pide. */}
+      <Sheet open={agendaSheetOpen} onOpenChange={setAgendaSheetOpen}>
+        <SheetContent side="bottom" className="h-[92dvh] gap-0 p-0">
+          <SheetHeader className="shrink-0 border-b px-4 py-3">
+            <SheetTitle className="flex items-center gap-2 text-base">
+              <CalendarDays className="size-4 text-muted-foreground" />
+              Agenda de hoy
+            </SheetTitle>
+          </SheetHeader>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <BarberTimeline session={session} initialAppointments={todayAppointments} />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Carga de la entrada de fila del turno antes de abrir el cobro */}
+      {loadingApptEntryId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            Cargando...
+          </div>
+        </div>
+      )}
 
       <DirectSaleDialog
         open={directSaleOpen}

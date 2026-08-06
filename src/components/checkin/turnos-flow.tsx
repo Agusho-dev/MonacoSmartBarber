@@ -69,6 +69,24 @@ export interface NewClientPrefill {
   name: string
 }
 
+/**
+ * Identidad ya resuelta que este flujo le entrega a la fila walk-in.
+ *
+ * El cliente que llega acá YA dio su teléfono (o puso la cara) y, si era nuevo,
+ * su nombre. Mandarlo a la fila sin esos datos lo obligaba a empezar de cero
+ * desde "¿Estás registrado?" — nadie completaba eso dos veces, así que el 95%
+ * del negocio (walk-in) se perdía en el híbrido.
+ */
+export interface WalkInHandoff {
+  /** 10 dígitos. Puede venir vacío si el cliente ya existe (alcanza `clientId`). */
+  phone: string
+  name: string
+  /** Ya existía en `clients`: la fila no le vuelve a ofrecer el alta. */
+  isReturning: boolean
+  /** Ficha del cliente cuando la conocemos: evita el find-or-create por teléfono. */
+  clientId?: string | null
+}
+
 interface TurnosCheckinFlowProps {
   branchId: string
   branchName: string
@@ -82,8 +100,8 @@ interface TurnosCheckinFlowProps {
   canBook: boolean
   /** Abre el sub-flujo de reserva; el prefill evita re-tipear teléfono y nombre. */
   onBook: (prefill?: NewClientPrefill) => void
-  /** Sólo hybrid: manda al flujo walk-in. */
-  onWalkIn: () => void
+  /** Sólo hybrid: manda al flujo walk-in con la identidad ya resuelta. */
+  onWalkIn: (datos?: WalkInHandoff) => void
   /** Vuelve el kiosko a cero (lo remonta desde el padre). */
   onReset: () => void
   onChangeBranch: () => void
@@ -365,6 +383,31 @@ export function TurnosCheckinFlow({
     setViaCamara(false)
     irA('phone')
   }, [irA])
+
+  // ── Salida hacia la fila (sólo hybrid) ──
+
+  /**
+   * Arma el traspaso a la fila con lo que ya sabemos del cliente.
+   *
+   * Dos identidades posibles, y cada una necesita cosas distintas:
+   *  - Cliente ya registrado (`clientId`): la fila lo anota por id, el teléfono
+   *    es decorativo. Por eso alcanza con el id aunque el número guardado en
+   *    `clients` venga con prefijo internacional y `toLocalPhone` lo haya dejado
+   *    vacío (pasa con ~50 fichas en prod).
+   *  - Cliente nuevo: la fila lo tiene que crear, y para eso van sí o sí nombre
+   *    y teléfono completo. Sin eso devolvemos `undefined` y la fila arranca de
+   *    cero, que es feo pero honesto: no podemos inventarle un número.
+   */
+  const datosParaLaFila = useCallback((): WalkInHandoff | undefined => {
+    const nombre = (clientName || appointment?.client_name || '').trim()
+    const tel = phone.replace(/\D/g, '')
+    if (!clientId && (nombre.length < 2 || tel.length !== PHONE_LENGTH)) return undefined
+    return { phone: tel, name: nombre, isReturning: Boolean(clientId), clientId }
+  }, [clientName, appointment, phone, clientId])
+
+  const entrarALaFila = useCallback(() => {
+    onWalkIn(datosParaLaFila())
+  }, [onWalkIn, datosParaLaFila])
 
   // ── Handlers del paso "tiene turno" ──
 
@@ -905,7 +948,7 @@ export function TurnosCheckinFlow({
 
         <div className="w-full flex flex-col gap-3">
           {esHybrid &&
-            botonPrimario('Entrar a la fila', onWalkIn, {
+            botonPrimario('Entrar a la fila', entrarALaFila, {
               icon: <Zap className="size-6" fill="currentColor" />,
             })}
 
@@ -963,7 +1006,7 @@ export function TurnosCheckinFlow({
 
         <div className="w-full flex flex-col gap-3">
           {esHybrid &&
-            botonPrimario('Entrar a la fila mientras tanto', onWalkIn, {
+            botonPrimario('Entrar a la fila mientras tanto', entrarALaFila, {
               icon: <Zap className="size-6" fill="currentColor" />,
             })}
           {botonSecundario('Listo, vuelvo después', onReset, <CheckCircle2 className="size-5" />)}
@@ -993,7 +1036,7 @@ export function TurnosCheckinFlow({
 
         <div className="w-full flex flex-col gap-3">
           {esHybrid &&
-            botonPrimario('Entrar a la fila', onWalkIn, {
+            botonPrimario('Entrar a la fila', entrarALaFila, {
               icon: <Zap className="size-6" fill="currentColor" />,
             })}
           {botonSecundario('Avisar en el mostrador', onReset, <Users className="size-5" />)}
