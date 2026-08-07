@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { User, Phone, ShieldCheck } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { glassPanel } from '../glass'
 
 interface Props {
   name: string
@@ -23,8 +25,9 @@ const PHONE_REGEX = /^\+?[\d\s\-]{8,15}$/
  * tokens del tema en vez de tocar `src/components/ui/`, que es compartido.
  */
 const INPUT_CLASS =
-  'h-13 rounded-xl border bg-[var(--t-surface)] text-base text-[var(--t-text)] ' +
+  'h-13 rounded-xl border bg-[var(--t-glass-bg)] backdrop-blur-xl text-base text-[var(--t-text)] ' +
   'placeholder:text-[var(--t-text-faint)] border-[var(--t-text-faint)] ' +
+  'shadow-[var(--t-glass-shadow)] transition-[border-color,box-shadow] duration-200 ' +
   'focus-visible:border-[var(--t-accent)] focus-visible:ring-[var(--t-ring)] ' +
   'aria-invalid:border-[var(--t-danger)]'
 
@@ -46,7 +49,7 @@ export function ContactStep({
   return (
     <div className="space-y-5">
       {/* Nombre */}
-      <div className="space-y-2">
+      <div className="t-rise space-y-2" style={{ '--t-i': 0 } as React.CSSProperties}>
         <label
           htmlFor="contact-name"
           className="flex items-center gap-1.5 text-sm font-semibold text-[var(--t-text)]"
@@ -74,7 +77,7 @@ export function ContactStep({
       </div>
 
       {/* Teléfono */}
-      <div className="space-y-2">
+      <div className="t-rise space-y-2" style={{ '--t-i': 2 } as React.CSSProperties}>
         <label
           htmlFor="contact-phone"
           className="flex items-center gap-1.5 text-sm font-semibold text-[var(--t-text)]"
@@ -107,14 +110,14 @@ export function ContactStep({
 
       {/* Política de cancelación */}
       <div
-        className="flex items-start gap-3 rounded-2xl border p-4"
-        style={{ backgroundColor: 'var(--t-surface)', borderColor: 'var(--t-border)' }}
+        className={cn(glassPanel, 't-rise flex items-start gap-3 p-4')}
+        style={{ '--t-i': 4 } as React.CSSProperties}
       >
         <Checkbox
           id="cancel-policy"
           checked={accepted}
           onCheckedChange={val => onChange('accepted', Boolean(val))}
-          className="mt-0.5 size-5 rounded-[6px] border-[var(--t-text-faint)] bg-[var(--t-surface-alt)] data-[state=checked]:border-[var(--t-primary)] data-[state=checked]:bg-[var(--t-primary)] data-[state=checked]:text-[var(--t-on-primary)] focus-visible:border-[var(--t-accent)] focus-visible:ring-[var(--t-ring)]"
+          className="mt-0.5 size-5 rounded-[6px] border-[var(--t-text-faint)] bg-[var(--t-glass-inner)] transition-[background-color,border-color] duration-200 data-[state=checked]:border-[var(--t-primary)] data-[state=checked]:bg-[var(--t-primary)] data-[state=checked]:text-[var(--t-on-primary)] focus-visible:border-[var(--t-accent)] focus-visible:ring-[var(--t-ring)]"
         />
         {/* El Label de shadcn trae `flex items-center gap-2`: metiendo texto rico
             adentro, cada corrida de texto se volvía un flex item y el párrafo se

@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { RotateCw } from 'lucide-react'
 import { toDateStr } from '@/lib/time-utils'
+import { cn } from '@/lib/utils'
+import { glassInteractive } from '../glass'
 import { diasDeVentana } from '../ventana'
+
+/** Tope del escalonado: la tira puede tener 30 días, no puede tardar un segundo. */
+const STAGGER_MAX = 9
 
 const DIAS_ABREV = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB']
 const MESES = [
@@ -94,7 +99,7 @@ export function DayStrip({
               {bloque.label}
             </span>
             <div className="flex gap-2">
-              {bloque.days.map(d => {
+              {bloque.days.map((d, i) => {
                 const str = toDateStr(d)
                 const habilitado = enabledDays.includes(d.getDay())
                 const sinCupo = habilitado && fullDates.has(str)
@@ -120,23 +125,28 @@ export function DayStrip({
                           ? ', no pudimos consultar, tocá para reintentar'
                           : ''
                     }`}
-                    className="flex h-[84px] w-[62px] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl border transition-[background-color,border-color,transform] duration-150 disabled:cursor-not-allowed enabled:active:scale-95"
+                    className={cn(
+                      glassInteractive,
+                      't-rise flex h-[84px] w-[62px] shrink-0 flex-col items-center justify-center gap-1',
+                      'disabled:pointer-events-none'
+                    )}
                     style={{
-                      backgroundColor: seleccionado
-                        ? 'var(--t-primary)'
-                        : habilitado
-                          ? 'var(--t-surface)'
-                          : 'transparent',
-                      borderColor: seleccionado
-                        ? 'var(--t-primary)'
-                        : 'var(--t-border)',
+                      '--t-i': Math.min(i, STAGGER_MAX),
+                      // El día elegido se despega de la tira: relleno primario,
+                      // un pelo más grande y halo del acento.
+                      backgroundColor: seleccionado ? 'var(--t-primary)' : undefined,
+                      borderColor: seleccionado ? 'var(--t-primary)' : undefined,
                       color: seleccionado
                         ? 'var(--t-on-primary)'
                         : habilitado
                           ? 'var(--t-text)'
                           : 'var(--t-text-faint)',
-                      opacity: habilitado ? (sinCupo ? 0.62 : 1) : 0.38,
-                    }}
+                      transform: seleccionado ? 'scale(1.04)' : undefined,
+                      boxShadow: seleccionado
+                        ? '0 12px 30px -12px var(--t-ring), var(--t-glass-shadow)'
+                        : undefined,
+                      opacity: habilitado ? (sinCupo ? 0.62 : 1) : 0.34,
+                    } as React.CSSProperties}
                   >
                     <span className="text-[10px] font-bold uppercase tracking-wider opacity-70">
                       {DIAS_ABREV[d.getDay()]}

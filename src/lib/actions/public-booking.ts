@@ -52,6 +52,14 @@ export interface PublicBookingResult {
   appointment_id: string
   cancellation_token: string
   barber_name: string | null
+  /**
+   * El cliente ya tiene una cara enrolada, así que la cámara de la tablet lo va
+   * a reconocer. Define qué instrucción de llegada se le muestra: mirar la
+   * cámara, o marcar que no está registrado y poner el teléfono.
+   */
+  client_has_face: boolean
+  /** Primera reserva con este teléfono en la organización. */
+  client_is_new: boolean
 }
 
 // ─── Lookup de sucursal por slug ────────────────────────────────────
@@ -248,6 +256,8 @@ export async function publicBookAppointment(
       appointment_id: appt.id,
       cancellation_token: appt.cancellation_token,
       barber_name: null, // se resuelve en el cliente a partir del staff seleccionado
+      client_has_face: 'clientHasFace' in result ? !!result.clientHasFace : false,
+      client_is_new: 'clientIsNew' in result ? !!result.clientIsNew : true,
     },
   }
 }

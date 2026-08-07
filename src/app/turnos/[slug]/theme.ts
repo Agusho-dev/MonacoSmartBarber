@@ -211,6 +211,43 @@ function readableFill(
   return mejor
 }
 
+// ─── Vidrio ──────────────────────────────────────────────────────────
+
+/** Un color que se pinta encima de una capa, con su mínimo WCAG. */
+interface Requisito {
+  color: RGB
+  min: number
+}
+
+/** true si TODOS los requisitos se cumplen sobre `capa`. */
+function capaLegible(capa: RGB, reqs: Requisito[]): boolean {
+  return reqs.every(r => contrastRatio(r.color, capa) >= r.min)
+}
+
+/**
+ * Mayor opacidad de `tint` que sigue siendo legible sobre TODAS las bases.
+ *
+ * El vidrio no es un color más: es una capa TRANSLÚCIDA, así que lo que ve el
+ * ojo es la composición con lo que tiene detrás. Elegir la opacidad a ojo (el
+ * `bg-white/[0.04]` del kiosko) puede hundir el texto que va encima por debajo
+ * del mínimo sin que nadie lo note, porque el color del texto nunca cambió.
+ *
+ * Se prueba de la opacidad más marcada a la más sutil y se queda la primera que
+ * pasa. Devolver 0 es un resultado válido: el relleno desaparece pero el borde,
+ * la línea de luz y la sombra siguen dibujando la tarjeta.
+ */
+function alphaLegible(
+  tint: RGB,
+  bases: RGB[],
+  candidatos: number[],
+  reqs: Requisito[]
+): number {
+  for (const a of candidatos) {
+    if (bases.every(base => capaLegible(mix(base, tint, a), reqs))) return a
+  }
+  return 0
+}
+
 /**
  * Devuelve `color` si ya se lee sobre todas las capas; si no, lo empuja hacia
  * el extremo legible (blanco en temas oscuros, casi-negro en claros) hasta que
@@ -279,6 +316,42 @@ export interface TurneroTheme {
   dangerText: string
   /** true si el fondo es oscuro. Útil para sombras y estados hover. */
   isDark: boolean
+
+  // ── Vidrio ──
+  /** Relleno translúcido de un panel de vidrio. Va con `backdrop-filter`. */
+  glassBg: string
+  /** Mismo relleno, un escalón más denso, para hover. */
+  glassBgHover: string
+  /** Caja anidada DENTRO de un panel de vidrio (un escalón más de elevación). */
+  glassInner: string
+  /** Borde de 1px del vidrio. */
+  glassBorder: string
+  /** Borde en hover / estado activo. */
+  glassBorderStrong: string
+  /** Línea de luz que corre por el borde superior. */
+  glassHighlight: string
+  /** `box-shadow` completo del panel en reposo. */
+  glassShadow: string
+  /** `box-shadow` completo del panel elevado. */
+  glassShadowHover: string
+  /**
+   * Fondo del header/footer pegajosos: el color de página con alpha, para que
+   * el contenido pase por debajo difuminado sin que el texto del chrome pierda
+   * contraste contra lo que sea que esté scrolleando atrás.
+   */
+  chromeBg: string
+  /**
+   * Manchas de luz del fondo. Sin algo detrás, el `backdrop-filter` del vidrio
+   * no se percibe: sobre un color plano no hay nada que desenfocar.
+   */
+  glow1: string
+  glow2: string
+  /**
+   * Cada superficie compuesta que el sistema de vidrio puede producir, en hex.
+   * No se emite como CSS: existe para que `theme.check.mts` valide el contraste
+   * contra TODAS ellas sin tener que replicar la derivación.
+   */
+  glassLayers: string[]
 }
 
 export interface BrandColors {
@@ -313,8 +386,16 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
 
   // La escala apagada se deriva del texto ya validado, no de una opacidad fija:
   // `opacity: 0.5` sobre un fondo de luminancia parecida es texto invisible.
-  const textMuted = fadeWhileLegible(text, surface, layers, AA_TEXT)
-  const textFaint = fadeWhileLegible(text, surface, layers, AA_LARGE)
+  //
+  // Se pide un 6% MÁS que el mínimo a propósito. `fadeWhileLegible` devuelve el
+  // gris más suave que todavía pasa, o sea que aterriza pegado a 4.5:1 y deja
+  // cero presupuesto para las capas TRANSLÚCIDAS que vienen después (vidrio,
+  // manchas de luz): cualquiera de ellas hundía el texto apagado por debajo del
+  // mínimo. Con esta holgura el vidrio existe; sin ella la pantalla es plana.
+  // Lo emitido sigue cumpliendo 4.5 y 3 con margen, nunca menos.
+  const HOLGURA_CAPAS = 1.10
+  const textMuted = fadeWhileLegible(text, surface, layers, AA_TEXT * HOLGURA_CAPAS)
+  const textFaint = fadeWhileLegible(text, surface, layers, AA_LARGE * HOLGURA_CAPAS)
 
   const border = mix(surface, text, 0.16)
 
@@ -335,6 +416,120 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
   const dangerBg = parseHex(isDark ? '#3f1416' : '#fef2f2')!
   const dangerText = parseHex(isDark ? '#fecaca' : '#b91c1c')!
 
+  // ─── Vidrio y ambiente ────────────────────────────────────────────
+  //
+  // Todo lo que sigue son CAPAS TRANSLÚCIDAS, así que se derivan DESPUÉS de la
+  // escala de texto y se acomodan a ella: el presupuesto de "cuánto puedo
+  // aclarar el fondo" ya quedó gastado por `textMuted`, que en fondos de
+  // luminancia media (el #606060 del dueño) queda al filo de 4.5:1. Al revés
+  // —vidrio primero, texto después— un tema podía quedarse sin ningún color de
+  // texto legible sobre todas sus superficies.
+
+  const reqs: Requisito[] = [
+    { color: text, min: AA_TEXT },
+    { color: textMuted, min: AA_TEXT },
+    { color: textFaint, min: AA_LARGE },
+    { color: primary, min: AA_LARGE },
+    { color: accent, min: AA_TEXT },
+  ]
+
+  // En tema oscuro el vidrio es blanco a baja opacidad; en tema claro es blanco
+  // casi sólido (la elevación la termina de contar la sombra).
+  const ESCALA_OSCURA = [0.16, 0.14, 0.12, 0.1, 0.08, 0.06, 0.05, 0.04, 0.03, 0.02]
+  const ESCALA_CLARA = [0.86, 0.8, 0.72, 0.64, 0.56, 0.48, 0.4, 0.32, 0.24, 0.16, 0.08]
+
+  let glassTint = WHITE
+  let glassAlpha = alphaLegible(WHITE, [bg], isDark ? ESCALA_OSCURA : ESCALA_CLARA, reqs)
+  if (glassAlpha === 0) {
+    // Fondo que ya no admite más luz (gris medio con texto blanco): antes de
+    // resignar el efecto se prueba el vidrio ahumado, que oscurece en vez de
+    // aclarar y también se lee como vidrio.
+    const humo = alphaLegible(BLACK, [bg], ESCALA_OSCURA, reqs)
+    if (humo > 0) {
+      glassTint = BLACK
+      glassAlpha = humo
+    }
+  }
+
+  const ESCALA_HOVER = (isDark
+    ? [0.24, 0.22, 0.2, 0.18, 0.16, 0.14, 0.12, 0.1, 0.08, 0.06, 0.05, 0.04, 0.03]
+    : [0.96, 0.92, 0.88, 0.84, 0.8, 0.72, 0.64, 0.56, 0.48, 0.4, 0.32, 0.24, 0.16]
+  ).filter(a => a > glassAlpha)
+  const glassAlphaHover = Math.max(
+    glassAlpha,
+    alphaLegible(glassTint, [bg], ESCALA_HOVER, reqs)
+  )
+
+  // La mancha de luz lleva el matiz CRUDO de la marca (es puro ambiente, no
+  // tiene texto propio encima) pero se valida contra el texto que sí cae sobre
+  // ella y contra el vidrio que se le apoya arriba.
+  const ESCALA_GLOW = [0.18, 0.15, 0.12, 0.1, 0.08, 0.06, 0.05, 0.04, 0.03, 0.02]
+  let glowAlpha = 0
+  for (const a of ESCALA_GLOW) {
+    const solido = mix(bg, brandPrimary, a)
+    const debil = mix(bg, brandPrimary, a * 0.62)
+    const capas = [solido, debil].flatMap(base => [
+      base,
+      mix(base, glassTint, glassAlpha),
+      mix(base, glassTint, glassAlphaHover),
+    ])
+    if (capas.every(c => capaLegible(c, reqs))) {
+      glowAlpha = a
+      break
+    }
+  }
+  const glowSolid = mix(bg, brandPrimary, glowAlpha)
+
+  // Caja anidada dentro de un panel: en tema oscuro sube un escalón de luz, en
+  // claro baja uno (sobre blanco casi sólido, más blanco no existe).
+  const innerTint = isDark ? WHITE : NEAR_BLACK
+  const basesVidrio = [
+    mix(bg, glassTint, glassAlpha),
+    mix(glowSolid, glassTint, glassAlpha),
+  ]
+  const innerAlpha = alphaLegible(
+    innerTint,
+    basesVidrio,
+    [0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02],
+    reqs
+  )
+
+  // Velo del header/footer: el contenido scrollea POR DEBAJO, así que lo que
+  // queda atrás puede ser cualquier color. Se busca el velo más transparente
+  // que aguante el peor caso posible (blanco puro y negro puro detrás).
+  let chromeAlpha = 1
+  for (const a of [0.84, 0.88, 0.9, 0.92, 0.94, 0.96, 0.98]) {
+    if ([mix(WHITE, bg, a), mix(BLACK, bg, a)].every(c => capaLegible(c, reqs))) {
+      chromeAlpha = a
+      break
+    }
+  }
+
+  const bordeTint = isDark ? WHITE : text
+  const sombra = isDark
+    ? '0 14px 38px -18px rgba(0,0,0,0.75), 0 2px 8px -4px rgba(0,0,0,0.45)'
+    : '0 12px 32px -16px rgba(15,23,42,0.28), 0 2px 6px -3px rgba(15,23,42,0.10)'
+  const sombraHover = isDark
+    ? '0 22px 48px -18px rgba(0,0,0,0.85), 0 3px 10px -4px rgba(0,0,0,0.5)'
+    : '0 20px 44px -16px rgba(15,23,42,0.34), 0 3px 8px -3px rgba(15,23,42,0.14)'
+
+  // Todas las superficies compuestas que puede generar el sistema, para que el
+  // chequeo las barra sin volver a derivarlas.
+  const glassLayers = [
+    glowSolid,
+    mix(bg, brandPrimary, glowAlpha * 0.62),
+    ...[bg, glowSolid].flatMap(base => {
+      const vidrio = mix(base, glassTint, glassAlpha)
+      return [
+        vidrio,
+        mix(base, glassTint, glassAlphaHover),
+        mix(vidrio, innerTint, innerAlpha),
+      ]
+    }),
+    mix(WHITE, bg, chromeAlpha),
+    mix(BLACK, bg, chromeAlpha),
+  ]
+
   return {
     bg: toHex(bg),
     surface: toHex(surface),
@@ -351,6 +546,19 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
     dangerBg: toHex(dangerBg),
     dangerText: toHex(dangerText),
     isDark,
+
+    glassBg: rgba(glassTint, glassAlpha),
+    glassBgHover: rgba(glassTint, glassAlphaHover),
+    glassInner: rgba(innerTint, innerAlpha),
+    glassBorder: rgba(bordeTint, isDark ? 0.2 : 0.12),
+    glassBorderStrong: rgba(bordeTint, isDark ? 0.36 : 0.26),
+    glassHighlight: rgba(WHITE, isDark ? 0.45 : 0.95),
+    glassShadow: sombra,
+    glassShadowHover: sombraHover,
+    chromeBg: rgba(bg, chromeAlpha),
+    glow1: rgba(brandPrimary, glowAlpha),
+    glow2: rgba(brandPrimary, Math.round(glowAlpha * 0.62 * 1000) / 1000),
+    glassLayers: glassLayers.map(toHex),
   }
 }
 
@@ -374,5 +582,16 @@ export function themeVars(t: TurneroTheme): CSSProperties {
     '--t-danger': t.danger,
     '--t-danger-bg': t.dangerBg,
     '--t-danger-text': t.dangerText,
+    '--t-glass-bg': t.glassBg,
+    '--t-glass-bg-hover': t.glassBgHover,
+    '--t-glass-inner': t.glassInner,
+    '--t-glass-border': t.glassBorder,
+    '--t-glass-border-strong': t.glassBorderStrong,
+    '--t-glass-highlight': t.glassHighlight,
+    '--t-glass-shadow': t.glassShadow,
+    '--t-glass-shadow-hover': t.glassShadowHover,
+    '--t-chrome-bg': t.chromeBg,
+    '--t-glow-1': t.glow1,
+    '--t-glow-2': t.glow2,
   } as CSSProperties
 }

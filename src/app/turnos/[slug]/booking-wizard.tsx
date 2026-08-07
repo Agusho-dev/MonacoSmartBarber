@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import Image from 'next/image'
 import { ChevronLeft, Loader2, MapPin, Phone, Scissors } from 'lucide-react'
 import { publicBookAppointment } from '@/lib/actions/public-booking'
@@ -10,9 +10,11 @@ import { ContactStep } from './wizard/contact-step'
 import { ConfirmationStep } from './wizard/confirmation-step'
 import { StepProgress } from './wizard/step-progress'
 import { buildTurneroTheme, themeVars } from './theme'
+import { TurneroAmbient, TurneroStyles, glassInteractive } from './glass'
 import { diasDeVentana } from './ventana'
 import { formatCurrency } from '@/lib/format'
 import { toDateStr } from '@/lib/time-utils'
+import { cn } from '@/lib/utils'
 import type { PublicService, PublicStaff } from '@/lib/actions/public-booking'
 
 // ─── Tipos de props ──────────────────────────────────────────────────
@@ -82,7 +84,11 @@ function notificarAppMobile(appointmentId: string) {
   try {
     const url = new URL(window.location.href)
     url.searchParams.set('booking', 'success')
-    window.history.replaceState(null, '', url.toString())
+    // El primer argumento va con el state ACTUAL, no `null`: ahí vive el paso
+    // del wizard que usa el botón físico de atrás del celular. Pisarlo con null
+    // dejaba la última entrada del historial sin marca y el gesto de volver se
+    // salía del turnero en vez de retroceder de paso.
+    window.history.replaceState(window.history.state, '', url.toString())
   } catch {
     // No-op
   }
@@ -115,6 +121,11 @@ const STEP_TITLES: Record<WizardStep, string> = {
   confirmation: '',
 }
 
+/** Marca que el wizard deja en cada entrada del historial del navegador. */
+interface EstadoHistorial {
+  turneroStep?: number
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 function isValidName(name: string): boolean {
@@ -142,6 +153,8 @@ function mapErrorCode(code: string): string {
 
 export function BookingWizard({ branch, services, staff, settings, branding, prefill }: Props) {
   const [step, setStep] = useState<WizardStep>('services')
+  /** Dirección de la última navegación: decide de qué lado entra el contenido. */
+  const [direccion, setDireccion] = useState<'adelante' | 'atras'>('adelante')
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([])
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined)
   const [selectedSlot, setSelectedSlot] = useState<SlotSelection | null>(null)
@@ -155,6 +168,11 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
   const [appointmentToken, setAppointmentToken] = useState('')
+  /**
+   * Cómo tiene que registrar su llegada en la tablet, según lo que el servidor
+   * ya sabe de este teléfono. Sale de la reserva, no se adivina en el cliente.
+   */
+  const [llegada, setLlegada] = useState({ tieneCara: false, esNuevo: true })
 
   const theme = useMemo(
     () => buildTurneroTheme({ bg: branding.bg, primary: branding.primary, text: branding.text }),
@@ -200,14 +218,88 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
     )
   }
 
+  // ─── Botón físico de atrás ──────────────────────────────────────
+  //
+  // Es la queja número uno de cualquier wizard en celular: el gesto de volver
+  // del teléfono se sale del sitio entero en vez de retroceder un paso, y el
+  // cliente pierde todo lo que había cargado. Se resuelve empujando una entrada
+  // de historial por paso y escuchando `popstate`.
+
+  const pasoRef = useRef<WizardStep>('services')
+  const confirmadoRef = useRef(false)
+
+  useEffect(() => {
+    pasoRef.current = step
+  }, [step])
+
+  useEffect(() => {
+    try {
+      const previo = (window.history.state ?? {}) as EstadoHistorial
+      window.history.replaceState({ ...previo, turneroStep: 0 }, '')
+    } catch {
+      // Historial bloqueado (algún WebView viejo): el wizard sigue andando con
+      // los botones de la pantalla, sólo se pierde el gesto del sistema.
+    }
+
+    function alVolver(ev: PopStateEvent) {
+      // Con el turno YA reservado no se retrocede: el paso anterior editaría
+      // datos de algo que ya existe en la base. Las entradas que quedan se
+      // consumen sin efecto y a los pocos toques el cliente sale del sitio,
+      // que es lo que corresponde después de confirmar.
+      if (confirmadoRef.current) return
+
+      const destino = (ev.state as EstadoHistorial | null)?.turneroStep
+      const actual = STEP_ORDER.indexOf(pasoRef.current)
+      if (typeof destino !== 'number' || actual < 0) return
+      // Sólo hacia atrás: avanzar desde el historial saltearía las validaciones
+      // de cada paso y podría dejar el wizard en un estado incompleto.
+      if (destino >= actual) return
+
+      setError('')
+      setDireccion('atras')
+      setStep(STEP_ORDER[destino])
+    }
+
+    window.addEventListener('popstate', alVolver)
+    return () => window.removeEventListener('popstate', alVolver)
+  }, [])
+
   // ─── Navegación ─────────────────────────────────────────────────
 
-  function goBack() {
-    const prev = STEP_ORDER[currentStepIndex - 1]
-    if (prev) {
-      setError('')
-      setStep(prev)
+  function avanzarA(next: WizardStep) {
+    setError('')
+    setDireccion('adelante')
+    setStep(next)
+
+    const idx = STEP_ORDER.indexOf(next)
+    if (idx > 0) {
+      try {
+        window.history.pushState({ turneroStep: idx } satisfies EstadoHistorial, '')
+      } catch {
+        // Ver arriba: sin historial el wizard igual funciona.
+      }
     }
+  }
+
+  /**
+   * Un solo camino hacia atrás para el botón de la pantalla y el del sistema:
+   * se le pide al navegador que retroceda y el `popstate` hace el cambio de
+   * paso. Si el estado del historial no es el nuestro (WebView que no lo
+   * soporta), se retrocede a mano.
+   */
+  function retroceder() {
+    const actual = STEP_ORDER.indexOf(pasoRef.current)
+    if (actual <= 0) return
+
+    const marca = (window.history.state as EstadoHistorial | null)?.turneroStep
+    if (marca === actual) {
+      window.history.back()
+      return
+    }
+
+    setError('')
+    setDireccion('atras')
+    setStep(STEP_ORDER[actual - 1])
   }
 
   function goNext() {
@@ -221,7 +313,7 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
       // Entrar al paso con un día ya elegido: la grilla se ve de una, sin el
       // "seleccioná un día" que antes obligaba a un click extra.
       if (!selectedDate) setSelectedDate(primerDiaHabilitado())
-      setStep('slot')
+      avanzarA('slot')
       return
     }
 
@@ -230,7 +322,7 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
         setError('Elegí un horario para continuar.')
         return
       }
-      setStep('contact')
+      avanzarA('contact')
       return
     }
 
@@ -277,12 +369,18 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
           if (result.error === 'SLOT_TAKEN' || result.error === 'TOO_LATE') {
             setSelectedSlot(null)
             setSlotRefreshKey(k => k + 1)
-            setStep('slot')
+            retroceder()
           }
           return
         }
 
         setAppointmentToken(result.data.cancellation_token)
+        setLlegada({
+          tieneCara: result.data.client_has_face,
+          esNuevo: result.data.client_is_new,
+        })
+        confirmadoRef.current = true
+        setDireccion('adelante')
         setStep('confirmation')
         notificarAppMobile(result.data.appointment_id)
       })
@@ -317,20 +415,40 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
 
   const habilitado = canProceed() && !isPending
   const ctaLabel = isLastContentStep ? 'Confirmar turno' : 'Continuar'
+  const mostrarAtras = !isFirstStep && step !== 'confirmation'
 
   // ─── Render ─────────────────────────────────────────────────────
 
   return (
     <div
-      className="min-h-screen bg-[var(--t-bg)] text-[var(--t-text)]"
+      className="relative min-h-screen bg-[var(--t-bg)] text-[var(--t-text)]"
       style={themeVars(theme)}
     >
+      <TurneroStyles />
+      <TurneroAmbient />
+
       {/* Header sticky con nombre + dirección + tel */}
-      <header
-        className="sticky top-0 z-20 border-b border-[var(--t-border)] bg-[var(--t-bg)]"
-      >
+      <header className="sticky top-0 z-30 border-b border-[var(--t-glass-border)] bg-[var(--t-chrome-bg)] backdrop-blur-xl">
         <div className="mx-auto max-w-2xl px-4 py-3">
           <div className="flex items-center gap-3">
+            {/* Segunda salida hacia atrás, arriba de todo: en un celular el
+                pulgar vive abajo, pero cuando el teclado del paso de datos tapa
+                el footer esta es la única que queda a la vista. */}
+            {mostrarAtras && (
+              <button
+                type="button"
+                onClick={retroceder}
+                disabled={isPending}
+                className={cn(
+                  glassInteractive,
+                  'flex h-10 shrink-0 items-center gap-1 rounded-xl pl-1.5 pr-3 text-[13px] font-bold text-[var(--t-text)] disabled:opacity-50'
+                )}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Atrás
+              </button>
+            )}
+
             {branding.logo_url ? (
               <Image
                 src={branding.logo_url}
@@ -374,15 +492,23 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
         </div>
       </header>
 
-      <div className="mx-auto max-w-2xl px-4 pb-44 pt-5">
+      <div className="relative z-10 mx-auto max-w-2xl px-4 pb-44 pt-5">
         {step !== 'confirmation' && (
-          <>
-            <StepProgress
-              current={currentStepIndex + 1}
-              total={STEP_ORDER.length}
-              label={STEP_LABELS[step]}
-            />
+          <StepProgress
+            current={currentStepIndex + 1}
+            total={STEP_ORDER.length}
+            label={STEP_LABELS[step]}
+          />
+        )}
 
+        {/* La key remonta el bloque en cada paso: es lo que dispara la
+            animación de entrada. La barra de progreso queda AFUERA para que se
+            llene con una transición continua en vez de reaparecer. */}
+        <div
+          key={step}
+          className={cn('t-step', direccion === 'atras' && 't-step-back')}
+        >
+          {step !== 'confirmation' && (
             <div className="mb-5 mt-5">
               <h1 className="text-[26px] font-bold leading-tight tracking-tight text-[var(--t-text)]">
                 {STEP_TITLES[step]}
@@ -398,80 +524,79 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
                 </p>
               )}
             </div>
-          </>
-        )}
+          )}
 
-        {error && (
-          <div
-            className="mb-4 rounded-2xl p-3.5 text-sm font-medium"
-            style={{ backgroundColor: 'var(--t-danger-bg)', color: 'var(--t-danger-text)' }}
-            role="alert"
-          >
-            {error}
-          </div>
-        )}
+          {error && (
+            <div
+              className="mb-4 rounded-2xl p-3.5 text-sm font-medium"
+              style={{ backgroundColor: 'var(--t-danger-bg)', color: 'var(--t-danger-text)' }}
+              role="alert"
+            >
+              {error}
+            </div>
+          )}
 
-        {step === 'services' && (
-          <ServicesStep
-            services={services}
-            selected={selectedServiceIds}
-            onToggle={toggleService}
-          />
-        )}
+          {step === 'services' && (
+            <ServicesStep
+              services={services}
+              selected={selectedServiceIds}
+              onToggle={toggleService}
+            />
+          )}
 
-        {step === 'slot' && (
-          <SlotStep
-            key={slotRefreshKey}
-            branchId={branch.id}
-            serviceIds={selectedServiceIds}
-            staff={staff}
-            maxAdvanceDays={settings.max_advance_days}
-            enabledDays={enabledDays}
-            selectedDate={selectedDate}
-            selectedTime={selectedSlot?.time ?? ''}
-            selectedStaffId={selectedSlot?.staffId ?? ''}
-            onDateChange={d => { setSelectedDate(d); setSelectedSlot(null) }}
-            onSlotSelect={slot => { setSelectedSlot(slot); setError('') }}
-            onClearSlot={() => setSelectedSlot(null)}
-          />
-        )}
+          {step === 'slot' && (
+            <SlotStep
+              key={slotRefreshKey}
+              branchId={branch.id}
+              serviceIds={selectedServiceIds}
+              staff={staff}
+              maxAdvanceDays={settings.max_advance_days}
+              enabledDays={enabledDays}
+              selectedDate={selectedDate}
+              selectedTime={selectedSlot?.time ?? ''}
+              selectedStaffId={selectedSlot?.staffId ?? ''}
+              onDateChange={d => { setSelectedDate(d); setSelectedSlot(null) }}
+              onSlotSelect={slot => { setSelectedSlot(slot); setError('') }}
+              onClearSlot={() => setSelectedSlot(null)}
+            />
+          )}
 
-        {step === 'contact' && (
-          <ContactStep
-            name={clientName}
-            phone={clientPhone}
-            accepted={policyAccepted}
-            cancellationHours={settings.cancellation_min_hours}
-            onChange={handleContactChange}
-          />
-        )}
+          {step === 'contact' && (
+            <ContactStep
+              name={clientName}
+              phone={clientPhone}
+              accepted={policyAccepted}
+              cancellationHours={settings.cancellation_min_hours}
+              onChange={handleContactChange}
+            />
+          )}
 
-        {step === 'confirmation' && (
-          <ConfirmationStep
-            cancellationToken={appointmentToken}
-            branch={branch}
-            services={selectedServices}
-            totalPrice={totalPrice}
-            durationMinutes={totalDuration}
-            staffName={selectedSlot?.staffName ?? 'Por asignar'}
-            staffAvatarUrl={selectedSlot?.staffAvatarUrl ?? null}
-            date={selectedDate!}
-            time={selectedSlot?.time ?? ''}
-            clientName={clientName}
-            clientPhone={clientPhone}
-          />
-        )}
+          {step === 'confirmation' && (
+            <ConfirmationStep
+              cancellationToken={appointmentToken}
+              branch={branch}
+              services={selectedServices}
+              totalPrice={totalPrice}
+              durationMinutes={totalDuration}
+              staffName={selectedSlot?.staffName ?? 'Por asignar'}
+              staffAvatarUrl={selectedSlot?.staffAvatarUrl ?? null}
+              date={selectedDate!}
+              time={selectedSlot?.time ?? ''}
+              clientName={clientName}
+              clientPhone={clientPhone}
+              clienteTieneCara={llegada.tieneCara}
+              clienteEsNuevo={llegada.esNuevo}
+            />
+          )}
+        </div>
       </div>
 
       {/* Footer sticky con resumen + acciones */}
       {step !== 'confirmation' && (
-        <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-[var(--t-border)] bg-[var(--t-bg)] pb-[env(safe-area-inset-bottom)]">
+        <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-[var(--t-glass-border)] bg-[var(--t-chrome-bg)] backdrop-blur-xl pb-[env(safe-area-inset-bottom)]">
           <div className="mx-auto max-w-2xl px-4 py-3">
             {selectedServices.length > 0 && step !== 'services' && (
-              <div
-                className="mb-2.5 flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs"
-                style={{ backgroundColor: 'var(--t-surface)', borderColor: 'var(--t-border)' }}
-              >
+              <div className="t-glass mb-2.5 flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs">
                 {selectedSlot ? (
                   <Avatar
                     url={selectedSlot.staffAvatarUrl}
@@ -496,31 +621,41 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
               </div>
             )}
 
-            <div className="flex gap-2">
-              {!isFirstStep && (
+            <div className="flex gap-2.5">
+              {/* Antes era un chevron pelado de 14×14 sin etiqueta, del mismo
+                  gris que el fondo de marca: el dueño miró la pantalla y no lo
+                  encontró. Ahora es un botón de vidrio con borde y la palabra
+                  "Atrás". */}
+              {mostrarAtras && (
                 <button
                   type="button"
-                  onClick={goBack}
+                  onClick={retroceder}
                   disabled={isPending}
-                  aria-label="Volver al paso anterior"
-                  className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border transition-opacity disabled:opacity-50"
-                  style={{
-                    backgroundColor: 'var(--t-surface)',
-                    borderColor: 'var(--t-border)',
-                    color: 'var(--t-text)',
-                  }}
+                  className={cn(
+                    glassInteractive,
+                    'flex h-14 shrink-0 items-center gap-1.5 rounded-xl pl-3 pr-4 text-[15px] font-bold text-[var(--t-text)] disabled:opacity-50'
+                  )}
                 >
                   <ChevronLeft className="h-5 w-5" />
+                  Atrás
                 </button>
               )}
               <button
                 type="button"
-                className="flex h-14 flex-1 items-center justify-center gap-2 rounded-xl text-base font-bold transition-[opacity,transform] duration-150 active:scale-[0.99] disabled:cursor-not-allowed"
+                className={cn(
+                  'flex h-14 flex-1 items-center justify-center gap-2 rounded-xl text-base font-bold',
+                  'transition-[background-color,color,box-shadow,transform] duration-200',
+                  'active:scale-[0.99] disabled:cursor-not-allowed',
+                  habilitado && 't-sheen'
+                )}
                 onClick={goNext}
                 disabled={!habilitado}
                 style={{
-                  backgroundColor: habilitado ? 'var(--t-primary)' : 'var(--t-surface-alt)',
+                  backgroundColor: habilitado ? 'var(--t-primary)' : 'var(--t-glass-bg)',
                   color: habilitado ? 'var(--t-on-primary)' : 'var(--t-text-faint)',
+                  boxShadow: habilitado
+                    ? '0 10px 30px -12px var(--t-ring), var(--t-glass-shadow)'
+                    : 'inset 0 0 0 1px var(--t-glass-border)',
                 }}
               >
                 {isPending ? (

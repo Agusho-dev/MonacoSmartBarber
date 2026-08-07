@@ -2,6 +2,8 @@
 
 import { formatCurrency } from '@/lib/format'
 import { Clock, Check, Scissors } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { glassPanel, glassInteractive } from '../glass'
 import type { PublicService } from '@/lib/actions/public-booking'
 
 interface Props {
@@ -10,13 +12,13 @@ interface Props {
   onToggle: (id: string) => void
 }
 
+/** Tope del escalonado: con 12 servicios el último no puede tardar medio segundo. */
+const STAGGER_MAX = 8
+
 export function ServicesStep({ services, selected, onToggle }: Props) {
   if (services.length === 0) {
     return (
-      <div
-        className="rounded-2xl border p-10 text-center"
-        style={{ backgroundColor: 'var(--t-surface)', borderColor: 'var(--t-border)' }}
-      >
+      <div className={cn(glassPanel, 'p-10 text-center')}>
         <Scissors className="mx-auto h-8 w-8 text-[var(--t-text-faint)]" />
         <p className="mt-3 text-sm text-[var(--t-text-muted)]">
           No hay servicios disponibles en esta sucursal.
@@ -27,7 +29,7 @@ export function ServicesStep({ services, selected, onToggle }: Props) {
 
   return (
     <div className="space-y-2.5">
-      {services.map(service => {
+      {services.map((service, i) => {
         const elegido = selected.includes(service.id)
         return (
           <button
@@ -35,15 +37,15 @@ export function ServicesStep({ services, selected, onToggle }: Props) {
             type="button"
             onClick={() => onToggle(service.id)}
             aria-pressed={elegido}
-            className="w-full rounded-2xl border p-4 text-left transition-[background-color,border-color,transform] duration-150 active:scale-[0.99]"
-            style={{
-              backgroundColor: 'var(--t-surface)',
+            className={cn(
+              glassInteractive,
+              't-rise w-full p-4 text-left',
               // El único refuerzo del estado elegido es el borde de acento + el
               // check: teñir el fondo con el primario a baja opacidad no se veía
               // sobre un fondo de luminancia parecida.
-              borderColor: elegido ? 'var(--t-accent)' : 'var(--t-border)',
-              boxShadow: elegido ? 'inset 0 0 0 1px var(--t-accent)' : undefined,
-            }}
+              elegido && 't-glass-sel'
+            )}
+            style={{ '--t-i': Math.min(i, STAGGER_MAX) } as React.CSSProperties}
           >
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0 flex-1">
@@ -63,11 +65,12 @@ export function ServicesStep({ services, selected, onToggle }: Props) {
                   {formatCurrency(service.price)}
                 </span>
                 <span
-                  className="flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors duration-150"
+                  className="flex h-7 w-7 items-center justify-center rounded-full border-2 transition-[background-color,border-color,transform] duration-200"
                   style={{
                     borderColor: elegido ? 'var(--t-primary)' : 'var(--t-text-faint)',
                     backgroundColor: elegido ? 'var(--t-primary)' : 'transparent',
                     color: 'var(--t-on-primary)',
+                    transform: elegido ? 'scale(1.08)' : 'scale(1)',
                   }}
                 >
                   {elegido && <Check className="h-4 w-4" strokeWidth={3} />}

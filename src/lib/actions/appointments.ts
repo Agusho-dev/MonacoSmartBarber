@@ -927,18 +927,24 @@ export async function createAppointment(input: CreateAppointmentInput) {
     }
   }
 
-  // Buscar o crear cliente (tenant-scoped por phone+org)
+  // Buscar o crear cliente (tenant-scoped por phone+org).
+  //
+  // El match va por `find_client_id_by_phone`, que compara los ÚLTIMOS 10
+  // DÍGITOS (migs 149/150). La igualdad exacta que había acá duplicaba al
+  // cliente guardado como "+54 9 351 212-5249" cuando tipeaba "3512125249", y
+  // el turno quedaba colgado del duplicado: sin historial, sin puntos, y en la
+  // tablet lo recibía como si fuera su primera vez.
   let clientId: string
 
-  const { data: existingClient } = await supabase
-    .from('clients')
-    .select('id')
-    .eq('phone', input.clientPhone)
-    .eq('organization_id', orgId)
-    .maybeSingle()
+  const { data: existingClientId } = await supabase.rpc('find_client_id_by_phone', {
+    p_org: orgId,
+    p_phone: input.clientPhone,
+  })
 
-  if (existingClient) {
-    clientId = existingClient.id
+  const clienteYaExistia = !!existingClientId
+
+  if (existingClientId) {
+    clientId = existingClientId as string
     await supabase.from('clients').update({ name: input.clientName }).eq('id', clientId)
   } else {
     const { data: newClient, error } = await supabase
@@ -948,6 +954,18 @@ export async function createAppointment(input: CreateAppointmentInput) {
       .single()
     if (error || !newClient) return { error: 'Error al registrar cliente' }
     clientId = newClient.id
+  }
+
+  // ¿Puede entrar por la cámara de la tablet? Sólo si ya tiene una cara
+  // enrolada: es el dato que decide qué instrucción se le da en la pantalla de
+  // confirmación ("mirá la cámara" vs "marcá que no estás registrado").
+  let clientHasFace = false
+  if (clienteYaExistia) {
+    const { count } = await supabase
+      .from('client_face_descriptors')
+      .select('id', { count: 'exact', head: true })
+      .eq('client_id', clientId)
+    clientHasFace = (count ?? 0) > 0
   }
 
   // Anti-doble-booking: un cliente no puede tener otro turno activo el mismo día en esta org
@@ -1163,7 +1181,7 @@ export async function createAppointment(input: CreateAppointmentInput) {
   revalidatePath('/dashboard/fila')
   revalidatePath('/dashboard/turnos/agenda')
   revalidatePath('/barbero/fila')
-  return { success: true, appointment }
+  return { success: true, appointment, clientHasFace, clientIsNew: !clienteYaExistia }
 }
 
 /**

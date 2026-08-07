@@ -16,9 +16,14 @@ import {
 import { publicGetAvailableSlots } from '@/lib/actions/public-booking'
 import type { PublicSlotGroup, PublicStaff } from '@/lib/actions/public-booking'
 import { toDateStr } from '@/lib/time-utils'
+import { cn } from '@/lib/utils'
+import { glassPanel, glassInteractive } from '../glass'
 import { fechaCortaDeStr, fechaLarga } from '../fechas'
 import { fechaDentroDeVentana } from '../ventana'
 import { DayStrip } from './day-strip'
+
+/** Tope del escalonado de los chips de horario. */
+const STAGGER_MAX = 11
 
 export interface SlotSelection {
   time: string
@@ -397,10 +402,7 @@ export function SlotStep({
 
       {/* Un solo barbero: no se pregunta nada, se informa */}
       {barberoUnico && !cargando && (
-        <div
-          className="flex items-center gap-3 rounded-2xl border p-3"
-          style={{ backgroundColor: 'var(--t-surface)', borderColor: 'var(--t-border)' }}
-        >
+        <div className={cn(glassPanel, 't-rise flex items-center gap-3 p-3')}>
           <Avatar url={barberoUnico.staff_avatar_url} name={barberoUnico.staff_name} size={44} />
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--t-text-muted)]">
@@ -418,10 +420,7 @@ export function SlotStep({
 
       {/* Grilla de horarios */}
       {cargando ? (
-        <div className="flex items-center justify-center gap-2 py-12 text-[var(--t-text-muted)]">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          <span className="text-sm">Buscando horarios…</span>
-        </div>
+        <GrillaEsqueleto />
       ) : error ? (
         <div
           className="rounded-2xl p-4 text-sm"
@@ -447,7 +446,7 @@ export function SlotStep({
                 {franja.label}
               </p>
               <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-                {franja.slots.map(slot => {
+                {franja.slots.map((slot, i) => {
                   // Keyeado por barbero+hora: con dos barberos, marcar sólo por
                   // hora encendía el 15:00 de los dos a la vez.
                   const elegido =
@@ -458,12 +457,20 @@ export function SlotStep({
                       type="button"
                       onClick={() => onSlotSelect(slot)}
                       aria-pressed={elegido}
-                      className="min-h-[48px] rounded-xl border text-[15px] font-semibold tabular-nums transition-[background-color,border-color,transform] duration-150 active:scale-95"
+                      className={cn(
+                        glassInteractive,
+                        't-rise min-h-[48px] rounded-xl text-[15px] font-semibold tabular-nums'
+                      )}
                       style={{
-                        backgroundColor: elegido ? 'var(--t-primary)' : 'var(--t-surface)',
-                        borderColor: elegido ? 'var(--t-primary)' : 'var(--t-border)',
+                        '--t-i': Math.min(i, STAGGER_MAX),
+                        backgroundColor: elegido ? 'var(--t-primary)' : undefined,
+                        borderColor: elegido ? 'var(--t-primary)' : undefined,
                         color: elegido ? 'var(--t-on-primary)' : 'var(--t-text)',
-                      }}
+                        transform: elegido ? 'scale(1.05)' : undefined,
+                        boxShadow: elegido
+                          ? '0 12px 28px -12px var(--t-ring), var(--t-glass-shadow)'
+                          : undefined,
+                      } as React.CSSProperties}
                     >
                       {slot.time}
                     </button>
@@ -496,16 +503,50 @@ function FiltroChip({
       type="button"
       onClick={onClick}
       aria-pressed={activo}
-      className="flex h-11 shrink-0 items-center gap-2 rounded-full border pl-2 pr-4 text-sm font-semibold transition-[background-color,border-color] duration-150"
+      className={cn(
+        glassInteractive,
+        'flex h-11 shrink-0 items-center gap-2 rounded-full pl-2 pr-4 text-sm font-semibold'
+      )}
       style={{
-        backgroundColor: activo ? 'var(--t-primary)' : 'var(--t-surface)',
-        borderColor: activo ? 'var(--t-primary)' : 'var(--t-border)',
+        backgroundColor: activo ? 'var(--t-primary)' : undefined,
+        borderColor: activo ? 'var(--t-primary)' : undefined,
         color: activo ? 'var(--t-on-primary)' : 'var(--t-text)',
+        boxShadow: activo ? '0 10px 26px -12px var(--t-ring)' : undefined,
       }}
     >
       <span className="flex h-6 w-6 items-center justify-center">{icon}</span>
       {label}
     </button>
+  )
+}
+
+/**
+ * Esqueleto de la grilla mientras se consulta la disponibilidad.
+ *
+ * Reemplaza al spinner con "Buscando horarios…": un spinner centrado no dice
+ * nada de lo que viene y la pantalla pega un salto cuando llegan los datos. El
+ * esqueleto ya tiene la forma de la grilla, así que el contenido aterriza donde
+ * el ojo lo estaba esperando.
+ */
+function GrillaEsqueleto() {
+  return (
+    <div className="space-y-5" aria-busy="true" aria-live="polite">
+      <span className="sr-only">Buscando horarios disponibles</span>
+      {[6, 10].map((cantidad, bloque) => (
+        <div key={bloque} className="space-y-2.5">
+          <div className="t-skel h-3 w-24 rounded-full" />
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+            {Array.from({ length: cantidad }, (_, i) => (
+              <div
+                key={i}
+                className="t-skel t-rise min-h-[48px] rounded-xl"
+                style={{ '--t-i': Math.min(i, STAGGER_MAX) } as React.CSSProperties}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -561,10 +602,7 @@ function SinHorarios({
   onElegirFecha: (str: string) => void
 }) {
   return (
-    <div
-      className="rounded-2xl border p-6 text-center"
-      style={{ backgroundColor: 'var(--t-surface)', borderColor: 'var(--t-border)' }}
-    >
+    <div className={cn(glassPanel, 't-rise p-6 text-center')}>
       <CalendarX2 className="mx-auto h-8 w-8 text-[var(--t-text-faint)]" />
       <p className="mt-3 text-base font-bold text-[var(--t-text)]">
         No quedan horarios{fecha ? ' ese día' : ''}
@@ -593,17 +631,16 @@ function SinHorarios({
             Próximos días con lugar
           </p>
           <div className="mt-2.5 flex flex-wrap justify-center gap-2">
-            {sugerencias.map(str => (
+            {sugerencias.map((str, i) => (
               <button
                 key={str}
                 type="button"
                 onClick={() => onElegirFecha(str)}
-                className="flex min-h-[44px] items-center gap-1.5 rounded-xl border px-4 text-sm font-semibold transition-[background-color] duration-150"
-                style={{
-                  backgroundColor: 'var(--t-surface-alt)',
-                  borderColor: 'var(--t-border)',
-                  color: 'var(--t-text)',
-                }}
+                className={cn(
+                  glassInteractive,
+                  't-rise flex min-h-[44px] items-center gap-1.5 rounded-xl px-4 text-sm font-semibold text-[var(--t-text)]'
+                )}
+                style={{ '--t-i': i } as React.CSSProperties}
               >
                 {fechaCortaDeStr(str)}
                 <ArrowRight className="h-3.5 w-3.5 opacity-70" />
