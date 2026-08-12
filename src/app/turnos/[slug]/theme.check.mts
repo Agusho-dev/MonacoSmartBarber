@@ -73,6 +73,9 @@ const REGLAS: Array<{
   { nombre: 'primary vs surface',  a: t => t.primary,    b: t => t.surface,    min: 3 },
   { nombre: 'primary vs surfAlt',  a: t => t.primary,    b: t => t.surfaceAlt, min: 3 },
   { nombre: 'onPrimary vs primary',a: t => t.onPrimary,  b: t => t.primary,    min: 4.5 },
+  // El CTA conserva el color de marca crudo, así que lo único exigible es que
+  // su texto se lea encima. La silueta la garantiza el borde, no el relleno.
+  { nombre: 'onCta vs cta',        a: t => t.onCta,      b: t => t.cta,        min: 4.5 },
   { nombre: 'accent vs bg',        a: t => t.accent,     b: t => t.bg,         min: 4.5 },
   { nombre: 'accent vs surface',   a: t => t.accent,     b: t => t.surface,    min: 4.5 },
   { nombre: 'dangerText vs dgBg',  a: t => t.dangerText, b: t => t.dangerBg,   min: 4.5 },

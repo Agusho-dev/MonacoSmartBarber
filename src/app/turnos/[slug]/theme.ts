@@ -343,6 +343,16 @@ export interface TurneroTheme {
   primary: string
   /** Texto/ícono que va encima de `primary`. */
   onPrimary: string
+  /**
+   * Relleno del botón principal. A diferencia de `primary`, conserva el color
+   * de marca CRUDO: el CTA no se despega del fondo por contraste de relleno
+   * sino por su borde, su sombra y su tamaño.
+   */
+  cta: string
+  /** Texto sobre `cta`. Con una marca oscura, blanco. */
+  onCta: string
+  /** Borde del CTA. Es lo que garantiza que el botón siempre tenga silueta. */
+  ctaBorder: string
   /** Color de marca para PRIMER PLANO (precios, links, íconos de acento). */
   accent: string
   /** Halo de foco, ya con alpha. */
@@ -522,6 +532,22 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
   // fondo, cosa que un primario negro sobre gris medio no cumple (4.1:1).
   const accent = readableAccent(brandPrimary, layers, AA_TEXT, isDark, text)
 
+  // ── El botón principal ────────────────────────────────────────────
+  //
+  // El CTA NO usa `primary`. Con la marca del dueño (primario #000000 sobre
+  // fondo #232323), `readableFill` tiene que ACLARAR el negro hasta separarlo
+  // del fondo, y sobre ese gris claro el único texto legible es oscuro: el
+  // resultado era un botón gris con letras casi negras, que se lee como
+  // deshabilitado. Es correcto por contraste y equivocado como diseño.
+  //
+  // Acá el relleno es el color de marca CRUDO y el texto el que se lea encima
+  // (con una marca oscura: blanco). Lo que garantiza que el botón tenga
+  // silueta no es el contraste del relleno contra el fondo sino su BORDE —más
+  // la sombra y el tamaño—, que es como se resuelve un botón negro sobre un
+  // fondo casi negro en cualquier interfaz oscura.
+  const cta = brandPrimary
+  const onCta = bestForeground([cta])
+
   // Rojo: en un fondo de luminancia media ningún rojo llega a 4.5:1, así que la
   // caja de error trae su propio fondo de alto contraste en vez de ser un tinte
   // translúcido de la superficie.
@@ -695,6 +721,12 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
     textFaint: toHex(textFaint),
     primary: toHex(primary),
     onPrimary: toHex(onPrimary),
+    cta: toHex(cta),
+    onCta: toHex(onCta),
+    // El borde sale del propio texto del botón: siempre contrasta contra el
+    // relleno, y con un CTA claro sobre fondo claro (marca blanca en tema
+    // claro) es lo único que lo dibuja.
+    ctaBorder: rgba(onCta, 0.38),
     accent: toHex(accent),
     ring: rgba(accent, 0.45),
     success: toHex(success),
@@ -737,6 +769,9 @@ export function themeVars(t: TurneroTheme): CSSProperties {
     '--t-text-faint': t.textFaint,
     '--t-primary': t.primary,
     '--t-on-primary': t.onPrimary,
+    '--t-cta': t.cta,
+    '--t-on-cta': t.onCta,
+    '--t-cta-border': t.ctaBorder,
     '--t-accent': t.accent,
     '--t-ring': t.ring,
     '--t-success': t.success,

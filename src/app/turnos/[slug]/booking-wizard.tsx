@@ -746,10 +746,13 @@ export function BookingWizard({
                 onClick={goNext}
                 disabled={!habilitado}
                 style={{
-                  backgroundColor: habilitado ? 'var(--t-primary)' : 'var(--t-glass-bg)',
-                  color: habilitado ? 'var(--t-on-primary)' : 'var(--t-text-faint)',
+                  backgroundColor: habilitado ? 'var(--t-cta)' : 'var(--t-glass-bg)',
+                  color: habilitado ? 'var(--t-on-cta)' : 'var(--t-text-faint)',
+                  // El borde no es decorativo: con una marca oscura sobre un
+                  // fondo oscuro es lo que le da silueta al botón. Ver `cta` en
+                  // `theme.ts`.
                   boxShadow: habilitado
-                    ? '0 10px 30px -12px var(--t-ring), var(--t-glass-shadow)'
+                    ? 'inset 0 0 0 1px var(--t-cta-border), 0 10px 30px -12px var(--t-ring), var(--t-glass-shadow)'
                     : 'inset 0 0 0 1px var(--t-glass-border)',
                 }}
               >

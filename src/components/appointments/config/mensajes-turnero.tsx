@@ -2,8 +2,9 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { MessageSquare, ChevronDown, Link as LinkIcon } from 'lucide-react'
-import { seedDefaultTemplates } from '@/lib/actions/whatsapp-meta'
+import { seedDefaultTemplates, syncWhatsAppTemplates } from '@/lib/actions/whatsapp-meta'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -97,6 +98,7 @@ export function MensajesTurnero({ valores, onCambiar, templates, hayCanalWhatsAp
             elegida={templates.find(t => t.id === valores.confirmacion) ?? null}
             recomendada={templates.find(t => t.name === RECOMENDADAS.confirmacion) ?? null}
             hayCanalWhatsApp={hayCanalWhatsApp}
+            onUsar={id => onCambiar({ confirmacion: id })}
           />
         </div>
 
@@ -220,12 +222,15 @@ function EstadoLinkCancelacion({
   elegida,
   recomendada,
   hayCanalWhatsApp,
+  onUsar,
 }: {
   elegida: TemplateOption | null
   recomendada: TemplateOption | null
   hayCanalWhatsApp: boolean
+  onUsar: (templateId: string) => void
 }) {
-  const [creando, setCreando] = useState(false)
+  const router = useRouter()
+  const [ocupado, setOcupado] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
 
   if (!hayCanalWhatsApp) return null
@@ -239,21 +244,35 @@ function EstadoLinkCancelacion({
     )
   }
 
+  const aprobada = recomendada?.status === 'approved'
+
   async function crear() {
-    setCreando(true)
+    setOcupado(true)
     setAviso(null)
     const r = await seedDefaultTemplates()
-    setCreando(false)
+    setOcupado(false)
+    setAviso(
+      r.errors.length
+        ? r.errors[0].message
+        : 'Plantilla enviada a Meta. La aprobación suele tardar minutos; volvé a tocar "Actualizar estado".'
+    )
+  }
 
-    if (r.errors.length) {
-      setAviso(r.errors[0].message)
+  /**
+   * Meta aprueba en su propio tiempo y `message_templates.status` sólo se
+   * refresca cuando alguien sincroniza. Sin este botón, el dueño tenía que
+   * adivinar cuándo volver.
+   */
+  async function actualizar() {
+    setOcupado(true)
+    setAviso(null)
+    const r = await syncWhatsAppTemplates()
+    setOcupado(false)
+    if (r.error) {
+      setAviso(r.error)
       return
     }
-    if (r.created > 0) {
-      setAviso('Plantilla enviada a Meta. Cuando la aprueben (suele tardar minutos) va a aparecer en la lista de arriba para que la elijas.')
-      return
-    }
-    setAviso('La plantilla ya existe en Meta. Si todavía no aparece arriba, está esperando aprobación.')
+    router.refresh()
   }
 
   return (
@@ -267,18 +286,30 @@ function EstadoLinkCancelacion({
         {elegida
           ? 'La plantilla que elegiste tiene 5 datos y ninguno es el link, así que el cliente recibe la confirmación pero no puede cancelar desde ahí.'
           : 'Sin confirmación, el cliente no recibe comprobante ni link para cancelar.'}{' '}
-        {recomendada
-          ? recomendada.status === 'approved'
-            ? 'Ya tenés lista una plantilla con link: elegí "' + recomendada.name + '" arriba.'
-            : 'La plantilla con link ya está creada y espera aprobación de Meta.'
-          : 'Podemos crear una plantilla con link en tu cuenta de Meta.'}
+        {!recomendada
+          ? 'Podemos crear una plantilla con link en tu cuenta de Meta.'
+          : aprobada
+            ? 'Ya tenés lista la plantilla con link. Un toque y queda activa.'
+            : 'La plantilla con link ya está creada y Meta la está revisando.'}
       </p>
 
-      {!recomendada && (
-        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={crear} disabled={creando}>
-          {creando ? 'Creando…' : 'Crear plantilla con link'}
-        </Button>
-      )}
+      <div className="flex flex-wrap gap-2">
+        {!recomendada && (
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={crear} disabled={ocupado}>
+            {ocupado ? 'Creando…' : 'Crear plantilla con link'}
+          </Button>
+        )}
+        {recomendada && aprobada && (
+          <Button size="sm" className="h-7 text-xs" onClick={() => onUsar(recomendada.id)}>
+            Usar esta plantilla
+          </Button>
+        )}
+        {recomendada && !aprobada && (
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={actualizar} disabled={ocupado}>
+            {ocupado ? 'Consultando…' : 'Actualizar estado'}
+          </Button>
+        )}
+      </div>
 
       {aviso && <p className="text-[11px] text-muted-foreground">{aviso}</p>}
     </div>
