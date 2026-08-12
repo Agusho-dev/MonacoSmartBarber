@@ -1,7 +1,9 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
-import { MessageSquare, ChevronDown } from 'lucide-react'
+import { MessageSquare, ChevronDown, Link as LinkIcon } from 'lucide-react'
+import { seedDefaultTemplates } from '@/lib/actions/whatsapp-meta'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -10,7 +12,11 @@ import { cn } from '@/lib/utils'
 
 /** Templates que el sistema crea solo al conectar WhatsApp. */
 const RECOMENDADAS = {
-  confirmacion: 'monaco_turno_confirmacion',
+  // La recomendada es la que lleva el link para cancelar. `monaco_turno_
+  // confirmacion` (sin link) sigue existiendo y funcionando: no se la edita
+  // porque editar una plantilla aprobada la manda de vuelta a revisión en Meta
+  // y, mientras dura, no se puede enviar ninguna confirmación.
+  confirmacion: 'monaco_turno_confirmacion_link',
   recordatorio: 'monaco_turno_recordatorio',
   reprogramacion: 'monaco_turno_reprogramado',
   cancelacion: 'monaco_turno_cancelado',
@@ -86,6 +92,11 @@ export function MensajesTurnero({ valores, onCambiar, templates, hayCanalWhatsAp
             onChange={v => onCambiar({ confirmacion: v })}
             recommendedName={RECOMENDADAS.confirmacion}
             disabled={!hayCanalWhatsApp}
+          />
+          <EstadoLinkCancelacion
+            elegida={templates.find(t => t.id === valores.confirmacion) ?? null}
+            recomendada={templates.find(t => t.name === RECOMENDADAS.confirmacion) ?? null}
+            hayCanalWhatsApp={hayCanalWhatsApp}
           />
         </div>
 
@@ -165,7 +176,7 @@ export function MensajesTurnero({ valores, onCambiar, templates, hayCanalWhatsAp
 
         {/* Detalle técnico: sólo lo necesita quien arma una plantilla nueva en
             Meta, así que va cerrado por defecto. */}
-        <details className="group rounded-lg border border-border bg-muted/20 px-3 py-2">
+        <details className="group rounded-lg border border-border bg-muted/20 px-3 py-2" data-seccion="variables">
           <summary className="flex cursor-pointer list-none items-center justify-between text-xs font-medium text-muted-foreground">
             Qué datos completa el sistema en cada mensaje
             <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
@@ -175,14 +186,101 @@ export function MensajesTurnero({ valores, onCambiar, templates, hayCanalWhatsAp
 {{2}} → servicio reservado
 {{3}} → fecha del turno
 {{4}} → hora del turno
-{{5}} → nombre de la sucursal`}
+{{5}} → nombre de la sucursal
+{{6}} → link para ver o cancelar el turno (opcional)`}
           </pre>
           <p className="mt-1.5 text-[11px] text-muted-foreground">
             Las plantillas <span className="font-mono">monaco_turno_*</span> ya vienen armadas con este
-            orden y se crean solas al conectar WhatsApp.
+            orden y se crean solas al conectar WhatsApp. El sistema manda tantas variables como
+            declare cada plantilla: si la tuya tiene 5, se envían 5. Meta rechaza el mensaje entero
+            si sobra o falta una.
+          </p>
+          <p className="mt-1.5 text-[11px] text-muted-foreground">
+            Si en vez de la variable {'{{6}}'} preferís un botón, sirve igual: un botón de tipo URL
+            con la dirección terminada en <span className="font-mono">{'{{1}}'}</span> recibe el
+            código del turno.
           </p>
         </details>
       </CardContent>
     </Card>
+  )
+}
+
+// ─── Estado del link de cancelación ──────────────────────────────────
+
+/**
+ * Si el mensaje de confirmación lleva o no el link para cancelar.
+ *
+ * Existe porque el link no se puede meter a la fuerza: el texto de la
+ * plantilla vive en Meta y una variable de más es un mensaje que no llega
+ * (error 132000). Esta tarjeta traduce eso a algo accionable — qué falta y qué
+ * botón tocar— en vez de dejar al dueño creyendo que el link se manda cuando no.
+ */
+function EstadoLinkCancelacion({
+  elegida,
+  recomendada,
+  hayCanalWhatsApp,
+}: {
+  elegida: TemplateOption | null
+  recomendada: TemplateOption | null
+  hayCanalWhatsApp: boolean
+}) {
+  const [creando, setCreando] = useState(false)
+  const [aviso, setAviso] = useState<string | null>(null)
+
+  if (!hayCanalWhatsApp) return null
+
+  if (elegida?.carriesLink) {
+    return (
+      <p className="flex items-center gap-1.5 pt-0.5 text-xs text-emerald-600 dark:text-emerald-400">
+        <LinkIcon className="size-3.5 shrink-0" />
+        Incluye el link para cancelar el turno.
+      </p>
+    )
+  }
+
+  async function crear() {
+    setCreando(true)
+    setAviso(null)
+    const r = await seedDefaultTemplates()
+    setCreando(false)
+
+    if (r.errors.length) {
+      setAviso(r.errors[0].message)
+      return
+    }
+    if (r.created > 0) {
+      setAviso('Plantilla enviada a Meta. Cuando la aprueben (suele tardar minutos) va a aparecer en la lista de arriba para que la elijas.')
+      return
+    }
+    setAviso('La plantilla ya existe en Meta. Si todavía no aparece arriba, está esperando aprobación.')
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+      <p className="text-xs font-medium">
+        {elegida
+          ? 'Este mensaje no incluye el link para cancelar'
+          : 'Sin mensaje de confirmación elegido'}
+      </p>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        {elegida
+          ? 'La plantilla que elegiste tiene 5 datos y ninguno es el link, así que el cliente recibe la confirmación pero no puede cancelar desde ahí.'
+          : 'Sin confirmación, el cliente no recibe comprobante ni link para cancelar.'}{' '}
+        {recomendada
+          ? recomendada.status === 'approved'
+            ? 'Ya tenés lista una plantilla con link: elegí "' + recomendada.name + '" arriba.'
+            : 'La plantilla con link ya está creada y espera aprobación de Meta.'
+          : 'Podemos crear una plantilla con link en tu cuenta de Meta.'}
+      </p>
+
+      {!recomendada && (
+        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={crear} disabled={creando}>
+          {creando ? 'Creando…' : 'Crear plantilla con link'}
+        </Button>
+      )}
+
+      {aviso && <p className="text-[11px] text-muted-foreground">{aviso}</p>}
+    </div>
   )
 }

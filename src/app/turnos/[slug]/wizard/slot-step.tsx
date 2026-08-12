@@ -1,26 +1,32 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import Image from 'next/image'
 import {
   AlertCircle,
   ArrowRight,
   CalendarX2,
+  Info,
   Loader2,
   Moon,
   Sun,
   Sunrise,
-  User,
-  Users,
+  UserRoundCog,
 } from 'lucide-react'
 import { publicGetAvailableSlots } from '@/lib/actions/public-booking'
-import type { PublicSlotGroup, PublicStaff } from '@/lib/actions/public-booking'
+import type {
+  PublicSlotGroup,
+  PublicStaff,
+  PublicWalkInStaff,
+} from '@/lib/actions/public-booking'
 import { toDateStr } from '@/lib/time-utils'
 import { cn } from '@/lib/utils'
+import { textoDias, textoRangos } from '@/lib/franjas'
 import { glassPanel, glassInteractive } from '../glass'
 import { fechaCortaDeStr, fechaLarga } from '../fechas'
 import { fechaDentroDeVentana } from '../ventana'
 import { DayStrip } from './day-strip'
+import { Avatar } from './avatar'
+import { BarberSheet } from './barber-sheet'
 
 /** Tope del escalonado de los chips de horario. */
 const STAGGER_MAX = 11
@@ -36,8 +42,10 @@ interface Props {
   branchId: string
   /** Todos los servicios elegidos: la disponibilidad usa la duración TOTAL. */
   serviceIds: string[]
-  /** Barberos habilitados, con los días que trabaja cada uno. */
+  /** Barberos habilitados, con los días y franjas en que toma turnos cada uno. */
   staff: PublicStaff[]
+  /** Barberos de la sucursal que sólo atienden por orden de llegada. */
+  walkInStaff: PublicWalkInStaff[]
   maxAdvanceDays: number
   /** Días reservables reales (config de la sucursal ∩ días que trabaja alguien). */
   enabledDays: number[]
@@ -126,25 +134,13 @@ function proximosDias(
   return out
 }
 
-const DIAS_PLURAL = [
-  'domingos', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados',
-]
-
-/** "Atiende los martes" / "Atiende martes y jueves". */
-function textoDias(days: number[]): string {
-  if (!days.length) return ''
-  if (days.length >= 6) return 'Atiende casi todos los días'
-  const nombres = days.map(d => DIAS_PLURAL[d])
-  if (nombres.length === 1) return `Atiende los ${nombres[0]}`
-  return `Atiende ${nombres.slice(0, -1).join(', ')} y ${nombres[nombres.length - 1]}`
-}
-
 // ─── Componente ──────────────────────────────────────────────────────
 
 export function SlotStep({
   branchId,
   serviceIds,
   staff,
+  walkInStaff,
   maxAdvanceDays,
   enabledDays,
   selectedDate,
@@ -158,6 +154,7 @@ export function SlotStep({
   const [cargando, setCargando] = useState(false)
   const [error, setError] = useState('')
   const [filtroStaff, setFiltroStaff] = useState<string | null>(null)
+  const [sheetAbierta, setSheetAbierta] = useState(false)
   const [sugerencias, setSugerencias] = useState<string[]>([])
   const [buscandoAlternativas, setBuscandoAlternativas] = useState(false)
   /** Qué sabemos de cada fecha ya consultada: llena, o no se pudo consultar. */
@@ -327,7 +324,20 @@ export function SlotStep({
     [horarios]
   )
 
-  /** Barbero que va a atender, cuando ya no hay ambigüedad. */
+  // ─── Quién va a atender ─────────────────────────────────────────
+  //
+  // Hay tres grados de certeza y la pantalla los dice distinto, porque
+  // prometer un barbero que después cambia es peor que no prometer nada:
+  //
+  //   · Eligió barbero, o hay uno solo ese día  → "Te atiende X".
+  //   · Ya eligió la hora                       → "Te atiende X" (el motor
+  //     devuelve un grupo por barbero, así que la hora viene con dueño).
+  //   · Todavía no eligió hora y hay varios     → "Posiblemente te atienda X":
+  //     depende de qué hora toque, y decirlo es más honesto que callarlo.
+  const barberoDelSlot = selectedTime
+    ? conCupo.find(g => g.staff_id === selectedStaffId) ?? null
+    : null
+
   const barberoUnico =
     filtro
       ? conCupo.find(g => g.staff_id === filtro) ?? null
@@ -335,9 +345,25 @@ export function SlotStep({
         ? conCupo[0]
         : null
 
-  // "Atiende los martes" explica por qué le tocó ese barbero sin haberlo elegido.
-  const diasDelBarbero = barberoUnico
-    ? textoDias(staff.find(s => s.id === barberoUnico.staff_id)?.days ?? [])
+  const barberoMostrado = barberoDelSlot ?? barberoUnico ?? conCupo[0] ?? null
+  const esSeguro = !!(barberoDelSlot || barberoUnico)
+
+  const fichaDelBarbero = barberoMostrado
+    ? staff.find(s => s.id === barberoMostrado.staff_id) ?? null
+    : null
+
+  // Las franjas del día elegido, no las de toda la semana: "Da turnos de 16 a
+  // 19" al lado de una grilla que arranca 16:00 explica la grilla.
+  const franjasDelDia = selectedDate && fichaDelBarbero
+    ? fichaDelBarbero.windows?.[selectedDate.getDay()] ?? []
+    : []
+
+  // El filtro se ignora solo cuando el barbero no atiende el día elegido (si no,
+  // la grilla quedaría vacía sin explicación). Pero ignorarlo EN SILENCIO deja
+  // al cliente creyendo que reservó con él, así que se avisa.
+  const filtroIgnorado = !!filtroStaff && filtro !== filtroStaff
+  const nombreFiltrado = filtroIgnorado
+    ? staff.find(s => s.id === filtroStaff)?.full_name ?? ''
     : ''
 
   function elegirFiltro(id: string | null) {
@@ -377,46 +403,88 @@ export function SlotStep({
         </p>
       )}
 
-      {/* Filtro opcional de barbero: sólo aparece si de verdad hay más de uno */}
-      {conCupo.length > 1 && (
-        <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="flex gap-2">
-            <FiltroChip
-              activo={filtro === null}
-              onClick={() => elegirFiltro(null)}
-              icon={<Users className="h-3.5 w-3.5" />}
-              label="Cualquiera"
+      {/* ── Quién te atiende ─────────────────────────────────────── */}
+      {barberoMostrado && !cargando && (
+        <div className={cn(glassPanel, 't-rise p-3.5')}>
+          <div className="flex items-center gap-3">
+            <Avatar
+              url={barberoMostrado.staff_avatar_url}
+              name={barberoMostrado.staff_name}
+              size={46}
             />
-            {conCupo.map(g => (
-              <FiltroChip
-                key={g.staff_id}
-                activo={filtro === g.staff_id}
-                onClick={() => elegirFiltro(g.staff_id)}
-                icon={<Avatar url={g.staff_avatar_url} name={g.staff_name} size={20} />}
-                label={g.staff_name}
-              />
-            ))}
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--t-text-muted)]">
+                {esSeguro ? 'Te atiende' : 'Posiblemente te atienda'}
+              </p>
+              <p className="truncate text-base font-bold leading-tight text-[var(--t-text)]">
+                {barberoMostrado.staff_name}
+              </p>
+              <p className="truncate text-xs text-[var(--t-text-muted)]">
+                {franjasDelDia.length > 0
+                  ? `Da turnos de ${textoRangos(franjasDelDia)}`
+                  : fichaDelBarbero?.days.length
+                    ? `Toma turnos ${textoDias(fichaDelBarbero.days)}`
+                    : 'Según el horario que elijas'}
+              </p>
+            </div>
+            {(conCupo.length > 1 || staff.length > 1 || walkInStaff.length > 0) && (
+              <button
+                type="button"
+                onClick={() => setSheetAbierta(true)}
+                className={cn(
+                  glassInteractive,
+                  'flex h-11 shrink-0 items-center gap-1.5 rounded-xl px-3 text-xs font-bold text-[var(--t-text)]'
+                )}
+              >
+                <UserRoundCog className="h-4 w-4" />
+                {filtro ? 'Cambiar' : 'Elegir barbero'}
+              </button>
+            )}
           </div>
+
+          {filtroIgnorado && nombreFiltrado && (
+            <p className="mt-3 flex items-start gap-2 rounded-xl p-2.5 text-xs leading-relaxed text-[var(--t-text-muted)]"
+              style={{
+                backgroundColor: 'var(--t-glass-inner)',
+                boxShadow: 'inset 0 0 0 1px var(--t-glass-border)',
+              }}
+              role="status"
+            >
+              <Info className="mt-px h-3.5 w-3.5 shrink-0 text-[var(--t-accent)]" />
+              <span>
+                <strong className="font-bold text-[var(--t-text)]">{nombreFiltrado}</strong> no toma
+                turnos ese día. Te mostramos los horarios de todos.
+              </span>
+            </p>
+          )}
         </div>
       )}
 
-      {/* Un solo barbero: no se pregunta nada, se informa */}
-      {barberoUnico && !cargando && (
-        <div className={cn(glassPanel, 't-rise flex items-center gap-3 p-3')}>
-          <Avatar url={barberoUnico.staff_avatar_url} name={barberoUnico.staff_name} size={44} />
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--t-text-muted)]">
-              Te atiende
-            </p>
-            <p className="truncate text-base font-bold text-[var(--t-text)]">
-              {barberoUnico.staff_name}
-            </p>
-            {diasDelBarbero && (
-              <p className="truncate text-xs text-[var(--t-text-muted)]">{diasDelBarbero}</p>
-            )}
-          </div>
-        </div>
+      {/* Sin barberos con cupo todavía (día lleno, o cargando la primera vez)
+          igual tiene que poder abrirse la hoja: es la única forma de descubrir
+          qué días atiende cada uno sin ir probando fecha por fecha. */}
+      {!barberoMostrado && !cargando && (staff.length > 0 || walkInStaff.length > 0) && (
+        <button
+          type="button"
+          onClick={() => setSheetAbierta(true)}
+          className={cn(
+            glassInteractive,
+            't-rise flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl text-sm font-bold text-[var(--t-text)]'
+          )}
+        >
+          <UserRoundCog className="h-4 w-4" />
+          Ver barberos y sus horarios
+        </button>
       )}
+
+      <BarberSheet
+        abierto={sheetAbierta}
+        staff={staff}
+        walkIn={walkInStaff}
+        seleccionado={filtroStaff}
+        onSeleccionar={elegirFiltro}
+        onCerrar={() => setSheetAbierta(false)}
+      />
 
       {/* Grilla de horarios */}
       {cargando ? (
@@ -487,39 +555,6 @@ export function SlotStep({
 
 // ─── Piezas ──────────────────────────────────────────────────────────
 
-function FiltroChip({
-  activo,
-  onClick,
-  icon,
-  label,
-}: {
-  activo: boolean
-  onClick: () => void
-  icon: React.ReactNode
-  label: string
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={activo}
-      className={cn(
-        glassInteractive,
-        'flex h-11 shrink-0 items-center gap-2 rounded-full pl-2 pr-4 text-sm font-semibold'
-      )}
-      style={{
-        backgroundColor: activo ? 'var(--t-primary)' : undefined,
-        borderColor: activo ? 'var(--t-primary)' : undefined,
-        color: activo ? 'var(--t-on-primary)' : 'var(--t-text)',
-        boxShadow: activo ? '0 10px 26px -12px var(--t-ring)' : undefined,
-      }}
-    >
-      <span className="flex h-6 w-6 items-center justify-center">{icon}</span>
-      {label}
-    </button>
-  )
-}
-
 /**
  * Esqueleto de la grilla mientras se consulta la disponibilidad.
  *
@@ -547,43 +582,6 @@ function GrillaEsqueleto() {
         </div>
       ))}
     </div>
-  )
-}
-
-export function Avatar({
-  url,
-  name,
-  size,
-}: {
-  url: string | null
-  name: string
-  size: number
-}) {
-  if (url) {
-    return (
-      <Image
-        src={url}
-        alt={name}
-        width={size}
-        height={size}
-        unoptimized
-        className="shrink-0 rounded-full object-cover"
-        style={{ width: size, height: size }}
-      />
-    )
-  }
-  return (
-    <span
-      className="flex shrink-0 items-center justify-center rounded-full border"
-      style={{
-        width: size,
-        height: size,
-        backgroundColor: 'var(--t-surface-alt)',
-        borderColor: 'var(--t-border)',
-      }}
-    >
-      <User className="text-[var(--t-text-muted)]" style={{ width: size * 0.5, height: size * 0.5 }} />
-    </span>
   )
 }
 

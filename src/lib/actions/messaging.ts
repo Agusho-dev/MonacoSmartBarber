@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from './org'
 import { requireOrgAccessToEntity } from './guard'
 import { revalidatePath } from 'next/cache'
+import { llevaLinkDeGestion } from '@/lib/whatsapp-template-shape'
 
 export async function getConversations(channelFilter?: string) {
   const supabase = createAdminClient()
@@ -433,10 +434,19 @@ export async function listTemplatesForPicker() {
 
   const { data, error } = await supabase
     .from('message_templates')
-    .select('id, name, language, category, status, channel_id')
+    .select('id, name, language, category, status, channel_id, components')
     .in('channel_id', channelIds)
     .order('name')
 
   if (error) return { data: [], hasChannel, error: error.message }
-  return { data: data ?? [], hasChannel, error: null }
+
+  // `components` no viaja al cliente: se resume en un booleano. Lo único que la
+  // pantalla necesita saber es si esa plantilla puede llevar el link para
+  // cancelar el turno; el blob completo son varios KB por template.
+  const rows = (data ?? []).map(({ components, ...t }) => ({
+    ...t,
+    carriesLink: llevaLinkDeGestion(components),
+  }))
+
+  return { data: rows, hasChannel, error: null }
 }

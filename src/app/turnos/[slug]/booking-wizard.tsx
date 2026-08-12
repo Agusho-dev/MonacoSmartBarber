@@ -2,20 +2,25 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import Image from 'next/image'
-import { ChevronLeft, Loader2, MapPin, Phone, Scissors } from 'lucide-react'
+import { ChevronLeft, Loader2, MapPin, Phone, Scissors, ShieldCheck } from 'lucide-react'
 import { publicBookAppointment } from '@/lib/actions/public-booking'
 import { ServicesStep } from './wizard/services-step'
-import { SlotStep, Avatar, type SlotSelection } from './wizard/slot-step'
-import { ContactStep } from './wizard/contact-step'
+import { SlotStep, type SlotSelection } from './wizard/slot-step'
+import { IdentifyStep, esTelefonoValido, type EstadoIdentidad, type Identidad } from './wizard/identify-step'
 import { ConfirmationStep } from './wizard/confirmation-step'
 import { StepProgress } from './wizard/step-progress'
+import { Avatar } from './wizard/avatar'
 import { buildTurneroTheme, themeVars } from './theme'
-import { TurneroAmbient, TurneroStyles, glassInteractive } from './glass'
+import { TurneroAmbient, TurneroStyles, ConfirmacionVerde, glassInteractive } from './glass'
 import { diasDeVentana } from './ventana'
 import { formatCurrency } from '@/lib/format'
 import { toDateStr } from '@/lib/time-utils'
 import { cn } from '@/lib/utils'
-import type { PublicService, PublicStaff } from '@/lib/actions/public-booking'
+import type {
+  PublicService,
+  PublicStaff,
+  PublicWalkInStaff,
+} from '@/lib/actions/public-booking'
 
 // ─── Tipos de props ──────────────────────────────────────────────────
 
@@ -57,6 +62,7 @@ interface Props {
   branch: Branch
   services: PublicService[]
   staff: PublicStaff[]
+  walkInStaff: PublicWalkInStaff[]
   settings: Settings
   branding: Branding
   prefill?: Prefill
@@ -97,27 +103,33 @@ function notificarAppMobile(appointmentId: string) {
 // ─── Steps del wizard ────────────────────────────────────────────────
 
 /**
- * TRES pasos, no cuatro: el paso "Elegí tu barbero" desapareció.
+ * El teléfono va PRIMERO.
  *
- * La agenda real de Monaco es de un barbero por día (Fabri los martes, Simón
- * los miércoles, Nico los jueves), así que preguntarle al cliente por el
- * barbero era pedirle que resolviera algo que el sistema ya sabe. Cuando de
- * verdad hay varios disponibles el mismo día, aparece un filtro opcional
- * ADENTRO del paso de horario.
+ * Antes el orden era servicio → horario → datos, y el nombre y el teléfono se
+ * pedían al final, cuando el cliente ya había hecho todo el trabajo. Poniendo
+ * la identificación adelante pasan tres cosas: el que ya vino no vuelve a
+ * tipear su nombre (lo autocompleta el teléfono), el turnero puede tratarlo por
+ * su nombre desde la primera pantalla, y los rechazos que dependen de QUIÉN es
+ * —"ya tenés un turno ese día"— aparecen antes de elegir nada en vez de
+ * después de elegirlo todo.
+ *
+ * El barbero sigue sin ser un paso: la agenda real es de un barbero por día, y
+ * quien quiera elegir tiene el botón "Elegir barbero" adentro del paso de
+ * horario.
  */
-type WizardStep = 'services' | 'slot' | 'contact' | 'confirmation'
+type WizardStep = 'identify' | 'services' | 'slot' | 'confirmation'
 
-const STEP_ORDER: WizardStep[] = ['services', 'slot', 'contact']
+const STEP_ORDER: WizardStep[] = ['identify', 'services', 'slot']
 const STEP_LABELS: Record<WizardStep, string> = {
+  identify: 'Tus datos',
   services: 'Servicio',
   slot: 'Día y horario',
-  contact: 'Tus datos',
   confirmation: 'Confirmación',
 }
 const STEP_TITLES: Record<WizardStep, string> = {
+  identify: '¿Quién sos?',
   services: '¿Qué te hacés?',
   slot: '¿Cuándo te viene bien?',
-  contact: 'Tus datos',
   confirmation: '',
 }
 
@@ -127,14 +139,6 @@ interface EstadoHistorial {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
-
-function isValidName(name: string): boolean {
-  return name.trim().length >= 2
-}
-
-function isValidPhone(phone: string): boolean {
-  return /^\+?[\d\s\-]{8,15}$/.test(phone.trim())
-}
 
 function mapErrorCode(code: string): string {
   const map: Record<string, string> = {
@@ -149,25 +153,50 @@ function mapErrorCode(code: string): string {
   return map[code] ?? code
 }
 
+/** Separa el prefill de la app mobile en nombre y apellido. */
+function partirNombre(completo: string): { firstName: string; lastName: string } {
+  const partes = completo.trim().split(/\s+/).filter(Boolean)
+  return { firstName: partes[0] ?? '', lastName: partes.slice(1).join(' ') }
+}
+
 // ─── Componente principal ────────────────────────────────────────────
 
-export function BookingWizard({ branch, services, staff, settings, branding, prefill }: Props) {
-  const [step, setStep] = useState<WizardStep>('services')
+export function BookingWizard({
+  branch,
+  services,
+  staff,
+  walkInStaff,
+  settings,
+  branding,
+  prefill,
+}: Props) {
+  // Prefill desde la app mobile: el cliente ya se identificó ahí, así que se
+  // arranca directo en el servicio. Re-pedirle el teléfono adentro de su propia
+  // app es preguntarle algo que la app ya sabe.
+  const prefillListo = !!prefill?.phone && esTelefonoValido(prefill.phone) && prefill.name.trim().length >= 2
+
+  const [step, setStep] = useState<WizardStep>(prefillListo ? 'services' : 'identify')
   /** Dirección de la última navegación: decide de qué lado entra el contenido. */
   const [direccion, setDireccion] = useState<'adelante' | 'atras'>('adelante')
+
+  const [identidad, setIdentidad] = useState<Identidad>(() => ({
+    phone: prefill?.phone ?? '',
+    ...partirNombre(prefill?.name ?? ''),
+  }))
+  const [estadoIdentidad, setEstadoIdentidad] = useState<EstadoIdentidad>('vacio')
+  const [turnoExistente, setTurnoExistente] = useState<{ date: string; time: string } | null>(null)
+
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([])
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined)
   const [selectedSlot, setSelectedSlot] = useState<SlotSelection | null>(null)
-  // Prefill desde la app mobile: el cliente ya se identificó ahí, re-tipear el
-  // teléfono con otro formato creaba un cliente duplicado.
-  const [clientName, setClientName] = useState(prefill?.name ?? '')
-  const [clientPhone, setClientPhone] = useState(prefill?.phone ?? '')
   const [policyAccepted, setPolicyAccepted] = useState(false)
   // Bumpear esta key fuerza a SlotStep a re-pedir la disponibilidad.
   const [slotRefreshKey, setSlotRefreshKey] = useState(0)
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
   const [appointmentToken, setAppointmentToken] = useState('')
+  /** Velo verde de "confirmado". Se apaga solo cuando termina su animación. */
+  const [mostrandoVerde, setMostrandoVerde] = useState(false)
   /**
    * Cómo tiene que registrar su llegada en la tablet, según lo que el servidor
    * ya sabe de este teléfono. Sale de la reserva, no se adivina en el cliente.
@@ -181,7 +210,12 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
 
   const currentStepIndex = STEP_ORDER.indexOf(step)
   const isFirstStep = currentStepIndex <= 0
-  const isLastContentStep = step === 'contact'
+  const isLastContentStep = step === 'slot'
+
+  const clientName = [identidad.firstName, identidad.lastName]
+    .map(s => s.trim())
+    .filter(Boolean)
+    .join(' ')
 
   const selectedServices = useMemo(
     () =>
@@ -225,7 +259,7 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
   // cliente pierde todo lo que había cargado. Se resuelve empujando una entrada
   // de historial por paso y escuchando `popstate`.
 
-  const pasoRef = useRef<WizardStep>('services')
+  const pasoRef = useRef<WizardStep>(step)
   const confirmadoRef = useRef(false)
 
   useEffect(() => {
@@ -235,7 +269,7 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
   useEffect(() => {
     try {
       const previo = (window.history.state ?? {}) as EstadoHistorial
-      window.history.replaceState({ ...previo, turneroStep: 0 }, '')
+      window.history.replaceState({ ...previo, turneroStep: STEP_ORDER.indexOf(step) }, '')
     } catch {
       // Historial bloqueado (algún WebView viejo): el wizard sigue andando con
       // los botones de la pantalla, sólo se pierde el gesto del sistema.
@@ -262,7 +296,16 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
 
     window.addEventListener('popstate', alVolver)
     return () => window.removeEventListener('popstate', alVolver)
+    // Sólo al montar: `step` se lee para sellar la entrada inicial (que con
+    // prefill no es la 0) y después el listener trabaja contra `pasoRef`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Cada paso empieza arriba. Sin esto, pasar de una grilla de horarios larga a
+  // la confirmación dejaba al cliente mirando la mitad de la pantalla.
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [step])
 
   // ─── Navegación ─────────────────────────────────────────────────
 
@@ -305,6 +348,19 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
   function goNext() {
     setError('')
 
+    if (step === 'identify') {
+      if (!esTelefonoValido(identidad.phone)) {
+        setError('Ingresá un número de teléfono válido.')
+        return
+      }
+      if (clientName.length < 2) {
+        setError('Ingresá tu nombre para continuar.')
+        return
+      }
+      avanzarA('services')
+      return
+    }
+
     if (step === 'services') {
       if (selectedServiceIds.length === 0) {
         setError('Seleccioná al menos un servicio para continuar.')
@@ -322,21 +378,8 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
         setError('Elegí un horario para continuar.')
         return
       }
-      avanzarA('contact')
-      return
-    }
-
-    if (step === 'contact') {
-      if (!isValidName(clientName)) {
-        setError('Ingresá tu nombre completo (mínimo 2 caracteres).')
-        return
-      }
-      if (!isValidPhone(clientPhone)) {
-        setError('Ingresá un número de teléfono válido.')
-        return
-      }
       if (!policyAccepted) {
-        setError('Aceptá la política de cancelación para continuar.')
+        setError('Aceptá la política de cancelación para confirmar.')
         return
       }
 
@@ -349,7 +392,7 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
         const result = await publicBookAppointment({
           branch_slug: branch.slug,
           branch_id: branch.id,
-          client_phone: clientPhone,
+          client_phone: identidad.phone,
           client_name: clientName,
           // El barbero sale del slot elegido: el motor devuelve un grupo por
           // barbero, así que la hora ya viene con dueño.
@@ -365,11 +408,10 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
           // Si el hueco se ocupó mientras completaba sus datos, el cartel de
           // error quedaba arriba de todo, fuera de pantalla, con la grilla
           // vieja intacta: el cliente reintentaba el mismo horario en loop.
-          // Lo devolvemos al paso de horarios con la grilla recargada.
+          // Lo devolvemos a la grilla recargada.
           if (result.error === 'SLOT_TAKEN' || result.error === 'TOO_LATE') {
             setSelectedSlot(null)
             setSlotRefreshKey(k => k + 1)
-            retroceder()
           }
           return
         }
@@ -381,6 +423,7 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
         })
         confirmadoRef.current = true
         setDireccion('adelante')
+        setMostrandoVerde(true)
         setStep('confirmation')
         notificarAppMobile(result.data.appointment_id)
       })
@@ -399,33 +442,42 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
     setError('')
   }
 
-  function handleContactChange(field: 'name' | 'phone' | 'accepted', value: string | boolean) {
-    if (field === 'name') setClientName(value as string)
-    else if (field === 'phone') setClientPhone(value as string)
-    else setPolicyAccepted(value as boolean)
+  function cambiarIdentidad(v: Identidad) {
+    setIdentidad(v)
     setError('')
   }
 
   function canProceed(): boolean {
+    if (step === 'identify') {
+      return esTelefonoValido(identidad.phone) && clientName.length >= 2
+    }
     if (step === 'services') return selectedServiceIds.length > 0
-    if (step === 'slot') return !!selectedDate && !!selectedSlot
-    if (step === 'contact') return isValidName(clientName) && isValidPhone(clientPhone) && policyAccepted
+    if (step === 'slot') return !!selectedDate && !!selectedSlot && policyAccepted
     return false
   }
 
   const habilitado = canProceed() && !isPending
   const ctaLabel = isLastContentStep ? 'Confirmar turno' : 'Continuar'
   const mostrarAtras = !isFirstStep && step !== 'confirmation'
+  const horasCancelacion = `${settings.cancellation_min_hours} ${
+    settings.cancellation_min_hours === 1 ? 'hora' : 'horas'
+  }`
 
   // ─── Render ─────────────────────────────────────────────────────
 
   return (
     <div
+      // La hoja de barberos se portalea acá adentro: es el elemento que publica
+      // los tokens `--t-*` y, al ser `relative` SIN z-index, no abre un contexto
+      // de apilamiento que le encierre el z-index (ver `barber-sheet.tsx`).
+      data-turnero-root
       className="relative min-h-screen bg-[var(--t-bg)] text-[var(--t-text)]"
       style={themeVars(theme)}
     >
       <TurneroStyles />
       <TurneroAmbient />
+
+      {mostrandoVerde && <ConfirmacionVerde onDone={() => setMostrandoVerde(false)} />}
 
       {/* Header sticky con nombre + dirección + tel */}
       <header className="sticky top-0 z-30 border-b border-[var(--t-glass-border)] bg-[var(--t-chrome-bg)] backdrop-blur-xl">
@@ -492,7 +544,7 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
         </div>
       </header>
 
-      <div className="relative z-10 mx-auto max-w-2xl px-4 pb-44 pt-5">
+      <div className="relative z-10 mx-auto max-w-2xl px-4 pb-52 pt-5">
         {step !== 'confirmation' && (
           <StepProgress
             current={currentStepIndex + 1}
@@ -513,14 +565,14 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
               <h1 className="text-[26px] font-bold leading-tight tracking-tight text-[var(--t-text)]">
                 {STEP_TITLES[step]}
               </h1>
+              {step === 'identify' && (
+                <p className="mt-1.5 text-sm text-[var(--t-text-muted)]">
+                  Con tu número alcanza. Si ya viniste, completamos el resto nosotros.
+                </p>
+              )}
               {step === 'services' && branding.welcome_message && (
                 <p className="mt-1.5 text-sm text-[var(--t-text-muted)]">
                   {branding.welcome_message}
-                </p>
-              )}
-              {step === 'contact' && (
-                <p className="mt-1.5 text-sm text-[var(--t-text-muted)]">
-                  Sólo para confirmarte el turno y avisarte si algo cambia.
                 </p>
               )}
             </div>
@@ -534,6 +586,18 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
             >
               {error}
             </div>
+          )}
+
+          {step === 'identify' && (
+            <IdentifyStep
+              branchId={branch.id}
+              valor={identidad}
+              estado={estadoIdentidad}
+              turnoExistente={turnoExistente}
+              onCambio={cambiarIdentidad}
+              onEstado={setEstadoIdentidad}
+              onTurnoExistente={setTurnoExistente}
+            />
           )}
 
           {step === 'services' && (
@@ -550,6 +614,7 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
               branchId={branch.id}
               serviceIds={selectedServiceIds}
               staff={staff}
+              walkInStaff={walkInStaff}
               maxAdvanceDays={settings.max_advance_days}
               enabledDays={enabledDays}
               selectedDate={selectedDate}
@@ -558,16 +623,6 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
               onDateChange={d => { setSelectedDate(d); setSelectedSlot(null) }}
               onSlotSelect={slot => { setSelectedSlot(slot); setError('') }}
               onClearSlot={() => setSelectedSlot(null)}
-            />
-          )}
-
-          {step === 'contact' && (
-            <ContactStep
-              name={clientName}
-              phone={clientPhone}
-              accepted={policyAccepted}
-              cancellationHours={settings.cancellation_min_hours}
-              onChange={handleContactChange}
             />
           )}
 
@@ -583,7 +638,7 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
               date={selectedDate!}
               time={selectedSlot?.time ?? ''}
               clientName={clientName}
-              clientPhone={clientPhone}
+              clientPhone={identidad.phone}
               clienteTieneCara={llegada.tieneCara}
               clienteEsNuevo={llegada.esNuevo}
             />
@@ -619,6 +674,46 @@ export function BookingWizard({ branch, services, staff, settings, branding, pre
                   {formatCurrency(totalPrice)}
                 </span>
               </div>
+            )}
+
+            {/* La política se acepta ACÁ, pegada al botón que confirma, y no en
+                un paso propio: es el único momento en que el cliente está
+                decidiendo comprometerse con un horario. Aparece recién con la
+                hora elegida para no ocupar el pie durante todo el flujo. */}
+            {step === 'slot' && selectedSlot && (
+              <label
+                htmlFor="cancel-policy"
+                className={cn(
+                  glassInteractive,
+                  't-rise mb-2.5 flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2.5'
+                )}
+              >
+                <input
+                  id="cancel-policy"
+                  type="checkbox"
+                  checked={policyAccepted}
+                  onChange={e => { setPolicyAccepted(e.target.checked); setError('') }}
+                  className="peer sr-only"
+                />
+                <span
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-[background-color,border-color] duration-200"
+                  style={{
+                    borderColor: policyAccepted ? 'var(--t-primary)' : 'var(--t-text-faint)',
+                    backgroundColor: policyAccepted ? 'var(--t-primary)' : 'transparent',
+                    color: 'var(--t-on-primary)',
+                  }}
+                  aria-hidden
+                >
+                  {policyAccepted && <ShieldCheck className="h-3.5 w-3.5" strokeWidth={3} />}
+                </span>
+                <span className="min-w-0 flex-1 text-xs leading-snug text-[var(--t-text-muted)]">
+                  Entiendo que puedo cancelar hasta{' '}
+                  <strong className="font-bold text-[var(--t-text)]">
+                    {horasCancelacion} antes
+                  </strong>{' '}
+                  del turno. Te mandamos el link por WhatsApp.
+                </span>
+              </label>
             )}
 
             <div className="flex gap-2.5">

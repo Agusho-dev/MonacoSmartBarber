@@ -95,20 +95,79 @@ export function TurneroAmbient() {
             'radial-gradient(ellipse 90% 48% at 50% -10%, var(--t-glow-1), transparent 62%)',
         }}
       />
+      {/* Las dos manchas laterales derivan MUY lento (28 s y 34 s) y sólo con
+          `transform`, que el compositor resuelve sin repintar: es lo que hace
+          que el vidrio parezca tener algo vivo detrás en vez de un degradado
+          pegado. Se apagan enteras con `prefers-reduced-motion`. */}
       <div
-        className="absolute inset-0"
+        className="t-drift absolute inset-0"
         style={{
           background:
             'radial-gradient(ellipse 52% 34% at 96% 24%, var(--t-glow-2), transparent 58%)',
         }}
       />
       <div
-        className="absolute inset-0"
+        className="t-drift t-drift-b absolute inset-0"
         style={{
           background:
             'radial-gradient(ellipse 58% 40% at 0% 84%, var(--t-glow-2), transparent 60%)',
         }}
       />
+    </div>
+  )
+}
+
+// ─── Confirmación en verde ───────────────────────────────────────────
+
+/**
+ * La pantalla se pone verde y aparece el tilde.
+ *
+ * Es deliberadamente el único lugar del turnero donde el color NO es el de la
+ * marca: "confirmado" es un código que el cliente ya trae aprendido de las apps
+ * de pedidos, y leerlo tarda menos que cualquier texto. El verde y el blanco
+ * van fijos (5:1 medido) justamente para que ninguna paleta de dueño pueda
+ * dejar ilegible el momento más importante del flujo.
+ *
+ * El relleno es un CÍRCULO que crece con `transform: scale()` desde donde
+ * estaba el botón de confirmar, no un `clip-path` ni un `width`: sólo el
+ * primero lo resuelve el compositor sin repintar, y esto corre en el celular
+ * más barato del local justo cuando el cliente está mirando.
+ *
+ * Se auto-oculta: la pantalla de confirmación ya está montada abajo y aparece
+ * sola cuando el velo se va.
+ */
+export function ConfirmacionVerde({ onDone }: { onDone?: () => void }) {
+  return (
+    <div
+      className="t-go-layer pointer-events-none fixed inset-0 z-50 overflow-hidden"
+      onAnimationEnd={e => {
+        if (e.animationName === 't-go-hide') onDone?.()
+      }}
+      role="status"
+      aria-live="polite"
+    >
+      <span className="t-go-fill" aria-hidden />
+      <div className="t-go-content relative flex h-full flex-col items-center justify-center gap-5 px-8 text-center">
+        <span className="relative flex h-28 w-28 items-center justify-center">
+          <span className="t-go-ring absolute inset-0 rounded-full" aria-hidden />
+          <span className="t-go-ring t-go-ring-b absolute inset-0 rounded-full" aria-hidden />
+          <svg viewBox="0 0 64 64" className="relative h-28 w-28" fill="none" aria-hidden>
+            <circle cx="32" cy="32" r="27" fill="rgba(255,255,255,0.16)" />
+            <path
+              d="M19 33 L28 42 L45 24"
+              stroke="#ffffff"
+              strokeWidth="5.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="t-go-tick"
+            />
+          </svg>
+        </span>
+        <p className="t-go-text text-[28px] font-bold leading-tight tracking-tight text-white">
+          ¡Turno confirmado!
+        </p>
+      </div>
+      <span className="sr-only">Tu turno quedó confirmado</span>
     </div>
   )
 }
@@ -127,9 +186,16 @@ export function TurneroStyles() {
         position: relative;
         background: var(--t-glass-bg);
         border: 1px solid var(--t-glass-border);
-        box-shadow: var(--t-glass-shadow);
-        -webkit-backdrop-filter: blur(16px) saturate(150%);
-        backdrop-filter: blur(16px) saturate(150%);
+        /* El rim interior es la mitad del efecto "vidrio grueso": una línea de
+           luz por dentro del borde arriba y una sombra por dentro abajo hacen
+           que el panel se lea como un material con canto, no como un
+           rectángulo pintado. */
+        box-shadow:
+          var(--t-glass-shadow),
+          inset 0 1px 1px -1px var(--t-glass-highlight),
+          inset 0 -1px 1px -1px rgba(0, 0, 0, 0.18);
+        -webkit-backdrop-filter: blur(20px) saturate(180%);
+        backdrop-filter: blur(20px) saturate(180%);
       }
       /* Línea de luz del borde superior. Va con los extremos recortados para
          que no se monte sobre las esquinas redondeadas. */
@@ -272,6 +338,100 @@ export function TurneroStyles() {
         animation: t-draw 380ms cubic-bezier(0.65, 0, 0.35, 1) 700ms forwards;
       }
 
+      /* ── Deriva del ambiente ───────────────────────────────────── */
+      /* Sólo transform: el compositor la resuelve sin repintar la página. */
+      @keyframes t-drift {
+        0%   { transform: translate3d(0, 0, 0) scale(1); }
+        50%  { transform: translate3d(-4%, 3%, 0) scale(1.08); }
+        100% { transform: translate3d(0, 0, 0) scale(1); }
+      }
+      .t-drift {
+        animation: t-drift 28s ease-in-out infinite;
+        will-change: transform;
+      }
+      .t-drift-b { animation-duration: 34s; animation-direction: reverse; }
+
+      /* ── Entrada de una tarjeta que aparece sola ───────────────── */
+      /* Distinta de .t-rise: ésta llega desde arriba y con un rebote corto,
+         porque anuncia un RECONOCIMIENTO ("te encontramos"), no un ítem más
+         de una lista. */
+      @keyframes t-pop-in {
+        0%   { opacity: 0; transform: translate3d(0, -8px, 0) scale(0.96); }
+        70%  { opacity: 1; transform: translate3d(0, 2px, 0) scale(1.01); }
+        100% { opacity: 1; transform: none; }
+      }
+      .t-pop-in { animation: t-pop-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+      /* ── Hoja inferior (elegir barbero) ────────────────────────── */
+      @keyframes t-veil-in { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes t-sheet-in {
+        from { transform: translate3d(0, 100%, 0); }
+        to   { transform: none; }
+      }
+      .t-veil { animation: t-veil-in 240ms ease both; }
+      .t-sheet {
+        animation: t-sheet-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        will-change: transform;
+      }
+
+      /* ── Confirmación en verde ─────────────────────────────────── */
+      @keyframes t-go-fill {
+        from { transform: scale(0); }
+        to   { transform: scale(1); }
+      }
+      @keyframes t-go-hide {
+        from { opacity: 1; }
+        to   { opacity: 0; }
+      }
+      @keyframes t-go-ring {
+        0%   { opacity: 0; transform: scale(0.5); }
+        25%  { opacity: 0.5; }
+        100% { opacity: 0; transform: scale(2.1); }
+      }
+      @keyframes t-go-text {
+        from { opacity: 0; transform: translate3d(0, 12px, 0); }
+        to   { opacity: 1; transform: none; }
+      }
+      .t-go-layer {
+        /* El velo se va solo. El 'forwards' deja opacity 0 fijo, así que aunque
+           el padre lo siguiera montando no volvería a taparle la pantalla al
+           cliente. */
+        animation: t-go-hide 460ms ease 1900ms forwards;
+      }
+      .t-go-fill {
+        position: absolute;
+        left: 50%;
+        /* Nace donde estaba el botón de confirmar, abajo: el verde se lee como
+           consecuencia del toque y no como una pantalla que apareció. */
+        top: 62%;
+        /* Dimensionado para que a escala 1 APENAS cubra la pantalla desde ese
+           origen. Con un círculo enorme (280vmax) el barrido se completaba
+           visualmente en el primer 20% de la animación y el efecto se leía como
+           un flash: el resto del crecimiento pasaba fuera de la pantalla. */
+        width: 150vmax;
+        height: 150vmax;
+        margin-left: -75vmax;
+        margin-top: -75vmax;
+        border-radius: 50%;
+        background: radial-gradient(circle at 50% 46%, #1aa14c 0%, #15803d 42%, #0f6a33 100%);
+        transform: scale(0);
+        animation: t-go-fill 620ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        will-change: transform;
+      }
+      .t-go-content { animation: t-go-text 420ms cubic-bezier(0.22, 1, 0.36, 1) 340ms both; }
+      .t-go-text { animation: t-go-text 460ms cubic-bezier(0.22, 1, 0.36, 1) 620ms both; }
+      .t-go-ring {
+        background: radial-gradient(circle, rgba(255,255,255,0.55), transparent 66%);
+        animation: t-go-ring 1500ms ease-out 520ms infinite;
+      }
+      .t-go-ring-b { animation-delay: 1000ms; }
+      /* 38 ≈ el largo real del trazo del tilde en el viewBox de 64. */
+      .t-go-tick {
+        stroke-dasharray: 38;
+        stroke-dashoffset: 38;
+        animation: t-draw 420ms cubic-bezier(0.65, 0, 0.35, 1) 560ms forwards;
+      }
+
       /* ── Sin animación ─────────────────────────────────────────── */
       /* El estado final tiene que quedar VISIBLE: apagar una animación con
          fill-mode "both" deja el elemento en su estado natural, pero el trazo
@@ -279,15 +439,31 @@ export function TurneroStyles() {
       @media (prefers-reduced-motion: reduce) {
         .t-step,
         .t-rise,
+        .t-pop-in,
         .t-check-shell,
         .t-check-ring,
         .t-check-tick,
         .t-sheen::after,
-        .t-skel::after {
+        .t-skel::after,
+        .t-drift,
+        .t-sheet,
+        .t-veil,
+        .t-go-content,
+        .t-go-text,
+        .t-go-ring,
+        .t-go-tick {
           animation: none !important;
         }
         .t-check-halo { animation: none !important; opacity: 0; }
         .t-check-ring, .t-check-tick { stroke-dashoffset: 0; }
+        .t-go-ring { opacity: 0; }
+        .t-go-tick { stroke-dashoffset: 0; }
+        /* El verde igual tiene que TAPAR la pantalla y después irse: sin el
+           relleno a escala 1 quedaría un círculo de tamaño cero y el cliente no
+           vería ninguna confirmación. Lo que se apaga es el movimiento, no el
+           estado. */
+        .t-go-fill { animation: none !important; transform: scale(1); }
+        .t-go-layer { animation: t-go-hide 300ms linear 1500ms forwards; }
         .t-glass-int { transition: none; }
         .t-glass-int:hover { transform: none; }
       }

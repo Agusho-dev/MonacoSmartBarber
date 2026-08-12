@@ -25,6 +25,13 @@ const MAX_ATTEMPTS = 3
 // y como lo consumimos en este archivo. No es exhaustivo: solo los campos que tocamos.
 interface TemplateParamComponent {
   type: string
+  /**
+   * Sólo para `type: 'button'`. Meta EXIGE los dos campos y rechaza el envío
+   * entero si falta cualquiera de ellos, así que se propagan tal cual vienen
+   * (un template con botón "Cancelar turno" viaja por acá).
+   */
+  sub_type?: string
+  index?: number
   parameters?: TemplateParamItem[]
 }
 interface TemplateParamItem {
@@ -59,6 +66,8 @@ interface MetaTemplatePayload {
     language: { code: string }
     components?: Array<{
       type: string
+      sub_type?: string
+      index?: number
       parameters: Array<Record<string, unknown>>
     }>
   }
@@ -418,6 +427,11 @@ function buildTemplatePayload(
   if (templateParams && Array.isArray(templateParams) && templateParams.length > 0) {
     payload.template.components = templateParams.map((comp: TemplateParamComponent) => ({
       type: comp.type,
+      // Un componente de botón sin `sub_type`/`index` es un 400 de Meta: se
+      // copian cuando existen y se omiten cuando no, para no ensuciar los
+      // componentes de body con claves que Meta no espera.
+      ...(comp.sub_type ? { sub_type: comp.sub_type } : {}),
+      ...(typeof comp.index === 'number' ? { index: comp.index } : {}),
       parameters: comp.parameters?.map((p: TemplateParamItem) => {
         if (p.type === 'text') return { type: 'text', text: p.text || '' }
         if (p.type === 'image') return { type: 'image', image: p.image }

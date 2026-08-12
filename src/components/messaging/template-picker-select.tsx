@@ -11,6 +11,12 @@ export interface TemplateOption {
   language: string
   category: string | null
   status: string
+  /**
+   * La plantilla declara una forma capaz de llevar el link para cancelar el
+   * turno (una sexta variable de body, o un botón URL con sufijo dinámico).
+   * Se resuelve en el servidor leyendo sus `components`.
+   */
+  carriesLink?: boolean
 }
 
 interface TemplatePickerSelectProps {

@@ -76,6 +76,13 @@ const REGLAS: Array<{
   { nombre: 'accent vs bg',        a: t => t.accent,     b: t => t.bg,         min: 4.5 },
   { nombre: 'accent vs surface',   a: t => t.accent,     b: t => t.surface,    min: 4.5 },
   { nombre: 'dangerText vs dgBg',  a: t => t.dangerText, b: t => t.dangerBg,   min: 4.5 },
+  // El verde de "listo" es tan corregible como el primario: sobre un fondo
+  // verde oscuro (#132a13 está en la lista) el green-600 crudo desaparece.
+  { nombre: 'success vs bg',       a: t => t.success,     b: t => t.bg,        min: 3 },
+  { nombre: 'success vs surface',  a: t => t.success,     b: t => t.surface,   min: 3 },
+  { nombre: 'onSuccess vs success',a: t => t.onSuccess,   b: t => t.success,   min: 4.5 },
+  { nombre: 'successText vs bg',   a: t => t.successText, b: t => t.bg,        min: 4.5 },
+  { nombre: 'successText vs surf', a: t => t.successText, b: t => t.surface,   min: 4.5 },
 ]
 
 /**
@@ -99,6 +106,8 @@ const REGLAS_VIDRIO: Array<{
   { nombre: 'textFaint vs vidrio', a: t => t.textFaint, min: 3 },
   { nombre: 'primary vs vidrio',   a: t => t.primary,   min: 3 },
   { nombre: 'accent vs vidrio',    a: t => t.accent,    min: 4.5 },
+  { nombre: 'success vs vidrio',   a: t => t.success,     min: 3 },
+  { nombre: 'successTxt vs vidrio',a: t => t.successText, min: 4.5 },
 ]
 
 // ─── Barrido ─────────────────────────────────────────────────────────

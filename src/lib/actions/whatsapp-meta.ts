@@ -485,6 +485,30 @@ const DEFAULT_TEMPLATES: TemplateSpec[] = [
     body_examples: ['Juan', 'Corte clásico', 'lunes 21 de abril', '15:30', 'Monaco Rondeau'],
   },
   {
+    // Misma confirmación, con el link para cancelar como sexta variable.
+    //
+    // Es un template NUEVO y no una edición de `monaco_turno_confirmacion`
+    // a propósito: editar una plantilla aprobada la devuelve a revisión en
+    // Meta y, mientras dura, TODO envío con ella falla. Una org que ya está
+    // mandando confirmaciones no puede quedarse sin ellas por una mejora.
+    // Conviven, y el turnero recomienda ésta.
+    //
+    // El cuerpo no puede TERMINAR en variable (Meta lo rechaza al crearlo),
+    // por eso el link va con texto después.
+    name: 'monaco_turno_confirmacion_link',
+    category: 'UTILITY',
+    body_text:
+      'Hola {{1}}! Tu turno para {{2}} el {{3}} a las {{4}} en {{5}} quedó confirmado. Te esperamos.\n\nSi no podés venir, cancelalo acá: {{6}} así le liberás el lugar a otra persona.',
+    body_examples: [
+      'Juan',
+      'Corte clásico',
+      'lunes 21 de abril',
+      '15:30',
+      'Monaco Rondeau',
+      'https://monaco-smart-barber.vercel.app/turnos/gestionar/a1b2c3d4e5f6a1b2c3d4e5f6',
+    ],
+  },
+  {
     name: 'monaco_turno_recordatorio',
     category: 'UTILITY',
     body_text:

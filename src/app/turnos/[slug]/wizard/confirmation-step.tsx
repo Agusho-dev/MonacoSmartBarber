@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import {
   CalendarPlus,
+  CalendarX2,
   Check,
   Clock,
   Copy,
@@ -18,7 +19,7 @@ import { getTzOffsetISO, toDateStr } from '@/lib/time-utils'
 import { cn } from '@/lib/utils'
 import { glassPanel, glassInteractive } from '../glass'
 import { fechaLarga } from '../fechas'
-import { Avatar } from './slot-step'
+import { Avatar } from './avatar'
 import type { PublicService } from '@/lib/actions/public-booking'
 
 const TZ_FALLBACK = 'America/Argentina/Buenos_Aires'
@@ -296,28 +297,44 @@ export function ConfirmationStep({
       >
         <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--t-text-muted)]">
           <LinkIcon className="h-3 w-3" />
-          Ver o cancelar tu turno
+          Si no podés venir
         </p>
         <p className="mt-1.5 text-sm text-[var(--t-text-muted)]">
-          Guardá este link, te sirve para gestionarlo:
+          Cancelá desde acá y le liberás el lugar a otra persona. El mismo link te llega por
+          WhatsApp, así que no hace falta que lo guardes.
         </p>
-        <a
-          href={manageUrl}
-          className="mt-2 block break-all text-sm font-semibold underline decoration-1 underline-offset-2 text-[var(--t-accent)]"
-        >
-          {manageUrl}
-        </a>
-        <button
-          type="button"
-          onClick={copiarLink}
-          className={cn(
-            glassInteractive,
-            'mt-3 flex min-h-[44px] items-center gap-2 rounded-xl px-4 text-sm font-semibold text-[var(--t-text)]'
-          )}
-        >
-          {copiado ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-          {copiado ? 'Link copiado' : 'Copiar link'}
-        </button>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <a
+            href={manageUrl}
+            className={cn(
+              glassInteractive,
+              'flex min-h-[46px] flex-1 items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold'
+            )}
+            style={{ color: 'var(--t-text)' }}
+          >
+            <CalendarX2 className="h-4 w-4" />
+            Ver o cancelar mi turno
+          </a>
+          <button
+            type="button"
+            onClick={copiarLink}
+            aria-label="Copiar el link para gestionar el turno"
+            className={cn(
+              glassInteractive,
+              'flex min-h-[46px] w-[46px] shrink-0 items-center justify-center rounded-xl text-[var(--t-text)]'
+            )}
+          >
+            {copiado ? (
+              <Check className="h-4 w-4 text-[var(--t-success-text)]" />
+            ) : (
+              <Copy className="h-4 w-4" />
+            )}
+          </button>
+        </div>
+        {copiado && (
+          <p className="mt-2 text-xs font-semibold text-[var(--t-success-text)]">Link copiado</p>
+        )}
       </section>
 
       {branch.phone && (
@@ -356,7 +373,7 @@ function TildeConfirmado() {
         <span
           className="t-check-halo pointer-events-none absolute inset-0 rounded-full"
           style={{
-            background: 'radial-gradient(circle, var(--t-ring), transparent 68%)',
+            background: 'radial-gradient(circle, var(--t-success), transparent 68%)',
           }}
           aria-hidden
         />
@@ -364,9 +381,12 @@ function TildeConfirmado() {
           className={cn(glassPanel, 'absolute inset-0 rounded-full')}
           aria-hidden
         />
+        {/* Verde y no el color de marca: es la continuación del velo que acaba
+            de pasar (`ConfirmacionVerde`), y sostener el mismo color hace que
+            las dos pantallas se lean como un solo momento. */}
         <svg
           viewBox="0 0 64 64"
-          className="relative h-14 w-14 text-[var(--t-accent)]"
+          className="relative h-14 w-14 text-[var(--t-success-text)]"
           fill="none"
           role="img"
           aria-label="Turno confirmado"

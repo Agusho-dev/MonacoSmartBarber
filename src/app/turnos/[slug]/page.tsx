@@ -2,7 +2,11 @@ import { redirect } from 'next/navigation'
 import Image from 'next/image'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getAppointmentSettings } from '@/lib/actions/appointments'
-import { publicGetBranchServices, publicGetAvailableStaff } from '@/lib/actions/public-booking'
+import {
+  publicGetBranchServices,
+  publicGetAvailableStaff,
+  publicGetBranchBarbers,
+} from '@/lib/actions/public-booking'
 import { getBranchAppointmentHours } from '@/lib/actions/appointment-hours'
 import { isValidUUID } from '@/lib/validation'
 import { BookingWizard } from './booking-wizard'
@@ -304,11 +308,19 @@ async function renderBranch(
   }
 
   // Cargar datos necesarios para el wizard en paralelo
-  const [services, staff, horario] = await Promise.all([
+  const [services, staff, barberos, horario] = await Promise.all([
     publicGetBranchServices(branch.id),
     publicGetAvailableStaff(branch.id),
+    publicGetBranchBarbers(branch.id),
     getBranchAppointmentHours(branch.id),
   ])
+
+  // Los que atienden sólo por orden de llegada = todos los barberos menos los
+  // que de verdad se pueden reservar. No se puede reservar con ellos, pero
+  // nombrarlos evita que el cliente que abre "Elegir barbero" y no encuentra al
+  // suyo concluya que el turnero está roto (ver `barber-sheet.tsx`).
+  const reservables = new Set(staff.map(s => s.id))
+  const walkInStaff = barberos.filter(b => !reservables.has(b.id))
 
   // Con franjas cargadas (mig 172), los días habilitados son los que tienen al
   // menos una franja: `appointment_days` deja de mandar. Si no, la tira de días
@@ -342,6 +354,7 @@ async function renderBranch(
       }}
       services={services}
       staff={staff}
+      walkInStaff={walkInStaff}
       settings={{
         max_advance_days: settings.max_advance_days,
         appointment_days: diasHabilitados,

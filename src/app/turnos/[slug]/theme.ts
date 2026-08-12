@@ -308,6 +308,16 @@ export interface TurneroTheme {
   accent: string
   /** Halo de foco, ya con alpha. */
   ring: string
+  /**
+   * Verde de "listo" como RELLENO, ya corregido para recortarse del fondo de
+   * marca (>= 3:1). Se usa en la pantalla de confirmación, no en el momento del
+   * tilde: ese es una capa propia (ver `--t-go-*`).
+   */
+  success: string
+  /** Texto/ícono que va encima de `success`. */
+  onSuccess: string
+  /** Verde como TINTA (>= 4.5:1). Degrada al color de texto si la paleta no da. */
+  successText: string
   /** Rojo sólido para rellenos destructivos (lleva texto blanco). */
   danger: string
   /** Fondo de cajas de error/alerta. */
@@ -530,6 +540,27 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
     mix(BLACK, bg, chromeAlpha),
   ]
 
+  // ─── Verde de "listo" ─────────────────────────────────────────────
+  //
+  // NO sale de la marca: "confirmado" es un código de color que el cliente ya
+  // trae aprendido de cualquier app de pedidos, y una barbería con primario
+  // bordó no puede quedarse sin él.
+  //
+  // Se deriva ACÁ ABAJO, después del vidrio, y no junto al primario: el verde
+  // cae sobre paneles translúcidos y hay que medirlo contra la composición real.
+  // Derivado arriba, contra las capas sólidas, quedaba en 2.9:1 sobre el vidrio
+  // de un tema claro — el chequeo de contraste lo agarró en el acto.
+  //
+  // La otra salida era meterlo en `reqs` para que el buscador de opacidad lo
+  // contemplara, pero eso le hace pagar a TODA la pantalla (menos vidrio en
+  // todos lados) el precio de un color que se usa en una sola. Es más barato
+  // corregir el verde.
+  const GREEN: RGB = { r: 22, g: 163, b: 74 } // green-600
+  const capasVerde = [...layers, ...glassLayers]
+  const success = readableFill(GREEN, capasVerde, AA_LARGE, isDark)
+  const onSuccess = bestForeground([success])
+  const successText = readableAccent(GREEN, capasVerde, AA_TEXT, isDark, text)
+
   return {
     bg: toHex(bg),
     surface: toHex(surface),
@@ -542,6 +573,9 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
     onPrimary: toHex(onPrimary),
     accent: toHex(accent),
     ring: rgba(accent, 0.45),
+    success: toHex(success),
+    onSuccess: toHex(onSuccess),
+    successText: toHex(successText),
     danger: '#dc2626',
     dangerBg: toHex(dangerBg),
     dangerText: toHex(dangerText),
@@ -579,6 +613,9 @@ export function themeVars(t: TurneroTheme): CSSProperties {
     '--t-on-primary': t.onPrimary,
     '--t-accent': t.accent,
     '--t-ring': t.ring,
+    '--t-success': t.success,
+    '--t-on-success': t.onSuccess,
+    '--t-success-text': t.successText,
     '--t-danger': t.danger,
     '--t-danger-bg': t.dangerBg,
     '--t-danger-text': t.dangerText,

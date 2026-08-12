@@ -8,6 +8,8 @@ import { RateLimits } from '@/lib/rate-limit'
 import { absoluteUrl } from '@/lib/app-url'
 import { isValidUUID } from '@/lib/validation'
 import { getLocalNow, getLocalDateStr, getTzOffsetISO } from '@/lib/time-utils'
+import { intersectarRangos, type Rango } from '@/lib/franjas'
+import { componentesDe, variablesDelBody, indiceBotonUrl } from '@/lib/whatsapp-template-shape'
 import { currentUserCan } from './permissions-gate'
 import type { Appointment, AppointmentSettings, AppointmentStaff, AppointmentStatus, AppointmentPaymentMethod } from '@/lib/types/database'
 
@@ -668,39 +670,112 @@ async function resolveOrgWhatsAppChannelId(orgId: string): Promise<string | null
  * seteaba, así que TODOS los mensajes de turnos fallaban: los templates
  * `monaco_turno_*` están aprobados como `es`.
  */
-async function getTemplateById(
-  templateId: string | null
-): Promise<{ name: string; language: string | null } | null> {
+interface TemplateInfo {
+  name: string
+  language: string | null
+  /** Mayor índice {{n}} declarado en el BODY. 5 es la forma histórica. */
+  bodyVars: number
+  /** Índice del botón URL con sufijo dinámico, o null si no tiene. */
+  urlButtonIndex: number | null
+}
+
+/**
+ * Nombre, idioma y FORMA del template registrado en Meta.
+ *
+ * El idioma no es cosmético: si el template está aprobado como `es` y se envía
+ * como `es_AR`, Meta responde 132001 "Template name does not exist in the
+ * translation" y el mensaje muere sin reintento. La columna
+ * `scheduled_messages.template_language` tiene default `es_AR` y nadie la
+ * seteaba, así que TODOS los mensajes de turnos fallaban: los templates
+ * `monaco_turno_*` están aprobados como `es`.
+ *
+ * La FORMA se lee por el mismo motivo, un escalón más arriba: Meta rechaza el
+ * envío entero (132000, "number of parameters does not match") si le mandamos
+ * una variable de más o de menos. Como los templates los edita el dueño en
+ * Business Manager, la cantidad de variables no se puede asumir — se cuenta de
+ * los `components` que ya guarda el sync.
+ */
+async function getTemplateById(templateId: string | null): Promise<TemplateInfo | null> {
   if (!templateId) return null
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('message_templates')
-    .select('name, language')
+    .select('name, language, components')
     .eq('id', templateId)
     .maybeSingle()
   if (!data?.name) return null
-  return { name: data.name, language: data.language ?? null }
+
+  const components = componentesDe(data.components)
+
+  return {
+    name: data.name,
+    language: data.language ?? null,
+    bodyVars: variablesDelBody(components),
+    urlButtonIndex: indiceBotonUrl(components),
+  }
 }
 
-function buildAppointmentTemplateParams(vars: {
+interface TemplateVars {
   clientName: string
   serviceName: string
   dateFormatted: string
   startTime: string
   branchName: string
-}) {
-  return [
-    {
-      type: 'body',
-      parameters: [
-        { type: 'text', text: vars.clientName },
-        { type: 'text', text: vars.serviceName },
-        { type: 'text', text: vars.dateFormatted },
-        { type: 'text', text: vars.startTime },
-        { type: 'text', text: vars.branchName },
-      ],
-    },
+  /** URL completa de /turnos/gestionar/<token>. */
+  manageUrl: string
+  /** Sólo el token: es lo que consume un botón URL con sufijo dinámico. */
+  manageToken: string
+}
+
+/**
+ * Parámetros del template, ajustados a lo que ese template DECLARA.
+ *
+ * El link para cancelar es obligatorio en la confirmación, pero no se puede
+ * meter a la fuerza: un template aprobado con 5 variables rechaza la 6ta con
+ * 132000 y el mensaje no llega. Así que se manda por el canal que el template
+ * ofrezca, en este orden:
+ *
+ *   1. Botón URL con sufijo dinámico → viaja el TOKEN (Meta le pega el sufijo
+ *      a la URL base del botón). Es la forma linda: el cliente ve un botón.
+ *   2. Sexta variable de body → viaja la URL completa. WhatsApp la vuelve
+ *      tocable sola.
+ *   3. Ninguna de las dos → se manda la forma histórica de 5 variables. El
+ *      mensaje llega igual, sin link, y el dashboard avisa que falta.
+ *
+ * Es la misma familia de trampa que el `language_code`: el template lo edita el
+ * dueño en Business Manager, así que su forma es un dato a leer, no a asumir.
+ */
+function buildAppointmentTemplateParams(vars: TemplateVars, info: TemplateInfo | null) {
+  const bodyVars = info?.bodyVars ?? 5
+
+  const todos = [
+    vars.clientName,
+    vars.serviceName,
+    vars.dateFormatted,
+    vars.startTime,
+    vars.branchName,
+    vars.manageUrl,
   ]
+
+  // Si el template declara menos variables de las que tenemos, se recortan (una
+  // de más es un envío fallido); si declara más de las que sabemos llenar, se
+  // completa con vacío antes que no mandar nada.
+  const textos = Array.from({ length: Math.max(0, bodyVars) }, (_, i) => todos[i] ?? '')
+
+  const componentes: Array<Record<string, unknown>> = [
+    { type: 'body', parameters: textos.map(text => ({ type: 'text', text })) },
+  ]
+
+  if (info?.urlButtonIndex !== null && info?.urlButtonIndex !== undefined) {
+    componentes.push({
+      type: 'button',
+      sub_type: 'url',
+      index: info.urlButtonIndex,
+      parameters: [{ type: 'text', text: vars.manageToken }],
+    })
+  }
+
+  return componentes
 }
 
 interface ScheduleContext {
@@ -715,6 +790,8 @@ interface ScheduleContext {
   startTime: string
   appointmentDateTime: Date
   managementUrl: string
+  /** Token pelado de `managementUrl`: lo consume un botón URL de Meta. */
+  manageToken: string
 }
 
 /**
@@ -752,22 +829,24 @@ async function scheduleAppointmentMessages(
       status: 'pending',
     }
 
-    const params = buildAppointmentTemplateParams({
+    const vars: TemplateVars = {
       clientName: ctx.clientName,
       serviceName: ctx.serviceName,
       dateFormatted: ctx.dateFormatted,
       startTime: ctx.startTime,
       branchName: ctx.branchName,
-    })
+      manageUrl: ctx.managementUrl,
+      manageToken: ctx.manageToken,
+    }
 
     if (confirmationTplId && confirmationTplName) {
       confirmationRow.template_id = confirmationTplId
       confirmationRow.template_name = confirmationTplName
-      confirmationRow.template_params = params
+      confirmationRow.template_params = buildAppointmentTemplateParams(vars, confirmationTpl)
       if (confirmationTpl?.language) confirmationRow.template_language = confirmationTpl.language
     } else if (confirmationTplName) {
       confirmationRow.template_name = confirmationTplName
-      confirmationRow.template_params = params
+      confirmationRow.template_params = buildAppointmentTemplateParams(vars, confirmationTpl)
     } else {
       const prefix = kind === 'reschedule' ? 'Tu turno fue reprogramado: ' : ''
       confirmationRow.content = `${prefix}${ctx.serviceName} el ${ctx.dateFormatted} a las ${ctx.startTime} en ${ctx.branchName}. Gestionalo acá: ${ctx.managementUrl}`
@@ -807,14 +886,18 @@ async function scheduleAppointmentMessages(
         status: 'pending',
       }
 
+      // Los params se arman contra el template DEL RECORDATORIO, no se reusan
+      // los de la confirmación: son dos plantillas distintas y pueden declarar
+      // distinta cantidad de variables. Mandar las 6 de una confirmación con
+      // link a un recordatorio de 5 es un 132000 y el recordatorio no llega.
       if (reminderTplId && reminderTplName) {
         row.template_id = reminderTplId
         row.template_name = reminderTplName
-        row.template_params = params
+        row.template_params = buildAppointmentTemplateParams(vars, reminderTpl)
         if (reminderTpl?.language) row.template_language = reminderTpl.language
       } else if (reminderTplName) {
         row.template_name = reminderTplName
-        row.template_params = params
+        row.template_params = buildAppointmentTemplateParams(vars, reminderTpl)
       } else {
         row.content = `Recordatorio: ${ctx.serviceName} el ${ctx.dateFormatted} a las ${ctx.startTime} en ${ctx.branchName}.`
       }
@@ -1172,6 +1255,7 @@ export async function createAppointment(input: CreateAppointmentInput) {
         startTime: input.startTime,
         appointmentDateTime: appointmentInstant(input.appointmentDate, input.startTime, branch.timezone),
         managementUrl,
+        manageToken: cancellationToken,
       },
       settings,
       'create'
@@ -1455,6 +1539,7 @@ export async function rescheduleAppointment(input: RescheduleAppointmentInput) {
           (existing.branch as { timezone?: string } | null)?.timezone
         ),
         managementUrl,
+        manageToken: cancellationToken,
       },
       settings,
       'reschedule'
@@ -1609,13 +1694,21 @@ export async function cancelAppointment(
             template_id: settings.cancellation_template_id,
             template_name: tplName,
             ...(cancelTpl?.language ? { template_language: cancelTpl.language } : {}),
-            template_params: buildAppointmentTemplateParams({
-              clientName: client.name ?? '',
-              serviceName: '',
-              dateFormatted,
-              startTime: appointment.start_time.substring(0, 5),
-              branchName: '',
-            }),
+            // `monaco_turno_cancelado` declara 4 variables, no 5: hasta que el
+            // builder pasó a leer la forma real del template, este mensaje se
+            // iba con una de más y Meta lo rechazaba entero (132000).
+            template_params: buildAppointmentTemplateParams(
+              {
+                clientName: client.name ?? '',
+                serviceName: '',
+                dateFormatted,
+                startTime: appointment.start_time.substring(0, 5),
+                branchName: '',
+                manageUrl: '',
+                manageToken: '',
+              },
+              cancelTpl
+            ),
             scheduled_for: new Date().toISOString(),
             phone: client.phone,
             status: 'pending',
@@ -2111,6 +2204,7 @@ export async function confirmAppointmentPrepayment(input: ConfirmPrepaymentInput
         branch.timezone
       ),
       managementUrl,
+      manageToken: appointment.cancellation_token,
     },
     settings,
     'create'
@@ -2187,15 +2281,19 @@ export async function getPublicBranchAppointmentStaff(branchId: string) {
   // la sucursal la usa: en Monaco los tres barberos trabajan casi toda la
   // semana, pero los turnos rotan y el cliente sólo puede reservar el día que
   // cada uno tiene asignado.
-  const [{ data: horarios }, { data: diasTurnos }] = await Promise.all([
+  const [{ data: horarios }, { data: diasTurnos }, { data: franjasSucursal }] = await Promise.all([
     supabase
       .from('staff_schedules')
-      .select('staff_id, day_of_week, branch_id')
+      .select('staff_id, day_of_week, branch_id, start_time, end_time')
       .in('staff_id', staffIds)
       .eq('is_active', true),
     supabase
       .from('appointment_staff_days')
       .select('staff_id, day_of_week, start_time, end_time')
+      .eq('branch_id', branchId),
+    supabase
+      .from('appointment_hours')
+      .select('day_of_week, start_time, end_time')
       .eq('branch_id', branchId),
   ])
 
@@ -2231,14 +2329,76 @@ export async function getPublicBranchAppointmentStaff(branchId: string) {
     }
   }
 
+  // ─── Franjas efectivas por día ──────────────────────────────────
+  //
+  // "¿A qué hora atiende Fabri los martes?" no se responde con una sola tabla:
+  // la ventana real es la INTERSECCIÓN de lo que la sucursal abre para turnos
+  // (`appointment_hours`, o el rango único de settings si no las usa) con la
+  // ventana del barbero (la franja de `appointment_staff_days` si la tiene, y
+  // si no su jornada de `staff_schedules`). Es exactamente lo que hace el motor
+  // slot por slot; acá se resuelve una sola vez para poder MOSTRARLO.
+  //
+  // Que salga del mismo criterio no es cosmético: si la pantalla dijera "de 9 a
+  // 20" porque leyó sólo la jornada, el cliente elegiría al barbero y después
+  // no encontraría ningún horario ofrecido en la mitad de esa franja.
+  const settings = await getAppointmentSettings(branch.organization_id, branchId)
+
+  const usaFranjasSucursal = (franjasSucursal ?? []).length > 0
+  const ventanasSucursal = new Map<number, Rango[]>()
+  if (usaFranjasSucursal) {
+    for (const f of franjasSucursal ?? []) {
+      const lista = ventanasSucursal.get(f.day_of_week) ?? []
+      lista.push({ start: f.start_time.slice(0, 5), end: f.end_time.slice(0, 5) })
+      ventanasSucursal.set(f.day_of_week, lista)
+    }
+  }
+
+  const rangoUnico: Rango | null = settings
+    ? {
+        start: settings.appointment_hours_open.slice(0, 5),
+        end: settings.appointment_hours_close.slice(0, 5),
+      }
+    : null
+
+  function ventanaDeLaSucursal(dia: number): Rango[] {
+    if (usaFranjasSucursal) return ventanasSucursal.get(dia) ?? []
+    return rangoUnico ? [rangoUnico] : []
+  }
+
+  /** Ventana propia del barbero ese día, antes de cruzarla con la sucursal. */
+  function ventanaDelBarbero(staffId: string, dia: number): Rango[] {
+    const conFranja = (diasTurnos ?? []).find(
+      d => d.staff_id === staffId && d.day_of_week === dia && d.start_time && d.end_time
+    )
+    if (conFranja) {
+      return [{ start: conFranja.start_time!.slice(0, 5), end: conFranja.end_time!.slice(0, 5) }]
+    }
+    return (horarios ?? [])
+      .filter(h => h.staff_id === staffId && h.day_of_week === dia)
+      .filter(h => !h.branch_id || h.branch_id === branchId)
+      .map(h => ({ start: h.start_time.slice(0, 5), end: h.end_time.slice(0, 5) }))
+  }
+
   return candidatos
     .filter((as) => (diasPorStaff.get(as.staff_id)?.size ?? 0) > 0)
-    .map((as) => ({
-      id: as.staff!.id,
-      full_name: as.staff!.full_name,
-      avatar_url: as.staff!.avatar_url,
-      days: [...diasPorStaff.get(as.staff_id)!].sort((a, b) => a - b),
-    }))
+    .map((as) => {
+      const dias = [...diasPorStaff.get(as.staff_id)!].sort((a, b) => a - b)
+      const windows: Record<number, Rango[]> = {}
+      for (const dia of dias) {
+        const cruce = intersectarRangos(
+          ventanaDelBarbero(as.staff_id, dia),
+          ventanaDeLaSucursal(dia)
+        )
+        if (cruce.length) windows[dia] = cruce
+      }
+      return {
+        id: as.staff!.id,
+        full_name: as.staff!.full_name,
+        avatar_url: as.staff!.avatar_url,
+        days: dias,
+        windows,
+      }
+    })
 }
 
 /**
