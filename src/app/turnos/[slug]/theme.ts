@@ -211,6 +211,45 @@ function readableFill(
   return mejor
 }
 
+/** Cuánto se aleja un color del gris. 0 = gris puro. */
+function croma(c: RGB): number {
+  return Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b)
+}
+
+/**
+ * El matiz de `hue`, llevado a la MISMA luminancia que `bg`.
+ *
+ * Es la pieza que hace posible el vidrio. El ambiente tiene que variar para que
+ * el `backdrop-filter` tenga algo que refractar, pero cualquier variación de
+ * LUMINANCIA sobre un tema oscuro compite con el texto —que también es claro— y
+ * el buscador de opacidades termina apagando el efecto hasta 0.02, o sea nada.
+ * Fue exactamente lo que pasó: la pantalla no estaba sin efecto, estaba sin
+ * presupuesto para el efecto.
+ *
+ * Variando el CROMA en vez del brillo, el ojo ve el degradado y el contraste
+ * casi no se mueve: la mancha puede subir a una opacidad que se nota sin bajar
+ * un punto la legibilidad. Es, además, cómo se comporta la luz de verdad sobre
+ * un vidrio teñido.
+ */
+function aLaLuminanciaDe(hue: RGB, bg: RGB): RGB {
+  const objetivo = relativeLuminance(bg)
+  const actual = relativeLuminance(hue)
+  // Un piso absoluto para que un fondo negro puro igual reciba algo de color.
+  const techo = objetivo * 1.9 + 0.014
+
+  if (actual <= techo && actual >= objetivo * 0.45) return hue
+
+  const destino = actual > techo ? BLACK : WHITE
+  let mejor = hue
+  for (let paso = 1; paso <= 20; paso++) {
+    const cand = mix(hue, destino, paso / 20)
+    const l = relativeLuminance(cand)
+    mejor = cand
+    if (destino === BLACK ? l <= techo : l >= objetivo * 0.45) break
+  }
+  return mejor
+}
+
 // ─── Vidrio ──────────────────────────────────────────────────────────
 
 /** Un color que se pinta encima de una capa, con su mínimo WCAG. */
@@ -340,6 +379,12 @@ export interface TurneroTheme {
   glassBorderStrong: string
   /** Línea de luz que corre por el borde superior. */
   glassHighlight: string
+  /**
+   * Blanco del brillo interno del panel (degradado de arriba hacia el medio).
+   * Es lo que hace que el vidrio tenga canto en vez de leerse como un
+   * rectángulo de relleno parejo.
+   */
+  glassSheen: string
   /** `box-shadow` completo del panel en reposo. */
   glassShadow: string
   /** `box-shadow` completo del panel elevado. */
@@ -350,6 +395,12 @@ export interface TurneroTheme {
    * contraste contra lo que sea que esté scrolleando atrás.
    */
   chromeBg: string
+  /**
+   * Degradado del fondo de la página. Los dos extremos son `bg` empujado un
+   * escalón: alcanza para que el vidrio tenga algo que refractar y no mueve el
+   * contraste de ningún texto.
+   */
+  bgGradient: string
   /**
    * Manchas de luz del fondo. Sin algo detrás, el `backdrop-filter` del vidrio
    * no se percibe: sobre un color plano no hay nada que desenfocar.
@@ -386,9 +437,61 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
     ? capasOscuras(bg)
     : { surface: WHITE, surfaceAlt: mix(WHITE, NEAR_BLACK, 0.05) }
 
+  // ─── El vidrio se decide ANTES que el texto ───────────────────────
+  //
+  // Éste es el orden que importa y estuvo al revés. Antes se derivaba primero
+  // toda la escala de texto —que `fadeWhileLegible` deja pegada a su mínimo por
+  // construcción— y recién después se buscaba cuánta opacidad de vidrio "cabía"
+  // sin romperla. No cabía casi nada: el buscador terminaba eligiendo 0.02, o
+  // sea ninguna, y la pantalla se veía plana. No faltaba efecto; faltaba
+  // presupuesto para el efecto, y se lo había gastado el texto.
+  //
+  // Ahora la opacidad del panel es una CONSTANTE DE DISEÑO y el texto se acomoda
+  // a ella. Es la misma regla que el resto del archivo aplica a los colores de
+  // marca: el que no llega al ratio se reemplaza por su variante legible. Si una
+  // paleta no admite la constante —un gris medio con texto blanco no tolera que
+  // le sumen luz— se baja por la escala hasta la primera que deje existir algún
+  // color de texto.
+  const ESCALA_OSCURA = [0.14, 0.12, 0.1, 0.08, 0.06, 0.05, 0.04, 0.03, 0.02]
+  const ESCALA_CLARA = [0.86, 0.8, 0.72, 0.64, 0.56, 0.48, 0.4, 0.32, 0.24, 0.16, 0.08]
+
+  /** ¿Existe algún color de texto que se lea sobre todas estas capas? */
+  function hayTextoPara(capas: RGB[]): boolean {
+    return [WHITE, NEAR_BLACK, BLACK].some(f =>
+      capas.every(l => contrastRatio(f, l) >= AA_TEXT)
+    )
+  }
+
+  function elegirVidrio(tint: RGB, escala: number[]): number {
+    for (const a of escala) {
+      const vidrio = mix(bg, tint, a)
+      const hover = mix(bg, tint, Math.min(1, a * 1.4))
+      if (hayTextoPara([bg, surface, surfaceAlt, vidrio, hover])) return a
+    }
+    return 0
+  }
+
+  let glassTint = WHITE
+  let glassAlpha = elegirVidrio(WHITE, isDark ? ESCALA_OSCURA : ESCALA_CLARA)
+  if (glassAlpha === 0 && isDark) {
+    // Fondo que ya no admite más luz (gris medio con texto blanco): antes de
+    // resignar el efecto se prueba el vidrio ahumado, que oscurece en vez de
+    // aclarar y también se lee como vidrio.
+    const humo = elegirVidrio(BLACK, ESCALA_OSCURA)
+    if (humo > 0) {
+      glassTint = BLACK
+      glassAlpha = humo
+    }
+  }
+
+  const glassAlphaHover = Math.min(1, glassAlpha * 1.4)
+  const vidrioBase = mix(bg, glassTint, glassAlpha)
+  const vidrioHover = mix(bg, glassTint, glassAlphaHover)
+
   // El texto de marca se respeta SOLO si de verdad se lee sobre TODAS las capas
-  // donde va a caer. Con bg #606060 un texto de marca gris medio daba 1.2:1.
-  const layers = [bg, surface, surfaceAlt]
+  // donde va a caer —incluido el vidrio—. Con bg #606060 un texto de marca gris
+  // medio daba 1.2:1.
+  const layers = [bg, surface, surfaceAlt, vidrioBase, vidrioHover]
   const text =
     brandText && layers.every(l => contrastRatio(brandText, l) >= AA_TEXT)
       ? brandText
@@ -397,13 +500,12 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
   // La escala apagada se deriva del texto ya validado, no de una opacidad fija:
   // `opacity: 0.5` sobre un fondo de luminancia parecida es texto invisible.
   //
-  // Se pide un 6% MÁS que el mínimo a propósito. `fadeWhileLegible` devuelve el
-  // gris más suave que todavía pasa, o sea que aterriza pegado a 4.5:1 y deja
-  // cero presupuesto para las capas TRANSLÚCIDAS que vienen después (vidrio,
-  // manchas de luz): cualquiera de ellas hundía el texto apagado por debajo del
-  // mínimo. Con esta holgura el vidrio existe; sin ella la pantalla es plana.
-  // Lo emitido sigue cumpliendo 4.5 y 3 con margen, nunca menos.
-  const HOLGURA_CAPAS = 1.10
+  // `fadeWhileLegible` devuelve el gris MÁS SUAVE que todavía pasa, o sea que
+  // aterriza pegado al mínimo por construcción. Como `layers` ya incluye el
+  // vidrio, el mínimo se mide donde de verdad cae el texto; la holgura que
+  // queda es sólo para las capas de AMBIENTE (manchas de luz, brillo interno),
+  // que se derivan después.
+  const HOLGURA_CAPAS = 1.18
   const textMuted = fadeWhileLegible(text, surface, layers, AA_TEXT * HOLGURA_CAPAS)
   const textFaint = fadeWhileLegible(text, surface, layers, AA_LARGE * HOLGURA_CAPAS)
 
@@ -426,14 +528,12 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
   const dangerBg = parseHex(isDark ? '#3f1416' : '#fef2f2')!
   const dangerText = parseHex(isDark ? '#fecaca' : '#b91c1c')!
 
-  // ─── Vidrio y ambiente ────────────────────────────────────────────
+  // ─── Ambiente ─────────────────────────────────────────────────────
   //
-  // Todo lo que sigue son CAPAS TRANSLÚCIDAS, así que se derivan DESPUÉS de la
-  // escala de texto y se acomodan a ella: el presupuesto de "cuánto puedo
-  // aclarar el fondo" ya quedó gastado por `textMuted`, que en fondos de
-  // luminancia media (el #606060 del dueño) queda al filo de 4.5:1. Al revés
-  // —vidrio primero, texto después— un tema podía quedarse sin ningún color de
-  // texto legible sobre todas sus superficies.
+  // El vidrio ya quedó fijado arriba (es constante de diseño). Lo que sigue son
+  // las capas de AMBIENTE, que sí se acomodan al texto: manchas de luz y brillo
+  // interno se apoyan sobre el vidrio y no pueden hundir lo que va escrito
+  // encima.
 
   const reqs: Requisito[] = [
     { color: text, min: AA_TEXT },
@@ -443,41 +543,34 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
     { color: accent, min: AA_TEXT },
   ]
 
-  // En tema oscuro el vidrio es blanco a baja opacidad; en tema claro es blanco
-  // casi sólido (la elevación la termina de contar la sombra).
-  const ESCALA_OSCURA = [0.16, 0.14, 0.12, 0.1, 0.08, 0.06, 0.05, 0.04, 0.03, 0.02]
-  const ESCALA_CLARA = [0.86, 0.8, 0.72, 0.64, 0.56, 0.48, 0.4, 0.32, 0.24, 0.16, 0.08]
-
-  let glassTint = WHITE
-  let glassAlpha = alphaLegible(WHITE, [bg], isDark ? ESCALA_OSCURA : ESCALA_CLARA, reqs)
-  if (glassAlpha === 0) {
-    // Fondo que ya no admite más luz (gris medio con texto blanco): antes de
-    // resignar el efecto se prueba el vidrio ahumado, que oscurece en vez de
-    // aclarar y también se lee como vidrio.
-    const humo = alphaLegible(BLACK, [bg], ESCALA_OSCURA, reqs)
-    if (humo > 0) {
-      glassTint = BLACK
-      glassAlpha = humo
-    }
-  }
-
-  const ESCALA_HOVER = (isDark
-    ? [0.24, 0.22, 0.2, 0.18, 0.16, 0.14, 0.12, 0.1, 0.08, 0.06, 0.05, 0.04, 0.03]
-    : [0.96, 0.92, 0.88, 0.84, 0.8, 0.72, 0.64, 0.56, 0.48, 0.4, 0.32, 0.24, 0.16]
-  ).filter(a => a > glassAlpha)
-  const glassAlphaHover = Math.max(
-    glassAlpha,
-    alphaLegible(glassTint, [bg], ESCALA_HOVER, reqs)
-  )
-
-  // La mancha de luz lleva el matiz CRUDO de la marca (es puro ambiente, no
-  // tiene texto propio encima) pero se valida contra el texto que sí cae sobre
-  // ella y contra el vidrio que se le apoya arriba.
-  const ESCALA_GLOW = [0.18, 0.15, 0.12, 0.1, 0.08, 0.06, 0.05, 0.04, 0.03, 0.02]
+  // ── Manchas de luz del fondo ──────────────────────────────────────
+  //
+  // Son lo que hace que el vidrio EXISTA: `backdrop-filter` desenfoca lo que
+  // tiene atrás, y atrás hay un color plano. Sin nada que desenfocar el efecto
+  // no se percibe y la pantalla se lee como tarjetas grises sobre gris.
+  //
+  // El tinte lleva el MATIZ de la marca a la LUMINANCIA del fondo (ver
+  // `aLaLuminanciaDe`): así la mancha se percibe como color y no como brillo, y
+  // no le come contraste a un texto que en un tema oscuro también es claro.
+  //
+  // Una marca sin croma (negro, blanco, gris — el caso del dueño, que tiene el
+  // primario en #000000) no tiene matiz que prestar: el ambiente toma un azul
+  // frío tenue. Es ambiente puro, no identidad; sin él, un turnero en blanco y
+  // negro no tiene forma de mostrar vidrio, porque el vidrio necesita que atrás
+  // haya ALGO.
+  const HUE_NEUTRO: RGB = { r: 91, g: 108, b: 184 } // índigo suave
+  const matiz = croma(brandPrimary) >= 12 ? brandPrimary : HUE_NEUTRO
+  const glowTint = aLaLuminanciaDe(matiz, bg)
+  // La escala arranca alta a propósito: con el tinte igualado en luminancia, una
+  // opacidad grande casi no mueve el contraste y sí se ve.
+  const ESCALA_GLOW = [
+    0.85, 0.75, 0.65, 0.55, 0.45, 0.38, 0.32, 0.26, 0.22, 0.18,
+    0.15, 0.12, 0.1, 0.08, 0.06, 0.05, 0.04, 0.03, 0.02,
+  ]
   let glowAlpha = 0
   for (const a of ESCALA_GLOW) {
-    const solido = mix(bg, brandPrimary, a)
-    const debil = mix(bg, brandPrimary, a * 0.62)
+    const solido = mix(bg, glowTint, a)
+    const debil = mix(bg, glowTint, a * 0.62)
     const capas = [solido, debil].flatMap(base => [
       base,
       mix(base, glassTint, glassAlpha),
@@ -488,19 +581,36 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
       break
     }
   }
-  const glowSolid = mix(bg, brandPrimary, glowAlpha)
+  const glowSolid = mix(bg, glowTint, glowAlpha)
 
   // Caja anidada dentro de un panel: en tema oscuro sube un escalón de luz, en
   // claro baja uno (sobre blanco casi sólido, más blanco no existe).
   const innerTint = isDark ? WHITE : NEAR_BLACK
+  // Las CUATRO superficies de vidrio posibles, reposo y hover, sobre el fondo y
+  // sobre la mancha de luz. Validar sólo las de reposo dejaba el brillo interno
+  // elegido contra la capa más oscura y después aplicado sobre la más clara: el
+  // chequeo de contraste lo agarró al instante (texto en 4.15:1).
   const basesVidrio = [
     mix(bg, glassTint, glassAlpha),
     mix(glowSolid, glassTint, glassAlpha),
+    mix(bg, glassTint, glassAlphaHover),
+    mix(glowSolid, glassTint, glassAlphaHover),
   ]
   const innerAlpha = alphaLegible(
     innerTint,
     basesVidrio,
     [0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02],
+    reqs
+  )
+
+  // Brillo interno del panel: un degradado blanco de arriba hacia el medio.
+  // Es lo que da la sensación de canto curvo —un panel de relleno parejo se lee
+  // como un rectángulo pintado, no como vidrio— y se mide con el mismo criterio
+  // que todo lo demás, apoyado SOBRE el vidrio ya compuesto.
+  const sheenAlpha = alphaLegible(
+    WHITE,
+    basesVidrio,
+    [0.1, 0.085, 0.07, 0.055, 0.045, 0.035, 0.025, 0.015],
     reqs
   )
 
@@ -515,6 +625,16 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
     }
   }
 
+  // El fondo no es un color plano sino un degradado muy corto: el vidrio
+  // necesita que lo de atrás VARÍE para leerse como vidrio. Los dos extremos
+  // son el mismo `bg` empujado un escalón, así que ningún texto cambia de
+  // contraste de forma apreciable — y las capas compuestas que sí importan se
+  // barren igual en `glassLayers`.
+  const fondoAlto = mix(bg, isDark ? WHITE : BLACK, 0.05)
+  const fondoBajo = mix(bg, isDark ? BLACK : NEAR_BLACK, 0.04)
+  const gradienteDeFondo =
+    `linear-gradient(180deg, ${toHex(fondoAlto)} 0%, ${toHex(bg)} 45%, ${toHex(fondoBajo)} 100%)`
+
   const bordeTint = isDark ? WHITE : text
   const sombra = isDark
     ? '0 14px 38px -18px rgba(0,0,0,0.75), 0 2px 8px -4px rgba(0,0,0,0.45)'
@@ -527,13 +647,17 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
   // chequeo las barra sin volver a derivarlas.
   const glassLayers = [
     glowSolid,
-    mix(bg, brandPrimary, glowAlpha * 0.62),
+    mix(bg, glowTint, glowAlpha * 0.62),
     ...[bg, glowSolid].flatMap(base => {
       const vidrio = mix(base, glassTint, glassAlpha)
       return [
         vidrio,
         mix(base, glassTint, glassAlphaHover),
         mix(vidrio, innerTint, innerAlpha),
+        // La zona más clara del brillo interno: es la superficie real donde cae
+        // el texto de la parte de arriba de cada tarjeta.
+        mix(vidrio, WHITE, sheenAlpha),
+        mix(mix(base, glassTint, glassAlphaHover), WHITE, sheenAlpha),
       ]
     }),
     mix(WHITE, bg, chromeAlpha),
@@ -584,14 +708,16 @@ export function buildTurneroTheme(brand: BrandColors): TurneroTheme {
     glassBg: rgba(glassTint, glassAlpha),
     glassBgHover: rgba(glassTint, glassAlphaHover),
     glassInner: rgba(innerTint, innerAlpha),
-    glassBorder: rgba(bordeTint, isDark ? 0.2 : 0.12),
-    glassBorderStrong: rgba(bordeTint, isDark ? 0.36 : 0.26),
-    glassHighlight: rgba(WHITE, isDark ? 0.45 : 0.95),
+    glassBorder: rgba(bordeTint, isDark ? 0.28 : 0.14),
+    glassBorderStrong: rgba(bordeTint, isDark ? 0.46 : 0.3),
+    glassHighlight: rgba(WHITE, isDark ? 0.62 : 0.95),
+    glassSheen: rgba(WHITE, sheenAlpha),
     glassShadow: sombra,
     glassShadowHover: sombraHover,
     chromeBg: rgba(bg, chromeAlpha),
-    glow1: rgba(brandPrimary, glowAlpha),
-    glow2: rgba(brandPrimary, Math.round(glowAlpha * 0.62 * 1000) / 1000),
+    bgGradient: gradienteDeFondo,
+    glow1: rgba(glowTint, glowAlpha),
+    glow2: rgba(glowTint, Math.round(glowAlpha * 0.62 * 1000) / 1000),
     glassLayers: glassLayers.map(toHex),
   }
 }
@@ -625,9 +751,11 @@ export function themeVars(t: TurneroTheme): CSSProperties {
     '--t-glass-border': t.glassBorder,
     '--t-glass-border-strong': t.glassBorderStrong,
     '--t-glass-highlight': t.glassHighlight,
+    '--t-glass-sheen': t.glassSheen,
     '--t-glass-shadow': t.glassShadow,
     '--t-glass-shadow-hover': t.glassShadowHover,
     '--t-chrome-bg': t.chromeBg,
+    '--t-bg-gradient': t.bgGradient,
     '--t-glow-1': t.glow1,
     '--t-glow-2': t.glow2,
   } as CSSProperties

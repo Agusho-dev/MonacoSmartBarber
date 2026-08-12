@@ -460,8 +460,8 @@ export function ReceiptScanDialog({
     if (!files?.length) return
     stopLoop(); stopStream()
     try {
-      const blob = await compressToWebP(files[0], 1200, 0.82)
-      await processCapture(blob, 'gallery')
+      const imagen = await compressToWebP(files[0], 1200, 0.82)
+      await processCapture(imagen.blob, 'gallery')
     } catch {
       setCamError('No se pudo leer la imagen.')
     }

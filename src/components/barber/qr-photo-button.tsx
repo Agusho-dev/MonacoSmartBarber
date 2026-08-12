@@ -31,43 +31,36 @@ export function QrPhotoButton({
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [token, setToken] = useState<string | null>(null)
   const [photoCount, setPhotoCount] = useState(0)
+  const [error, setError] = useState<string | null>(null)
 
   // Create session when dialog opens
   const createSession = useCallback(async () => {
-    // Resolve organization_id from the authenticated user's staff record
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    // La organización sale de la cookie de sesión del barbero, resuelta en el
+    // servidor. Acá antes se hacía `supabase.auth.getUser()`: este panel se
+    // autentica por PIN, NO por Supabase Auth, así que `user` era null y la
+    // función cortaba en su primera línea sin decir nada. Resultado: el QR no
+    // se generaba nunca y nadie subió una foto por esta vía desde abril.
+    setError(null)
+    const { createQrPhotoSession } = await import('@/lib/actions/uploads')
+    const res = await createQrPhotoSession()
 
-    const { data: staff } = await supabase
-      .from('staff')
-      .select('organization_id')
-      .eq('auth_user_id', user.id)
-      .single()
+    if ('error' in res) {
+      setError(res.error)
+      return
+    }
 
-    if (!staff?.organization_id) return
-
-    const newToken = crypto.randomUUID()
-    const { data, error } = await supabase
-      .from('qr_photo_sessions')
-      .insert({ token: newToken, organization_id: staff.organization_id })
-      .select('id')
-      .single()
-
-    if (error || !data) return
-    setSessionId(data.id)
-    setToken(newToken)
-    onSessionChange?.(data.id)
-  }, [supabase, onSessionChange])
+    setSessionId(res.id)
+    setToken(res.token)
+    onSessionChange?.(res.id)
+  }, [onSessionChange])
 
   // Deactivate session
   const deactivateSession = useCallback(async () => {
     if (!sessionId) return
-    await supabase
-      .from('qr_photo_sessions')
-      .update({ is_active: false })
-      .eq('id', sessionId)
+    const { deactivateQrPhotoSession } = await import('@/lib/actions/uploads')
+    await deactivateQrPhotoSession(sessionId)
     onSessionChange?.(null)
-  }, [supabase, sessionId, onSessionChange])
+  }, [sessionId, onSessionChange])
 
   // Handle dialog open/close
   function handleOpenChange(isOpen: boolean) {
@@ -146,6 +139,16 @@ export function QrPhotoButton({
                   level="M"
                   includeMargin={false}
                 />
+              </div>
+            ) : error ? (
+              // Antes acá no había nada: cuando la sesión no se creaba, el
+              // diálogo se quedaba en "Generando..." para siempre y el barbero
+              // no tenía forma de saber que estaba roto.
+              <div className="flex size-[252px] flex-col items-center justify-center gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-5 text-center">
+                <p className="text-sm font-medium text-destructive">{error}</p>
+                <Button type="button" size="sm" variant="outline" onClick={createSession}>
+                  Reintentar
+                </Button>
               </div>
             ) : (
               <div className="flex size-[252px] items-center justify-center rounded-2xl bg-muted">

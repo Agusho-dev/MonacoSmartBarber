@@ -419,7 +419,10 @@ export function SlotStep({
               <p className="truncate text-base font-bold leading-tight text-[var(--t-text)]">
                 {barberoMostrado.staff_name}
               </p>
-              <p className="truncate text-xs text-[var(--t-text-muted)]">
+              {/* Dos líneas antes que cortar: con horario entrecortado
+                  ("10 a 13 y 16 a 19") `truncate` se comía justo la segunda
+                  franja, que es la información nueva. */}
+              <p className="line-clamp-2 text-xs leading-snug text-[var(--t-text-muted)]">
                 {franjasDelDia.length > 0
                   ? `Da turnos de ${textoRangos(franjasDelDia)}`
                   : fichaDelBarbero?.days.length

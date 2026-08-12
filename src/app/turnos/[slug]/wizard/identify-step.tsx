@@ -281,10 +281,21 @@ export function IdentifyStep({
                 <User className="h-3 w-3" />
                 Nombre
               </label>
+              {/* `autoComplete="off"` y un `name` que no es el estándar: con
+                  `given-name`/`family-name` Chrome rellenaba estos campos con
+                  el perfil guardado del DUEÑO ("Nacho / ADMIN") apenas
+                  aparecían, incluso para un teléfono que no existe en la base.
+                  Un nombre precargado que no es el del cliente es peor que un
+                  campo vacío: se confirma sin mirar y el turno queda a nombre
+                  de otra persona. Acá el único autocompletado legítimo es el
+                  nuestro, el que sale del teléfono. */}
               <input
                 id="ident-first"
+                name="turnero-nombre"
                 type="text"
-                autoComplete="given-name"
+                autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
                 placeholder="Juan"
                 value={valor.firstName}
                 onChange={e => cambiarNombre('firstName', e.target.value)}
@@ -300,8 +311,11 @@ export function IdentifyStep({
               </label>
               <input
                 id="ident-last"
+                name="turnero-apellido"
                 type="text"
-                autoComplete="family-name"
+                autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
                 placeholder="García"
                 value={valor.lastName}
                 onChange={e => cambiarNombre('lastName', e.target.value)}

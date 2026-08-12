@@ -39,9 +39,12 @@ function Uploader({ token }: { token: string }) {
     if (!files?.length) return
     setPhase('uploading'); setError(null)
     try {
-      const webp = await compressToWebP(files[0], 1600, 0.85)
-      const base64 = await blobToBase64(webp)
-      const res = await submitReceiptUpload(token, base64, 'image/webp')
+      const imagen = await compressToWebP(files[0], 1600, 0.85)
+      const base64 = await blobToBase64(imagen.blob)
+      // El tipo va el REAL, no 'image/webp' fijo: si el browser no sabe
+      // codificar WebP, `toBlob` devuelve PNG, y declararlo mal deja el
+      // comprobante guardado con un mimetype que no es el de sus bytes.
+      const res = await submitReceiptUpload(token, base64, imagen.contentType)
       if ('error' in res) { setError(res.error); setPhase('error'); return }
       setPhase('done')
     } catch {

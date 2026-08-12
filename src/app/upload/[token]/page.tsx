@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { compressToWebP, extensionDe } from '@/lib/image-utils'
 import { Camera, Check, X, AlertCircle } from 'lucide-react'
 
 export default function UploadPage({ params }: { params: Promise<{ token: string }> }) {
@@ -28,6 +29,7 @@ function UploadClient({ token }: { token: string }) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'invalid' | 'expired'>('loading')
   const [uploads, setUploads] = useState<{ url: string; uploading: boolean; failed?: boolean }[]>([])
   const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Validate token on mount
@@ -80,38 +82,10 @@ function UploadClient({ token }: { token: string }) {
     }
   }, [supabase, sessionId])
 
-  const compressToWebP = useCallback(
-    (file: File, maxWidth = 1200, quality = 0.75): Promise<Blob> => {
-      return new Promise((resolve, reject) => {
-        const img = new Image()
-        img.onload = () => {
-          const ratio = Math.min(maxWidth / img.width, maxWidth / img.height, 1)
-          const canvas = document.createElement('canvas')
-          canvas.width = Math.round(img.width * ratio)
-          canvas.height = Math.round(img.height * ratio)
-          const ctx = canvas.getContext('2d')!
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-          canvas.toBlob(
-            (blob) =>
-              blob ? resolve(blob) : reject(new Error('Compression failed')),
-            'image/webp',
-            quality
-          )
-          URL.revokeObjectURL(img.src)
-        }
-        img.onerror = () => {
-          URL.revokeObjectURL(img.src)
-          reject(new Error('Failed to load image'))
-        }
-        img.src = URL.createObjectURL(file)
-      })
-    },
-    []
-  )
-
   async function handleFiles(files: FileList | null) {
     if (!files || !sessionId || status !== 'ready') return
     setUploading(true)
+    setUploadError(null)
 
     for (const file of Array.from(files)) {
       const previewUrl = URL.createObjectURL(file)
@@ -119,29 +93,41 @@ function UploadClient({ token }: { token: string }) {
       setUploads((prev) => [...prev, { url: previewUrl, uploading: true }])
 
       try {
-        const blob = await compressToWebP(file)
-        const filename = `${crypto.randomUUID()}.webp`
+        // El helper compartido: si no puede decodificar (un HEIC de iPhone,
+        // por ejemplo) devuelve el archivo original en vez de tirar la subida
+        // abajo, y avisa cuál es el tipo REAL de los bytes.
+        const imagen = await compressToWebP(file)
+        const filename = `${crypto.randomUUID()}.${extensionDe(imagen.contentType)}`
         const storagePath = `qr-${token}/${filename}`
 
         const { error: uploadError } = await supabase.storage
           .from('visit-photos')
-          .upload(storagePath, blob, {
-            contentType: 'image/webp',
+          .upload(storagePath, imagen.blob, {
+            contentType: imagen.contentType,
             cacheControl: '31536000',
           })
 
         if (uploadError) throw uploadError
 
-        // Record in database so the panel gets the realtime notification
-        await supabase
+        // Sin esta fila el panel del barbero nunca se entera: la foto queda en
+        // el bucket y no aparece en ningún lado. El error se chequea — antes
+        // era un `await` pelado, o sea un fallo invisible.
+        const { error: dbError } = await supabase
           .from('qr_photo_uploads')
           .insert({ session_id: sessionId, storage_path: storagePath })
+
+        if (dbError) throw dbError
 
         setUploads((prev) =>
           prev.map((u, i) => (i === idx ? { ...u, uploading: false } : u))
         )
       } catch (err) {
         console.error('Upload failed', err)
+        setUploadError(
+          err instanceof Error
+            ? `No se pudo subir "${file.name}": ${err.message}`
+            : `No se pudo subir "${file.name}".`
+        )
         setUploads((prev) =>
           prev.map((u, i) => (i === idx ? { ...u, uploading: false, failed: true } : u))
         )
@@ -258,6 +244,18 @@ function UploadClient({ token }: { token: string }) {
             {uploading ? 'Subiendo...' : 'Sacar Foto'}
           </span>
         </button>
+
+        {/* El fallo se DICE. Antes sólo se pintaba de rojo la miniatura y el
+            barbero se quedaba esperando una foto que nunca iba a llegar. */}
+        {uploadError && (
+          <p
+            className="flex items-start gap-2 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-center text-xs text-red-200"
+            role="alert"
+          >
+            <AlertCircle className="mt-px size-4 shrink-0" />
+            <span>{uploadError}</span>
+          </p>
+        )}
 
         <p className="text-center text-xs text-white/40">
           Las fotos se envían automáticamente al panel del barbero

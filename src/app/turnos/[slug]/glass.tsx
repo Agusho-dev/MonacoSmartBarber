@@ -88,11 +88,15 @@ export function GlassButton({
 export function TurneroAmbient() {
   return (
     <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden" aria-hidden>
+      {/* El degradado de base. Un fondo PLANO no deja ver el vidrio: el
+          `backdrop-filter` no tiene nada que desenfocar y los paneles se leen
+          como rectángulos grises sobre gris. */}
+      <div className="absolute inset-0" style={{ background: 'var(--t-bg-gradient)' }} />
       <div
-        className="absolute inset-0"
+        className="t-drift-slow absolute inset-0"
         style={{
           background:
-            'radial-gradient(ellipse 90% 48% at 50% -10%, var(--t-glow-1), transparent 62%)',
+            'radial-gradient(ellipse 110% 55% at 50% -12%, var(--t-glow-1), transparent 64%)',
         }}
       />
       {/* Las dos manchas laterales derivan MUY lento (28 s y 34 s) y sólo con
@@ -103,14 +107,21 @@ export function TurneroAmbient() {
         className="t-drift absolute inset-0"
         style={{
           background:
-            'radial-gradient(ellipse 52% 34% at 96% 24%, var(--t-glow-2), transparent 58%)',
+            'radial-gradient(ellipse 64% 42% at 98% 22%, var(--t-glow-1), transparent 60%)',
         }}
       />
       <div
         className="t-drift t-drift-b absolute inset-0"
         style={{
           background:
-            'radial-gradient(ellipse 58% 40% at 0% 84%, var(--t-glow-2), transparent 60%)',
+            'radial-gradient(ellipse 70% 46% at -4% 78%, var(--t-glow-2), transparent 62%)',
+        }}
+      />
+      <div
+        className="t-drift t-drift-c absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(ellipse 46% 30% at 22% 42%, var(--t-glow-2), transparent 66%)',
         }}
       />
     </div>
@@ -184,7 +195,12 @@ export function TurneroStyles() {
       /* ── Vidrio ────────────────────────────────────────────────── */
       .t-glass {
         position: relative;
-        background: var(--t-glass-bg);
+        /* Dos capas: el brillo interno (degradado de arriba al medio) sobre el
+           relleno translúcido. Es lo que le da CANTO al panel; con relleno
+           parejo se lee como un rectángulo pintado, no como vidrio. */
+        background:
+          linear-gradient(180deg, var(--t-glass-sheen) 0%, transparent 52%),
+          var(--t-glass-bg);
         border: 1px solid var(--t-glass-border);
         /* El rim interior es la mitad del efecto "vidrio grueso": una línea de
            luz por dentro del borde arriba y una sombra por dentro abajo hacen
@@ -350,6 +366,8 @@ export function TurneroStyles() {
         will-change: transform;
       }
       .t-drift-b { animation-duration: 34s; animation-direction: reverse; }
+      .t-drift-c { animation-duration: 41s; animation-delay: -12s; }
+      .t-drift-slow { animation: t-drift 46s ease-in-out infinite reverse; will-change: transform; }
 
       /* ── Entrada de una tarjeta que aparece sola ───────────────── */
       /* Distinta de .t-rise: ésta llega desde arriba y con un rebote corto,
@@ -446,6 +464,7 @@ export function TurneroStyles() {
         .t-sheen::after,
         .t-skel::after,
         .t-drift,
+        .t-drift-slow,
         .t-sheet,
         .t-veil,
         .t-go-content,

@@ -3,7 +3,6 @@
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, Pencil, Power, Trash2, Camera, Eye, EyeOff, Smartphone, Scissors } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
 import { useBranchStore } from '@/stores/branch-store'
 import { formatCurrency } from '@/lib/format'
 import type { Staff, UserRole, Role } from '@/lib/types/database'
@@ -72,7 +71,6 @@ const emptyForm = {
 
 export function BarberosClient({ barbers, branches, todayVisits, roles, canHideStaff }: Props) {
   const router = useRouter()
-  const supabase = createClient()
   const { selectedBranchId } = useBranchStore()
 
   const filtered = selectedBranchId
@@ -201,17 +199,22 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, canHideS
       }
     }
 
-    // Upload avatar if a new file was selected
+    // Foto de perfil.
+    //
+    // Va por server action con la service role. Antes subía desde el browser
+    // con la anon key contra una policy que exige `auth.role() =
+    // 'authenticated'`, el helper devolvía `null` ante cualquier error y este
+    // bloque lo ignoraba: el diálogo se cerraba como si hubiera guardado y la
+    // foto no existía. No se subió un solo avatar entre abril y hoy.
     if (savedStaffId && avatarFile) {
-      try {
-        const { uploadStaffAvatar } = await import('@/lib/image-utils')
-        const { updateBarberAvatar } = await import('@/lib/actions/barber')
-        const avatarUrl = await uploadStaffAvatar(supabase, savedStaffId, avatarFile)
-        if (avatarUrl) {
-          await updateBarberAvatar(savedStaffId, avatarUrl)
-        }
-      } catch (err) {
-        console.error('Failed to upload avatar', err)
+      const { uploadStaffAvatar } = await import('@/lib/actions/uploads')
+      const fd = new FormData()
+      fd.append('file', avatarFile)
+      const res = await uploadStaffAvatar(savedStaffId, fd)
+      if ('error' in res) {
+        setSaving(false)
+        alert(res.error)
+        return
       }
     }
 

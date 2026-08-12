@@ -296,8 +296,8 @@ export function CompleteServiceDialog({
       if (result.visitId) {
         let paths: string[] = [...qrPhotoPaths]
         if (photoFiles.length > 0) {
-          const blobs = await Promise.all(photoFiles.map((f) => compressToWebP(f)))
-          const galleryPaths = await uploadVisitPhotos(supabase, result.visitId, blobs)
+          const imagenes = await Promise.all(photoFiles.map((f) => compressToWebP(f)))
+          const galleryPaths = await uploadVisitPhotos(supabase, result.visitId, imagenes)
           paths = [...paths, ...galleryPaths]
         }
 
