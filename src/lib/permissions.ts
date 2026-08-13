@@ -72,6 +72,14 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
             'comprobantes.manage': 'Conciliar a mano y configurar el escaneo de comprobantes',
         },
     },
+    arca: {
+        label: 'Facturación ARCA',
+        permissions: {
+            'arca.view': 'Ver el facturador y los comprobantes emitidos',
+            'arca.emit': 'Emitir facturas y notas de crédito ante ARCA',
+            'arca.manage': 'Configurar el facturador y el cupo de facturación',
+        },
+    },
     salary: {
         label: 'Sueldos',
         permissions: {
@@ -205,6 +213,9 @@ export const PERMISSION_DESCRIPTIONS: Record<string, string> = {
 
     'comprobantes.view': 'Permite ver el tablero de conciliación: cruza cada cobro por transferencia contra su comprobante escaneado.',
     'comprobantes.manage': 'Permite conciliar comprobantes a mano, marcar problemas y elegir el motor de lectura (IA/OCR).',
+    'arca.view': 'Permite ver el facturador: el cupo del período, las ventas facturables y los comprobantes ya emitidos con su CAE.',
+    'arca.emit': 'Permite emitir facturas electrónicas y notas de crédito ante ARCA. Son comprobantes fiscales reales: una vez emitidos sólo se anulan con nota de crédito.',
+    'arca.manage': 'Permite configurar el facturador (CUIT, certificado, punto de venta) y definir el cupo: cuánto de lo que se vende se factura.',
 
     'salary.view': 'Permite ver los sueldos configurados para cada miembro del equipo.',
     'salary.view_commissions': 'Permite ver el detalle de comisiones generadas por atención.',

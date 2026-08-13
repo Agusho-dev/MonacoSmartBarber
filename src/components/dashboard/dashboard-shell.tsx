@@ -25,6 +25,7 @@ import {
   Handshake,
   CalendarClock,
   Bot,
+  FileCheck2,
 } from 'lucide-react'
 import {
   DndContext,
@@ -91,6 +92,9 @@ const navItems = [
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3, requiredPermissions: ['stats.view'] },
   { href: '/dashboard/caja', label: 'Caja', icon: Receipt, requiredPermissions: ['caja.view'] },
   { href: '/dashboard/comprobantes', label: 'Comprobantes', icon: ScanLine, requiredPermissions: ['comprobantes.view'] },
+  // "Facturación ARCA" y no "Facturación" a secas: el dropdown del avatar ya
+  // usa esa palabra para /dashboard/billing, que es la suscripción del SaaS.
+  { href: '/dashboard/facturacion', label: 'Facturación ARCA', icon: FileCheck2, requiredPermissions: ['arca.view'] },
   { href: '/dashboard/finanzas', label: 'Finanzas', icon: DollarSign, requiredPermissions: ['finances.view', 'salary.view'] },
   { href: '/dashboard/configuracion', label: 'Configuración', icon: Settings, requiredPermissions: ['settings.view'] },
 ]
