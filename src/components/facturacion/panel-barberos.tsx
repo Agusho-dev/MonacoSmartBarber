@@ -984,7 +984,7 @@ function FichaBarbero({
     // Un cupo NUEVO nace prendido. Arrancando apagado, el dueño configuraba
     // todo, guardaba, y quedaba inerte sin que nada se lo dijera — pasó con 3
     // de los primeros 4 que se cargaron. Prenderlo no emite nada por sí solo:
-    // la emisión sigue necesitando el botón o la corrida automática.
+    // la emisión sigue necesitando que alguien apriete el botón.
     const [habilitada, setHabilitada] = useState<boolean>(m?.habilitada ?? true)
     const [modo, setModo] = useState<ModoCupo>(m?.modo ?? 'cantidad')
     const [origen, setOrigen] = useState<OrigenVentas>(m?.origen ?? 'propios')
@@ -1087,7 +1087,7 @@ function FichaBarbero({
                     // dueño ve "emitidos" y cree que el cupo quedó completo.
                     toast.success(
                         `${emitidos} ${emitidos === 1 ? 'comprobante emitido' : 'comprobantes emitidos'} a nombre de ${fila.nombre}. ` +
-                            `Quedan ${r.restantes} para llegar al cupo: volvé a tocar "Facturar" o esperá la corrida automática.`,
+                            `Quedan ${r.restantes} para llegar al cupo: volvé a tocar "Facturar" para seguir.`,
                         { duration: 8000 },
                     )
                 } else {
@@ -1424,7 +1424,8 @@ function FichaBarbero({
                         <div className="min-w-0 pr-3">
                             <p className="text-sm font-medium">Cupo activo</p>
                             <p className="text-xs text-muted-foreground">
-                                Apagado, sus cortes quedan sin facturar hasta que lo prendas.
+                                Prendido habilita a facturarle; apagado, no se le puede emitir nada.
+                                No significa que emita solo.
                             </p>
                         </div>
                         <Switch
@@ -1659,6 +1660,16 @@ function FichaBarbero({
                                 ? `Facturar ${numero(proyeccion.cantidad)} ${proyeccion.cantidad === 1 ? 'corte' : 'cortes'} ahora`
                                 : 'Facturar según su cupo'}
                         </Button>
+                    )}
+
+                    {puedeEmitir && (
+                        // La garantía, escrita donde importa: al lado del botón.
+                        // Un comprobante fiscal no se borra, así que saber que
+                        // nada sale sin que vos lo pidas es la mitad de la
+                        // tranquilidad para usar la pantalla.
+                        <p className="mt-2 text-xs text-muted-foreground">
+                            Nada se emite solo. Los comprobantes salen únicamente cuando apretás este botón.
+                        </p>
                     )}
 
                     {puedeEmitir && !lectura.operativo && (

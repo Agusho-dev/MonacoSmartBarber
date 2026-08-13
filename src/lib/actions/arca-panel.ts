@@ -474,7 +474,10 @@ export async function guardarCupoBarbero(input: {
     if (p.incluyePropinas !== undefined)   fila.include_tips    = p.incluyePropinas
     if (p.permitirExceso !== undefined)    fila.allow_overflow  = p.permitirExceso
     if (p.diasHaciaAtras !== undefined)    fila.lookback_days   = p.diasHaciaAtras
-    if (p.emisionAutomatica !== undefined) fila.auto_emit       = p.emisionAutomatica
+    // La emisión automática NO se puede prender desde acá (mig 186): la
+    // facturación es manual por decisión de producto. Se ignora en vez de
+    // rechazar para que un llamador viejo no rompa; el efecto es el mismo.
+    if (p.emisionAutomatica === false)     fila.auto_emit       = false
     if (p.horaEmision !== undefined)       fila.auto_emit_hour  = p.horaEmision
     // La prioridad la ajusta un trigger según el origen: los del pool corren
     // después, así cada barbero se lleva lo suyo primero.

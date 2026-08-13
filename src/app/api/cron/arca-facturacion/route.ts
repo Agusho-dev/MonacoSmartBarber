@@ -26,6 +26,15 @@ import { correrPolitica } from '@/lib/arca/motor'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
+// OJO: hoy esta ruta NO EMITE NADA.
+//
+// La facturación es manual por decisión de producto (mig 186): el job de
+// pg_cron está desprogramado y `auto_emit` quedó en false en todas las
+// políticas con default false, así que el filtro de abajo no devuelve ninguna.
+// La ruta se conserva porque el motor sigue soportando la emisión automática y
+// reactivarla es reprogramar el cron; mientras tanto es inofensiva incluso si
+// alguien la llama a mano.
+
 /** Hora y fecha de pared en la zona horaria pedida. */
 function localAhora(tz: string): { hora: number; fecha: string } {
     const partes = new Intl.DateTimeFormat('en-CA', {
