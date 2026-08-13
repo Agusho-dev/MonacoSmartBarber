@@ -981,7 +981,11 @@ function FichaBarbero({
 
     // -- cupo ---------------------------------------------------------------
     const m = fila.cupo
-    const [habilitada, setHabilitada] = useState<boolean>(m?.habilitada ?? false)
+    // Un cupo NUEVO nace prendido. Arrancando apagado, el dueño configuraba
+    // todo, guardaba, y quedaba inerte sin que nada se lo dijera — pasó con 3
+    // de los primeros 4 que se cargaron. Prenderlo no emite nada por sí solo:
+    // la emisión sigue necesitando el botón o la corrida automática.
+    const [habilitada, setHabilitada] = useState<boolean>(m?.habilitada ?? true)
     const [modo, setModo] = useState<ModoCupo>(m?.modo ?? 'cantidad')
     const [origen, setOrigen] = useState<OrigenVentas>(m?.origen ?? 'propios')
     const [periodo, setPeriodo] = useState<PeriodoCupo>(m?.periodo ?? 'mes')
@@ -1135,6 +1139,33 @@ function FichaBarbero({
             monto,
             exacto: false,
         }
+    })()
+
+    /**
+     * ¿El objetivo que se está tipeando tiene sentido contra su tope anual?
+     *
+     * El riesgo real no es el sistema desbocado —el cupo es un límite duro— sino
+     * un cero de más al escribir. $50.000.000 por mes en alguien cuya categoría
+     * permite $45.151.659 AL AÑO es un error de tipeo, y conviene marcarlo antes
+     * de guardar y no descubrirlo con los comprobantes emitidos.
+     */
+    const alerta = (() => {
+        const tope = fila.anual?.topeAnual ?? null
+        if (!tope || modo === 'manual') return null
+        const vecesPorAnio = periodo === 'mes' ? 12 : periodo === 'semana' ? 52 : 365
+
+        let anualizado = 0
+        if (modo === 'monto') {
+            if (!objMonto) return null
+            anualizado = objMonto * vecesPorAnio
+        } else {
+            if (!objCantidad) return null
+            const prom = sinFacturar.cantidad > 0 ? sinFacturar.monto / sinFacturar.cantidad : 0
+            if (prom <= 0) return null
+            anualizado = objCantidad * prom * vecesPorAnio
+        }
+        if (anualizado <= tope) return null
+        return { anualizado, tope, exceso: anualizado - tope }
     })()
 
     /** El formulario difiere de lo guardado: la proyección de abajo no es lo que se ve arriba. */
@@ -1403,42 +1434,61 @@ function FichaBarbero({
                         />
                     </div>
 
-                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                        <div>
-                            <Label htmlFor="modo-cupo">Cómo se mide</Label>
-                            <Select
-                                value={modo}
-                                onValueChange={(v) => setModo(v as ModoCupo)}
-                                disabled={!puedeConfigurar || pendiente || !taxpayerId}
-                            >
-                                <SelectTrigger id="modo-cupo" className="mt-1.5 w-full">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="cantidad">Por cantidad de cortes</SelectItem>
-                                    <SelectItem value="monto">Por monto facturado</SelectItem>
-                                    <SelectItem value="manual">A mano</SelectItem>
-                                </SelectContent>
-                            </Select>
+                    {/* Una frase, no dos selects sueltos. "Cómo se mide" +
+                        "Cada cuánto" obligaba a armar la regla en la cabeza. */}
+                    <div className="mt-3 rounded-lg border border-border p-3">
+                        <p className="text-sm font-medium">Facturarle…</p>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                            {([
+                                { v: 'monto' as const, t: 'Un monto', d: 'Ponés $ y el sistema elige los cortes.' },
+                                { v: 'cantidad' as const, t: 'Una cantidad', d: 'Ponés cuántos cortes.' },
+                                { v: 'manual' as const, t: 'Nada automático', d: 'No se emite solo.' },
+                            ]).map((o) => (
+                                <button
+                                    key={o.v}
+                                    type="button"
+                                    disabled={!puedeConfigurar || pendiente || !taxpayerId}
+                                    onClick={() => setModo(o.v)}
+                                    className={cn(
+                                        'rounded-lg border p-2.5 text-left transition',
+                                        modo === o.v
+                                            ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                                            : 'border-border hover:bg-muted/40',
+                                        'disabled:cursor-not-allowed disabled:opacity-60',
+                                    )}
+                                >
+                                    <span className="block text-sm font-medium">{o.t}</span>
+                                    <span className="block text-xs text-muted-foreground">{o.d}</span>
+                                </button>
+                            ))}
                         </div>
 
-                        <div>
-                            <Label htmlFor="periodo-cupo">Cada cuánto</Label>
-                            <Select
-                                value={periodo}
-                                onValueChange={(v) => setPeriodo(v as PeriodoCupo)}
-                                disabled={!puedeConfigurar || pendiente || !taxpayerId || modo === 'manual'}
-                            >
-                                <SelectTrigger id="periodo-cupo" className="mt-1.5 w-full">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="dia">{ETIQUETA_PERIODO.dia}</SelectItem>
-                                    <SelectItem value="semana">{ETIQUETA_PERIODO.semana}</SelectItem>
-                                    <SelectItem value="mes">{ETIQUETA_PERIODO.mes}</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
+                        {modo !== 'manual' && (
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <span className="text-sm text-muted-foreground">cada</span>
+                                {([
+                                    { v: 'mes' as const, t: 'mes' },
+                                    { v: 'semana' as const, t: 'semana' },
+                                    { v: 'dia' as const, t: 'día' },
+                                ]).map((o) => (
+                                    <button
+                                        key={o.v}
+                                        type="button"
+                                        disabled={!puedeConfigurar || pendiente || !taxpayerId}
+                                        onClick={() => setPeriodo(o.v)}
+                                        className={cn(
+                                            'rounded-full border px-3 py-1 text-sm transition',
+                                            periodo === o.v
+                                                ? 'border-primary bg-primary text-primary-foreground'
+                                                : 'border-border text-muted-foreground hover:border-foreground/25',
+                                            'disabled:cursor-not-allowed disabled:opacity-60',
+                                        )}
+                                    >
+                                        {o.t}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
                     </div>
 
                     {modo === 'cantidad' && (
@@ -1512,6 +1562,18 @@ function FichaBarbero({
                                 {pendiente ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
                                 Guardar cupo
                             </Button>
+                            {alerta && (
+                                <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+                                    <p className="font-semibold">Revisá el número antes de guardar</p>
+                                    <p className="mt-1">
+                                        A este ritmo son{' '}
+                                        <span className="tabular-nums">{money(alerta.anualizado)}</span> al año, y su
+                                        categoría {fila.categoria ? `(${fila.categoria}) ` : ''}permite hasta{' '}
+                                        <span className="tabular-nums">{money(alerta.tope)}</span>. Se pasaría por{' '}
+                                        <span className="tabular-nums">{money(alerta.exceso)}</span>.
+                                    </p>
+                                </div>
+                            )}
                             {hayCambiosSinGuardar && (
                                 <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
                                     Tenés cambios sin guardar. Lo de abajo muestra lo que pasaría con la
