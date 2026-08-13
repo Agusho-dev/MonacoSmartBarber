@@ -540,7 +540,12 @@ export async function generarPedidoCertificado(): Promise<
         generado = generarClaveYCsr({
             cuit: t.cuit,
             razonSocial: t.razon_social ?? `CUIT ${t.cuit}`,
-            alias: `barberos-${t.cuit.slice(-4)}`,
+            // El alias sale de la razón social, no de una palabra fija. Es sólo
+            // una etiqueta dentro del portal de ARCA (no sale en la factura ni
+            // tiene efecto fiscal), pero acá cada barbero es un monotributista
+            // aparte: con "barberos-XXXX" para todos, el dueño abre el portal y
+            // no sabe cuál es cuál.
+            alias: `${t.razon_social ?? 'facturacion'}-${t.cuit.slice(-4)}`,
         })
     } catch (e) {
         console.error('[generarPedidoCertificado]', e)
@@ -699,13 +704,17 @@ export async function verificarConexionArca(): Promise<
     if (!t) return { error: 'Primero cargá los datos fiscales.' }
 
     const supabase = createAdminClient()
-    const guardarResultado = async (ok: boolean, mensaje: string | null) => {
+    // Se guarda el título legible Y el motivo crudo. Sin el crudo, un problema
+    // de TLS ("dh key too small") se ve idéntico a un problema de red y se
+    // diagnostica a mano; con él, la causa está en la propia fila.
+    const guardarResultado = async (ok: boolean, mensaje: string | null, crudo?: string | null) => {
+        const detalle = crudo && crudo !== mensaje ? `${mensaje} · ${crudo}`.slice(0, 500) : mensaje
         const { error } = await supabase
             .from('arca_taxpayers')
             .update({
                 last_check_at: new Date().toISOString(),
                 last_check_ok: ok,
-                last_check_error: mensaje,
+                last_check_error: ok ? null : detalle,
                 status: ok ? (t.environment === 'produccion' ? 'activo' : 'verificado') : 'error',
             })
             .eq('id', t.id)
@@ -740,7 +749,8 @@ export async function verificarConexionArca(): Promise<
     } catch (e) {
         const err = e instanceof ErrorWsfe ? e : null
         const traducido = traducirErrorArca(err?.codigo ?? 'red', err?.message ?? String(e))
-        await guardarResultado(false, traducido.titulo)
+        console.error('[verificarConexionArca/FEDummy]', err?.codigo, err?.crudo ?? e)
+        await guardarResultado(false, traducido.titulo, err?.crudo ?? null)
         return { error: traducido.titulo, data: { servidores: null, puntosVenta: [], diagnostico: traducido, ok: false } }
     }
 
@@ -797,8 +807,8 @@ export async function verificarConexionArca(): Promise<
     } catch (e) {
         const err = e instanceof ErrorWsfe ? e : null
         const traducido = traducirErrorArca(err?.codigo ?? null, err?.message ?? String(e))
-        console.error('[verificarConexionArca]', err?.codigo, err?.message ?? e)
-        await guardarResultado(false, traducido.titulo)
+        console.error('[verificarConexionArca]', err?.codigo, err?.crudo ?? err?.message ?? e)
+        await guardarResultado(false, traducido.titulo, err?.crudo ?? null)
         return { error: traducido.titulo, data: { servidores, puntosVenta: [], diagnostico: traducido, ok: false } }
     }
 }

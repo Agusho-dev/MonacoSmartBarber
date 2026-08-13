@@ -14,6 +14,7 @@
 // =============================================================================
 
 import { XMLParser } from 'fast-xml-parser'
+import { postXml, ErrorHttpArca } from './http'
 import {
     ENDPOINTS,
     NS_FEV1,
@@ -114,38 +115,36 @@ async function llamar(
     for (let i = 0; i < intentos; i++) {
         if (i > 0) await new Promise((r) => setTimeout(r, 800 * i))
 
-        let res: Response
+        let res: { status: number; text: string }
         try {
-            res = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'text/xml; charset=utf-8',
-                    SOAPAction: `${NS_FEV1}${metodo}`,
-                },
-                body,
-                signal: AbortSignal.timeout(TIMEOUT_WSFE_MS),
-                cache: 'no-store',
+            // `postXml` y no `fetch`: los servidores de ARCA negocian DH de 1024
+            // bits y OpenSSL 3 los rechaza. Ver src/lib/arca/http.ts.
+            res = await postXml(url, body, {
+                soapAction: `${NS_FEV1}${metodo}`,
+                timeoutMs: TIMEOUT_WSFE_MS,
             })
         } catch (e) {
-            const timeout = e instanceof Error && e.name === 'TimeoutError'
+            const err = e instanceof ErrorHttpArca ? e : null
+            const timeout = err?.codigo === 'timeout'
             ultimo = new ErrorWsfe(
                 timeout
                     ? `ARCA no respondió a tiempo (${metodo}).`
                     : `No pudimos conectarnos con ARCA (${metodo}).`,
                 timeout ? 'timeout' : 'red',
-                e instanceof Error ? e.message : String(e),
+                // El motivo REAL, no un "fetch failed" que no dice nada.
+                err?.causa ?? (e instanceof Error ? e.message : String(e)),
                 true,
             )
             continue
         }
 
-        const xml = await res.text()
+        const xml = res.text
 
         const fault = xml.match(/<(?:\w+:)?faultstring[^>]*>([\s\S]*?)<\/(?:\w+:)?faultstring>/i)?.[1]
         if (fault) {
             throw new ErrorWsfe(fault.trim(), 'soap_fault', xml.slice(0, 2000))
         }
-        if (!res.ok) {
+        if (res.status < 200 || res.status >= 300) {
             ultimo = new ErrorWsfe(
                 `ARCA respondió HTTP ${res.status} (${metodo}).`,
                 `http_${res.status}`,
@@ -246,6 +245,15 @@ export interface PuntoVentaArca {
  */
 export async function feParamGetPtosVenta(ctx: ContextoWsfe): Promise<PuntoVentaArca[]> {
     const r = await llamar('FEParamGetPtosVenta', bloqueAuth(ctx), ctx.ambiente)
+
+    // 602 "Sin Resultados" NO es una falla: es la respuesta de ARCA cuando el
+    // CUIT todavía no dio de alta ningún punto de venta para Web Services. Es
+    // el diagnóstico más frecuente del onboarding y tiene un mensaje propio
+    // (`diagnosticoPuntosVenta`), así que devolver lista vacía es lo correcto.
+    // Tratarlo como excepción hacía que el usuario viera un error de conexión
+    // en vez de "te falta crear el punto de venta, se hace así".
+    if (errores(r).some((e) => e.code === 602)) return []
+
     lanzarSiHayErrores(r, 'FEParamGetPtosVenta')
     return comoArray<any>((r as any)?.ResultGet?.PtoVenta).map((p) => {
         const bloqueado = String(p?.Bloqueado ?? 'N').toUpperCase() === 'S'

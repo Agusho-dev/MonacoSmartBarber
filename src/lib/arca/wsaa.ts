@@ -14,6 +14,7 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { firmarTraCms } from './crypto'
+import { postXml, ErrorHttpArca } from './http'
 import {
     ENDPOINTS,
     SERVICIO_WSAA,
@@ -80,11 +81,22 @@ function isoConOffset(d: Date, offsetMinutos = -180): string {
  */
 export function armarTra(servicio: string = SERVICIO_WSAA): string {
     const ahora = new Date()
-    // Ventana amplia hacia atrás y adelante: tolera hasta 24 h de desfasaje de
-    // reloj, y 10 minutos alcanzan de sobra para absorber un servidor con la
-    // hora corrida sin abrir un agujero de reutilización.
+    // `generationTime` 10 minutos atrás: absorbe un reloj corrido sin abrir una
+    // ventana de reutilización grande.
     const desde = new Date(ahora.getTime() - 10 * 60_000)
-    const hasta = new Date(ahora.getTime() + 10 * 60_000)
+    // `expirationTime` a 12 HORAS, y esto NO es un número al azar:
+    //
+    // WSAA **copia** este valor a la vigencia del Ticket de Acceso que emite.
+    // Medido contra producción: con `expirationTime` = ahora + 10 min, el TA
+    // devuelto vencía exactamente 10 minutos después. Y como el cache lo pide
+    // con 10 minutos de margen, ese ticket no era reutilizable NUNCA: cada
+    // emisión hubiera vuelto a WSAA, que rechaza el segundo pedido con
+    // `coe.alreadyAuthenticated`. O sea, la primera factura salía y la segunda
+    // no, hasta que venciera.
+    //
+    // 12 h es la duración documentada del TA y entra holgado en la tolerancia
+    // de ±24 h que declara la especificación.
+    const hasta = new Date(ahora.getTime() + 12 * 3600_000)
     const uniqueId = Math.floor(ahora.getTime() / 1000) % 4_294_967_295
 
     return [
@@ -114,26 +126,22 @@ async function loginCms(cms: string, ambiente: AmbienteArca): Promise<{ token: s
         `<wsaa:loginCms><wsaa:in0>${cms}</wsaa:in0></wsaa:loginCms>` +
         '</soapenv:Body></soapenv:Envelope>'
 
-    let res: Response
+    let res: { status: number; text: string }
     try {
-        res = await fetch(ENDPOINTS[ambiente].wsaa, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'text/xml; charset=utf-8',
-                SOAPAction: '',
-            },
-            body: sobre,
-            signal: AbortSignal.timeout(TIMEOUT_WSAA_MS),
-            cache: 'no-store',
+        // Mismo motivo que en wsfe.ts: TLS. Ver src/lib/arca/http.ts.
+        res = await postXml(ENDPOINTS[ambiente].wsaa, sobre, {
+            soapAction: '',
+            timeoutMs: TIMEOUT_WSAA_MS,
         })
     } catch (e) {
-        const msg = e instanceof Error && e.name === 'TimeoutError'
+        const err = e instanceof ErrorHttpArca ? e : null
+        const msg = err?.codigo === 'timeout'
             ? 'ARCA no respondió a tiempo al pedido de autenticación.'
             : 'No pudimos conectarnos con ARCA para autenticar.'
-        throw new ErrorWsaa(msg, 'red', e instanceof Error ? e.message : String(e))
+        throw new ErrorWsaa(msg, 'red', err?.causa ?? (e instanceof Error ? e.message : String(e)))
     }
 
-    const xml = await res.text()
+    const xml = res.text
 
     // El SOAP Fault viaja con HTTP 500. Hay que leer el cuerpo igual, porque el
     // faultstring es el único lugar donde ARCA dice qué pasó de verdad.
@@ -142,7 +150,7 @@ async function loginCms(cms: string, ambiente: AmbienteArca): Promise<{ token: s
         const codigo = (fault.match(/((?:coe|cms|xml|wsn|wsaa)\.[A-Za-z.]+)/)?.[1]) ?? null
         throw new ErrorWsaa(fault.trim(), codigo, xml.slice(0, 2000))
     }
-    if (!res.ok) {
+    if (res.status < 200 || res.status >= 300) {
         throw new ErrorWsaa(`WSAA respondió HTTP ${res.status}.`, `http_${res.status}`, xml.slice(0, 2000))
     }
 
