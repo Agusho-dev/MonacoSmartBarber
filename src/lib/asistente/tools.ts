@@ -170,7 +170,15 @@ export function buildTools(ctx: AssistantContext) {
           sucursal: picked?.name ?? 'todas las sucursales',
           totales: f.totals,
           break_even: f.breakEven,
+          // `momChange` ya viene con `isPartial`/`daysElapsed`/`daysInMonth`. La nota es
+          // explícita porque este objeto se lo come un modelo: sin ella el asistente leía el
+          // -50% del mes en curso y contestaba que el negocio se cayó a la mitad.
           variacion_mensual: f.momChange,
+          nota_variacion: f.momChange.isPartial
+            ? `El último mes está EN CURSO (${f.momChange.daysElapsed} de ${f.momChange.daysInMonth} días). `
+              + 'Los porcentajes comparan contra el MISMO tramo de días del mes anterior, no contra el mes completo. '
+              + 'No afirmar caídas ni subidas del mes sin aclarar que está incompleto.'
+            : null,
           meses: f.months.map((m) => ({
             mes: m.month, label: m.label, ingresos: m.revenue, gastos_totales: m.totalExpenses,
             ganancia_neta: m.netProfit, cortes: m.cuts,

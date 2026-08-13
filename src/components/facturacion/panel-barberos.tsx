@@ -1102,6 +1102,53 @@ function FichaBarbero({
     }
 
     const sinFacturar = fila.sinFacturar
+
+    /**
+     * Qué va a pasar si se aprieta "Facturar según su cupo".
+     *
+     * Se calcula sobre la política GUARDADA (`m`), no sobre el formulario: el
+     * botón ejecuta lo guardado, y proyectar lo que se está editando sería
+     * prometer un número distinto del que va a salir. Si difieren, se avisa.
+     *
+     * En modo monto la cantidad es una ESTIMACIÓN (monto restante dividido el
+     * ticket promedio de lo disponible): la selección real depende de qué
+     * cortes entren, y por eso se muestra como "aprox.".
+     */
+    const proyeccion = (() => {
+        const disp = sinFacturar.cantidad
+        const dispMonto = sinFacturar.monto
+        if (!m || m.modo === 'manual' || disp === 0) {
+            return { modo: m?.modo ?? 'manual', cantidad: 0, monto: 0, exacto: true }
+        }
+        if (m.modo === 'cantidad') {
+            const faltan = Math.max((m.objetivoCantidad ?? 0) - m.emitidos, 0)
+            const cantidad = Math.min(faltan, disp)
+            const promedio = disp > 0 ? dispMonto / disp : 0
+            return { modo: 'cantidad' as const, cantidad, monto: Math.round(cantidad * promedio), exacto: false }
+        }
+        const restante = Math.max((m.objetivoMonto ?? 0) - m.montoEmitido, 0)
+        const monto = Math.min(restante, dispMonto)
+        const promedio = disp > 0 ? dispMonto / disp : 0
+        return {
+            modo: 'monto' as const,
+            cantidad: promedio > 0 ? Math.floor(monto / promedio) : 0,
+            monto,
+            exacto: false,
+        }
+    })()
+
+    /** El formulario difiere de lo guardado: la proyección de abajo no es lo que se ve arriba. */
+    const hayCambiosSinGuardar = m
+        ? habilitada !== m.habilitada ||
+          modo !== m.modo ||
+          periodo !== m.periodo ||
+          origen !== m.origen ||
+          (modo === 'cantidad'
+              ? objCantidad !== m.objetivoCantidad
+              : modo === 'monto'
+                  ? objMonto !== m.objetivoMonto
+                  : false)
+        : false
     const a = fila.anual
 
     return (
@@ -1465,15 +1512,12 @@ function FichaBarbero({
                                 {pendiente ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
                                 Guardar cupo
                             </Button>
-                            {/* Esto no es un detalle: guardar acá reescribe la
-                                política entera, y el panel no recibe el resto de
-                                sus campos. Callarlo sería resetear en silencio la
-                                estrategia y la emisión automática del barbero. */}
-                            <p className="mt-2 text-xs text-muted-foreground">
-                                Guardar desde acá deja el resto de la política en los valores por defecto
-                                (reparte los cortes en el período, toma todos los medios de cobro y no emite
-                                sola). El detalle fino se configura en la pestaña Cupo.
-                            </p>
+                            {hayCambiosSinGuardar && (
+                                <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                                    Tenés cambios sin guardar. Lo de abajo muestra lo que pasaría con la
+                                    configuración guardada, no con la que estás editando.
+                                </p>
+                            )}
                         </>
                     )}
                 </section>
@@ -1484,22 +1528,55 @@ function FichaBarbero({
                 <section>
                     <h3 className="flex items-center gap-2 text-sm font-semibold">
                         <Receipt className="size-4 text-muted-foreground" />
-                        Ventas sin facturar
+                        Qué se le va a facturar
                     </h3>
 
                     {sinFacturar.cantidad === 0 ? (
                         <p className="mt-2 text-sm text-muted-foreground">
-                            No le quedan cortes pendientes de facturar.
+                            No quedan cortes pendientes de facturar.
                         </p>
+                    ) : proyeccion.modo === 'manual' ? (
+                        <div className="mt-2 rounded-lg border border-border p-3 text-sm text-muted-foreground">
+                            El cupo está en modo a mano: no se factura nada solo. Elegí por cantidad o por
+                            monto para que el sistema seleccione.
+                        </div>
                     ) : (
                         <div className="mt-2 rounded-lg border border-border p-3">
-                            <p className="text-sm">
-                                <strong className="tabular-nums">{numero(sinFacturar.cantidad)}</strong>{' '}
-                                {sinFacturar.cantidad === 1 ? 'venta' : 'ventas'} por un total de{' '}
-                                <strong className="tabular-nums">{money(sinFacturar.monto)}</strong>.
+                            {/* El número grande es lo que VA A PASAR, no el pozo
+                                disponible. Antes el titular era "938 ventas" con
+                                un cupo de 28: se leía como que iba a emitir 938. */}
+                            <p className="text-2xl font-semibold tabular-nums">
+                                {numero(proyeccion.cantidad)}{' '}
+                                <span className="text-base font-normal text-muted-foreground">
+                                    {proyeccion.cantidad === 1 ? 'comprobante' : 'comprobantes'}
+                                </span>
                             </p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                                No se factura todo: entra lo que permita su cupo del período.
+                            <p className="mt-0.5 text-sm text-muted-foreground">
+                                {proyeccion.exacto ? '' : 'aprox. '}
+                                <span className="tabular-nums text-foreground">{money(proyeccion.monto)}</span>
+                                {' · '}sale de {numero(sinFacturar.cantidad)} ventas disponibles por{' '}
+                                <span className="tabular-nums">{money(sinFacturar.monto)}</span>
+                            </p>
+
+                            {/* Barra: qué porción del pozo se lleva este cupo. */}
+                            <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                                <div
+                                    className="h-full rounded-full bg-primary"
+                                    style={{
+                                        width: `${Math.min(
+                                            100,
+                                            sinFacturar.cantidad > 0
+                                                ? (proyeccion.cantidad / sinFacturar.cantidad) * 100
+                                                : 0,
+                                        )}%`,
+                                    }}
+                                />
+                            </div>
+
+                            <p className="mt-2 text-xs text-muted-foreground">
+                                {proyeccion.cantidad === 0
+                                    ? 'El cupo del período ya está cubierto: no entra ninguno más.'
+                                    : `Quedan ${numero(sinFacturar.cantidad - proyeccion.cantidad)} sin facturar en este período.`}
                             </p>
                         </div>
                     )}
@@ -1509,10 +1586,16 @@ function FichaBarbero({
                             className="mt-3 w-full"
                             variant="outline"
                             onClick={() => setConfirmando(true)}
-                            disabled={pendiente || !taxpayerId || sinFacturar.cantidad === 0 || !lectura.operativo}
+                            // Se deshabilita por la PROYECCIÓN, no por el pozo: con
+                            // el cupo ya cubierto hay ventas disponibles pero no
+                            // entra ninguna, y un botón que se aprieta y no hace
+                            // nada se lee como que el sistema está roto.
+                            disabled={pendiente || !taxpayerId || proyeccion.cantidad === 0 || !lectura.operativo}
                         >
                             {pendiente ? <Loader2 className="size-4 animate-spin" /> : <Receipt className="size-4" />}
-                            Facturar según su cupo
+                            {proyeccion.cantidad > 0
+                                ? `Facturar ${numero(proyeccion.cantidad)} ${proyeccion.cantidad === 1 ? 'corte' : 'cortes'} ahora`
+                                : 'Facturar según su cupo'}
                         </Button>
                     )}
 

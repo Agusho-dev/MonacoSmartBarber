@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import type { SalaryScheme } from '@/lib/types/database'
 import { validateBranchAccess, getCurrentOrgId } from './org'
 import { getActiveTimezone } from '@/lib/i18n'
+import { getLocalDateStr } from '@/lib/time-utils'
 
 // Tipos locales para las nuevas tablas (migración 037/044)
 export type SalaryReportType = 'commission' | 'base_salary' | 'bonus' | 'advance' | 'hybrid_deficit' | 'product_commission' | 'tip'
@@ -595,23 +596,46 @@ export async function paySelectedReports(
     return { error: 'Error al registrar el pago.' }
   }
 
-  // Generar expense_ticket para reflejar el egreso en caja/finanzas
+  // Generar expense_ticket para reflejar el egreso en caja/finanzas.
+  //
+  // `source: 'salary_batch'` (migración 186) es lo que impide el doble conteo: Finanzas arma
+  // los "gastos variables" del mes con `source='manual'` y, en la MISMA suma de egresos, agrega
+  // los `salary_reports` de este mismo lote. Sin el marcador, cada peso de sueldo se restaba
+  // dos veces del resultado neto ($23,4M en la org al 13/08/2026). El ticket SIGUE existiendo
+  // y sigue apareciendo en Caja y en el donut de egresos: lo que cambia es que Finanzas ya no
+  // lo confunde con un gasto variable nuevo.
+  //
+  // `expense_date` sale de la TZ de la org, no de `toISOString()`: en Vercel el proceso corre
+  // en UTC, así que después de las 21:00 argentinas la fecha UTC ya es mañana. Ya pasó — el
+  // lote de $1.251.000 del 01/07/2026 a las 23:41 quedó fechado 2026-07-02; el mismo pago un
+  // día 31 mueve la plata de mes.
+  const tzPago = await getActiveTimezone()
   const { data: expenseTicket, error: expenseError } = await supabase
     .from('expense_tickets')
     .insert({
       branch_id: branchId,
       amount: totalAmount,
       category: 'Sueldos',
+      source: 'salary_batch',
       description: `Pago de sueldo a ${staffName} (${reports.length} reporte${reports.length === 1 ? '' : 's'})`,
       payment_account_id: paymentMethod === 'transfer' ? paymentAccountId ?? null : null,
-      expense_date: new Date().toISOString().slice(0, 10),
+      expense_date: getLocalDateStr(tzPago),
     })
     .select('id')
     .single()
 
+  // Si el ticket no se crea, el pago igual se registra (el sueldo YA se transfirió: abortar acá
+  // dejaría la plata fuera del sistema), pero el egreso no aparece en Caja ni en el donut de
+  // egresos. Eso pasó y nadie se enteró en 5 semanas: 11 lotes sin ticket por $2.705.801, de
+  // los cuales 5 de Rondeau del 08/07/2026 por $2.688.000 — Rondeau tiene $21.711 de tickets en
+  // toda su historia contra $2.701.801 de sueldos pagados. Por eso ahora el warning VUELVE al
+  // llamador en vez de morir en los logs del servidor.
+  let expenseWarning: string | undefined
   if (expenseError) {
-    console.error('Error al crear expense_ticket del sueldo:', expenseError)
-    // No bloqueamos el pago — dejamos el batch sin expense_ticket_id (queda warning en logs)
+    console.error('[paySelectedReports] expense_ticket', expenseError.message)
+    expenseWarning =
+      'El pago quedó registrado, pero no se pudo crear el comprobante de egreso: ' +
+      'este sueldo no va a aparecer en Caja ni en Egresos hasta que se cargue a mano.'
   } else if (expenseTicket) {
     await supabase
       .from('salary_payment_batches')
@@ -639,7 +663,7 @@ export async function paySelectedReports(
   revalidatePath('/dashboard/finanzas')
   revalidatePath('/dashboard/caja')
   revalidatePath('/dashboard/cuentas')
-  return { success: true, data: { batchId: batch.id, totalAmount } }
+  return { success: true, warning: expenseWarning, data: { batchId: batch.id, totalAmount } }
 }
 
 /**

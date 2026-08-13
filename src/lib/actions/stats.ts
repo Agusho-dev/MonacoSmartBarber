@@ -77,11 +77,36 @@ export interface StatsData {
   /** Tasa de retorno calculada dentro del período consultado (a diferencia de segmentation, que usa ventana móvil). */
   retention: Retention
   totals: {
+    /** Todo lo cobrado, servicios + productos. Es el número que cuadra contra Finanzas y Caja. */
     revenue: number
+    /**
+     * Cortes REALES. Excluye las ventas de producto sueltas, que son visitas sin `service_id`
+     * ni `queue_entry_id` creadas por `directProductSale`. Antes se contaban como cortes
+     * (`safe.length`) y por eso esta pantalla nunca coincidía con Finanzas: julio en Paraná
+     * decía 1216 cuando los cortes eran 1200 y las otras 16 eran ceras y cremas.
+     */
     cuts: number
+    /**
+     * Ticket promedio de SERVICIO: `(revenue - productRevenue) / cuts`. Antes era
+     * `revenue / totalVisitas`, que mezclaba dos cosas: metía la plata de los productos en el
+     * numerador y las ventas de producto en el denominador. Julio en Paraná daba $16.477 y el
+     * ticket de servicio es $16.484.
+     */
     avgTicket: number
     clients: number
+    /** Plata de ventas de producto sueltas, mostrada aparte para que no quede diluida. */
+    productRevenue: number
+    productCount: number
   }
+}
+
+/**
+ * Un "corte" es una visita atada a un servicio o a una entrada de la fila. Una visita sin
+ * ninguno de los dos es una venta de producto suelta (`directProductSale`): plata real, pero
+ * no un corte. Misma definición que usa Finanzas — es a propósito que sea una sola.
+ */
+function esCorte(v: { service_id?: string | null; queue_entry_id?: string | null }): boolean {
+  return Boolean(v.service_id || v.queue_entry_id)
 }
 
 export async function fetchStats(
@@ -106,7 +131,7 @@ export async function fetchStats(
       revenueByMethod: [],
       segmentation: { new_count: 0, recurring: 0, at_risk: 0, lost: 0, total: 0 },
       retention: { returning_in_period: 0, unique_in_period: 0, rate: 0 },
-      totals: { revenue: 0, cuts: 0, avgTicket: 0, clients: 0 },
+      totals: { revenue: 0, cuts: 0, avgTicket: 0, clients: 0, productRevenue: 0, productCount: 0 },
     }
   }
 
@@ -120,7 +145,7 @@ export async function fetchStats(
       revenueByMethod: [],
       segmentation: { new_count: 0, recurring: 0, at_risk: 0, lost: 0, total: 0 },
       retention: { returning_in_period: 0, unique_in_period: 0, rate: 0 },
-      totals: { revenue: 0, cuts: 0, avgTicket: 0, clients: 0 },
+      totals: { revenue: 0, cuts: 0, avgTicket: 0, clients: 0, productRevenue: 0, productCount: 0 },
     }
   }
 
@@ -128,7 +153,7 @@ export async function fetchStats(
     return supabase
       .from('visits')
       .select(
-        'id, branch_id, client_id, barber_id, amount, payment_method, completed_at, commission_amount, barber:staff(full_name)'
+        'id, branch_id, client_id, barber_id, amount, payment_method, completed_at, commission_amount, service_id, queue_entry_id, barber:staff(full_name)'
       )
       .in('branch_id', filterBranchIds)
       .gte('completed_at', fromISO)
@@ -205,7 +230,7 @@ export async function fetchStats(
       clients: new Set<string>(),
       commission: 0,
     }
-    existing.cuts++
+    if (esCorte(v)) existing.cuts++
     existing.revenue += v.amount
     existing.commission += v.commission_amount
     existing.clients.add(v.client_id)
@@ -228,7 +253,7 @@ export async function fetchStats(
     const day = toLocalDate(v.completed_at, tz)
     const d = dailyAgg.get(day) || { revenue: 0, cuts: 0 }
     d.revenue += v.amount
-    d.cuts++
+    if (esCorte(v)) d.cuts++
     dailyAgg.set(day, d)
   }
   const trends: TrendPoint[] = [...dailyAgg.entries()]
@@ -240,7 +265,7 @@ export async function fetchStats(
   for (const v of safe) {
     const d = methodAgg.get(v.payment_method) || { amount: 0, cuts: 0 }
     d.amount += v.amount
-    d.cuts++
+    if (esCorte(v)) d.cuts++
     methodAgg.set(v.payment_method, d)
   }
   const revenueByMethod: MethodRevenue[] = [...methodAgg.entries()].map(
@@ -270,7 +295,12 @@ export async function fetchStats(
   }
 
   const totalRevenue = safe.reduce((s, v) => s + v.amount, 0)
-  const totalCuts = safe.length
+  const totalCuts = safe.reduce((s, v) => s + (esCorte(v) ? 1 : 0), 0)
+  // Ventas de producto sueltas: se muestran aparte en vez de quedar diluidas dentro de
+  // "Cortes" e inflando el ticket promedio.
+  const productos = safe.filter((v) => !esCorte(v))
+  const productRevenue = productos.reduce((s, v) => s + v.amount, 0)
+  const serviceRevenue = totalRevenue - productRevenue
   const uniqueClients = new Set(safe.map((v) => v.client_id)).size
 
   // Tasa de retorno DENTRO del período [fromISO, toISO]: clientes con 2+ visitas
@@ -303,8 +333,10 @@ export async function fetchStats(
     totals: {
       revenue: totalRevenue,
       cuts: totalCuts,
-      avgTicket: totalCuts > 0 ? Math.round(totalRevenue / totalCuts) : 0,
+      avgTicket: totalCuts > 0 ? Math.round(serviceRevenue / totalCuts) : 0,
       clients: uniqueClients,
+      productRevenue,
+      productCount: productos.length,
     },
   }
 }

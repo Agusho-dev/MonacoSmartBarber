@@ -273,6 +273,8 @@ export interface AccountPeriodTotals {
 // archivo 'use server' sólo se pueden exportar funciones async.
 const CASH_ACCOUNT_ID = 'cash_virtual_id'
 const CARD_ACCOUNT_ID = 'card_virtual_id'
+/** Destino virtual de los cobros por transferencia que no quedaron atados a ninguna cuenta. */
+const UNASSIGNED_TRANSFER_ID = 'unassigned_transfer_virtual_id'
 
 export async function getAllAccountBalanceTotals(
   branchId?: string | null,
@@ -370,23 +372,32 @@ export async function getAllAccountBalanceTotals(
   const accountIds = accounts?.map(a => a.id) || []
 
   // Transfers + expenses de cuentas en paralelo.
+  //
+  // EL SCOPE ES LA SUCURSAL DEL MOVIMIENTO, NO LA DE LA CUENTA. Antes estas dos queries
+  // filtraban por `payment_account_id IN accountIds`, o sea por las cuentas registradas en la
+  // sucursal elegida. El ledger está bien (el trigger copia `visits.branch_id`), pero una
+  // cuenta puede cobrar en una sucursal distinta de la que tiene cargada: la cuenta
+  // "Alejo Jofre" (`payment_accounts.branch_id` = Test) cobró 810 visitas de PARANÁ por
+  // $13.270.000. Con Paraná elegido esos cobros desaparecían del gráfico ($10.414.000 en
+  // `transfer_logs`), y con Test elegido aparecían $3.436.000 de cobros en un mes en que Test
+  // facturó $1.000. Era la causa del 98% de la rotura del invariante
+  // `sum(charges) == Ingresos de Estadísticas`.
+  //
   // OJO: el order() tiene que ser por una columna que exista. transfer_logs NO tiene
   // `created_at`: ordenar por ahí hacía fallar la query, fetchAll se comía el error y
   // TODAS las cuentas mostraban $0 de ingresos.
-  const [allTransfers, allExpenses] = await Promise.all([
-    accountIds.length > 0
-      ? fetchAll<AccountAmountRow>((from, to) =>
-          withRange(
-            supabase
-              .from('transfer_logs')
-              .select(TRANSFER_INCOME_COLUMNS)
-              .in('payment_account_id', accountIds),
-            'transferred_at'
-          )
-            .order('transferred_at')
-            .range(from, to)
-        )
-      : Promise.resolve([] as AccountAmountRow[]),
+  const [allTransfers, allExpenses, unassignedTransfers] = await Promise.all([
+    fetchAll<AccountAmountRow>((from, to) =>
+      withRange(
+        supabase
+          .from('transfer_logs')
+          .select(TRANSFER_INCOME_COLUMNS)
+          .in('branch_id', scopeBranchIds),
+        'transferred_at'
+      )
+        .order('transferred_at')
+        .range(from, to)
+    ),
     accountIds.length > 0
       ? fetchAll<{ payment_account_id: string; amount: number }>((from, to) =>
           withRange(
@@ -401,6 +412,25 @@ export async function getAllAccountBalanceTotals(
             .range(from, to)
         )
       : Promise.resolve([] as { payment_account_id: string; amount: number }[]),
+    // Cobros por transferencia SIN cuenta asignada. El trigger no les crea fila en
+    // `transfer_logs` (el ledger es por cuenta), así que no estaban en ningún destino: ni en
+    // una cuenta, ni en Efectivo, ni en Tarjeta. Se restaban del total en silencio — $559.000
+    // en la org, $166.000 en Paraná (abr $96.000, may $54.000, jul $16.000), y el de julio
+    // demuestra que no es un episodio histórico cerrado. Mostrarlos como destino propio hace
+    // que el invariante cierre por construcción y que el dueño VEA que hay plata sin atribuir.
+    fetchAll<{ amount: number; tip_amount: number | null }>((from, to) =>
+      withRange(
+        supabase
+          .from('visits')
+          .select('amount, tip_amount')
+          .eq('payment_method', 'transfer')
+          .is('payment_account_id', null)
+          .in('branch_id', scopeBranchIds),
+        'completed_at'
+      )
+        .order('completed_at')
+        .range(from, to)
+    ),
   ])
 
   // La propina se atribuye por `tip_payment_method`, no por `payment_method`: existe el
@@ -417,7 +447,25 @@ export async function getAllAccountBalanceTotals(
   const card = sumBy('card')
   const cashTotalExpenses = cashExpenses.reduce((s, e) => s + Number(e.amount), 0)
 
-  const balances: AccountPeriodTotals[] = (accounts || []).map(acc => {
+  // Cuentas que COBRARON en estas sucursales pero están registradas en otra. Hay que
+  // resolverles el nombre acá: si la lista de destinos siguiera saliendo sólo de
+  // `payment_accounts.branch_id`, los cobros que ahora sí trae la query quedarían huérfanos y
+  // volveríamos al mismo agujero de $10,4M por el otro camino. Las cuentas de la sucursal sin
+  // movimiento se conservan (aparecen en $0), que es lo que hace legible el gráfico.
+  const idsConMovimiento = new Set(
+    (allTransfers ?? []).map(t => t.payment_account_id).filter(Boolean)
+  )
+  const idsForaneos = [...idsConMovimiento].filter(id => !accountIds.includes(id))
+  let cuentasForaneas: { id: string; name: string }[] = []
+  if (idsForaneos.length > 0) {
+    const { data: foraneas } = await supabase
+      .from('payment_accounts')
+      .select('id, name')
+      .in('id', idsForaneos)
+    cuentasForaneas = foraneas ?? []
+  }
+
+  const balances: AccountPeriodTotals[] = [...(accounts || []), ...cuentasForaneas].map(acc => {
     const rows = (allTransfers ?? []).filter(t => t.payment_account_id === acc.id)
     const charges = rows.reduce((s, t) => s + Number(t.amount), 0)
     const tips = rows.reduce((s, t) => s + Number(t.tip_amount ?? 0), 0)
@@ -460,6 +508,23 @@ export async function getAllAccountBalanceTotals(
     income: card.charges + card.tips,
     balance: card.charges + card.tips,
   })
+
+  // Transferencias que se cobraron sin elegir cuenta. Se agrega SÓLO si tiene movimiento:
+  // un destino en $0 permanente sería ruido, y su presencia es justamente la señal de que
+  // hay plata que hay que ir a atribuir.
+  const sinCuentaCharges = unassignedTransfers.reduce((s, v) => s + Number(v.amount), 0)
+  const sinCuentaTips = unassignedTransfers.reduce((s, v) => s + Number(v.tip_amount ?? 0), 0)
+  if (sinCuentaCharges + sinCuentaTips > 0) {
+    balances.push({
+      id: UNASSIGNED_TRANSFER_ID,
+      name: 'Transferencia sin cuenta asignada',
+      charges: sinCuentaCharges,
+      tips: sinCuentaTips,
+      expenses: 0,
+      income: sinCuentaCharges + sinCuentaTips,
+      balance: sinCuentaCharges + sinCuentaTips,
+    })
+  }
 
   return balances
 }

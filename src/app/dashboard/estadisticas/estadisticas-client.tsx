@@ -183,20 +183,34 @@ export function EstadisticasClient({ initialData, branches, orgName = 'BarberOS'
 
       <div className={isPending ? 'pointer-events-none opacity-50' : ''}>
         <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {/* "Ingresos" es TODO lo cobrado (servicios + productos): es el número que cuadra
+              contra Finanzas, Caja y el invariante de Cobros por destino. Lo que se separa es
+              el conteo: un producto no es un corte. */}
           <SummaryCard
             title="Ingresos"
             value={formatCurrency(data.totals.revenue)}
             icon={DollarSign}
+            subtitle={
+              data.totals.productRevenue > 0
+                ? `incluye ${formatCurrency(data.totals.productRevenue)} de productos`
+                : undefined
+            }
           />
           <SummaryCard
             title="Cortes"
             value={String(data.totals.cuts)}
             icon={Scissors}
+            subtitle={
+              data.totals.productCount > 0
+                ? `+ ${data.totals.productCount} ${data.totals.productCount === 1 ? 'venta' : 'ventas'} de producto`
+                : undefined
+            }
           />
           <SummaryCard
             title="Ticket promedio"
             value={formatCurrency(data.totals.avgTicket)}
             icon={TrendingUp}
+            subtitle={data.totals.productRevenue > 0 ? 'por corte, sin productos' : undefined}
           />
           <SummaryCard
             title="Clientes únicos"
@@ -239,10 +253,12 @@ function SummaryCard({
   title,
   value,
   icon: Icon,
+  subtitle,
 }: {
   title: string
   value: string
   icon: React.ComponentType<{ className?: string }>
+  subtitle?: string
 }) {
   return (
     <Card className="gap-2">
@@ -254,6 +270,7 @@ function SummaryCard({
       </CardHeader>
       <CardContent>
         <p className="text-2xl lg:text-3xl font-bold">{value}</p>
+        {subtitle && <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>}
       </CardContent>
     </Card>
   )

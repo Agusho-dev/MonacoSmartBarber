@@ -241,6 +241,23 @@ export function FinanzasClient({
       .sort((a, b) => b.amount - a.amount)
   }, [periodExpenses, expenseAccountFilter])
 
+  // Desglose por origen, para el pie del donut. El donut muestra TODA la plata que salió
+  // (variables + gastos fijos + sueldos y propinas liquidadas), mientras la tarjeta "Gastos
+  // variables" cuenta sólo los cargados a mano. Los dos números son correctos para su
+  // definición, pero convivían en la misma pantalla sin decir cuál era cuál: $27.769.880 al
+  // lado de $23.934.865, y la diferencia era exactamente la tarjeta de gastos fijos.
+  const expensesBySource = useMemo(() => {
+    const acc = { manual: 0, fijos: 0, sueldos: 0, total: 0 }
+    for (const t of periodExpenses) {
+      const monto = Number(t.amount)
+      acc.total += monto
+      if (t.source === 'fixed_expense_period') acc.fijos += monto
+      else if (t.source === 'salary_batch' || t.source === 'tip_batch') acc.sueldos += monto
+      else acc.manual += monto
+    }
+    return acc
+  }, [periodExpenses])
+
   const filteredAccounts = useMemo(() => {
     if (!selectedBranchId) return accounts
     return accounts.filter(a => a.branch_id === selectedBranchId)
@@ -249,12 +266,25 @@ export function FinanzasClient({
   const { totals, breakEven } = data
   const isPositive = totals.netProfit >= 0
 
+  // Contra qué compara el delta. Cuando el último mes es el mes EN CURSO, el servidor recorta
+  // el mes anterior al mismo día (tramo contra tramo) y hay que decirlo: si no, el dueño lee
+  // "−50%" el día 13 y entiende que se le cayó el negocio a la mitad, cuando en realidad va
+  // arriba. El día 13/08/2026 en Paraná el like-for-like era +17,8%.
+  const { isPartial, daysElapsed, daysInMonth } = data.momChange
+  const momLabel = isPartial
+    ? `vs mismos ${daysElapsed} días del mes anterior`
+    : 'vs mes anterior'
+
   // Enriquecer cada mes con totales derivados: costos totales y margen neto %,
   // para que el dueño vea de un vistazo "cuánto entra vs cuánto se va" y la
   // rentabilidad, sin tener que hacer la cuenta de cabeza.
   const chartMonths = data.months.map((m, i) => {
-    const totalCosts =
-      m.fixedExpenses + m.variableExpenses + m.commissions + m.baseSalaryPaid
+    // `m.totalExpenses` — el MISMO campo del que sale `m.netProfit`. Antes esta línea
+    // recomponía los costos con su propia fórmula (fijos + variables + comisiones +
+    // baseSalaryPaid), que no era la del servidor: el tooltip de Paraná mayo mostraba
+    // Ingresos $20.422.000, Costos $26.107.102,77 y Neto −$6.666.749,77 — una resta que no
+    // da. Dos fórmulas para la misma plata siempre terminan divergiendo.
+    const totalCosts = m.totalExpenses
     const marginPct = m.revenue > 0 ? Math.round((m.netProfit / m.revenue) * 100) : 0
     return {
       ...m,
@@ -336,7 +366,12 @@ export function FinanzasClient({
     row('Gastos fijos', formatAmountCSV(totals.fixedExpenses))
     row('Gastos variables', formatAmountCSV(totals.variableExpenses))
     row('Comisiones', formatAmountCSV(totals.commissions))
-    row('Sueldos fijos pagados', formatAmountCSV(totals.salaryPayments ?? 0))
+    // "Pagos salariales" y no "Sueldos fijos pagados": este total incluye sueldo base, bonos
+    // y déficit del esquema híbrido. Con la etiqueta vieja el CSV informaba $28.217.464 de
+    // "sueldo fijo" cuando el sueldo fijo real eran $25.276.000.
+    row('Pagos salariales (sueldo, bonos)', formatAmountCSV(totals.salaryPayments ?? 0))
+    row('Sueldo base pagado', formatAmountCSV(data.months.reduce((s, m) => s + m.baseSalaryPaid, 0)))
+    row('Egresos totales', formatAmountCSV(totals.totalExpenses))
     row('Resultado neto', formatAmountCSV(totals.netProfit))
     row('Cortes', totals.cuts)
     row('Ticket promedio', formatAmountCSV(breakEven.avgRevenuePerCut))
@@ -464,7 +499,9 @@ export function FinanzasClient({
         ['Gastos fijos', formatCurrency(totals.fixedExpenses)],
         ['Gastos variables', formatCurrency(totals.variableExpenses)],
         ['Comisiones', formatCurrency(totals.commissions)],
-        ['Sueldos fijos pagados', formatCurrency(totals.salaryPayments ?? 0)],
+        ['Pagos salariales (sueldo, bonos)', formatCurrency(totals.salaryPayments ?? 0)],
+        ['Sueldo base pagado', formatCurrency(data.months.reduce((s, m) => s + m.baseSalaryPaid, 0))],
+        ['Egresos totales', formatCurrency(totals.totalExpenses)],
         ['Resultado neto', formatCurrency(totals.netProfit)],
         ['Cortes', String(totals.cuts)],
         ['Ticket promedio', formatCurrency(breakEven.avgRevenuePerCut)],
@@ -672,8 +709,13 @@ export function FinanzasClient({
             title="Ingresos brutos"
             value={formatCurrency(totals.revenue)}
             icon={DollarSign}
-            subtitle={`${totals.cuts} cortes`}
+            subtitle={
+              isPartial
+                ? `${totals.cuts} cortes · mes en curso, ${daysElapsed} de ${daysInMonth} días`
+                : `${totals.cuts} cortes`
+            }
             momChange={data.momChange.revenue}
+            momLabel={momLabel}
           />
           <SummaryCard
             title="Gastos fijos"
@@ -687,6 +729,7 @@ export function FinanzasClient({
             icon={ShoppingBag}
             subtitle="Egresos del período"
             momChange={data.momChange.variableExpenses}
+            momLabel={momLabel}
           />
           <SummaryCard
             title="Comisiones"
@@ -694,11 +737,16 @@ export function FinanzasClient({
             icon={Scissors}
             subtitle={`${formatCurrency(breakEven.avgCommissionPerCut)} promedio/corte`}
           />
+          {/* Ojo: `getCommissionSummary()` se llama SIN sucursal y SIN ventana (finanzas/page.tsx),
+              así que este número es de toda la organización y de toda la historia — no del
+              período ni de la sucursal que dice el selector. Con Paraná elegido la tarjeta
+              mostraba $349.950 / 41 reportes cuando Paraná son $72.000 / 11. Mientras siga
+              siendo un acumulado, la etiqueta lo tiene que decir. */}
           <SummaryCard
             title="Comisiones por pagar"
             value={formatCurrency(commissionSummary.totalPending)}
             icon={Users}
-            subtitle={`${commissionSummary.pendingCount} reportes pendientes · ${formatCurrency(commissionSummary.totalPaid)} pagadas`}
+            subtitle={`${commissionSummary.pendingCount} reportes pendientes · ${formatCurrency(commissionSummary.totalPaid)} pagadas · acumulado de todas las sucursales`}
           />
           <SummaryCard
             title="Resultado neto"
@@ -707,6 +755,7 @@ export function FinanzasClient({
             subtitle={isPositive ? 'Ganancia' : 'Pérdida'}
             highlight={isPositive ? 'positive' : 'negative'}
             momChange={data.momChange.netProfit}
+            momLabel={momLabel}
           />
         </div>
 
@@ -1011,10 +1060,10 @@ export function FinanzasClient({
             <CardHeader>
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <CardTitle className="text-base">Egresos por categoría</CardTitle>
+                  <CardTitle className="text-base">Todo lo que salió, por categoría</CardTitle>
                   <CardDescription>
                     {totalExpensesPie > 0
-                      ? `${formatCurrency(totalExpensesPie)} · ${reportPeriodLabel}`
+                      ? `${formatCurrency(totalExpensesPie)} · ${reportPeriodLabel} · incluye gastos fijos y sueldos`
                       : `Sin egresos en ${reportPeriodLabel}`}
                   </CardDescription>
                 </div>
@@ -1092,6 +1141,34 @@ export function FinanzasClient({
                       </div>
                     ))}
                   </div>
+
+                  {/* Pie que cuadra contra las tarjetas de arriba. Sin esto, el donut y la
+                      tarjeta "Gastos variables" mostraban dos totales distintos de la misma
+                      pantalla sin explicar por qué. */}
+                  {expenseAccountFilter === '__all__' && expensesBySource.total > 0 && (
+                    <div className="mt-3 space-y-1 border-t pt-3 text-xs text-muted-foreground">
+                      <div className="flex items-center justify-between">
+                        <span>Gastos variables (carga manual)</span>
+                        <span className="font-medium">{formatCurrency(expensesBySource.manual)}</span>
+                      </div>
+                      {expensesBySource.fijos > 0 && (
+                        <div className="flex items-center justify-between">
+                          <span>Gastos fijos pagados</span>
+                          <span className="font-medium">{formatCurrency(expensesBySource.fijos)}</span>
+                        </div>
+                      )}
+                      {expensesBySource.sueldos > 0 && (
+                        <div className="flex items-center justify-between">
+                          <span>Sueldos y propinas liquidadas</span>
+                          <span className="font-medium">{formatCurrency(expensesBySource.sueldos)}</span>
+                        </div>
+                      )}
+                      <p className="pt-1 leading-snug">
+                        El resultado neto cuenta los sueldos una sola vez, desde los reportes de
+                        liquidación: acá aparecen porque es plata que efectivamente salió.
+                      </p>
+                    </div>
+                  )}
                 </>
               )}
             </CardContent>
@@ -1278,6 +1355,7 @@ function SummaryCard({
   subtitle,
   highlight,
   momChange,
+  momLabel = 'vs mes anterior',
 }: {
   title: string
   value: string
@@ -1285,6 +1363,11 @@ function SummaryCard({
   subtitle?: string
   highlight?: 'positive' | 'negative'
   momChange?: number | null
+  /**
+   * Qué se está comparando. Con el mes en curso NO es "vs mes anterior": el servidor recorta
+   * el mes anterior al mismo día, así que la etiqueta tiene que decir contra qué se mide.
+   */
+  momLabel?: string
 }) {
   return (
     <Card
@@ -1326,7 +1409,7 @@ function SummaryCard({
         {momChange !== undefined && momChange !== null && (
           <p className={`mt-0.5 text-xs font-medium flex items-center gap-1 ${momChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
             {momChange >= 0 ? <TrendingUp className="size-3" /> : <TrendingDown className="size-3" />}
-            {momChange >= 0 ? '+' : ''}{momChange}% vs mes anterior
+            {momChange >= 0 ? '+' : ''}{momChange}% {momLabel}
           </p>
         )}
       </CardContent>

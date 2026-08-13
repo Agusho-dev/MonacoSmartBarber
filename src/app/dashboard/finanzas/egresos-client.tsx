@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { Plus, Trash2, Wallet, Pencil, Download } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
+import { toDateStr, todayDateStr } from '@/lib/time-utils'
 import { createExpenseTicket, deleteExpenseTicket, updateExpenseTicket } from '@/lib/actions/expense-tickets'
 import { useBranchStore } from '@/stores/branch-store'
 import type { Branch, ExpenseTicket, PaymentAccount } from '@/lib/types/database'
@@ -98,12 +99,17 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
     // Estado de filtros
     const [filterAccount, setFilterAccount] = useState<string>('__all__')
     // F12: rango libre de fechas (default = mes actual)
+    // `toDateStr` lee los campos LOCALES del Date; `toISOString()` devuelve la fecha UTC, así
+    // que en Argentina a partir de las 21:00 el rango arrancaba el día 2 y terminaba MAÑANA.
+    // No es teórico: 9 de los 16 tickets de Paraná de junio están fechados 01/06 y suman
+    // $7.500.422 de los $13.937.900 del mes — abriendo la pestaña un 30/6 a las 22:00, el
+    // total se leía 54% más chico sin ningún aviso.
     const defaultFromDate = useMemo(() => {
         const d = new Date()
         d.setDate(1)
-        return d.toISOString().slice(0, 10)
+        return toDateStr(d)
     }, [])
-    const defaultToDate = useMemo(() => new Date().toISOString().slice(0, 10), [])
+    const defaultToDate = useMemo(() => todayDateStr(), [])
     const [filterFrom, setFilterFrom] = useState<string>(defaultFromDate)
     const [filterTo, setFilterTo] = useState<string>(defaultToDate)
 

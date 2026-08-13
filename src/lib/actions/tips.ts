@@ -401,6 +401,12 @@ export async function payAllPendingTipsForBarber(
       branch_id: branchId,
       amount: total,
       category: 'Propinas',
+      // `source: 'tip_batch'` (mig 186): igual que el lote de sueldo, este ticket es la
+      // contracara en caja de un pago que Finanzas ya cuenta por `salary_reports`. Sin el
+      // marcador caía en `source='manual'` y se restaba dos veces del resultado neto.
+      // Además la propina es plata del CLIENTE que nunca entró a `revenue`, así que tratarla
+      // como gasto variable del negocio la contaba como pérdida.
+      source: 'tip_batch',
       description: `Pago de propinas a ${staffName} (${pending.length} cobro${pending.length === 1 ? '' : 's'})`,
       payment_account_id: paymentMethod === 'transfer' ? paymentAccountId ?? null : null,
       expense_date: today,

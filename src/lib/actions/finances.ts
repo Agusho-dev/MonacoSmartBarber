@@ -5,7 +5,7 @@ import { fetchAll } from '@/lib/supabase/fetch-all'
 import { revalidatePath } from 'next/cache'
 import { getMonthBoundsStr, getLocalNow, getPeriodBoundsStr } from '@/lib/time-utils'
 import { getActiveTimezone } from '@/lib/i18n'
-import { validateBranchAccess } from './org'
+import { validateBranchAccess, getCurrentOrgId } from './org'
 import { getScopedBranchIds } from './branch-access'
 
 export interface MonthlyFinancial {
@@ -38,6 +38,19 @@ export interface MoMChange {
   variableExpenses: number | null
   netProfit: number | null
   cuts: number | null
+  /**
+   * true = el mes de referencia es el mes EN CURSO, o sea incompleto. Cuando es true, los
+   * porcentajes de arriba comparan contra el MISMO TRAMO DE DÍAS del mes anterior, no contra
+   * el mes anterior completo, y la UI tiene que decirlo.
+   *
+   * Antes se comparaba medio mes contra un mes entero: el 13/08/2026 la pantalla informaba
+   * -50% de ingresos y -50% de cortes en Paraná cuando el like-for-like (1-13 ago vs 1-13 jul)
+   * era +17,8% en las dos métricas. Le decía al dueño que se le cayó el negocio a la mitad
+   * justo en su mejor mes.
+   */
+  isPartial: boolean
+  daysElapsed: number
+  daysInMonth: number
 }
 
 export interface BarberPerformance {
@@ -67,9 +80,11 @@ export interface FinancialSummary {
     commissions: number
     fixedExpenses: number
     variableExpenses: number
-    bonuses: number
-    advances: number
+    bonuses: number          // desglose informativo: YA está dentro de salaryPayments
+    advances: number         // desglose informativo: NO se suma ni se resta del neto
     salaryPayments: number
+    /** Egresos del período. Es la suma de `months[].totalExpenses`, no una re-derivación. */
+    totalExpenses: number
     netProfit: number
     cuts: number
   }
@@ -101,12 +116,41 @@ function monthLabel(ym: string): string {
   return `${MONTH_SHORT[m] ?? m} '${y.slice(2)}`
 }
 
+/**
+ * Resultado vacío para cuando el scope no autoriza nada. Mismo patrón que `fetchStats`
+ * (`stats.ts`): un `branchId` que no pertenece a la org no devuelve datos ajenos.
+ */
+function emptyFinancialSummary(): FinancialSummary {
+  return {
+    months: [],
+    breakEven: { cutsNeeded: 0, avgRevenuePerCut: 0, avgCommissionPerCut: 0, netPerCut: 0, monthlyFixedExpenses: 0 },
+    totals: {
+      revenue: 0, commissions: 0, fixedExpenses: 0, variableExpenses: 0,
+      bonuses: 0, advances: 0, salaryPayments: 0, totalExpenses: 0, netProfit: 0, cuts: 0,
+    },
+    momChange: { revenue: null, commissions: null, variableExpenses: null, netProfit: null, cuts: null, isPartial: false, daysElapsed: 0, daysInMonth: 0 },
+    currentMonthCuts: 0,
+    currentMonthRevenue: 0,
+    barberPerformance: [],
+    serviceRevenue: [],
+  }
+}
+
 /** Fila mínima que necesita el gráfico "Egresos por categoría". */
 export interface PeriodExpenseRow {
   category: string
   amount: number
   payment_account_id: string | null
   branch_id: string
+  /**
+   * `manual` | `fixed_expense_period` | `salary_batch` | `tip_batch`.
+   *
+   * El donut muestra TODA la plata que salió, así que necesita distinguir de dónde viene cada
+   * peso: la tarjeta "Gastos variables" cuenta sólo `manual`, y sin este campo el donut decía
+   * $27.769.880 al lado de una tarjeta de $23.934.865 sin ninguna forma de explicar la
+   * diferencia.
+   */
+  source: string
 }
 
 /**
@@ -141,7 +185,7 @@ export async function fetchExpensesByCategory(
   return fetchAll<PeriodExpenseRow>((from, to) => {
     let q = supabase
       .from('expense_tickets')
-      .select('category, amount, payment_account_id, branch_id')
+      .select('category, amount, payment_account_id, branch_id, source')
       .in('branch_id', scopeBranchIds)
     if (range) {
       q = q.gte('expense_date', range.start.slice(0, 10)).lte('expense_date', range.end.slice(0, 10))
@@ -155,7 +199,15 @@ export async function fetchFinancialData(
   branchId?: string | null,
   endMonth?: string | null  // "YYYY-MM" — si se pasa, se usa como mes final en vez del actual
 ): Promise<FinancialSummary> {
-  const supabase = await createClient()
+  // `createAdminClient()`, como TODO el resto del camino financiero (`stats.ts`,
+  // `paymentAccounts.ts`, `salary.ts`, `tips.ts`, `caja.ts`, `fixed-expenses.ts` y
+  // `fetchExpensesByCategory` acá arriba). Era el último fetch de plata que quedaba con el
+  // cliente RLS, y la policy de `expense_tickets` resuelve sucursales por `staff.branch_id`
+  // dando el total SÓLO a `role='owner'` o `manage_all_branches`: un ADMIN pedía 4 sucursales
+  // y la RLS devolvía 2, sin ningún aviso. Medido: Gonzalo Tassistro (admin) veía $0 de gastos
+  // variables en junio contra $13.937.900 reales, y en la misma pantalla el donut —que sí usa
+  // admin client— mostraba otro número.
+  const supabase = createAdminClient()
   let localNow = getLocalNow()
 
   // Si se especifica un mes final, usarlo como referencia en vez del mes actual
@@ -165,10 +217,22 @@ export async function fetchFinancialData(
     localNow = new Date(Date.UTC(ey, em - 1, 15))
   }
 
-  // Resolver el scope de branches para filtrar: una sucursal específica o todas las de la org
+  // Resolver el scope de branches para filtrar: una sucursal específica o todas las de la org.
+  //
+  // La validación del `branchId` es OBLIGATORIA ahora que abajo corre con service role: este
+  // archivo es `'use server'`, así que cada export es un endpoint HTTP con un action-id que
+  // viaja en el bundle del cliente. Mientras el fetch usaba el cliente RLS, la policy contenía
+  // el scope; con admin client, sin este chequeo alcanzaría el UUID de una sucursal ajena para
+  // leer las finanzas completas de otra organización.
   let orgBranchIds: string[] = []
-  if (!branchId) {
+  let orgId: string | null
+  if (branchId) {
+    orgId = await validateBranchAccess(branchId)
+    if (!orgId) return emptyFinancialSummary()
+  } else {
+    orgId = await getCurrentOrgId()
     orgBranchIds = await getScopedBranchIds()
+    if (orgBranchIds.length === 0) return emptyFinancialSummary()
   }
 
   // Si monthsBack === 0, detectar el primer mes con registros para mostrar todo el historial
@@ -240,13 +304,16 @@ export async function fetchFinancialData(
     .eq('status', 'paid')
     .gte('paid_at', startDateStr.slice(0, 10))
     .lte('paid_at', endDateStr.slice(0, 10))
+  // El filtro de organización es lo que hace segura la rama `branch_id.is.null` de abajo.
+  // Hasta acá lo aportaba la RLS (`fep_select_by_org`); con service role, sin esto, TODA fila
+  // org-wide de CUALQUIER organización entraría en los egresos de esta org. Hoy no hay ninguna
+  // fila con `branch_id IS NULL` en la base, así que la fuga era latente — pero migrar a admin
+  // client sin cerrarla la habría activado.
+  if (orgId) fpq = fpq.eq('organization_id', orgId)
   if (branchId) {
     fpq = fpq.eq('branch_id', branchId)
   } else if (orgBranchIds.length > 0) {
-    // Incluye gastos org-wide (branch_id null pero organization_id = org)
-    // Para org-wide sin branchFilter específico hay que hacer una condición compuesta.
-    // Estrategia: traer todos los períodos de las branches de la org + los org-wide,
-    // filtrando por organization_id usando la FK.
+    // Incluye gastos org-wide (branch_id null pero organization_id = org, ya filtrado arriba).
     fpq = fpq.or(`branch_id.in.(${orgBranchIds.join(',')}),branch_id.is.null`)
   }
 
@@ -259,10 +326,18 @@ export async function fetchFinancialData(
     .lte('expense_date', endDateStr.slice(0, 10))
   eq = branchFilter(eq)
 
+  // OJO con los tipos que entran acá: cada uno se SUMA a los egresos del mes.
+  //
+  // `commission` y `product_commission` quedaron AFUERA a propósito. La comisión ya se cuenta
+  // como DEVENGADA desde `visits.commission_amount` (más abajo, `m.commissions`), que es además
+  // el input de `avgCommissionPerCut` y del punto de equilibrio. Tenerla también acá la restaba
+  // dos veces: en Paraná la igualdad mes a mes era exacta ($6.000 mar / $103.200 abr /
+  // $102.400 may / $233.000 jun / $164.000 jul). La base contable es el DEVENGADO —no depende
+  // de que el dueño liquide—, así que la fuente es `visits` y punto.
   let sq = supabase
     .from('salary_reports')
     .select('type, amount, report_date, status')
-    .in('type', ['bonus', 'advance', 'commission', 'base_salary', 'hybrid_deficit', 'product_commission'])
+    .in('type', ['bonus', 'advance', 'base_salary', 'hybrid_deficit'])
     .eq('status', 'paid')
     .gte('report_date', startDateStr.slice(0, 10))
     .lte('report_date', endDateStr.slice(0, 10))
@@ -318,23 +393,38 @@ export async function fetchFinancialData(
     monthMap.set(key, { revenue: 0, commissions: 0, cuts: 0, variableExp: 0, bonuses: 0, advances: 0, salaryPayments: 0, baseSalaryPaid: 0 })
   }
 
-  // Agrupar visitas por mes local usando Intl
+  // Un solo `Intl.DateTimeFormat` reutilizado: instanciarlo dentro del loop creaba un
+  // formateador por visita (6.271 en el histórico de una sola sucursal).
+  const fmtLocalDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }) // "YYYY-MM-DD"
+
+  /** Visitas con su mes y día LOCALES ya resueltos, para reusar en la comparación por tramo. */
+  const visitasLocales: { ym: string; day: number; amount: number; commission: number; esCorte: boolean }[] = []
+
+  // Agrupar visitas por mes local
   for (const v of visits ?? []) {
-    // Convertir timestamp UTC a "YYYY-MM" local
-    const localMonth = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz,
-      year: 'numeric',
-      month: '2-digit',
-    }).format(new Date(v.completed_at)) // retorna "YYYY-MM"
-    const key = localMonth
+    const localDate = fmtLocalDate.format(new Date(v.completed_at))
+    const key = localDate.slice(0, 7)
+    const day = Number(localDate.slice(8, 10))
+    // Solo cuenta como "corte" si estaba asociado a un servicio o entrada de cola: las
+    // visitas sin ninguno de los dos son ventas de producto sueltas (`directProductSale`).
+    const esCorte = Boolean(v.service_id || v.queue_entry_id)
+    visitasLocales.push({
+      ym: key,
+      day,
+      amount: Number(v.amount),
+      commission: Number(v.commission_amount),
+      esCorte,
+    })
     const m = monthMap.get(key)
     if (m) {
       m.revenue += Number(v.amount)
       m.commissions += Number(v.commission_amount)
-      // Solo contar como "corte" si estaba asociado a un servicio o entrada de cola
-      if (v.service_id || v.queue_entry_id) {
-        m.cuts++
-      }
+      if (esCorte) m.cuts++
     }
   }
 
@@ -376,10 +466,21 @@ export async function fetchFinancialData(
     .map(([ym, d]) => {
       // Gastos fijos históricos: solo los que existían al final de este mes
       const historicalFixed = getHistoricalFixedForMonth(ym)
-      // Egresos totales = comisiones + fijos históricos + variables + bonos + pagos salariales
-      // Los adelantos se restan porque son dinero a favor del negocio (ya entregado, se descuenta)
-      const totalExp = d.commissions + historicalFixed + d.variableExp + d.bonuses + d.salaryPayments
-      const net = d.revenue - totalExp + d.advances
+
+      // Egresos = comisiones DEVENGADAS + fijos + variables + pagos salariales.
+      //
+      // UNA SOLA FUENTE POR CONCEPTO. Los dos términos que estaban acá y ya no están:
+      //  · `d.bonuses` — el bono se acumula en `bonuses` (desglose) Y en `salaryPayments`
+      //    (total real) 20 líneas más arriba. Sumar las dos variables contaba cada bono dos
+      //    veces: $2.015.014 en la org (Paraná may $1.215.013, jun $800.000).
+      //  · `+ d.advances` en el neto — el adelanto es un anticipo del `base_salary`, que se
+      //    cuenta entero como egreso, y el total del lote ya viene neto de él. Acreditarlo
+      //    otra vez regalaba $2.417.109 de ganancia inexistente.
+      // La tercera pata del doble conteo se cierra afuera: los `expense_tickets` de los lotes
+      // de sueldo dejan de ser `source='manual'` (migración 186), así que la misma plata no
+      // entra como "gasto variable" además de como pago salarial ($23.393.104 en la org).
+      const totalExp = d.commissions + historicalFixed + d.variableExp + d.salaryPayments
+      const net = d.revenue - totalExp
       return {
         month: ym,
         label: monthLabel(ym),
@@ -406,8 +507,22 @@ export async function fetchFinancialData(
   const totalBonuses = months.reduce((s, m) => s + m.bonuses, 0)
   const totalAdvances = months.reduce((s, m) => s + m.advances, 0)
   const totalSalaryPayments = months.reduce((s, m) => s + m.salaryPayments, 0)
+  // Egresos y neto del período = SUMA DE LOS MESES, no una re-derivación a partir de las
+  // variables sueltas de arriba. Es la vacuna estructural contra la clase de bug que tenía
+  // este archivo: la fórmula del total y la del mes eran dos expresiones distintas de lo
+  // mismo, y cuando una se corrige y la otra no, la tarjeta y el gráfico dicen cosas
+  // diferentes sobre la misma plata.
+  const totalExpensesAll = months.reduce((s, m) => s + m.totalExpenses, 0)
+  const totalNetProfit = months.reduce((s, m) => s + m.netProfit, 0)
 
-  const avgRevPerCut = totalCuts > 0 ? totalRevenue / totalCuts : 0
+  // El ticket promedio es de SERVICIO: la plata de las ventas de producto sueltas sale del
+  // numerador, porque esas visitas tampoco están en el denominador (`totalCuts` las excluye).
+  // Con producto de un solo lado, el promedio quedaba inflado — julio en Paraná daba $16.697
+  // cuando el ticket de servicio es $16.484, $213 de más que salían de $255.000 de ceras y
+  // cremas repartidos entre 1.200 cortes. Y `netPerCut` alimenta el punto de equilibrio, que
+  // es una métrica de servicio: mezclarle producto lo corre sin que se note.
+  const totalProductRevenue = visitasLocales.reduce((s, v) => s + (v.esCorte ? 0 : v.amount), 0)
+  const avgRevPerCut = totalCuts > 0 ? (totalRevenue - totalProductRevenue) / totalCuts : 0
   const avgCommPerCut = totalCuts > 0 ? totalCommissions / totalCuts : 0
   const netPerCut = avgRevPerCut - avgCommPerCut
 
@@ -423,18 +538,32 @@ export async function fetchFinancialData(
   }
 
   // ── Ingresos por servicio (agregar antes del fetch paralelo) ──
+  //
+  // Las visitas sin `service_id` van a DOS buckets distintos, no a uno:
+  //  · `__venta_producto__` — sin servicio y sin fila: es una venta de producto suelta
+  //    (`directProductSale`). Se cuentan las VENTAS, no cortes.
+  //  · `__sin_servicio__`   — salió de la fila pero nadie eligió el servicio.
+  // Antes iban juntas al mismo bucket y ahí el guard `service_id || queue_entry_id` se degradaba
+  // a `queue_entry_id`, o sea contaba sólo la segunda mitad mientras sumaba la plata de las dos:
+  // julio en Paraná imprimía "$255.000 · 0 cortes · $0 prom." (se lee como pantalla rota) y
+  // junio "$204.000 · 1 corte · $204.000 prom." sobre 10 visitas de $20.400 reales.
   const serviceMap = new Map<string, { revenue: number; cuts: number }>()
   for (const v of visits ?? []) {
-    const key = v.service_id ?? '__sin_servicio__'
+    const esVentaProducto = !v.service_id && !v.queue_entry_id
+    const key = v.service_id ?? (esVentaProducto ? '__venta_producto__' : '__sin_servicio__')
     const s = serviceMap.get(key) ?? { revenue: 0, cuts: 0 }
     s.revenue += Number(v.amount)
-    if (v.service_id || v.queue_entry_id) s.cuts++
+    // Cada fila de este bucket cuenta 1: para servicios y para la fila sin servicio es un
+    // corte; para producto es una venta. En los tres casos el divisor del promedio es correcto.
+    s.cuts++
     serviceMap.set(key, s)
   }
 
   // Fetch paralelo: nombres de barberos + nombres de servicios
   const barberIds = [...barberMap.keys()]
-  const serviceIds = [...serviceMap.keys()].filter((id): id is string => id !== '__sin_servicio__' && id !== null)
+  const serviceIds = [...serviceMap.keys()].filter(
+    (id): id is string => id !== '__sin_servicio__' && id !== '__venta_producto__' && id !== null
+  )
 
   const [staffNamesRaw, serviceNamesRaw] = await Promise.all([
     barberIds.length > 0
@@ -461,10 +590,14 @@ export async function fetchFinancialData(
     }))
     .sort((a, b) => b.revenue - a.revenue)
 
+  const NOMBRE_BUCKET: Record<string, string> = {
+    __venta_producto__: 'Productos (venta directa)',
+    __sin_servicio__: 'Cortes sin servicio cargado',
+  }
   const serviceRevenue: ServiceRevenue[] = [...serviceMap.entries()]
     .map(([serviceId, d]) => ({
-      serviceId: serviceId === '__sin_servicio__' ? null : serviceId,
-      serviceName: serviceId === '__sin_servicio__' ? 'Sin servicio' : (serviceNames[serviceId] ?? 'Servicio eliminado'),
+      serviceId: NOMBRE_BUCKET[serviceId] ? null : serviceId,
+      serviceName: NOMBRE_BUCKET[serviceId] ?? serviceNames[serviceId] ?? 'Servicio eliminado',
       revenue: d.revenue,
       cuts: d.cuts,
       avgTicket: d.cuts > 0 ? Math.round(d.revenue / d.cuts) : 0,
@@ -489,12 +622,65 @@ export async function fetchFinancialData(
   const lastMonth = months[momBaseIdx] ?? actualLastMonth
   const prevMonth = momBaseIdx >= 1 ? months[momBaseIdx - 1] : null
 
+  // ── Mes en curso: se compara TRAMO CONTRA TRAMO ──
+  //
+  // El único resguardo que había (`currentMonthIsEmpty`) sólo se activaba el día 1: del 2 en
+  // adelante esto comparaba medio mes contra un mes entero. El 13/08/2026 en Paraná informaba
+  // -50% de ingresos y -50% de cortes cuando el like-for-like (1-13 ago vs 1-13 jul) era
+  // +17,8% en las dos: la pantalla anunciaba un derrumbe en el mejor mes de la sucursal.
+  //
+  // Ahora, cuando el mes de referencia es el mes en curso, el mes anterior se recorta al mismo
+  // día. Los gastos fijos se prorratean por días transcurridos, que es la única forma de que
+  // un neto parcial sea comparable contra otro neto parcial.
+  const refEsMesEnCurso = lastMonth?.month === currentYM
+  const [refY, refM] = (lastMonth?.month ?? currentYM).split('-').map(Number)
+  const daysInMonth = new Date(Date.UTC(refY, refM, 0)).getUTCDate()
+  const daysElapsed = refEsMesEnCurso ? localNow.getUTCDate() : daysInMonth
+  const isPartial = refEsMesEnCurso && daysElapsed < daysInMonth
+
+  /** Recorta un mes a sus primeros `dayLimit` días. Devuelve las métricas comparables. */
+  function tramoDelMes(m: MonthlyFinancial, dayLimit: number) {
+    if (dayLimit >= 28 && !isPartial) {
+      return { revenue: m.revenue, cuts: m.cuts, commissions: m.commissions, variableExpenses: m.variableExpenses, netProfit: m.netProfit }
+    }
+    let revenue = 0, cuts = 0, commissions = 0
+    for (const v of visitasLocales) {
+      if (v.ym !== m.month || v.day > dayLimit) continue
+      revenue += v.amount
+      commissions += v.commission
+      if (v.esCorte) cuts++
+    }
+    let variableExp = 0
+    for (const e of variableExpenses ?? []) {
+      if (e.expense_date.slice(0, 7) !== m.month) continue
+      if (Number(e.expense_date.slice(8, 10)) > dayLimit) continue
+      variableExp += Number(e.amount)
+    }
+    let salaryPayments = 0
+    for (const sr of salaryReports ?? []) {
+      if (sr.type === 'advance') continue
+      if (sr.report_date.slice(0, 7) !== m.month) continue
+      if (Number(sr.report_date.slice(8, 10)) > dayLimit) continue
+      salaryPayments += Math.abs(Number(sr.amount))
+    }
+    // Los fijos son un costo del mes entero: para comparar tramos hay que prorratearlos.
+    const fixedProrrateado = m.fixedExpenses * (dayLimit / daysInMonth)
+    const netProfit = revenue - (commissions + fixedProrrateado + variableExp + salaryPayments)
+    return { revenue, cuts, commissions, variableExpenses: variableExp, netProfit }
+  }
+
+  const refTramo = lastMonth ? tramoDelMes(lastMonth, daysElapsed) : null
+  const prevTramo = prevMonth ? tramoDelMes(prevMonth, daysElapsed) : null
+
   const momChange: MoMChange = {
-    revenue: prevMonth ? pctChange(lastMonth.revenue, prevMonth.revenue) : null,
-    commissions: prevMonth ? pctChange(lastMonth.commissions, prevMonth.commissions) : null,
-    variableExpenses: prevMonth ? pctChange(lastMonth.variableExpenses, prevMonth.variableExpenses) : null,
-    netProfit: prevMonth ? pctChange(lastMonth.netProfit, prevMonth.netProfit) : null,
-    cuts: prevMonth ? pctChange(lastMonth.cuts, prevMonth.cuts) : null,
+    revenue: refTramo && prevTramo ? pctChange(refTramo.revenue, prevTramo.revenue) : null,
+    commissions: refTramo && prevTramo ? pctChange(refTramo.commissions, prevTramo.commissions) : null,
+    variableExpenses: refTramo && prevTramo ? pctChange(refTramo.variableExpenses, prevTramo.variableExpenses) : null,
+    netProfit: refTramo && prevTramo ? pctChange(refTramo.netProfit, prevTramo.netProfit) : null,
+    cuts: refTramo && prevTramo ? pctChange(refTramo.cuts, prevTramo.cuts) : null,
+    isPartial,
+    daysElapsed,
+    daysInMonth,
   }
 
   return {
@@ -514,7 +700,8 @@ export async function fetchFinancialData(
       bonuses: totalBonuses,
       advances: totalAdvances,
       salaryPayments: totalSalaryPayments,
-      netProfit: totalRevenue - totalCommissions - totalFixedAll - totalVariable - totalBonuses - totalSalaryPayments + totalAdvances,
+      totalExpenses: totalExpensesAll,
+      netProfit: totalNetProfit,
       cuts: totalCuts,
     },
     // Nuevos campos
