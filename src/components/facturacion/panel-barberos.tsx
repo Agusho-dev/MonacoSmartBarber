@@ -42,6 +42,7 @@ import {
     Loader2,
     Receipt,
     Save,
+    Settings2,
     ShieldAlert,
     TrendingUp,
     UserPlus,
@@ -102,6 +103,7 @@ import {
     facturarPendientesDe,
     type PanelFacturacion,
     type FilaPanel,
+    type OrigenVentas,
 } from '@/lib/actions/arca-panel'
 
 // -----------------------------------------------------------------------------
@@ -360,39 +362,24 @@ const UMBRAL_RIESGO = 85
  * que la action haga merge en vez de UPDATE completo). Mientras tanto, la
  * pantalla lo dice en voz alta abajo del botón en lugar de resetear en silencio.
  */
-const RESTO_DE_LA_POLITICA = {
-    estrategia: 'distribuido',
-    metodosPago: ['cash', 'card', 'transfer'],
-    incluyePropinas: false,
-    permitirExceso: false,
-    diasHaciaAtras: 7,
-    emisionAutomatica: false,
-    horaEmision: 22,
-} as const
-
-// -----------------------------------------------------------------------------
-// Orden
-// -----------------------------------------------------------------------------
-
+/** Criterios de orden de la lista. */
 type Orden = 'atencion' | 'facturado' | 'nombre'
 
 /**
- * Peso de urgencia. Primero lo que hay que decidir hoy, después lo que hay que
- * terminar de configurar, y al final lo que ya funciona.
+ * Peso de urgencia: cuanto MENOR, más arriba va en la lista.
  *
- * Los que están al 70–89% caen en el grupo "listo", pero el desempate por
- * porcentaje los deja arriba de todo ese grupo: se ven sin ocupar el lugar de
- * los que de verdad están al límite.
+ * El orden por defecto no es alfabético a propósito. Con 19 barberos, un panel
+ * ordenado por nombre obliga a recorrerlo entero para encontrar el problema;
+ * ordenado por urgencia, el problema está siempre en la primera fila.
  */
-function peso(f: FilaPanel, l: Lectura): number {
-    if (l.enAlerta) return 0
-    if (f.estado === 'error') return 1
-    // El server marca `requiereAtencion` por sus propios motivos. Se respeta
-    // aunque acá no sepamos cuál es: un flag del server que la lista ignora es
-    // un aviso que no llega a nadie.
-    if (f.requiereAtencion) return 2
-    if (l.incompleto) return 3
-    return 4
+function peso(fila: FilaPanel, l: Lectura): number {
+    if (l.excedido) return 0                      // ya se pasó del tope
+    if (fila.estado === 'error') return 1         // la conexión con ARCA falla
+    if (l.nivel === 'riesgo') return 2            // está por pasarse
+    if (fila.estado === 'sin_punto_venta') return 3
+    if (fila.estado === 'sin_certificado') return 4
+    if (fila.estado === 'sin_monotributo') return 5
+    return 6                                      // andando
 }
 
 // =============================================================================
@@ -404,6 +391,8 @@ interface PanelBarberosProps {
     puedeConfigurar: boolean
     puedeEmitir: boolean
     onRefrescar: () => void
+    /** Abre el trámite de ARCA (certificado, autorización, punto de venta) de ESE monotributo. */
+    onConfigurar?: (taxpayerId: string) => void
 }
 
 export function PanelBarberos({
@@ -411,6 +400,7 @@ export function PanelBarberos({
     puedeConfigurar,
     puedeEmitir,
     onRefrescar,
+    onConfigurar,
 }: PanelBarberosProps) {
     const [orden, setOrden] = useState<Orden>('atencion')
     const [staffAbierto, setStaffAbierto] = useState<string | null>(null)
@@ -677,6 +667,7 @@ export function PanelBarberos({
                             categorias={categorias}
                             puedeConfigurar={puedeConfigurar}
                             puedeEmitir={puedeEmitir}
+                            onConfigurar={onConfigurar}
                             onRefrescar={onRefrescar}
                             onAlta={() => {
                                 setStaffAbierto(null)
@@ -974,6 +965,7 @@ function FichaBarbero({
     puedeEmitir,
     onRefrescar,
     onAlta,
+    onConfigurar,
 }: {
     fila: FilaPanel
     lectura: Lectura
@@ -982,6 +974,7 @@ function FichaBarbero({
     puedeEmitir: boolean
     onRefrescar: () => void
     onAlta: () => void
+    onConfigurar?: (taxpayerId: string) => void
 }) {
     const [pendiente, iniciar] = useTransition()
     const [confirmando, setConfirmando] = useState(false)
@@ -990,6 +983,7 @@ function FichaBarbero({
     const m = fila.cupo
     const [habilitada, setHabilitada] = useState<boolean>(m?.habilitada ?? false)
     const [modo, setModo] = useState<ModoCupo>(m?.modo ?? 'cantidad')
+    const [origen, setOrigen] = useState<OrigenVentas>(m?.origen ?? 'propios')
     const [periodo, setPeriodo] = useState<PeriodoCupo>(m?.periodo ?? 'mes')
     const [objCantidad, setObjCantidad] = useState<number | null>(m?.objetivoCantidad ?? null)
     const [objMonto, setObjMonto] = useState<number | null>(m?.objetivoMonto ?? null)
@@ -1020,10 +1014,10 @@ function FichaBarbero({
                     periodo,
                     objetivoCantidad: modo === 'cantidad' ? objCantidad : null,
                     objetivoMonto: modo === 'monto' ? objMonto : null,
-                    // Ver `RESTO_DE_LA_POLITICA`: la action pisa estas columnas y
-                    // el panel no las recibe, así que vuelven al default.
-                    ...RESTO_DE_LA_POLITICA,
-                    metodosPago: [...RESTO_DE_LA_POLITICA.metodosPago],
+                    origen,
+                    // Nada más: la action hace MERGE. Lo que no se manda queda
+                    // como estaba — mandar defaults acá era lo que apagaba la
+                    // emisión automática sin que nadie lo pidiera.
                 })
                 if ('error' in r) {
                     toast.error(r.error)
@@ -1154,6 +1148,20 @@ function FichaBarbero({
                             {fila.estado === 'sin_monotributo' && puedeConfigurar && (
                                 <Button variant="outline" size="sm" className="mt-3" onClick={onAlta}>
                                     Dar de alta
+                                </Button>
+                            )}
+                            {/* El trámite del certificado es por persona: desde acá
+                                se abre el suyo, ya seleccionado, sin tener que
+                                buscarlo en otra pantalla. */}
+                            {fila.taxpayerId && fila.estado !== 'listo' && puedeConfigurar && onConfigurar && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="mt-3"
+                                    onClick={() => onConfigurar(fila.taxpayerId!)}
+                                >
+                                    <Settings2 className="size-3.5" />
+                                    Seguir configurando en ARCA
                                 </Button>
                             )}
                         </div>
@@ -1296,6 +1304,43 @@ function FichaBarbero({
                         De todo lo que trabaja, esto es lo que se emite a su nombre. Es la palanca: el tope
                         de arriba es la consecuencia.
                     </p>
+
+                    {/* De dónde salen los cortes. Va ANTES del cupo porque
+                        cambia el universo sobre el que el cupo corta: sin esto,
+                        quien no atiende no puede facturar nada. */}
+                    <div className="mt-3 rounded-lg border border-border p-3">
+                        <p className="text-sm font-medium">¿De dónde salen los cortes?</p>
+                        <div className="mt-2 grid gap-2">
+                            {([
+                                { v: 'propios' as const, t: 'Los que atiende él', d: 'Sólo sus propios cortes.' },
+                                { v: 'sucursal' as const, t: 'Los de su sucursal', d: 'Cualquier corte del local donde trabaja.' },
+                                { v: 'organizacion' as const, t: 'Los de todo el negocio', d: 'Cualquier corte, de cualquier sucursal.' },
+                            ]).map((o) => (
+                                <button
+                                    key={o.v}
+                                    type="button"
+                                    disabled={!puedeConfigurar || pendiente || !taxpayerId}
+                                    onClick={() => setOrigen(o.v)}
+                                    className={cn(
+                                        'rounded-lg border p-2.5 text-left transition',
+                                        origen === o.v
+                                            ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                                            : 'border-border hover:bg-muted/40',
+                                        'disabled:cursor-not-allowed disabled:opacity-60',
+                                    )}
+                                >
+                                    <span className="block text-sm font-medium">{o.t}</span>
+                                    <span className="block text-xs text-muted-foreground">{o.d}</span>
+                                </button>
+                            ))}
+                        </div>
+                        {origen !== 'propios' && (
+                            <p className="mt-2 text-xs text-muted-foreground">
+                                Toma de lo que queda sin facturar después de que cada barbero cubrió su
+                                propio cupo. Es lo que le permite facturar a quien no atiende.
+                            </p>
+                        )}
+                    </div>
 
                     <div className="mt-3 flex items-center justify-between rounded-lg border border-border p-3">
                         <div className="min-w-0 pr-3">

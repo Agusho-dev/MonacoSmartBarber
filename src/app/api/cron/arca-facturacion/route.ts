@@ -59,10 +59,16 @@ export async function GET() {
 
     const { data: politicas, error } = await supabase
         .from('arca_billing_policies')
-        .select('id, organization_id, branch_id, auto_emit_hour, last_auto_run_at, mode')
+        .select('id, organization_id, branch_id, auto_emit_hour, last_auto_run_at, mode, prioridad')
         .eq('is_enabled', true)
         .eq('auto_emit', true)
         .neq('mode', 'manual')
+        // El ORDEN importa: una venta se factura una sola vez. Primero corren
+        // los cupos "propios" (prioridad 100) y cada barbero se lleva lo suyo;
+        // después los del pool (200), que absorben lo que quedó sin facturar.
+        // Al revés, los dueños se quedarían con los cortes de los barberos.
+        .order('prioridad', { ascending: true })
+        .order('created_at', { ascending: true })
 
     if (error) {
         console.error('[cron/arca-facturacion] lectura de políticas', error.message)

@@ -133,6 +133,9 @@ export type FilaPolitica = {
     lookback_days: number
     auto_emit: boolean
     auto_emit_hour: number
+    /** De dónde salen las ventas: propios | sucursal | organizacion. */
+    origen: 'propios' | 'sucursal' | 'organizacion'
+    prioridad: number
 }
 
 export async function leerCupo(policyId: string): Promise<EstadoCupo | null> {
@@ -162,6 +165,7 @@ export async function leerCandidatos(
     limite = 300,
     ambiente: 'homologacion' | 'produccion' = 'produccion',
     staffId: string | null = null,
+    branchIds: string[] | null = null,
 ): Promise<CandidatoVenta[] | { error: string }> {
     const supabase = createAdminClient()
     const desde = new Date(Date.now() - pol.lookback_days * 86_400_000).toISOString()
@@ -169,7 +173,7 @@ export async function leerCandidatos(
 
     const { data, error } = await supabase.rpc('arca_billing_candidates', {
         p_organization_id: orgId,
-        p_branch_ids: pol.branch_id ? [pol.branch_id] : null,
+        p_branch_ids: branchIds ?? (pol.branch_id ? [pol.branch_id] : null),
         p_from: desde,
         p_to: hasta,
         p_payment_methods: pol.payment_methods ?? ['cash', 'card', 'transfer'],
@@ -651,9 +655,34 @@ export async function correrPolitica(
     }
     if (!contribuyente) return { error: 'Esa política no tiene un monotributo asociado.' }
 
-    // Sólo las ventas DE ESE BARBERO entran en su cupo.
+    // De dónde salen las ventas de este cupo.
+    //
+    //   propios      → sólo las de su barbero (el caso normal)
+    //   sucursal     → cualquiera de su sucursal
+    //   organizacion → cualquiera del local
+    //
+    // Los dos últimos existen para los dueños: Tony factura con su monotributo
+    // aunque no corte, porque si dependiera de sus propios cortes su CUIT
+    // quedaría sin usar mientras el local factura millones.
+    const origen = politica.origen ?? 'propios'
+    let staffFiltro: string | null = null
+    let branchFiltro: string[] | null = null
+
+    if (origen === 'propios') {
+        staffFiltro = contribuyente.staff_id
+    } else if (origen === 'sucursal') {
+        // La sucursal es la del barbero titular, no la de la política: el cupo
+        // es de una persona y esa persona trabaja en un lugar.
+        const { data: st } = await supabase
+            .from('staff')
+            .select('branch_id')
+            .eq('id', contribuyente.staff_id ?? '')
+            .maybeSingle()
+        if (st?.branch_id) branchFiltro = [st.branch_id]
+    }
+
     const candidatos = await leerCandidatos(
-        orgId, politica, 300, contribuyente.environment, contribuyente.staff_id,
+        orgId, politica, 300, contribuyente.environment, staffFiltro, branchFiltro,
     )
     if ('error' in candidatos) return { error: candidatos.error }
 

@@ -104,6 +104,33 @@ export async function contribuyenteDeBarbero(
     return filas.find((f) => f.environment === 'produccion') ?? filas[0] ?? null
 }
 
+/**
+ * El contribuyente que se está CONFIGURANDO.
+ *
+ * Con un monotributo por barbero, "el contribuyente de la org" ya no existe:
+ * hay que decir cuál. Si no se pasa ninguno, cae en el de producción — que es
+ * lo correcto como default, pero no alcanza para dar de alta a los demás.
+ */
+export async function cargarContribuyentePorId(
+    orgId: string,
+    taxpayerId: string | null | undefined,
+): Promise<FilaContribuyente | null> {
+    if (!taxpayerId) return cargarContribuyente(orgId)
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+        .from('arca_taxpayers')
+        .select('*')
+        .eq('id', taxpayerId)
+        // El id viene del cliente: se filtra por organización sí o sí.
+        .eq('organization_id', orgId)
+        .maybeSingle()
+    if (error) {
+        console.error('[cargarContribuyentePorId]', error.message)
+        return null
+    }
+    return (data as FilaContribuyente | null) ?? null
+}
+
 /** Todos los monotributos de la organización, con su barbero. */
 export async function listarContribuyentes(orgId: string): Promise<FilaContribuyente[]> {
     const supabase = createAdminClient()

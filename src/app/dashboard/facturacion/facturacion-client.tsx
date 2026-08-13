@@ -26,6 +26,9 @@ import { WizardConfiguracion } from '@/components/facturacion/wizard-configuraci
 import { TablaComprobantes } from '@/components/facturacion/tabla-comprobantes'
 import { PanelBarberos } from '@/components/facturacion/panel-barberos'
 import { getEstadoFacturador, type EstadoFacturador } from '@/lib/actions/arca'
+import {
+    Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import { getComprobantes, type ListadoComprobantes } from '@/lib/actions/arca-emision'
 import { getPanelFacturacion, type PanelFacturacion } from '@/lib/actions/arca-panel'
 
@@ -55,13 +58,21 @@ export function FacturacionClient({
     const [comprobantes, setComprobantes] = useState(comprobantesIniciales)
     const [panel, setPanel] = useState(panelInicial)
     const [pestania, setPestania] = useState<Pestania>('barberos')
+    /**
+     * A QUIÉN se está configurando.
+     *
+     * Con un monotributo por barbero, el trámite del certificado es de una
+     * persona a la vez. `null` = el que resuelve el server por defecto (el de
+     * producción). Al tocar "Configurar" desde la ficha de alguien, se fija acá.
+     */
+    const [contribuyenteSel, setContribuyenteSel] = useState<string | null>(null)
     const [refrescando, setRefrescando] = useState(false)
 
     const refrescar = useCallback(async () => {
         setRefrescando(true)
         try {
             const [e, c, pa] = await Promise.all([
-                getEstadoFacturador(),
+                getEstadoFacturador(contribuyenteSel ?? undefined),
                 getComprobantes({ limite: 100 }),
                 getPanelFacturacion(),
             ])
@@ -77,7 +88,20 @@ export function FacturacionClient({
             setRefrescando(false)
         }
         router.refresh()
-    }, [router])
+    }, [router, contribuyenteSel])
+
+    /** Desde la ficha de un barbero: fija a quién se configura y salta a la pestaña. */
+    const configurarA = useCallback(async (taxpayerId: string) => {
+        setContribuyenteSel(taxpayerId)
+        setPestania('configuracion')
+        try {
+            setEstado(await getEstadoFacturador(taxpayerId))
+        } catch {
+            toast.error('No pudimos abrir la configuración de ese monotributo.')
+        }
+    }, [])
+
+    const conMonotributo = panel.filas.filter((f) => f.taxpayerId)
 
     const PESTANIAS: { id: Pestania; etiqueta: string }[] = [
         { id: 'barberos', etiqueta: 'Barberos' },
@@ -166,11 +190,49 @@ export function FacturacionClient({
                     puedeConfigurar={puedeConfigurar}
                     puedeEmitir={puedeEmitir}
                     onRefrescar={refrescar}
+                    onConfigurar={configurarA}
                 />
             )}
 
             {pestania === 'configuracion' && (
-                <WizardConfiguracion estado={estado} puedeConfigurar={puedeConfigurar} onRefrescar={refrescar} />
+                <div className="space-y-5">
+                    {/* Quién se está configurando. El trámite del certificado es
+                        de a uno: sin este selector, la pantalla mostraba siempre
+                        el mismo monotributo y no había forma de dar de alta al
+                        resto del equipo. */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
+                        <div>
+                            <p className="text-sm font-semibold">¿A quién estás configurando?</p>
+                            <p className="text-sm text-muted-foreground">
+                                Cada barbero tiene su monotributo, y el trámite del certificado se hace por persona.
+                            </p>
+                        </div>
+
+                        {conMonotributo.length > 0 ? (
+                            <Select
+                                value={contribuyenteSel ?? estado.contribuyente?.id ?? ''}
+                                onValueChange={(v) => void configurarA(v)}
+                            >
+                                <SelectTrigger className="w-72">
+                                    <SelectValue placeholder="Elegí un barbero" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {conMonotributo.map((f) => (
+                                        <SelectItem key={f.taxpayerId!} value={f.taxpayerId!}>
+                                            {f.nombre} · {f.estado === 'listo' ? 'listo' : 'falta configurar'}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        ) : (
+                            <p className="text-sm text-muted-foreground">
+                                Todavía no hay ningún monotributo cargado. Dalos de alta desde la pestaña Barberos.
+                            </p>
+                        )}
+                    </div>
+
+                    <WizardConfiguracion estado={estado} puedeConfigurar={puedeConfigurar} onRefrescar={refrescar} />
+                </div>
             )}
 
 

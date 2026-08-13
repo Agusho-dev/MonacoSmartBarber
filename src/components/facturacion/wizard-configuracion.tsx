@@ -850,7 +850,9 @@ function PasoCertificado({
 
     async function generar() {
         setGenerando(true)
-        const r = await generarPedidoCertificado()
+        // El id va explícito: con un monotributo por barbero, "el contribuyente
+        // de la organización" ya no existe — hay que decir cuál.
+        const r = await generarPedidoCertificado(c?.id)
         setGenerando(false)
         setConfirmandoNuevo(false)
         if ('error' in r) {
@@ -877,7 +879,7 @@ function PasoCertificado({
             return
         }
         setSubiendo(true)
-        const r = await cargarCertificado(pem)
+        const r = await cargarCertificado(pem, c?.id)
         setSubiendo(false)
         if ('error' in r) {
             toast.error(r.error)
@@ -1167,7 +1169,7 @@ function PasoConexion({
 
     async function probar() {
         setProbando(true)
-        const r = await verificarConexionArca()
+        const r = await verificarConexionArca(c?.id)
         setProbando(false)
 
         if ('error' in r) {

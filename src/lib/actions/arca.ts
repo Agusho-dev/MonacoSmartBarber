@@ -43,6 +43,7 @@ import { traducirErrorArca, diagnosticoPuntosVenta, type ErrorTraducido } from '
 import type { EstadoCupo, PoliticaCupo } from '@/lib/arca/cupo'
 import {
     cargarContribuyente,
+    cargarContribuyentePorId,
     contextoWsfe,
     cuitEsValido,
     limpiarCuit,
@@ -312,7 +313,7 @@ function armarChecklist(
 }
 
 /** Todo lo que necesita la pantalla del facturador, en una sola llamada. */
-export async function getEstadoFacturador(): Promise<EstadoFacturador> {
+export async function getEstadoFacturador(taxpayerId?: string): Promise<EstadoFacturador> {
     const vacio: EstadoFacturador = {
         configurado: false,
         faltaClaveDeCifrado: false,
@@ -335,7 +336,7 @@ export async function getEstadoFacturador(): Promise<EstadoFacturador> {
     const supabase = createAdminClient()
     const branchIds = await getScopedBranchIds()
 
-    const t = await cargarContribuyente(orgId)
+    const t = await cargarContribuyentePorId(orgId, taxpayerId)
 
     const [pvRes, polRes, sucRes] = await Promise.all([
         t
@@ -518,7 +519,7 @@ export async function guardarDatosFiscales(input: {
  * nada. Es la diferencia entre este flujo y el de los ERP que te hacen correr
  * openssl y terminás con la clave dando vueltas en Descargas.
  */
-export async function generarPedidoCertificado(): Promise<
+export async function generarPedidoCertificado(taxpayerId?: string): Promise<
     { ok: true; csrPem: string; alias: string; nombreArchivo: string } | { error: string }
 > {
     if (!(await currentUserCan('arca.manage'))) return { error: 'No tenés permiso para configurar el facturador.' }
@@ -532,7 +533,7 @@ export async function generarPedidoCertificado(): Promise<
     const orgId = await getCurrentOrgId()
     if (!orgId) return { error: 'No autorizado.' }
 
-    const t = await cargarContribuyente(orgId)
+    const t = await cargarContribuyentePorId(orgId, taxpayerId)
     if (!t) return { error: 'Primero cargá los datos fiscales.' }
 
     let generado: ReturnType<typeof generarClaveYCsr>
@@ -591,9 +592,10 @@ export async function generarPedidoCertificado(): Promise<
  * archivos en Descargas y sube el que no es. Sin esta validación se enteraría
  * recién al emitir, con un error críptico de WSAA.
  */
-export async function cargarCertificado(certificadoPem: string): Promise<
-    { ok: true; vence: string; diasParaVencer: number } | { error: string }
-> {
+export async function cargarCertificado(
+    certificadoPem: string,
+    taxpayerId?: string,
+): Promise<{ ok: true; vence: string; diasParaVencer: number } | { error: string }> {
     if (!(await currentUserCan('arca.manage'))) return { error: 'No tenés permiso para configurar el facturador.' }
     const orgId = await getCurrentOrgId()
     if (!orgId) return { error: 'No autorizado.' }
@@ -615,7 +617,7 @@ export async function cargarCertificado(certificadoPem: string): Promise<
         return { error: 'El archivo no parece un certificado. Tiene que empezar con "-----BEGIN CERTIFICATE-----".' }
     }
 
-    const t = await cargarContribuyente(orgId)
+    const t = await cargarContribuyentePorId(orgId, taxpayerId)
     if (!t) return { error: 'Primero cargá los datos fiscales.' }
     if (!t.private_key_enc) return { error: 'Primero generá el pedido de certificado.' }
 
@@ -693,14 +695,14 @@ export interface ResultadoVerificacion {
  *      y la existencia del punto de venta, todo de una. Y de paso trae los
  *      números, así el usuario los elige de una lista en vez de tipearlos.
  */
-export async function verificarConexionArca(): Promise<
+export async function verificarConexionArca(taxpayerId?: string): Promise<
     { ok: true; data: ResultadoVerificacion } | { error: string; data?: ResultadoVerificacion }
 > {
     if (!(await currentUserCan('arca.manage'))) return { error: 'No tenés permiso para configurar el facturador.' }
     const orgId = await getCurrentOrgId()
     if (!orgId) return { error: 'No autorizado.' }
 
-    const t = await cargarContribuyente(orgId)
+    const t = await cargarContribuyentePorId(orgId, taxpayerId)
     if (!t) return { error: 'Primero cargá los datos fiscales.' }
 
     const supabase = createAdminClient()

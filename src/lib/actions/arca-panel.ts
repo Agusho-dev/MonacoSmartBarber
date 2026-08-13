@@ -40,11 +40,15 @@ export type EstadoBarbero =
     | 'listo'
     | 'error'
 
+export type OrigenVentas = 'propios' | 'sucursal' | 'organizacion'
+
 export interface CupoMensual {
     policyId: string | null
     habilitada: boolean
     modo: 'manual' | 'cantidad' | 'monto'
     periodo: 'dia' | 'semana' | 'mes'
+    /** De dónde salen los cortes que factura. Clave para quien no corta. */
+    origen: OrigenVentas
     objetivoCantidad: number | null
     objetivoMonto: number | null
     emitidos: number
@@ -190,6 +194,7 @@ export async function getPanelFacturacion(): Promise<PanelFacturacion> {
                   habilitada: r.policy_enabled,
                   modo: r.modo,
                   periodo: r.periodo,
+                  origen: (r.origen ?? 'propios') as OrigenVentas,
                   objetivoCantidad: r.target_count,
                   objetivoMonto: r.target_amount !== null ? Number(r.target_amount) : null,
                   emitidos: Number(r.emitidos_periodo ?? 0),
@@ -408,6 +413,7 @@ const CupoSchema = z.object({
     diasHaciaAtras: z.number().int().min(1).max(60).optional(),
     emisionAutomatica: z.boolean().optional(),
     horaEmision: z.number().int().min(0).max(23).optional(),
+    origen: z.enum(['propios', 'sucursal', 'organizacion']).optional(),
 })
 
 export async function guardarCupoBarbero(input: {
@@ -425,6 +431,7 @@ export async function guardarCupoBarbero(input: {
     diasHaciaAtras?: number
     emisionAutomatica?: boolean
     horaEmision?: number
+    origen?: OrigenVentas
 }): Promise<{ ok: true; policyId: string } | { error: string }> {
     if (!(await currentUserCan('arca.manage'))) return { error: 'No tenés permiso para configurar el facturador.' }
     const orgId = await getCurrentOrgId()
@@ -469,6 +476,9 @@ export async function guardarCupoBarbero(input: {
     if (p.diasHaciaAtras !== undefined)    fila.lookback_days   = p.diasHaciaAtras
     if (p.emisionAutomatica !== undefined) fila.auto_emit       = p.emisionAutomatica
     if (p.horaEmision !== undefined)       fila.auto_emit_hour  = p.horaEmision
+    // La prioridad la ajusta un trigger según el origen: los del pool corren
+    // después, así cada barbero se lleva lo suyo primero.
+    if (p.origen !== undefined)            fila.origen          = p.origen
 
     const { data: existente } = await supabase
         .from('arca_billing_policies')
