@@ -16,6 +16,18 @@ const nextConfig: NextConfig = {
   // desde cientos de archivos con 8-12 íconos cada uno, y date-fns).
   experimental: {
     optimizePackageImports: ['lucide-react', 'date-fns', '@radix-ui/react-icons', 'recharts'],
+    serverActions: {
+      // El default es 1 MB y las fotos que sube el dueño salen de un iPhone:
+      // 2–5 MB cada una. Al pasarse, Next rechaza la llamada ANTES de que
+      // llegue al servidor, la promesa se rechaza y la pantalla se queda
+      // colgada — así se murió la carga de la foto de un barbero.
+      //
+      // Es un colchón, no el arreglo: las imágenes se comprimen en el browser
+      // antes de mandarlas (un avatar termina en ~30 KB). Esto cubre el caso
+      // en que el browser no pueda decodificar el archivo (un HEIC de iPhone)
+      // y haya que subir el original.
+      bodySizeLimit: '8mb',
+    },
   },
   images: {
     // Logos de organización + avatares de staff/clientes vienen del bucket

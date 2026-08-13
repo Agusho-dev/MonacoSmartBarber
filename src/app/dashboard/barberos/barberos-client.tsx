@@ -148,6 +148,27 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, canHideS
     }
 
     setSaving(true)
+    try {
+      await guardar()
+    } catch (err) {
+      // Sin este catch, cualquier excepción dejaba el botón en "Guardando…"
+      // PARA SIEMPRE: el `setSaving(false)` vivía al final del camino feliz y
+      // una promesa rechazada nunca llegaba ahí. Fue exactamente lo que pasó
+      // cuando una foto de iPhone superó el límite de cuerpo de los server
+      // actions: la llamada moría antes de salir del browser y la pantalla se
+      // quedaba colgada sin decir una palabra.
+      console.error('[barberos] guardar', err)
+      alert(
+        err instanceof Error
+          ? `No pudimos guardar: ${err.message}`
+          : 'No pudimos guardar. Probá de nuevo.'
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function guardar() {
     const data = {
       full_name: form.full_name,
       branch_id: form.branch_id || null,
@@ -167,7 +188,6 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, canHideS
       const result = await updateStaffMember(editingId, data)
       if (result.error) {
         alert(result.error)
-        setSaving(false)
         return
       }
     } else {
@@ -175,7 +195,6 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, canHideS
       const result = await createStaffMember(data)
       if (result.error) {
         alert(result.error)
-        setSaving(false)
         return
       }
       if (result.data) {
@@ -206,19 +225,30 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, canHideS
     // 'authenticated'`, el helper devolvía `null` ante cualquier error y este
     // bloque lo ignoraba: el diálogo se cerraba como si hubiera guardado y la
     // foto no existía. No se subió un solo avatar entre abril y hoy.
+    //
+    // Se comprime ANTES de mandarla. Un avatar se muestra a 80 px: 400 px de
+    // lado alcanzan y sobran, y bajan una foto de iPhone de ~3 MB a ~30 KB.
+    // No es sólo ahorro — los server actions de Next tienen un límite de
+    // cuerpo (1 MB por default) y una foto sin comprimir lo pasaba, con lo
+    // cual la llamada ni siquiera llegaba al servidor.
     if (savedStaffId && avatarFile) {
+      const { compressToWebP } = await import('@/lib/image-utils')
       const { uploadStaffAvatar } = await import('@/lib/actions/uploads')
+
+      const imagen = await compressToWebP(avatarFile, 400, 0.85)
       const fd = new FormData()
-      fd.append('file', avatarFile)
+      fd.append(
+        'file',
+        new File([imagen.blob], avatarFile.name, { type: imagen.contentType })
+      )
+
       const res = await uploadStaffAvatar(savedStaffId, fd)
       if ('error' in res) {
-        setSaving(false)
         alert(res.error)
         return
       }
     }
 
-    setSaving(false)
     setDialogOpen(false)
     router.refresh()
   }
