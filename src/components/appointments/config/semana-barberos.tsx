@@ -10,6 +10,8 @@ import {
   UserRound,
   CalendarClock,
   CalendarOff,
+  Plus,
+  X,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -20,6 +22,8 @@ import {
   NOMBRES_DIAS,
   NOMBRES_DIAS_CORTOS,
   ORDEN_SEMANA,
+  aHora,
+  aMinutos,
   diasConTurnos,
   franjaValida,
   rangoCorto,
@@ -72,7 +76,7 @@ export function SemanaBarberos({
     // Un tap prende el día con la opción por defecto: toma turnos durante toda
     // su jornada (franja NULL). Acotar la franja es el caso raro y vive en el
     // popover.
-    onCambiarDia(staffId, dia, agenda[staffId]?.[dia] ? null : { franja: null })
+    onCambiarDia(staffId, dia, agenda[staffId]?.[dia] ? null : { franjas: [] })
   }
 
   /**
@@ -90,7 +94,7 @@ export function SemanaBarberos({
   const asignacionesSinHorario = barberosQueAtienden.flatMap(b =>
     ORDEN_SEMANA.filter(dia => {
       const entrada = agenda[b.id]?.[dia]
-      return !!entrada && !entrada.franja && jornadaDe(b.id, dia).length === 0
+      return !!entrada && !entrada.franjas.length && jornadaDe(b.id, dia).length === 0
     }).map(dia => ({ barbero: b, dia }))
   )
 
@@ -210,13 +214,13 @@ export function SemanaBarberos({
                       hayOtrosDias={diasConTurnos(agenda, barbero.id).some(d => d !== dia)}
                       onAlternar={() => alternarDia(barbero.id, dia)}
                       onGuardar={valor => onCambiarDia(barbero.id, dia, valor)}
-                      onAplicarASemana={franja => {
+                      onAplicarASemana={franjas => {
                         // Sólo pisa los días que ya toman turnos: "usar en sus
                         // otros días" nunca debe agregar días que el dueño no
                         // pidió.
                         for (const otro of diasConTurnos(agenda, barbero.id)) {
                           if (otro === dia) continue
-                          onCambiarDia(barbero.id, otro, { franja: franja ? { ...franja } : null })
+                          onCambiarDia(barbero.id, otro, { franjas: franjas.map(f => ({ ...f })) })
                         }
                       }}
                     />
@@ -367,13 +371,13 @@ function CeldaDia({
   hayOtrosDias: boolean
   onAlternar: () => void
   onGuardar: (valor: DiaDeAgenda | null) => void
-  onAplicarASemana: (franja: Tramo | null) => void
+  onAplicarASemana: (franjas: Tramo[]) => void
 }) {
   const tomaTurnos = !!entrada
   const trabaja = jornadaDelDia.length > 0
   // Día marcado, sin franja propia y sin jornada: el motor lo saltea en
   // silencio. Es el único caso que hay que gritar en la grilla.
-  const sinEfecto = tomaTurnos && !entrada?.franja && !trabaja
+  const sinEfecto = tomaTurnos && !entrada?.franjas.length && !trabaja
   const activo = tomaTurnos && barbero.recibeTurnos && diaHabilitado && !sinEfecto
 
   return (
@@ -449,20 +453,27 @@ function CeldaDia({
               // se derramaba sobre la celda de al lado.
               className={cn(
                 'absolute inset-x-px bottom-px flex h-6 items-center justify-center gap-0.5 overflow-hidden rounded-b-[7px] border-t border-border/40 bg-background/40 px-1 text-[10px] font-medium tabular-nums transition-colors hover:bg-background/80 hover:text-foreground',
-                sinEfecto ? 'text-amber-500' : entrada?.franja ? 'text-foreground' : 'text-muted-foreground'
+                sinEfecto ? 'text-amber-500' : entrada?.franjas.length ? 'text-foreground' : 'text-muted-foreground'
               )}
               aria-label={`Editar la franja de turnos de ${barbero.nombre} el ${NOMBRES_DIAS[dia]}`}
             >
+              {/* El chip muestra la PRIMERA franja y cuántas más hay: en una
+                  columna de 3.25rem no entra "10–13 · 16–19", y truncarlo
+                  escondería justamente el corte. */}
               <span className="min-w-0 truncate">
-                {entrada?.franja
-                  ? rangoCorto(entrada.franja)
+                {entrada?.franjas.length
+                  ? rangoCorto(entrada.franjas[0])
                   : trabaja
                     ? rangoCorto(jornadaDelDia[0])
                     : 'sin horario'}
               </span>
-              {!entrada?.franja && trabaja && jornadaDelDia.length > 1 && (
-                <span className="shrink-0 text-[9px]">+{jornadaDelDia.length - 1}</span>
-              )}
+              {entrada?.franjas.length
+                ? entrada.franjas.length > 1 && (
+                    <span className="shrink-0 text-[9px]">+{entrada.franjas.length - 1}</span>
+                  )
+                : trabaja && jornadaDelDia.length > 1 && (
+                    <span className="shrink-0 text-[9px]">+{jornadaDelDia.length - 1}</span>
+                  )}
             </button>
           </PopoverTrigger>
           <PopoverContent align="center" className="w-72 p-0">
@@ -502,20 +513,36 @@ function EditorDeDia({
   horarioLocal: Tramo
   hayOtrosDias: boolean
   onGuardar: (valor: DiaDeAgenda | null) => void
-  onAplicarASemana: (franja: Tramo | null) => void
+  onAplicarASemana: (franjas: Tramo[]) => void
 }) {
-  const [borrador, setBorrador] = useState<Tramo | null>(entrada.franja ? { ...entrada.franja } : null)
+  const [borrador, setBorrador] = useState<Tramo[]>(entrada.franjas.map(f => ({ ...f })))
   const trabaja = jornadaDelDia.length > 0
-  const valido = !borrador || franjaValida(borrador)
+  const acotado = borrador.length > 0
+
+  const invalida = borrador.some(f => !franjaValida(f))
+  // El solape lo rechaza el servidor; avisarlo acá evita que el dueño se coma
+  // un error recién al guardar toda la pantalla.
+  const seSuperponen = haySolape(borrador)
+  const valido = !invalida && !seSuperponen
 
   /**
    * Cada edición sube al padre apenas es válida (no en el blur): un `type=time`
    * puede quedar a medio escribir y el popover se cierra al tocar afuera, sin
    * garantía de blur previo. Lo inválido queda sólo en el borrador.
    */
-  function aplicar(franja: Tramo | null) {
-    setBorrador(franja)
-    if (!franja || franjaValida(franja)) onGuardar({ franja })
+  function aplicar(franjas: Tramo[]) {
+    setBorrador(franjas)
+    if (franjas.every(franjaValida) && !haySolape(franjas)) onGuardar({ franjas })
+  }
+
+  /** Franja nueva pegada después de la última, del mismo largo que la jornada. */
+  function siguienteFranja(): Tramo {
+    const ultima = borrador[borrador.length - 1]
+    if (!ultima) return { ...(jornadaDelDia[0] ?? horarioLocal) }
+    // Arranca dos horas después del corte anterior: es una propuesta editable,
+    // no una regla — el caso típico es "10 a 13" y después "16 a 19".
+    const inicio = sumarHoras(ultima.fin, 3)
+    return { inicio, fin: sumarHoras(inicio, 3) }
   }
 
   return (
@@ -529,57 +556,95 @@ function EditorDeDia({
         <p className="text-[11px] font-medium text-muted-foreground">¿En qué horario acepta turnos?</p>
 
         <OpcionFranja
-          activa={borrador === null}
+          activa={!acotado}
           titulo="Toda su jornada"
           detalle={trabaja ? `Trabaja ${resumenTramos(jornadaDelDia)}` : 'Ese día no trabaja'}
           alerta={!trabaja}
-          onClick={() => aplicar(null)}
+          onClick={() => aplicar([])}
         />
 
         <OpcionFranja
-          activa={borrador !== null}
-          titulo="Sólo una franja"
-          detalle="Acepta turnos nada más que en ese rango"
-          onClick={() => aplicar(borrador ?? { ...(jornadaDelDia[0] ?? horarioLocal) })}
+          activa={acotado}
+          titulo="En franjas"
+          detalle="Sólo en los rangos que definas. Podés poner más de uno para un horario cortado."
+          onClick={() => aplicar(acotado ? borrador : [{ ...(jornadaDelDia[0] ?? horarioLocal) }])}
         />
       </div>
 
-      {borrador !== null && (
-        <div className="flex items-center gap-1.5">
-          <input
-            type="time"
-            value={borrador.inicio}
-            onChange={e => aplicar({ ...borrador, inicio: e.target.value })}
-            className="h-9 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label="Desde"
-          />
-          <span className="text-xs text-muted-foreground">a</span>
-          <input
-            type="time"
-            value={borrador.fin}
-            onChange={e => aplicar({ ...borrador, fin: e.target.value })}
-            className="h-9 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label="Hasta"
-          />
+      {acotado && (
+        <div className="space-y-1.5">
+          {borrador.map((franja, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <input
+                type="time"
+                value={franja.inicio}
+                onChange={e =>
+                  aplicar(borrador.map((f, j) => (j === i ? { ...f, inicio: e.target.value } : f)))
+                }
+                className="h-9 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={`Desde, franja ${i + 1}`}
+              />
+              <span className="text-xs text-muted-foreground">a</span>
+              <input
+                type="time"
+                value={franja.fin}
+                onChange={e =>
+                  aplicar(borrador.map((f, j) => (j === i ? { ...f, fin: e.target.value } : f)))
+                }
+                className="h-9 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={`Hasta, franja ${i + 1}`}
+              />
+              {/* Con una sola franja no se ofrece quitarla: para eso está
+                  "Toda su jornada" arriba, que además es un estado distinto. */}
+              {borrador.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => aplicar(borrador.filter((_, j) => j !== i))}
+                  className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  aria-label={`Quitar la franja ${i + 1}`}
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
+            </div>
+          ))}
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 w-full text-xs"
+            onClick={() => aplicar([...borrador, siguienteFranja()])}
+          >
+            <Plus className="mr-1 size-3.5" />
+            Agregar otra franja
+          </Button>
         </div>
       )}
 
-      {!valido && (
+      {invalida && (
         <p className="flex items-start gap-1.5 text-[11px] text-amber-500">
           <TriangleAlert className="mt-px size-3.5 shrink-0" />
           La hora de fin tiene que ser posterior a la de inicio.
         </p>
       )}
 
+      {!invalida && seSuperponen && (
+        <p className="flex items-start gap-1.5 text-[11px] text-amber-500">
+          <TriangleAlert className="mt-px size-3.5 shrink-0" />
+          Hay dos franjas que se pisan. Separalas o juntalas en una sola.
+        </p>
+      )}
+
       {/* No lo impedimos: acotar la franja es exactamente la forma de dar turnos
           un día que el barbero no tiene como jornada. Pero con "toda su jornada"
           el motor no encuentra ninguna franja y no ofrece nada. */}
-      {borrador === null && !trabaja && (
+      {!acotado && !trabaja && (
         <p className="flex items-start gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] leading-snug text-amber-500">
           <TriangleAlert className="mt-px size-3.5 shrink-0" />
           <span>
             Ese día no tiene horario de trabajo cargado, así que el turnero no va a ofrecer nada. Elegí
-            &ldquo;Sólo una franja&rdquo; o cargale la jornada desde Equipo.
+            &ldquo;En franjas&rdquo; o cargale la jornada desde Equipo.
           </span>
         </p>
       )}
@@ -608,6 +673,17 @@ function EditorDeDia({
       </button>
     </div>
   )
+}
+
+/** ¿Dos franjas del mismo día se pisan? Se mide sobre la lista ordenada. */
+function haySolape(franjas: Tramo[]): boolean {
+  const validas = franjas.filter(franjaValida).sort((a, b) => aMinutos(a.inicio) - aMinutos(b.inicio))
+  return validas.some((f, i) => i > 0 && aMinutos(f.inicio) < aMinutos(validas[i - 1].fin))
+}
+
+/** Suma horas sin pasarse de las 23:59, para proponer la franja siguiente. */
+function sumarHoras(hhmm: string, horas: number): string {
+  return aHora(Math.min(aMinutos(hhmm) + horas * 60, 23 * 60 + 59))
 }
 
 function OpcionFranja({

@@ -47,12 +47,15 @@ export type JornadaSemanal = Record<string, Record<number, Tramo[]>>
  * Un día de la agenda de turnos (`appointment_staff_days`).
  *
  * Que la clave del día exista ya significa "este barbero toma turnos ese día".
- * `franja` en `null` = los toma durante toda su jornada normal (NULL/NULL en la
- * tabla); con valor, sólo dentro de esa franja — y en ese caso ni siquiera hace
- * falta que tenga jornada cargada.
+ * `franjas` VACÍO = los toma durante toda su jornada normal (una fila con
+ * NULL/NULL en la tabla); con una o más franjas, sólo dentro de ellas — y en
+ * ese caso ni siquiera hace falta que tenga jornada cargada.
+ *
+ * Son varias desde la mig 182: un día cortado ("10 a 13 y 16 a 19") es la forma
+ * de empujar los turnos a las horas flojas y dejar las pico para el walk-in.
  */
 export interface DiaDeAgenda {
-  franja: Tramo | null
+  franjas: Tramo[]
 }
 
 /** Agenda de turnos: barbero → día (0-6) → cómo toma turnos ese día. */
@@ -263,8 +266,10 @@ export function describirDias(dias: number[]): string {
 /** Compara dos celdas de la grilla, contando "no toma turnos" (undefined). */
 export function franjasIguales(a: DiaDeAgenda | undefined, b: DiaDeAgenda | undefined): boolean {
   if (!a || !b) return !a && !b
-  if (!a.franja || !b.franja) return !a.franja && !b.franja
-  return a.franja.inicio === b.franja.inicio && a.franja.fin === b.franja.fin
+  const na = normalizarTramos(a.franjas)
+  const nb = normalizarTramos(b.franjas)
+  if (na.length !== nb.length) return false
+  return na.every((t, i) => t.inicio === nb[i].inicio && t.fin === nb[i].fin)
 }
 
 export function clonarAgenda(agenda: AgendaTurnos): AgendaTurnos {
@@ -272,7 +277,7 @@ export function clonarAgenda(agenda: AgendaTurnos): AgendaTurnos {
   for (const [staffId, dias] of Object.entries(agenda)) {
     copia[staffId] = {}
     for (const [dia, valor] of Object.entries(dias)) {
-      copia[staffId][Number(dia)] = { franja: valor.franja ? { ...valor.franja } : null }
+      copia[staffId][Number(dia)] = { franjas: valor.franjas.map(f => ({ ...f })) }
     }
   }
   return copia
@@ -319,7 +324,7 @@ export function tramosDeTurnos({
   if (!usaAgendaPorDia) return jornadaDelDia
   const entrada = agenda[staffId]?.[dia]
   if (!entrada) return []
-  return entrada.franja ? [entrada.franja] : jornadaDelDia
+  return entrada.franjas.length ? normalizarTramos(entrada.franjas) : jornadaDelDia
 }
 
 // ─── Vista previa de horarios (espejo del motor) ─────────────────────

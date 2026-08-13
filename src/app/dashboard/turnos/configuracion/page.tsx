@@ -174,7 +174,7 @@ export default async function TurnosConfigPage({ searchParams }: Props) {
   }
 
   // Agenda de turnos: lo que sí edita la grilla. Que la clave del día exista ya
-  // significa "toma turnos ese día"; `franja` null = toda su jornada.
+  // significa "toma turnos ese día"; `franjas` vacío = toda su jornada.
   const agenda: AgendaTurnos = {}
   for (const id of idsBarberos) agenda[id] = {}
   let hayDiasDeBarberosOcultos = false
@@ -186,8 +186,15 @@ export default async function TurnosConfigPage({ searchParams }: Props) {
       hayDiasDeBarberosOcultos = true
       continue
     }
+    // Varias filas por día = día cortado (mig 182): se acumulan en la lista de
+    // franjas de esa celda. Una fila con horas en NULL es "toda su jornada" y
+    // no agrega ninguna franja, que es justamente cómo se representa.
+    const previas = agenda[dia.staff_id][dia.day_of_week]?.franjas ?? []
     agenda[dia.staff_id][dia.day_of_week] = {
-      franja: dia.start_time && dia.end_time ? { inicio: dia.start_time, fin: dia.end_time } : null,
+      franjas:
+        dia.start_time && dia.end_time
+          ? [...previas, { inicio: dia.start_time, fin: dia.end_time }]
+          : previas,
     }
   }
 

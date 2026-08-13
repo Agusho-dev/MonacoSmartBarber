@@ -202,9 +202,18 @@ export function TurnosConfigClient(props: Props) {
       if (!cambio) continue
       porBarbero.push({
         staffId: barbero.id,
-        dias: diasConTurnos(estado.agenda, barbero.id).map(dia => {
-          const franja = estado.agenda[barbero.id][dia].franja
-          return { dia, inicio: franja?.inicio ?? null, fin: franja?.fin ?? null }
+        // Una entrada POR FRANJA, no por día: un día cortado viaja como varias
+        // entradas con el mismo `dia`, que es la forma que tiene la tabla
+        // desde la mig 182. Sin franjas propias va una sola entrada con las
+        // horas en null = toda su jornada.
+        dias: diasConTurnos(estado.agenda, barbero.id).flatMap<{
+          dia: number
+          inicio: string | null
+          fin: string | null
+        }>(dia => {
+          const franjas = estado.agenda[barbero.id][dia].franjas
+          if (!franjas.length) return [{ dia, inicio: null, fin: null }]
+          return franjas.map(f => ({ dia, inicio: f.inicio, fin: f.fin }))
         }),
       })
     }

@@ -18,6 +18,11 @@ import type { AmbienteArca, CondicionIvaEmisor } from './config'
 export interface FilaContribuyente {
     id: string
     organization_id: string
+    /** Barbero titular del monotributo. Es lo que ata cada venta a su CUIT. */
+    staff_id: string | null
+    monotributo_categoria: string | null
+    tope_anual_override: string | number | null
+    is_active: boolean
     environment: AmbienteArca
     auth_mode: 'certificado_propio' | 'delegacion'
     cuit: string
@@ -68,6 +73,50 @@ export async function cargarContribuyente(orgId: string): Promise<FilaContribuye
     }
     const filas = (data ?? []) as FilaContribuyente[]
     return filas.find((f) => f.environment === 'produccion') ?? filas[0] ?? null
+}
+
+/**
+ * El contribuyente de un BARBERO.
+ *
+ * Es la pieza central del modelo por barbero: cada corte lo factura el CUIT de
+ * quien lo hizo, y eso sale de `visits.barber_id` → `arca_taxpayers.staff_id`.
+ * Devuelve null si ese barbero todavía no tiene monotributo cargado — que no es
+ * un error, es el estado normal mientras se dan de alta.
+ */
+export async function contribuyenteDeBarbero(
+    orgId: string,
+    staffId: string | null,
+): Promise<FilaContribuyente | null> {
+    if (!staffId) return null
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+        .from('arca_taxpayers')
+        .select('*')
+        .eq('organization_id', orgId)
+        .eq('staff_id', staffId)
+        .eq('is_active', true)
+        .order('environment', { ascending: false }) // 'produccion' antes que 'homologacion'
+    if (error) {
+        console.error('[contribuyenteDeBarbero]', error.message)
+        return null
+    }
+    const filas = (data ?? []) as FilaContribuyente[]
+    return filas.find((f) => f.environment === 'produccion') ?? filas[0] ?? null
+}
+
+/** Todos los monotributos de la organización, con su barbero. */
+export async function listarContribuyentes(orgId: string): Promise<FilaContribuyente[]> {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+        .from('arca_taxpayers')
+        .select('*')
+        .eq('organization_id', orgId)
+        .eq('is_active', true)
+    if (error) {
+        console.error('[listarContribuyentes]', error.message)
+        return []
+    }
+    return (data ?? []) as FilaContribuyente[]
 }
 
 /**

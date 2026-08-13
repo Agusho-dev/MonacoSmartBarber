@@ -111,12 +111,13 @@ function saneaColor(valor: string, porDefecto: string): string {
 function saneaDiasDeAgenda(
   dias: DiaDeAgendaInput[]
 ): { dias: Array<{ day_of_week: number; start_time: string | null; end_time: string | null }>; error?: string } {
-  // Map por día: el UNIQUE(branch, staff, day) rechazaría un duplicado con un
-  // error crudo de Postgres, y mandar dos veces el mismo día es un desliz de la
-  // UI, no algo que el dueño tenga que entender.
-  const porDia = new Map<number, { start_time: string | null; end_time: string | null }>()
+  // Una entrada por FRANJA, no por día: desde la mig 182 un día puede venir
+  // cortado ("10 a 13 y 16 a 19") y llega como varias entradas con el mismo
+  // `dia`. El tope es 7 días × 6 franjas — generoso para cualquier agenda real
+  // y acotado para que un payload manipulado no inserte miles de filas.
+  const limpios: Array<{ day_of_week: number; start_time: string | null; end_time: string | null }> = []
 
-  for (const d of dias.slice(0, 7)) {
+  for (const d of dias.slice(0, 42)) {
     const dia = Number(d.dia)
     if (!Number.isInteger(dia) || dia < 0 || dia > 6) {
       return { dias: [], error: 'Día de la semana inválido' }
@@ -127,7 +128,7 @@ function saneaDiasDeAgenda(
 
     // Sin franja = toda su jornada. Es la opción por defecto de la grilla.
     if (inicio === null && fin === null) {
-      porDia.set(dia, { start_time: null, end_time: null })
+      limpios.push({ day_of_week: dia, start_time: null, end_time: null })
       continue
     }
     if (inicio === null || fin === null) {
@@ -139,14 +140,12 @@ function saneaDiasDeAgenda(
     if (fin <= inicio) {
       return { dias: [], error: 'La hora de fin tiene que ser posterior a la de inicio' }
     }
-    porDia.set(dia, { start_time: inicio, end_time: fin })
+    limpios.push({ day_of_week: dia, start_time: inicio, end_time: fin })
   }
 
-  return {
-    dias: [...porDia.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([day_of_week, horas]) => ({ day_of_week, ...horas })),
-  }
+  // El solape entre franjas del mismo día lo valida `saveBarberAppointmentDays`,
+  // que es la dueña de la tabla y ve el conjunto completo.
+  return { dias: limpios.sort((a, b) => a.day_of_week - b.day_of_week) }
 }
 
 /**

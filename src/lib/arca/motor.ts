@@ -70,7 +70,25 @@ export interface ResultadoLote {
     emitidos: ComprobanteEmitido[]
     fallidos: { visitId: string; motivo: string; codigo: string | null }[]
     total: number
+    /** Cuántas quedaron sin emitir por el tope de la corrida. 0 = se hizo todo. */
+    restantes?: number
 }
+
+/**
+ * Cuántos comprobantes se emiten como máximo en UNA corrida.
+ *
+ * Cada emisión son dos viajes SOAP a ARCA (último autorizado + pedido de CAE)
+ * más la reserva en la base: entre 2 y 3 segundos, y los servidores de ARCA no
+ * son rápidos. Medido con un objetivo de $1.500.000 para un barbero, el plan
+ * daba 89 comprobantes → unos 250 segundos, contra un `maxDuration` de 300.
+ * Demasiado al filo: si se corta a la mitad, la mitad de los comprobantes
+ * quedan en estado dudoso y hay que reconciliarlos uno por uno.
+ *
+ * Con tope, la corrida termina siempre bien y lo que falta se emite en la
+ * siguiente (el cron corre cada hora, y el botón se puede volver a apretar).
+ * Cortar a tiempo es preferible a terminar en un estado que hay que auditar.
+ */
+const MAX_POR_CORRIDA = 35
 
 export interface VistaPreviaCupo {
     plan: PlanFacturacion
@@ -98,6 +116,8 @@ export interface PoliticaVistaMinima {
 export type FilaPolitica = {
     id: string
     organization_id: string
+    /** Dueño del cupo. En el modelo por barbero, siempre viene. */
+    taxpayer_id: string | null
     branch_id: string | null
     is_enabled: boolean
     mode: 'manual' | 'cantidad' | 'monto'
@@ -141,6 +161,7 @@ export async function leerCandidatos(
     pol: FilaPolitica,
     limite = 300,
     ambiente: 'homologacion' | 'produccion' = 'produccion',
+    staffId: string | null = null,
 ): Promise<CandidatoVenta[] | { error: string }> {
     const supabase = createAdminClient()
     const desde = new Date(Date.now() - pol.lookback_days * 86_400_000).toISOString()
@@ -161,6 +182,7 @@ export async function leerCandidatos(
         p_seed: `${pol.id}:${new Date().toISOString().slice(0, 7)}`,
         p_limit: limite,
         p_environment: ambiente,
+        p_staff_id: staffId,
     })
 
     if (error) {
@@ -535,6 +557,22 @@ export async function resolverEnDuda(
 // Preparación del contexto de emisión
 // -----------------------------------------------------------------------------
 
+/**
+ * Contexto de emisión para UN contribuyente puntual.
+ *
+ * En el modelo por barbero cada CUIT tiene su propio certificado y por lo tanto
+ * su propio Ticket de Acceso: no se puede emitir el corte de Lucas con el
+ * contexto de Nico. Por eso la preparación se hace por contribuyente y no por
+ * organización.
+ */
+export async function prepararEmisionDe(
+    t: FilaContribuyente,
+): Promise<{ t: FilaContribuyente; ctx: ContextoWsfe } | { error: string; traducido?: ErrorTraducido }> {
+    const ctx = await contextoWsfe(t)
+    if ('error' in ctx) return { error: ctx.error, traducido: ctx.traducido }
+    return { t, ctx }
+}
+
 export async function prepararEmision(orgId: string): Promise<
     { t: FilaContribuyente; ctx: ContextoWsfe } | { error: string; traducido?: ErrorTraducido }
 > {
@@ -595,7 +633,28 @@ export async function correrPolitica(
     const cupo = await leerCupo(policyId)
     if (!cupo) return { error: 'No pudimos calcular el cupo del período.' }
 
-    const candidatos = await leerCandidatos(orgId, politica, 300, await ambienteDeOrg(orgId))
+    // El contribuyente lo define la política: es el monotributo de ESE barbero.
+    let contribuyente: FilaContribuyente | null = null
+    if (politica.taxpayer_id) {
+        const { data, error: errTp } = await supabase
+            .from('arca_taxpayers')
+            .select('*')
+            .eq('id', politica.taxpayer_id)
+            .maybeSingle()
+        if (errTp) {
+            console.error('[correrPolitica] contribuyente', errTp.message)
+            return { error: 'No pudimos leer el monotributo de esa política.' }
+        }
+        contribuyente = data as FilaContribuyente | null
+    } else {
+        contribuyente = await cargarContribuyente(orgId)
+    }
+    if (!contribuyente) return { error: 'Esa política no tiene un monotributo asociado.' }
+
+    // Sólo las ventas DE ESE BARBERO entran en su cupo.
+    const candidatos = await leerCandidatos(
+        orgId, politica, 300, contribuyente.environment, contribuyente.staff_id,
+    )
     if ('error' in candidatos) return { error: candidatos.error }
 
     const plan = planificarFacturacion(candidatos, cupo, aPoliticaCupo(politica))
@@ -611,7 +670,7 @@ export async function correrPolitica(
         return { emitidos: [], fallidos: [], total: 0 }
     }
 
-    const prep = await prepararEmision(orgId)
+    const prep = await prepararEmisionDe(contribuyente)
     if ('error' in prep) return { error: prep.error }
 
     const { data: sucursales } = await supabase
@@ -627,7 +686,10 @@ export async function correrPolitica(
     const fallidos: ResultadoLote['fallidos'] = []
     let cortado = false
 
-    for (const c of plan.seleccionados) {
+    const aEmitir = plan.seleccionados.slice(0, MAX_POR_CORRIDA)
+    const restantes = plan.seleccionados.length - aEmitir.length
+
+    for (const c of aEmitir) {
         const tz = tzPorSucursal.get(c.branchId) ?? 'America/Argentina/Buenos_Aires'
         const res = await emitirUno(prep.t, prep.ctx, {
             orgId,
@@ -660,8 +722,16 @@ export async function correrPolitica(
     // interrumpido por una caída de ARCA dejaría el cupo del día sin llenar
     // hasta el día siguiente. Y si lo escribiera una corrida manual, apretar
     // "Facturar ahora" a la mañana cancelaría la corrida automática de la noche.
-    if (desdeCron && !cortado) await sellarCorrida(supabase, policyId)
+    // Si quedaron comprobantes afuera por el tope, la corrida NO se sella: así
+    // el cron vuelve dentro de la hora y termina el trabajo en vez de esperar
+    // al día siguiente.
+    if (desdeCron && !cortado && restantes === 0) await sellarCorrida(supabase, policyId)
 
     revalidatePath('/dashboard/facturacion')
-    return { emitidos, fallidos, total: emitidos.reduce((a, e) => a + e.total, 0) }
+    return {
+        emitidos,
+        fallidos,
+        total: emitidos.reduce((a, e) => a + e.total, 0),
+        restantes,
+    }
 }

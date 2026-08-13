@@ -402,23 +402,34 @@ export async function getAvailableSlots(
   }
 
   const usaAgendaPorDia = (diasDeTurnos ?? []).length > 0
-  const franjaDelDia = new Map<string, { start: string | null; end: string | null }>()
+
+  /**
+   * Franjas del día por barbero. Es una LISTA, no un solo rango (mig 182): un
+   * barbero puede tomar turnos "de 10 a 13 y de 16 a 19", que es la forma de
+   * empujar los turnos a las horas flojas y dejar las pico para el walk-in.
+   *
+   * La lista vacía tiene un significado propio y distinto de "no está en el
+   * Map": el barbero SÍ toma turnos ese día, pero durante toda su jornada
+   * normal (fila con start_time/end_time en NULL).
+   */
+  const franjasDelDia = new Map<string, Rango[]>()
 
   if (usaAgendaPorDia) {
     for (const d of diasDeTurnos ?? []) {
       if (d.day_of_week !== dayOfWeek) continue
-      franjaDelDia.set(d.staff_id, {
-        start: d.start_time ? d.start_time.slice(0, 5) : null,
-        end: d.end_time ? d.end_time.slice(0, 5) : null,
-      })
+      const previas = franjasDelDia.get(d.staff_id) ?? []
+      if (d.start_time && d.end_time) {
+        previas.push({ start: d.start_time.slice(0, 5), end: d.end_time.slice(0, 5) })
+      }
+      franjasDelDia.set(d.staff_id, previas)
     }
   }
 
   const habilitadosHoy = usaAgendaPorDia
-    ? branchStaff.filter((s) => franjaDelDia.has(s.staff_id))
+    ? branchStaff.filter((s) => franjasDelDia.has(s.staff_id))
     : branchStaff
 
-  if (barberId && usaAgendaPorDia && !franjaDelDia.has(barberId)) {
+  if (barberId && usaAgendaPorDia && !franjasDelDia.has(barberId)) {
     return { slots: [], error: 'Ese barbero no toma turnos ese día' }
   }
 
@@ -515,15 +526,15 @@ export async function getAvailableSlots(
   for (const staffId of staffIds) {
     if (absentStaff.has(staffId)) continue
 
-    const franja = franjaDelDia.get(staffId)
+    const propias = franjasDelDia.get(staffId) ?? []
 
-    // Ventana horaria del barbero para ese día. Por defecto es su jornada de
-    // trabajo (`staff_schedules`); si la agenda por día le puso una franja
-    // explícita, esa manda y no hace falta que tenga jornada cargada — un
+    // Ventanas horarias del barbero para ese día. Por defecto son su jornada de
+    // trabajo (`staff_schedules`); si la agenda por día le puso franjas
+    // explícitas, esas mandan y no hace falta que tenga jornada cargada — un
     // barbero puede tomar turnos en una franja acotada sin que eso sea su
-    // horario de fichaje.
-    const staffSchedules = franja?.start && franja.end
-      ? [{ staff_id: staffId, start_time: franja.start, end_time: franja.end }]
+    // horario de fichaje. Pueden ser VARIAS (mig 182): un día cortado.
+    const staffSchedules = propias.length
+      ? propias.map(f => ({ staff_id: staffId, start_time: f.start, end_time: f.end }))
       : (schedules?.filter(s => s.staff_id === staffId) ?? [])
 
     if (!staffSchedules.length) continue
@@ -2365,14 +2376,19 @@ export async function getPublicBranchAppointmentStaff(branchId: string) {
     return rangoUnico ? [rangoUnico] : []
   }
 
-  /** Ventana propia del barbero ese día, antes de cruzarla con la sucursal. */
+  /**
+   * Ventanas propias del barbero ese día, antes de cruzarlas con la sucursal.
+   *
+   * Son varias desde la mig 182 (día cortado). Si no tiene ninguna franja
+   * explícita, la ventana es su jornada de trabajo.
+   */
   function ventanaDelBarbero(staffId: string, dia: number): Rango[] {
-    const conFranja = (diasTurnos ?? []).find(
-      d => d.staff_id === staffId && d.day_of_week === dia && d.start_time && d.end_time
-    )
-    if (conFranja) {
-      return [{ start: conFranja.start_time!.slice(0, 5), end: conFranja.end_time!.slice(0, 5) }]
-    }
+    const conFranja = (diasTurnos ?? [])
+      .filter(d => d.staff_id === staffId && d.day_of_week === dia && d.start_time && d.end_time)
+      .map(d => ({ start: d.start_time!.slice(0, 5), end: d.end_time!.slice(0, 5) }))
+
+    if (conFranja.length) return conFranja
+
     return (horarios ?? [])
       .filter(h => h.staff_id === staffId && h.day_of_week === dia)
       .filter(h => !h.branch_id || h.branch_id === branchId)

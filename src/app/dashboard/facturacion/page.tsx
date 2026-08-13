@@ -4,6 +4,7 @@ import { getCurrentOrgId } from '@/lib/actions/org'
 import { getCurrentUserPermissions } from '@/lib/actions/permissions-gate'
 import { getEstadoFacturador } from '@/lib/actions/arca'
 import { getComprobantes } from '@/lib/actions/arca-emision'
+import { getPanelFacturacion } from '@/lib/actions/arca-panel'
 import { FacturacionClient } from './facturacion-client'
 
 export const dynamic = 'force-dynamic'
@@ -20,15 +21,17 @@ export default async function FacturacionPage() {
     const perms = await getCurrentUserPermissions()
     if (!perms['arca.view']) redirect('/dashboard')
 
-    const [estado, comprobantes] = await Promise.all([
+    const [estado, comprobantes, panel] = await Promise.all([
         getEstadoFacturador(),
         getComprobantes({ limite: 100 }),
+        getPanelFacturacion(),
     ])
 
     return (
         <FacturacionClient
             estadoInicial={estado}
             comprobantesIniciales={comprobantes}
+            panelInicial={panel}
             puedeConfigurar={perms['arca.manage'] === true}
             puedeEmitir={perms['arca.emit'] === true}
         />
