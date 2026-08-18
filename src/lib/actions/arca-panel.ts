@@ -26,6 +26,7 @@ import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { currentUserCan } from '@/lib/actions/permissions-gate'
 import { cuitEsValido, limpiarCuit } from '@/lib/arca/contexto'
 import { correrPolitica } from '@/lib/arca/motor'
+import { errorPuntoVentaContingencia } from '@/lib/arca/errores'
 import type { ResultadoLote } from '@/lib/arca/motor'
 import type { CondicionIvaEmisor } from '@/lib/arca/config'
 
@@ -37,6 +38,12 @@ export type EstadoBarbero =
     | 'sin_monotributo'   // el barbero existe pero no tiene CUIT cargado
     | 'sin_certificado'   // tiene CUIT, falta el trámite del certificado
     | 'sin_punto_venta'   // certificado listo, falta dar de alta el PV en ARCA
+    // Tiene punto de venta en ARCA, vivo y sin bloquear, pero es de CONTINGENCIA
+    // (CAEA). Es un estado propio y no 'sin_punto_venta' porque la solución es
+    // distinta: no hay que "dar de alta un punto de venta" —ya lo hizo— hay que
+    // dar de alta OTRO, del tipo Web Services. Decirle que le falta uno cuando
+    // en la pantalla de ARCA ve el suyo ahí es la peor forma de no ayudarlo.
+    | 'pv_contingencia'
     | 'listo'
     | 'error'
 
@@ -69,8 +76,15 @@ export interface EstadoAnual {
     restante: number
     /** 0–100+, o null si no hay categoría cargada. */
     porcentaje: number | null
-    /** Cierre estimado a 12 meses según el ritmo de los últimos 90 días. */
-    proyectadoAnual: number
+    /**
+     * Cierre estimado a 12 meses según el ritmo reciente, o `null` cuando todavía
+     * no hay historia suficiente para proyectar (menos de 14 días facturando).
+     *
+     * `null` y no 0: anualizar cuatro días es multiplicar el ruido por 91, y esa
+     * cifra alimenta el bloque de alerta del panel. "Todavía no sabemos" es una
+     * respuesta mejor que un número inventado — y muy distinta de "cierra en $0".
+     */
+    proyectadoAnual: number | null
     /** Cuánto se pasaría del tope a ese ritmo. 0 si no se pasa. */
     excesoProyectado: number
 }
@@ -176,6 +190,10 @@ export async function getPanelFacturacion(): Promise<PanelFacturacion> {
                 detalle = r.tiene_csr
                     ? 'Falta subir el certificado que devuelve ARCA.'
                     : 'Falta generar el pedido de certificado.'
+            } else if ((r.puntos_venta ?? 0) === 0 && (r.puntos_venta_contingencia ?? 0) > 0) {
+                const traducido = errorPuntoVentaContingencia([], r.emision_tipo_contingencia)
+                estado = 'pv_contingencia'
+                detalle = `${traducido.detalle} ${traducido.accion ?? ''}`.trim()
             } else if ((r.puntos_venta ?? 0) === 0) {
                 estado = 'sin_punto_venta'
                 detalle = 'Falta dar de alta un punto de venta para Web Services en ARCA.'
@@ -207,7 +225,10 @@ export async function getPanelFacturacion(): Promise<PanelFacturacion> {
             : null
 
         const tope = r.tope_anual !== null ? Number(r.tope_anual) : null
-        const proyectado = Number(r.proyectado_anual ?? 0)
+        const proyectado =
+            r.proyectado_anual !== null && r.proyectado_anual !== undefined
+                ? Number(r.proyectado_anual)
+                : null
         const anual: EstadoAnual | null = r.taxpayer_id
             ? {
                   desde: '',
@@ -219,19 +240,33 @@ export async function getPanelFacturacion(): Promise<PanelFacturacion> {
                   restante: tope ? Math.max(tope - Number(r.facturado_12m ?? 0), 0) : 0,
                   porcentaje: r.porcentaje_anual !== null ? Number(r.porcentaje_anual) : null,
                   proyectadoAnual: proyectado,
-                  excesoProyectado: tope ? Math.max(proyectado - tope, 0) : 0,
+                  excesoProyectado: tope && proyectado !== null ? Math.max(proyectado - tope, 0) : 0,
               }
             : null
 
-        if (cupo) {
-            facturadoMes += cupo.montoEmitido
-            comprobantesMes += cupo.emitidos
-        }
+        // El MES, no el período del cupo. Antes se sumaba `monto_periodo`, que con
+        // `period = 'semana'` es la semana: la tarjeta decía "Facturado este mes:
+        // $0" un lunes con $694.000 emitidos en agosto. Y se sumaba sólo si el
+        // barbero tenía cupo cargado, así que los comprobantes de uno sin cupo no
+        // aparecían en ningún total.
+        // Los `??` a la forma vieja no son decorativos: si la migración 188 no
+        // está aplicada, la RPC sigue siendo la de la 185 y estas columnas no
+        // vienen. Sin el fallback, la tarjeta pasaría a mostrar $0 (Known Risk #23).
+        facturadoMes += Number(r.facturado_mes ?? r.monto_periodo ?? 0)
+        comprobantesMes += Number(r.comprobantes_mes ?? r.emitidos_periodo ?? 0)
+
         const sinFacturar = {
             cantidad: Number(r.sin_facturar_cant ?? 0),
             monto: Number(r.sin_facturar_monto ?? 0),
         }
-        pendientes += sinFacturar.cantidad
+        // NO se acumula cuando la RPC trae el total: con tres cupos de origen
+        // 'organizacion' cada fila trae el MISMO pozo del negocio y sumarlas lo
+        // triplica (6.139 sobre 2.639 ventas reales).
+        if (r.sin_facturar_org_cant !== undefined && r.sin_facturar_org_cant !== null) {
+            pendientes = Number(r.sin_facturar_org_cant)
+        } else {
+            pendientes += sinFacturar.cantidad
+        }
 
         const enRiesgo = (anual?.porcentaje ?? 0) >= UMBRAL_RIESGO || (anual?.excesoProyectado ?? 0) > 0
 
@@ -257,8 +292,10 @@ export async function getPanelFacturacion(): Promise<PanelFacturacion> {
     // Primero lo que necesita atención; después lo que falta configurar; al
     // final lo que ya está andando. Ordenado por nombre, el problema hay que
     // buscarlo; ordenado por urgencia, aparece solo.
+    // `pv_contingencia` va casi arriba: es un barbero que el dueño cree
+    // configurado y que no puede emitir un solo comprobante.
     const peso: Record<EstadoBarbero, number> = {
-        error: 0, sin_punto_venta: 2, sin_certificado: 3, sin_monotributo: 4, listo: 5,
+        error: 0, pv_contingencia: 1, sin_punto_venta: 2, sin_certificado: 3, sin_monotributo: 4, listo: 5,
     }
     filas.sort((a, b) => {
         if (a.requiereAtencion !== b.requiereAtencion) return a.requiereAtencion ? -1 : 1
@@ -517,7 +554,7 @@ export async function facturarPendientesDe(
     const supabase = createAdminClient()
     const { data: pol, error } = await supabase
         .from('arca_billing_policies')
-        .select('id')
+        .select('id, is_enabled')
         .eq('taxpayer_id', taxpayerId)
         .eq('organization_id', orgId)
         .maybeSingle()
@@ -527,6 +564,18 @@ export async function facturarPendientesDe(
         return { error: 'No pudimos leer el cupo de ese barbero.' }
     }
     if (!pol) return { error: 'Ese barbero todavía no tiene un cupo configurado.' }
+
+    // El chequeo de "cupo apagado" también vive en `correrPolitica`, que es la
+    // puerta que de verdad protege. Acá se repite sólo para poder decir QUÉ
+    // hacer: el mensaje del motor ("La política está desactivada") es correcto y
+    // completamente inútil para el dueño, que está mirando el interruptor.
+    if (!pol.is_enabled) {
+        return {
+            error:
+                'El cupo está apagado, así que no se le puede emitir nada. ' +
+                'Prendé "Cupo activo" acá arriba y volvé a intentar.',
+        }
+    }
 
     const r = await correrPolitica(pol.id, {
         desdeCron: false,

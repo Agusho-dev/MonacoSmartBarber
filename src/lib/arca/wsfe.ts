@@ -228,11 +228,52 @@ export async function feDummy(ambiente: AmbienteArca): Promise<EstadoServidores>
 
 export interface PuntoVentaArca {
     numero: number
+    /** Lo que ARCA declara en `EmisionTipo`, tal cual. Ej: `CAE - Monotributo`. */
     emisionTipo: string
     bloqueado: boolean
     fechaBaja: string | null
-    /** Un PV bloqueado o dado de baja no sirve para facturar. */
+    /**
+     * Si ese punto de venta sirve para pedir CAE en línea (`FECAESolicitar`),
+     * que es lo único que emite este sistema. Ver `sirveParaCae`.
+     */
+    sirveParaCae: boolean
+    /** Un PV bloqueado, dado de baja o de contingencia no sirve para facturar. */
     utilizable: boolean
+}
+
+/**
+ * ¿Este punto de venta sirve para pedir CAE en línea?
+ *
+ * ARCA tiene DOS regímenes de emisión y le dedica un tipo de punto de venta a
+ * cada uno. `EmisionTipo` dice cuál es:
+ *
+ *   · `CAE - Monotributo`, `RECE`, `CAE y CAEA` → CAE en línea. Es lo nuestro.
+ *   · `CAEA - Monotributo CONTINGENCIA`         → SÓLO contingencia. El CAEA se
+ *     pide por adelantado para quincenas enteras y se informa después; pedirle
+ *     un CAE a un punto de venta así lo rechaza con el error 10005
+ *     ("EL PUNTO DE VENTA INFORMADO DEBE ESTAR DADO DE ALTA Y SER DEL TIPO RECE").
+ *
+ * Y ese rechazo es PERMANENTE: no se arregla reintentando, hay que dar de alta
+ * otro punto de venta en ARCA. Por eso el tipo de emisión es parte de
+ * `utilizable` y no un dato decorativo — un CUIT de Monaco tenía sólo un punto
+ * de venta CAEA, pasaba la prueba de conexión en verde (`Bloqueado=N`,
+ * `FchBaja=NULL`) y después fallaba en cada emisión sin decir por qué.
+ *
+ * FALLA ABIERTA a propósito: sólo se descarta lo que ARCA declara
+ * EXPLÍCITAMENTE como CAEA. Un `EmisionTipo` vacío, nuevo o desconocido se
+ * acepta, porque romper una configuración que hoy factura bien porque ARCA
+ * cambió una etiqueta sería mucho peor que dejar pasar un caso raro — y si ese
+ * caso raro no sirve, ARCA lo rechaza y el sistema ya sabe explicarlo.
+ */
+export function sirveParaCae(emisionTipo: string): boolean {
+    const tokens = String(emisionTipo ?? '')
+        .toUpperCase()
+        .split(/[^A-Z0-9]+/)
+        .filter(Boolean)
+    if (!tokens.length) return true
+    // "CAE y CAEA" sirve: alcanza con que aparezca CAE (o el nombre viejo, RECE).
+    if (tokens.some((t) => t === 'CAE' || t === 'RECE' || t === 'RECEL')) return true
+    return !tokens.includes('CAEA')
 }
 
 /**
@@ -259,12 +300,15 @@ export async function feParamGetPtosVenta(ctx: ContextoWsfe): Promise<PuntoVenta
         const bloqueado = String(p?.Bloqueado ?? 'N').toUpperCase() === 'S'
         const fechaBaja = p?.FchBaja ? String(p.FchBaja) : null
         const dadoDeBaja = !!fechaBaja && fechaBaja !== 'NULL' && fechaBaja !== ''
+        const emisionTipo = String(p?.EmisionTipo ?? '')
+        const paraCae = sirveParaCae(emisionTipo)
         return {
             numero: Number(p?.Nro ?? 0),
-            emisionTipo: String(p?.EmisionTipo ?? ''),
+            emisionTipo,
             bloqueado,
             fechaBaja: dadoDeBaja ? fechaBaja : null,
-            utilizable: !bloqueado && !dadoDeBaja,
+            sirveParaCae: paraCae,
+            utilizable: !bloqueado && !dadoDeBaja && paraCae,
         }
     })
 }

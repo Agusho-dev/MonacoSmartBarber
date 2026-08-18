@@ -680,7 +680,15 @@ export async function cargarCertificado(
 
 export interface ResultadoVerificacion {
     servidores: { app: string; db: string; auth: string; todoOk: boolean } | null
-    puntosVenta: { numero: number; utilizable: boolean; emisionTipo: string }[]
+    puntosVenta: {
+        numero: number
+        utilizable: boolean
+        emisionTipo: string
+        /** false = de contingencia (CAEA). Existe y está vivo, pero ARCA lo rechaza con 10005. */
+        sirveParaCae: boolean
+        bloqueado: boolean
+        dadoDeBaja: boolean
+    }[]
     diagnostico: ErrorTraducido | null
     ok: boolean
 }
@@ -770,30 +778,77 @@ export async function verificarConexionArca(taxpayerId?: string): Promise<
         const pvs = await feParamGetPtosVenta(ctx)
         const utilizables = pvs.filter((p) => p.utilizable)
 
-        // Se guardan los que ARCA reconoce, sin pisar la asignación a sucursal
-        // que el usuario ya haya hecho.
-        for (const pv of utilizables) {
+        // Se guardan TODOS los que ARCA reconoce y están vivos, no sólo los
+        // utilizables. Un punto de venta de contingencia tiene que quedar
+        // registrado con su tipo: es la única forma de que el panel pueda decir
+        // "el que tenés no sirve, y por esto", en vez de "no tenés ninguno" —
+        // que manda al usuario a dar de alta algo que ya dio de alta.
+        const vivos = pvs.filter((p) => !p.bloqueado && !p.fechaBaja)
+        const ahora = new Date().toISOString()
+        // Los fallos al guardar se ACUMULAN y se devuelven. Antes iban a
+        // `console.error` y nada más, y eso cerraba el camino de reparación: el
+        // usuario daba de alta en ARCA el punto de venta bueno, apretaba "Probar
+        // conexión", el INSERT chocaba contra un índice único, y la pantalla
+        // quedaba idéntica sin decir una palabra.
+        const noGuardados: number[] = []
+        for (const pv of vivos) {
             const { data: yaEsta } = await supabase
                 .from('arca_sales_points')
                 .select('id')
                 .eq('taxpayer_id', t.id)
                 .eq('numero', pv.numero)
                 .maybeSingle()
-            if (!yaEsta) {
+            if (yaEsta) {
+                // Actualizar y no sólo insertar: el tipo de emisión cambia en
+                // ARCA (es justamente lo que el usuario va a ir a arreglar), y
+                // sin este UPDATE la fila vieja seguiría diciendo "contingencia"
+                // para siempre. No se toca `branch_id` ni `is_active`: son del
+                // usuario.
+                const { error } = await supabase
+                    .from('arca_sales_points')
+                    .update({
+                        emision_tipo: pv.emisionTipo || null,
+                        descripcion: pv.emisionTipo || null,
+                        verificado_at: ahora,
+                    })
+                    .eq('id', yaEsta.id)
+                if (error) {
+                    console.error('[verificarConexionArca] update PV', pv.numero, error.message)
+                    noGuardados.push(pv.numero)
+                }
+            } else {
                 const { error } = await supabase.from('arca_sales_points').insert({
                     taxpayer_id: t.id,
                     organization_id: orgId,
                     numero: pv.numero,
+                    emision_tipo: pv.emisionTipo || null,
                     descripcion: pv.emisionTipo || null,
+                    verificado_at: ahora,
                     branch_id: null,
                     is_active: true,
                 })
-                if (error) console.error('[verificarConexionArca] alta PV', error.message)
+                if (error) {
+                    console.error('[verificarConexionArca] alta PV', pv.numero, error.message)
+                    noGuardados.push(pv.numero)
+                }
             }
         }
 
-        const diagnostico = diagnosticoPuntosVenta(pvs.length, utilizables.length)
-        const ok = utilizables.length > 0
+        let diagnostico = diagnosticoPuntosVenta(pvs)
+        if (noGuardados.length) {
+            diagnostico = {
+                titulo: 'ARCA contestó bien pero no pudimos guardar todo',
+                detalle:
+                    `El punto de venta ${noGuardados
+                        .map((n) => `N° ${String(n).padStart(5, '0')}`)
+                        .join(', ')} existe en ARCA y no lo pudimos registrar acá.`,
+                accion: 'Volvé a probar la conexión. Si sigue igual, avisá: es un problema nuestro, no tuyo.',
+                culpa: 'sistema',
+                reintentable: true,
+                codigo: 'pv_no_guardado',
+            }
+        }
+        const ok = utilizables.length > 0 && noGuardados.length === 0
         await guardarResultado(ok, ok ? null : diagnostico?.titulo ?? 'Sin puntos de venta')
 
         revalidatePath('/dashboard/facturacion')
@@ -801,7 +856,14 @@ export async function verificarConexionArca(taxpayerId?: string): Promise<
             ok: true,
             data: {
                 servidores,
-                puntosVenta: pvs.map((p) => ({ numero: p.numero, utilizable: p.utilizable, emisionTipo: p.emisionTipo })),
+                puntosVenta: pvs.map((p) => ({
+                    numero: p.numero,
+                    utilizable: p.utilizable,
+                    emisionTipo: p.emisionTipo,
+                    sirveParaCae: p.sirveParaCae,
+                    bloqueado: p.bloqueado,
+                    dadoDeBaja: !!p.fechaBaja,
+                })),
                 diagnostico,
                 ok,
             },

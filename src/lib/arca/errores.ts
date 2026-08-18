@@ -291,13 +291,58 @@ export function traducirErrorArca(
 }
 
 /**
+ * El mensaje del punto de venta de CONTINGENCIA (CAEA).
+ *
+ * Se usa en dos lugares y tiene que decir exactamente lo mismo en los dos: en
+ * el wizard (cuando ARCA devuelve sólo puntos CAEA) y en la emisión (cuando ya
+ * hay uno guardado y el motor se niega a usarlo). Que sea una sola función es
+ * lo que garantiza que el dueño no lea dos explicaciones distintas del mismo
+ * problema según por dónde entró.
+ */
+export function errorPuntoVentaContingencia(
+    numeros: number[],
+    emisionTipo?: string | null,
+): ErrorTraducido {
+    const lista = numeros.length
+        ? numeros.map((n) => `N° ${String(n).padStart(5, '0')}`).join(', ')
+        : 'el punto de venta cargado'
+    return {
+        titulo: 'El punto de venta es de contingencia y no sirve para facturar',
+        detalle:
+            `ARCA tiene ${lista} dado de alta como ` +
+            `${emisionTipo?.trim() ? `"${emisionTipo.trim()}"` : 'CAEA (contingencia)'}. ` +
+            'Ese tipo sirve sólo para el régimen de contingencia, donde el código se pide por adelantado para ' +
+            'una quincena entera. Para facturar corte por corte hace falta uno de Web Services (CAE / RECE). ' +
+            'Es un cambio que sólo se puede hacer en ARCA: mientras siga así, cada comprobante va a salir ' +
+            'rechazado con el error 10005.',
+        accion:
+            'En ARCA: "Administración de puntos de venta y domicilios" → clic en el nombre → ' +
+            'A/B/M de puntos de venta → Agregar, y elegí el sistema de Web Services que corresponde a tu ' +
+            'condición fiscal (para monotributo aparece como "CAE - Monotributo"). Usá un número NUEVO, sin ' +
+            'ventas previas. Cuando lo tengas, volvé acá y apretá "Probar conexión".',
+        culpa: 'usuario',
+        reintentable: false,
+        codigo: 'punto_venta_contingencia',
+    }
+}
+
+/**
  * Interpreta el resultado de `FEParamGetPtosVenta` para el checklist del wizard.
  * Un array vacío NO es un error técnico: es el diagnóstico más frecuente y el
  * más fácil de arreglar.
+ *
+ * Recibe la lista y no dos contadores porque los tres casos se distinguen por
+ * el MOTIVO de que no sirvan, y el motivo está en cada punto de venta. Con
+ * `(cantidad, utilizables)` el caso más caro de todos —el punto de venta de
+ * contingencia— caía en el cajón de "bloqueados o dados de baja" y mandaba al
+ * usuario a revisar algo que estaba perfecto.
  */
-export function diagnosticoPuntosVenta(cantidad: number, utilizables: number): ErrorTraducido | null {
-    if (utilizables > 0) return null
-    if (cantidad === 0) {
+export function diagnosticoPuntosVenta(
+    puntos: { numero: number; emisionTipo: string; bloqueado: boolean; fechaBaja: string | null; sirveParaCae: boolean }[],
+): ErrorTraducido | null {
+    if (puntos.some((p) => !p.bloqueado && !p.fechaBaja && p.sirveParaCae)) return null
+
+    if (puntos.length === 0) {
         return {
             titulo: 'Todavía no hay ningún punto de venta',
             detalle: 'ARCA respondió bien, pero este CUIT no tiene puntos de venta dados de alta para Web Services.',
@@ -309,12 +354,68 @@ export function diagnosticoPuntosVenta(cantidad: number, utilizables: number): E
             codigo: 'sin_puntos_venta',
         }
     }
+
+    // Vivos pero de contingencia: el caso de Monaco. Se diagnostica antes que
+    // "bloqueados" porque es el único que se arregla dando de alta OTRO punto
+    // de venta en vez de desbloquear el que ya está.
+    const contingencia = puntos.filter((p) => !p.bloqueado && !p.fechaBaja && !p.sirveParaCae)
+    if (contingencia.length) {
+        return errorPuntoVentaContingencia(
+            contingencia.map((p) => p.numero),
+            contingencia[0]?.emisionTipo,
+        )
+    }
+
     return {
         titulo: 'Los puntos de venta están bloqueados o dados de baja',
-        detalle: `ARCA devolvió ${cantidad} punto(s) de venta, pero ninguno está en condiciones de emitir.`,
+        detalle: `ARCA devolvió ${puntos.length} punto(s) de venta, pero ninguno está en condiciones de emitir.`,
         accion: 'Revisalos en ARCA o dá de alta uno nuevo.',
         culpa: 'usuario',
         reintentable: true,
         codigo: 'puntos_venta_bloqueados',
     }
+}
+
+/**
+ * ¿Este error se va a repetir igual en la próxima venta del lote?
+ *
+ * La distinción es la que separa "seguir con las otras 34" de "cortar acá":
+ *
+ *   · Errores de la VENTA (ya facturada, importe en cero, sumas que no cierran)
+ *     son de esa venta: la siguiente puede salir perfecta.
+ *   · Errores de la CONFIGURACIÓN o del SERVICIO (certificado, autorización,
+ *     punto de venta, ARCA caída) no dependen de la venta: insistir 34 veces
+ *     produce 34 errores idénticos, 34 filas de basura en el historial y 68
+ *     llamadas al pedo a un servidor que ya dijo que no.
+ *
+ * El caso que lo hizo evidente: un punto de venta de contingencia devolvía
+ * 10005 en cada intento y el motor seguía martillando.
+ */
+export function errorCortaElLote(codigo: string | null | undefined): boolean {
+    if (!codigo) return false
+    const c = String(codigo)
+
+    // Códigos propios del motor.
+    if (
+        [
+            'sin_punto_venta',
+            'punto_venta_contingencia',
+            'sin_contribuyente',
+            'reserva',
+            'timeout',
+            'red',
+        ].includes(c)
+    ) {
+        return true
+    }
+
+    // Todo lo de WSAA es del certificado o de la autorización: nunca de la venta.
+    if (/^(coe|cms|xml|wsn|wsaa)\./.test(c)) return true
+
+    // WSFEv1: servicio caído, autorización, y los rechazos de configuración.
+    const n = Number(c)
+    if (Number.isFinite(n)) {
+        return [500, 501, 502, 600, 601, 602, 10005, 11002, 10016].includes(n)
+    }
+    return false
 }

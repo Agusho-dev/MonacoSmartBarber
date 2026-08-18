@@ -266,7 +266,8 @@ function leer(f: FilaPanel): Lectura {
     const incompleto =
         f.estado === 'sin_monotributo' ||
         f.estado === 'sin_certificado' ||
-        f.estado === 'sin_punto_venta'
+        f.estado === 'sin_punto_venta' ||
+        f.estado === 'pv_contingencia'
 
     const cupo = f.cupo
     const modo: ModoCupo = cupo?.modo ?? 'manual'
@@ -329,6 +330,14 @@ const ESTADOS: Record<
         clase: 'border-border bg-muted text-muted-foreground',
         accion: 'Seguir configurando',
     },
+    // Ámbar y no gris: no es "todavía no lo configuró", es "está configurado
+    // mal y no lo sabe". Un barbero así figuraba "Listo" y no podía emitir un
+    // solo comprobante.
+    pv_contingencia: {
+        etiqueta: 'Punto de venta de contingencia',
+        clase: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
+        accion: 'Cómo arreglarlo',
+    },
     error: {
         etiqueta: 'Con problema',
         clase: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400',
@@ -376,6 +385,7 @@ function peso(fila: FilaPanel, l: Lectura): number {
     if (l.excedido) return 0                      // ya se pasó del tope
     if (fila.estado === 'error') return 1         // la conexión con ARCA falla
     if (l.nivel === 'riesgo') return 2            // está por pasarse
+    if (fila.estado === 'pv_contingencia') return 3
     if (fila.estado === 'sin_punto_venta') return 3
     if (fila.estado === 'sin_certificado') return 4
     if (fila.estado === 'sin_monotributo') return 5
@@ -978,6 +988,22 @@ function FichaBarbero({
 }) {
     const [pendiente, iniciar] = useTransition()
     const [confirmando, setConfirmando] = useState(false)
+    /**
+     * El motivo del último intento fallido, con las instrucciones de ARCA.
+     *
+     * Vive en la pantalla y no en un toast a propósito: el caso que motivó esto
+     * fue un punto de venta de contingencia. El toast decía "2 fallaron, revisá
+     * el detalle en Comprobantes", desaparecía, y en Comprobantes lo único que
+     * había era el texto crudo de ARCA en mayúsculas. Un error que exige un
+     * trámite en otro sitio web tiene que quedar leíble hasta que se resuelva.
+     */
+    const [falla, setFalla] = useState<{
+        titulo: string
+        detalle: string
+        accion?: string
+        culpa: 'usuario' | 'arca' | 'sistema'
+        codigo?: string
+    } | null>(null)
 
     // -- cupo ---------------------------------------------------------------
     const m = fila.cupo
@@ -1061,10 +1087,12 @@ function FichaBarbero({
     async function facturar() {
         if (!taxpayerId) return
         setConfirmando(false)
+        setFalla(null)
         iniciar(async () => {
             try {
                 const r = await facturarPendientesDe(taxpayerId)
                 if ('error' in r) {
+                    setFalla({ titulo: 'No pudimos emitir', detalle: r.error, culpa: 'sistema' })
                     toast.error(r.error)
                     return
                 }
@@ -1077,9 +1105,25 @@ function FichaBarbero({
                 } else if (fallidos > 0) {
                     // Un lote a medias NO es un éxito. Si se dice "listo" y tres
                     // cortes quedaron sin facturar, nadie los vuelve a mirar.
+                    //
+                    // Y el motivo se queda EN LA PANTALLA, no en un toast que se
+                    // va en cinco segundos. "2 fallaron, revisá el detalle en
+                    // Comprobantes" mandaba al dueño a otra pantalla a leer el
+                    // grito en mayúsculas de ARCA, sin una sola instrucción de
+                    // qué hacer. El motivo real ya viaja traducido en `fallidos`.
+                    const t = r.fallidos.find((f) => f.traducido)?.traducido
+                    setFalla(
+                        t
+                            ? { titulo: t.titulo, detalle: t.detalle, accion: t.accion, culpa: t.culpa, codigo: t.codigo }
+                            : {
+                                  titulo: 'ARCA rechazó los comprobantes',
+                                  detalle: r.fallidos[0]?.motivo ?? 'Sin detalle.',
+                                  culpa: 'arca',
+                              },
+                    )
                     toast.warning(
                         `${emitidos} ${emitidos === 1 ? 'comprobante emitido' : 'comprobantes emitidos'}, ` +
-                            `${fallidos} ${fallidos === 1 ? 'falló' : 'fallaron'}. Revisá el detalle en Comprobantes.`,
+                            `${fallidos} ${fallidos === 1 ? 'falló' : 'fallaron'}.`,
                     )
                 } else if (r.restantes && r.restantes > 0) {
                     // Una tanda se corta en 35 para no chocar contra el límite de
@@ -1097,13 +1141,24 @@ function FichaBarbero({
                 }
                 onRefrescar()
             } catch {
-                toast.error(
+                const msg =
                     'Se cortó la conexión mientras emitíamos. Actualizá antes de reintentar: ' +
-                        'puede que algunos comprobantes hayan salido.',
-                )
+                    'puede que algunos comprobantes hayan salido.'
+                setFalla({ titulo: 'Se cortó la emisión', detalle: msg, culpa: 'sistema' })
+                toast.error(msg)
             }
         })
     }
+
+    /**
+     * El cupo GUARDADO está apagado.
+     *
+     * Se mira `m.habilitada` (lo que hay en la base) y no el `habilitada` del
+     * formulario: la emisión corre contra la política guardada, así que prender
+     * el interruptor sin apretar "Guardar cupo" no habilita nada. Un barbero sin
+     * cupo cargado tampoco puede emitir por este botón.
+     */
+    const cupoApagado = !m || m.habilitada === false
 
     const sinFacturar = fila.sinFacturar
 
@@ -1301,10 +1356,19 @@ function FichaBarbero({
                                         : 'text-muted-foreground',
                                 )}
                             >
-                                A este ritmo cierra el año en {money(a.proyectadoAnual)}
-                                {lectura.proyectaExceso
-                                    ? `: se pasa por ${money(lectura.excesoProyectado)}.`
-                                    : ', dentro del tope.'}
+                                {/* Sin historia suficiente NO se inventa un cierre.
+                                    Antes esto imprimía "cierra el año en $0", que se
+                                    lee como una promesa de que no se pasa. */}
+                                {a.proyectadoAnual === null ? (
+                                    'Todavía lleva pocos días facturando: no alcanza para estimar el cierre del año.'
+                                ) : (
+                                    <>
+                                        A este ritmo cierra el año en {money(a.proyectadoAnual)}
+                                        {lectura.proyectaExceso
+                                            ? `: se pasa por ${money(lectura.excesoProyectado)}.`
+                                            : ', dentro del tope.'}
+                                    </>
+                                )}
                             </p>
 
                             <p className="mt-1 text-xs text-muted-foreground">
@@ -1653,7 +1717,20 @@ function FichaBarbero({
                             // el cupo ya cubierto hay ventas disponibles pero no
                             // entra ninguna, y un botón que se aprieta y no hace
                             // nada se lee como que el sistema está roto.
-                            disabled={pendiente || !taxpayerId || proyeccion.cantidad === 0 || !lectura.operativo}
+                            //
+                            // Y también por el cupo APAGADO, por el mismo motivo:
+                            // el botón se apretaba, el server contestaba "La
+                            // política está desactivada" y la pantalla seguía
+                            // mostrando "13 comprobantes" listos. Dos cosas
+                            // contradictorias en la misma pantalla, ninguna de las
+                            // dos accionable.
+                            disabled={
+                                pendiente ||
+                                !taxpayerId ||
+                                proyeccion.cantidad === 0 ||
+                                !lectura.operativo ||
+                                cupoApagado
+                            }
                         >
                             {pendiente ? <Loader2 className="size-4 animate-spin" /> : <Receipt className="size-4" />}
                             {proyeccion.cantidad > 0
@@ -1662,7 +1739,18 @@ function FichaBarbero({
                         </Button>
                     )}
 
-                    {puedeEmitir && (
+                    {puedeEmitir && cupoApagado && (
+                        <div className="mt-2 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+                            <p className="font-semibold text-foreground">El cupo está apagado</p>
+                            <p className="mt-1">
+                                {habilitada
+                                    ? 'Lo prendiste pero todavía no lo guardaste. Apretá "Guardar cupo" y después vas a poder emitir.'
+                                    : `Con el cupo apagado no se le puede emitir nada a ${fila.nombre}, ni a mano. Prendé "Cupo activo" acá arriba y guardá.`}
+                            </p>
+                        </div>
+                    )}
+
+                    {puedeEmitir && !cupoApagado && (
                         // La garantía, escrita donde importa: al lado del botón.
                         // Un comprobante fiscal no se borra, así que saber que
                         // nada sale sin que vos lo pidas es la mitad de la
@@ -1676,6 +1764,34 @@ function FichaBarbero({
                         <p className="mt-2 text-xs text-muted-foreground">
                             Para emitir hay que terminar de configurarlo: {fila.detalleEstado}
                         </p>
+                    )}
+
+                    {/* El motivo del último intento fallido, con el trámite que
+                        haya que hacer en ARCA. Queda visible hasta que se
+                        resuelva o se cierre la hoja. */}
+                    {falla && (
+                        <div
+                            className={cn(
+                                'mt-3 rounded-lg border p-3 text-xs',
+                                falla.culpa === 'usuario'
+                                    ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                                    : 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400',
+                            )}
+                        >
+                            <div className="flex items-start gap-2">
+                                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                                <div className="min-w-0">
+                                    <p className="font-semibold">{falla.titulo}</p>
+                                    <p className="mt-1 leading-relaxed">{falla.detalle}</p>
+                                    {falla.accion && (
+                                        <p className="mt-1.5 leading-relaxed font-medium">{falla.accion}</p>
+                                    )}
+                                    {falla.codigo && (
+                                        <p className="mt-1.5 opacity-70">Código de ARCA: {falla.codigo}</p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
                     )}
                 </section>
             </div>

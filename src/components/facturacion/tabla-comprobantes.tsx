@@ -31,6 +31,7 @@ import {
     Ban,
 } from 'lucide-react'
 
+import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -331,13 +332,27 @@ export function TablaComprobantes({
                 toast.error(res.error)
                 return
             }
-            if (res.revisados === 0) {
+            // `sinVerificar` son los que NO se pudieron consultar (el monotributo
+            // con el que se emitieron ya no está, o ARCA no contestó). Se dicen
+            // aparte porque siguen trabados: callarlos daría la impresión de que
+            // la pantalla quedó limpia.
+            const trabados =
+                res.sinVerificar > 0
+                    ? ` Quedaron ${res.sinVerificar} sin poder verificar: los dejamos como estaban, ` +
+                      'porque liberarlos sin saber qué contestó ARCA puede duplicar un comprobante.'
+                    : ''
+            if (res.revisados === 0 && res.sinVerificar === 0) {
                 toast.success('No quedó ningún comprobante en duda.')
+            } else if (res.revisados === 0) {
+                toast.warning(`No pudimos verificar ${res.sinVerificar} comprobante${res.sinVerificar === 1 ? '' : 's'}`, {
+                    description: trabados.trim(),
+                })
             } else {
                 toast.success(`Revisamos ${res.revisados} comprobante${res.revisados === 1 ? '' : 's'}`, {
                     description:
                         `${res.confirmados} estaba${res.confirmados === 1 ? '' : 'n'} emitido${res.confirmados === 1 ? '' : 's'} en ARCA y ya tiene${res.confirmados === 1 ? '' : 'n'} su CAE. ` +
-                        `${res.liberados} no llegó a emitirse: ese número queda libre para el próximo comprobante.`,
+                        `${res.liberados} no llegó a emitirse: ese número queda libre para el próximo comprobante.` +
+                        trabados,
                 })
             }
             onRefrescar()
@@ -633,9 +648,12 @@ export function TablaComprobantes({
                                                                 <p className="text-xs text-muted-foreground">
                                                                     {fila.nombreTipo}
                                                                 </p>
-                                                                {conProblema && fila.error && (
+                                                                {/* El título traducido, no el grito de ARCA en
+                                                                    mayúsculas. El detalle y el trámite van en la
+                                                                    hoja de detalle, que es donde hay lugar. */}
+                                                                {conProblema && (fila.errorTraducido || fila.error) && (
                                                                     <p className="mt-0.5 max-w-[22rem] text-xs text-amber-600 dark:text-amber-400">
-                                                                        {fila.error}
+                                                                        {fila.errorTraducido?.titulo ?? fila.error}
                                                                     </p>
                                                                 )}
                                                             </div>
@@ -717,6 +735,41 @@ export function TablaComprobantes({
                                 detalle={errorDetalle}
                                 onReintentar={filaActiva ? () => abrirDetalle(filaActiva) : undefined}
                             />
+                        )}
+
+                        {/* POR QUÉ FALLÓ, con el trámite que haya que hacer.
+                            Esta hoja es a donde manda el toast de la emisión
+                            ("revisá el detalle en Comprobantes") y hasta ahora lo
+                            único que había era el texto crudo de ARCA en la fila
+                            de la tabla. */}
+                        {!cargandoDetalle && filaActiva?.errorTraducido && (
+                            <div
+                                className={cn(
+                                    'mb-4 rounded-lg border p-3 text-sm',
+                                    filaActiva.errorTraducido.culpa === 'usuario'
+                                        ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                                        : 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400',
+                                )}
+                                data-print-oculto
+                            >
+                                <p className="font-semibold">{filaActiva.errorTraducido.titulo}</p>
+                                <p className="mt-1 text-xs leading-relaxed">{filaActiva.errorTraducido.detalle}</p>
+                                {filaActiva.errorTraducido.accion && (
+                                    <p className="mt-1.5 text-xs font-medium leading-relaxed">
+                                        {filaActiva.errorTraducido.accion}
+                                    </p>
+                                )}
+                                {filaActiva.error && (
+                                    <details className="mt-2">
+                                        <summary className="cursor-pointer text-xs opacity-70">
+                                            Lo que contestó ARCA
+                                        </summary>
+                                        <p className="mt-1 font-mono text-[11px] leading-relaxed break-words opacity-80">
+                                            {filaActiva.error}
+                                        </p>
+                                    </details>
+                                )}
+                            </div>
                         )}
 
                         {!cargandoDetalle && detalle && (

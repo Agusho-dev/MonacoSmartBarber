@@ -33,7 +33,12 @@ import {
     sumasCierran,
 } from '@/lib/arca/comprobante'
 import { urlQrArca, numeroFormateado, aFechaConGuiones } from '@/lib/arca/qr'
-import { traducirErrorArca, type ErrorTraducido } from '@/lib/arca/errores'
+import {
+    errorCortaElLote,
+    errorPuntoVentaContingencia,
+    traducirErrorArca,
+    type ErrorTraducido,
+} from '@/lib/arca/errores'
 import {
     planificarFacturacion,
     type CandidatoVenta,
@@ -68,10 +73,24 @@ export interface ComprobanteEmitido {
 
 export interface ResultadoLote {
     emitidos: ComprobanteEmitido[]
-    fallidos: { visitId: string; motivo: string; codigo: string | null }[]
+    /**
+     * `traducido` viaja con cada falla A PROPÓSITO. Sin él, la pantalla sólo
+     * podía decir "2 fallaron, revisá el detalle en Comprobantes" y el motivo
+     * real —"el punto de venta es de contingencia, hay que dar de alta otro en
+     * ARCA"— quedaba enterrado en `arca_invoices.last_error`. Un error que el
+     * dueño no puede leer donde lo produjo es un error que nadie arregla.
+     */
+    fallidos: { visitId: string; motivo: string; codigo: string | null; traducido?: ErrorTraducido }[]
     total: number
     /** Cuántas quedaron sin emitir por el tope de la corrida. 0 = se hizo todo. */
     restantes?: number
+    /**
+     * true si el lote se abandonó porque el error no era de esa venta sino de la
+     * configuración o del servicio, y repetirlo 34 veces habría dado 34 errores
+     * idénticos. Lo usa la UI para no decir "faltan N" como si fuera cuestión de
+     * volver a apretar el botón.
+     */
+    cortado?: boolean
 }
 
 /**
@@ -256,13 +275,26 @@ export async function emitirUno(
 ): Promise<ResultadoEmision> {
     const supabase = createAdminClient()
 
-    const pv = await puntoVentaDe(t.id, d.branchId)
-    if (!pv) {
+    // El punto de venta es del CUIT. Si el que tiene no sirve para pedir CAE,
+    // ARCA va a rechazar el comprobante con 10005 SIEMPRE: mejor no gastar el
+    // viaje y devolver el motivo real, con las instrucciones de ARCA adentro.
+    const resPv = await puntoVentaDe(t.id, d.branchId)
+    if (!resPv.ok) {
+        if (resPv.motivo === 'contingencia') {
+            const traducido = errorPuntoVentaContingencia(
+                resPv.puntos.map((p) => p.numero),
+                resPv.puntos[0]?.emisionTipo,
+            )
+            return { error: traducido.titulo, codigo: 'punto_venta_contingencia', traducido }
+        }
         return {
-            error: 'Esta sucursal no tiene punto de venta asignado. Asignáselo en la configuración del facturador.',
+            error:
+                `${t.razon_social ?? 'Este CUIT'} no tiene punto de venta cargado. ` +
+                'Probá la conexión con ARCA en la configuración del facturador para traerlos.',
             codigo: 'sin_punto_venta',
         }
     }
+    const pv = resPv.pv
 
     const centavos = Math.round(d.totalPesos * 100)
     if (centavos <= 0) return { error: 'El importe tiene que ser mayor a cero.', codigo: 'importe_invalido' }
@@ -421,7 +453,7 @@ export async function emitirUno(
             // Rechazado.
             const principal = res.errores[0] ?? res.observaciones[0] ?? null
             const traducido = traducirErrorArca(principal?.code ?? null, principal?.msg ?? null)
-            await marcar(invoiceId, 'rechazada', {
+            const marcado = await marcar(invoiceId, 'rechazada', {
                 resultado: 'R',
                 errores: res.errores.length ? res.errores : null,
                 observaciones: res.observaciones.length ? res.observaciones : null,
@@ -429,6 +461,19 @@ export async function emitirUno(
                 last_error: principal ? `${principal.code}: ${principal.msg}` : 'Rechazado por ARCA',
                 attempt_count: vuelta + 1,
             })
+            // Si el rechazo NO se pudo guardar, la fila sigue en `reservado` con
+            // un número que ARCA no autorizó, y eso traba la numeración del punto
+            // de venta entero. Se corta el lote y se dice, en vez de seguir
+            // pidiendo números sobre una base inconsistente.
+            if (!marcado) {
+                return {
+                    error:
+                        'ARCA rechazó el comprobante y además no pudimos registrar el rechazo. ' +
+                        'No emitas más hasta revisarlo: el número quedó reservado y puede trabar la numeración.',
+                    codigo: 'reserva',
+                    traducido,
+                }
+            }
 
             // 10016 = numeración desincronizada. Vale una segunda vuelta: la
             // fila quedó en 'rechazada', o sea que el número volvió a estar libre.
@@ -453,6 +498,7 @@ export async function emitirUno(
             // Liberar el número acá es lo que produciría una doble facturación.
             const resuelto = await resolverEnDuda(
                 ctx, invoiceId, pv.numero, armado.cbteTipo, numero, t.cuit, hoyLocal, false,
+                armado.detalle.impTotal,
             )
             if (resuelto) return resuelto
 
@@ -469,13 +515,32 @@ export async function emitirUno(
     return ultimoError ?? { error: 'No se pudo emitir el comprobante.', codigo: 'desconocido' }
 }
 
-export async function marcar(invoiceId: string, status: string, extra: Record<string, unknown> = {}) {
+/**
+ * Cambia el estado de un comprobante.
+ *
+ * Devuelve si el update entró, y el que llama TIENE que mirarlo cuando el estado
+ * nuevo libera el número (`rechazada`, `anulada`). Si esa transición no se
+ * guarda, la fila se queda en `reservado` con un número que ARCA nunca autorizó:
+ * el sistema va a pedir el N+1 para siempre, ARCA va a esperar el N, y todo el
+ * punto de venta queda rechazando con 10016 sin ninguna pantalla desde donde
+ * destrabarlo. Antes esto era un `console.error` y nada más — el patrón del
+ * Known Risk #13, bugs invisibles de años.
+ */
+export async function marcar(
+    invoiceId: string,
+    status: string,
+    extra: Record<string, unknown> = {},
+): Promise<boolean> {
     const supabase = createAdminClient()
     const { error } = await supabase
         .from('arca_invoices')
         .update({ status, ...extra })
         .eq('id', invoiceId)
-    if (error) console.error('[marcar]', invoiceId, status, error.message)
+    if (error) {
+        console.error('[marcar]', invoiceId, status, error.message)
+        return false
+    }
+    return true
 }
 
 /**
@@ -504,19 +569,50 @@ export async function resolverEnDuda(
     cuit: string,
     fechaLocal: string,
     liberarSiNoExiste: boolean,
+    /**
+     * Importe que la fila local dice tener, en pesos. Si viene y no coincide con
+     * el que devuelve ARCA, no se estampa nada.
+     *
+     * Es la última red contra pegarle a esta fila el CAE de OTRO comprobante:
+     * dos CUIT distintos numeran ambos desde 1 y emiten el mismo tipo, así que
+     * "punto de venta 2, Factura C, número 7" existe en los dos. Un CAE ajeno
+     * pegado acá deja la venta contada como facturada y un QR que el validador
+     * de ARCA rechaza — y eso no se descubre hasta que alguien escanea el papel.
+     */
+    impTotalEsperado?: number | null,
 ): Promise<ResultadoEmision | null> {
     try {
         const c = await feCompConsultar(ctx, ptoVta, cbteTipo, cbteNro)
         if (!c.existe || !c.cae) {
             if (liberarSiNoExiste) {
-                await marcar(invoiceId, 'rechazada', {
+                const liberado = await marcar(invoiceId, 'rechazada', {
                     last_error: 'ARCA no registró el comprobante; número liberado.',
                 })
+                if (!liberado) console.error('[resolverEnDuda] no se pudo liberar', invoiceId)
             }
             return null
         }
 
         const total = c.impTotal ?? 0
+
+        if (
+            impTotalEsperado !== null &&
+            impTotalEsperado !== undefined &&
+            Math.round(total * 100) !== Math.round(impTotalEsperado * 100)
+        ) {
+            console.error(
+                '[resolverEnDuda] el comprobante de ARCA no es el nuestro',
+                invoiceId,
+                'ARCA:', total,
+                'local:', impTotalEsperado,
+            )
+            await marcar(invoiceId, 'en_duda', {
+                last_error:
+                    `ARCA tiene el ${ptoVta}-${cbteNro} por $${total} y el nuestro es por ` +
+                    `$${impTotalEsperado}. No lo tocamos: hay que revisarlo a mano.`,
+            })
+            return null
+        }
         const qrUrl = urlQrArca({
             fecha: c.cbteFch ? aFechaConGuiones(c.cbteFch) : fechaLocal,
             cuit,
@@ -669,6 +765,18 @@ export async function correrPolitica(
     let branchFiltro: string[] | null = null
 
     if (origen === 'propios') {
+        // Sin `staff_id` no hay "propios" que filtrar, y `leerCandidatos` con
+        // `p_staff_id = null` NO filtra nada: le facturaría a este CUIT los
+        // cortes de TODA la organización, que es exactamente lo contrario de lo
+        // que pidió el dueño al elegir "sólo los suyos". Se corta acá.
+        if (!contribuyente.staff_id) {
+            return {
+                error:
+                    `El monotributo de ${contribuyente.razon_social ?? 'este CUIT'} no está vinculado a ningún ` +
+                    'barbero, así que no podemos saber cuáles son "sus" cortes. Vinculalo, o cambiá el origen ' +
+                    'del cupo a "los de su sucursal" o "los de todo el negocio".',
+            }
+        }
         staffFiltro = contribuyente.staff_id
     } else if (origen === 'sucursal') {
         // La sucursal es la del barbero titular, no la de la política: el cupo
@@ -678,18 +786,43 @@ export async function correrPolitica(
             .select('branch_id')
             .eq('id', contribuyente.staff_id ?? '')
             .maybeSingle()
-        if (st?.branch_id) branchFiltro = [st.branch_id]
+        // Y si no se pudo resolver, se corta por el mismo motivo que arriba:
+        // `branchFiltro = null` significa "todas las sucursales", así que
+        // degradar en silencio convertiría un cupo de sucursal en uno org-wide.
+        if (!st?.branch_id) {
+            return {
+                error:
+                    `No pudimos determinar la sucursal de ${contribuyente.razon_social ?? 'este CUIT'}. ` +
+                    'Asignale una sucursal al barbero, o cambiá el origen del cupo a "los de todo el negocio".',
+            }
+        }
+        branchFiltro = [st.branch_id]
+    }
+
+    // El alcance del usuario entra en la PLANIFICACIÓN, no después.
+    //
+    // Un usuario con alcance limitado no puede disparar la emisión de las
+    // sucursales que no ve, ni siquiera a través de una política org-wide. Pero
+    // recortar el plan YA ARMADO deja el cupo corto sin decirlo: se planifican
+    // 52 comprobantes sobre toda la organización, se filtran los de las otras
+    // sucursales y salen 9, con el cupo de la semana igual de vacío y ningún
+    // aviso. Filtrando antes, el plan se llena con lo que sí se puede emitir.
+    let alcance = branchFiltro
+    if (opciones.branchIdsPermitidos) {
+        alcance = alcance
+            ? alcance.filter((b) => opciones.branchIdsPermitidos!.includes(b))
+            : opciones.branchIdsPermitidos
     }
 
     const candidatos = await leerCandidatos(
-        orgId, politica, 300, contribuyente.environment, staffFiltro, branchFiltro,
+        orgId, politica, 300, contribuyente.environment, staffFiltro, alcance,
     )
     if ('error' in candidatos) return { error: candidatos.error }
 
     const plan = planificarFacturacion(candidatos, cupo, aPoliticaCupo(politica))
 
-    // Un usuario con alcance limitado no puede disparar la emisión de las
-    // sucursales que no ve, ni siquiera a través de una política org-wide.
+    // Red de contención: que el filtro de arriba no exista es un bug, no una
+    // opción. Si alguna vez se cae, esto evita emitir fuera de alcance.
     if (opciones.branchIdsPermitidos) {
         const permitidas = new Set(opciones.branchIdsPermitidos)
         plan.seleccionados = plan.seleccionados.filter((c) => permitidas.has(c.branchId))
@@ -736,10 +869,19 @@ export async function correrPolitica(
         if ('ok' in res) {
             emitidos.push(res.data)
         } else {
-            fallidos.push({ visitId: c.visitId, motivo: res.error, codigo: res.codigo })
-            // Si ARCA dejó de aceptar (certificado, autorización, servicio
-            // caído), seguir con los otros 40 sólo genera 40 errores iguales.
-            if (['600', '601', 'sin_punto_venta', 'timeout', '500', '501', '502'].includes(res.codigo ?? '')) {
+            fallidos.push({
+                visitId: c.visitId,
+                motivo: res.error,
+                codigo: res.codigo,
+                traducido: res.traducido,
+            })
+            // Si el error es de la configuración o del servicio y no de esta
+            // venta, seguir con las otras 34 sólo genera 34 errores idénticos,
+            // 34 filas de basura en el historial y 68 llamadas al pedo a un
+            // servidor que ya dijo que no. La lista de códigos vivía acá y no
+            // incluía 10005: un punto de venta de contingencia hacía que el
+            // motor martillara ARCA hasta agotar el lote.
+            if (errorCortaElLote(res.codigo)) {
                 cortado = true
                 break
             }
@@ -761,6 +903,9 @@ export async function correrPolitica(
         emitidos,
         fallidos,
         total: emitidos.reduce((a, e) => a + e.total, 0),
-        restantes,
+        // Si el lote se abandonó, lo que "queda" no se arregla apretando otra
+        // vez: hay que resolver el motivo primero.
+        restantes: cortado ? 0 : restantes,
+        cortado,
     }
 }

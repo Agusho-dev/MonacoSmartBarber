@@ -60,13 +60,31 @@ export function cuitEsValido(cuit: string): boolean {
 }
 
 /** El contribuyente activo de la org: producción si existe, si no homologación. */
+/**
+ * "El" contribuyente de una organización.
+ *
+ * OJO: en el modelo por barbero esto es un concepto BORROSO — hay un monotributo
+ * por persona y elegir "alguno" nunca es lo correcto para emitir. Para eso están
+ * `contribuyenteDeBarbero` (por quién hizo el corte) y `cargarContribuyentePorId`
+ * (por el que dice la política o el comprobante). Usar esta función para emitir
+ * fue el origen de tres bugs fiscales: notas de crédito con el CUIT de otro
+ * barbero, lotes enteros facturados a nombre de quien no cortó, y consultas de
+ * reconciliación contra el CUIT equivocado.
+ *
+ * Queda para los usos donde cualquier contribuyente sirve (saber el ambiente de
+ * la organización, saber si hay algo configurado). Ahora al menos filtra por
+ * activo y ordena determinísticamente: antes podía devolver un monotributo dado
+ * de baja, y con varias filas de producción el `.order('environment')` no
+ * desempataba nada.
+ */
 export async function cargarContribuyente(orgId: string): Promise<FilaContribuyente | null> {
     const supabase = createAdminClient()
     const { data, error } = await supabase
         .from('arca_taxpayers')
         .select('*')
         .eq('organization_id', orgId)
-        .order('environment', { ascending: true })
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
     if (error) {
         console.error('[cargarContribuyente]', error.message)
         return null
@@ -258,27 +276,104 @@ export async function staffIdActual(): Promise<string | null> {
     }
 }
 
+export interface PuntoVentaElegido {
+    id: string
+    numero: number
+    emisionTipo: string | null
+    sirveParaCae: boolean
+}
+
+export type ResolucionPuntoVenta =
+    | { ok: true; pv: PuntoVentaElegido }
+    /** No hay ninguno cargado para ese CUIT (o falló la lectura). */
+    | { ok: false; motivo: 'ninguno' }
+    /** Hay, pero todos son de contingencia (CAEA): ARCA los rechaza con 10005. */
+    | { ok: false; motivo: 'contingencia'; puntos: PuntoVentaElegido[] }
+
 /**
- * Punto de venta que le toca a una sucursal: el suyo si tiene, y si no el
- * comodín de la organización.
+ * Punto de venta con el que se emite una venta de ese CUIT.
+ *
+ * EL PUNTO DE VENTA ES DEL CUIT, NO DE LA SUCURSAL. Eso importa porque los
+ * cupos con `origen = 'sucursal' | 'organizacion'` facturan cortes de sucursales
+ * donde el titular no trabaja: es literalmente para qué existen ("Tony factura
+ * con su monotributo aunque no corte"). Con la resolución vieja —sucursal propia
+ * o comodín, y si no, nada— la primera venta de otra sucursal devolvía
+ * `sin_punto_venta`, que corta el lote entero. Un cupo org-wide emitía hasta
+ * topar con un corte de otro local y ahí se plantaba, siempre.
+ *
+ * Prioridad: el de la sucursal que cobró → el comodín → el único que tenga →
+ * el de número más bajo. Los dos últimos son la red: elegir uno determinístico
+ * es mucho mejor que abortar, porque cualquier punto de venta del CUIT puede
+ * facturar cualquier venta del CUIT. Lo único que cambia es en qué serie de
+ * numeración cae, y para eso está la asignación por sucursal.
+ *
+ * `sirve_para_cae = false` NO se filtra en la query a propósito: hay que poder
+ * distinguir "no tiene punto de venta" de "tiene uno pero es de contingencia",
+ * que son dos problemas con dos soluciones distintas en ARCA.
  */
 export async function puntoVentaDe(
     taxpayerId: string,
     branchId: string | null,
-): Promise<{ id: string; numero: number } | null> {
+): Promise<ResolucionPuntoVenta> {
     const supabase = createAdminClient()
-    const { data, error } = await supabase
-        .from('arca_sales_points')
-        .select('id, numero, branch_id')
-        .eq('taxpayer_id', taxpayerId)
-        .eq('is_active', true)
+    const leer = (columnas: string) =>
+        supabase
+            .from('arca_sales_points')
+            .select(columnas)
+            .eq('taxpayer_id', taxpayerId)
+            .eq('is_active', true)
+            .order('numero', { ascending: true })
+
+    let { data, error } = await leer('id, numero, branch_id, emision_tipo, sirve_para_cae')
+
+    // Known Risk #23: una migración en el repo NO es una migración aplicada. Si
+    // las columnas de la 188 todavía no existen (42703), se lee la forma vieja en
+    // vez de dejar el facturador entero muerto con un mensaje equivocado ("no
+    // tiene punto de venta"). Se pierde la detección de contingencia acá —el
+    // rechazo 10005 de ARCA lo sigue explicando igual—, pero se emite.
+    if (error?.code === '42703') {
+        console.error('[puntoVentaDe] falta la migración 188: sin detección de punto de venta de contingencia')
+        const reintento = await leer('id, numero, branch_id')
+        data = reintento.data
+        error = reintento.error
+    }
+
     if (error) {
         console.error('[puntoVentaDe]', error.message)
-        return null
+        return { ok: false, motivo: 'ninguno' }
     }
-    const filas = (data ?? []) as { id: string; numero: number; branch_id: string | null }[]
-    const propio = branchId ? filas.find((f) => f.branch_id === branchId) : undefined
-    const comodin = filas.find((f) => f.branch_id === null)
-    const elegido = propio ?? comodin
-    return elegido ? { id: elegido.id, numero: elegido.numero } : null
+
+    const filas = ((data ?? []) as any[]).map((f) => ({
+        id: f.id as string,
+        numero: Number(f.numero),
+        branchId: (f.branch_id ?? null) as string | null,
+        emisionTipo: (f.emision_tipo ?? null) as string | null,
+        // `null` = fila vieja que nunca se revalidó contra ARCA. Se asume que
+        // sirve (falla abierta, igual que `sirveParaCae` en wsfe.ts): apagar un
+        // punto de venta que hoy factura bien sería el peor de los dos errores.
+        sirveParaCae: f.sirve_para_cae !== false,
+    }))
+
+    if (filas.length === 0) return { ok: false, motivo: 'ninguno' }
+
+    const utiles = filas.filter((f) => f.sirveParaCae)
+    if (utiles.length === 0) {
+        return { ok: false, motivo: 'contingencia', puntos: filas.map(sinSucursal) }
+    }
+
+    const elegido =
+        (branchId ? utiles.find((f) => f.branchId === branchId) : undefined) ??
+        utiles.find((f) => f.branchId === null) ??
+        utiles[0]
+
+    return { ok: true, pv: sinSucursal(elegido) }
+}
+
+function sinSucursal(f: {
+    id: string
+    numero: number
+    emisionTipo: string | null
+    sirveParaCae: boolean
+}): PuntoVentaElegido {
+    return { id: f.id, numero: f.numero, emisionTipo: f.emisionTipo, sirveParaCae: f.sirveParaCae }
 }

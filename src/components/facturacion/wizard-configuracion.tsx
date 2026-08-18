@@ -1285,13 +1285,28 @@ function PasoConexion({
                                     'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-semibold',
                                     pv.utilizable
                                         ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                                        : 'border-border bg-muted text-muted-foreground',
+                                        : !pv.sirveParaCae
+                                            ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                                            : 'border-border bg-muted text-muted-foreground',
                                 )}
+                                // El tipo crudo de ARCA, para que el usuario pueda
+                                // cotejarlo con lo que ve en su propia pantalla.
+                                title={pv.emisionTipo || undefined}
                             >
                                 {pv.utilizable ? <Check className="size-3.5" /> : <XCircle className="size-3.5" />}
                                 N° {String(pv.numero).padStart(5, '0')}
+                                {/* "No se puede usar" no alcanza: hay tres motivos
+                                    distintos y cada uno se arregla distinto. El de
+                                    contingencia es el que más confunde, porque el
+                                    punto de venta EXISTE y está habilitado. */}
                                 <span className="font-normal">
-                                    {pv.utilizable ? 'listo para facturar' : 'no se puede usar'}
+                                    {pv.utilizable
+                                        ? 'listo para facturar'
+                                        : !pv.sirveParaCae
+                                            ? 'es de contingencia (CAEA): no sirve'
+                                            : pv.bloqueado
+                                                ? 'bloqueado en ARCA'
+                                                : 'dado de baja'}
                                 </span>
                             </span>
                         ))}
@@ -1410,8 +1425,9 @@ function PasoPuntosVenta({
     return (
         <div className="space-y-4">
             <p className="text-sm leading-relaxed text-muted-foreground">
-                Cada sucursal factura con su propio punto de venta y lleva su propia numeración, así los comprobantes
-                nunca se pisan entre locales.
+                El punto de venta es del CUIT, no del local: con uno solo alcanza para facturar cualquier corte.
+                Dejalo en <strong>Todas las sucursales</strong> salvo que quieras que cada local lleve su propia
+                numeración, en cuyo caso hace falta un punto de venta por local.
             </p>
 
             <div className="overflow-x-auto rounded-lg border border-border">
@@ -1472,7 +1488,9 @@ function PasoPuntosVenta({
 
             <p className="text-xs leading-relaxed text-muted-foreground">
                 Si dejás un punto de venta en &quot;Todas las sucursales&quot;, se usa como comodín cuando la sucursal
-                que cobró no tiene uno propio.
+                que cobró no tiene uno propio. Y si asignás todos a sucursales puntuales, los cortes de las demás
+                usan el de número más bajo: preferimos facturar en la serie que no era antes que dejar el corte sin
+                comprobante.
             </p>
         </div>
     )

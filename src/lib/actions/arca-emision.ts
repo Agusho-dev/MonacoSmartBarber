@@ -29,14 +29,20 @@ import { LETRA_CBTE, NOMBRE_CBTE, notaCreditoPara } from '@/lib/arca/config'
 import { feCaeSolicitar, feCompUltimoAutorizado, ErrorWsfe } from '@/lib/arca/wsfe'
 import { armarComprobante, fechaLocalDeSucursal } from '@/lib/arca/comprobante'
 import { urlQrArca, numeroFormateado, aFechaConGuiones } from '@/lib/arca/qr'
-import { traducirErrorArca, type ErrorTraducido } from '@/lib/arca/errores'
+import { errorCortaElLote, traducirErrorArca, type ErrorTraducido } from '@/lib/arca/errores'
 import {
     planificarFacturacion,
     type CandidatoVenta,
     type EstadoCupo,
     type PoliticaCupo,
 } from '@/lib/arca/cupo'
-import { ambienteDeOrg, puntoVentaDe, staffIdActual } from '@/lib/arca/contexto'
+import {
+    ambienteDeOrg,
+    cargarContribuyentePorId,
+    contribuyenteDeBarbero,
+    staffIdActual,
+    type FilaContribuyente,
+} from '@/lib/arca/contexto'
 import {
     aPoliticaCupo,
     correrPolitica,
@@ -44,7 +50,7 @@ import {
     leerCandidatos,
     leerCupo,
     marcar,
-    prepararEmision,
+    prepararEmisionDe,
     resolverEnDuda,
     type ComprobanteEmitido,
     type FilaPolitica,
@@ -220,7 +226,7 @@ export async function emitirComprobanteDeVenta(
     const supabase = createAdminClient()
     const { data: visita, error } = await supabase
         .from('visits')
-        .select('id, branch_id, client_id, amount, tip_amount, completed_at, organization_id, branches(timezone)')
+        .select('id, branch_id, barber_id, client_id, amount, tip_amount, completed_at, organization_id, branches(timezone)')
         .eq('id', visitId)
         .eq('organization_id', orgId)
         .maybeSingle()
@@ -234,7 +240,18 @@ export async function emitirComprobanteDeVenta(
     const acceso = await validateBranchAccess(visita.branch_id)
     if (!acceso) return { error: 'No tenés acceso a esa sucursal.' }
 
-    const prep = await prepararEmision(orgId)
+    // CADA CORTE LO FACTURA EL CUIT DE QUIEN LO HIZO. Con `prepararEmision(orgId)`
+    // esto emitía con "algún" contribuyente de la organización —el primero que
+    // ordenara Postgres entre los cuatro de producción—, o sea a nombre de un
+    // barbero que no hizo el corte. Un comprobante fiscal con el CUIT equivocado
+    // no se corrige: se anula con nota de crédito y queda en los libros de los dos.
+    const titular = await contribuyenteDeBarbero(orgId, visita.barber_id)
+    if (!titular) {
+        return {
+            error: 'Esa venta no tiene un monotributo asociado: el barbero que la hizo todavía no lo tiene cargado.',
+        }
+    }
+    const prep = await prepararEmisionDe(titular)
     if ('error' in prep) return prep
 
     const tz = (visita as any).branches?.timezone ?? 'America/Argentina/Buenos_Aires'
@@ -270,13 +287,10 @@ export async function emitirLote(visitIds: string[]): Promise<ResultadoLote | { 
     const ids = Array.from(new Set(visitIds)).slice(0, 100)
     if (ids.length === 0) return { emitidos: [], fallidos: [], total: 0 }
 
-    const prep = await prepararEmision(orgId)
-    if ('error' in prep) return { error: prep.error }
-
     const supabase = createAdminClient()
     const { data: visitas, error } = await supabase
         .from('visits')
-        .select('id, branch_id, client_id, amount, completed_at, branches(timezone)')
+        .select('id, branch_id, barber_id, client_id, amount, completed_at, branches(timezone)')
         .in('id', ids)
         .eq('organization_id', orgId)
     if (error) {
@@ -289,11 +303,45 @@ export async function emitirLote(visitIds: string[]): Promise<ResultadoLote | { 
     const emitidos: ComprobanteEmitido[] = []
     const fallidos: ResultadoLote['fallidos'] = []
 
+    // Un contexto POR CONTRIBUYENTE, cacheado: cada CUIT tiene su propio
+    // certificado y por lo tanto su propio Ticket de Acceso. Antes el lote
+    // entero se emitía con `prepararEmision(orgId)`, o sea con "algún"
+    // contribuyente de la organización, y todos los comprobantes salían a
+    // nombre de un barbero que no hizo esos cortes.
+    const contextos = new Map<string, Awaited<ReturnType<typeof prepararEmisionDe>> | null>()
+    const contextoDe = async (t: FilaContribuyente) => {
+        const cacheado = contextos.get(t.id)
+        if (cacheado !== undefined) return cacheado
+        const prep = await prepararEmisionDe(t)
+        contextos.set(t.id, prep)
+        return prep
+    }
+
     // Secuencial a propósito: la numeración se serializa igual del lado de la
     // base, y en paralelo lo único que se gana es pelearse por el mismo lock.
+    let cortado = false
     for (const v of (visitas ?? []) as any[]) {
         if (!scoped.includes(v.branch_id)) {
             fallidos.push({ visitId: v.id, motivo: 'Sin acceso a esa sucursal', codigo: 'sin_acceso' })
+            continue
+        }
+        const titular = await contribuyenteDeBarbero(orgId, v.barber_id)
+        if (!titular) {
+            fallidos.push({
+                visitId: v.id,
+                motivo: 'El barbero que hizo ese corte todavía no tiene monotributo cargado.',
+                codigo: 'sin_contribuyente_barbero',
+            })
+            continue
+        }
+        const prep = await contextoDe(titular)
+        if (!prep || 'error' in prep) {
+            fallidos.push({
+                visitId: v.id,
+                motivo: prep && 'error' in prep ? prep.error : 'No pudimos preparar la emisión.',
+                codigo: 'contexto',
+                traducido: prep && 'error' in prep ? prep.traducido : undefined,
+            })
             continue
         }
         const tz = v.branches?.timezone ?? 'America/Argentina/Buenos_Aires'
@@ -311,11 +359,22 @@ export async function emitirLote(visitIds: string[]): Promise<ResultadoLote | { 
             staffId,
         })
         if ('ok' in res) emitidos.push(res.data)
-        else fallidos.push({ visitId: v.id, motivo: res.error, codigo: res.codigo })
+        else {
+            fallidos.push({ visitId: v.id, motivo: res.error, codigo: res.codigo, traducido: res.traducido })
+            // Mismo criterio que `correrPolitica`: un error de configuración o
+            // de servicio se va a repetir idéntico en las 99 ventas siguientes.
+            // OJO: acá el lote puede mezclar contribuyentes, y el error puede
+            // ser de UNO solo. Se corta igual —es el criterio conservador con
+            // plata y fisco— y la UI dice por qué.
+            if (errorCortaElLote(res.codigo)) {
+                cortado = true
+                break
+            }
+        }
     }
 
     revalidatePath('/dashboard/facturacion')
-    return { emitidos, fallidos, total: emitidos.reduce((a, e) => a + e.total, 0) }
+    return { emitidos, fallidos, total: emitidos.reduce((a, e) => a + e.total, 0), cortado }
 }
 
 /** Minutos que tiene que llevar un comprobante trabado antes de tocarlo. */
@@ -342,18 +401,25 @@ const MINUTOS_ANTES_DE_RECONCILIAR = 10
  * sería crear el problema que esta función viene a resolver.
  */
 export async function reconciliarEnDuda(): Promise<
-    { ok: true; revisados: number; confirmados: number; liberados: number } | { error: string }
+    | { ok: true; revisados: number; confirmados: number; liberados: number; sinVerificar: number }
+    | { error: string }
 > {
     const orgId = await getCurrentOrgId()
     if (!orgId) return { error: 'No autorizado.' }
-    if (!(await currentUserCan('arca.view'))) return { error: 'No tenés permiso.' }
+    // `arca.emit` y no `arca.view`: esta función MUTA estado fiscal — estampa
+    // CAEs y libera números de comprobante. Estaba gateada con el permiso de
+    // sólo lectura, así que alguien que sólo podía mirar el facturador podía
+    // cambiar el estado de comprobantes reales.
+    if (!(await currentUserCan('arca.emit'))) {
+        return { error: 'No tenés permiso para modificar comprobantes.' }
+    }
 
     const supabase = createAdminClient()
     const corte = new Date(Date.now() - MINUTOS_ANTES_DE_RECONCILIAR * 60_000).toISOString()
 
     const { data: trabados, error } = await supabase
         .from('arca_invoices')
-        .select('id, pto_vta, cbte_tipo, cbte_nro, fecha_cbte, status')
+        .select('id, taxpayer_id, pto_vta, cbte_tipo, cbte_nro, fecha_cbte, status, imp_total')
         .eq('organization_id', orgId)
         .in('status', ['en_duda', 'reservado'])
         .lt('created_at', corte)
@@ -364,32 +430,71 @@ export async function reconciliarEnDuda(): Promise<
         console.error('[reconciliarEnDuda]', error.message)
         return { error: 'No pudimos leer los comprobantes trabados.' }
     }
-    if (!trabados?.length) return { ok: true, revisados: 0, confirmados: 0, liberados: 0 }
+    if (!trabados?.length) return { ok: true, revisados: 0, confirmados: 0, liberados: 0, sinVerificar: 0 }
 
-    const prep = await prepararEmision(orgId)
-    if ('error' in prep) return { error: prep.error }
+    // A CADA COMPROBANTE SE LE PREGUNTA CON SU PROPIO CUIT.
+    //
+    // Esto era `prepararEmision(orgId)` una sola vez, o sea el CUIT de "algún"
+    // contribuyente de la organización, y se usaba para consultar los
+    // comprobantes de los cuatro. La consecuencia era la peor posible: se le
+    // preguntaba a ARCA por el comprobante N° 29 de Nico usando el CUIT de
+    // Stefano, ARCA contestaba que no existe —porque en ESE CUIT no existe— y
+    // con `liberarSiNoExiste = true` la fila se liberaba. La venta volvía al
+    // pozo de candidatas y salía un SEGUNDO comprobante por un corte que ARCA
+    // ya había autorizado: dos CAE vivos por la misma venta, que es exactamente
+    // el desastre que esta función existe para evitar.
+    const contextos = new Map<string, { ctx: Awaited<ReturnType<typeof prepararEmisionDe>>; cuit: string }>()
+    const contextoDe = async (taxpayerId: string | null) => {
+        if (!taxpayerId) return null
+        const cacheado = contextos.get(taxpayerId)
+        if (cacheado) return cacheado
+        const t = await cargarContribuyentePorId(orgId, taxpayerId)
+        if (!t) return null
+        const prep = await prepararEmisionDe(t)
+        const entrada = { ctx: prep, cuit: t.cuit }
+        contextos.set(taxpayerId, entrada)
+        return entrada
+    }
 
     let confirmados = 0
     let liberados = 0
+    let sinVerificar = 0
     for (const inv of trabados as any[]) {
+        const entrada = await contextoDe(inv.taxpayer_id)
+        // Sin contexto no se puede preguntar, y NO PREGUNTAR NO ES "NO EXISTE":
+        // la fila se queda trabada, que es el estado seguro. Liberarla a ciegas
+        // es lo que duplica comprobantes.
+        if (!entrada || 'error' in entrada.ctx) {
+            sinVerificar++
+            continue
+        }
         const resuelto = await resolverEnDuda(
-            prep.ctx,
+            entrada.ctx.ctx,
             inv.id,
             inv.pto_vta,
             inv.cbte_tipo,
             Number(inv.cbte_nro),
-            prep.t.cuit,
+            entrada.cuit,
             inv.fecha_cbte,
             // Acá sí se libera: pasaron más de 10 minutos, así que si ARCA no
             // lo tiene registrado es porque nunca lo autorizó.
             true,
+            // Y el importe se compara: dos CUIT numeran ambos desde 1, así que
+            // "PV 2, Factura C, N° 7" existe en los dos.
+            inv.imp_total !== null && inv.imp_total !== undefined ? Number(inv.imp_total) : null,
         )
         if (resuelto && 'ok' in resuelto) confirmados++
         else liberados++
     }
 
     revalidatePath('/dashboard/facturacion')
-    return { ok: true, revisados: trabados.length, confirmados, liberados }
+    return {
+        ok: true,
+        revisados: trabados.length - sinVerificar,
+        confirmados,
+        liberados,
+        sinVerificar,
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -450,7 +555,18 @@ export async function emitirNotaCredito(
         }
     }
 
-    const prep = await prepararEmision(orgId)
+    // LA NOTA DE CRÉDITO LA EMITE EL MISMO CUIT QUE EMITIÓ LA FACTURA.
+    //
+    // Antes esto era `prepararEmision(orgId)`, que devuelve "algún" contribuyente
+    // de la organización — el primero que ordene Postgres entre los cuatro que
+    // hay en producción. Anular la factura de Nico podía intentar emitirse con el
+    // monotributo de Stefano: una NC contra un comprobante de otro CUIT no anula
+    // nada y ensucia los libros de los dos.
+    const titular = await cargarContribuyentePorId(orgId, orig.taxpayer_id)
+    if (!titular) {
+        return { error: 'No encontramos el monotributo con el que se emitió ese comprobante.' }
+    }
+    const prep = await prepararEmisionDe(titular)
     if ('error' in prep) return prep
 
     const tipoNC = notaCreditoPara(orig.cbte_tipo)
@@ -460,8 +576,12 @@ export async function emitirNotaCredito(
     const tz = sucursal?.timezone ?? 'America/Argentina/Buenos_Aires'
     const hoyLocal = fechaLocalDeSucursal(tz)
 
-    const pv = await puntoVentaDe(prep.t.id, orig.branch_id)
-    if (!pv) return { error: 'Esta sucursal no tiene punto de venta asignado.' }
+    // Y va en el MISMO punto de venta que la factura: la numeración de la NC es
+    // por punto de venta, y una NC en otra serie no cierra contra el original.
+    const pv = { id: orig.sales_point_id as string, numero: Number(orig.pto_vta) }
+    if (!pv.id || !Number.isFinite(pv.numero) || pv.numero <= 0) {
+        return { error: 'Ese comprobante no tiene punto de venta registrado: no podemos anularlo automáticamente.' }
+    }
 
     const armado = armarComprobante({
         totalCentavos: Math.round(Number(orig.imp_total) * 100),
@@ -667,18 +787,61 @@ export async function guardarPolitica(input: {
         include_tips: p.incluyePropinas,
         allow_overflow: p.permitirExceso,
         lookback_days: p.diasHaciaAtras,
-        auto_emit: p.emisionAutomatica,
+        // `auto_emit` NO sale del formulario: ver el bloque de abajo.
         auto_emit_hour: p.horaEmision,
     }
 
-    const consulta = supabase.from('arca_billing_policies').select('id').eq('organization_id', orgId)
-    const { data: existente } = p.branchId
-        ? await consulta.eq('branch_id', p.branchId).maybeSingle()
-        : await consulta.is('branch_id', null).maybeSingle()
+    // OJO: esta action quedó del modelo VIEJO (una política por sucursal) y hoy
+    // no la llama ninguna pantalla — el panel por barbero usa
+    // `guardarCupoBarbero`. Se conserva porque es un endpoint HTTP público y
+    // borrarla es un cambio aparte, pero se le cerraron los dos agujeros que
+    // tenía, que eran graves:
+    //
+    //  1. Buscaba la política existente por `(org, branch_id)`. Las cuatro
+    //     políticas reales tienen `branch_id = NULL` y un `taxpayer_id` cada
+    //     una, así que `.is('branch_id', null).maybeSingle()` fallaba con
+    //     PGRST116 (varias filas), el error se descartaba —sólo se leía `data`—
+    //     y el camino caía en INSERT: una política FANTASMA sin contribuyente,
+    //     que `correrPolitica` habría ejecutado con un CUIT arbitrario.
+    //  2. Escribía `auto_emit` sin ningún guard, o sea que podía reactivar la
+    //     emisión automática que la migración 186 apagó a propósito, en las tres
+    //     capas, por decisión del dueño.
+    const consulta = supabase
+        .from('arca_billing_policies')
+        .select('id')
+        .eq('organization_id', orgId)
+        .is('taxpayer_id', null)
+    const { data: candidatas, error: errBusqueda } = p.branchId
+        ? await consulta.eq('branch_id', p.branchId).limit(2)
+        : await consulta.is('branch_id', null).limit(2)
+
+    if (errBusqueda) {
+        console.error('[guardarPolitica] búsqueda', errBusqueda.message)
+        return { error: 'No pudimos leer la configuración de facturación.' }
+    }
+    if ((candidatas ?? []).length > 1) {
+        return {
+            error:
+                'Hay más de un cupo cargado para ese alcance. Editalo desde el panel de barberos, ' +
+                'que es el que trabaja por monotributo.',
+        }
+    }
+    const existente = (candidatas ?? [])[0] ?? null
 
     const res = existente
-        ? await supabase.from('arca_billing_policies').update(fila).eq('id', existente.id).select('id').single()
-        : await supabase.from('arca_billing_policies').insert(fila).select('id').single()
+        ? await supabase
+              // `auto_emit` no está en `fila`, así que un update NO lo toca: la
+              // emisión es manual y sólo se reactiva a mano en la base (mig 186).
+              .from('arca_billing_policies')
+              .update(fila)
+              .eq('id', existente.id)
+              .select('id')
+              .single()
+        : await supabase
+              .from('arca_billing_policies')
+              .insert({ ...fila, auto_emit: false })
+              .select('id')
+              .single()
 
     if (res.error) {
         console.error('[guardarPolitica]', res.error.message)
@@ -832,10 +995,41 @@ export interface ListadoComprobantes {
         branchName: string | null
         receptor: string | null
         emitidoVia: string
+        /** El texto crudo de ARCA. Se guarda para el detalle técnico. */
         error: string | null
+        /**
+         * El mismo error, en castellano y con el trámite que haya que hacer.
+         *
+         * La tabla mostraba `last_error` tal cual, o sea el grito de ARCA en
+         * mayúsculas ("NO AUTORIZADO A EMITIR COMPROBANTES - EL PUNTO DE VENTA
+         * INFORMADO DEBE ESTAR DADO DE ALTA Y SER DEL TIPO RECE"). El catálogo
+         * de `errores.ts` ya sabía traducir eso a "el punto de venta es de
+         * contingencia, se arregla así" desde el día uno; simplemente nadie lo
+         * usaba en esta pantalla.
+         */
+        errorTraducido: { titulo: string; detalle: string; accion?: string; culpa: string; codigo: string } | null
     }[]
     total: number
     error: string | null
+}
+
+/**
+ * Traduce la falla guardada de un comprobante.
+ *
+ * Prefiere el código estructurado de `arca_invoices.errores` —que es lo que ARCA
+ * devolvió— y cae al parseo del texto de `last_error` sólo para las filas viejas,
+ * que se guardaban con el formato `"10005: MENSAJE"`.
+ */
+function traducirFallaDeComprobante(
+    errores: unknown,
+    lastError: string | null,
+): { titulo: string; detalle: string; accion?: string; culpa: string; codigo: string } | null {
+    if (!lastError && !Array.isArray(errores)) return null
+    const primero = Array.isArray(errores) ? (errores[0] as { code?: unknown; msg?: unknown } | undefined) : undefined
+    const codigo = typeof primero?.code === 'number' ? primero.code : null
+    const mensaje = typeof primero?.msg === 'string' ? primero.msg : lastError
+    const t = traducirErrorArca(codigo, mensaje)
+    return { titulo: t.titulo, detalle: t.detalle, accion: t.accion, culpa: t.culpa, codigo: t.codigo }
 }
 
 export async function getComprobantes(params?: {
@@ -854,7 +1048,7 @@ export async function getComprobantes(params?: {
         .from('arca_invoices')
         .select(
             'id, cbte_tipo, pto_vta, cbte_nro, fecha_cbte, imp_total, status, cae, cae_vto, ' +
-            'receptor_nombre, emitted_via, last_error, branch_id',
+            'receptor_nombre, emitted_via, last_error, errores, branch_id',
             { count: 'exact' },
         )
         .eq('organization_id', orgId)
@@ -896,6 +1090,7 @@ export async function getComprobantes(params?: {
             receptor: f.receptor_nombre,
             emitidoVia: f.emitted_via,
             error: f.last_error,
+            errorTraducido: traducirFallaDeComprobante(f.errores, f.last_error),
         })),
         total: count ?? 0,
         error: null,
