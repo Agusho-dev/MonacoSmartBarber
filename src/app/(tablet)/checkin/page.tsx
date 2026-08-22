@@ -13,7 +13,15 @@
  *     Al elegirla navega a `?branch=<id>` para que ESTE componente vuelva a
  *     correr y pueda resolver el modo: sin eso, una sucursal en modo turnos
  *     atendida desde una tablet sin querystring nunca salía del walk-in.
- *   - Con branch + turnero activo → ModeRouter.
+ *   - Con branch + turnero activo en modo `appointments` → ModeRouter (flujo
+ *     de turnos puro, sin fila).
+ *   - Con branch + turnero activo en modo `hybrid` → CheckinWalkIn con
+ *     `conTurnos`: la tablet es la fila de siempre (cara/teléfono, servicio,
+ *     barbero, fichaje del staff) y, al identificar al cliente, si tiene turno
+ *     HOY le ofrece confirmar la llegada. Sin turno no le pregunta nada ni le
+ *     ofrece reservar: reservar es cosa de la página `/turnos/[slug]` y de la
+ *     app. (Antes hybrid iba al flujo de turnos y cada walk-in pasaba por
+ *     "no tenés turno, ¿entrás a la fila?" — y el staff perdía "Soy barbero".)
  *   - Con branch sin turnero activo → CheckinWalkIn.
  */
 
@@ -133,6 +141,15 @@ export default async function CheckinPage({ searchParams }: CheckinPageProps) {
     return (
       <Suspense>
         <CheckinWalkIn />
+      </Suspense>
+    )
+  }
+
+  // Híbrido: la fila manda, los turnos se suman (ver cabecera).
+  if (operationMode === 'hybrid') {
+    return (
+      <Suspense>
+        <CheckinWalkIn conTurnos />
       </Suspense>
     )
   }

@@ -6,6 +6,14 @@ import Image from 'next/image'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { checkinClient, checkinClientByFace, reassignMyBarber } from '@/lib/actions/queue'
+import {
+  lookupAppointmentByPhone,
+  lookupAppointmentForClient,
+  confirmAppointmentArrival,
+} from '@/lib/actions/kiosk-turnos'
+import type { AppointmentInfo } from '@/lib/actions/kiosk-turnos'
+import { format, parseISO } from 'date-fns'
+import { es } from 'date-fns/locale'
 import { registerBarberClockIn, registerBarberClockOut } from '@/lib/actions/attendance'
 import { verifyBarberPin } from '@/lib/actions/auth'
 import { Button } from '@/components/ui/button'
@@ -37,6 +45,10 @@ import {
   X,
   UserPlus,
   Hand,
+  CalendarClock,
+  Clock,
+  AlertCircle,
+  Users,
 } from 'lucide-react'
 import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule } from '@/lib/types/database'
 import {
@@ -97,6 +109,9 @@ type Step =
   | 'barber'
   | 'success'
   | 'manage_turn'
+  | 'appointment'
+  | 'appointment_too_early'
+  | 'appointment_too_late'
   | 'staff_face_scan'
   | 'staff_action_confirm'
   | 'staff_pin'
@@ -147,6 +162,9 @@ const IDLE_MS_POR_PASO: Record<Step, number> = {
   barber: IDLE_MS_PERSONAL,
   success: IDLE_MS_PERSONAL,
   manage_turn: IDLE_MS_PERSONAL,
+  appointment: IDLE_MS_PERSONAL,
+  appointment_too_early: IDLE_MS_PERSONAL,
+  appointment_too_late: IDLE_MS_PERSONAL,
   staff_face_scan: IDLE_MS_NEUTRAL,
   staff_action_confirm: IDLE_MS_PERSONAL,
   staff_pin: IDLE_MS_PERSONAL,
@@ -176,9 +194,18 @@ interface CheckinWalkInProps {
    * era el motivo por el que "entrar a la fila" no anotaba a nadie.
    */
   startWith?: WalkInHandoff
+  /**
+   * Sucursal en modo `hybrid`: la tablet es la fila de siempre y, además, al
+   * identificar al cliente (cara o teléfono) mira si tiene turno HOY. Si lo
+   * tiene, le ofrece confirmar la llegada (RPC `check_in_appointment`, la
+   * única puerta); si no, sigue el walk-in exactamente igual que siempre —
+   * sin preguntarle nada ni ofrecerle reservar. Reservar es cosa de la página
+   * y de la app, no de la tablet.
+   */
+  conTurnos?: boolean
 }
 
-export function CheckinWalkIn({ onExit, startWith }: CheckinWalkInProps = {}) {
+export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinWalkInProps = {}) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [step, setStep] = useState<Step>('branch')
@@ -240,6 +267,17 @@ export function CheckinWalkIn({ onExit, startWith }: CheckinWalkInProps = {}) {
   const [faceClientId, setFaceClientId] = useState<string | null>(startWith?.clientId ?? null)
   const [hasExistingFace, setHasExistingFace] = useState(false)
 
+  // ── Turno de hoy (sólo `conTurnos`) ──
+  /** Turno del día del cliente identificado; manda a la pantalla `appointment`. */
+  const [appointment, setAppointment] = useState<AppointmentInfo | null>(null)
+  const [confirmingArrival, setConfirmingArrival] = useState(false)
+  /** Hora real del turno cuando el RPC contestó TOO_EARLY. */
+  const [tooEarlyStartsAt, setTooEarlyStartsAt] = useState<string | null>(null)
+  /** La pantalla de éxito cambia de copy: llegó por turno, no por la fila. */
+  const [appointmentConfirmed, setAppointmentConfirmed] = useState(false)
+  /** `check_in_appointment` adoptó una entrada de fila que el cliente ya tenía. */
+  const [adoptedQueueEntry, setAdoptedQueueEntry] = useState(false)
+
   const [capturedFaceDescriptors, setCapturedFaceDescriptors] = useState<Float32Array[]>([])
   const [capturedFacePhoto, setCapturedFacePhoto] = useState<Blob | null>(null)
   const [capturedScanPhoto, setCapturedScanPhoto] = useState<Blob | null>(null)
@@ -280,14 +318,25 @@ export function CheckinWalkIn({ onExit, startWith }: CheckinWalkInProps = {}) {
   useEffect(() => {
     // Cargar branches filtradas por org via server action
     const loadBranches = async () => {
-      const { getPublicBranches, getPublicAppCheckinBgColor } = await import('@/lib/actions/org')
-      const [data, globalBg] = await Promise.all([getPublicBranches(), getPublicAppCheckinBgColor()])
+      const { getPublicBranches, getPublicAppCheckinBgColor, setActiveOrgFromBranch } = await import('@/lib/actions/org')
+      let [data, globalBg] = await Promise.all([getPublicBranches(), getPublicAppCheckinBgColor()])
+
+      // `getPublicBranches()` resuelve la org desde la cookie. Una tablet
+      // abierta DIRECTO en `/checkin?branch=…` (link del dashboard, dispositivo
+      // nuevo) no la tiene: devolvía [] y el kiosko quedaba girando en
+      // "Seleccioná tu sucursal" para siempre. Con `?branch=` la org se deduce
+      // de la sucursal: la fijamos y volvemos a pedir.
+      const branchParam = searchParams.get('branch')
+      if (branchParam && !(data ?? []).some((b: Branch) => b.id === branchParam)) {
+        await setActiveOrgFromBranch(branchParam)
+        ;[data, globalBg] = await Promise.all([getPublicBranches(), getPublicAppCheckinBgColor()])
+      }
+
       setGlobalCheckinBg(globalBg)
       if (data) {
           setBranches(data as Branch[])
 
           // Prioridad 1: parámetro ?branch= en la URL (viene del dashboard)
-          const branchParam = searchParams.get('branch')
           if (branchParam) {
             const found = data.find((b: Branch) => b.id === branchParam)
             if (found) {
@@ -620,6 +669,11 @@ export function CheckinWalkIn({ onExit, startWith }: CheckinWalkInProps = {}) {
     setStaffEnrollId(null)
     setStaffEnrollName('')
     setBarberNextArrival({})
+    setAppointment(null)
+    setConfirmingArrival(false)
+    setTooEarlyStartsAt(null)
+    setAppointmentConfirmed(false)
+    setAdoptedQueueEntry(false)
 
     // En el kiosko híbrido la fila es un desvío: al terminar, el control vuelve
     // al flujo de turnos. Sin `onExit` (kiosko walk-in puro) se queda en home.
@@ -666,11 +720,122 @@ export function CheckinWalkIn({ onExit, startWith }: CheckinWalkInProps = {}) {
   useIdleReset({
     // Nunca cortar en medio de una operación en vuelo (check-in, lookup, PIN):
     // el timer se reprograma solo cuando termina.
-    enabled: idleMs > 0 && !submitting && !lookingUp && !staffPinSubmitting,
+    enabled: idleMs > 0 && !submitting && !lookingUp && !staffPinSubmitting && !confirmingArrival,
     timeoutMs: idleMs,
     resetKey: step,
     onIdle: reset,
   })
+
+  // ── Turno de hoy (sólo `conTurnos`) ──
+
+  /**
+   * Mira si el cliente identificado tiene turno HOY en esta sucursal y, si lo
+   * tiene, lo lleva a confirmar la llegada. Devuelve `true` cuando navegó.
+   *
+   * Falla ABIERTA hacia la fila: si la búsqueda se cae (red, rate-limit), el
+   * cliente sigue el walk-in normal en vez de quedarse trabado — peor que no
+   * registrarle el turno es no atenderlo.
+   */
+  const buscarTurnoDeHoy = useCallback(
+    async (clientId: string): Promise<boolean> => {
+      if (!conTurnos || !selectedBranch) return false
+      try {
+        const res = await lookupAppointmentForClient(selectedBranch.id, clientId)
+        if ('ok' in res && res.data.found && res.data.appointment) {
+          setAppointment(res.data.appointment)
+          setTooEarlyStartsAt(null)
+          goTo('appointment')
+          return true
+        }
+      } catch {
+        // ver arriba: seguimos por la fila
+      }
+      return false
+    },
+    [conTurnos, selectedBranch, goTo]
+  )
+
+  /**
+   * El teléfono no está en `clients` con ese formato exacto, pero el turno se
+   * busca por los últimos 10 dígitos: un cliente guardado como "+54 9 351 …"
+   * que reservó por la web tiene turno y acá figuraría como "primera vez".
+   * Antes de darlo por nuevo, preguntamos por su turno. Devuelve `true` si
+   * navegó a la pantalla del turno.
+   */
+  const buscarTurnoPorTelefono = useCallback(
+    async (ph: string): Promise<boolean> => {
+      if (!conTurnos || !selectedBranch) return false
+      try {
+        const res = await lookupAppointmentByPhone(selectedBranch.id, ph)
+        if ('ok' in res && res.data.found && res.data.appointment) {
+          const apt = res.data.appointment
+          setAppointment(apt)
+          setTooEarlyStartsAt(null)
+          setName(apt.client_name)
+          setIsReturning(true)
+          if (apt.client_id) {
+            setFaceClientId(apt.client_id)
+            const { clientHasFaceEnrolled } = await import('@/lib/actions/kiosk-face')
+            setHasExistingFace(await clientHasFaceEnrolled(apt.client_id, selectedBranch.id))
+          }
+          goTo('appointment')
+          return true
+        }
+      } catch {
+        // seguimos por la fila
+      }
+      return false
+    },
+    [conTurnos, selectedBranch, goTo]
+  )
+
+  /** "Confirmar mi llegada": una sola puerta, el RPC `check_in_appointment`. */
+  const confirmarLlegadaTurno = useCallback(async () => {
+    if (!appointment || confirmingArrival) return
+    setConfirmingArrival(true)
+    setError('')
+    try {
+      const result = await confirmAppointmentArrival(appointment.id)
+      if ('ok' in result) {
+        setQueueEntryId(result.queueEntryId || null)
+        setAdoptedQueueEntry(result.adoptedExistingEntry)
+        setAppointmentConfirmed(true)
+        goTo('success')
+        return
+      }
+      if (result.code === 'TOO_EARLY') {
+        setTooEarlyStartsAt(result.startsAt ?? appointment.starts_at)
+        goTo('appointment_too_early')
+        return
+      }
+      if (result.code === 'TOO_LATE') {
+        goTo('appointment_too_late')
+        return
+      }
+      if (result.code === 'QUEUE_CONFLICT') {
+        // Ya tiene lugar en la fila: se lo mostramos en vez de gritarle.
+        await irAMiTurno(null, true)
+        return
+      }
+      setError(result.error)
+    } catch {
+      setError('No pudimos confirmar la llegada. Intentá de nuevo.')
+    } finally {
+      setConfirmingArrival(false)
+    }
+  }, [appointment, confirmingArrival, goTo, irAMiTurno])
+
+  /**
+   * Desde "llegaste temprano" / "se pasó la hora": el cliente entra a la fila
+   * común con la identidad que ya tenemos. El turno queda como está; si llega
+   * su hora mientras espera, `check_in_appointment` desde la agenda adopta la
+   * entrada (mig 168) en vez de duplicarlo.
+   */
+  const entrarALaFilaDesdeTurno = useCallback(() => {
+    setAppointment(null)
+    setTooEarlyStartsAt(null)
+    goTo('service_selection')
+  }, [goTo])
 
   // ── Branch ──
 
@@ -769,7 +934,20 @@ export function CheckinWalkIn({ onExit, startWith }: CheckinWalkInProps = {}) {
           setLookingUp(false)
           return
         }
+
+        // Sucursal con turnos: si tiene turno hoy, va derecho a confirmar la
+        // llegada. Si no, sigue el walk-in de siempre.
+        if (await buscarTurnoDeHoy(data.id)) {
+          setLookingUp(false)
+          return
+        }
       } else {
+        // No está con ese teléfono exacto — pero puede tener turno reservado
+        // por la web con otro formato de número (ver `buscarTurnoPorTelefono`).
+        if (await buscarTurnoPorTelefono(ph)) {
+          setLookingUp(false)
+          return
+        }
         setName('')
         setFaceClientId(null)
         setIsReturning(false)
@@ -914,12 +1092,12 @@ export function CheckinWalkIn({ onExit, startWith }: CheckinWalkInProps = {}) {
 
     if (activeEntry) {
       await irAMiTurno(activeEntry.id as string, false)
-    } else {
+    } else if (!(await buscarTurnoDeHoy(faceClientId))) {
       goTo('service_selection')
     }
     // goTo/irAMiTurno son estables (useCallback); el auto-reset lo maneja el effect declarativo
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [faceClientId, faceDescriptor, capturedScanPhoto, selectedBranch])
+  }, [faceClientId, faceDescriptor, capturedScanPhoto, selectedBranch, buscarTurnoDeHoy])
 
   const handleFaceConfirmNo = useCallback(() => {
     // Mantenemos faceDescriptor y capturedScanPhoto para guardarlos al cliente real que ingrese por teléfono
@@ -1146,6 +1324,23 @@ export function CheckinWalkIn({ onExit, startWith }: CheckinWalkInProps = {}) {
         return () => { setPhone(''); goTo('home') }
       case 'name':
         return () => { setPhone(''); setName(''); setIsReturning(false); goTo('phone') }
+      case 'appointment':
+        // "No soy yo": se limpia la identidad entera y se vuelve al inicio.
+        return () => {
+          setAppointment(null)
+          setFaceMatch(null)
+          setFaceDescriptor(null)
+          setFaceClientId(null)
+          setName('')
+          setPhone('')
+          setIsReturning(false)
+          setHasExistingFace(false)
+          setCapturedScanPhoto(null)
+          goTo('home')
+        }
+      case 'appointment_too_early':
+      case 'appointment_too_late':
+        return () => goTo('appointment')
       case 'service_selection':
         return () => {
           // Con handoff nunca pasó por el enrolamiento (entró directo acá): el
@@ -1673,6 +1868,61 @@ export function CheckinWalkIn({ onExit, startWith }: CheckinWalkInProps = {}) {
     </>
   )
 
+  // ── Turno de hoy: derivados para las pantallas ──
+  const turnoInicio = appointment ? parseISO(appointment.starts_at) : null
+  const turnoHora = turnoInicio ? format(turnoInicio, 'HH:mm') : null
+  const turnoFechaLarga = (() => {
+    if (!turnoInicio) return ''
+    // `capitalize` de Tailwind sube CADA palabra ("Sábado 22 A Las 15:00"); se
+    // arregla en el dato.
+    const f = format(turnoInicio, "EEEE d 'a las' HH:mm", { locale: es })
+    return f.charAt(0).toUpperCase() + f.slice(1)
+  })()
+  const turnoPrimerNombre = (name || appointment?.client_name || '').trim().split(' ')[0]
+  const tooEarlyHora = tooEarlyStartsAt ? format(parseISO(tooEarlyStartsAt), 'HH:mm') : turnoHora
+
+  const botonTurnoPrimario = (
+    texto: string,
+    onClick: () => void,
+    opts?: { icon?: React.ReactNode; loading?: boolean }
+  ) => (
+    <GlassRing radius="rounded-[0.875rem] md:rounded-[1.375rem]" halo={!isLightBg} className="w-full">
+      <Button
+        onClick={onClick}
+        disabled={opts?.loading}
+        className={cn(
+          isLightBg
+            ? 'relative z-[1] flex w-full flex-row items-center justify-center gap-3 md:gap-4 overflow-hidden rounded-[0.875rem] md:rounded-[1.375rem] border border-zinc-300 bg-white text-zinc-900 shadow-sm px-3 py-3 md:px-5 md:py-4 transition-all duration-300 hover:border-zinc-400 hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600/35'
+            : terminalPrimaryInnerBtn,
+          'h-14 md:h-16 min-h-0 rounded-[0.875rem] md:rounded-[1.375rem] text-lg md:text-xl font-semibold shadow-none disabled:opacity-60 disabled:hover:scale-100'
+        )}
+        size="lg"
+      >
+        {!isLightBg && <span className="checkin-terminal-shimmer-layer pointer-events-none absolute inset-0 rounded-[inherit] opacity-30 motion-reduce:opacity-0" />}
+        <span className={cn('relative flex items-center gap-3 font-bold tracking-wide', isLightBg ? 'text-zinc-900' : 'text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]')}>
+          {opts?.loading ? <Loader2 className="size-6 animate-spin" /> : opts?.icon}
+          {texto}
+        </span>
+      </Button>
+    </GlassRing>
+  )
+
+  const botonTurnoSecundario = (texto: string, onClick: () => void, icon?: React.ReactNode) => (
+    <Button
+      onClick={onClick}
+      variant="outline"
+      className={cn(
+        'h-12 md:h-14 w-full rounded-xl text-base md:text-lg',
+        isLightBg
+          ? 'border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 hover:border-zinc-400'
+          : 'border-white/15 bg-white/5 text-white hover:bg-white/10 hover:text-white hover:border-white/28'
+      )}
+    >
+      {icon}
+      {texto}
+    </Button>
+  )
+
   // ── Render ──
 
   return (
@@ -2044,6 +2294,167 @@ export function CheckinWalkIn({ onExit, startWith }: CheckinWalkInProps = {}) {
         </div>
       )}
 
+      {/* ═══════════════ TURNO DE HOY (sucursal híbrida) ═══════════════ */}
+      {step === 'appointment' && appointment && (
+        <div
+          key={`appointment-${animKey}`}
+          className="relative z-[1] w-full max-w-sm md:max-w-xl flex flex-col items-center gap-5 md:gap-7 px-4 md:px-6 pt-10 md:pt-12 pb-6 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+        >
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
+
+          <div className={cn(
+            'size-20 md:size-24 rounded-full border flex items-center justify-center animate-in zoom-in-75 duration-500',
+            isLightBg
+              ? 'border-violet-300 bg-violet-100 shadow-md'
+              : 'border-violet-500/25 bg-violet-500/10 shadow-[0_0_28px_rgba(167,139,250,0.18)]'
+          )}>
+            <CalendarClock
+              className={cn('size-10 md:size-12', isLightBg ? 'text-violet-600' : 'text-violet-300')}
+              strokeWidth={1.5}
+            />
+          </div>
+
+          <div className="text-center">
+            <p className={cn('text-lg md:text-xl', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
+              Hola{turnoPrimerNombre ? `, ${turnoPrimerNombre}` : ''}
+            </p>
+            <h2 className={cn('text-3xl md:text-5xl font-bold mt-2 text-balance', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
+              Tenés turno hoy a las {turnoHora}
+            </h2>
+          </div>
+
+          <div
+            className={cn(
+              'w-full rounded-2xl border p-4 md:p-5 flex items-center gap-4 md:gap-5',
+              isLightBg ? 'bg-white border-zinc-200 shadow-sm' : 'bg-white/5 border-white/10'
+            )}
+          >
+            {appointment.barber_avatar_url ? (
+              <Image
+                src={appointment.barber_avatar_url}
+                alt={appointment.barber_name ?? 'Barbero'}
+                width={96}
+                height={96}
+                unoptimized
+                className="size-16 md:size-20 rounded-full object-cover ring-2 ring-cyan-400/30 shrink-0"
+              />
+            ) : (
+              <div
+                className={cn(
+                  'size-16 md:size-20 rounded-full flex items-center justify-center text-2xl md:text-3xl font-bold shrink-0',
+                  isLightBg ? 'bg-zinc-200 text-zinc-700' : 'bg-white/10 text-white'
+                )}
+              >
+                {(appointment.barber_name ?? '?').charAt(0).toUpperCase()}
+              </div>
+            )}
+
+            <div className="flex-1 min-w-0 space-y-1.5 md:space-y-2 text-left">
+              <div className="flex items-center gap-2">
+                <Clock className={cn('size-5 shrink-0', isLightBg ? 'text-cyan-600' : 'text-cyan-300')} strokeWidth={1.75} />
+                <span className={cn('text-base md:text-xl font-semibold', isLightBg ? 'text-zinc-900' : 'text-white')}>
+                  {turnoFechaLarga}
+                </span>
+              </div>
+              {appointment.services.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <Scissors className={cn('size-5 shrink-0', isLightBg ? 'text-emerald-600' : 'text-emerald-300')} strokeWidth={1.75} />
+                  <span className={cn('text-base md:text-lg truncate', isLightBg ? 'text-zinc-700' : 'text-white/75')}>
+                    {appointment.services.join(', ')}
+                  </span>
+                </div>
+              )}
+              {appointment.barber_name && (
+                <div className="flex items-center gap-2">
+                  <User className={cn('size-5 shrink-0', isLightBg ? 'text-violet-600' : 'text-violet-300')} strokeWidth={1.75} />
+                  <span className={cn('text-base md:text-lg', isLightBg ? 'text-zinc-700' : 'text-white/75')}>
+                    Te atiende <span className={cn('font-semibold', isLightBg ? 'text-zinc-900' : 'text-white')}>{appointment.barber_name}</span>
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {error && (
+            <p className="text-destructive text-center text-lg">{error}</p>
+          )}
+
+          {botonTurnoPrimario('Confirmar mi llegada', confirmarLlegadaTurno, {
+            icon: <CheckCircle2 className="size-6" strokeWidth={2} />,
+            loading: confirmingArrival,
+          })}
+
+          <button
+            type="button"
+            onClick={() => getBackAction()?.()}
+            className={cn(
+              'text-base md:text-lg underline underline-offset-4 transition-colors',
+              isLightBg ? 'text-zinc-500 hover:text-zinc-900' : 'text-white/40 hover:text-white/75'
+            )}
+          >
+            No soy yo
+          </button>
+        </div>
+      )}
+
+      {step === 'appointment_too_early' && (
+        <div
+          key={`appointment-early-${animKey}`}
+          className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-5 md:gap-7 px-4 md:px-6 pt-12 md:pt-16 pb-6 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+        >
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
+          <div className={cn(
+            'size-16 md:size-20 rounded-2xl border flex items-center justify-center',
+            isLightBg ? 'border-cyan-300 bg-cyan-50' : 'border-cyan-400/25 bg-cyan-500/10'
+          )}>
+            <Clock className={cn('size-8 md:size-10', isLightBg ? 'text-cyan-600' : 'text-cyan-300')} strokeWidth={1.5} />
+          </div>
+          <div className="text-center space-y-2">
+            <h2 className={cn('text-3xl md:text-5xl font-bold text-balance', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
+              {tooEarlyHora ? `Tu turno es a las ${tooEarlyHora}` : 'Todavía falta para tu turno'}
+            </h2>
+            <p className={cn('text-base md:text-xl', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
+              Llegaste con tiempo: la llegada se registra desde una hora antes. Si querés, mientras tanto entrás a la fila común.
+            </p>
+          </div>
+          <div className="w-full flex flex-col gap-3">
+            {botonTurnoPrimario('Entrar a la fila mientras tanto', entrarALaFilaDesdeTurno, {
+              icon: <Zap className="size-6" fill="currentColor" />,
+            })}
+            {botonTurnoSecundario('Listo, vuelvo después', reset, <CheckCircle2 className="size-5" />)}
+          </div>
+        </div>
+      )}
+
+      {step === 'appointment_too_late' && (
+        <div
+          key={`appointment-late-${animKey}`}
+          className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-5 md:gap-7 px-4 md:px-6 pt-12 md:pt-16 pb-6 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+        >
+          <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
+          <div className={cn(
+            'size-16 md:size-20 rounded-2xl border flex items-center justify-center',
+            isLightBg ? 'border-amber-300 bg-amber-50' : 'border-amber-400/25 bg-amber-500/10'
+          )}>
+            <AlertCircle className={cn('size-8 md:size-10', isLightBg ? 'text-amber-600' : 'text-amber-300')} strokeWidth={1.5} />
+          </div>
+          <div className="text-center space-y-2">
+            <h2 className={cn('text-3xl md:text-5xl font-bold text-balance', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
+              Se pasó la hora de tu turno{turnoHora ? ` (${turnoHora})` : ''}
+            </h2>
+            <p className={cn('text-base md:text-xl', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
+              Ya no podemos registrarlo desde acá, pero te atendemos igual por la fila.
+            </p>
+          </div>
+          <div className="w-full flex flex-col gap-3">
+            {botonTurnoPrimario('Entrar a la fila', entrarALaFilaDesdeTurno, {
+              icon: <Zap className="size-6" fill="currentColor" />,
+            })}
+            {botonTurnoSecundario('Avisar en el mostrador', reset, <Users className="size-5" />)}
+          </div>
+        </div>
+      )}
+
       {/* ═══════════════ PHONE ENTRY ═══════════════ */}
       {step === 'phone' && (
         <div
@@ -2359,15 +2770,31 @@ export function CheckinWalkIn({ onExit, startWith }: CheckinWalkInProps = {}) {
                   <CheckCircle2 className={cn('size-6 md:size-9', isLightBg ? 'text-emerald-600' : 'text-emerald-400')} strokeWidth={1.5} />
                 </div>
 
-                <h2 className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>¡Estás en la fila!</h2>
+                <h2 className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
+                  {appointmentConfirmed ? '¡Llegada registrada!' : '¡Estás en la fila!'}
+                </h2>
 
                 <div className="text-center">
                   <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
                     ¡Tomá asiento!
                   </p>
-                  {effectiveAhead && effectiveAhead.label && (
+                  {appointmentConfirmed ? (
                     <p className={cn('text-lg md:text-xl font-medium mt-3', isLightBg ? 'text-emerald-600' : 'text-emerald-400')}>
-                      {effectiveAhead.label}
+                      {appointment?.barber_name
+                        ? `${appointment.barber_name} ya sabe que llegaste`
+                        : 'Tu barbero ya sabe que llegaste'}
+                      {turnoHora ? ` · turno de las ${turnoHora}` : ''}
+                    </p>
+                  ) : (
+                    effectiveAhead && effectiveAhead.label && (
+                      <p className={cn('text-lg md:text-xl font-medium mt-3', isLightBg ? 'text-emerald-600' : 'text-emerald-400')}>
+                        {effectiveAhead.label}
+                      </p>
+                    )
+                  )}
+                  {appointmentConfirmed && adoptedQueueEntry && (
+                    <p className={cn('text-sm md:text-base mt-2', isLightBg ? 'text-cyan-700' : 'text-cyan-200/80')}>
+                      Ya estabas en la fila: tu turno quedó sumado a ese lugar.
                     </p>
                   )}
                   <p className={cn('text-base md:text-lg mt-2', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>
@@ -2377,7 +2804,7 @@ export function CheckinWalkIn({ onExit, startWith }: CheckinWalkInProps = {}) {
               </div>
 
               <div className="w-full max-w-xl flex flex-col items-center gap-2">
-                {queueEntryId && (
+                {queueEntryId && !appointmentConfirmed && (
                   <Button
                     onClick={() => setChangingBarberInSuccess(true)}
                     variant="outline"

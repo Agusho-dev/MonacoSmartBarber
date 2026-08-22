@@ -126,4 +126,31 @@ export const RateLimits = {
   publicBookingCancel: async (token: string) => {
     return rateLimit('public_booking_cancel', token, { limit: 3, window: 3600 })
   },
+
+  // ─── API mobile (`/api/mobile/**`) ────────────────────────────────
+  // Acá la clave es el USUARIO autenticado (auth.uid del JWT), no la IP: la app
+  // corre detrás del CGNAT de las telcos y miles de clientes comparten una IP.
+  // Límites en CONTRACTS.md §1.1.
+
+  // Listado de slots: 60 por usuario cada 60s (el wizard precarga varios días).
+  mobileSlots: async (userId: string) => {
+    return rateLimit('mobile_slots', userId, { limit: 60, window: 60 })
+  },
+
+  // Reserva: 10 por usuario cada 60s. Además sigue el límite por teléfono
+  // (3/h) de `createAppointment`.
+  mobileBook: async (userId: string) => {
+    return rateLimit('mobile_book', userId, { limit: 10, window: 60 })
+  },
+
+  // Cancelación: 10 por usuario cada 60s.
+  mobileCancel: async (userId: string) => {
+    return rateLimit('mobile_cancel', userId, { limit: 10, window: 60 })
+  },
+
+  // Bootstrap (sucursales, datos del wizard, /me, tokens push): 30 por usuario
+  // cada 60s.
+  mobileBootstrap: async (userId: string) => {
+    return rateLimit('mobile_bootstrap', userId, { limit: 30, window: 60 })
+  },
 }

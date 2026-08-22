@@ -156,6 +156,13 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
             'rewards.manage': 'Gestionar recompensas y catálogo',
         },
     },
+    notifications: {
+        label: 'Notificaciones push',
+        permissions: {
+            'notifications.view': 'Ver campañas, automatizaciones y dispositivos de la app',
+            'notifications.manage': 'Crear y enviar campañas push y configurar las notificaciones automáticas',
+        },
+    },
     agreements: {
         label: 'Convenios Comerciales',
         permissions: {
@@ -252,6 +259,9 @@ export const PERMISSION_DESCRIPTIONS: Record<string, string> = {
 
     'rewards.view': 'Permite ver el programa de fidelización y el catálogo de recompensas.',
     'rewards.manage': 'Permite crear y editar recompensas, niveles y reglas del programa de fidelización.',
+
+    'notifications.view': 'Permite ver las campañas push enviadas a la app de clientes, las notificaciones automáticas y cuántos dispositivos tienen la app instalada.',
+    'notifications.manage': 'Permite crear, programar y cancelar campañas push, enviarse pruebas y editar los textos y horarios de las notificaciones automáticas (recordatorios, cancelaciones, premios).',
 
     'agreements.view': 'Permite ver el listado de partners aliados y los beneficios que ofrecen a los clientes.',
     'agreements.manage': 'Permite invitar nuevos partners, aprobar o rechazar beneficios y pausar convenios.',

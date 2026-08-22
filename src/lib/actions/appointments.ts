@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getCurrentOrgId } from './org'
 import { assertBranchAccess, getAllowedBranchIds, filterBranchesByAccess } from './branch-access'
-import { RateLimits } from '@/lib/rate-limit'
+import { RateLimits, rateLimit } from '@/lib/rate-limit'
 import { absoluteUrl } from '@/lib/app-url'
 import { isValidUUID } from '@/lib/validation'
 import { getLocalNow, getLocalDateStr, getTzOffsetISO } from '@/lib/time-utils'
@@ -277,10 +277,21 @@ export async function getAvailableSlots(
      * correr el turno de las 15:00 a las 15:45.
      */
     ignoreLeadTime?: boolean
+    /**
+     * Clave de rate-limit alternativa a la IP. La API mobile (`/api/mobile/**`)
+     * ya autenticó al cliente por JWT y pasa su `auth.uid`: la app corre detrás
+     * del CGNAT de las telcos, así que el gate por IP+sucursal (20/min) se
+     * agotaba entre clientes que no tienen nada que ver entre sí. Con clave
+     * propia el límite es 60/min por usuario. Nada más cambia.
+     */
+    rateLimitKey?: string
   }
 ): Promise<{ slots: BarberAvailability[]; error?: string }> {
-  // Rate-limit: endpoint público, sin auth
-  const gate = await RateLimits.publicBookingList(branchId)
+  // Rate-limit: endpoint público, sin auth (por IP), o por usuario si el
+  // caller ya lo identificó (API mobile).
+  const gate = options?.rateLimitKey
+    ? await rateLimit('public_booking_list', options.rateLimitKey, { limit: 60, window: 60 })
+    : await RateLimits.publicBookingList(branchId)
   if (!gate.allowed) {
     return { slots: [], error: 'Demasiadas consultas, esperá un momento' }
   }
@@ -976,11 +987,18 @@ interface CreateAppointmentInput {
    * el de `kioskCheckin` por sucursal siguen aplicando.
    */
   viaKiosk?: boolean
+  /**
+   * Reserva hecha desde la app mobile (`/api/mobile/turnos/[slug]/book`). Se
+   * persiste como `public`, pero saltea el gate por IP: la app mobile ya pasó
+   * por rate-limit por usuario (`RateLimits.mobileBook`) y el teléfono viene
+   * del JWT, no del body. El límite por teléfono (3/h) y todo lo demás sigue.
+   */
+  viaApp?: boolean
 }
 
 export async function createAppointment(input: CreateAppointmentInput) {
   // Rate-limit por IP antes de tocar DB (solo para creación vía turnero público).
-  if (input.source === 'public' && !input.viaKiosk) {
+  if (input.source === 'public' && !input.viaKiosk && !input.viaApp) {
     const ipGate = await RateLimits.publicBookingCreateByIp()
     if (!ipGate.allowed) {
       return { error: 'Demasiadas reservas desde esta dirección, esperá un minuto' }
@@ -2250,8 +2268,20 @@ function mapAppointmentPaymentMethodToVisit(method: AppointmentPaymentMethod): '
  * Listado público (rate-limited) de barberos habilitados para turnos en una
  * sucursal. Devuelve sólo nombre + avatar — seguro para exponer en el turnero.
  */
-export async function getPublicBranchAppointmentStaff(branchId: string) {
-  const gate = await RateLimits.publicBookingList(branchId)
+export async function getPublicBranchAppointmentStaff(
+  branchId: string,
+  opts?: {
+    /**
+     * Clave de rate-limit alternativa a la IP (API mobile: `auth.uid` del
+     * cliente). Mismo motivo que en `getAvailableSlots`: detrás del CGNAT el
+     * gate por IP+sucursal se comparte entre clientes distintos.
+     */
+    rateLimitKey?: string
+  }
+) {
+  const gate = opts?.rateLimitKey
+    ? await rateLimit('public_booking_list', opts.rateLimitKey, { limit: 60, window: 60 })
+    : await RateLimits.publicBookingList(branchId)
   if (!gate.allowed) return []
 
   if (!isValidUUID(branchId)) return []

@@ -11,7 +11,11 @@ import {
   Megaphone,
   Smartphone,
   ImageIcon,
+  BellRing,
+  Lock,
 } from 'lucide-react'
+import { NotificacionesClient } from '@/app/dashboard/notificaciones/notificaciones-client'
+import type { ComponentProps } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { updateRewardConfig } from '@/lib/actions/rewards'
 import { toast } from 'sonner'
@@ -101,7 +105,17 @@ interface Props {
   initialConfigs: RewardConfig[]
   initialCatalog: CatalogItem[]
   initialBillboard: BillboardItem[]
+  /** Pestaña inicial (`?tab=`): `puntos | catalogo | cartelera | notificaciones`. */
+  initialTab?: string
+  /**
+   * Datos de la pestaña Notificaciones (push a la app). `null` cuando el
+   * usuario no tiene `notifications.view`: la pestaña se muestra bloqueada en
+   * vez de desaparecer, para que se entienda que existe y qué permiso falta.
+   */
+  notificaciones: Omit<ComponentProps<typeof NotificacionesClient>, 'embedded'> | null
 }
+
+const TABS = ['puntos', 'catalogo', 'cartelera', 'notificaciones'] as const
 
 // ── Reward type labels ───────────────────────────────────────────────────────
 
@@ -120,7 +134,11 @@ export function AppMovilClient({
   initialConfigs,
   initialCatalog,
   initialBillboard,
+  initialTab,
+  notificaciones,
 }: Props) {
+  const tabInicial = (TABS as readonly string[]).includes(initialTab ?? '') ? (initialTab as string) : 'puntos'
+
   return (
     <div className="mx-auto max-w-6xl space-y-4 lg:space-y-6">
       <div className="flex items-center gap-2.5 sm:gap-3">
@@ -128,14 +146,14 @@ export function AppMovilClient({
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight lg:text-3xl">APP Móvil</h1>
           <p className="text-xs sm:text-sm text-muted-foreground lg:text-base hidden sm:block">
-            Configurá los contenidos y recompensas que ven los clientes en la app.
+            Todo lo que ven y reciben los clientes en la app: puntos, premios, cartelera y notificaciones push.
           </p>
         </div>
       </div>
 
-      <Tabs defaultValue="puntos" className="space-y-6">
+      <Tabs defaultValue={tabInicial} className="space-y-6">
         <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
-          <TabsList className="grid w-full min-w-[280px] grid-cols-3 sm:w-full">
+          <TabsList className="grid w-full min-w-[360px] grid-cols-4 sm:w-full">
             <TabsTrigger value="puntos" className="gap-1.5 text-xs sm:text-sm sm:gap-2">
               <Gift className="size-3.5 sm:size-4" />
               Puntos
@@ -148,6 +166,10 @@ export function AppMovilClient({
               <Megaphone className="size-3.5 sm:size-4" />
               Cartelera
             </TabsTrigger>
+            <TabsTrigger value="notificaciones" className="gap-1.5 text-xs sm:text-sm sm:gap-2">
+              {notificaciones ? <BellRing className="size-3.5 sm:size-4" /> : <Lock className="size-3.5 sm:size-4" />}
+              Notificaciones
+            </TabsTrigger>
           </TabsList>
         </div>
 
@@ -159,6 +181,24 @@ export function AppMovilClient({
         </TabsContent>
         <TabsContent value="cartelera">
           <CarteleraTab branches={branches} initialBillboard={initialBillboard} />
+        </TabsContent>
+        <TabsContent value="notificaciones">
+          {notificaciones ? (
+            <NotificacionesClient {...notificaciones} embedded />
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Lock className="size-4 text-muted-foreground" />
+                  Notificaciones push
+                </CardTitle>
+                <CardDescription>
+                  Tu rol no tiene el permiso <span className="font-mono">notifications.view</span>. Pedile al dueño que lo
+                  habilite en Equipo › Roles para ver las campañas, las notificaciones automáticas y los dispositivos con la app.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          )}
         </TabsContent>
       </Tabs>
     </div>

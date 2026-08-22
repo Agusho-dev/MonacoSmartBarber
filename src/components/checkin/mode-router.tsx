@@ -1,12 +1,16 @@
 'use client'
 
 /**
- * ModeRouter — cascarón del kiosko para sucursales con turnos.
+ * ModeRouter — cascarón del kiosko para sucursales en modo `appointments`.
+ *
+ * Desde el 22/ago/2026 `hybrid` NO pasa por acá: `page.tsx` lo manda a
+ * `CheckinWalkIn conTurnos` (la fila de siempre + confirmación de llegada si el
+ * cliente tiene turno hoy). Este router queda para el modo sin fila.
  *
  * Rutea entre tres superficies y no hace nada más:
- *   - `TurnosCheckinFlow`: el flujo del cliente con turno (appointments/hybrid).
+ *   - `TurnosCheckinFlow`: el flujo del cliente con turno.
  *   - `InlineQuickBookFlow`: la reserva inline.
- *   - `CheckinWalkIn`: la fila, sólo alcanzable desde hybrid.
+ *   - `CheckinWalkIn`: la fila (sólo la pediría un `hybrid`, hoy inalcanzable).
  *
  * La sucursal y el modo los resuelve el server component (`page.tsx`), que ya
  * verificó que el turnero esté REALMENTE activo (operation_mode + is_enabled).
