@@ -10,9 +10,15 @@
  *              siendo la password del usuario de Auth) devuelve la sesión sin
  *              mandar nada. Si no, genera un código de 6 dígitos, guarda SÓLO
  *              su hash y lo manda por WhatsApp con un template AUTHENTICATION.
- *   `verify` → valida el código (máx. 5 intentos, 10 minutos), crea o vincula
- *              el cliente y el usuario de Auth, fija la password al
+ *   `verify` → valida el código (máx. 5 intentos, 10 minutos), vincula el
+ *              cliente con su usuario de Auth, fija la password al
  *              `device_secret` de ESTE dispositivo y devuelve la sesión.
+ *
+ * SÓLO CLIENTES EXISTENTES (decisión del dueño, 22/ago/2026): la app NO crea
+ * cuentas. El cliente nace cuando se registra en la tablet de check-in del
+ * local; si el teléfono no está en `clients` (últimos 10 dígitos) `start`
+ * contesta 404 CLIENT_NOT_FOUND sin mandar ningún WhatsApp, y la app explica
+ * "¿Aún no sos cliente?". `verify` lo vuelve a chequear por las dudas.
  *
  * Lo que cambió respecto de la v1 y NO hay que deshacer:
  *   - NUNCA se resetea la password sin un código verificado. La v1 lo hacía
@@ -76,6 +82,8 @@ const OTP_MAX_ATTEMPTS = 5
 const META_TIMEOUT_MS = 10_000
 const RL_PHONE = { bucket: 'client_otp_phone', limit: 3, window: 600 }
 const RL_IP = { bucket: 'client_otp_ip', limit: 10, window: 3600 }
+const MSG_CLIENT_NOT_FOUND =
+  'Este número todavía no está registrado como cliente. Tu cuenta se crea en tu primera visita a la barbería: registrate en la tablet del local con tu celular.'
 const DEVICE_SECRET_MIN = 32
 const DEVICE_SECRET_MAX = 256
 const DEVICE_ID_MAX = 128
@@ -201,9 +209,14 @@ async function handleStart(ctx: Ctx): Promise<Response> {
     if (sesion) return responderSesion(ctx, sesion, cliente, false)
   }
 
-  // 2. Rate-limit (por teléfono y por IP) antes de generar nada.
+  // 2. Rate-limit (por teléfono y por IP) antes de generar nada. Va ANTES del
+  //    chequeo de existencia: así tampoco se puede enumerar qué números son
+  //    clientes a velocidad de máquina.
   const limitado = await chequearRateLimits(ctx)
   if (limitado) return limitado
+
+  // 2b. Sólo clientes existentes: sin ficha no hay código (ni WhatsApp).
+  if (!cliente) return fail(404, 'CLIENT_NOT_FOUND', MSG_CLIENT_NOT_FOUND)
 
   // 3. Código: fijo para los teléfonos de prueba, aleatorio para el resto.
   const codigoFijo = codigoDePrueba(ctx.tel)
@@ -320,14 +333,16 @@ async function handleVerify(ctx: Ctx, body: ReqBody): Promise<Response> {
     )
   }
 
-  // 3. Código correcto. Antes de consumirlo, resolvemos al cliente: si es
-  //    nuevo y no vino el nombre, el código sigue vigente para que la app lo
-  //    pida y reintente sin obligar a un segundo OTP.
+  // 3. Código correcto. Resolvemos al cliente: la app no crea cuentas, así
+  //    que sin ficha el código se consume y se contesta CLIENT_NOT_FOUND
+  //    (no debería pasar: `start` ya lo rechazó; cubre el caso de una ficha
+  //    borrada entre medio).
   let cliente = await buscarCliente(ctx)
   if (cliente instanceof Response) return cliente
   const nombre = limpiarNombre(body.name)
-  if (!cliente && !nombre) {
-    return fail(400, 'NAME_REQUIRED', 'Decinos tu nombre para crear tu cuenta.')
+  if (!cliente) {
+    await consumirDesafio(ctx, desafio.id)
+    return fail(404, 'CLIENT_NOT_FOUND', MSG_CLIENT_NOT_FOUND)
   }
 
   const { data: consumido, error: conErr } = await ctx.admin
@@ -345,36 +360,9 @@ async function handleVerify(ctx: Ctx, body: ReqBody): Promise<Response> {
     return fail(404, 'OTP_NOT_FOUND', 'No encontramos un código vigente para este número. Pedí uno nuevo.')
   }
 
-  // 4. Find-or-create del cliente.
-  let esNuevo = false
-  if (!cliente) {
-    const { data: creado, error: insErr } = await ctx.admin
-      .from('clients')
-      .insert({
-        organization_id: ctx.orgId,
-        phone: ctx.tel.national10 ?? ctx.tel.e164,
-        name: nombre,
-      })
-      .select('id, name, auth_user_id, phone')
-      .single<ClienteRow>()
-    if (insErr || !creado) {
-      if (insErr?.code === '23505') {
-        // Carrera con otro alta del mismo teléfono (kiosko, dashboard): lo tomamos.
-        const otraVez = await buscarCliente(ctx)
-        if (otraVez instanceof Response) return otraVez
-        cliente = otraVez
-      }
-      if (!cliente) {
-        console.error(LOG, 'insert clients falló', ctx.log, insErr?.code, insErr?.message)
-        return fail(500, 'AUTH_FAILED', 'No pudimos crear tu cuenta. Probá de nuevo.')
-      }
-    } else {
-      cliente = creado
-      esNuevo = true
-    }
-  } else if (nombre && nombreEsPlaceholder(cliente.name)) {
-    // Cliente existente sin nombre real (alta por teléfono, "Sin nombre", etc.):
-    // adoptamos el que mandó. Si ya tenía nombre, no se toca.
+  // 4. Nombre: si la ficha no tiene un nombre real (alta por teléfono, "Sin
+  //    nombre", etc.) y la app mandó uno, lo adoptamos. Si ya tenía, no se toca.
+  if (nombre && nombreEsPlaceholder(cliente.name)) {
     const { error: nomErr } = await ctx.admin.from('clients').update({ name: nombre }).eq('id', cliente.id)
     if (nomErr) console.error(LOG, 'no se pudo actualizar el nombre', ctx.log, nomErr.message)
     else cliente = { ...cliente, name: nombre }
@@ -394,7 +382,7 @@ async function handleVerify(ctx: Ctx, body: ReqBody): Promise<Response> {
     return fail(500, 'AUTH_FAILED', 'No pudimos iniciar sesión. Probá de nuevo.')
   }
 
-  return responderSesion(ctx, signIn.session, cliente, esNuevo)
+  return responderSesion(ctx, signIn.session, cliente, false)
 }
 
 // ── Piezas ──────────────────────────────────────────────────────────────────
