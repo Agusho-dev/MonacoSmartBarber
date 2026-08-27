@@ -81,6 +81,7 @@ interface CatalogItem {
   valid_until: string | null
   points_cost: number
   image_url: string | null
+  category: string | null
   created_at: string
 }
 
@@ -381,6 +382,8 @@ const emptyCatalogForm = {
   valid_until: '',
   is_active: true,
   image_url: '',
+  // '' = automática (la app la deriva de is_free_service / discount_pct).
+  category: '',
 }
 
 function CatalogoTab({ initialCatalog }: { initialCatalog: CatalogItem[] }) {
@@ -413,6 +416,7 @@ function CatalogoTab({ initialCatalog }: { initialCatalog: CatalogItem[] }) {
       valid_until: item.valid_until ? item.valid_until.slice(0, 10) : '',
       is_active: item.is_active,
       image_url: item.image_url || '',
+      category: item.category || '',
     })
     setDialogOpen(true)
   }
@@ -437,6 +441,9 @@ function CatalogoTab({ initialCatalog }: { initialCatalog: CatalogItem[] }) {
       valid_until: form.valid_until || null,
       is_active: form.is_active,
       image_url: form.image_url.trim() || null,
+      // NULL = automática: la app deriva Cortes/Merch de is_free_service y
+      // discount_pct. Sólo se guarda un valor cuando el dueño lo elige a mano.
+      category: form.category || null,
     }
 
     let error
@@ -698,6 +705,35 @@ function CatalogoTab({ initialCatalog }: { initialCatalog: CatalogItem[] }) {
                 onChange={(e) => setForm({ ...form, image_url: e.target.value })}
                 placeholder="https://..."
               />
+              <p className="text-xs text-muted-foreground">
+                Sin imagen, la app dibuja un ícono según el tipo de premio.
+              </p>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Categoría en la app</Label>
+              <Select
+                value={form.category || 'auto'}
+                onValueChange={(val) =>
+                  setForm({ ...form, category: val === 'auto' ? '' : val })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Automática (recomendado)</SelectItem>
+                  <SelectItem value="cortes">Cortes</SelectItem>
+                  <SelectItem value="merch">Merch</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Es la solapa donde aparece en la pantalla Premios. Automática lo
+                manda a <strong>Cortes</strong> si es servicio gratis o tiene
+                descuento, y a <strong>Merch</strong> si no. Elegila a mano sólo
+                para corregir un caso puntual. (La solapa <strong>Marcas</strong>
+                son los convenios con comercios, no se carga acá.)
+              </p>
             </div>
 
             <div className="flex items-center justify-between rounded-lg border p-3">

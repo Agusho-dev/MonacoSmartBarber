@@ -505,7 +505,7 @@ const DEFAULT_TEMPLATES: TemplateSpec[] = [
       'lunes 21 de abril',
       '15:30',
       'Monaco Rondeau',
-      'https://monaco-smart-barber.vercel.app/turnos/gestionar/a1b2c3d4e5f6a1b2c3d4e5f6',
+      'https://monacobarber.vercel.app/turnos/gestionar/a1b2c3d4e5f6a1b2c3d4e5f6',
     ],
   },
   {

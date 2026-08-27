@@ -28,13 +28,19 @@ export interface PushDestino {
  * Destinos posibles al tocar la notificación. Son rutas internas de la app
  * Flutter (contrato §6.3 / §6.7): `PushHandler` sólo navega a paths que
  * empiecen con `/`, así que acá no entran URLs externas.
+ *
+ * **Tienen que existir en el router de la app** (`Monaco-mobile/lib/core/router/
+ * app_router.dart`): una ruta que no existe deja al cliente en la pantalla de
+ * error de go_router, y sólo se nota cuando ya salió la campaña. `/catalog`
+ * salió de la lista el 24/ago/2026, cuando el catálogo pasó a ser el propio tab
+ * `/rewards` (verificado: ninguna campaña ni notificación en prod lo usaba).
  */
 export const PUSH_DESTINOS: readonly PushDestino[] = [
   { value: '/home', label: 'Inicio', descripcion: 'La pantalla principal de la app' },
   { value: '/turnos', label: 'Mis turnos', descripcion: 'Sus turnos reservados y el botón para sacar uno' },
-  { value: '/rewards', label: 'Premios', descripcion: 'Los premios que puede canjear' },
+  { value: '/rewards', label: 'Premios', descripcion: 'El catálogo: todo lo que puede canjear con sus puntos' },
+  { value: '/mis-premios', label: 'Mis premios', descripcion: 'Los premios que ya canjeó, con el código para mostrar en el local' },
   { value: '/points', label: 'Puntos', descripcion: 'Su saldo y movimientos de puntos' },
-  { value: '/catalog', label: 'Catálogo', descripcion: 'Servicios y precios' },
   { value: '/billboard', label: 'Cartelera', descripcion: 'Novedades y promociones' },
   { value: '/convenios', label: 'Convenios', descripcion: 'Beneficios con comercios aliados' },
   { value: 'branch', label: 'Una sucursal', descripcion: 'La ficha de una sucursal (ocupación y horarios)' },

@@ -71,6 +71,7 @@ Las credenciales de WhatsApp salen de `organization_whatsapp_config` (fila activ
 
 | HTTP | `error` | Cuándo |
 |---|---|---|
+| 404 | `CLIENT_NOT_FOUND` | el teléfono no es de ningún cliente de la org (últimos 10 dígitos). **La app no crea cuentas**: el cliente nace en la tablet de check-in. `start` lo devuelve sin mandar WhatsApp. |
 | 400 | `BAD_REQUEST` | body inválido (action, device_id, device_secret, org_id, code) |
 | 400 | `INVALID_PHONE` | menos de 8 dígitos o forma irreconocible |
 | 404 | `ORG_NOT_FOUND` | `org_id` inexistente o inactiva |
