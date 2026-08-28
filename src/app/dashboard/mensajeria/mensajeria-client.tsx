@@ -104,6 +104,7 @@ export function MensajeriaClient(props: MensajeriaProps) {
       initialTags={props.initialTags}
       appSettings={props.appSettings}
       branches={props.branches}
+      totalConversations={props.totalConversations}
     >
       <div
         className={`wa-scope flex flex-col h-full min-h-0 overflow-hidden bg-[#0b141a] transition-[padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${

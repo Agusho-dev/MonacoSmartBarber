@@ -59,6 +59,8 @@ export interface MensajeriaProps {
   initialTags: ConversationTag[]
   appSettings: ReviewAutoSettings | null
   branches: { id: string; name: string }[]
+  /** Total de conversaciones de la org, para el contador "N de M" de la lista. */
+  totalConversations: number
 }
 
 export type SettingsTab = 'whatsapp' | 'instagram' | 'facebook' | 'tags'

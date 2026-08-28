@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   Search, Calendar, Plus, Pencil, MessageSquare, Instagram, Facebook, Clock, X, CheckCheck,
-  Camera, Video, Mic, FileText, LayoutTemplate, Sticker, MapPin,
+  Camera, Video, Mic, FileText, LayoutTemplate, Sticker, MapPin, Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar } from '../shared/avatar'
@@ -13,7 +13,6 @@ import {
   type LastMessageMediaKind,
 } from '../shared/helpers'
 import { useMensajeria } from '../shared/mensajeria-context'
-import type { PlatformFilter } from '../shared/types'
 
 function PreviewIcon({ kind }: { kind: LastMessageMediaKind }) {
   const cls = 'size-3.5 shrink-0'
@@ -45,6 +44,8 @@ export function ConversationList({
     isConfigured, isInstagramConfigured,
     filteredConversations,
     scheduled, handleCancelScheduled,
+    buscando, hayMasConversaciones, cargandoMas, cargarMasConversaciones,
+    conversacionesCargadas, totalConversaciones,
   } = useMensajeria()
 
   // Filtro "No leídos" local (no toca el context ni su realtime endurecido).
@@ -57,6 +58,25 @@ export function ConversationList({
     () => (unreadOnly ? filteredConversations.filter(c => c.unread_count > 0) : filteredConversations),
     [filteredConversations, unreadOnly],
   )
+
+  // Scroll infinito: mientras se BUSCA no se pagina — la búsqueda ya consulta
+  // toda la base, y seguir trayendo páginas viejas sólo mete ruido.
+  const buscandoAlgo = search.trim().length >= 2
+  const paginar = !buscandoAlgo && !unreadOnly && hayMasConversaciones
+  const centinelaRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const nodo = centinelaRef.current
+    if (!nodo || !paginar) return
+    const obs = new IntersectionObserver(
+      (entradas) => { if (entradas[0]?.isIntersecting) cargarMasConversaciones() },
+      // 400 px de anticipo: la página siguiente empieza a viajar antes de que
+      // el usuario llegue al fondo, así el scroll no se corta.
+      { rootMargin: '400px' },
+    )
+    obs.observe(nodo)
+    return () => obs.disconnect()
+  }, [paginar, cargarMasConversaciones])
 
   const chipBase = 'px-3 py-1 rounded-full text-[13px] font-medium shrink-0 transition-colors'
   const chipOn = 'bg-[#103629] text-[#00a884]'
@@ -93,7 +113,15 @@ export function ConversationList({
               <input
                 className="w-full h-9 rounded-lg bg-[#202c33] pl-11 pr-3 text-sm text-[#e9edef] placeholder:text-[#8696a0] outline-none focus:ring-1 focus:ring-[#00a884]/40"
                 placeholder="Buscar o iniciar un chat nuevo" value={search} onChange={(e) => setSearch(e.target.value)} />
+              {buscando && (
+                <Loader2 className="absolute right-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-[#8696a0]" />
+              )}
             </div>
+            {!buscandoAlgo && hayMasConversaciones && totalConversaciones > conversacionesCargadas && (
+              <p className="pt-1.5 px-1 text-[11px] text-[#8696a0]">
+                {conversacionesCargadas} de {totalConversaciones} · el buscador mira todo el historial
+              </p>
+            )}
           </div>
 
           {/* Chips de filtro (Todos / No leídos [+ plataformas si hay IG]) */}
@@ -125,9 +153,11 @@ export function ConversationList({
               <div className="flex flex-col items-center justify-center py-16 text-[#8696a0] px-6 text-center">
                 <MessageSquare className="mb-3 size-10 opacity-20" />
                 <p className="text-sm">
-                  {unreadOnly ? 'No hay chats sin leer'
-                    : !(isConfigured || isInstagramConfigured) ? 'Configurá WhatsApp o Instagram para empezar'
-                      : 'No hay conversaciones'}
+                  {buscando ? 'Buscando en todo el historial…'
+                    : unreadOnly ? 'No hay chats sin leer'
+                      : buscandoAlgo ? `Sin resultados para "${search.trim()}"`
+                        : !(isConfigured || isInstagramConfigured) ? 'Configurá WhatsApp o Instagram para empezar'
+                          : 'No hay conversaciones'}
                 </p>
                 {!(isConfigured || isInstagramConfigured) && (
                   <button className="mt-2 text-xs text-[#00a884] hover:underline" onClick={onOpenSettings}>
@@ -221,6 +251,34 @@ export function ConversationList({
                     </button>
                   )
                 })}
+
+                {/* Centinela del scroll infinito + estado del historial. */}
+                <div ref={centinelaRef} />
+                {cargandoMas && (
+                  <div className="flex items-center justify-center gap-2 py-4 text-[12px] text-[#8696a0]">
+                    <Loader2 className="size-3.5 animate-spin" />
+                    Cargando conversaciones anteriores…
+                  </div>
+                )}
+                {!cargandoMas && paginar && (
+                  <button
+                    onClick={cargarMasConversaciones}
+                    className="w-full py-3 text-[12px] text-[#00a884] hover:underline">
+                    Cargar conversaciones anteriores
+                  </button>
+                )}
+                {!buscandoAlgo && !hayMasConversaciones && totalConversaciones > 0 && (
+                  <p className="py-4 text-center text-[11px] text-[#8696a0]">
+                    {totalConversaciones} conversaciones · todo el historial
+                  </p>
+                )}
+                {buscandoAlgo && (
+                  <p className="py-4 text-center text-[11px] text-[#8696a0]">
+                    {buscando
+                      ? 'Buscando en todo el historial…'
+                      : `${visibleConversations.length} resultado${visibleConversations.length === 1 ? '' : 's'} en ${totalConversaciones} conversaciones`}
+                  </p>
+                )}
               </div>
             )}
           </div>

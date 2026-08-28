@@ -6,7 +6,8 @@ import { createClient } from '@/lib/supabase/client'
 import { sendMessage as sendMessageAction, markAsRead, cancelScheduledMessage, sendTemplateToConversation, sendTemplateToClient, resendMessage } from '@/lib/actions/messaging'
 import { getQuickReplies } from '@/lib/actions/quick-replies'
 import { syncWhatsAppTemplates } from '@/lib/actions/whatsapp-meta'
-import { startConversation, updateConversationStatus, getClientVisits, scheduleMessageAuto } from '@/lib/actions/conversations'
+import { startConversation, updateConversationStatus, getClientVisits, scheduleMessageAuto, searchConversations, loadMoreConversations } from '@/lib/actions/conversations'
+import { INBOX_PAGE_SIZE } from '@/lib/inbox'
 import { createConversationTag, deleteConversationTag, assignConversationTag, removeConversationTag, updateConversationTag, autoTagConversation } from '@/lib/actions/tags'
 import { toast } from 'sonner'
 import type { Message, ConversationTag, OrgWhatsAppConfig, OrgInstagramConfig } from '@/lib/types/database'
@@ -101,6 +102,15 @@ interface MensajeriaContextValue {
   isConfigured: boolean
   isInstagramConfigured: boolean
   filteredConversations: ConversationWithRelations[]
+  /** Búsqueda contra TODO el historial (no sólo lo cargado) en curso. */
+  buscando: boolean
+  /** Quedan conversaciones más viejas por traer con scroll. */
+  hayMasConversaciones: boolean
+  cargandoMas: boolean
+  cargarMasConversaciones: () => void
+  /** Cuántas cargadas / cuántas hay en total. */
+  conversacionesCargadas: number
+  totalConversaciones: number
   canReply: boolean
   replyWindowState: 'open' | 'never' | 'expired'
   replyWindowLeft: string | null
@@ -153,6 +163,7 @@ export function MensajeriaProvider({
   initialTags,
   appSettings,
   branches,
+  totalConversations,
 }: {
   children: React.ReactNode
   initialConversations: ConversationWithRelations[]
@@ -164,11 +175,27 @@ export function MensajeriaProvider({
   initialTags: ConversationTag[]
   appSettings: ReviewAutoSettings | null
   branches: { id: string; name: string }[]
+  totalConversations: number
 }) {
   const supabase = useMemo(() => createClient(), [])
 
   // Conversations
   const [conversations, setConversations] = useState(initialConversations)
+
+  // ── Historial completo ──────────────────────────────────────────────────
+  // El inbox carga de a páginas y el buscador consulta la BASE, no el array.
+  // Antes la página pedía las conversaciones sin `.limit()` y se comía en
+  // silencio el tope de PostgREST (1000 filas): con 6.367 conversaciones sólo
+  // se veían los últimos 10 días, y buscar a alguien de junio no devolvía nada.
+  const [resultadosBusqueda, setResultadosBusqueda] = useState<ConversationWithRelations[] | null>(null)
+  const [buscando, setBuscando] = useState(false)
+  const [cargandoMas, setCargandoMas] = useState(false)
+  const [hayMasConversaciones, setHayMasConversaciones] = useState(
+    initialConversations.length >= INBOX_PAGE_SIZE,
+  )
+  const [enFaseNulls, setEnFaseNulls] = useState(false)
+  // Descarta respuestas viejas cuando el usuario sigue tipeando.
+  const busquedaSeqRef = useRef(0)
   const [activeConv, setActiveConv] = useState<ConversationWithRelations | null>(null)
   // Ref espejo de activeConv: los handlers de Realtime lo leen para tener el valor
   // fresco SIN meter activeConv en las deps del efecto. Antes, activeConv en deps
@@ -265,12 +292,30 @@ export function MensajeriaProvider({
   useEffect(() => {
     if (!activeConv) return
     loadMessages(activeConv.id)
-    if (activeConv.unread_count > 0) {
-      markAsRead(activeConv.id)
-      setConversations(prev =>
-        prev.map(c => c.id === activeConv.id ? { ...c, unread_count: 0 } : c)
-      )
-    }
+
+    // ADOPCIÓN: una conversación abierta desde la búsqueda puede no estar en
+    // `conversations` (la búsqueda consulta la base, no el array cargado). Todos
+    // los handlers de Realtime y el "marcar leído" actualizan haciendo `.map()`
+    // sobre ese array, así que sin esto la conversación quedaba muda en la
+    // lista: el badge de no leídos no se limpiaba y un mensaje nuevo no movía
+    // nada. Insertarla acá hace que todo lo demás funcione sin tocar el canal
+    // de Realtime.
+    setConversations(prev => {
+      const i = prev.findIndex(c => c.id === activeConv.id)
+      if (i === -1) {
+        const conAdopcion = [...prev, { ...activeConv, unread_count: 0 }]
+        conAdopcion.sort((a, b) => {
+          const ta = a.last_message_at ? Date.parse(a.last_message_at) : 0
+          const tb = b.last_message_at ? Date.parse(b.last_message_at) : 0
+          return tb - ta
+        })
+        return conAdopcion
+      }
+      if (activeConv.unread_count === 0) return prev
+      return prev.map(c => c.id === activeConv.id ? { ...c, unread_count: 0 } : c)
+    })
+
+    if (activeConv.unread_count > 0) markAsRead(activeConv.id)
   }, [activeConv, loadMessages])
 
   // Load client visits
@@ -483,9 +528,77 @@ export function MensajeriaProvider({
     // activeConvRef.current. loadMessages es estable (useCallback([supabase])).
   }, [supabase, loadMessages])
 
+  // ── Búsqueda contra toda la base (debounced) ────────────────────────────
+  // El filtro local sigue existiendo y responde en el primer teclazo sobre lo
+  // ya cargado; esto trae además lo que está fuera de las páginas cargadas y se
+  // MEZCLA con aquello. Sin el filtro local, escribir se sentiría trabado; sin
+  // esto, el historial viejo era inalcanzable.
+  useEffect(() => {
+    const q = search.trim()
+    if (q.length < 2) {
+      setResultadosBusqueda(null)
+      setBuscando(false)
+      return
+    }
+    const seq = ++busquedaSeqRef.current
+    setBuscando(true)
+    const t = setTimeout(async () => {
+      const res = await searchConversations(q)
+      // Llegó tarde: el usuario ya cambió lo que buscaba.
+      if (seq !== busquedaSeqRef.current) return
+      setResultadosBusqueda(
+        (res.data ?? []) as unknown as ConversationWithRelations[],
+      )
+      setBuscando(false)
+    }, 280)
+    return () => clearTimeout(t)
+  }, [search])
+
+  // ── Página siguiente de la lista ────────────────────────────────────────
+  const cargarMasConversaciones = useCallback(async () => {
+    if (cargandoMas || !hayMasConversaciones) return
+    setCargandoMas(true)
+    try {
+      const ultima = conversations[conversations.length - 1]
+      const cursor = (ultima?.last_message_at as string | null) ?? null
+      const res = await loadMoreConversations(cursor, enFaseNulls)
+      if (res.data) {
+        const nuevas = res.data as unknown as ConversationWithRelations[]
+        // Dedup por id: el realtime puede haber subido alguna al tope mientras
+        // se pedía la página, y una conversación repetida rompe la key de React.
+        setConversations(prev => {
+          const vistos = new Set(prev.map(c => c.id))
+          return [...prev, ...nuevas.filter(c => !vistos.has(c.id))]
+        })
+        setHayMasConversaciones(res.hasMore ?? false)
+        setEnFaseNulls(res.nullsPhase ?? false)
+      } else {
+        // Un error no puede dejar el scroll pidiendo la misma página para
+        // siempre: se corta y el usuario ve lo que ya tiene.
+        setHayMasConversaciones(false)
+      }
+    } finally {
+      setCargandoMas(false)
+    }
+  }, [cargandoMas, hayMasConversaciones, conversations, enFaseNulls])
+
   // Filtered conversations
   const filteredConversations = useMemo(() => {
-    return conversations.filter(c => {
+    // Buscando: lo local (respuesta inmediata) + lo que trajo el server
+    // (historial completo), sin repetidos y ordenado por fecha.
+    const base = (() => {
+      if (!resultadosBusqueda) return conversations
+      const porId = new Map<string, ConversationWithRelations>()
+      for (const c of conversations) porId.set(c.id, c)
+      for (const c of resultadosBusqueda) if (!porId.has(c.id)) porId.set(c.id, c)
+      return [...porId.values()].sort((a, b) => {
+        const ta = a.last_message_at ? Date.parse(a.last_message_at) : 0
+        const tb = b.last_message_at ? Date.parse(b.last_message_at) : 0
+        return tb - ta
+      })
+    })()
+
+    return base.filter(c => {
       if (platformFilter !== 'all' && c.channel?.platform !== platformFilter) return false
       if (statusFilter !== 'all' && c.status !== statusFilter) return false
       if (tagFilter && !c.tags?.some(t => t.tag_id === tagFilter)) return false
@@ -493,9 +606,13 @@ export function MensajeriaProvider({
       const s = search.toLowerCase()
       const name = (c.client?.name || c.platform_user_name || '').toLowerCase()
       const phone = (c.client?.phone || c.platform_user_id || '').toLowerCase()
+      // Los que vinieron del server ya matchearon con la tolerancia buena
+      // (acentos, tokens en cualquier orden, teléfono normalizado): no se los
+      // vuelve a filtrar con el `includes` crudo, que los descartaría.
+      if (resultadosBusqueda?.some(r => r.id === c.id)) return true
       return name.includes(s) || phone.includes(s)
     })
-  }, [conversations, platformFilter, statusFilter, tagFilter, search])
+  }, [conversations, resultadosBusqueda, platformFilter, statusFilter, tagFilter, search])
 
   // Ventana de servicio de 24h de WhatsApp/IG. SOLO la abre un mensaje ENTRANTE
   // del cliente (el webhook setea can_reply_until = inbound + 24h). Mandar un
@@ -779,6 +896,12 @@ export function MensajeriaProvider({
     templateTarget, setTemplateTarget,
     isConfigured, isInstagramConfigured,
     filteredConversations,
+    buscando,
+    hayMasConversaciones,
+    cargandoMas,
+    cargarMasConversaciones,
+    conversacionesCargadas: conversations.length,
+    totalConversaciones: totalConversations,
     canReply, replyWindowState, replyWindowLeft,
     handleSend, handleResend, handleStatusChange, handleStartConversation,
     handleSchedule, handleCancelScheduled,

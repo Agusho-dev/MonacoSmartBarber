@@ -1,6 +1,8 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
+import { countConversations } from '@/lib/actions/conversations'
+import { INBOX_PAGE_SIZE } from '@/lib/inbox'
 import { MensajeriaClient } from './mensajeria-client'
 
 export const dynamic = 'force-dynamic'
@@ -38,7 +40,14 @@ export default async function MensajeriaPage() {
     { data: aiConfig },
     { data: tags },
     { data: appSettings },
+    totalConversations,
   ] = await Promise.all([
+    // PRIMERA PÁGINA, con `.limit()` explícito. Antes iba sin límite y se comía
+    // en silencio el tope de PostgREST (`max-rows` = 1000): con 6.367
+    // conversaciones, el inbox mostraba sólo los últimos 10 días y todo lo
+    // anterior era inalcanzable — ni scrolleando ni buscando. Ahora el resto
+    // llega por `loadMoreConversations` (scroll) y `searchConversations`
+    // (búsqueda contra la tabla entera).
     channelIds.length > 0
       ? supabase
           .from('conversations')
@@ -49,7 +58,9 @@ export default async function MensajeriaPage() {
             tags:conversation_tag_assignments(tag_id, tag:conversation_tags(id, name, color))
           `)
           .in('channel_id', channelIds)
-          .order('last_message_at', { ascending: false, nullsFirst: false })
+          .not('last_message_at', 'is', null)
+          .order('last_message_at', { ascending: false })
+          .limit(INBOX_PAGE_SIZE)
       : Promise.resolve({ data: [] }),
     channelFilters.length > 0
       ? supabase
@@ -117,6 +128,7 @@ export default async function MensajeriaPage() {
           .maybeSingle()
           .then((r) => ({ data: r.data }))
       : Promise.resolve({ data: null }),
+    countConversations(),
   ])
 
   // Hidratar último mensaje de cada conversación para el preview en el inbox.
@@ -151,6 +163,7 @@ export default async function MensajeriaPage() {
       initialTags={tags ?? []}
       appSettings={appSettings ?? null}
       branches={(orgBranches ?? []) as { id: string; name: string }[]}
+      totalConversations={totalConversations.total}
     />
   )
 }
