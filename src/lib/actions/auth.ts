@@ -40,7 +40,12 @@ export async function logout() {
 }
 
 export async function loginWithPin(formData: FormData) {
-  const supabase = await createClient()
+  // Service role a propósito: desde la mig 212 la columna `pin` NO es legible por
+  // `anon`, y la pantalla de login del barbero no tiene sesión de Supabase (se
+  // autentica justamente con este PIN). Verificar una credencial es una operación
+  // de servidor; leerla con el cliente RLS era lo que obligaba a dejar la columna
+  // abierta al rol público. `verifyBarberPin` ya lo hacía así.
+  const supabase = createAdminClient()
   const staffId = formData.get('staff_id') as string
   const pin = formData.get('pin') as string
 

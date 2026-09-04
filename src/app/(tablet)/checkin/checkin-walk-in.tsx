@@ -130,8 +130,13 @@ const KEYPAD = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const
  * `queue_entries` tiene UNA sola FK a `staff` (`barber_id`), así que el embed
  * por nombre de tabla no es ambiguo (ver riesgo #15 del CLAUDE.md raíz).
  */
+// Sin `email`, `pin` ni `auth_user_id`: esto corre en el browser de una tablet
+// pública, con la anon key que viaja en el bundle. Pedía el PIN de los barberos y
+// no lo usa para nada (la tarjeta sólo dibuja nombre, avatar y estado). Ver mig 212.
+// El embed va por nombre de constraint para que una FK futura a `staff` no rompa la
+// query entera con PGRST201 (Known Risk #15).
 const QUEUE_ENTRY_SELECT =
-  '*, barber:staff(id, full_name, status, is_active, branch_id, role, commission_pct, email, pin, auth_user_id, created_at, updated_at)'
+  '*, barber:staff!queue_entries_barber_id_fkey(id, full_name, status, is_active, branch_id, role, commission_pct, avatar_url, created_at, updated_at)'
 
 /**
  * Ventana de inactividad por pantalla (0 = sin timeout).
@@ -569,7 +574,10 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
     const supabase = createClient()
     supabase
       .from('staff')
-      .select('*')
+      // Lista de columnas explícita: `select('*')` arrastraba `pin`, `email` y
+      // `auth_user_id` hasta el browser de una tablet pública. Con la anon key —que
+      // viaja en el bundle— se leían 36 PINs de 14 organizaciones. Ver mig 212.
+      .select('id, full_name, branch_id, role, role_id, status, avatar_url, hidden_from_checkin, hidden_from_mobile, is_active, is_also_barber, organization_id, phone, commission_pct, created_at, updated_at, deleted_at')
       .eq('branch_id', selectedBranch.id)
       .in('role', ['barber', 'admin', 'owner'])
       .eq('is_active', true)
@@ -918,10 +926,19 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
         setHasExistingFace(await clientHasFaceEnrolled(data.id, selectedBranch.id))
 
         const supabase = createClient()
+          // El "¿ya está en la fila?" es POR SUCURSAL. Sin `.eq('branch_id', ...)`
+          // esta consulta encontraba la entrada del cliente en OTRO local y la tablet
+          // lo mandaba a "¡Estás en la fila! · ¡Tomá asiento!" mostrándole la posición
+          // y el barbero de una sucursal en la que no estaba parado — sin anotarlo acá
+          // y sin nombrar nunca la sucursal. El índice único real es
+          // (client_id, branch_id): dos sucursales nunca chocaron entre sí.
+          // Este guard del browser es el que manda: corta ANTES de llamar a la server
+          // action, así que arreglarlo sólo del lado del servidor no cambiaba nada.
         const { data: activeEntry } = await supabase
           .from('queue_entries')
           .select('id')
           .eq('client_id', data.id)
+          .eq('branch_id', selectedBranch.id)
           .in('status', ['waiting', 'in_progress'])
           .order('checked_in_at', { ascending: false })
           .limit(1)
@@ -1081,10 +1098,13 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
     }
 
     const supabase = createClient()
+    // Mismo criterio que el guard por teléfono: el "ya está en la fila" es POR
+    // SUCURSAL. Éste es el camino de la CÁMARA, o sea el principal del kiosko.
     const { data: activeEntry } = await supabase
       .from('queue_entries')
       .select('id')
       .eq('client_id', faceClientId)
+      .eq('branch_id', selectedBranch.id)
       .in('status', ['waiting', 'in_progress'])
       .order('checked_in_at', { ascending: false })
       .limit(1)

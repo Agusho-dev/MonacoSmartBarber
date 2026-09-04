@@ -66,7 +66,11 @@ export default function BarberLoginPage() {
     const supabase = createClient()
     supabase
       .from("staff")
-      .select("*")
+      // Columnas explícitas: esta pantalla corre en el browser con la anon key, y
+      // `select("*")` traía el `pin` de cada barbero a la misma página donde se pide
+      // el PIN. Desde la mig 212 `anon` ya no tiene permiso sobre esa columna, así
+      // que además de inseguro un `*` acá devolvería 42501 y dejaría la lista vacía.
+      .select("id, full_name, branch_id, role, role_id, status, avatar_url, hidden_from_checkin, hidden_from_mobile, is_active, is_also_barber, organization_id, phone, commission_pct, created_at, updated_at, deleted_at")
       .eq("branch_id", selectedBranch.id)
       .eq("role", "barber")
       .eq("is_active", true)

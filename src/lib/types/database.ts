@@ -144,15 +144,22 @@ export interface ClientReview {
 export interface Staff {
   id: string
   organization_id: string
-  auth_user_id: string | null
   branch_id: string | null
   role: UserRole
   role_id: string | null
   full_name: string
-  email: string | null
   phone: string | null
-  pin: string | null
   commission_pct: number
+  // `auth_user_id`, `email` y `pin` son OPCIONALES a propósito (mig 212): desde que
+  // `anon` perdió el permiso sobre esas tres columnas, ninguna pantalla que corra en
+  // el browser de una tablet las recibe — el kiosko, el panel del barbero y la
+  // pantalla de login piden columnas explícitas y no las incluyen. Marcarlas
+  // obligatorias obligaba a castear a `Staff` un objeto que no las tiene, que es
+  // justamente el error que TypeScript tiene que seguir señalando si alguien vuelve
+  // a pedirlas desde el cliente. En el servidor (service role) siguen llegando.
+  auth_user_id?: string | null
+  email?: string | null
+  pin?: string | null
   status: StaffStatus
   is_active: boolean
   avatar_url: string | null

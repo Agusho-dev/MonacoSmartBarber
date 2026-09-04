@@ -300,7 +300,10 @@ export function QueuePanel({
     const [barbersRes, schedRes, settingsRes, attendanceRes, assignmentData] = await Promise.all([
       supabase
         .from('staff')
-        .select('*')
+        // Columnas explícitas: el panel corre con la anon key (se autentica por PIN,
+        // no por Supabase Auth), así que `select('*')` le entregaba el `pin` de todos
+        // sus compañeros a cualquiera con las devtools abiertas. Ver mig 212.
+        .select('id, full_name, branch_id, role, role_id, status, avatar_url, hidden_from_checkin, hidden_from_mobile, is_active, is_also_barber, organization_id, phone, commission_pct, created_at, updated_at, deleted_at')
         .eq('branch_id', session.branch_id)
         .or('role.eq.barber,is_also_barber.eq.true')
         .eq('is_active', true)
