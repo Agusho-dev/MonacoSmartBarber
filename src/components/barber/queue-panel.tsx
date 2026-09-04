@@ -157,6 +157,8 @@ export function QueuePanel({
   // porque es dato de agenda, no de tiempo real — Known Risk #9.
   const [todayAppointments, setTodayAppointments] = useState<Appointment[]>(appointments)
   const [loading, setLoading] = useState(true)
+  /** Mensaje visible cuando la fila NO se pudo leer (≠ fila vacía). */
+  const [queueError, setQueueError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
   const [now, setNow] = useState(Date.now())
@@ -222,13 +224,34 @@ export function QueuePanel({
     // Query liviano: eliminamos visits(count) — era un correlated subquery por cliente
     // que generaba 177k calls/día según pg_stat_statements. El conteo ya vive en
     // clients.total_visits y en la vista client_loyalty_state.total_visits.
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('queue_entries')
-      .select('*, client:clients(id, name, phone, loyalty:client_loyalty_state(total_visits)), barber:staff(id, full_name, avatar_url), service:services(id, name, duration_minutes, price)')
+      // Embeds POR NOMBRE DE CONSTRAINT, no por tabla. `queue_entries` puede tener más
+      // de una FK a `staff` (hoy `barber_id`; el 4/9/2026 se agregó `cancelled_by` y
+      // toda esta query empezó a fallar con PGRST201 "more than one relationship was
+      // found"). Con el nombre del constraint la query es inmune a que aparezca otra FK.
+      // Es el Known Risk #15 del CLAUDE.md, cobrado en vivo: las tablets de los tres
+      // locales mostraron "Esperando clientes · General 0" con gente sentada adentro.
+      .select('*, client:clients!queue_entries_client_id_fkey(id, name, phone, loyalty:client_loyalty_state(total_visits)), barber:staff!queue_entries_barber_id_fkey(id, full_name, avatar_url), service:services!queue_entries_service_id_fkey(id, name, duration_minutes, price)')
       .eq('branch_id', session.branch_id)
       .in('status', ['waiting', 'in_progress'])
+      // `priority_order` es el FIFO real (el mismo que usa `claim_next_for_barber`).
+      // `position` se recicla y se duplica entre entradas vivas: ordenar por ella
+      // mostraba un orden distinto del que el motor iba a ejecutar.
+      .order('priority_order')
       .order('position')
 
+    // Un fallo de lectura NO es una fila vacía. Sin esto, cualquier error de la query
+    // (PGRST201, RLS, red) pintaba "Esperando clientes · Cuando llegue alguien
+    // aparecerá acá" — indistinguible de un local sin gente, que es como una query
+    // rota se convirtió en tres locales parados sin que nadie supiera por qué.
+    if (error) {
+      console.error('[queue-panel] fetchQueue:', error.message)
+      setQueueError('No pudimos leer la fila. Reintentando…')
+      setLoading(false)
+      return
+    }
+    setQueueError(null)
     if (data) setEntries(data as QueueEntry[])
     setLoading(false)
   }, [supabase, session.branch_id])
@@ -538,6 +561,18 @@ export function QueuePanel({
 
   // Real waiting clients for this barber (non-break)
   const myRealWaitingEntries = myWaitingEntries.filter(e => !e.is_break)
+
+  /**
+   * Gente esperando que NO es de nadie, o que lleva demasiado. Es lo que hace falta
+   * para que "General" deje de ser un cajón silencioso: un cliente del pool cuyo hint
+   * no cayó en ninguna "Mi fila" sólo existe ahí, y la pestaña por defecto es "Mi fila".
+   */
+  const alertasEnGeneral = allWaitingEntries.filter(e => {
+    if (e.is_break) return false
+    const sinDueño = !e.barber_id
+    const demorado = now - new Date(e.checked_in_at).getTime() >= 40 * 60 * 1000
+    return sinDueño || demorado
+  }).length
 
   // Un turno cuyo cliente YA está en la fila no deja al barbero frenado: la
   // ventana de protección bloquea walk-ins, pero `claim_next_for_barber` sí le
@@ -1098,6 +1133,17 @@ export function QueuePanel({
               <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                 <Clock className="size-3" />
                 <span>{formatElapsed(entry.checked_in_at)} esperando</span>
+                {(() => {
+                  // Medido sobre 90 días de prod: la mediana de espera real es de 5 a
+                  // 12 min y el p90 no pasa de 51. Los clientes que terminaron
+                  // anotados-y-nunca-atendidos llevaban 1 a 4 HORAS mientras el local
+                  // atendía a 9-12 personas que llegaron después. La señal estaba en
+                  // pantalla, en gris, y no se veía.
+                  const min = Math.floor((now - new Date(entry.checked_in_at).getTime()) / 60000)
+                  if (min >= 70) return <span className="ml-1 font-semibold text-destructive">· lleva demasiado</span>
+                  if (min >= 40) return <span className="ml-1 font-medium text-amber-500">· se está demorando</span>
+                  return null
+                })()}
               </div>
               {isGeneralQueue && entry.barber && (
                 <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
@@ -1269,16 +1315,43 @@ export function QueuePanel({
     )
   }
 
+  /**
+   * Vacío de "Mi fila" ≠ vacío del local, y ninguno de los dos es "no pudimos leer".
+   * Esta pantalla decía "Esperando clientes · Cuando llegue alguien aparecerá acá" en
+   * los tres casos: con gente sentada asignada a otro barbero, con clientes del pool
+   * que no cayeron en la "Mi fila" de nadie, y con la query caída.
+   */
   function renderEmptyQueue() {
+    const hayGenteEnElLocal = allWaitingEntries.filter(e => !e.is_break).length
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center" role="status">
-        <div className="mb-4 flex size-16 items-center justify-center rounded-3xl bg-muted animate-float">
-          <Scissors className="size-8 text-muted-foreground/60" />
+        <div className={`mb-4 flex size-16 items-center justify-center rounded-3xl ${queueError ? 'bg-destructive/15' : 'bg-muted animate-float'}`}>
+          <Scissors className={`size-8 ${queueError ? 'text-destructive' : 'text-muted-foreground/60'}`} />
         </div>
-        <p className="text-base font-bold">Esperando clientes</p>
-        <p className="mt-1 max-w-[220px] text-xs text-muted-foreground">
-          Cuando llegue alguien aparecerá acá.
-        </p>
+        {queueError ? (
+          <>
+            <p className="text-base font-bold text-destructive">No pudimos leer la fila</p>
+            <p className="mt-1 max-w-[240px] text-xs text-muted-foreground">
+              Esto <span className="font-semibold">no</span> significa que no haya nadie esperando.
+              Reintentá en unos segundos o avisá en el mostrador.
+            </p>
+          </>
+        ) : hayGenteEnElLocal > 0 ? (
+          <>
+            <p className="text-base font-bold">No tenés clientes asignados</p>
+            <p className="mt-1 max-w-[240px] text-xs text-muted-foreground">
+              Pero hay {hayGenteEnElLocal} {hayGenteEnElLocal === 1 ? 'persona esperando' : 'personas esperando'} en
+              el local. Mirá <span className="font-semibold text-foreground">General</span> para tomar al próximo.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-base font-bold">Esperando clientes</p>
+            <p className="mt-1 max-w-[220px] text-xs text-muted-foreground">
+              Cuando llegue alguien aparecerá acá.
+            </p>
+          </>
+        )}
         {dayStats.servicesCount > 0 && (
           <p className="mt-3 text-[11px] font-semibold text-muted-foreground">
             Hoy: {dayStats.servicesCount} corte{dayStats.servicesCount === 1 ? '' : 's'}
@@ -1539,7 +1612,12 @@ export function QueuePanel({
                 </TabsTrigger>
                 <TabsTrigger value="general-queue" className="flex-1 text-sm h-9">
                   General
-                  <Badge variant="secondary" className="ml-2 px-1.5 py-0 min-w-5 h-5 flex items-center justify-center text-[11px] font-bold shadow-sm bg-background">
+                  <Badge
+                    variant="secondary"
+                    className={`ml-2 px-1.5 py-0 min-w-5 h-5 flex items-center justify-center text-[11px] font-bold shadow-sm ${
+                      alertasEnGeneral > 0 ? 'bg-amber-500 text-black animate-pulse' : 'bg-background'
+                    }`}
+                  >
                     {allWaitingEntries.filter((e) => !e.is_break).length}
                   </Badge>
                 </TabsTrigger>
@@ -1638,7 +1716,10 @@ export function QueuePanel({
                 </TabsTrigger>
                 <TabsTrigger value="general-queue" className="flex-1 py-2 md:py-3 text-base md:text-lg">
                   Fila general
-                  <Badge variant="secondary" className="ml-2 px-2 text-base">
+                  <Badge
+                    variant="secondary"
+                    className={`ml-2 px-2 text-base ${alertasEnGeneral > 0 ? 'bg-amber-500 text-black animate-pulse' : ''}`}
+                  >
                     {allWaitingEntries.filter(e => !e.is_break).length}
                   </Badge>
                 </TabsTrigger>

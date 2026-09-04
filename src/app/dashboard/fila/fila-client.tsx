@@ -308,7 +308,12 @@ function QueueCard({
 
         {/* Acciones */}
         <div className="flex items-center gap-1 shrink-0">
-          {!isBreak && entry.barber_id && onStartService && (
+          {/* El botón verde también va en las tarjetas del pool ("Menor espera",
+              barber_id NULL). Sin esto, la ÚNICA acción posible sobre un cliente que
+              eligió "Menor espera" era la X roja que lo borra de la fila: para
+              atenderlo había que adivinar que se arrastra a la columna de un barbero.
+              Con barbero asignado inicia el corte; sin barbero abre el selector. */}
+          {!isBreak && onStartService && (
             <Button
               variant="ghost"
               size="icon"
@@ -316,7 +321,7 @@ function QueueCard({
               onPointerDown={(e) => e.stopPropagation()}
               disabled={actionLoading === entry.id}
               className="size-7 text-green-400"
-              title="Iniciar corte"
+              title={entry.barber_id ? 'Iniciar corte' : 'Asignar barbero y atender'}
             >
               <Play className="size-3.5" />
             </Button>
@@ -937,6 +942,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
   // Confirmación para cancelar un corte ya iniciado (in_progress) desde el dashboard.
   const [cancelConfirmEntry, setCancelConfirmEntry] = useState<QueueEntry | null>(null)
+  /** Cliente del pool al que hay que elegirle barbero antes de arrancar el corte. */
+  const [asignarBarberoEntry, setAsignarBarberoEntry] = useState<QueueEntry | null>(null)
 
   const [draggedEntry, setDraggedEntry] = useState<QueueEntry | null>(null)
   const [draggedTemplate, setDraggedTemplate] = useState<BreakConfig | null>(null)
@@ -972,12 +979,25 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     // Evitamos clients(*) y staff(*) que traen columnas no usadas.
     // FIX #9: scopear por organization_id. Sin esto (y con la policy pública
     // queue_entries_public_read) el dashboard traía la cola de TODAS las orgs.
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('queue_entries')
-      .select('*, client:clients(id, name, phone), barber:staff(id, full_name, avatar_url)')
+      // Embeds por nombre de constraint (Known Risk #15): con dos FKs a `staff`,
+      // PostgREST rechaza la query entera con PGRST201 y esto devolvía null.
+      .select('*, client:clients!queue_entries_client_id_fkey(id, name, phone), barber:staff!queue_entries_barber_id_fkey(id, full_name, avatar_url)')
       .eq('organization_id', orgId)
       .in('status', ['waiting', 'in_progress'])
+      // `priority_order` = hora de llegada = el FIFO real. `position` sólo desempata:
+      // se recicla (`next_queue_position` = MAX+1 sobre las activas) y se duplica.
+      .order('priority_order')
       .order('position')
+    if (error) {
+      // Un fallo de lectura no es una fila vacía. Sin esto, un error de query pintaba
+      // el tablero sin nadie — que es como el dueño se enteró de un outage recién
+      // cuando los barberos le avisaron por teléfono.
+      console.error('[dashboard/fila] fetchQueue:', error.message)
+      toast.error('No pudimos leer la fila. Reintentá en unos segundos.')
+      return
+    }
     if (data) {
       const typed = data as QueueEntry[]
       setEntries(typed)
@@ -1288,7 +1308,18 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       cols[b.id] = []
     }
 
-    const sortedEntries = [...branchEntries].sort((a, b) => a.position - b.position)
+    // Orden por `priority_order` (llegada real); `position` sólo desempata. Este sort
+    // alimenta las columnas del tablero, así que pisaba el `.order('priority_order')`
+    // del fetch: el kanban dibujaba en orden de `position` —columna que se recicla y
+    // se duplica— mientras el panel del barbero y `claim_next_for_barber` ejecutaban
+    // en orden de llegada. Y como el drag deriva el orden nuevo de lo dibujado, ese
+    // orden equivocado era el que terminaba escrito.
+    const sortedEntries = [...branchEntries].sort((a, b) => {
+      const pa = new Date(a.priority_order).getTime()
+      const pb = new Date(b.priority_order).getTime()
+      if (pa !== pb) return pa - pb
+      return a.position - b.position
+    })
 
     for (const entry of sortedEntries) {
       if (entry.status !== 'waiting') continue
@@ -1450,6 +1481,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
 
     const activeIdx = entries.findIndex(e => e.id === activeId)
     if (activeIdx === -1) return
+    const arrastrada = entries[activeIdx]
 
     let finalEntries = [...entries]
 
@@ -1461,28 +1493,100 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       }
     }
 
-    // Reconstruimos posiciones desde 1 para TODA la fila esperando (branch context)
-    const waitingItems = finalEntries.filter(e => e.status === 'waiting' && (!selectedBranchId || e.branch_id === selectedBranchId))
-    
+    // Renumeramos `position` (orden de dibujo) para la fila esperando DE ESTA SUCURSAL.
+    //
+    // El scope por sucursal es obligatorio, no una optimización: el fetch trae la cola
+    // de TODA la organización (`.eq('organization_id', orgId)`), así que en la vista
+    // "todas las sucursales" arrastrar una tarjeta tocaba la fila de los cuatro
+    // locales a la vez, con un ancla de tiempo compartida entre negocios distintos.
+    const branchIdDelDrag = selectedBranchId || arrastrada.branch_id
+    const waitingItems = finalEntries.filter(
+      e => e.status === 'waiting' && e.branch_id === branchIdDelDrag
+    )
+
     // Lista de updates para Supabase
     const updates: { id: string; position: number; barber_id?: string | null; is_dynamic?: boolean; priority_order?: string }[] = []
 
-    // Calcular priority_order sintéticos: tomar el más antiguo como base y espaciar 1s entre cada uno.
-    // La base sale SÓLO de los walk-ins: el priority_order de un turno es su hora
-    // reservada (puede ser de la mañana o de dentro de dos horas), así que
-    // meterlo acá corría la base y reescribía el orden de llegada de toda la fila.
-    const walkInPriorities = waitingItems
-      .filter(e => !e.is_appointment)
-      .map(e => new Date(e.priority_order).getTime())
-      .filter(t => !isNaN(t))
-    const basePriority = walkInPriorities.length > 0
-      ? Math.min(...walkInPriorities)
-      : Date.now()
+    // ── priority_order: SÓLO se le toca al que se arrastró ──────────────────────
+    //
+    // `priority_order` es la hora de llegada del cliente y la clave FIFO real del
+    // sistema (`claim_next_for_barber` ordena por ella, el panel del barbero también).
+    // Hasta el 4/9/2026 este bloque la REESCRIBÍA para toda la fila: tomaba el mínimo
+    // como base y repartía base+1s, base+2s… en el orden de dibujo. Tres consecuencias,
+    // verificadas contra producción:
+    //
+    //   1. Se perdía el orden de llegada DENTRO de la cola de cada barbero, que es
+    //      donde importa (`claim_next_for_barber` filtra `barber_id = yo OR barber_id
+    //      IS NULL`: un barbero nunca compite con los clientes de otro). El 4/9 en
+    //      Rondeau hubo 13 inversiones mismo-barbero y el 3/9, 8 — p. ej. Facundo
+    //      Brusco (llegó 15:13) quedó con prio 14:38:24.974 y Joaquín yotti (llegó
+    //      16:01) con 14:38:22.974, los dos de Nico Maidana: 48 min de inversión.
+    //   2. Como el ancla queda en el PASADO, los rebaseados además se le adelantan a
+    //      todo el que hizo check-in después del último drag, sin que nadie lo pida.
+    //   3. Se disparaba sin que nadie quisiera reordenar nada: `position` se recicla y
+    //      se repite, así que casi nunca vale 1..N, `entry.position !== newPos` daba
+    //      true para TODA la fila y un temblor de 5 px sobre una tarjeta (el
+    //      `activationConstraint` del MouseSensor) rebaseaba la cola entera. Medido:
+    //      17-33 entradas por día con la hora de llegada falseada, sólo en Rondeau,
+    //      con desfases de hasta 210 minutos.
+    //
+    // Ahora se mueve UNA sola entrada, intercalando su timestamp entre sus vecinos
+    // nuevos. `position` se sigue renumerando (es dibujo), pero NO vuelve a decidir la
+    // hora de llegada de nadie.
+    const movedId = activeId !== overId ? String(activeId) : null
+    const movedEntry = movedId ? waitingItems.find(e => e.id === movedId) : undefined
+    // Cambiar a alguien de columna es cambiarle el BARBERO, no el lugar en la fila:
+    // conserva su hora de llegada. Sólo un reordenamiento dentro de su misma columna
+    // significa "a éste atendelo antes/después".
+    const dbDelMovido = movedEntry
+      ? confirmedEntriesRef.current.find(e => e.id === movedEntry.id) ?? movedEntry
+      : undefined
+    const cambioDeColumna =
+      !!movedEntry && !!dbDelMovido && movedEntry.barber_id !== dbDelMovido.barber_id
 
-    let walkInIndex = 0
+    if (movedEntry && !movedEntry.is_appointment && !cambioDeColumna) {
+      const prioridadDe = (e: QueueEntry) => new Date(e.priority_order).getTime()
+      // Vecinos walk-in en el orden nuevo. Los turnos se saltean: su `priority_order`
+      // es la hora RESERVADA, no una hora de llegada, y no sirve de cota.
+      const vecinos = waitingItems.filter(e => !e.is_appointment && !isNaN(prioridadDe(e)))
+      const idx = vecinos.findIndex(e => e.id === movedEntry.id)
+      const anterior = idx > 0 ? prioridadDe(vecinos[idx - 1]) : null
+      const siguiente = idx >= 0 && idx < vecinos.length - 1 ? prioridadDe(vecinos[idx + 1]) : null
+
+      let nuevaPrioridad: number
+      if (anterior !== null && siguiente !== null) {
+        nuevaPrioridad = Math.floor((anterior + siguiente) / 2)
+        // Vecinos pegados al milisegundo: no hay punto medio. Empujamos al de adelante
+        // 2 ms — mover UNA entrada es infinitamente menos daño que rebasear la fila.
+        if (nuevaPrioridad <= anterior || nuevaPrioridad >= siguiente) {
+          nuevaPrioridad = anterior + 1
+          updates.push({
+            id: vecinos[idx + 1].id,
+            position: vecinos[idx + 1].position,
+            priority_order: new Date(anterior + 2).toISOString(),
+          })
+        }
+      } else if (siguiente !== null) {
+        nuevaPrioridad = siguiente - 1000 // lo pusieron primero
+      } else if (anterior !== null) {
+        nuevaPrioridad = anterior + 1000 // lo pusieron último
+      } else {
+        nuevaPrioridad = prioridadDe(movedEntry) // era el único: nada que reordenar
+      }
+
+      updates.push({
+        id: movedEntry.id,
+        position: movedEntry.position,
+        barber_id: movedEntry.barber_id,
+        is_dynamic: movedEntry.is_dynamic,
+        priority_order: new Date(nuevaPrioridad).toISOString(),
+      })
+    }
+
     waitingItems.forEach((entry, index) => {
       const newPos = index + 1
       const dbEntry = confirmedEntriesRef.current.find(e => e.id === entry.id) || entry
+      const yaEnLista = updates.find(u => u.id === entry.id)
 
       // Un turno sólo puede recibir `position` (que es orden de dibujo, y hay que
       // renumerarlo o quedarían posiciones repetidas). Su `priority_order` es la
@@ -1496,19 +1600,25 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
         return
       }
 
-      const newPriorityOrder = new Date(basePriority + walkInIndex * 1000).toISOString()
-      walkInIndex++
+      if (yaEnLista) {
+        yaEnLista.position = newPos
+        return
+      }
 
-      const wasChanged = entry.position !== newPos || entry.barber_id !== dbEntry.barber_id || entry.is_dynamic !== dbEntry.is_dynamic
+      // Cambió de columna sin ser el arrastrado, o se le corrió la posición de dibujo.
+      // En ninguno de los dos casos se toca `priority_order`.
+      const cambioBarbero =
+        entry.barber_id !== dbEntry.barber_id || entry.is_dynamic !== dbEntry.is_dynamic
 
-      if (wasChanged) {
+      if (cambioBarbero) {
         updates.push({
           id: entry.id,
           position: newPos,
           barber_id: entry.barber_id,
           is_dynamic: entry.is_dynamic,
-          priority_order: newPriorityOrder,
         })
+      } else if (entry.position !== newPos) {
+        updates.push({ id: entry.id, position: newPos })
       }
     })
 
@@ -1536,11 +1646,17 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     }
   }
 
-  // Dispatcher de la X: si el corte ya empezó (in_progress, no descanso) pide
-  // confirmación avisando que no se cobra; para waiting/descansos cancela directo.
+  // Dispatcher de la X: pide confirmación para cualquier CLIENTE (esperando o en
+  // curso) y cancela directo sólo los descansos.
+  //
+  // Antes un cliente `waiting` se cancelaba con un solo tap, sin preguntar y sin
+  // deshacer. Sacar a alguien de la fila es la acción menos reversible de esta
+  // pantalla —el cliente no se entera: se queda sentado esperando un turno que ya no
+  // existe— y en producción son 4 por día los que terminan así. El panel del barbero
+  // ya confirmaba; el dashboard, que es donde además está el drag, no.
   function handleCancel(entryId: string) {
     const entry = entries.find((e) => e.id === entryId)
-    if (entry && entry.status === 'in_progress' && !entry.is_break) {
+    if (entry && !entry.is_break) {
       setCancelConfirmEntry(entry)
       return
     }
@@ -1562,7 +1678,9 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
 
   async function handleStartService(entry: QueueEntry) {
     if (!entry.barber_id) {
-      toast.error('El cliente no tiene barbero asignado')
+      // Cliente del pool ("Menor espera"). Antes esto era un toast sin salida y el
+      // botón ni se dibujaba: la única acción sobre esta tarjeta era la X.
+      setAsignarBarberoEntry(entry)
       return
     }
     setActionLoading(entry.id)
@@ -2025,15 +2143,87 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
         />
       )}
 
+      {/* Selector de barbero para un cliente del pool ("Menor espera").
+          Los que atienden ahora quedan deshabilitados (arrancarles un segundo corte
+          choca contra `idx_queue_one_in_progress_per_barber`); los que no ficharon se
+          marcan pero se pueden elegir igual: la fila real manda sobre el fichaje. */}
+      <AlertDialog
+        open={!!asignarBarberoEntry}
+        onOpenChange={(open) => { if (!open) setAsignarBarberoEntry(null) }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Quién lo atiende?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{asignarBarberoEntry?.client?.name ?? 'El cliente'}</strong> eligió
+              &ldquo;Menor espera&rdquo;, así que no tiene barbero asignado. Elegí uno para
+              arrancar el corte.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="grid max-h-[45vh] gap-2 overflow-y-auto py-1">
+            {filteredBarbers
+              .filter(b => !asignarBarberoEntry || b.branch_id === asignarBarberoEntry.branch_id)
+              .map((barbero) => {
+                const ocupado = entries.some(
+                  e => e.barber_id === barbero.id && e.status === 'in_progress'
+                )
+                return (
+                  <Button
+                    key={barbero.id}
+                    variant="outline"
+                    disabled={ocupado || actionLoading === asignarBarberoEntry?.id}
+                    className="h-auto justify-start py-2.5 text-left"
+                    onClick={async () => {
+                      const entry = asignarBarberoEntry
+                      if (!entry) return
+                      setAsignarBarberoEntry(null)
+                      setActionLoading(entry.id)
+                      const result = await startService(entry.id, barbero.id)
+                      if ('error' in result) toast.error(result.error)
+                      else toast.success(`Corte iniciado con ${barbero.full_name}`)
+                      await fetchQueue()
+                      setActionLoading(null)
+                    }}
+                  >
+                    <span className="flex-1 truncate font-medium">{barbero.full_name}</span>
+                    {ocupado ? (
+                      <span className="text-xs text-muted-foreground">atendiendo</span>
+                    ) : notClockedInBarbers.has(barbero.id) ? (
+                      <span className="text-xs text-amber-500">sin fichar</span>
+                    ) : (
+                      <span className="text-xs text-green-500">libre</span>
+                    )}
+                  </Button>
+                )
+              })}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Volver</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog
         open={!!cancelConfirmEntry}
         onOpenChange={(open) => { if (!open) setCancelConfirmEntry(null) }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Cancelar un corte en curso?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {cancelConfirmEntry?.status === 'in_progress'
+                ? '¿Cancelar un corte en curso?'
+                : '¿Sacar al cliente de la fila?'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              <strong>{cancelConfirmEntry?.client?.name ?? 'El cliente'}</strong> ya está siendo atendido. Si lo cancelás, ese corte <strong>no se va a cobrar ni registrar</strong> y saldrá de la fila.
+              {cancelConfirmEntry?.status === 'in_progress' ? (
+                <>
+                  <strong>{cancelConfirmEntry?.client?.name ?? 'El cliente'}</strong> ya está siendo atendido. Si lo cancelás, ese corte <strong>no se va a cobrar ni registrar</strong> y saldrá de la fila.
+                </>
+              ) : (
+                <>
+                  <strong>{cancelConfirmEntry?.client?.name ?? 'El cliente'}</strong> queda marcado como ausente y sale de la fila. Si todavía está en el local <strong>no se va a enterar</strong>: va a seguir esperando un turno que ya no existe y va a tener que anotarse de nuevo.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -2046,7 +2236,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
                 if (id) doCancel(id)
               }}
             >
-              Sí, cancelar corte
+              {cancelConfirmEntry?.status === 'in_progress' ? 'Sí, cancelar corte' : 'Sí, sacarlo de la fila'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

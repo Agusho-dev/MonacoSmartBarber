@@ -52,9 +52,17 @@ export default async function TvPage({
     branchIds.length > 0
       ? supabase
           .from('queue_entries')
-          .select('*, client:clients(*), barber:staff(*)')
+          // Embeds por nombre de constraint: `queue_entries` puede ganar otra FK a
+          // `staff` y PostgREST rechaza la query ENTERA con PGRST201 (Known Risk #15).
+          .select('*, client:clients!queue_entries_client_id_fkey(*), barber:staff!queue_entries_barber_id_fkey(*)')
           .in('status', ['waiting', 'in_progress'])
           .in('branch_id', branchIds)
+          // La TV es la única pantalla donde el CLIENTE ve su lugar en la fila, así
+          // que tiene que mostrar el orden que el motor va a ejecutar. `position` se
+          // recicla y se duplica entre entradas vivas (medido en Rondeau: 64 pares
+          // con la misma `position` y vidas solapadas en un solo día); el FIFO real
+          // es `priority_order`, que es por lo que ordena `claim_next_for_barber`.
+          .order('priority_order')
           .order('position')
       : Promise.resolve({ data: [] }),
     branchIds.length > 0

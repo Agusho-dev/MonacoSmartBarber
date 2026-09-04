@@ -6,6 +6,62 @@ import { validateBranchAccess, getCurrentOrgId } from './org'
 import { getActiveTimezone } from '@/lib/i18n'
 import { isValidUUID } from '@/lib/validation'
 
+/**
+ * Resuelve si el cliente ya tiene lugar en la fila, distinguiendo **esta** sucursal de
+ * las otras. La distinción no es cosmética.
+ *
+ * El chequeo original preguntaba por `client_id` sin filtrar `branch_id`, así que un
+ * cliente con una entrada viva en OTRA sucursal recibía `alreadyInQueue` y la tablet
+ * lo mandaba a "ya tenés lugar, puesto N" — con la posición y la espera de un local en
+ * el que no estaba parado. El cliente se sentaba a esperar un turno que ningún barbero
+ * de ESTA sucursal podía ver, hasta que alguien le cancelaba la entrada vieja y recién
+ * ahí podía anotarse. Es el "me registré y no estoy en la fila" que reportó el dueño.
+ *
+ * El índice único que de verdad existe es `idx_queue_unique_active_client` sobre
+ * (client_id, **branch_id**): dos sucursales nunca chocaron entre sí. El pre-chequeo
+ * era más estricto que la base.
+ *
+ * La entrada de la otra sucursal se cancela: la persona está físicamente acá, así que
+ * allá es un fantasma que le va a hacer perder un llamado a un barbero. Queda auditada
+ * con `cancel_reason = 'moved_to_other_branch'`.
+ */
+async function resolverEntradaActiva(
+  supabase: ReturnType<typeof createAdminClient>,
+  clientId: string,
+  branchId: string,
+) {
+  const { data: activas } = await supabase
+    .from('queue_entries')
+    .select('id, position, status, barber_id, branch_id')
+    .eq('client_id', clientId)
+    .in('status', ['waiting', 'in_progress'])
+    .order('checked_in_at', { ascending: false })
+
+  const filas = activas ?? []
+  const enEstaSucursal = filas.find(e => e.branch_id === branchId) ?? null
+  const enOtras = filas.filter(e => e.branch_id !== branchId)
+
+  if (!enEstaSucursal && enOtras.length > 0) {
+    // Sólo las que ESPERAN: si en la otra sucursal ya lo están atendiendo, el dato raro
+    // es éste y no aquél — no cortamos un corte en curso desde otro local.
+    const aCancelar = enOtras.filter(e => e.status === 'waiting').map(e => e.id)
+    if (aCancelar.length > 0) {
+      const { error } = await supabase
+        .from('queue_entries')
+        .update({
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+          cancel_reason: 'moved_to_other_branch',
+        })
+        .in('id', aCancelar)
+        .eq('status', 'waiting')
+      if (error) console.error('[resolverEntradaActiva] cancelar fantasma:', error.message)
+    }
+  }
+
+  return { enEstaSucursal, enOtras }
+}
+
 export async function checkinClient(formData: FormData) {
   const supabase = createAdminClient()
   const rawName = ((formData.get('name') as string | null) ?? '').trim()
@@ -87,17 +143,9 @@ export async function checkinClient(formData: FormData) {
     clientId = existingClient.id
     await supabase.from('clients').update({ name }).eq('id', clientId).eq('organization_id', branchResult.organization_id)
 
-    const { data: activeEntry } = await supabase
-      .from('queue_entries')
-      .select('id, position, status, barber_id')
-      .eq('client_id', clientId)
-      .in('status', ['waiting', 'in_progress'])
-      .order('checked_in_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (activeEntry) {
-      return { alreadyInQueue: true, position: activeEntry.position, queueEntryId: activeEntry.id }
+    const activo = await resolverEntradaActiva(supabase, clientId, branchId)
+    if (activo.enEstaSucursal) {
+      return { alreadyInQueue: true, position: activo.enEstaSucursal.position, queueEntryId: activo.enEstaSucursal.id }
     }
   } else if (isSpecial) {
     // Teléfono virtual único 00XXXXXXXX (mismo formato que el kiosko). Reintentamos si
@@ -1188,9 +1236,43 @@ export async function cancelQueueEntry(
   const cancelableStatuses =
     entry.is_break || adminCanCancelInProgress ? ['waiting', 'in_progress'] : ['waiting']
 
+  // Quién saca al cliente de la fila (mig 211). Hasta el 4/9/2026 una cancelación no
+  // dejaba NINGÚN rastro —ni cuándo, ni quién, ni por qué— y eso hizo que meses de
+  // clientes que se anotaban y desaparecían fueran indistinguibles de clientes que se
+  // iban solos. En el panel del barbero el actor sale de la cookie `barber_session`
+  // (ahí no hay usuario de Supabase Auth); en el dashboard, del `staff` del usuario
+  // logueado. Si no se puede resolver queda NULL: `cancelled_at` y el motivo los
+  // estampa igual el trigger.
+  let actorStaffId: string | null = null
+  try {
+    const { getBarberSession } = await import('./auth')
+    const barberSession = await getBarberSession()
+    actorStaffId = barberSession?.staff_id ?? null
+    if (!actorStaffId) {
+      const authClient = await createClient()
+      const { data: { user } } = await authClient.auth.getUser()
+      if (user) {
+        const { data: staffRow } = await supabase
+          .from('staff')
+          .select('id')
+          .eq('auth_user_id', user.id)
+          .is('deleted_at', null)
+          .maybeSingle()
+        actorStaffId = staffRow?.id ?? null
+      }
+    }
+  } catch {
+    actorStaffId = null
+  }
+
   const { data: cancelledRows, error } = await supabase
     .from('queue_entries')
-    .update({ status: 'cancelled' })
+    .update({
+      status: 'cancelled',
+      cancelled_at: new Date().toISOString(),
+      cancelled_by: actorStaffId,
+      cancel_reason: entry.is_break ? 'break_cancelado' : 'no_show',
+    })
     .eq('id', queueEntryId)
     .in('status', cancelableStatuses)
     .select('id')
@@ -1312,17 +1394,16 @@ export async function checkinClientByFace(
     return { error: 'Cliente no encontrado' }
   }
 
-  const { data: activeEntry } = await supabase
-    .from('queue_entries')
-    .select('id, position, status, barber_id')
-    .eq('client_id', clientId)
-    .in('status', ['waiting', 'in_progress'])
-    .order('checked_in_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (activeEntry) {
-    return { alreadyInQueue: true, position: activeEntry.position, queueEntryId: activeEntry.id }
+  // Mismo criterio que `checkinClient`: el "ya estás en la fila" es POR SUCURSAL. Sin
+  // el scope, la cámara reconocía al cliente y lo rebotaba mostrándole la posición de
+  // otro local. Ver `resolverEntradaActiva`.
+  const activoFace = await resolverEntradaActiva(supabase, clientId, branchId)
+  if (activoFace.enEstaSucursal) {
+    return {
+      alreadyInQueue: true,
+      position: activoFace.enEstaSucursal.position,
+      queueEntryId: activoFace.enEstaSucursal.id,
+    }
   }
 
   const { data: position } = await supabase.rpc('next_queue_position', {
