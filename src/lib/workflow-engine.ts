@@ -1871,11 +1871,25 @@ export async function processExpiredDelays(): Promise<{ processed: number; error
   let processed = 0
 
   // Buscar ejecuciones en 'delayed' (estado dedicado desde la migración P0).
-  // Incluimos también las legacy en 'waiting_reply' por compatibilidad hasta que se vacíen.
+  //
+  // SÓLO 'delayed'. NO incluir 'waiting_reply': ahí no se espera un reloj, se espera al
+  // CLIENTE. La edge function `process-scheduled-messages` deja la ejecución de reseñas en
+  // waiting_reply sobre el nodo `delay` y sin `delay_until`, así que el fallback de más abajo
+  // la daba por vencida a los ~180 s (updated_at + config.seconds + 60 s de gracia), la
+  // condición se evaluaba SIN la estrella del cliente y `advanceFromNode` cerraba la
+  // ejecución. La estrella que el cliente apretaba después caía al vacío.
+  //
+  // Medido contra prod: con este cron caído (1–12 ago) se entregaron 487 links de Google
+  // sobre 730 inbound; con el cron vivo (13–24 ago) 167 sobre 653 — mismo tráfico, un
+  // tercio de las respuestas. No hay nada que "vaciar": en prod NUNCA existió una fila en
+  // 'delayed' (es un estado transitorio de los delays largos del propio motor), y lo que
+  // queda en waiting_reply lo cierra `expire_stale_workflow_executions` (SQL puro, cada
+  // 5 min) a las `wait_reply_timeout_minutes` del workflow — 1440, la misma ventana de 24 h
+  // que da WhatsApp para contestar.
   const { data: executions } = await supabase
     .from('workflow_executions')
     .select('*, current_node:workflow_nodes(*), workflow:automation_workflows(organization_id)')
-    .in('status', ['delayed', 'waiting_reply'])
+    .eq('status', 'delayed')
     .limit(50)
 
   if (!executions || executions.length === 0) return { processed: 0, errors: [] }

@@ -120,6 +120,10 @@ Deno.serve(async (req: Request) => {
       let sent = false
       let errorMsg: string | null = null
       let httpStatus: number | undefined
+      // wamid que devuelve Meta. Es la clave por la que el webhook matchea los acuses de
+      // entrega (statuses[].id -> messages.platform_message_id). Sin guardarlo, el mensaje
+      // se queda en 'sent' para siempre y el inbox no puede mostrar delivered/read/failed.
+      let platformMessageId: string | null = null
 
       // Resolver organization_id (preferimos la columna directa)
       let orgId: string | null = msg.organization_id ?? null
@@ -249,6 +253,7 @@ Deno.serve(async (req: Request) => {
             const result = await res.json()
             if (res.ok && result.messages?.[0]?.id) {
               sent = true
+              platformMessageId = String(result.messages[0].id)
             } else {
               errorMsg = result.error?.message || `Error HTTP ${res.status}`
             }
@@ -265,7 +270,7 @@ Deno.serve(async (req: Request) => {
       // Registrar en conversaciones si fue exitoso
       if (sent) {
         try {
-          await recordInConversation(msg, orgId, orgChannelCache)
+          await recordInConversation(msg, orgId, orgChannelCache, platformMessageId)
         } catch (recErr: unknown) {
           const message = recErr instanceof Error ? recErr.message : String(recErr)
           console.error('[recordInConversation] error msg_id=' + msg.id + ':', message)
@@ -446,7 +451,12 @@ function buildTemplatePayload(
 }
 
 // Registra el mensaje enviado en la tabla de conversaciones para que aparezca en el inbox.
-async function recordInConversation(msg: ScheduledMessage, orgId: string, orgChannelCache: Map<string, { id: string }[]>) {
+async function recordInConversation(
+  msg: ScheduledMessage,
+  orgId: string,
+  orgChannelCache: Map<string, { id: string }[]>,
+  platformMessageId: string | null = null,
+) {
   if (!orgChannelCache.has(orgId)) {
     const { data: channels, error: chErr } = await supabase
       .from('social_channels')
@@ -515,6 +525,9 @@ async function recordInConversation(msg: ScheduledMessage, orgId: string, orgCha
     content_type: msg.template_name ? 'template' : 'text',
     content: msg.content || (msg.template_name ? `[Template: ${msg.template_name}]` : null),
     template_name: msg.template_name || null,
+    // Sin esto el webhook no puede matchear los acuses de Meta y el mensaje queda 'sent'
+    // para siempre. El envío por el microservicio Baileys no devuelve wamid: queda null.
+    platform_message_id: platformMessageId,
     status: 'sent',
   })
   if (msgInsErr) {
