@@ -604,3 +604,42 @@ export async function leerTurno(appointmentId: string): Promise<TurnoParaSena | 
         timezone: branch?.timezone || 'America/Argentina/Buenos_Aires',
     }
 }
+
+/**
+ * Estampa el pago de la seña sobre el TURNO.
+ *
+ * `appointments.payment_status` no lo lee el sistema de señas —la tablet y el
+ * listado leen `booking_deposits`— pero sí lo leen la agenda y la vista del
+ * asistente de IA. Sin esto, un turno con la seña acreditada se dibujaba como
+ * "sin pagar" y ofrecía el botón "registrar pago": una invitación a cobrarle
+ * dos veces al mismo cliente. Verificado en producción el 7/9/2026.
+ *
+ * `partial` y no `paid` salvo que la seña cubra el precio entero: el resto se
+ * cobra en el mostrador y el turno no está saldado hasta entonces.
+ *
+ * Best-effort a propósito: si esto falla, la plata ya está acreditada y el
+ * turno ya existe. Romper la acreditación por no poder pintar una etiqueta
+ * pondría a Mercado Pago a reintentar el webhook cada 15 minutos sobre un caso
+ * que ya está resuelto.
+ */
+export async function estamparPagoEnTurno(
+    appointmentId: string,
+    sena: Pick<BookingDeposit, 'amount' | 'service_total' | 'paid_at'>,
+): Promise<void> {
+    const supabase = createAdminClient()
+    const cubreTodo = Number(sena.amount) >= Number(sena.service_total)
+
+    const { error } = await supabase
+        .from('appointments')
+        .update({
+            payment_status: cubreTodo ? 'paid' : 'partial',
+            payment_amount: sena.amount,
+            payment_method: 'mercadopago',
+            paid_at: sena.paid_at ?? new Date().toISOString(),
+        })
+        .eq('id', appointmentId)
+
+    if (error) {
+        console.error('[estamparPagoEnTurno] no pudimos marcar el turno como señado:', error.message)
+    }
+}

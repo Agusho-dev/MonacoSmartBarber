@@ -75,6 +75,7 @@ import {
     leerSenaDeTurno,
     leerSenaIniciada,
     leerSenasDelTurno,
+    estamparPagoEnTurno,
     leerServicios,
     leerSucursal,
     leerTurno,
@@ -1014,6 +1015,11 @@ async function vincularTurno(sena: BookingDeposit, appointmentId: string): Promi
         }
         throw e
     }
+
+    // La agenda y el asistente de IA leen `appointments.payment_status`, no
+    // `booking_deposits`: sin esto el turno se dibuja "sin pagar" y ofrece
+    // "registrar pago" sobre plata que ya entró.
+    await estamparPagoEnTurno(appointmentId, sena)
 
     revalidatePath('/dashboard/turnos/agenda')
     revalidatePath('/dashboard/turnos/senas')
