@@ -23,10 +23,15 @@ import {
   Plus,
   Repeat2,
   Save,
+  Globe,
   Search,
+  Smartphone,
   Sparkles,
   Star,
+  Tablet,
   Tag,
+  Upload,
+  UserCog,
   Users,
   UserX,
   X,
@@ -44,11 +49,15 @@ import type { ClientProfileVisit } from '@/lib/actions/visit-history'
 import {
   fetchClientsDirectory,
   fetchClientsForExport,
+  fetchSignupFunnel,
   type ClientSegment,
   type ClientSortKey,
   type ClientsDirectoryQuery,
   type ClientsDirectoryResult,
   type DirectoryClient,
+  type SignupFilter,
+  type SignupFunnelResult,
+  type SignupSource,
 } from '@/lib/actions/clients-directory'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -170,6 +179,74 @@ const SEGMENT_ORDER: ClientSegment[] = [
 
 const PAGE_SIZE = 50
 
+/**
+ * Vocabulario del origen del alta (`clients.signup_source`, mig 210).
+ *
+ * "Sin dato" no es un error ni un pendiente de carga: son los 6.419 clientes
+ * anteriores a la migración. Inventarles un origen habría sido peor que dejarlos
+ * en blanco, así que se los nombra por lo que son.
+ */
+const SOURCE_META: Record<
+  SignupFilter,
+  { label: string; short: string; hint: string; icon: typeof Users; badge: string }
+> = {
+  app: {
+    label: 'App',
+    short: 'App',
+    hint: 'Se creó la cuenta desde la app de Monaco',
+    icon: Smartphone,
+    badge: 'bg-violet-500/15 text-violet-300 border-violet-500/30',
+  },
+  web: {
+    label: 'Turnero web',
+    short: 'Web',
+    hint: 'Reservó desde la página pública de turnos',
+    icon: Globe,
+    badge: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+  },
+  kiosk: {
+    label: 'Tablet del local',
+    short: 'Tablet',
+    hint: 'Se registró en la tablet de check-in',
+    icon: Tablet,
+    badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  },
+  staff: {
+    label: 'Cargado por el equipo',
+    short: 'Equipo',
+    hint: 'Alta manual desde el dashboard',
+    icon: UserCog,
+    badge: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+  },
+  import: {
+    label: 'Importado',
+    short: 'Importado',
+    hint: 'Vino de un CSV de difusión',
+    icon: Upload,
+    badge: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30',
+  },
+  desconocido: {
+    label: 'Sin dato',
+    short: 'Sin dato',
+    hint: 'Alta anterior al registro de origen',
+    icon: CircleDashed,
+    badge: 'bg-white/[0.06] text-muted-foreground border-white/10',
+  },
+}
+
+const SOURCE_ORDER: SignupFilter[] = ['app', 'web', 'kiosk', 'staff', 'import', 'desconocido']
+
+/** Las ventanas del bloque de altas. Tienen que existir en `fetchSignupFunnel`. */
+const VENTANAS: { days: number; label: string }[] = [
+  { days: 7, label: '7 días' },
+  { days: 30, label: '30 días' },
+  { days: 90, label: '90 días' },
+]
+
+function metaOrigen(src: SignupSource | null) {
+  return SOURCE_META[src ?? 'desconocido']
+}
+
 function diasDesde(iso: string | null): number | null {
   if (!iso) return null
   const ms = Date.now() - new Date(iso).getTime()
@@ -231,6 +308,8 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
   const [segments, setSegments] = useState<ClientSegment[]>([])
   const [onlyWithVisits, setOnlyWithVisits] = useState(false)
   const [hideWalkins, setHideWalkins] = useState(false)
+  /** Orígenes elegidos. Vacío = todos (no filtra). */
+  const [signupSources, setSignupSources] = useState<SignupFilter[]>([])
   // Debe coincidir con el fetch inicial de page.tsx (el primer refetch se omite).
   const [sort, setSort] = useState<ClientSortKey>('last_visit')
   const [dir, setDir] = useState<'asc' | 'desc'>('desc')
@@ -259,13 +338,21 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
   const dirEfectiva: 'asc' | 'desc' = sortEfectivo === sort ? dir : 'desc'
 
   const segmentKey = segments.join(',')
+  const origenKey = signupSources.join(',')
 
   // Cualquier cambio de filtro vuelve a la página 1. Se ajusta DURANTE el render
   // (patrón soportado por React: re-renderiza sin commitear), no en un useEffect:
   // así el efecto de carga nunca llega a dispararse con la página vieja. Cubre
   // también al BranchSelector, que escribe directo al store Zustand y no pasa por
   // ningún handler de esta pantalla.
-  const filtroKey = [selectedBranchId ?? '', search, segmentKey, onlyWithVisits, hideWalkins].join('|')
+  const filtroKey = [
+    selectedBranchId ?? '',
+    search,
+    segmentKey,
+    origenKey,
+    onlyWithVisits,
+    hideWalkins,
+  ].join('|')
   const [prevFiltroKey, setPrevFiltroKey] = useState(filtroKey)
   if (prevFiltroKey !== filtroKey) {
     setPrevFiltroKey(filtroKey)
@@ -277,6 +364,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
       branchId: selectedBranchId,
       search,
       segments: segmentKey ? (segmentKey.split(',') as ClientSegment[]) : [],
+      signupSources: origenKey ? (origenKey.split(',') as SignupFilter[]) : [],
       onlyWithVisits,
       hideWalkins,
       sort: sortEfectivo,
@@ -284,7 +372,17 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
       page,
       pageSize: PAGE_SIZE,
     }),
-    [selectedBranchId, search, segmentKey, onlyWithVisits, hideWalkins, sortEfectivo, dirEfectiva, page]
+    [
+      selectedBranchId,
+      search,
+      segmentKey,
+      origenKey,
+      onlyWithVisits,
+      hideWalkins,
+      sortEfectivo,
+      dirEfectiva,
+      page,
+    ]
   )
 
 
@@ -332,6 +430,38 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
     load(query)
   }, [query, load, selectedBranchId])
 
+  // --- Altas por origen (independiente de los filtros de la lista) --------
+  // Mide adquisición, no la vista actual: por eso NO depende de la búsqueda ni
+  // de la sucursal elegida. Una ficha de cliente es de la organización.
+  const [ventanaAltas, setVentanaAltas] = useState(30)
+  const [altas, setAltas] = useState<SignupFunnelResult | null>(null)
+  const [altasLoading, setAltasLoading] = useState(true)
+  const altasReqRef = useRef(0)
+
+  useEffect(() => {
+    const myId = ++altasReqRef.current
+    setAltasLoading(true)
+    fetchSignupFunnel(ventanaAltas)
+      .then((res) => {
+        if (altasReqRef.current !== myId) return
+        setAltas(res)
+      })
+      .catch(() => {
+        if (altasReqRef.current !== myId) return
+        // Sin esto el bloque quedaba con el spinner para siempre y sin decir nada.
+        setAltas({
+          days: ventanaAltas,
+          rows: [],
+          sinOrigen: 0,
+          truncated: false,
+          error: 'No pudimos leer las altas',
+        })
+      })
+      .finally(() => {
+        if (altasReqRef.current === myId) setAltasLoading(false)
+      })
+  }, [ventanaAltas])
+
   // --- Derivados ----------------------------------------------------------
   const countsMap = useMemo(() => {
     const m = new Map<ClientSegment, { count: number; totalSpent: number }>()
@@ -357,7 +487,11 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
   const numero = (n: number) => (hayErrorDeConteos ? '—' : n.toLocaleString('es-AR'))
 
   const hayFiltros =
-    search !== '' || segments.length > 0 || onlyWithVisits || hideWalkins
+    search !== '' ||
+    segments.length > 0 ||
+    signupSources.length > 0 ||
+    onlyWithVisits ||
+    hideWalkins
 
   const branchName = selectedBranchId
     ? (branches.find((b) => b.id === selectedBranchId)?.name ?? 'esta sucursal')
@@ -370,6 +504,13 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
   function toggleSegment(seg: ClientSegment) {
     setPage(1)
     setSegments((prev) => (prev.includes(seg) ? prev.filter((s) => s !== seg) : [...prev, seg]))
+  }
+
+  function toggleOrigen(src: SignupFilter) {
+    setPage(1)
+    setSignupSources((prev) =>
+      prev.includes(src) ? prev.filter((s) => s !== src) : [...prev, src]
+    )
   }
 
   function toggleSort(field: ClientSortKey) {
@@ -386,6 +527,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
   function limpiarFiltros() {
     setSearchInput('')
     setSegments([])
+    setSignupSources([])
     setOnlyWithVisits(false)
     setHideWalkins(false)
     setSortManual(false)
@@ -420,6 +562,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
           'Barbero habitual',
           'Sucursal habitual',
           'Cliente desde',
+          'Origen',
           'Observaciones',
         ],
         res.rows.map((c) => [
@@ -435,6 +578,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
           c.topBarberName ?? '',
           c.topBranchName ?? '',
           formatDate(c.createdAt),
+          metaOrigen(c.signupSource).label,
           c.notes ?? '',
         ]),
         `clientes-${new Date().toISOString().slice(0, 10)}`
@@ -646,6 +790,86 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
             </div>
           </div>
 
+          {/* Altas nuevas: cuántas cuentas se crearon por cada camino y cuántas
+              de esas personas ya vinieron al local. Una cuenta creada es una
+              descarga; una cuenta que ya vino es un cliente — y eso es lo que
+              contesta si la publicidad trajo gente de verdad. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-white/[0.06] bg-zinc-900/40 px-3 py-2">
+            <div className="flex items-center gap-1.5">
+              <Sparkles className="size-3.5 text-violet-400" />
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300">
+                Altas nuevas
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1">
+              {VENTANAS.map((v) => (
+                <button
+                  key={v.days}
+                  onClick={() => setVentanaAltas(v.days)}
+                  className={cn(
+                    'rounded-full px-2 py-0.5 text-[11px] transition-colors',
+                    ventanaAltas === v.days
+                      ? 'bg-white/[0.09] text-zinc-100'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+
+            {altasLoading && !altas ? (
+              <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+            ) : altas?.error ? (
+              <span className="text-[11px] text-amber-300">{altas.error}</span>
+            ) : altas && altas.rows.length === 0 && altas.sinOrigen === 0 ? (
+              <span className="text-[11px] text-muted-foreground">
+                Ninguna alta en estos {altas.days} días.
+              </span>
+            ) : (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(altas?.rows ?? []).map((r) => {
+                  const meta = SOURCE_META[r.source]
+                  const Icon = meta.icon
+                  const pct = r.creados > 0 ? Math.round((r.conVisita / r.creados) * 100) : 0
+                  return (
+                    <span
+                      key={r.source}
+                      title={`${meta.label}: ${r.creados} altas, ${r.conVisita} con al menos una visita`}
+                      className={cn(
+                        'flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px]',
+                        meta.badge
+                      )}
+                    >
+                      <Icon className="size-3" />
+                      <span className="font-semibold">{meta.short}</span>
+                      <span className="tabular-nums">{r.creados}</span>
+                      <span className="opacity-75">
+                        · {r.conVisita} {r.conVisita === 1 ? 'ya vino' : 'ya vinieron'} ({pct}%)
+                      </span>
+                    </span>
+                  )
+                })}
+                {(altas?.sinOrigen ?? 0) > 0 && (
+                  <span
+                    title="Altas del período que no registraron por dónde entraron"
+                    className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[11px] text-muted-foreground"
+                  >
+                    <CircleDashed className="size-3" />
+                    Sin origen
+                    <span className="tabular-nums">{altas?.sinOrigen}</span>
+                  </span>
+                )}
+                {altas?.truncated && (
+                  <span className="text-[11px] text-amber-300">
+                    (muestra parcial: hay más altas de las que pudimos contar)
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Buscador + toggles */}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <div className="relative flex-1">
@@ -704,6 +928,42 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                 </Button>
               )}
             </div>
+          </div>
+
+          {/* Filtro por origen. Es la pregunta "¿quiénes llegaron por la
+              publicidad?" hecha filtro. */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-muted-foreground">Origen:</span>
+            <FilterToggle
+              active={signupSources.length === 0}
+              onClick={() => {
+                setPage(1)
+                setSignupSources([])
+              }}
+            >
+              Todos
+            </FilterToggle>
+            {SOURCE_ORDER.map((src) => {
+              const meta = SOURCE_META[src]
+              const Icon = meta.icon
+              return (
+                <FilterToggle
+                  key={src}
+                  active={signupSources.includes(src)}
+                  onClick={() => toggleOrigen(src)}
+                >
+                  <span className="flex items-center gap-1" title={meta.hint}>
+                    <Icon className="size-3" />
+                    {meta.short}
+                  </span>
+                </FilterToggle>
+              )
+            })}
+            {result.signupTruncated && (
+              <span className="text-[11px] text-amber-300">
+                Muestra parcial: afiná los filtros para ver el resto.
+              </span>
+            )}
           </div>
 
           {/* Contador honesto: siempre se ve sobre cuántos se buscó */}
@@ -870,7 +1130,10 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                               {iniciales(c.name)}
                             </div>
                             <div className="min-w-0">
-                              <p className="truncate font-medium leading-tight">{nombreVisible(c.name)}</p>
+                              <div className="flex items-center gap-1.5">
+                                <p className="truncate font-medium leading-tight">{nombreVisible(c.name)}</p>
+                                <OrigenBadge source={c.signupSource} />
+                              </div>
                               <p
                                 className={cn(
                                   'truncate font-mono text-[11px]',
@@ -1019,9 +1282,12 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                           {meta.label}
                         </Badge>
                       </div>
-                      <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-                        {telefonoLegible(c.phone, c.isWalkin)}
-                      </p>
+                      <div className="mt-0.5 flex items-center gap-1.5">
+                        <p className="font-mono text-[11px] text-muted-foreground">
+                          {telefonoLegible(c.phone, c.isWalkin)}
+                        </p>
+                        <OrigenBadge source={c.signupSource} />
+                      </div>
                       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
                         <span className="tabular-nums">
                           {c.visitCount} {c.visitCount === 1 ? 'visita' : 'visitas'}
@@ -1150,6 +1416,9 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                           fd.append('name', c.name)
                           fd.append('phone', c.phone)
                           fd.append('branch_id', selectedBranchId)
+                          // El cliente ya existe (viene del directorio): esto no
+                          // crea ficha. El origen viaja igual por consistencia.
+                          fd.append('origen', 'staff')
                           const res = await checkinClient(fd)
                           if (res?.error) toast.error(res.error)
                           else toast.success(`${nombreVisible(c.name)} añadido a la fila`)
@@ -1448,6 +1717,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
 
                     <p className="text-center text-[11px] text-muted-foreground/70">
                       Cliente desde {formatDate(c.createdAt)}
+                      {c.signupSource && ` · ${SOURCE_META[c.signupSource].label}`}
                     </p>
                   </div>
                 </>
@@ -1475,6 +1745,30 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Etiqueta de origen. Sólo se dibuja cuando el cliente DECLARA uno: pintar
+ * "Sin dato" en 6.419 filas sería ruido en cada renglón y taparía justamente lo
+ * que interesa ver (las altas nuevas). Para buscarlos está el chip del filtro.
+ */
+function OrigenBadge({ source, className }: { source: SignupSource | null; className?: string }) {
+  if (!source) return null
+  const meta = SOURCE_META[source]
+  const Icon = meta.icon
+  return (
+    <span
+      title={meta.hint}
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-px text-[10px] leading-none',
+        meta.badge,
+        className
+      )}
+    >
+      <Icon className="size-2.5" />
+      {meta.short}
+    </span>
+  )
+}
 
 function FilterToggle({
   active,

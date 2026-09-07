@@ -2,7 +2,7 @@
 // src/lib/arca/crypto.ts
 //
 // Todo lo criptográfico del facturador ARCA:
-//   · cifrado en reposo de la clave privada    (AES-256-GCM)
+//   · cifrado en reposo de la clave privada    (re-export de crypto/secretos)
 //   · generación del par de claves + CSR       (para que el usuario NO toque openssl)
 //   · lectura del certificado que devuelve ARCA
 //   · verificación de que ese certificado es el de NUESTRA clave
@@ -25,51 +25,16 @@
 // clave privada fiscal.
 // =============================================================================
 
-import { createCipheriv, createDecipheriv, randomBytes, generateKeyPairSync } from 'crypto'
+import { generateKeyPairSync } from 'crypto'
 import forge from 'node-forge'
-import { claveMaestra } from './clave-maestra'
 
-// Re-exportado para no obligar a los call-sites a conocer dos módulos.
-export { hayClaveDeCifrado } from './clave-maestra'
-
-// -----------------------------------------------------------------------------
-// Cifrado en reposo
-// -----------------------------------------------------------------------------
-
-const FORMATO = 'v1'
-
-/**
- * Cifra un secreto. Salida: `v1.<iv>.<tag>.<ciphertext>`, todo en base64.
- * GCM y no CBC porque además de cifrar autentica: si alguien toca la fila en
- * la base, el descifrado falla en vez de devolver basura.
- *
- * Es async porque la clave maestra puede venir de Supabase Vault (mig 179), no
- * sólo del entorno.
- */
-export async function cifrarSecreto(plano: string): Promise<string> {
-    const key = await claveMaestra()
-    const iv = randomBytes(12)
-    const cipher = createCipheriv('aes-256-gcm', key, iv)
-    const ct = Buffer.concat([cipher.update(plano, 'utf8'), cipher.final()])
-    const tag = cipher.getAuthTag()
-    return [FORMATO, iv.toString('base64'), tag.toString('base64'), ct.toString('base64')].join('.')
-}
-
-/** Descifra lo que produjo `cifrarSecreto`. */
-export async function descifrarSecreto(payload: string): Promise<string> {
-    const partes = payload.split('.')
-    if (partes.length !== 4 || partes[0] !== FORMATO) {
-        throw new Error('El secreto guardado no tiene el formato esperado (se esperaba v1.iv.tag.ct).')
-    }
-    const [, ivB64, tagB64, ctB64] = partes
-    const key = await claveMaestra()
-    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'))
-    decipher.setAuthTag(Buffer.from(tagB64, 'base64'))
-    return Buffer.concat([
-        decipher.update(Buffer.from(ctB64, 'base64')),
-        decipher.final(),
-    ]).toString('utf8')
-}
+// El cifrado en reposo vive en `src/lib/crypto/secretos.ts` desde que las señas
+// de Mercado Pago guardan sus access_token con la misma clave maestra. Se
+// re-exporta desde acá para no tocar los call-sites que ya lo importan de este
+// módulo; el formato de salida (`v1.<iv>.<tag>.<ct>`) y el secreto de Vault
+// (`arca_encryption_key`) son EXACTAMENTE los mismos, porque cambiarlos dejaría
+// ilegibles las claves privadas fiscales ya guardadas.
+export { cifrarSecreto, descifrarSecreto, hayClaveDeCifrado } from '@/lib/crypto/secretos'
 
 // -----------------------------------------------------------------------------
 // Generación de clave privada + CSR

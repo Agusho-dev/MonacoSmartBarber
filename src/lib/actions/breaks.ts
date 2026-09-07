@@ -3,6 +3,7 @@
 import { createAdminClient, createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
+import { leerBarberSession } from '@/lib/barber-cookie'
 import { getCurrentOrgId, validateBranchAccess } from './org'
 
 // ─── Configuración de descansos (CRUD) ──────────────────────────────────────
@@ -85,10 +86,9 @@ async function getApproverStaffId(adminSupabase: ReturnType<typeof createAdminCl
     const cookieStore = await cookies()
     const session = cookieStore.get('barber_session')
     if (session) {
-        try {
-            const parsed = JSON.parse(session.value)
-            return parsed.staff_id as string
-        } catch { }
+        // Cookie firmada (HMAC): sin firma válida no hay staff.
+        const parsed = leerBarberSession(session.value)
+        if (parsed?.staff_id) return parsed.staff_id
     }
     return null
 }

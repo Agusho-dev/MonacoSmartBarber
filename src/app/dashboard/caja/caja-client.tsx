@@ -29,6 +29,7 @@ import {
   TrendingUp,
   Clock,
   Sparkles,
+  CalendarCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -187,6 +188,14 @@ const PAYMENT_TOKENS = {
   },
 } as const
 
+// La seña no es un "método de pago" del mostrador: es plata que ya entró por
+// Mercado Pago. Token propio (ámbar) para que se lea distinta de los tres medios.
+const PREPAID_TOKEN = {
+  label: 'Seña',
+  text: 'text-amber-300',
+  bar: 'bg-amber-500',
+} as const
+
 function paymentBadge(method: string, accountName: string | null) {
   if (method === 'cash') {
     return (
@@ -311,16 +320,23 @@ export function CajaClient({
   }
 
   // ── Totales filtrados ──
+  // Los tres medios miden lo que PASÓ POR EL MOSTRADOR (`amountAtCounter`), igual
+  // que `fetchCajaSummary`: la seña la cobró Mercado Pago días antes y contarla
+  // como efectivo/tarjeta/transferencia le reclamaría al barbero plata que nunca
+  // tuvo en la mano. La seña va en su propia línea y el total sigue siendo la
+  // FACTURACIÓN, así el número grande significa lo mismo con y sin filtros.
   const filteredTotals = useMemo(() => {
-    let cash = 0, card = 0
+    let cash = 0, card = 0, prepaid = 0
     const byAccount = new Map<string, { name: string; total: number }>()
     for (const t of filteredTickets) {
-      if (t.paymentMethod === 'cash') cash += t.amount
-      else if (t.paymentMethod === 'card') card += t.amount
+      prepaid += t.prepaidAmount
+      const enMostrador = t.amountAtCounter
+      if (t.paymentMethod === 'cash') cash += enMostrador
+      else if (t.paymentMethod === 'card') card += enMostrador
       else if (t.paymentMethod === 'transfer' && t.paymentAccountId) {
         const existing = byAccount.get(t.paymentAccountId)
-        if (existing) existing.total += t.amount
-        else byAccount.set(t.paymentAccountId, { name: t.paymentAccountName ?? 'Cuenta', total: t.amount })
+        if (existing) existing.total += enMostrador
+        else byAccount.set(t.paymentAccountId, { name: t.paymentAccountName ?? 'Cuenta', total: enMostrador })
       }
     }
     const transferTotal = Array.from(byAccount.values()).reduce((s, a) => s + a.total, 0)
@@ -328,8 +344,9 @@ export function CajaClient({
       cash,
       card,
       transferTotal,
+      prepaid,
       accounts: Array.from(byAccount.entries()).map(([id, v]) => ({ accountId: id, accountName: v.name, total: v.total })),
-      total: cash + card + transferTotal,
+      total: cash + card + transferTotal + prepaid,
       count: filteredTickets.length,
     }
   }, [filteredTickets])
@@ -638,7 +655,7 @@ function HeroRevenuePanel({
 }: {
   tickets: CajaTicket[]
   summary: CajaDailySummary
-  filteredTotals: { cash: number; card: number; transferTotal: number; total: number; count: number }
+  filteredTotals: { cash: number; card: number; transferTotal: number; prepaid: number; total: number; count: number }
   hasActiveFilters: boolean
   isToday: boolean
 }) {
@@ -649,6 +666,10 @@ function HeroRevenuePanel({
   const transfer = hasActiveFilters
     ? filteredTotals.transferTotal
     : summary.accounts.reduce((s, a) => s + a.total, 0)
+  // Señas ya cobradas por Mercado Pago. Es la cuarta parte de la torta: sin
+  // ella, los tres medios (netos) no suman la recaudación del día y la barra
+  // quedaba corta sin que nada lo explicara.
+  const prepaid = hasActiveFilters ? filteredTotals.prepaid : summary.totalPrepaid
 
   const animatedTotal = useCountUp(total)
   const aov = count > 0 ? total / count : 0
@@ -723,6 +744,7 @@ function HeroRevenuePanel({
             cash={cash}
             card={card}
             transfer={transfer}
+            prepaid={prepaid}
             total={total}
           />
         </div>
@@ -768,9 +790,9 @@ function Sparkline({ buckets }: { buckets: number[] }) {
 }
 
 function PaymentCompositionBar({
-  cash, card, transfer, total,
+  cash, card, transfer, prepaid, total,
 }: {
-  cash: number; card: number; transfer: number; total: number
+  cash: number; card: number; transfer: number; prepaid: number; total: number
 }) {
   if (total <= 0) {
     return (
@@ -782,11 +804,15 @@ function PaymentCompositionBar({
   const pCash = (cash / total) * 100
   const pCard = (card / total) * 100
   const pTransfer = (transfer / total) * 100
+  const pPrepaid = (prepaid / total) * 100
 
   const segments = [
     { key: 'cash', label: 'Efectivo', amount: cash, pct: pCash, token: PAYMENT_TOKENS.cash, icon: <Banknote className="size-3" /> },
     { key: 'card', label: 'Tarjeta', amount: card, pct: pCard, token: PAYMENT_TOKENS.card, icon: <CreditCard className="size-3" /> },
     { key: 'transfer', label: 'Transferencias', amount: transfer, pct: pTransfer, token: PAYMENT_TOKENS.transfer, icon: <ArrowRightLeft className="size-3" /> },
+    // Parte de la facturación del día que NO pasó por el mostrador: ya la cobró
+    // Mercado Pago cuando el cliente reservó.
+    { key: 'prepaid', label: 'Señas cobradas por adelantado', amount: prepaid, pct: pPrepaid, token: PREPAID_TOKEN, icon: <CalendarCheck className="size-3" /> },
   ].filter(s => s.amount > 0)
 
   return (
@@ -1173,6 +1199,24 @@ function TicketRow({
                 <span className="text-zinc-400">Total</span>
                 <span className="text-zinc-100 tabular-nums">{formatCurrency(ticket.amount)}</span>
               </div>
+              {/* Con seña, el "Total" es el precio completo y por el mostrador
+                  entró menos: sin estas dos líneas el arqueo del día no cierra
+                  contra la suma de los tickets. */}
+              {ticket.prepaidAmount > 0 && (
+                <>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 text-amber-300">
+                      <CalendarCheck className="size-3" />
+                      Seña ya cobrada (Mercado Pago)
+                    </span>
+                    <span className="text-amber-300 tabular-nums">−{formatCurrency(ticket.prepaidAmount)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="text-zinc-400">Cobrado en el mostrador</span>
+                    <span className="text-zinc-100 tabular-nums">{formatCurrency(ticket.amountAtCounter)}</span>
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>
@@ -1194,7 +1238,10 @@ function BarberPodium({
     const map = new Map<string, number>()
     for (const t of tickets) {
       if (t.paymentMethod === 'cash') {
-        map.set(t.barberId, (map.get(t.barberId) ?? 0) + t.amount)
+        // Efectivo A RENDIR: lo que el barbero tiene en la mano, no el precio
+        // de lista. La parte señada la cobró Mercado Pago y no se la rinde a
+        // nadie (`amountAtCounter` = amount − seña, con piso en cero).
+        map.set(t.barberId, (map.get(t.barberId) ?? 0) + t.amountAtCounter)
       }
     }
     return barbers
@@ -1374,8 +1421,10 @@ function ExportDialog({
       if (error) { toast.error(error); return }
       if (data.length === 0) { toast.info('No hay datos para exportar con los filtros seleccionados'); return }
 
-      const headers = ['Fecha', 'Hora', 'Cliente', 'Telefono', 'Barbero', 'Monto', 'Metodo de Pago', 'Cuenta']
-      const toRow = (r: CajaCSVRow) => [r.fecha, r.hora, r.cliente, r.telefono, r.barbero, r.monto, r.metodoPago, r.cuenta]
+      // `Monto` es el precio completo (la facturación); `Sena` y `En mostrador`
+      // lo parten, porque la seña la cobró Mercado Pago y nunca pasó por la caja.
+      const headers = ['Fecha', 'Hora', 'Cliente', 'Telefono', 'Barbero', 'Monto', 'Sena', 'En mostrador', 'Metodo de Pago', 'Cuenta']
+      const toRow = (r: CajaCSVRow) => [r.fecha, r.hora, r.cliente, r.telefono, r.barbero, r.monto, r.sena, r.montoEnMostrador, r.metodoPago, r.cuenta]
       const rangeLabel = startDate === endDate ? startDate : `${startDate}-a-${endDate}`
       const paymentSuffix = filterPayment === 'all' ? 'todos' : safeFilePart(paymentLabel)
 

@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { isValidUUID } from '@/lib/validation'
 import { RateLimits } from '@/lib/rate-limit'
 import { getAvailableSlots, getAppointmentSettings, createAppointment } from '@/lib/actions/appointments'
+import { canalInterno } from '@/lib/appointments/canal-interno'
 import { getTzOffsetISO } from '@/lib/time-utils'
 import type { BranchOperationMode } from '@/lib/actions/turnos-mode'
 
@@ -470,7 +471,11 @@ export async function quickBookFromKiosk(params: {
     startTime: hora,
     durationMinutes: duracion || (settings?.slot_interval_minutes ?? 30),
     source: 'public',
-    viaKiosk: true,
+    // Todos los clientes del local comparten la IP de la tablet: sin esto, a
+    // partir del tercero del día el kiosko rechazaría reservas legítimas. Va
+    // por el token del canal interno (memoria del proceso, nunca viaja al
+    // browser) y no por un booleano del body, que cualquiera podía mandar.
+    canalInterno: canalInterno('kiosko'),
   })
 
   if ('error' in result && result.error) return { error: result.error }

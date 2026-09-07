@@ -1,11 +1,30 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Check, Loader2, MapPin, Scissors, User, XCircle } from 'lucide-react'
+import Link from 'next/link'
+import { Check, Loader2, MapPin, Scissors, Undo2, User, Wallet, XCircle } from 'lucide-react'
 import { publicCancelByToken } from '@/lib/actions/public-booking'
 import { themeVars, type TurneroTheme } from '../../[slug]/theme'
 import { fechaLargaDeStr } from '../../[slug]/fechas'
+import { PieLegal } from '../../[slug]/pie-legal'
 import type { Appointment } from '@/lib/types/database'
+
+/**
+ * La seña de este turno, con las consecuencias ya resueltas por el servidor.
+ *
+ * Las dos frases (`siCancelaATiempo` / `siCancelaTarde`) vienen calculadas
+ * porque la regla vive en la config de la sucursal y en el motor, no acá: si la
+ * pantalla la reimplementara, tarde o temprano prometería una devolución que el
+ * sistema no hace.
+ */
+export interface SenaDelTurno {
+  montoTexto: string
+  restoTexto: string | null
+  consumida: boolean
+  siCancelaATiempo: string
+  siCancelaTarde: string
+  arrepentimiento: { hasta: string; diasRestantes: number } | null
+}
 
 const ESTADOS: Record<string, string> = {
   confirmed: 'Confirmado',
@@ -22,9 +41,26 @@ interface Props {
   token: string
   theme: TurneroTheme
   cancellationMinHours: number
+  /**
+   * El instante del turno, ya resuelto en la zona de la SUCURSAL por el
+   * servidor. No se calcula acá: `new Date('2026-09-10T15:00:00')` lo
+   * interpreta en la zona del teléfono, y un cliente de viaje —o cualquiera
+   * después de un cambio de horario— veía la ventana de cancelación corrida.
+   */
+  instanteISO: string
+  sucursalSlug: string | null
+  sena: SenaDelTurno | null
 }
 
-export function GestionarClient({ appointment, token, theme, cancellationMinHours }: Props) {
+export function GestionarClient({
+  appointment,
+  token,
+  theme,
+  cancellationMinHours,
+  instanteISO,
+  sucursalSlug,
+  sena,
+}: Props) {
   const [isPending, startTransition] = useTransition()
   const [cancelado, setCancelado] = useState(false)
   const [error, setError] = useState('')
@@ -43,10 +79,13 @@ export function GestionarClient({ appointment, token, theme, cancellationMinHour
   const cancelable = ['confirmed', 'checked_in'].includes(appointment.status)
 
   const [ahora] = useState(() => Date.now())
-  const horasRestantes =
-    (new Date(`${appointment.appointment_date}T${appointment.start_time}`).getTime() - ahora) /
-    3_600_000
+  const horasRestantes = (new Date(instanteISO).getTime() - ahora) / 3_600_000
   const enVentana = horasRestantes >= cancellationMinHours
+
+  /** Lo que le va a pasar a la seña si cancela AHORA. */
+  const consecuenciaSena = sena && !sena.consumida
+    ? (enVentana ? sena.siCancelaATiempo : sena.siCancelaTarde)
+    : null
 
   function handleCancel() {
     setError('')
@@ -67,7 +106,7 @@ export function GestionarClient({ appointment, token, theme, cancellationMinHour
 
   if (cancelado) {
     return (
-      <Marco theme={theme}>
+      <Marco theme={theme} sucursal={sucursalSlug}>
         <div
           className="rounded-3xl border p-8 text-center"
           style={{ backgroundColor: 'var(--t-surface)', borderColor: 'var(--t-border)' }}
@@ -82,13 +121,28 @@ export function GestionarClient({ appointment, token, theme, cancellationMinHour
           <p className="mt-1.5 text-sm text-[var(--t-text-muted)]">
             Listo, liberamos el horario. Si cambiás de idea, reservá uno nuevo cuando quieras.
           </p>
+
+          {/* El destino de la plata se repite DESPUÉS de cancelar y no sólo
+              antes: es el momento en que el cliente se lo pregunta, y hacerlo
+              volver a leer la pantalla anterior no es una respuesta. */}
+          {consecuenciaSena && (
+            <p
+              className="mt-4 rounded-2xl p-3.5 text-left text-sm text-[var(--t-text-muted)]"
+              style={{ backgroundColor: 'var(--t-surface-alt)' }}
+            >
+              <strong className="block font-bold text-[var(--t-text)]">
+                Tu seña de {sena?.montoTexto}
+              </strong>
+              {consecuenciaSena}
+            </p>
+          )}
         </div>
       </Marco>
     )
   }
 
   return (
-    <Marco theme={theme}>
+    <Marco theme={theme} sucursal={sucursalSlug}>
       <div
         className="rounded-3xl border p-6"
         style={{ backgroundColor: 'var(--t-surface)', borderColor: 'var(--t-border)' }}
@@ -136,6 +190,81 @@ export function GestionarClient({ appointment, token, theme, cancellationMinHour
           </Fila>
         </div>
       </div>
+
+      {/* LA SEÑA. Va inmediatamente debajo del turno y arriba de todo lo demás:
+          es plata del cliente y es lo que va a buscar cuando abra este link. */}
+      {sena && (
+        <div
+          className="rounded-3xl border p-5"
+          style={{ backgroundColor: 'var(--t-surface)', borderColor: 'var(--t-border)' }}
+        >
+          <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--t-text-muted)]">
+            <Wallet className="h-3.5 w-3.5" />
+            Seña pagada
+          </p>
+          <p className="mt-1.5 text-3xl font-bold leading-none tabular-nums text-[var(--t-text)]">
+            {sena.montoTexto}
+          </p>
+          {sena.restoTexto && (
+            <p className="mt-1.5 text-sm text-[var(--t-text-muted)]">
+              {sena.consumida
+                ? 'Este turno ya se cobró.'
+                : `Los ${sena.restoTexto} que faltan los pagás en el local.`}
+            </p>
+          )}
+
+          {consecuenciaSena && (
+            <div
+              className="mt-4 rounded-2xl p-3.5"
+              style={{ backgroundColor: 'var(--t-surface-alt)' }}
+            >
+              <p className="text-[13px] font-bold text-[var(--t-text)]">Si cancelás ahora</p>
+              <p className="mt-1 text-[13px] leading-relaxed text-[var(--t-text-muted)]">
+                {consecuenciaSena}
+              </p>
+            </div>
+          )}
+
+          {/* El art. 1110 CCyC da 10 días corridos IRRENUNCIABLES para revocar
+              un contrato a distancia, y la Disp. 377/2026 declara abusiva la
+              cláusula que lo limite. O sea que mientras la ventana esté abierta
+              esto pisa a cualquier política de cancelación de la sucursal — y
+              por eso se muestra incluso cuando el bloque de arriba dice que la
+              seña se pierde. */}
+          {sena.arrepentimiento && !sena.consumida && (
+            <div
+              className="mt-3 rounded-2xl p-3.5"
+              style={{
+                backgroundColor: 'var(--t-surface-alt)',
+                boxShadow: 'inset 0 0 0 1px var(--t-border)',
+              }}
+            >
+              <p className="flex items-center gap-2 text-[13px] font-bold text-[var(--t-text)]">
+                <Undo2 className="h-4 w-4" />
+                Podés pedir la devolución total
+              </p>
+              <p className="mt-1 text-[13px] leading-relaxed text-[var(--t-text-muted)]">
+                Tenés {sena.arrepentimiento.diasRestantes}{' '}
+                {sena.arrepentimiento.diasRestantes === 1 ? 'día' : 'días'} más —hasta el{' '}
+                {sena.arrepentimiento.hasta}— para arrepentirte y que te devolvamos los{' '}
+                {sena.montoTexto} completos, sin explicar por qué.
+              </p>
+              <Link
+                href={sucursalSlug ? `/arrepentimiento?suc=${encodeURIComponent(sucursalSlug)}` : '/arrepentimiento'}
+                className="mt-3 flex min-h-[46px] items-center justify-center gap-2 rounded-xl border text-sm font-bold"
+                style={{
+                  backgroundColor: 'var(--t-surface)',
+                  borderColor: 'var(--t-border)',
+                  color: 'var(--t-text)',
+                }}
+              >
+                <Undo2 className="h-4 w-4" />
+                Botón de arrepentimiento
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
 
       {error && (
         <div
@@ -201,6 +330,19 @@ export function GestionarClient({ appointment, token, theme, cancellationMinHour
               <p className="mt-1 text-sm text-[var(--t-text-muted)]">
                 El horario se libera para otro cliente y no se puede deshacer.
               </p>
+              {/* Con seña, la última pantalla antes de perder plata tiene que
+                  decir cuánta y a dónde va. */}
+              {consecuenciaSena && (
+                <p
+                  className="mt-3 rounded-xl p-3 text-[13px] leading-relaxed text-[var(--t-text-muted)]"
+                  style={{ backgroundColor: 'var(--t-surface-alt)' }}
+                >
+                  <strong className="font-bold text-[var(--t-text)]">
+                    Seña de {sena?.montoTexto}:
+                  </strong>{' '}
+                  {consecuenciaSena}
+                </p>
+              )}
               <div className="mt-4 flex gap-2">
                 <button
                   type="button"
@@ -270,13 +412,27 @@ export function GestionarClient({ appointment, token, theme, cancellationMinHour
 
 // ─── Piezas ──────────────────────────────────────────────────────────
 
-function Marco({ theme, children }: { theme: TurneroTheme; children: React.ReactNode }) {
+function Marco({
+  theme,
+  sucursal,
+  children,
+}: {
+  theme: TurneroTheme
+  sucursal?: string | null
+  children: React.ReactNode
+}) {
   return (
     <div
-      className="flex min-h-screen items-center justify-center bg-[var(--t-bg)] p-4 text-[var(--t-text)]"
+      // `justify-center` sólo mientras el contenido entre: con la tarjeta de la
+      // seña y el pie legal la columna crece, y centrada verticalmente el
+      // encabezado se iba arriba de la pantalla y no se podía scrollear hasta él.
+      className="flex min-h-screen flex-col items-center justify-center gap-6 bg-[var(--t-bg)] p-4 text-[var(--t-text)]"
       style={themeVars(theme)}
     >
       <div className="w-full max-w-md space-y-4">{children}</div>
+      <div className="w-full max-w-md">
+        <PieLegal sucursal={sucursal} />
+      </div>
     </div>
   )
 }

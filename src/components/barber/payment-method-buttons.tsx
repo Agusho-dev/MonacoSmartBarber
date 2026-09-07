@@ -1,11 +1,13 @@
 'use client'
 
 import { cn } from '@/lib/utils'
-import { Banknote, CreditCard, ArrowRightLeft, Gift, type LucideIcon } from 'lucide-react'
+import { Banknote, CreditCard, ArrowRightLeft, type LucideIcon } from 'lucide-react'
 import { vibrate } from '@/lib/barber-feedback'
 import type { PaymentMethod } from '@/lib/types/database'
 
-export type PaymentOptionValue = PaymentMethod | 'points'
+// El valor 'points' (canje legacy pre-mig 204) se eliminó: el canje en el local
+// va por el escáner de beneficios de la tablet, nunca por un método de pago.
+export type PaymentOptionValue = PaymentMethod
 
 interface PaymentOption {
   value: PaymentOptionValue
@@ -23,25 +25,20 @@ const DEFAULT_OPTIONS: PaymentOption[] = [
 interface PaymentMethodButtonsProps {
   value: PaymentOptionValue | null
   onChange: (value: PaymentOptionValue) => void
-  allowPoints?: boolean
   className?: string
 }
 
 export function PaymentMethodButtons({
   value,
   onChange,
-  allowPoints,
   className,
 }: PaymentMethodButtonsProps) {
-  const options: PaymentOption[] = allowPoints
-    ? [...DEFAULT_OPTIONS, { value: 'points', label: 'Puntos', icon: Gift, hint: 'Canje de premio' }]
-    : DEFAULT_OPTIONS
+  const options: PaymentOption[] = DEFAULT_OPTIONS
 
   return (
     <div
       className={cn(
-        'grid gap-2 sm:gap-3',
-        options.length === 4 ? 'grid-cols-2' : 'grid-cols-3',
+        'grid grid-cols-3 gap-2 sm:gap-3',
         '[&>*]:min-w-0',
         className,
       )}

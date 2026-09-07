@@ -84,16 +84,12 @@ export function ConfirmPrepaymentDialog({ open, onOpenChange, appointment, staff
         staffId: staffId ?? null,
         notes: notes.trim() || undefined,
       })
-      if (res.error) {
-        toast.error(res.error)
-      } else {
-        const msg = res.paymentStatus === 'paid'
-          ? 'Pago confirmado · turno activo'
-          : 'Seña registrada · turno activo'
-        toast.success(msg)
-        onDone?.()
-        onOpenChange(false)
-      }
+      // `confirmAppointmentPrepayment` quedó fuera de servicio con la mig 207 y
+      // hoy sólo devuelve un error explicativo: el cobro por adelantado se hace
+      // como seña al reservar, no a mano desde la agenda. Este diálogo sigue
+      // existiendo porque su botón se muestra para turnos en 'pending_payment',
+      // un estado que la base nunca admitió — o sea que no se abre nunca.
+      toast.error(res.error)
     })
   }
 

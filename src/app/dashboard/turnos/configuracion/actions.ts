@@ -10,6 +10,23 @@ import {
 } from '@/lib/actions/appointments'
 import type { AppointmentSettings } from '@/lib/types/database'
 
+import { randomBytes } from 'node:crypto'
+import { createAdminClient, createClient } from '@/lib/supabase/server'
+import { validateBranchAccess } from '@/lib/actions/org'
+import {
+  appMercadoPago,
+  desconectar,
+  guardarCredenciales,
+  identificarCuenta,
+  redirectUriOauth,
+  resolverProveedor,
+  urlAppProduccion,
+} from '@/lib/mercadopago/credenciales'
+import { esErrorMercadoPago } from '@/lib/mercadopago/http'
+import { urlDeAutorizacion } from '@/lib/mercadopago/oauth'
+import { traducirErrorMp } from '@/lib/mercadopago/errores'
+import type { AmbienteMp } from '@/lib/senas/contrato'
+
 // ─── Tipos del payload ───────────────────────────────────────────────
 
 interface DiaDeAgendaInput {
@@ -256,4 +273,277 @@ export async function guardarConfiguracionTurnos(
   revalidatePath('/dashboard/turnos/configuracion')
 
   return { ok: errores.length === 0, errores }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Seña y cobros online — conectar Mercado Pago
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Estas acciones son la puerta del dashboard a `@/lib/mercadopago/*`. Viven acá
+// y no en `src/lib/actions/senas.ts` (que es de la seña en sí) porque lo que
+// hacen es administrar la CUENTA de cobro de cada sucursal, que es una decisión
+// de configuración.
+//
+// Dos reglas que no se negocian en este bloque:
+//
+//  1. NUNCA sale un token hacia el browser. Ni el access token, ni el refresh,
+//     ni el secreto del webhook. Lo único que devuelven estas acciones es el
+//     estado ("conectado con la cuenta 12345678, desde el 3/9") y el mensaje de
+//     error traducido. Un access token de Mercado Pago cobra plata: si viaja al
+//     cliente, viaja al DOM, al devtools y a cualquier extensión instalada.
+//
+//  2. El `redirect_uri` del OAuth es ESTÁTICO y sale de `redirectUriOauth()`,
+//     que a su vez sale de `NEXT_PUBLIC_APP_URL` — nunca del header `host`.
+//     Mercado Pago exige que coincida EXACTAMENTE con el cargado en el panel de
+//     la aplicación, así que derivarlo del request haría que cada deploy de
+//     preview generara un redirect que MP rechaza. Es la misma trampa que dejó
+//     cinco crons y los webhooks de Meta muertos con un alias viejo de Vercel.
+
+/** Vigencia del `state` del OAuth. El code de MP dura 10 minutos; el ida y
+ *  vuelta por la pantalla de autorización puede tardar bastante más. */
+const MINUTOS_STATE = 30
+
+function ambienteValido(v: unknown): AmbienteMp {
+  return v === 'prueba' ? 'prueba' : 'produccion'
+}
+
+/**
+ * Arranca la conexión por OAuth: crea el `state` anti-CSRF, lo guarda y
+ * devuelve la URL de autorización de Mercado Pago.
+ *
+ * El `state` es la ÚNICA forma que tiene el callback de saber a qué sucursal
+ * pertenece el `code` que vuelve: el `redirect_uri` es uno solo para toda la
+ * plataforma, así que no puede llevar la sucursal en la ruta ni en un query
+ * param (MP compara la URL completa contra la registrada y descarta cualquier
+ * diferencia). Va con vencimiento y con `used_at` para que no se pueda
+ * reutilizar.
+ */
+export async function iniciarConexionMercadoPago(
+  branchId: string,
+  ambiente: AmbienteMp = 'produccion',
+): Promise<{ url: string } | { error: string }> {
+  if (!(await currentUserCan('senas.manage'))) {
+    return { error: 'No tenés permiso para conectar cuentas de cobro.' }
+  }
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'Sin acceso a esa sucursal.' }
+
+  const app = appMercadoPago()
+  if (!app) {
+    return {
+      error:
+        'Falta configurar la aplicación de Mercado Pago de la plataforma ' +
+        '(MERCADOPAGO_OAUTH_CLIENT_ID y MERCADOPAGO_OAUTH_CLIENT_SECRET). ' +
+        'Mientras tanto podés conectar la cuenta pegando las credenciales a mano.',
+    }
+  }
+
+  const state = randomBytes(24).toString('base64url')
+  const auth = await createClient()
+  const { data: { user } } = await auth.auth.getUser()
+
+  const supabase = createAdminClient()
+  const { error } = await supabase.from('payment_oauth_states').insert({
+    state,
+    organization_id: orgId,
+    branch_id: branchId,
+    provider: 'mercadopago',
+    environment: ambienteValido(ambiente),
+    created_by: user?.id ?? null,
+    expires_at: new Date(Date.now() + MINUTOS_STATE * 60_000).toISOString(),
+  })
+
+  // Si el `state` no quedó guardado, el callback lo va a rechazar por inválido:
+  // mandar al dueño a Mercado Pago igual sería hacerle autorizar para nada.
+  if (error) {
+    console.error('[iniciarConexionMercadoPago]', error.message)
+    return { error: 'No pudimos preparar la conexión con Mercado Pago. Reintentá en un momento.' }
+  }
+
+  return {
+    url: urlDeAutorizacion({
+      clientId: app.clientId,
+      redirectUri: app.redirectUri,
+      state,
+    }),
+  }
+}
+
+export interface CredencialesManualesInput {
+  branchId: string
+  ambiente?: AmbienteMp
+  accessToken: string
+  publicKey?: string
+  webhookSecret?: string
+}
+
+/**
+ * Conexión pegando las credenciales a mano.
+ *
+ * `guardarCredenciales` valida el access token contra `/users/me` ANTES de
+ * escribir nada, así que un token mal copiado (el error clásico es pegar la
+ * public key en el campo del access token) se rechaza acá y no aparece recién
+ * el día que un cliente intenta pagar.
+ */
+export async function guardarCredencialesManuales(
+  input: CredencialesManualesInput,
+): Promise<{ ok: boolean; error?: string; cuenta?: string | null }> {
+  if (!(await currentUserCan('senas.manage'))) {
+    return { ok: false, error: 'No tenés permiso para conectar cuentas de cobro.' }
+  }
+  const orgId = await validateBranchAccess(input.branchId)
+  if (!orgId) return { ok: false, error: 'Sin acceso a esa sucursal.' }
+
+  const accessToken = (input.accessToken ?? '').trim()
+  if (!accessToken) return { ok: false, error: 'Pegá el access token de Mercado Pago.' }
+
+  const auth = await createClient()
+  const { data: { user } } = await auth.auth.getUser()
+
+  const r = await guardarCredenciales({
+    modo: 'manual',
+    organizationId: orgId,
+    branchId: input.branchId,
+    ambiente: ambienteValido(input.ambiente),
+    accessToken,
+    publicKey: (input.publicKey ?? '').trim() || null,
+    webhookSecret: (input.webhookSecret ?? '').trim() || null,
+    connectedBy: user?.id ?? null,
+  })
+
+  if (!r.ok) return { ok: false, error: r.error }
+
+  revalidatePath('/dashboard/turnos/configuracion')
+  revalidatePath('/dashboard/turnos/senas')
+  return { ok: true, cuenta: r.mpUserId ?? null }
+}
+
+/**
+ * Prueba la conexión contra Mercado Pago de verdad.
+ *
+ * `GET /users/me` es la llamada más barata que confirma las dos cosas que
+ * importan: que el token descifra y sigue vivo, y con qué cuenta cobra esta
+ * sucursal. De paso `resolverProveedor` renueva el token si está por vencer,
+ * así que este botón también sirve para destrabar una conexión OAuth vieja.
+ *
+ * El resultado se persiste en `last_check_at` / `last_error`: sin eso, el
+ * diagnóstico vive en un toast que se va en cinco segundos y la tarjeta sigue
+ * diciendo lo mismo que antes.
+ */
+export async function probarConexionMercadoPago(
+  branchId: string,
+  ambiente: AmbienteMp = 'produccion',
+): Promise<{ ok: boolean; cuenta?: string | null; error?: string }> {
+  if (!(await currentUserCan('senas.view'))) {
+    return { ok: false, error: 'No tenés permiso para ver los cobros online.' }
+  }
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { ok: false, error: 'Sin acceso a esa sucursal.' }
+
+  const proveedor = await resolverProveedor(branchId, ambienteValido(ambiente))
+  if (!proveedor) {
+    return { ok: false, error: 'Esta sucursal todavía no tiene una cuenta de Mercado Pago conectada.' }
+  }
+
+  const supabase = createAdminClient()
+  try {
+    const cuenta = await identificarCuenta(proveedor.accessToken)
+    const { error } = await supabase
+      .from('branch_payment_providers')
+      .update({
+        status: 'conectado',
+        last_check_at: new Date().toISOString(),
+        last_error: null,
+        // El collector_id es lo que mapea una notificación del webhook a esta
+        // sucursal: si la cuenta cambió, corregirlo acá evita que los pagos
+        // lleguen sin dueño.
+        mp_user_id: cuenta.id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', proveedor.id)
+    if (error) console.error('[probarConexionMercadoPago] update ok:', error.message)
+
+    revalidatePath('/dashboard/turnos/configuracion')
+    return { ok: true, cuenta: cuenta.nickname ?? cuenta.id }
+  } catch (e) {
+    const t = traducirErrorMp(e)
+    const detalle = `${t.titulo}: ${t.detalle} ${t.accion}`.trim()
+    const { error } = await supabase
+      .from('branch_payment_providers')
+      .update({
+        // 401 = el token dejó de valer (revocado, o rotado en el panel de MP).
+        // Cualquier otra cosa —red, 5xx, timeout— puede ser un hipo pasajero y
+        // no justifica apagar una cuenta que probablemente siga cobrando.
+        status: esErrorMercadoPago(e) && e.status === 401 ? 'revocado' : proveedor.status,
+        last_check_at: new Date().toISOString(),
+        last_error: detalle.slice(0, 500),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', proveedor.id)
+    if (error) console.error('[probarConexionMercadoPago] update error:', error.message)
+
+    revalidatePath('/dashboard/turnos/configuracion')
+    return { ok: false, error: detalle }
+  }
+}
+
+/**
+ * Desconecta la cuenta de una sucursal.
+ *
+ * Apaga además la seña: dejarla prendida sin cuenta haría que cada intento de
+ * reserva muriera con "MP_NO_CONECTADO" en un lugar donde el cliente ya eligió
+ * día y hora. Es preferible que la sucursal vuelva a reservar sin seña.
+ */
+export async function desconectarMercadoPago(
+  branchId: string,
+  ambiente: AmbienteMp = 'produccion',
+): Promise<{ ok: boolean; error?: string }> {
+  if (!(await currentUserCan('senas.manage'))) {
+    return { ok: false, error: 'No tenés permiso para desconectar cuentas de cobro.' }
+  }
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { ok: false, error: 'Sin acceso a esa sucursal.' }
+
+  const r = await desconectar(branchId, ambienteValido(ambiente))
+  if (!r.ok) return r
+
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from('branch_deposit_settings')
+    .update({ is_enabled: false })
+    .eq('branch_id', branchId)
+    .eq('organization_id', orgId)
+  if (error) {
+    console.error('[desconectarMercadoPago] apagar seña:', error.message)
+    return {
+      ok: true,
+      error:
+        'La cuenta se desconectó, pero no pudimos apagar la seña de esta sucursal. ' +
+        'Apagala a mano antes de que alguien intente reservar.',
+    }
+  }
+
+  revalidatePath('/dashboard/turnos/configuracion')
+  revalidatePath('/dashboard/turnos/senas')
+  return { ok: true }
+}
+
+/**
+ * Lo que la pantalla necesita saber de la plataforma (no de la sucursal): si el
+ * modo OAuth se puede ofrecer y a qué URL vuelve Mercado Pago.
+ *
+ * La falta de configuración se dice con palabras en la tarjeta en vez de
+ * romper la pantalla o esconder el botón sin explicación.
+ */
+export async function estadoAppMercadoPago(): Promise<{
+  oauthDisponible: boolean
+  redirectUri: string
+  /** La base pública fija con la que se arman las URLs que ve Mercado Pago. */
+  urlBase: string
+}> {
+  return {
+    oauthDisponible: !!appMercadoPago(),
+    redirectUri: redirectUriOauth(),
+    urlBase: urlAppProduccion(),
+  }
 }

@@ -1,6 +1,6 @@
 # API mobile — `/api/mobile/**`
 
-> **Versión**: 2026-08-20 (rediseño app mobile, CONTRACTS.md §1)
+> **Versión**: 2026-09-03 (seña de Mercado Pago; base: 2026-08-20, CONTRACTS.md §1)
 > **Base**: `https://monaco-smart-barber.vercel.app` (la app lo toma de `AppConstants.apiBaseUrl`)
 > **Código**: route handlers en `src/app/api/mobile/**`, helpers en `src/lib/mobile/`
 > **Alcance**: lo que la app Flutter consume por HTTP. Lo que la app lee directo por
@@ -35,6 +35,8 @@ de eso).
   | `mobileSlots` | `mobile_slots` | 60 / 60 s | `turnos/[slug]/slots` |
   | `mobileBook` | `mobile_book` | 10 / 60 s | `turnos/[slug]/book` (además sigue el 3/h por teléfono de `createAppointment`) |
   | `mobileCancel` | `mobile_cancel` | 10 / 60 s | `turnos/cancel` |
+  | `mobileSena` | `mobile_sena` | 8 / 60 s | `turnos/[slug]/sena` |
+  | `mobileSenaEstado` | `mobile_sena_estado` | 60 / 60 s | `senas/[id]` |
 
   Superado → `429 { error: 'RATE_LIMITED', message }`. Además, el motor recibe
   `rateLimitKey = userId` para que su gate interno `public_booking_list` (20/min por
@@ -104,6 +106,7 @@ para el turnero web, más los datos del cliente.
     "buffer_minutes": 10
   },
   "branding": { "logo_url": "https://…/logo.jpeg", "welcome_message": null },
+  "deposit": { "enabled": false, "percentage": 50, "min_amount": 0 },
   "services": [ { "id": "…", "name": "Corte", "price": 16000, "duration_minutes": 40,
                   "booking_mode": "self_service", "availability": "checkin" } ],
   "staff": [ { "id": "…", "full_name": "Fabrizio Galeassi", "avatar_url": null,
@@ -122,6 +125,13 @@ para el turnero web, más los datos del cliente.
   franjas REALES: el cruce de su ventana con la de la sucursal, o sea lo que el motor va
   a ofrecer). `walk_in_staff` = todos los barberos de cara al cliente menos los
   reservables ("atienden sin turno").
+- `deposit` sirve **para anunciar la seña antes de que el cliente elija nada**, no para
+  calcularla: `enabled` = `branch_deposit_settings.is_enabled` y el canal `app` habilitado;
+  `percentage` y `min_amount`, los de esa sucursal. **El monto lo calcula y lo escribe el
+  servidor** al pedir la seña (`politica.titulo`, "Seña $8.000 ARS"): la app no
+  reimplementa `calcularSena` — dos fórmulas para la misma plata terminan diciendo
+  números distintos. Si la config no se puede leer, viaja `enabled: false` (falla
+  abierta: un aviso de menos, nunca una reserva rota).
 - `client.first_name` / `last_name`: `clients.name` partido por el primer espacio. Un
   nombre que es sólo dígitos (clientes viejos creados como `name || phone`) se devuelve
   vacío. `client.upcoming` = próximo turno vivo del cliente en la org (misma query que
@@ -211,6 +221,136 @@ curl -s -X POST "$BASE/api/mobile/turnos/test/book" -H "Authorization: Bearer $T
   -d '{"staff_id":null,"date":"2026-08-25","start_time":"10:00","service_ids":["5e9842ec-1b84-4885-8c86-5a8ba53d9ef8"],"duration_minutes":30}'
 ```
 
+### `POST /api/mobile/turnos/[slug]/sena`
+
+Prepara el cobro de la **seña** de una reserva que todavía no existe. Devuelve el
+`init_point` de Mercado Pago y la copia que hay que mostrar pegada al botón. **El turno
+no se crea acá**: lo crea el webhook cuando el pago se acredita (`createAppointment`,
+el mismo motor de siempre, ya `confirmed`).
+
+Mismo body que `/book`, `name` incluido (la identidad sale del JWT; `name` es sólo el
+nombre a mostrar):
+
+```json
+{ "staff_id": null, "date": "2026-09-10", "start_time": "15:00",
+  "service_ids": ["5e9842ec-1b84-4885-8c86-5a8ba53d9ef8"], "duration_minutes": 30,
+  "name": "Nacho" }
+```
+
+`name` es opcional y se usa con el **mismo criterio que `/book`**: si trae al menos 2
+caracteres pisa el nombre guardado en `clients`. Acá se persiste al crear la intención y
+no al reservar, porque el turno lo crea el webhook minutos después leyendo `clients`: sin
+eso, el mismo cliente terminaba con el turno a nombre de la versión vieja según si la
+sucursal cobra seña o no.
+
+**El horario NO queda reservado mientras el cliente paga** (`hold_minutes = 0`, decisión
+del dueño). Si dos personas pagan el mismo horario, la segunda queda `sin_cupo` y se le
+devuelve la plata automáticamente. Eso hay que avisarlo antes de cobrar: viene escrito en
+`politica.reserva`.
+
+- `400 BAD_REQUEST`, `404 BRANCH_NOT_FOUND`, `409 NOT_BOOKABLE`, `429 RATE_LIMITED`
+  (bucket `mobile_sena`), igual que `/book`.
+- **`200 { "ok": false, "code": "SENA_NO_APLICA", "message": … }`** — esta sucursal **no
+  pide seña** por este canal (hoy, las cuatro: `branch_deposit_settings.is_enabled = false`).
+  Va con **200 y no con un 4xx** a propósito: es el camino feliz de reservar gratis, y la
+  app tiene que **seguir por `POST /book`** sin mostrarle nada al cliente.
+- Los demás rechazos van con status y el código del contrato (`CodigoErrorSena`):
+
+  | code | status | qué pasó |
+  |---|---|---|
+  | `SENA_NO_APLICA` | **200** | la sucursal no pide seña → seguir por `/book` |
+  | `MP_NO_CONECTADO` | 503 | la sucursal no tiene cuenta de Mercado Pago conectada |
+  | `SLOT_TAKEN` | 409 | el horario ya no está disponible |
+  | `ALREADY_BOOKED_TODAY` | 409 | el cliente ya tiene un turno activo ese día |
+  | `PRECIO_INVALIDO` | 409 | el servicio no tiene precio cargado |
+  | `NOT_BOOKABLE` | 409 | la sucursal no toma turnos online |
+  | `MP_ERROR` | 502 | Mercado Pago rechazó la creación del checkout |
+  | `RATE_LIMITED` | 429 | |
+  | `INTERNAL` | 500 | |
+
+- `200` (`CrearSenaOk`):
+
+```json
+{
+  "ok": true,
+  "deposit_id": "3f1c0b8e-…",
+  "init_point": "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=…",
+  "amount": 8000,
+  "service_total": 16000,
+  "resto": 8000,
+  "expires_at": "2026-09-03T18:12:00.000Z",
+  "politica": {
+    "titulo": "Seña $8.000 ARS",
+    "detalle": "Es el 50% de Corte. Los $8.000 restantes los pagás en el local.",
+    "cancelacion": "…",
+    "reserva": "…",
+    "arrepentimiento": "…"
+  }
+}
+```
+
+- `init_point` se abre en Custom Tabs (Android) / `SFSafariViewController` (iOS). **No en
+  un WebView propio**: el checkout de Mercado Pago necesita las cookies del navegador del
+  sistema para reconocer al usuario logueado.
+- Los cinco textos de `politica` se muestran **en la misma pantalla y pegados al botón**,
+  no detrás de un link (art. 1111 CCyC: la información sobre revocación va "en caracteres
+  destacados inmediatamente antes de la aceptación").
+- La vuelta del checkout cae en `https://monacobarber.vercel.app/pago/<deposit_id>`, que
+  rebota al deep link **`monaco://pago?deposit=<deposit_id>`**. El parámetro **no puede
+  llamarse `code`**: `supabase_flutter` intercepta cualquier deep link con `code` y lo
+  trata como callback de OAuth.
+
+```bash
+curl -s -X POST "$BASE/api/mobile/turnos/rondeau/sena" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"staff_id":null,"date":"2026-09-10","start_time":"15:00","service_ids":["5e9842ec-1b84-4885-8c86-5a8ba53d9ef8"],"duration_minutes":30}'
+```
+
+### `GET /api/mobile/senas/[id]`
+
+El estado de una seña: lo consulta la pantalla "confirmando tu pago…" al volver del
+checkout. Devuelve `EstadoSenaResponse`.
+
+- **Pertenencia obligatoria**: `booking_deposits.client_id` tiene que ser el cliente del
+  JWT. Si no lo es (o no existe) → `404 NOT_FOUND`, sin confirmar si existe. El
+  `deposit_id` no es un secreto: viaja en la URL del checkout y en la back_url.
+- `429 RATE_LIMITED` (bucket `mobile_sena_estado`, 60/min: alcanza para ~3 esperas
+  completas de 40 s preguntando cada 2 s).
+- `200`:
+
+```json
+{
+  "ok": true,
+  "deposit_id": "3f1c0b8e-…",
+  "status": "pagada",
+  "amount": 8000,
+  "resto": 8000,
+  "appointment": {
+    "id": "b7f4011f-…", "appointment_date": "2026-09-10", "start_time": "15:00:00",
+    "barber_name": "Fabrizio Galeassi", "branch_name": "Rondeau", "service_names": "Corte"
+  },
+  "mensaje": null,
+  "seguir_esperando": false
+}
+```
+
+- `status` ∈ `iniciada | pagada | consumida | perdida | devuelta | sin_cupo | rechazada |
+  expirada | cancelada`.
+- `appointment` viene sólo con `pagada` / `consumida` (antes de eso el turno no existe).
+- `mensaje` es texto listo para mostrar tal cual, en castellano: el motivo del rechazo
+  traducido (`motivoRechazo`), el aviso de devolución automática por `sin_cupo`, etc.
+- **`seguir_esperando` es lo único que corta el polling.** Es `true` sólo mientras la seña
+  esté `iniciada` **y** su link no haya vencido. `pagada` lo pone en `false` aunque no sea
+  un estado terminal del contrato: es el final que la pantalla estaba esperando.
+- La app además puede escuchar su propia fila de `booking_deposits` por **Realtime** (mig
+  207, policy `booking_deposits_select_own_client` por `current_client_id()`). Este
+  endpoint es el que la destraba si el WebSocket no prende, y el único que trae los datos
+  del turno ya creado.
+
+```bash
+curl -s "$BASE/api/mobile/senas/3f1c0b8e-0000-0000-0000-000000000000" -H "Authorization: Bearer $TOKEN"
+```
+
 ### `POST /api/mobile/turnos/cancel`
 
 ```json
@@ -273,6 +413,66 @@ Para validar la sesión al arrancar.
 ```
 Baja lógica: `is_active=false` (no borra). Idempotente. → `200 { "ok": true }`.
 
+## El circuito de la seña fuera de `/api/mobile`
+
+Estas rutas no las llama la app, pero son las que hacen que los dos endpoints de arriba
+signifiquen algo. Se documentan acá porque quien depure "pagué y no tengo turno" va a
+empezar por este archivo.
+
+| Ruta | Quién la llama | Qué hace |
+|---|---|---|
+| `POST /api/webhooks/mercadopago/senas?b=<branch_id>` | Mercado Pago | Convierte el pago en turno |
+| `GET /pago/[id]` | el browser del cliente al volver del checkout | Rebota al deep link `monaco://pago?deposit=<id>` |
+| `GET /api/mercadopago/oauth/callback` | Mercado Pago | Cierra el "Conectar cuenta" del dueño |
+| `GET/POST /api/cron/mp-conciliar` | pg_cron | Respaldo del webhook + renovación de tokens |
+
+### El webhook
+
+- La `notification_url` se hornea **en cada preferencia** con `?b=<branch_id>` (y **pisa**
+  a la configurada en el panel de Mercado Pago). El respaldo para una notificación que MP
+  dispare por su cuenta es el `user_id` del body → `resolverProveedorPorCollector`.
+- **Firma obligatoria**, con el secreto de esa cuenta: manifest
+  `id:<data.id>;request-id:<x-request-id>;ts:<ts>;` (punto y coma final incluido), `ts` en
+  **milisegundos**, HMAC-SHA256 comparado con `timingSafeEqual`. Falla **cerrada**: sin
+  secreto configurado, se rechaza. No es el mismo webhook que
+  `/api/webhooks/mercadopago` (suscripciones del SaaS), que acepta cualquier POST cuando
+  no hay secreto.
+- **Procesa ANTES de contestar**, a propósito y no con `after()`. El reintento de MP (cada
+  15 min hasta el 200) es el único mecanismo gratis de recuperación que hay, y sólo sirve
+  si el 200 significa de verdad "ya está".
+- Status: **200 para todo** —incluidos `merchant_order`, cuenta desconocida y pagos que no
+  referencian ninguna seña— salvo **400** con un body de más de 16 KB, **429** ante una
+  ráfaga sin firma válida, **401** con firma inválida (no hay nada que reintentar) y
+  **503** ante un error de red o de base (que es como se le pide a MP que vuelva). Un 500
+  por un evento que no nos interesa lo pone a reintentar cada 15 minutos para siempre, así
+  que ninguna excepción se escapa sin traducirse a uno de esos.
+- **Body acotado a 16 KB y cupo de 300/min por IP.** El endpoint es anónimo hasta el paso
+  de la firma, así que sin tope sirve de tabla de escritura pública. El cupo se **mide**
+  temprano y se **aplica** recién después de verificar la firma: una notificación firmada
+  nunca se rechaza por tope. Lo que corta es la escritura del ruido.
+- Toda notificación —válida o no— queda en `payment_webhook_events`, pero de la
+  notificación se guardan **sólo** `type`/`topic`/`action`/`data.id`/`user_id`/`live_mode`
+  (recortados a 200 caracteres), nunca el body completo: la fuente de verdad es siempre
+  `GET /v1/payments/{id}`. El índice único `(provider, request_id)` dedupea los reintentos;
+  el candado real de idempotencia es el UPDATE condicional por estado más el índice único
+  de `mp_payment_id`.
+
+### El cron de conciliación
+
+`/api/cron/mp-conciliar`, sin `CRON_SECRET` (convención del repo), idempotente y con
+respuesta de **contadores pelados** (sin ids ni orgs: no tiene auth).
+
+1. Señas `iniciada` vencidas hace más de 5 min → `GET /v1/payments/search` por
+   `external_reference` y, si hay un pago aprobado que nunca llegó por webhook, se
+   acredita. **"No me avisaron" no es "no pagó".**
+2. Proveedores OAuth a menos de 30 días del vencimiento → se renuevan llamando a
+   `resolverProveedor` (la única implementación de la renovación; un segundo camino sería
+   un segundo lugar donde olvidarse de persistir el `refresh_token` rotativo).
+3. Recién al final, `expire_booking_deposits()`.
+
+El SQL para programarlo con pg_cron está al pie del archivo de la ruta. **Ya está
+programado** (migración 208, cada 5 minutos vía `trigger_mp_conciliar()`).
+
 ## Cambios en el motor que hizo esta API (mínimos, compatibles)
 
 - `getAvailableSlots(..., options.rateLimitKey?)` y
@@ -280,6 +480,8 @@ Baja lógica: `is_active=false` (no borra). Idempotente. → `200 { "ok": true }
   `public_booking_list` es 60/min por esa clave en vez de 20/min por IP+sucursal.
 - `CreateAppointmentInput.viaApp?: boolean`: saltea el gate por IP igual que `viaKiosk`.
 - `RateLimits.mobileSlots/mobileBook/mobileCancel/mobileBootstrap`.
+
+- `RateLimits.mobileSena` (8/min) y `RateLimits.mobileSenaEstado` (60/min).
 
 `public-booking.ts` y el wizard web no se tocaron.
 

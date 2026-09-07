@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef, useTransition } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import {
   Building2, Calendar, CalendarClock, CalendarPlus, ChevronLeft, ChevronRight,
   DollarSign, Loader2, Phone, Scissors, Settings, User, X, Layers, AlertCircle,
@@ -22,6 +23,9 @@ import {
   getAppointmentSettings,
 } from '@/lib/actions/appointments'
 import { CompleteServiceDialog } from '@/components/barber/complete-service-dialog'
+import { senasDeTurnos } from '@/lib/actions/senas-cobro'
+import { SenaBadge } from '@/components/senas/sena-badge'
+import { formatCurrency } from '@/lib/format'
 import { listAppointmentBlocksForDate } from '@/lib/actions/appointment-blocks'
 import { listWaitlist } from '@/lib/actions/waitlist'
 import {
@@ -144,6 +148,8 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
   const [services, setServices] = useState<BookingServiceOption[]>([])
   const [blocks, setBlocks] = useState<AppointmentBlock[]>([])
   const [waitlist, setWaitlist] = useState<AppointmentWaitlist[]>([])
+  /** Monto de la seña pagada por id de turno. Se pide en lote, no por tarjeta. */
+  const [senas, setSenas] = useState<Record<string, number>>({})
 
   const [viewMode, setViewMode] = useState<'single' | 'multi'>('single')
   const [zoom, setZoom] = useState<ZoomLevel>('normal')
@@ -239,6 +245,41 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
       console.error('[agenda] refreshWaitlist', e)
     }
   }, [resolvedBranchId, scopeActual, sigueVigente])
+
+  // Señas pagadas de los turnos que se están dibujando. Va colgado de
+  // `appointments` y no de cada camino de carga (single / multi / refresh) para
+  // que ninguno pueda olvidarse de pedirlas: son cuatro lugares distintos.
+  useEffect(() => {
+    const ids = appointments.map(a => a.id)
+    if (!ids.length) {
+      setSenas({})
+      return
+    }
+    let vigente = true
+    senasDeTurnos(ids)
+      .then(mapa => { if (vigente) setSenas(mapa) })
+      // Sin señas la agenda se dibuja igual, sólo sin el distintivo. Lo que NO
+      // puede pasar es que un fallo acá rompa la pantalla entera.
+      .catch(e => console.error('[agenda] senasDeTurnos', e))
+    return () => { vigente = false }
+  }, [appointments])
+
+  // Deep link desde /dashboard/turnos/senas: "ver el turno" de una seña tiene
+  // que abrir ESE turno, no la agenda de hoy con la sucursal que estuviera
+  // elegida. Corre una sola vez: después manda lo que el usuario navegue.
+  const paramsUrl = useSearchParams()
+  const deepLinkAplicado = useRef(false)
+  useEffect(() => {
+    if (deepLinkAplicado.current) return
+    const fecha = paramsUrl.get('fecha')
+    const sucursal = paramsUrl.get('sucursal')
+    const turno = paramsUrl.get('turno')
+    if (!fecha && !sucursal && !turno) return
+    deepLinkAplicado.current = true
+    if (fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha)) setDate(fecha)
+    if (sucursal && allowedBranchIds?.includes(sucursal) !== false) setSelectedBranchId(sucursal)
+    if (turno) setSelectedId(turno)
+  }, [paramsUrl, allowedBranchIds, setSelectedBranchId])
 
   const load = useCallback(async (scope: string) => {
     if (viewMode === 'multi') {
@@ -885,6 +926,7 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
               date={date}
               barbers={columnas}
               appointments={appointments}
+              senas={senas}
               blocks={blocks}
               slotInterval={settings.slot_interval_minutes}
               hoursOpen={settings.appointment_hours_open}
@@ -973,6 +1015,7 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
           {selected && (
             <AppointmentDetail
               appointment={selected}
+              sena={senas[selected.id]}
               onClose={() => setSelectedId(null)}
               onCheckIn={handleCheckIn}
               onStart={handleStart}
@@ -1068,6 +1111,7 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
 
 function AppointmentDetail({
   appointment,
+  sena,
   onClose,
   onCheckIn,
   onStart,
@@ -1079,6 +1123,8 @@ function AppointmentDetail({
   isActing,
 }: {
   appointment: Appointment
+  /** Monto de la seña ya pagada por Mercado Pago, si la hay. */
+  sena?: number
   onClose: () => void
   onCheckIn: (a: Appointment) => void
   onStart: (a: Appointment) => void
@@ -1128,6 +1174,19 @@ function AppointmentDetail({
             Barbero: {appointment.barber?.full_name ?? 'Sin asignar'}
           </p>
         </div>
+        {sena != null && sena > 0 && (
+          <div className="rounded-md border border-sky-500/40 bg-sky-500/10 p-3 text-xs">
+            <p className="flex items-center gap-1.5 font-medium text-sky-700 dark:text-sky-300">
+              <SenaBadge monto={sena} />
+              Seña pagada por Mercado Pago
+            </p>
+            <p className="mt-1 font-mono text-sm font-semibold">{formatCurrency(sena)}</p>
+            <p className="mt-1 text-sky-700/90 dark:text-sky-300/90">
+              Se descuenta sola cuando el barbero cobre el corte. Si cancelás el turno, la seña se resuelve según la
+              política de la sucursal.
+            </p>
+          </div>
+        )}
         {appointment.payment_status !== 'unpaid' && appointment.payment_amount !== null && (
           <div className="rounded-md border bg-emerald-500/5 p-3 text-xs">
             <p className="font-medium">Pago registrado</p>

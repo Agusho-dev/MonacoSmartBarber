@@ -22,6 +22,7 @@ export const NAV_FEATURE_MAP: Record<string, NavFeatureMeta> = {
   '/dashboard/mensajeria':     { featureKey: 'messaging.inbox',        moduleId: 'messaging_whatsapp',  minPlan: 'pro' },
   '/dashboard/asistente':      { featureKey: 'ai.enabled',             moduleId: null,                  minPlan: 'enterprise' },
   '/dashboard/app-movil':      { featureKey: 'mobile_app.enabled',     moduleId: 'mobile_app',          minPlan: 'pro' },
+  '/dashboard/fidelizacion':   { featureKey: 'mobile_app.enabled',     moduleId: 'mobile_app',          minPlan: 'pro' },
   '/dashboard/convenios':      { featureKey: 'agreements.enabled',     moduleId: 'agreements',          minPlan: 'enterprise' },
   '/dashboard/estadisticas':   { featureKey: 'reports.basic',          moduleId: 'reports_basic',       minPlan: 'start' },
   '/dashboard/caja':           { featureKey: 'caja.basic',             moduleId: 'caja_basic' },

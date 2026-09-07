@@ -4,6 +4,7 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { DashboardShell } from '@/components/dashboard/dashboard-shell'
 import { ImpersonationBanner } from '@/components/dashboard/impersonation-banner'
 import { DbDownError } from '@/components/dashboard/db-down-error'
+import { LoyaltyResultHost } from '@/components/barber/loyalty-result-host'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { getEntitlements } from '@/lib/actions/entitlements'
 import type { EntitlementsSnapshot } from '@/components/billing/entitlements-provider'
@@ -328,6 +329,9 @@ export default async function DashboardLayout({
       >
         {children}
       </DashboardShell>
+      {/* Tarjeta del programa de fidelización tras un cobro desde /dashboard/fila,
+          la agenda o la lista de turnos (esas superficies desmontan el diálogo). */}
+      <LoyaltyResultHost />
     </>
   )
 }

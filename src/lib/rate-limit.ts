@@ -153,4 +153,23 @@ export const RateLimits = {
   mobileBootstrap: async (userId: string) => {
     return rateLimit('mobile_bootstrap', userId, { limit: 30, window: 60 })
   },
+
+  // Crear la intención de seña: 8 por usuario cada 60s. Más apretado que
+  // `mobileBook` porque cada llamada crea una preferencia REAL en Mercado Pago
+  // (que le cuelga un link de pago vivo a la reserva). El cliente que corrige
+  // el servicio y vuelve al resumen genera una intención nueva cada vez, así
+  // que 8 le deja margen de sobra para tantear sin que un bucle de la app —o
+  // alguien con el token— nos llene la cuenta de checkouts abiertos.
+  mobileSena: async (userId: string) => {
+    return rateLimit('mobile_sena', userId, { limit: 8, window: 60 })
+  },
+
+  // Consultar el estado de una seña mientras el cliente vuelve del checkout:
+  // 60 por usuario cada 60s. La pantalla "confirmando tu pago" pregunta cada
+  // 2 s durante ~40 s (el webhook de MP tarda), o sea ~20 llamadas por intento;
+  // el tope tiene que dejar entrar dos o tres intentos seguidos sin cortar
+  // justo cuando el pago está por acreditarse.
+  mobileSenaEstado: async (userId: string) => {
+    return rateLimit('mobile_sena_estado', userId, { limit: 60, window: 60 })
+  },
 }

@@ -154,6 +154,9 @@ async function resolveCsvClientIds(
         phone: c.phone,
         name: c.name || `+54${c.phone}`,
         notes: note,
+        // Contactos importados de un CSV (mig 210): no son altas del negocio y
+        // mezclarlos con las de la app falsearía la conversión de la publicidad.
+        signup_source: 'import' as const,
       }))
       // ignoreDuplicates: si otro import creó el mismo teléfono en paralelo, el
       // UNIQUE (organization_id, phone) lo absorbe en vez de tirar la operación.

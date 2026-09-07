@@ -3,8 +3,18 @@ export const metadata = {
   description: 'Política de privacidad de Smart Barbershops',
 }
 
+/**
+ * /privacidad — Política de privacidad pública.
+ *
+ * Actualizada el 3/9/2026 al incorporar los pagos: Mercado Pago pasó a ser un
+ * proveedor que trata datos de nuestros clientes y por eso tiene que estar
+ * declarado acá. La aclaración de que los datos de la tarjeta NO pasan por
+ * nosotros no es marketing: es el hecho que define qué datos tenemos y cuáles
+ * no, y es lo primero que pregunta alguien antes de pagar en un sitio que no
+ * conoce.
+ */
 export default function PrivacidadPage() {
-  const lastUpdated = '31 de marzo de 2026'
+  const lastUpdated = '3 de septiembre de 2026'
   const appName = 'Smart Barbershops'
   const contactEmail = 'ignacio.baldovino@hotmail.com'
 
@@ -29,9 +39,20 @@ export default function PrivacidadPage() {
           <ul className="list-disc list-inside text-gray-600 space-y-2 leading-relaxed">
             <li>Nombre y número de teléfono de clientes del negocio</li>
             <li>Historial de visitas y servicios realizados</li>
+            <li>Turnos reservados, su estado y las cancelaciones</li>
             <li>Mensajes enviados y recibidos a través de WhatsApp Business API</li>
             <li>Información de contacto proporcionada voluntariamente</li>
             <li>Datos de uso de la plataforma por parte del personal del negocio</li>
+            <li>
+              Cuando pagás una seña: el monto, la fecha, el estado del pago y el identificador que
+              nos devuelve Mercado Pago. <strong>No recibimos ni almacenamos los datos de tu tarjeta</strong> —
+              número, vencimiento ni código de seguridad—: esos datos los ingresás directamente en Mercado Pago
+              y nunca pasan por nuestros sistemas
+            </li>
+            <li>
+              Si usás el botón de arrepentimiento: el nombre, el teléfono y el detalle que escribas, junto con el
+              código de identificación que te devolvemos, para poder darle seguimiento al pedido
+            </li>
           </ul>
         </section>
 
@@ -42,6 +63,9 @@ export default function PrivacidadPage() {
             <li>Gestionar la relación entre el negocio y sus clientes</li>
             <li>Enviar comunicaciones de servicio vía WhatsApp (confirmaciones, recordatorios, notificaciones)</li>
             <li>Administrar turnos, historial de visitas y fidelización</li>
+            <li>Cobrar y, cuando corresponde, devolver las señas de reserva</li>
+            <li>Responder los pedidos de arrepentimiento dentro de las 24 horas y dejar registro de esa respuesta</li>
+            <li>Cumplir obligaciones contables, fiscales y de defensa del consumidor</li>
             <li>Mejorar la calidad del servicio ofrecido</li>
           </ul>
         </section>
@@ -74,6 +98,22 @@ export default function PrivacidadPage() {
             <li><strong>Supabase</strong> — almacenamiento de datos y autenticación</li>
             <li><strong>Meta (WhatsApp Business API)</strong> — mensajería</li>
             <li><strong>Vercel</strong> — hosting de la aplicación</li>
+            <li>
+              <strong>Mercado Pago</strong> (Mercado Libre S.R.L.) — procesamiento de las señas de reserva.
+              Cuando pagás, salís de nuestro sitio y completás la operación en Mercado Pago: los datos de tu
+              medio de pago los tratan ellos bajo su propia{' '}
+              <a
+                href="https://www.mercadopago.com.ar/privacidad"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:underline"
+              >
+                política de privacidad
+              </a>. Nosotros sólo recibimos de vuelta el resultado de la operación (aprobada o rechazada), el
+              monto y un identificador, que es lo que necesitamos para confirmar tu turno y para poder
+              devolverte la seña si corresponde
+            </li>
+            <li><strong>Google (Firebase Cloud Messaging)</strong> — envío de notificaciones push a la app</li>
           </ul>
         </section>
 

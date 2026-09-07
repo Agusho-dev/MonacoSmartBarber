@@ -155,14 +155,14 @@ function OrgBrandingCard({ org }: { org: OrgInfo | null }) {
                 {logoUrl ? 'Hacé click para cambiar' : 'Hacé click para subir'}
               </p>
               <p className="text-xs text-muted-foreground/60">
-                PNG, JPG, WebP o SVG. Máx 5MB.
+                PNG, JPG o WebP. Máx 5MB.
               </p>
             </div>
           </div>
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/svg+xml"
+            accept="image/png,image/jpeg,image/webp"
             className="hidden"
             onChange={handleLogoSelect}
           />

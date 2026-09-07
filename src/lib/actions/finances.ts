@@ -405,7 +405,16 @@ export async function fetchFinancialData(
   /** Visitas con su mes y día LOCALES ya resueltos, para reusar en la comparación por tramo. */
   const visitasLocales: { ym: string; day: number; amount: number; commission: number; esCorte: boolean }[] = []
 
-  // Agrupar visitas por mes local
+  // Agrupar visitas por mes local.
+  //
+  // LA SEÑA NO SE TOCA ACÁ, a propósito (mig 207). `visits.amount` sigue siendo el
+  // precio completo del servicio y la seña es sólo una PARTICIÓN del cobro: la
+  // misma venta, pagada en dos tiempos. Restarla de `revenue` haría que un mes con
+  // señas informara la mitad de lo que se vendió; contarla como una venta más
+  // duplicaría el corte, partiría el ticket promedio y falsearía la comisión.
+  // Lo único que cambia es POR DÓNDE entró la plata, y de eso se ocupa
+  // `getAllAccountBalanceTotals` (destino "Mercado Pago · seña"), que es donde
+  // vive el invariante `sum(charges) == este revenue`.
   for (const v of visits ?? []) {
     const localDate = fmtLocalDate.format(new Date(v.completed_at))
     const key = localDate.slice(0, 7)

@@ -51,13 +51,30 @@ export async function updateOrgI18n(input: {
 export async function uploadOrgLogo(formData: FormData) {
   const file = formData.get('logo') as File | null
   if (!file || file.size === 0) return { success: false, error: 'No se recibió archivo' }
+  if (file.size > 5 * 1024 * 1024) {
+    return { success: false, error: 'El logo pesa más de 5 MB. Probá con una imagen más liviana.' }
+  }
+
+  // El bucket `branding` sólo acepta estos MIME (mig 205, sin SVG): validar acá
+  // da un motivo claro en vez del rechazo opaco de la Storage API. Mismo patrón
+  // que uploadRewardImage / uploadPushImage, los otros dos uploads del bucket.
+  const tipo = (file.type || '').toLowerCase()
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(tipo)) {
+    return {
+      success: false,
+      error: tipo.includes('heic') || tipo.includes('heif')
+        ? 'Ese formato (HEIC de iPhone) no se puede subir. Exportalo como JPG.'
+        : 'El logo tiene que ser JPG, PNG o WEBP.',
+    }
+  }
 
   const orgId = await getCurrentOrgId()
   if (!orgId) return { success: false, error: 'Organización no encontrada' }
 
   const supabase = createAdminClient()
 
-  const ext = file.name.split('.').pop() ?? 'png'
+  // La extensión sale del MIME validado, no del nombre del archivo.
+  const ext = tipo.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png'
   const path = `org-logos/${orgId}/logo.${ext}`
 
   const arrayBuffer = await file.arrayBuffer()
@@ -65,11 +82,11 @@ export async function uploadOrgLogo(formData: FormData) {
 
   const { error: uploadError } = await supabase.storage
     .from('branding')
-    .upload(path, buffer, { contentType: file.type, upsert: true })
+    .upload(path, buffer, { contentType: tipo, upsert: true })
 
   if (uploadError) {
     console.error('[uploadOrgLogo] Error al subir logo:', uploadError)
-    return { success: false, error: 'Error al subir el logo' }
+    return { success: false, error: 'No pudimos subir el logo: ' + uploadError.message }
   }
 
   const { data: publicUrl } = supabase.storage.from('branding').getPublicUrl(path)

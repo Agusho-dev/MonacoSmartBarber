@@ -8,12 +8,15 @@ import {
   publicGetBranchBarbers,
 } from '@/lib/actions/public-booking'
 import { getBranchAppointmentHours } from '@/lib/actions/appointment-hours'
+import { leerConfigSena } from '@/lib/senas/repo'
 import { isValidUUID } from '@/lib/validation'
 import { BookingWizard } from './booking-wizard'
 import { OrgLanding, type LandingBranch } from './org-landing'
 import { LinkInvalido } from './link-invalido'
+import { PieLegal } from './pie-legal'
 import { estadoHorario } from './horarios'
 import { buildTurneroTheme, themeVars } from './theme'
+import type { BranchDepositSettings } from '@/lib/senas/contrato'
 import { MapPin, Phone, Users } from 'lucide-react'
 import type { AppointmentSettings } from '@/lib/types/database'
 
@@ -224,7 +227,7 @@ async function renderBranch(
 
     return (
       <div
-        className="flex min-h-screen flex-col items-center justify-center bg-[var(--t-bg)] p-4 text-[var(--t-text)]"
+        className="flex min-h-screen flex-col items-center justify-center gap-8 bg-[var(--t-bg)] p-4 text-[var(--t-text)]"
         style={themeVars(theme)}
       >
         <div
@@ -303,17 +306,67 @@ async function renderBranch(
             </a>
           )}
         </div>
+
+        {/* Esta sucursal no cobra seña —no toma turnos online— pero el botón de
+            arrepentimiento tiene que estar en todo el sitio donde se ofrece el
+            servicio, no sólo donde se cobra (Disp. 954/2025). */}
+        <div className="w-full max-w-md">
+          <PieLegal sucursal={branch.slug} />
+        </div>
       </div>
     )
   }
 
   // Cargar datos necesarios para el wizard en paralelo
-  const [services, staff, barberos, horario] = await Promise.all([
+  const [services, staff, barberos, horario, deposito] = await Promise.all([
     publicGetBranchServices(branch.id),
     publicGetAvailableStaff(branch.id),
     publicGetBranchBarbers(branch.id),
     getBranchAppointmentHours(branch.id),
+    // La config de la seña FALLA ABIERTA hacia "sin seña": si la lectura se
+    // cae, el turnero sigue reservando gratis como toda la vida en vez de
+    // quedarse mudo. Es un cobro opcional, no un requisito del turno — trabar
+    // la reserva entera porque no pudimos leer un porcentaje sería cambiar un
+    // problema chico por uno grande.
+    leerConfigSena(branch.id).catch((e): BranchDepositSettings | null => {
+      console.error('[turnos/[slug]] leerConfigSena:', e)
+      return null
+    }),
   ])
+
+  // ¿Esta sucursal puede cobrar de verdad?
+  //
+  // Prender `branch_deposit_settings.is_enabled` es una casilla del dashboard;
+  // conectar la cuenta de Mercado Pago es un trámite aparte. Con la casilla
+  // prendida y la cuenta sin conectar, el wizard llevaría al cliente hasta el
+  // botón de pagar para morir ahí con "esta sucursal todavía no tiene los pagos
+  // conectados" — y como el paso de la seña reemplaza al de confirmar, ese
+  // turnero queda MUERTO: no se puede reservar ni con seña ni sin ella.
+  //
+  // Falla hacia el lado seguro: sin cuenta conectada, la sucursal reserva gratis
+  // como toda la vida. Se pierde una seña, no un turno.
+  //
+  // Los filtros espejan a `resolverProveedor`, que es quien de verdad va a
+  // buscar el token al momento de cobrar (produccion + no revocado + con token
+  // guardado): si acá dijéramos que sí y allá que no, volvemos al mismo pozo.
+  const senaCobrable = await (async () => {
+    if (!deposito?.is_enabled) return false
+    const { data, error } = await supabase
+      .from('branch_payment_providers')
+      .select('id')
+      .eq('branch_id', branch.id)
+      .eq('provider', 'mercadopago')
+      .eq('environment', 'produccion')
+      .neq('status', 'revocado')
+      .not('access_token_cifrado', 'is', null)
+      .maybeSingle()
+
+    if (error) {
+      console.error('[turnos/[slug]] branch_payment_providers:', error.message)
+      return false
+    }
+    return !!data
+  })()
 
   // Los que atienden sólo por orden de llegada = todos los barberos menos los
   // que de verdad se pueden reservar. No se puede reservar con ellos, pero
@@ -368,6 +421,7 @@ async function renderBranch(
         // La app mobile abre el turnero en un WebView con ?from=app.
         embedded: param(searchParams, 'from') === 'app',
       }}
+      deposito={senaCobrable ? deposito : null}
     />
   )
 }

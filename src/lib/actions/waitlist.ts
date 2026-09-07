@@ -84,7 +84,14 @@ export async function addToWaitlist(input: AddToWaitlistInput) {
   } else {
     const { data: newClient, error } = await supabase
       .from('clients')
-      .insert({ name: input.clientName, phone: input.clientPhone, organization_id: orgId })
+      .insert({
+        name: input.clientName,
+        phone: input.clientPhone,
+        organization_id: orgId,
+        // Lista de espera (mig 210): `source === 'manual'` es el alta que carga
+        // el staff desde el dashboard; el resto entra por la web pública.
+        signup_source: input.source === 'manual' ? 'staff' : 'web',
+      })
       .select('id')
       .single()
     if (error || !newClient) return { error: 'Error al registrar cliente' }

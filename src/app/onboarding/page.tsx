@@ -159,7 +159,7 @@ function LogoUploader({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept="image/png,image/jpeg,image/webp"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0]
@@ -188,7 +188,7 @@ function LogoUploader({
           </div>
           <div className="text-center">
             <p className="text-sm font-medium">Subir logo</p>
-            <p className="text-xs text-white/30 mt-0.5">PNG, SVG, JPG</p>
+            <p className="text-xs text-white/30 mt-0.5">PNG, JPG, WebP</p>
           </div>
         </>
       )}

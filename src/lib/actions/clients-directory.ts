@@ -34,6 +34,40 @@ const CLIENT_SEGMENTS: ClientSegment[] = [
   'sin_visitas',
 ]
 
+/**
+ * Origen del alta (`clients.signup_source`, mig 210). Es NULL para los 6.419
+ * clientes anteriores a la migración: inventarles un origen sería peor que no
+ * tenerlo, así que en la UI se muestran como "Sin dato".
+ */
+export type SignupSource = 'kiosk' | 'app' | 'web' | 'staff' | 'import'
+
+/** Lo que se puede elegir en el filtro: los orígenes reales + los que no declaran uno. */
+export type SignupFilter = SignupSource | 'desconocido'
+
+const SIGNUP_SOURCES: SignupSource[] = ['kiosk', 'app', 'web', 'staff', 'import']
+const SIGNUP_FILTERS: SignupFilter[] = [...SIGNUP_SOURCES, 'desconocido']
+
+/**
+ * Tope de filas que escanea el filtro por origen.
+ *
+ * `search_clients_page` (mig 167) NO devuelve `signup_source` y acá no se aplican
+ * migraciones, así que el filtro se resuelve del lado del server action: se pide
+ * una ventana grande de la RPC —con el MISMO orden y los mismos filtros— y se
+ * cruza contra el conjunto de ids de cada origen. Es el mismo tope que ya usa la
+ * exportación, y cuando se toca se avisa (`signupTruncated`) en vez de recortar
+ * en silencio.
+ */
+const ORIGEN_SCAN_CAP = 5000
+
+/**
+ * Tope de ids con origen declarado que se traen para resolver el filtro.
+ * Hoy son 0 filas (la columna nace vacía) y crece sólo con las altas nuevas.
+ */
+const ORIGEN_IDS_CAP = 20000
+
+/** PostgREST corta en 1000 filas sin avisar: toda lista larga se pagina. */
+const PAGINA_REST = 1000
+
 export type ClientSortKey =
   | 'relevance'
   | 'name'
@@ -94,6 +128,8 @@ export interface DirectoryClient {
   topBarberId: string | null
   topBarberName: string | null
   topBranchName: string | null
+  /** Cómo entró a la base. NULL = alta anterior a la mig 210 (o camino sin cubrir). */
+  signupSource: SignupSource | null
 }
 
 export interface SegmentCount {
@@ -108,6 +144,8 @@ export interface ClientsDirectoryQuery {
   segments?: ClientSegment[]
   onlyWithVisits?: boolean
   hideWalkins?: boolean
+  /** Orígenes de alta a mostrar. Vacío = todos (no filtra nada). */
+  signupSources?: SignupFilter[]
   sort?: ClientSortKey
   dir?: 'asc' | 'desc'
   page?: number
@@ -142,6 +180,11 @@ export interface ClientsDirectoryResult {
    * que poder mostrar "—" en vez de un 0 inventado.
    */
   countsError: string | null
+  /**
+   * El filtro por origen tocó el tope de escaneo: lo que se muestra es un recorte
+   * del universo, no el universo. Se avisa; un recorte silencioso es un dato falso.
+   */
+  signupTruncated: boolean
 }
 
 const EMPTY_RESULT = (page: number, pageSize: number, error: string): ClientsDirectoryResult => ({
@@ -155,6 +198,7 @@ const EMPTY_RESULT = (page: number, pageSize: number, error: string): ClientsDir
   pageSize,
   error,
   countsError: error,
+  signupTruncated: false,
 })
 
 interface RawRow {
@@ -186,7 +230,7 @@ function num(v: string | number | null | undefined): number {
   return Number.isFinite(n) ? n : 0
 }
 
-function mapRow(r: RawRow): DirectoryClient {
+function mapRow(r: RawRow, origen: SignupSource | null = null): DirectoryClient {
   return {
     id: r.id,
     name: r.name,
@@ -209,6 +253,7 @@ function mapRow(r: RawRow): DirectoryClient {
     topBarberId: r.top_barber_id,
     topBarberName: r.top_barber_name,
     topBranchName: r.top_branch_name,
+    signupSource: origen,
   }
 }
 
@@ -266,6 +311,91 @@ async function getThresholds(orgId: string): Promise<SegmentThresholds> {
   }
 }
 
+/**
+ * Origen de alta de un puñado de ids (los de la página visible).
+ *
+ * Por qué una segunda consulta y no un cambio en la RPC: `search_clients_page`
+ * es de la migración 167 y acá no se aplican migraciones. Redefinirla desde el
+ * código sería peor (dos cuerpos de la misma función, que es exactamente la
+ * trampa de la mig 166: el repo decía una cosa y prod otra). La consulta va
+ * acotada a los ≤200 ids de la página y por PK, así que cuesta milisegundos.
+ *
+ * Devuelve el error en vez de un mapa vacío: una etiqueta faltante tiene que
+ * poder distinguirse de "no lo pudimos leer" (Known Risk #5).
+ */
+async function traerOrigenesDeIds(
+  supabase: ReturnType<typeof createAdminClient>,
+  orgId: string,
+  ids: string[]
+): Promise<{ origenes: Map<string, SignupSource | null>; error: string | null }> {
+  const origenes = new Map<string, SignupSource | null>()
+  if (ids.length === 0) return { origenes, error: null }
+
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('id, signup_source')
+      .eq('organization_id', orgId)
+      .in('id', ids.slice(i, i + 200))
+    if (error) {
+      console.error('[clients-directory] signup_source de la página:', error.message)
+      return { origenes: new Map(), error: 'No pudimos leer el origen de las altas' }
+    }
+    for (const row of (data ?? []) as { id: string; signup_source: string | null }[]) {
+      const src = row.signup_source
+      origenes.set(row.id, SIGNUP_SOURCES.includes(src as SignupSource) ? (src as SignupSource) : null)
+    }
+  }
+  return { origenes, error: null }
+}
+
+/**
+ * Todos los clientes de la org que SÍ declaran origen, como mapa id → origen.
+ *
+ * El complemento ("sin dato") se deriva por ausencia: los 6.419 clientes previos
+ * a la mig 210 no se traen nunca. Sólo se llama cuando el filtro por origen está
+ * activo. Pagina de a 1000 porque PostgREST corta ahí sin avisar.
+ */
+async function traerOrigenesDeclarados(
+  supabase: ReturnType<typeof createAdminClient>,
+  orgId: string
+): Promise<{ origenes: Map<string, SignupSource>; truncated: boolean; error: string | null }> {
+  const origenes = new Map<string, SignupSource>()
+  let desde = 0
+
+  while (desde < ORIGEN_IDS_CAP) {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('id, signup_source')
+      .eq('organization_id', orgId)
+      .not('signup_source', 'is', null)
+      .order('id')
+      .range(desde, desde + PAGINA_REST - 1)
+    if (error) {
+      console.error('[clients-directory] signup_source declarados:', error.message)
+      return { origenes: new Map(), truncated: false, error: 'No pudimos leer los orígenes de alta' }
+    }
+    const filas = (data ?? []) as { id: string; signup_source: string | null }[]
+    for (const row of filas) {
+      if (SIGNUP_SOURCES.includes(row.signup_source as SignupSource)) {
+        origenes.set(row.id, row.signup_source as SignupSource)
+      }
+    }
+    if (filas.length < PAGINA_REST) return { origenes, truncated: false, error: null }
+    desde += PAGINA_REST
+  }
+
+  return { origenes, truncated: true, error: null }
+}
+
+/** ¿Este cliente entra por el filtro de origen elegido? */
+function pasaFiltroOrigen(origen: SignupSource | null, elegidos: SignupFilter[]): boolean {
+  if (elegidos.length === 0) return true
+  return origen === null
+    ? elegidos.includes('desconocido')
+    : elegidos.includes(origen)
+}
+
 export async function fetchClientsDirectory(
   query: ClientsDirectoryQuery
 ): Promise<ClientsDirectoryResult> {
@@ -297,6 +427,12 @@ export async function fetchClientsDirectory(
   const dir = query.dir === 'asc' ? 'asc' : 'desc'
   const onlyWithVisits = query.onlyWithVisits === true
   const hideWalkins = query.hideWalkins === true
+  const origenes = (query.signupSources ?? []).filter((o) =>
+    (SIGNUP_FILTERS as string[]).includes(o)
+  )
+  // Elegir los seis valores es no filtrar nada: se trata como "todos" para no
+  // pagar el escaneo grande al pedo.
+  const filtraPorOrigen = origenes.length > 0 && origenes.length < SIGNUP_FILTERS.length
 
   const listArgs = {
     p_organization_id: orgId,
@@ -322,17 +458,29 @@ export async function fetchClientsDirectory(
     p_vip_visits: thresholds.vipVisits,
   }
 
-  const hayFiltrosDeBase = Boolean(search) || onlyWithVisits || hideWalkins
+  // Con filtro por origen, `counts` deja de servir como denominador: se calcula
+  // sobre la población YA filtrada, así que el tamaño real de la base tiene que
+  // pedirse aparte igual que cuando hay búsqueda o toggles.
+  const hayFiltrosDeBase = Boolean(search) || onlyWithVisits || hideWalkins || filtraPorOrigen
 
   const [listRes, countsRes, baseRes] = await Promise.all([
-    supabase.rpc('search_clients_page', listArgs),
+    // Con filtro por origen se pide una ventana grande y se pagina acá (la RPC no
+    // conoce `signup_source`); sin filtro, la RPC pagina como siempre.
+    supabase.rpc(
+      'search_clients_page',
+      filtraPorOrigen ? { ...listArgs, p_limit: ORIGEN_SCAN_CAP, p_offset: 0 } : listArgs
+    ),
     // Conteos por segmento CON los filtros actuales: es lo que muestran los chips.
-    supabase.rpc('client_segment_counts', {
-      ...countsArgs,
-      p_query: search || null,
-      p_only_with_visits: onlyWithVisits,
-      p_hide_walkins: hideWalkins,
-    }),
+    // Con filtro por origen se derivan de las filas ya filtradas (abajo): la RPC
+    // no sabe de orígenes y devolvería un desglose de otra población.
+    filtraPorOrigen
+      ? Promise.resolve(null)
+      : supabase.rpc('client_segment_counts', {
+          ...countsArgs,
+          p_query: search || null,
+          p_only_with_visits: onlyWithVisits,
+          p_hide_walkins: hideWalkins,
+        }),
     // Tamaño de la base SIN filtros: el denominador. Si no hay filtros es la misma
     // consulta, así que no la repetimos.
     hayFiltrosDeBase
@@ -363,7 +511,7 @@ export async function fetchClientsDirectory(
       }))
 
   let countsError: string | null = null
-  if (countsRes.error) {
+  if (countsRes && countsRes.error) {
     console.error('[clients-directory] client_segment_counts:', countsRes.error.message)
     countsError = 'No pudimos calcular los segmentos'
   }
@@ -372,18 +520,71 @@ export async function fetchClientsDirectory(
     countsError = countsError ?? 'No pudimos calcular el total de la base'
   }
 
-  const counts = parseCounts(countsRes.data)
-  const baseCounts = baseRes ? parseCounts(baseRes.data) : counts
+  const baseCountsSource = baseRes ? parseCounts(baseRes.data) : null
 
+  // ── Origen del alta ────────────────────────────────────────────────
+  // Dos caminos, y el barato es el default:
+  //   · sin filtro → sólo hacen falta las etiquetas de la página (≤200 ids);
+  //   · con filtro → hace falta el universo de orígenes declarados para poder
+  //     paginar sobre la población correcta.
+  let visibles: RawRow[] = rows
+  let total = rows.length > 0 ? Number(rows[0].total_rows) || 0 : page > 1 ? -1 : 0
+  let counts = parseCounts(countsRes?.data)
+  let signupTruncated = false
+  const origenPorId = new Map<string, SignupSource | null>()
+
+  if (filtraPorOrigen) {
+    const declarados = await traerOrigenesDeclarados(supabase, orgId)
+    if (declarados.error) {
+      return EMPTY_RESULT(page, pageSize, declarados.error)
+    }
+    signupTruncated = declarados.truncated || rows.length >= ORIGEN_SCAN_CAP
+
+    const filtradas = rows.filter((r) =>
+      pasaFiltroOrigen(declarados.origenes.get(r.id) ?? null, origenes)
+    )
+    for (const r of filtradas) origenPorId.set(r.id, declarados.origenes.get(r.id) ?? null)
+
+    total = filtradas.length
+    const desde = (page - 1) * pageSize
+    // Página fuera de rango: mismo contrato que la RPC (-1 ⇒ reencuadrar).
+    visibles = desde >= filtradas.length && page > 1 ? [] : filtradas.slice(desde, desde + pageSize)
+    if (desde >= filtradas.length && page > 1) total = -1
+
+    // Los chips se derivan de la MISMA población filtrada. No es una regla nueva
+    // de segmento: el segmento ya viene calculado por la RPC, acá sólo se agrupa.
+    const acumulado = new Map<ClientSegment, { count: number; totalSpent: number }>()
+    for (const r of filtradas) {
+      const seg = ((CLIENT_SEGMENTS as string[]).includes(r.segment)
+        ? r.segment
+        : 'sin_visitas') as ClientSegment
+      const prev = acumulado.get(seg) ?? { count: 0, totalSpent: 0 }
+      acumulado.set(seg, { count: prev.count + 1, totalSpent: prev.totalSpent + num(r.total_spent) })
+    }
+    counts = CLIENT_SEGMENTS.filter((seg) => acumulado.has(seg)).map((seg) => ({
+      segment: seg,
+      count: acumulado.get(seg)!.count,
+      totalSpent: acumulado.get(seg)!.totalSpent,
+    }))
+  } else {
+    const etiquetas = await traerOrigenesDeIds(supabase, orgId, rows.map((r) => r.id))
+    if (etiquetas.error) {
+      // La lista sirve igual sin la etiqueta de origen: se avisa y se sigue.
+      countsError = countsError ?? etiquetas.error
+    }
+    for (const [id, origen] of etiquetas.origenes) origenPorId.set(id, origen)
+  }
+
+  const baseCounts = baseCountsSource ?? counts
   const baseTotal = baseCounts.reduce((acc, c) => acc + c.count, 0)
   const sinVisitas = baseCounts.find((c) => c.segment === 'sin_visitas')?.count ?? 0
 
   return {
-    clients: rows.map(mapRow),
+    clients: visibles.map((r) => mapRow(r, origenPorId.get(r.id) ?? null)),
     // `total_rows` viaja en las filas, así que una página fuera de rango no lo trae.
     // En ese caso devolvemos -1 para que el llamador sepa que hay que reencuadrar,
     // en vez de reportar "0 clientes" (que sería el cero silencioso otra vez).
-    total: rows.length > 0 ? Number(rows[0].total_rows) || 0 : page > 1 ? -1 : 0,
+    total,
     counts,
     baseTotal,
     baseWithVisits: Math.max(0, baseTotal - sinVisitas),
@@ -392,6 +593,7 @@ export async function fetchClientsDirectory(
     pageSize,
     error: null,
     countsError,
+    signupTruncated,
   }
 }
 
@@ -430,10 +632,24 @@ export async function fetchClientsForExport(
     (CLIENT_SEGMENTS as string[]).includes(s)
   )
 
+  const origenes = (query.signupSources ?? []).filter((o) =>
+    (SIGNUP_FILTERS as string[]).includes(o)
+  )
+  const filtraPorOrigen = origenes.length > 0 && origenes.length < SIGNUP_FILTERS.length
+
+  // El CSV lleva la columna Origen siempre, así que el mapa de orígenes
+  // declarados se trae una sola vez y sirve para etiquetar y para filtrar.
+  const declarados = await traerOrigenesDeclarados(supabase, orgId)
+  if (declarados.error) {
+    return { rows: [], truncated: false, error: declarados.error }
+  }
+
   const PAGE = 200
   const all: DirectoryClient[] = []
   let offset = 0
 
+  // `offset` cuenta filas ESCANEADAS (no las que quedaron): con filtro por origen
+  // el CSV puede tener muchas menos y el tope sigue siendo del escaneo.
   while (offset < EXPORT_CAP) {
     const { data, error } = await supabase.rpc('search_clients_page', {
       p_organization_id: orgId,
@@ -457,10 +673,160 @@ export async function fetchClientsForExport(
     }
 
     const rows = (data ?? []) as RawRow[]
-    all.push(...rows.map(mapRow))
+    for (const r of rows) {
+      const origen = declarados.origenes.get(r.id) ?? null
+      if (filtraPorOrigen && !pasaFiltroOrigen(origen, origenes)) continue
+      all.push(mapRow(r, origen))
+    }
     if (rows.length < PAGE) break
     offset += PAGE
   }
 
-  return { rows: all, truncated: all.length >= EXPORT_CAP, error: null }
+  return {
+    rows: all,
+    truncated: offset >= EXPORT_CAP || declarados.truncated,
+    error: null,
+  }
+}
+
+// ─── Altas por origen: la conversión real de la publicidad ────────────
+
+/** Ventanas ofrecidas por la UI. Días corridos hacia atrás desde ahora. */
+const VENTANAS_ALTAS = [7, 30, 90] as const
+
+export interface SignupFunnelRow {
+  source: SignupSource
+  /** Fichas creadas por ese camino dentro del período. */
+  creados: number
+  /** De esos, cuántos ya tienen al menos una visita registrada. */
+  conVisita: number
+}
+
+export interface SignupFunnelResult {
+  days: number
+  rows: SignupFunnelRow[]
+  /**
+   * Altas del período SIN origen declarado. No es ruido: si esto crece, hay un
+   * camino de alta que no está escribiendo `signup_source` y la conversión de la
+   * publicidad se está midiendo sobre un universo incompleto.
+   */
+  sinOrigen: number
+  /** Se tocó el tope de escaneo: los números son un piso, no el total. */
+  truncated: boolean
+  error: string | null
+}
+
+/** Tope de altas que se analizan por período. */
+const ALTAS_CAP = 20000
+
+/**
+ * Cuántas cuentas se crearon por cada camino en los últimos `days` días y
+ * cuántas de ellas ya vinieron al local.
+ *
+ * Es la única métrica que responde "¿la publicidad trajo gente de verdad?": una
+ * cuenta creada es una descarga; una cuenta creada QUE YA VINO es un cliente.
+ *
+ * Se calcula en TypeScript y no en SQL porque acá no se aplican migraciones; el
+ * costo está acotado a las altas del período (hoy, sobre 6.419 clientes, ninguna
+ * declara origen: la columna nace vacía a propósito).
+ *
+ * Es org-scope a propósito: una ficha de cliente no pertenece a una sucursal
+ * —la app ni siquiera tiene sucursal desde el rediseño del 24/8— así que
+ * filtrar por la sucursal elegida daría un número que no significa nada.
+ */
+export async function fetchSignupFunnel(days: number): Promise<SignupFunnelResult> {
+  const ventana = (VENTANAS_ALTAS as readonly number[]).includes(days) ? days : 30
+  const vacio = (error: string | null): SignupFunnelResult => ({
+    days: ventana,
+    rows: [],
+    sinOrigen: 0,
+    truncated: false,
+    error,
+  })
+
+  if (!(await currentUserCan('clients.view'))) {
+    return vacio('No tenés permiso para ver clientes')
+  }
+
+  const orgId = await getCurrentOrgId()
+  if (!orgId) return vacio('Organización no encontrada')
+
+  const supabase = createAdminClient()
+  const desde = new Date(Date.now() - ventana * 24 * 60 * 60 * 1000).toISOString()
+
+  const idsPorOrigen = new Map<SignupSource, string[]>()
+  let sinOrigen = 0
+  let truncated = false
+  let leidos = 0
+
+  while (leidos < ALTAS_CAP) {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('id, signup_source')
+      .eq('organization_id', orgId)
+      .gte('created_at', desde)
+      .order('id')
+      .range(leidos, leidos + PAGINA_REST - 1)
+
+    if (error) {
+      console.error('[clients-directory] altas por origen:', error.message)
+      return vacio('No pudimos leer las altas del período')
+    }
+
+    const filas = (data ?? []) as { id: string; signup_source: string | null }[]
+    for (const row of filas) {
+      const src = row.signup_source
+      if (SIGNUP_SOURCES.includes(src as SignupSource)) {
+        const lista = idsPorOrigen.get(src as SignupSource) ?? []
+        lista.push(row.id)
+        idsPorOrigen.set(src as SignupSource, lista)
+      } else {
+        sinOrigen++
+      }
+    }
+
+    leidos += filas.length
+    if (filas.length < PAGINA_REST) break
+    if (leidos >= ALTAS_CAP) truncated = true
+  }
+
+  // ¿Cuáles de esas fichas ya tienen una visita? Una sola pasada sobre `visits`
+  // acotada a esos ids. Se pagina de a 1000 (PostgREST corta ahí en silencio) y
+  // un cliente puede tener varias visitas, así que se dedupe con un Set.
+  const todosLosIds = [...idsPorOrigen.values()].flat()
+  const conVisita = new Set<string>()
+
+  for (let i = 0; i < todosLosIds.length; i += 200) {
+    const lote = todosLosIds.slice(i, i + 200)
+    let desdeFila = 0
+    for (;;) {
+      const { data, error } = await supabase
+        .from('visits')
+        .select('client_id')
+        .eq('organization_id', orgId)
+        .in('client_id', lote)
+        .range(desdeFila, desdeFila + PAGINA_REST - 1)
+      if (error) {
+        console.error('[clients-directory] visitas de las altas:', error.message)
+        return vacio('No pudimos cruzar las altas con las visitas')
+      }
+      const filas = (data ?? []) as { client_id: string | null }[]
+      for (const f of filas) if (f.client_id) conVisita.add(f.client_id)
+      if (filas.length < PAGINA_REST) break
+      desdeFila += PAGINA_REST
+    }
+  }
+
+  const rows: SignupFunnelRow[] = SIGNUP_SOURCES.filter((src) => idsPorOrigen.has(src)).map(
+    (src) => {
+      const ids = idsPorOrigen.get(src)!
+      return {
+        source: src,
+        creados: ids.length,
+        conVisita: ids.filter((id) => conVisita.has(id)).length,
+      }
+    }
+  )
+
+  return { days: ventana, rows, sinOrigen, truncated, error: null }
 }

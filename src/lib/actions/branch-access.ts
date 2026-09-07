@@ -5,6 +5,7 @@ import { createAdminClient, createClient } from '@/lib/supabase/server'
 import { getCurrentOrgId, getOrgBranchIds } from './org'
 import { isValidUUID } from '@/lib/validation'
 import { cookies } from 'next/headers'
+import { leerBarberSession } from '@/lib/barber-cookie'
 
 /**
  * Branch-access helpers para enforzar el scoping por sucursal server-side.
@@ -33,10 +34,12 @@ export const getAllowedBranchIds = cache(async function getAllowedBranchIds(): P
   // 1) Panel barbero por PIN — acceso solo a su sucursal
   const barberSession = cookieStore.get('barber_session')
   if (barberSession) {
-    try {
-      const parsed = JSON.parse(barberSession.value)
+    // Cookie firmada (HMAC, src/lib/barber-cookie.ts): un JSON armado a mano
+    // no elige sucursal.
+    const parsed = leerBarberSession(barberSession.value)
+    if (parsed) {
       if (isValidUUID(parsed.branch_id)) {
-        return [parsed.branch_id]
+        return [parsed.branch_id!]
       }
       // Si la cookie no trae branch_id, resolver desde staff
       if (isValidUUID(parsed.staff_id)) {
@@ -48,7 +51,7 @@ export const getAllowedBranchIds = cache(async function getAllowedBranchIds(): P
           .maybeSingle()
         if (staff?.branch_id) return [staff.branch_id]
       }
-    } catch { /* ignore */ }
+    }
   }
 
   // 2) Dashboard (Supabase Auth)

@@ -5,6 +5,7 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { timingSafeEqual } from 'crypto'
 import { RateLimits, getClientIP } from '@/lib/rate-limit'
+import { firmarBarberSession, leerBarberSession } from '@/lib/barber-cookie'
 
 export async function loginWithEmail(
   _prevState: { error?: string; success?: boolean } | null,
@@ -42,9 +43,7 @@ export async function logout() {
 export async function loginWithPin(formData: FormData) {
   // Service role a propósito: desde la mig 212 la columna `pin` NO es legible por
   // `anon`, y la pantalla de login del barbero no tiene sesión de Supabase (se
-  // autentica justamente con este PIN). Verificar una credencial es una operación
-  // de servidor; leerla con el cliente RLS era lo que obligaba a dejar la columna
-  // abierta al rol público. `verifyBarberPin` ya lo hacía así.
+  // autentica justamente con este PIN). Verificar una credencial es del servidor.
   const supabase = createAdminClient()
   const staffId = formData.get('staff_id') as string
   const pin = formData.get('pin') as string
@@ -130,7 +129,11 @@ export async function loginWithPin(formData: FormData) {
   await supabase.auth.signOut()
 
   const cookieStore = await cookies()
-  const session = JSON.stringify({
+  // La cookie viaja FIRMADA (HMAC, src/lib/barber-cookie.ts): era JSON plano y
+  // cualquier request podia inventarse una sesion con el staff_id u
+  // organization_id de otro — getCurrentOrgId() y validateBranchAccess() la
+  // daban por buena sin PIN ni fichaje.
+  const session = firmarBarberSession({
     staff_id: staff.id,
     full_name: staff.full_name,
     branch_id: staff.branch_id,
@@ -139,6 +142,9 @@ export async function loginWithPin(formData: FormData) {
     role_id: staff.role_id,
     permissions,
   })
+  if (!session) {
+    return { error: 'No pudimos iniciar la sesión. Avisale al administrador.' }
+  }
 
   cookieStore.set('barber_session', session, {
     httpOnly: true,
@@ -156,21 +162,11 @@ export async function getBarberSession() {
   const sessionCookie = cookieStore.get('barber_session')
   if (!sessionCookie) return null
 
-  let parsed: {
-    staff_id: string
-    full_name: string
-    branch_id: string
-    organization_id: string
-    role: string
-    role_id: string | null
-    permissions: Record<string, boolean>
-  }
-
-  try {
-    parsed = JSON.parse(sessionCookie.value)
-  } catch {
-    return null
-  }
+  // Verifica la firma HMAC antes de confiar en nada del contenido. Una cookie
+  // del formato viejo (JSON sin firmar) o armada a mano devuelve null: sesión
+  // inválida, el barbero vuelve a entrar con su PIN.
+  const parsed = leerBarberSession(sessionCookie.value)
+  if (!parsed) return null
 
   const supabase = createAdminClient()
 

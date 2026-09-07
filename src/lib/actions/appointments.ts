@@ -1,5 +1,6 @@
 'use server'
 
+import { timingSafeEqual } from 'crypto'
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getCurrentOrgId } from './org'
@@ -7,10 +8,17 @@ import { assertBranchAccess, getAllowedBranchIds, filterBranchesByAccess } from 
 import { RateLimits, rateLimit } from '@/lib/rate-limit'
 import { absoluteUrl } from '@/lib/app-url'
 import { isValidUUID } from '@/lib/validation'
+import { toLocalPhone } from '@/lib/phone'
+import { leerCanalInterno } from '@/lib/appointments/canal-interno'
 import { getLocalNow, getLocalDateStr, getTzOffsetISO } from '@/lib/time-utils'
 import { intersectarRangos, type Rango } from '@/lib/franjas'
 import { componentesDe, variablesDelBody, indiceBotonUrl } from '@/lib/whatsapp-template-shape'
 import { currentUserCan } from './permissions-gate'
+import {
+  resolverSenaDeTurnoCancelado,
+  senaObligatoriaParaClientes,
+  senaRespaldaReserva,
+} from '@/lib/senas/motor'
 import type { Appointment, AppointmentSettings, AppointmentStaff, AppointmentStatus, AppointmentPaymentMethod } from '@/lib/types/database'
 
 // ─── Tipos de filas de relaciones inline ──────────────────────────────
@@ -31,8 +39,30 @@ interface AppointmentStaffWithStaff {
 // ─── Settings ───────────────────────────────────────────────────────
 
 /**
+ * Los IDs de template que se heredan de la fila org-level cuando el override de
+ * sucursal los tiene en NULL. Sólo estos: el resto del override manda entero.
+ */
+const CAMPOS_TEMPLATE_HEREDABLES = [
+  'confirmation_template_id',
+  'reminder_template_id',
+  'cancellation_template_id',
+  'reschedule_template_id',
+  'waitlist_template_id',
+  'payment_request_template_id',
+] as const
+
+/**
  * Retorna los settings efectivos para una sucursal: override por branch si
  * existe, sino default de la org. Llamar con branchId=null devuelve el default.
+ *
+ * Los `*_template_id` se MERGEAN desde la fila org-level cuando el override los
+ * tiene en NULL, y no es un detalle: la fila branch-level de Rondeau se creó sin
+ * templates (`change_branch_operation_mode` la crea copiando la org, pero la de
+ * Rondeau es anterior a esa corrección) y como el `if (override) return override`
+ * cortaba acá, esa sucursal no mandó NI UNA confirmación ni una cancelación por
+ * WhatsApp: cada lector preguntaba `settings.confirmation_template_id`, recibía
+ * null y se saltaba el envío en silencio. Un template a nivel org es una decisión
+ * de la marca; una sucursal que no eligió el suyo hereda, no se queda muda.
  */
 export async function getAppointmentSettings(
   orgId?: string,
@@ -43,24 +73,40 @@ export async function getAppointmentSettings(
 
   const supabase = createAdminClient()
 
-  if (branchId) {
-    const { data: override } = await supabase
+  // Las dos filas se piden en paralelo: la org-level hace falta igual, sea como
+  // fallback (sin override) o como plantilla de los templates (con override).
+  const [overrideRes, orgLevelRes] = await Promise.all([
+    branchId
+      ? supabase
+          .from('appointment_settings')
+          .select('*')
+          .eq('organization_id', resolvedOrgId)
+          .eq('branch_id', branchId)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    supabase
       .from('appointment_settings')
       .select('*')
       .eq('organization_id', resolvedOrgId)
-      .eq('branch_id', branchId)
-      .maybeSingle()
-    if (override) return override as AppointmentSettings
+      .is('branch_id', null)
+      .maybeSingle(),
+  ])
+
+  const override = overrideRes.data as Record<string, unknown> | null
+  const orgLevel = orgLevelRes.data
+
+  if (!override) return (orgLevel as AppointmentSettings | null) ?? null
+
+  if (orgLevel) {
+    const base = orgLevel as Record<string, unknown>
+    for (const campo of CAMPOS_TEMPLATE_HEREDABLES) {
+      if (override[campo] == null && base[campo] != null) {
+        override[campo] = base[campo]
+      }
+    }
   }
 
-  const { data } = await supabase
-    .from('appointment_settings')
-    .select('*')
-    .eq('organization_id', resolvedOrgId)
-    .is('branch_id', null)
-    .maybeSingle()
-
-  return data as AppointmentSettings | null
+  return override as unknown as AppointmentSettings
 }
 
 export async function updateAppointmentSettings(
@@ -980,25 +1026,75 @@ interface CreateAppointmentInput {
   notes?: string
   createdByStaffId?: string
   /**
-   * Reserva hecha desde la tablet del local. Se persiste como `public` (la
-   * hace el cliente), pero salteando el rate-limit por IP: todos los clientes
-   * del local comparten la IP de la tablet y a partir del tercero del día el
-   * kiosko empezaría a rechazar reservas legítimas. El límite por teléfono y
-   * el de `kioskCheckin` por sucursal siguen aplicando.
+   * @deprecated INERTE desde el 3/9/2026 — se acepta para no romper llamadores
+   * viejos, pero NO saltea nada. Era una bandera de confianza: este archivo es
+   * `'use server'`, así que un POST al action-id con `viaKiosk: true` salteaba
+   * el rate-limit por IP desde cualquier lado. El salteo va por `canalInterno`.
    */
   viaKiosk?: boolean
   /**
-   * Reserva hecha desde la app mobile (`/api/mobile/turnos/[slug]/book`). Se
-   * persiste como `public`, pero saltea el gate por IP: la app mobile ya pasó
-   * por rate-limit por usuario (`RateLimits.mobileBook`) y el teléfono viene
-   * del JWT, no del body. El límite por teléfono (3/h) y todo lo demás sigue.
+   * La seña PAGADA que respalda esta reserva. NO es una bandera de confianza:
+   * se verifica contra `booking_deposits` (pagada, sin turno, misma sucursal,
+   * misma fecha y misma hora). Es lo único que permite crear un turno en una
+   * sucursal que cobra seña sin pasar por Mercado Pago, y sólo lo manda
+   * `acreditarPago` después de que el pago se acreditó.
+   */
+  depositId?: string | null
+  /**
+   * @deprecated INERTE desde el 3/9/2026, misma razón que `viaKiosk`: un
+   * booleano del body no prueba de dónde vino la llamada. Usar `canalInterno`.
    */
   viaApp?: boolean
+  /**
+   * Token del CANAL INTERNO (`canalInterno('kiosko' | 'app' | 'sena_acreditada')`,
+   * en `@/lib/appointments/canal-interno`). Es lo único que saltea el
+   * rate-limit por IP, y sólo vale si lo generó ESTE proceso: es un valor
+   * aleatorio en memoria que nunca viaja al browser, así que un POST directo al
+   * action-id no lo puede fabricar. No autoriza nada más: los permisos, el
+   * scope de sucursal y la seña se siguen verificando contra la base.
+   *
+   * Cómo se usa desde otro módulo del servidor:
+   *   import { canalInterno } from '@/lib/appointments/canal-interno'
+   *   await createAppointment({ …, canalInterno: canalInterno('app') })
+   */
+  canalInterno?: string
 }
 
 export async function createAppointment(input: CreateAppointmentInput) {
-  // Rate-limit por IP antes de tocar DB (solo para creación vía turnero público).
-  if (input.source === 'public' && !input.viaKiosk && !input.viaApp) {
+  // ── Quién puede saltear el rate-limit por IP ────────────────────────
+  // Sólo dos cosas, y ninguna la puede fabricar quien POSTea al action-id:
+  //   · el CANAL INTERNO (token aleatorio del proceso — kiosko, app mobile,
+  //     webhook de señas), que prueba que la llamada nació adentro; y
+  //   · una SEÑA PAGADA que respalda exactamente esta reserva, verificada
+  //     contra `booking_deposits` acá mismo (`senaRespaldatoria`).
+  // Los booleanos `viaKiosk` / `viaApp` que hacían esto antes eran del body:
+  // con `viaApp: true` cualquiera reservaba sin límite desde una sola IP.
+  const exencionInterna = leerCanalInterno(input.canalInterno)
+
+  // ¿Hay una seña PAGADA que respalde exactamente esta reserva? Se resuelve acá
+  // arriba —antes que nada, y es una sola lectura por PK— porque de ella
+  // dependen los DOS rate-limits y el guard de seña de más abajo. Pagar esa
+  // lectura antes de limitar es preferible a cobrarle el gate por IP al webhook
+  // de Mercado Pago (cuya IP es la de MP, compartida por todos los pagos) y
+  // quedarse con la plata del cliente sin darle el turno.
+  let senaRespaldatoria = false
+  if (input.source !== 'manual' && input.depositId && isValidUUID(input.depositId)) {
+    try {
+      senaRespaldatoria = await senaRespaldaReserva(input.depositId, {
+        branchId: input.branchId,
+        appointmentDate: input.appointmentDate,
+        startTime: input.startTime,
+      })
+    } catch (e) {
+      // No saber si la seña respalda la reserva NO habilita a reservar gratis:
+      // es un control de plata y se corta (misma regla que `getAvailableSlots`,
+      // que nunca degrada a "todo libre").
+      console.error('[createAppointment] verificación de seña:', e)
+      return { error: 'No pudimos verificar si esta reserva necesita seña. Probá de nuevo.' }
+    }
+  }
+
+  if (input.source === 'public' && !exencionInterna && !senaRespaldatoria) {
     const ipGate = await RateLimits.publicBookingCreateByIp()
     if (!ipGate.allowed) {
       return { error: 'Demasiadas reservas desde esta dirección, esperá un minuto' }
@@ -1031,8 +1127,49 @@ export async function createAppointment(input: CreateAppointmentInput) {
   const settings = await getAppointmentSettings(orgId, input.branchId)
   if (!settings?.is_enabled) return { error: 'Turnos no habilitados' }
 
-  // Rate-limit por teléfono+org (anti-spam orientado al turnero público)
-  if (input.source === 'public') {
+  // ── Guard de seña (mig 207) ────────────────────────────────────────
+  // El paso de pago es una PANTALLA, y una pantalla no es un control: este
+  // export es un endpoint HTTP con un action-id que viaja en el bundle (lo
+  // prueba `espera-client.tsx`, un componente de cliente que lo importa
+  // directo), así que un POST armado a mano crea el turno `confirmed` sin
+  // haber pagado nada. Por eso el guard vive ACÁ y no sólo en los dos
+  // llamadores públicos: taparlos a ellos deja la puerta de al lado abierta.
+  //
+  // Se saltea de dos maneras y las dos son verificables:
+  //   · `source: 'manual'` — el alta del dashboard, que arriba ya exigió
+  //     sesión, sucursal y `appointments.manage`.
+  //   · una seña PAGADA que respalda exactamente esta reserva, que es como
+  //     entra `acreditarPago`. Ningún token ni bandera del llamador alcanza:
+  //     `canalInterno` sólo exime del rate-limit, no de pagar.
+  if (input.source !== 'manual' && !senaRespaldatoria) {
+    try {
+      const serviciosDelTurno = input.serviceIds?.length
+        ? input.serviceIds
+        : (input.serviceId ? [input.serviceId] : [])
+      if (await senaObligatoriaParaClientes(input.branchId, serviciosDelTurno)) {
+        return {
+          error: 'Esta sucursal pide una seña para reservar. El turno se confirma cuando se acredita el pago.',
+        }
+      }
+    } catch (e) {
+      // Ídem: si no podemos saber si hace falta seña, no se reserva.
+      console.error('[createAppointment] guard de seña:', e)
+      return { error: 'No pudimos verificar si esta reserva necesita seña. Probá de nuevo.' }
+    }
+  }
+
+  // Rate-limit por teléfono+org (anti-spam orientado al turnero público).
+  //
+  // Una seña PAGADA lo saltea, y esto es lo que necesita el webhook de Mercado
+  // Pago (`acreditarPago` → `crearTurnoDeSena` en `src/lib/senas/motor.ts`): el
+  // cliente ya puso la plata, así que rechazar por "creaste varios turnos
+  // recientemente" sería quedarse con la seña sin dar el turno. No es una
+  // bandera: `senaRespaldatoria` sale de `senaRespaldaReserva`, que verifica
+  // contra `booking_deposits` que la seña esté pagada, sin turno todavía y sea
+  // de esta misma sucursal, fecha y hora. Basta con mandar `depositId`; el
+  // token `canalInterno('sena_acreditada')` es opcional y sirve para el gate
+  // por IP cuando la seña todavía no está verificada.
+  if (input.source === 'public' && !senaRespaldatoria) {
     const phoneGate = await RateLimits.publicBookingCreateByPhone(input.clientPhone, orgId)
     if (!phoneGate.allowed) {
       return { error: 'Ya creaste varios turnos recientemente. Contactanos si necesitás más.' }
@@ -1046,6 +1183,14 @@ export async function createAppointment(input: CreateAppointmentInput) {
   // cliente guardado como "+54 9 351 212-5249" cuando tipeaba "3512125249", y
   // el turno quedaba colgado del duplicado: sin historial, sin puntos, y en la
   // tablet lo recibía como si fuera su primera vez.
+  //
+  // OJO (deuda conocida, NO se arregla acá): el UNIQUE de la base es sobre el
+  // string CRUDO de `clients.phone` y el matching es por los últimos 10 dígitos.
+  // O sea que "3512125249" y "5493512125249" son la misma persona para el match
+  // y dos filas distintas para el índice: el día que dos caminos guarden formatos
+  // distintos, entra el duplicado igual. Con el alta de cuentas abierta al
+  // público esto se multiplica. Arreglarlo es normalizar la columna y rehacer el
+  // índice — una migración de datos, no un cambio de este archivo.
   let clientId: string
 
   const { data: existingClientId } = await supabase.rpc('find_client_id_by_phone', {
@@ -1059,9 +1204,39 @@ export async function createAppointment(input: CreateAppointmentInput) {
     clientId = existingClientId as string
     await supabase.from('clients').update({ name: input.clientName }).eq('id', clientId)
   } else {
+    // Validación mínima del teléfono ANTES de crear la ficha. Va sólo en el
+    // camino de alta (no en el de match) a propósito: `find_client_id_by_phone`
+    // ya exige 10 dígitos para matchear, así que exigirlo antes rechazaría
+    // reservas de clientes viejos guardados con un teléfono corto.
+    //
+    // La regla no es nueva: `toLocalPhone` (@/lib/phone) es la MISMA con la que
+    // trabaja todo el sistema —últimos 10 dígitos, migs 149/150— y devuelve ''
+    // cuando no llega. Hasta ahora este insert aceptaba cualquier string; con
+    // el alta de cuentas abierta al público eso ensucia la base de una forma
+    // que después no se puede deshacer.
+    if (!toLocalPhone(input.clientPhone)) {
+      return { error: 'Ingresá un teléfono válido (10 dígitos, sin el 0 ni el 15)' }
+    }
     const { data: newClient, error } = await supabase
       .from('clients')
-      .insert({ name: input.clientName, phone: input.clientPhone, organization_id: orgId })
+      .insert({
+        name: input.clientName,
+        phone: input.clientPhone,
+        organization_id: orgId,
+        // Origen del alta (mig 210). No sale de una bandera del body: `source`
+        // ya está verificado arriba (el alta manual exige permiso y sucursal) y
+        // `exencionInterna` es el token del proceso, que un POST al action-id no
+        // puede fabricar. Lo que no se puede probar queda como 'web', que es de
+        // donde viene una reserva pública.
+        signup_source:
+          input.source === 'manual'
+            ? 'staff'
+            : exencionInterna === 'kiosko'
+              ? 'kiosk'
+              : exencionInterna === 'app'
+                ? 'app'
+                : 'web',
+      })
       .select('id')
       .single()
     if (error || !newClient) return { error: 'Error al registrar cliente' }
@@ -1080,14 +1255,25 @@ export async function createAppointment(input: CreateAppointmentInput) {
     clientHasFace = (count ?? 0) > 0
   }
 
-  // Anti-doble-booking: un cliente no puede tener otro turno activo el mismo día en esta org
+  // Anti-doble-booking: un cliente no puede tener otro turno activo el mismo día
+  // en esta org. Espejado en `tieneTurnoActivoEseDia` (`@/lib/senas/repo`), que
+  // corre ANTES del checkout de la seña: los dos tienen que listar los mismos
+  // estados o el cliente paga y recién después se entera de que no hay turno.
+  //
+  // Son TRES estados. `pending_payment` NO está y no es un olvido: ese valor
+  // NUNCA existió en `appointments_status_check` (la migración 109, que lo
+  // agregaba, no se aplicó nunca en prod — verificado el 3/9/2026). Filtrar por
+  // un valor imposible no rompía nada, pero mentía sobre cómo funciona la seña:
+  // la seña NO usa estados de turno, su ciclo de vida vive en
+  // `booking_deposits.status` y el turno nace directamente en `confirmed`
+  // cuando el pago ya está acreditado.
   const { data: clientAppointmentsToday } = await supabase
     .from('appointments')
     .select('id')
     .eq('organization_id', orgId)
     .eq('client_id', clientId)
     .eq('appointment_date', input.appointmentDate)
-    .in('status', ['pending_payment', 'confirmed', 'checked_in', 'in_progress'])
+    .in('status', ['confirmed', 'checked_in', 'in_progress'])
     .limit(1)
 
   if (clientAppointmentsToday?.length) {
@@ -1165,23 +1351,29 @@ export async function createAppointment(input: CreateAppointmentInput) {
       + 24 * 60 * 60 * 1000
   )
 
-  // Obtener nombre y precio del servicio (precio necesario para prepago)
+  // Nombre del servicio para los mensajes.
   let serviceName = ''
-  let servicePrice = 0
   if (input.serviceId) {
     const { data: service } = await supabase
       .from('services')
-      .select('name, price')
+      .select('name')
       .eq('id', input.serviceId)
       .single()
     serviceName = service?.name ?? ''
-    servicePrice = Number(service?.price ?? 0)
   }
 
-  // Si la org está en prepago, el turno nace como pending_payment y no
-  // reserva comunicación hasta que el staff confirme el cobro.
-  const isPrepago = settings.payment_mode === 'prepago'
-  const initialStatus: AppointmentStatus = isPrepago ? 'pending_payment' : 'confirmed'
+  // El turno SIEMPRE nace `confirmed` (mig 207).
+  //
+  // La rama `payment_mode = 'prepago'` que vivía acá ponía `status =
+  // 'pending_payment'`, un valor que `appointments_status_check` NO admite
+  // (scheduled|confirmed|checked_in|in_progress|completed|cancelled|no_show):
+  // toda reserva en una sucursal marcada como prepago moría con 23514 antes de
+  // insertarse. Nunca se notó porque las 5 filas de `appointment_settings` están
+  // en 'postpago'. Ese circuito quedó reemplazado por la SEÑA
+  // (`branch_deposit_settings` + `booking_deposits`), que resuelve el pago ANTES
+  // de crear el turno: cuando `createAppointment` corre, la plata ya está
+  // acreditada y el turno no tiene por qué nacer en un estado intermedio.
+  const initialStatus: AppointmentStatus = 'confirmed'
 
   const { data: appointment, error: insertError } = await supabase
     .from('appointments')
@@ -1251,11 +1443,11 @@ export async function createAppointment(input: CreateAppointmentInput) {
     .toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
   const managementUrl = await absoluteUrl(`/turnos/gestionar/${cancellationToken}`)
 
-  if (isPrepago) {
-    // Solicitud de pago (la confirmación + recordatorios se encolan recién al
-    // confirmarse el pago; ver confirmAppointmentPrepayment).
-    const prepaymentAmount = calculatePrepaymentAmount(settings, servicePrice)
-    await schedulePaymentRequestMessage({
+  // Confirmación + recordatorios, siempre. (Antes esto era el `else` de la rama
+  // de prepago; ver la nota de `initialStatus`: esa rama pedía plata por WhatsApp
+  // sobre un turno que en realidad nunca había llegado a insertarse.)
+  await scheduleAppointmentMessages(
+    {
       orgId,
       appointmentId: appointment.id,
       clientId,
@@ -1265,31 +1457,13 @@ export async function createAppointment(input: CreateAppointmentInput) {
       branchName: branch.name,
       dateFormatted,
       startTime: input.startTime,
+      appointmentDateTime: appointmentInstant(input.appointmentDate, input.startTime, branch.timezone),
       managementUrl,
-      amount: prepaymentAmount,
-      instructions: settings.payment_instructions ?? null,
-      templateId: settings.payment_request_template_id ?? null,
-    })
-  } else {
-    await scheduleAppointmentMessages(
-      {
-        orgId,
-        appointmentId: appointment.id,
-        clientId,
-        phone: input.clientPhone,
-        clientName: input.clientName,
-        serviceName,
-        branchName: branch.name,
-        dateFormatted,
-        startTime: input.startTime,
-        appointmentDateTime: appointmentInstant(input.appointmentDate, input.startTime, branch.timezone),
-        managementUrl,
-        manageToken: cancellationToken,
-      },
-      settings,
-      'create'
-    )
-  }
+      manageToken: cancellationToken,
+    },
+    settings,
+    'create'
+  )
 
   revalidatePath('/dashboard/fila')
   revalidatePath('/dashboard/turnos/agenda')
@@ -1297,96 +1471,12 @@ export async function createAppointment(input: CreateAppointmentInput) {
   return { success: true, appointment, clientHasFace, clientIsNew: !clienteYaExistia }
 }
 
-/**
- * Calcula el monto a prepagar según la configuración:
- *   - fixed: 100% del precio del servicio
- *   - percentage: servicePrice * prepayment_percentage / 100
- */
-function calculatePrepaymentAmount(settings: AppointmentSettings, servicePrice: number): number {
-  if (!servicePrice || servicePrice <= 0) return 0
-  if (settings.prepayment_type === 'fixed') return servicePrice
-  const pct = Math.min(100, Math.max(1, Number(settings.prepayment_percentage ?? 50)))
-  return Math.round((servicePrice * pct) / 100)
-}
-
-interface PaymentRequestContext {
-  orgId: string
-  appointmentId: string
-  clientId: string
-  phone: string
-  clientName: string
-  serviceName: string
-  branchName: string
-  dateFormatted: string
-  startTime: string
-  managementUrl: string
-  amount: number
-  instructions: string | null
-  templateId: string | null
-}
-
-/**
- * Encola UN mensaje con el pedido de pago previo al servicio. Graceful no-op
- * si no hay canal WA o teléfono. El cliente recibe:
- *   - Template payment_request si está configurado
- *   - Sino texto libre armado con los datos del turno + instructions
- */
-async function schedulePaymentRequestMessage(ctx: PaymentRequestContext) {
-  try {
-    if (!ctx.phone) return
-    const supabase = createAdminClient()
-    const channelId = await resolveOrgWhatsAppChannelId(ctx.orgId)
-
-    const tpl = await getTemplateById(ctx.templateId)
-    const templateName = tpl?.name ?? null
-
-    const row: Record<string, unknown> = {
-      organization_id: ctx.orgId,
-      appointment_id: ctx.appointmentId,
-      client_id: ctx.clientId,
-      channel_id: channelId,
-      scheduled_for: new Date().toISOString(),
-      phone: ctx.phone,
-      status: 'pending',
-    }
-
-    if (ctx.templateId && templateName) {
-      row.template_id = ctx.templateId
-      row.template_name = templateName
-      if (tpl?.language) row.template_language = tpl.language
-      row.template_params = [
-        {
-          type: 'body',
-          parameters: [
-            { type: 'text', text: ctx.clientName },
-            { type: 'text', text: ctx.serviceName },
-            { type: 'text', text: ctx.dateFormatted },
-            { type: 'text', text: ctx.startTime },
-            { type: 'text', text: ctx.branchName },
-            { type: 'text', text: formatARS(ctx.amount) },
-            { type: 'text', text: ctx.instructions ?? '' },
-          ],
-        },
-      ]
-    } else {
-      const amountLabel = ctx.amount > 0 ? ` (${formatARS(ctx.amount)})` : ''
-      const instructionsBlock = ctx.instructions ? `\n${ctx.instructions}` : ''
-      row.content = `Hola ${ctx.clientName}, tu turno para ${ctx.serviceName} el ${ctx.dateFormatted} a las ${ctx.startTime} en ${ctx.branchName} queda pendiente hasta recibir el pago${amountLabel}.${instructionsBlock}\nCuando lo confirmemos te avisamos. Gestioná tu turno acá: ${ctx.managementUrl}`
-    }
-
-    await supabase.from('scheduled_messages').insert(row)
-  } catch (e) {
-    console.error('[Appointments] Error enviando solicitud de pago:', e)
-  }
-}
-
-function formatARS(amount: number): string {
-  try {
-    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(amount)
-  } catch {
-    return `$${amount}`
-  }
-}
+// El circuito de PREPAGO manual (calculatePrepaymentAmount +
+// schedulePaymentRequestMessage + PaymentRequestContext) se borró con la mig 207.
+// Pedía plata por WhatsApp para un turno que nunca se insertaba (ver la nota de
+// `initialStatus` en createAppointment) y la confirmación posterior creaba una
+// visita paralela que rompía caja, ARCA, puntos y el ticket promedio. El cobro
+// por adelantado hoy es la SEÑA: `src/lib/senas/`.
 
 // ─── Reschedule Appointment ────────────────────────────────────────
 
@@ -1475,6 +1565,11 @@ export async function rescheduleAppointment(input: RescheduleAppointmentInput) {
     }
   }
 
+  // La SEÑA no se toca al reprogramar: sigue atada a este mismo turno
+  // (`booking_deposits.appointment_id`), que es la fila que se está moviendo.
+  // Reprogramar no es cancelar — no hay nada que devolver ni que perder — y la
+  // seña se consume igual cuando el corte se cobre, en la fecha que sea.
+  //
   // Regenerar token (invalida el anterior).
   // La expiración se calcula en la TZ de la SUCURSAL: `new Date('YYYY-MM-DDTHH:MM')`
   // se parsea con el reloj del proceso (UTC en Vercel) y el token de gestión
@@ -1627,9 +1722,65 @@ export async function updateAppointmentDuration(appointmentId: string, newDurati
 
 // ─── Cancel Appointment ─────────────────────────────────────────────
 
+/**
+ * Resuelve la seña de un turno que se cae (mig 207): devolución, crédito o
+ * pérdida, según `branch_deposit_settings` y cuánta anticipación hubo.
+ *
+ * Va en try/catch a propósito: si Mercado Pago está caído o la devolución falla,
+ * el turno TIENE que quedar cancelado igual —el horario se libera y otro cliente
+ * lo toma— y la plata se resuelve después desde el dashboard. Al revés (no
+ * cancelar porque no se pudo devolver) el cliente se queda sin turno Y sin
+ * plata. Lo que no puede pasar es que el fallo sea invisible: queda logueado y
+ * el estado de la seña sigue siendo `pagada`, o sea pendiente de resolver.
+ */
+async function resolverSenaAlCancelar(
+  appointmentId: string,
+  canceladoPor: 'client' | 'staff' | 'system',
+  horasDeAnticipacion: number,
+) {
+  try {
+    await resolverSenaDeTurnoCancelado(appointmentId, { canceladoPor, horasDeAnticipacion })
+  } catch (err) {
+    console.error(`[Senas] no se pudo resolver la seña del turno ${appointmentId}:`, err)
+  }
+}
+
+/** Horas que faltan para el turno. Negativo = la hora ya pasó. */
+function horasHastaElTurno(
+  appointmentDate: string,
+  startTime: string,
+  timezone?: string,
+): number {
+  const cuando = appointmentInstant(appointmentDate, startTime, timezone)
+  return (cuando.getTime() - Date.now()) / (1000 * 60 * 60)
+}
+
+/**
+ * ¿El token de gestión que trae quien cancela es el del turno?
+ *
+ * Comparación en tiempo constante y con chequeo de largo previo
+ * (`timingSafeEqual` TIRA si los buffers difieren en tamaño). El largo de un
+ * token de gestión es público: 24 caracteres.
+ */
+function tokenDeGestionValido(recibido: string | null | undefined, guardado: unknown): boolean {
+  const a = (recibido ?? '').trim()
+  const b = typeof guardado === 'string' ? guardado.trim() : ''
+  if (!a || !b) return false
+  const ba = Buffer.from(a, 'utf8')
+  const bb = Buffer.from(b, 'utf8')
+  if (ba.length !== bb.length) return false
+  return timingSafeEqual(ba, bb)
+}
+
 export async function cancelAppointment(
   appointmentId: string,
-  cancelledBy: 'client' | 'staff' | 'system'
+  cancelledBy: 'client' | 'staff' | 'system',
+  /**
+   * La PRUEBA de quien cancela como cliente: el token de gestión del turno (el
+   * del link de WhatsApp). No es una bandera de confianza —se verifica contra
+   * la fila— sino una capability, igual que en `cancelAppointmentByToken`.
+   */
+  prueba?: { manageToken?: string | null }
 ) {
   const supabase = createAdminClient()
 
@@ -1644,13 +1795,38 @@ export async function cancelAppointment(
     return { error: 'El turno ya fue cancelado o completado' }
   }
 
-  // Scope check para staff — clientes cancelan vía cancelAppointmentByToken (público)
-  if (cancelledBy === 'staff') {
+  // ── Autorización ────────────────────────────────────────────────────
+  // `cancelledBy` NO prueba nada: este archivo es `'use server'`, o sea que
+  // cada export es un endpoint HTTP con un action-id que viaja en el bundle del
+  // cliente, y ese parámetro lo elige quien llama. Antes el control era
+  // `if (cancelledBy === 'staff')`: mandando 'system' se salteaba TODO —sin
+  // sesión, sin permiso y sin sucursal— y desde la migración 207 esa es
+  // justamente la rama que devuelve la seña ENTERA por Mercado Pago ("el local
+  // canceló el turno", devolución incondicional). Con el UUID de un turno
+  // —que viaja al browser en la agenda y en la respuesta de la reserva—
+  // cualquiera cancelaba turnos ajenos y se auto-devolvía la plata.
+  //
+  // Ahora cada valor exige su prueba:
+  //   · 'staff' / 'system' → sesión con acceso a la sucursal y permiso.
+  //   · 'client'           → el token de gestión del turno, que es lo que ya
+  //     tienen los DOS únicos caminos legítimos: el link de WhatsApp
+  //     (`cancelAppointmentByToken`) y la app, que valida la pertenencia por
+  //     JWT y reenvía el token de la fila que acaba de leer.
+  const autorizadoComoStaff = async (): Promise<boolean> => {
     const access = await assertBranchAccess(appointment.branch_id)
-    if (!access.ok) return { error: 'Sin acceso a esta sucursal' }
-    if (!(await currentUserCan('appointments.manage'))) {
-      return { error: 'No tenés permiso para cancelar turnos' }
+    if (!access.ok) return false
+    return await currentUserCan('appointments.manage')
+  }
+
+  if (cancelledBy === 'client') {
+    const conToken = tokenDeGestionValido(prueba?.manageToken, appointment.cancellation_token)
+    if (!conToken && !(await autorizadoComoStaff())) {
+      // Mismo texto que "no existe": confirmar que el turno existe ya es más de
+      // lo que hace falta decirle a quien no puede tocarlo.
+      return { error: 'Turno no encontrado' }
     }
+  } else if (!(await autorizadoComoStaff())) {
+    return { error: 'No tenés permiso para cancelar turnos' }
   }
 
   if (cancelledBy === 'client') {
@@ -1679,6 +1855,16 @@ export async function cancelAppointment(
     .eq('id', appointmentId)
 
   if (error) return { error: error.message }
+
+  // La seña: devolución / crédito / pérdida según la anticipación real.
+  {
+    const branchRel = unwrapRel(appointment.branch as { timezone?: string } | { timezone?: string }[] | null)
+    await resolverSenaAlCancelar(
+      appointmentId,
+      cancelledBy,
+      horasHastaElTurno(appointment.appointment_date, appointment.start_time, branchRel?.timezone),
+    )
+  }
 
   // Cancelar queue entry si existe.
   // `.eq('status','waiting')` no es cosmético: si el corte YA arrancó, cancelar
@@ -1788,7 +1974,7 @@ export async function cancelAppointmentByToken(token: string) {
     return { error: 'El link expiró' }
   }
 
-  return cancelAppointment(appointment.id, 'client')
+  return cancelAppointment(appointment.id, 'client', { manageToken: token })
 }
 
 // ─── Mark No-Show ───────────────────────────────────────────────────
@@ -1834,6 +2020,12 @@ export async function markNoShow(appointmentId: string, staffId: string) {
     .eq('id', appointmentId)
 
   if (error) return { error: error.message }
+
+  // La seña de un ausente SE PIERDE. Va como cancelación del CLIENTE con cero
+  // horas de anticipación —que es literalmente lo que pasó— y no como 'system':
+  // 'system'/'staff' son las bajas que no son culpa del cliente y se devuelven.
+  // Perder la seña por no aparecer es el motivo por el que la seña existe.
+  await resolverSenaAlCancelar(appointmentId, 'client', 0)
 
   // Cancelar mensajes pendientes (no tiene sentido enviar recordatorios si ya faltó)
   await cancelScheduledMessagesForAppointment(appointmentId)
@@ -2115,150 +2307,30 @@ interface ConfirmPrepaymentInput {
 }
 
 /**
- * Confirma manualmente el prepago de un turno en 'pending_payment'. Efecto:
- *  1) Crea una visita (impacta caja/finanzas al momento de la confirmación).
- *  2) Marca el turno como 'confirmed' + payment_status ('paid' o 'partial').
- *  3) Dispara el encolado de confirmación + recordatorios (que no se mandaron
- *     al crear el turno porque estaba esperando pago).
+ * FUERA DE SERVICIO desde la mig 207. Se conserva el export porque
+ * `ConfirmPrepaymentDialog` todavía lo importa, y devuelve un error explicativo
+ * en vez de hacer nada: ejecutarla era peor que no tenerla.
  *
- * El monto por defecto lo dicta appointment_settings:
- *  - prepayment_type='fixed'      → precio del servicio
- *  - prepayment_type='percentage' → precio * prepayment_percentage / 100
+ * Lo que hacía y por qué no vuelve:
+ *  - Exigía `status = 'pending_payment'`, un valor que `appointments_status_check`
+ *    no admite. O sea que ningún turno podía estar nunca en ese estado y la
+ *    función era, en los hechos, inalcanzable (código muerto desde el día uno).
+ *  - No chequeaba `currentUserCan` y aceptaba un `amount` arbitrario del cliente:
+ *    en un archivo `'use server'` eso es un endpoint HTTP para escribir plata.
+ *  - Creaba una `visits` propia para el prepago (`queue_entry_id = NULL`). Esa
+ *    visita duplicaba el corte en las estadísticas, partía el ticket promedio,
+ *    consumía el tope mensual de la cuenta de un barbero por `transfer_logs`,
+ *    generaba un segundo comprobante de ARCA por el mismo servicio y acreditaba
+ *    un segundo lote de puntos.
+ *
+ * El cobro por adelantado hoy es la SEÑA: se paga por Mercado Pago antes de que
+ * el turno exista y se refleja en `visits.prepaid_amount` sobre la ÚNICA visita
+ * del corte, sin tocar `amount`.
  */
-export async function confirmAppointmentPrepayment(input: ConfirmPrepaymentInput) {
-  if (!isValidUUID(input.appointmentId)) return { error: 'ID inválido' }
-
-  const supabase = createAdminClient()
-
-  const { data: appointment } = await supabase
-    .from('appointments')
-    .select('*, service:service_id(id, name, price), client:client_id(id, name, phone)')
-    .eq('id', input.appointmentId)
-    .single()
-
-  if (!appointment) return { error: 'Turno no encontrado' }
-  if (appointment.status !== 'pending_payment') {
-    return { error: 'El turno no está esperando pago' }
-  }
-  if (!appointment.barber_id) return { error: 'Asigná un barbero antes de confirmar el pago' }
-
-  const access = await assertBranchAccess(appointment.branch_id)
-  if (!access.ok) return { error: 'Sin acceso a esta sucursal' }
-
-  const settings = await getAppointmentSettings(appointment.organization_id, appointment.branch_id)
-  if (!settings) return { error: 'Settings no encontrados' }
-
-  const servicePrice = Number(appointment.service?.price ?? 0)
-  const defaultAmount = calculatePrepaymentAmount(settings, servicePrice)
-  const amount = input.amount && input.amount > 0 ? input.amount : defaultAmount
-
-  if (amount <= 0) return { error: 'Monto inválido — definí un precio en el servicio o pasá amount' }
-
-  const { data: branch } = await supabase
-    .from('branches')
-    .select('id, organization_id, name, timezone')
-    .eq('id', appointment.branch_id)
-    .single()
-
-  if (!branch) return { error: 'Sucursal no encontrada' }
-
-  const visitPaymentMethod = mapAppointmentPaymentMethodToVisit(input.method)
-  const now = new Date().toISOString()
-
-  // Crea la visita (impacta caja/finanzas YA; queue_entry_id=NULL porque aún
-  // no hubo servicio). El trigger on_queue_completed, cuando el servicio
-  // eventualmente se complete, reutilizará esta visita via appointment_id.
-  const { error: visitError } = await supabase
-    .from('visits')
-    .insert({
-      organization_id: branch.organization_id,
-      branch_id: appointment.branch_id,
-      client_id: appointment.client_id,
-      barber_id: appointment.barber_id,
-      service_id: appointment.service_id,
-      appointment_id: appointment.id,
-      queue_entry_id: null,
-      payment_method: visitPaymentMethod,
-      payment_account_id: input.paymentAccountId ?? null,
-      amount,
-      commission_pct: 0,
-      commission_amount: 0,
-      started_at: now,
-      completed_at: now,
-      notes: input.notes?.trim() ? `[Prepago] ${input.notes.trim()}` : '[Prepago]',
-    })
-
-  if (visitError) return { error: 'Error al registrar pago: ' + visitError.message }
-
-  // Decidir payment_status según si el amount cubre el total del servicio.
-  const isFullPayment = servicePrice > 0 ? amount >= servicePrice : true
-  const paymentStatus: 'paid' | 'partial' = isFullPayment ? 'paid' : 'partial'
-
-  const { error: updateError } = await supabase
-    .from('appointments')
-    .update({
-      status: 'confirmed',
-      payment_status: paymentStatus,
-      payment_amount: amount,
-      payment_method: input.method,
-      paid_at: now,
-      paid_by_staff_id: input.staffId ?? null,
-      payment_notes: input.notes?.trim() || null,
-    })
-    .eq('id', appointment.id)
-
-  if (updateError) return { error: 'Error al actualizar turno: ' + updateError.message }
-
-  // Encolar confirmación + recordatorios (no se mandaron al crear el turno).
-  const dateFormatted = new Date(appointment.appointment_date + 'T12:00:00')
-    .toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
-  const managementUrl = await absoluteUrl(`/turnos/gestionar/${appointment.cancellation_token}`)
-
-  await scheduleAppointmentMessages(
-    {
-      orgId: branch.organization_id,
-      appointmentId: appointment.id,
-      clientId: appointment.client_id,
-      phone: appointment.client?.phone ?? '',
-      clientName: appointment.client?.name ?? '',
-      serviceName: appointment.service?.name ?? '',
-      branchName: branch.name,
-      dateFormatted,
-      startTime: appointment.start_time,
-      // start_time viene 'HH:MM:SS' de la DB: concatenarle ':00' daba Invalid
-      // Date y ningún recordatorio se encolaba.
-      appointmentDateTime: appointmentInstant(
-        appointment.appointment_date,
-        appointment.start_time,
-        branch.timezone
-      ),
-      managementUrl,
-      manageToken: appointment.cancellation_token,
-    },
-    settings,
-    'create'
-  )
-
-  revalidatePath('/dashboard/turnos/agenda')
-  revalidatePath('/dashboard/fila')
-  revalidatePath('/dashboard/finanzas')
-  revalidatePath('/dashboard/caja')
-  return { success: true, amount, paymentStatus }
-}
-
-/**
- * Mapea el método de pago del turno al enum `payment_method` de visits
- * (cash/card/transfer). MercadoPago y transferencia se cuentan como transfer;
- * tarjetas como card; efectivo como cash; 'otro' como transfer (fallback).
- */
-function mapAppointmentPaymentMethodToVisit(method: AppointmentPaymentMethod): 'cash' | 'card' | 'transfer' {
-  switch (method) {
-    case 'efectivo': return 'cash'
-    case 'tarjeta_debito':
-    case 'tarjeta_credito': return 'card'
-    case 'transferencia':
-    case 'mercadopago':
-    case 'otro': return 'transfer'
+export async function confirmAppointmentPrepayment(_input: ConfirmPrepaymentInput) {
+  void _input
+  return {
+    error: 'El prepago manual ya no está disponible. El pago por adelantado se cobra como seña al reservar (Mercado Pago).',
   }
 }
 

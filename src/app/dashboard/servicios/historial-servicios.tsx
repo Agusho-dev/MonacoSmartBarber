@@ -84,6 +84,16 @@ interface PaymentAccountOption {
 interface VisitHistory {
   id: string
   amount: number
+  /**
+   * Lo que el cliente pagó por adelantado como seña (mig 207). `amount` sigue
+   * siendo el precio COMPLETO del servicio: de ahí salen comisión, puntos y
+   * facturación. Lo único que la seña cambia es cuánto entró por el mostrador
+   * (`amount - prepaid_amount`, que es lo que proyecta el ledger de cuentas).
+   * Se trae para poder DECIRLO en el diálogo de edición: sin este dato, un
+   * admin que ve $8.000 en caja "corrige" el importe a $8.000 y rompe las tres
+   * cosas de arriba.
+   */
+  prepaid_amount: number | null
   started_at: string | null
   completed_at: string
   payment_method: string
@@ -220,6 +230,7 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
           .select(`
             id,
             amount,
+            prepaid_amount,
             started_at,
             completed_at,
             payment_method,
@@ -312,6 +323,17 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
       paymentAccounts.filter((a) => !branchIdOfVisit || !a.branch_id || a.branch_id === branchIdOfVisit),
     [paymentAccounts]
   )
+
+  // Seña de la visita que se está editando. `amount` es el precio COMPLETO del
+  // servicio (comisión, puntos y ARCA salen de ahí); la seña sólo explica por
+  // qué en caja entró menos. Escribir acá lo que pasó por el mostrador es el
+  // error que este bloque existe para evitar.
+  const senaDeLaVisita = Number(editingVisit?.prepaid_amount ?? 0)
+  // Un campo vacío o ilegible no puede imprimir "$NaN" en un cartel sobre plata.
+  const montoEditadoCrudo = Number(editAmount)
+  const montoEditado = Number.isFinite(montoEditadoCrudo) ? montoEditadoCrudo : (editingVisit?.amount ?? 0)
+  const montoBajoLaSena =
+    senaDeLaVisita > 0 && montoEditado < senaDeLaVisita
 
   function openEdit(visit: VisitHistory) {
     setEditingVisit(visit)
@@ -816,6 +838,15 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
                       { label: 'Barbero', value: editingVisit.barber?.full_name },
                       { label: 'Servicio', value: editingVisit.service?.name || '—' },
                       { label: 'Sucursal', value: editingVisit.branch?.name },
+                      // La seña se muestra ACÁ, arriba del campo de monto, y no
+                      // como una nota al pie: es el dato que decide si el
+                      // importe que se está por escribir tiene sentido.
+                      ...(senaDeLaVisita > 0
+                        ? [{
+                            label: 'Seña',
+                            value: `${formatCurrency(senaDeLaVisita)} pagados al reservar · ${formatCurrency(Math.max(0, editingVisit.amount - senaDeLaVisita))} por el mostrador`,
+                          }]
+                        : []),
                       {
                         label: 'Fecha',
                         value: new Date(editingVisit.completed_at).toLocaleString('es-AR', {
@@ -865,6 +896,30 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
                       />
                     </div>
                   </div>
+
+                  {/* Con seña, el campo de arriba NO es lo que pasó por caja, y
+                      la diferencia es el 50% del ticket: sin este texto, un
+                      admin que concilia efectivo "corrige" $16.000 a $8.000 y
+                      con eso rompe la comisión del barbero, los puntos del
+                      cliente y lo que se factura en ARCA. */}
+                  {senaDeLaVisita > 0 && (
+                    <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-xs leading-relaxed text-sky-700 dark:text-sky-300">
+                      <p className="font-semibold">
+                        Este corte tiene {formatCurrency(senaDeLaVisita)} de seña pagados por Mercado Pago.
+                      </p>
+                      <p className="mt-1 opacity-90">
+                        El monto es el precio <strong>completo</strong> del servicio y la seña ya está contemplada
+                        aparte: de la caja y del ledger de cuentas se descuenta sola. Por el mostrador entraron{' '}
+                        {formatCurrency(Math.max(0, montoEditado - senaDeLaVisita))} — no escribas ese número acá.
+                      </p>
+                      {montoBajoLaSena && (
+                        <p className="mt-2 font-semibold text-red-600 dark:text-red-400">
+                          El monto que escribiste ({formatCurrency(montoEditado)}) es menor que la seña que el cliente
+                          ya pagó. Guardar así deja el cobro en negativo: revisá el importe.
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   {editPaymentMethod === 'transfer' && (
                     <div className="space-y-1.5">

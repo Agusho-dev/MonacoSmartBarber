@@ -3,7 +3,18 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { validateBranchAccess } from './org'
+import { getBarberSession } from './auth'
 import { isValidUUID } from '@/lib/validation'
+import {
+  deliveryErrorMessage,
+  isReferralQr,
+  parseReferralQr,
+  referralErrorMessage,
+  weekdayPhrase,
+  type CheckoutCouponInfo,
+  type CheckoutReferralInfo,
+  type RewardKind,
+} from '@/lib/loyalty-checkout'
 
 export async function updateRewardConfig(
   branchId: string,
@@ -55,13 +66,6 @@ export async function updateRewardConfig(
   return { success: true }
 }
 
-interface CheckoutCouponInfo {
-  clientRewardId: string
-  rewardName: string | null
-  discountPct: number | null
-  isFreeService: boolean
-}
-
 /**
  * ¿Dos client_id son la MISMA persona? (misma org + mismos últimos 10 dígitos de
  * teléfono). Cubre el duplicado por normalización de teléfono inconsistente entre
@@ -107,17 +111,6 @@ function isoWeekdayInTz(tz: string): number {
   return ({ Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 } as Record<string, number>)[short] ?? 0
 }
 
-const DIAS_ES = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']
-/** Frase legible de los días permitidos: [1,2,3] → "de lunes a miércoles". */
-function weekdayPhrase(days: number[]): string {
-  const s = [...new Set(days)].filter((d) => d >= 1 && d <= 7).sort((a, b) => a - b)
-  if (s.length === 0) return 'ningún día'
-  if (s.length === 1) return `los ${DIAS_ES[s[0]]}`
-  const contiguo = s.every((d, i) => i === 0 || d === s[i - 1] + 1)
-  if (contiguo) return `de ${DIAS_ES[s[0]]} a ${DIAS_ES[s[s.length - 1]]}`
-  return s.slice(0, -1).map((d) => DIAS_ES[d]).join(', ') + ' y ' + DIAS_ES[s[s.length - 1]]
-}
-
 /**
  * Valida (SIN consumir) un cupón de descuento (client_rewards) para aplicarlo en
  * el cobro del panel de barberos. Se usa al escanear el QR: confirma que existe,
@@ -146,12 +139,14 @@ export async function validateCouponForCheckout(
   const supabase = createAdminClient()
   const { data: reward, error } = await supabase
     .from('client_rewards')
-    .select('id, status, expires_at, client_id, organization_id, created_at, reward:reward_catalog(name, discount_pct, is_free_service, activation_delay_minutes, redeemable_weekdays)')
+    // `service:service_id(...)`: embed POR COLUMNA (Known Risk #17). Trae nombre y precio
+    // vigente del servicio acotado, que desde la mig 203 es la base del descuento.
+    .select('id, status, expires_at, client_id, organization_id, created_at, reward:reward_catalog(name, discount_pct, is_free_service, activation_delay_minutes, redeemable_weekdays, kind, service_id, allow_stacking, service:service_id(name, price))')
     .eq('qr_code', clean)
     .maybeSingle()
 
-  if (error) return { error: 'Error al validar el cupón' }
-  if (!reward) return { error: 'Cupón no encontrado' }
+  if (error) return { error: 'Error al validar el beneficio' }
+  if (!reward) return { error: 'Beneficio no encontrado' }
   if (reward.organization_id !== orgId) return { error: 'Este cupón es de otra organización' }
   if (clientId && reward.client_id !== clientId) {
     // No es necesariamente ajeno: la misma persona puede tener 2 filas en clients por
@@ -160,17 +155,22 @@ export async function validateCouponForCheckout(
     const same = await sameClientPerson(supabase, reward.client_id, clientId)
     if (!same) return { error: 'Este cupón pertenece a otro cliente' }
   }
-  if (reward.status === 'redeemed') return { error: 'Este cupón ya fue canjeado' }
-  if (reward.status === 'expired') return { error: 'El cupón está vencido' }
-  if (reward.status !== 'available') return { error: 'El cupón no está disponible' }
+  if (reward.status === 'redeemed') return { error: 'Este beneficio ya fue usado' }
+  if (reward.status === 'expired') return { error: 'El beneficio está vencido' }
+  // Estado nuevo de la mig 196: cancelado desde el dashboard (con o sin devolución de puntos).
+  if (reward.status === 'cancelled') return { error: 'Este beneficio fue cancelado' }
+  if (reward.status !== 'available') return { error: 'El beneficio no está disponible' }
   if (reward.expires_at && new Date(reward.expires_at) < new Date()) {
-    return { error: 'El cupón está vencido' }
+    return { error: 'El beneficio está vencido' }
   }
 
   const cat = Array.isArray(reward.reward) ? reward.reward[0] : reward.reward
-  if (!cat) return { error: 'Cupón inválido' }
-  if (!cat.is_free_service && (cat.discount_pct ?? 0) <= 0) {
-    return { error: 'Este cupón no tiene descuento aplicable' }
+  if (!cat) return { error: 'Beneficio inválido' }
+  // `kind` (mig 196): merch/especial son una ENTREGA, no un descuento — no tienen %
+  // y la RPC de canje los marca usados sin tocar el importe. Sólo `descuento` exige %.
+  const kind: RewardKind = cat.kind === 'merch' || cat.kind === 'especial' ? cat.kind : 'descuento'
+  if (kind === 'descuento' && !cat.is_free_service && (cat.discount_pct ?? 0) <= 0) {
+    return { error: 'Este beneficio no tiene descuento aplicable' }
   }
 
   // Reglas de tiempo (mismas que la RPC redeem_coupon_for_visit, mig 151): activación
@@ -197,6 +197,10 @@ export async function validateCouponForCheckout(
     }
   }
 
+  const scopedService = Array.isArray(cat.service) ? cat.service[0] : cat.service
+  const servicePriceRaw = scopedService?.price
+  const servicePrice = servicePriceRaw != null && Number.isFinite(Number(servicePriceRaw)) ? Number(servicePriceRaw) : null
+
   return {
     success: true,
     coupon: {
@@ -204,6 +208,132 @@ export async function validateCouponForCheckout(
       rewardName: cat.name ?? null,
       discountPct: cat.discount_pct ?? null,
       isFreeService: !!cat.is_free_service,
+      kind,
+      serviceId: (cat.service_id as string | null) ?? null,
+      serviceName: scopedService?.name ?? null,
+      servicePrice,
+      allowStacking: !!cat.allow_stacking,
+    },
+  }
+}
+
+/**
+ * Entrega de un premio merch/especial SIN cobro (el cliente pasa a retirar la gorra).
+ * Llama a `deliver_reward_by_qr`, que marca el beneficio como usado y registra
+ * quién lo entregó. Un premio de descuento NO se entrega por acá: se aplica en el
+ * cobro (`needs_checkout`), igual que una invitación de un amigo.
+ *
+ * Mismo contexto de auth que el resto del archivo: panel PIN → admin client +
+ * validateBranchAccess (resuelve la org desde la cookie barber_session) y
+ * getBarberSession para el staff que entrega.
+ */
+export async function deliverRewardByQr(
+  qrCode: string,
+  branchId: string,
+): Promise<{ success: true; rewardName: string; kind: RewardKind } | { error: string }> {
+  const raw = (qrCode ?? '').trim()
+  if (!raw) return { error: 'Ingresá un código' }
+  if (isReferralQr(raw)) return { error: 'Una invitación se aplica al cobrar un servicio' }
+  const clean = raw.toLowerCase()
+  if (!/^[0-9a-f-]{8,64}$/.test(clean)) return { error: 'El código del beneficio no es válido' }
+  if (!isValidUUID(branchId)) return { error: 'Sucursal inválida' }
+
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado para esta sucursal' }
+
+  // Quién entrega (auditoría en client_rewards.delivered_by). Sin sesión de barbero
+  // (p. ej. cobro desde el dashboard) va null: la RPC lo admite.
+  const session = await getBarberSession()
+
+  const supabase = createAdminClient()
+  const { data, error } = await supabase.rpc('deliver_reward_by_qr', {
+    p_qr_code: clean,
+    p_staff_id: session?.staff_id ?? null,
+    p_branch_id: branchId,
+  })
+  if (error) {
+    console.error('[deliverRewardByQr] deliver_reward_by_qr:', error.message)
+    return { error: 'No se pudo registrar la entrega' }
+  }
+  // La RPC contesta HTTP 200 con {success:false, error} cuando rechaza: hay que mirarlo.
+  const row = (data ?? {}) as { success?: boolean; error?: string; reward_name?: string | null; kind?: string | null }
+  if (!row.success) return { error: deliveryErrorMessage(row.error) }
+
+  const kind: RewardKind = row.kind === 'merch' || row.kind === 'especial' ? row.kind : 'descuento'
+  return { success: true, rewardName: row.reward_name ?? 'Beneficio', kind }
+}
+
+export type BenefitQrValidation =
+  | { success: true; kind: 'coupon'; coupon: CheckoutCouponInfo }
+  | { success: true; kind: 'referral'; referral: CheckoutReferralInfo }
+  | { error: string }
+
+/**
+ * UN SOLO escáner para el cobro: recibe lo que leyó la cámara (o tipeó el
+ * barbero) y decide qué es.
+ *  - "MNC-REF:<código>" → invitación de un amigo (referidos, mig 196/197): valida
+ *    SIN consumir vía `validate_referral_for_checkout`. La aplicación real la hace
+ *    `apply_referral_for_visit` dentro de `completeService`, cuando ya existe la
+ *    visita, igual que el cupón.
+ *  - cualquier otra cosa → QR de beneficio (`client_rewards.qr_code`, 32 hex):
+ *    delega en `validateCouponForCheckout`.
+ *
+ * Mismo contexto de auth que el cupón: panel PIN → admin client + validateBranchAccess.
+ */
+export async function validateBenefitQrForCheckout(
+  raw: string,
+  branchId: string,
+  clientId: string | null,
+): Promise<BenefitQrValidation> {
+  const clean = (raw ?? '').trim()
+  if (!clean) return { error: 'Ingresá un código' }
+
+  if (!isReferralQr(clean)) {
+    const r = await validateCouponForCheckout(clean, branchId, clientId)
+    if ('error' in r) return r
+    return { success: true, kind: 'coupon', coupon: r.coupon }
+  }
+
+  // ── Invitación de un amigo ──
+  const code = parseReferralQr(clean)
+  if (!code) return { error: referralErrorMessage('code_not_found') }
+  if (!isValidUUID(branchId)) return { error: 'Sucursal inválida' }
+  if (clientId && !isValidUUID(clientId)) return { error: 'Cliente inválido' }
+
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado para esta sucursal' }
+
+  const supabase = createAdminClient()
+  const { data, error } = await supabase.rpc('validate_referral_for_checkout', {
+    p_org: orgId,
+    p_code: code,
+    p_client_id: clientId,
+    p_branch_id: branchId,
+    p_exclude_visit_id: null,
+  })
+  if (error) {
+    console.error('[validateBenefitQrForCheckout] validate_referral_for_checkout:', error.message)
+    return { error: 'No se pudo validar la invitación' }
+  }
+  const row = (data ?? {}) as {
+    ok?: boolean
+    error?: string
+    referrer_first_name?: string | null
+    discount_pct?: number | null
+    referred_points?: number | null
+    referrer_points?: number | null
+  }
+  if (!row.ok) return { error: referralErrorMessage(row.error) }
+
+  return {
+    success: true,
+    kind: 'referral',
+    referral: {
+      code,
+      referrerFirstName: row.referrer_first_name ?? null,
+      discountPct: Number(row.discount_pct ?? 0),
+      referredPoints: Number(row.referred_points ?? 0),
+      referrerPoints: Number(row.referrer_points ?? 0),
     },
   }
 }

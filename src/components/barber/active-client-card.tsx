@@ -12,7 +12,6 @@ import {
   Check,
   Pause,
   User,
-  Gift,
   Instagram,
   Coffee,
   ChevronDown,
@@ -99,7 +98,6 @@ export function ActiveClientCard({
     ['--timer-glow' as string]: isPaused ? 'oklch(0 0 0 / 0.08)' : style.glow,
   }), [style, isPaused])
 
-  const isReward = entry.reward_claimed
   const clientName = entry.client?.name ?? 'Cliente'
   const serviceName = entry.service?.name ?? 'Servicio'
   const servicePrice = entry.service?.price ?? 0
@@ -129,11 +127,6 @@ export function ActiveClientCard({
                 <h3 className="truncate text-xl font-black leading-tight tracking-tight">
                   {clientName}
                 </h3>
-                {isReward && (
-                  <Badge className="bg-white/20 hover:bg-white/25 border-0 text-current gap-1 text-[10px] uppercase tracking-wider">
-                    <Gift className="size-3" /> Premio
-                  </Badge>
-                )}
                 {isPaused && (
                   <Badge className="bg-white/25 hover:bg-white/30 border-0 text-current gap-1 text-[10px] uppercase tracking-wider">
                     <Pause className="size-3" /> Pausado
@@ -224,11 +217,6 @@ export function ActiveClientCard({
               <h2 className="truncate text-3xl md:text-4xl font-black leading-none tracking-tight">
                 {clientName}
               </h2>
-              {isReward && (
-                <Badge className="bg-white/20 hover:bg-white/25 border-0 text-current gap-1.5 px-2.5 py-1">
-                  <Gift className="size-3.5" /> Premio reclamado
-                </Badge>
-              )}
               {isPaused && (
                 <Badge className="bg-white/25 hover:bg-white/30 border-0 text-current gap-1.5 px-2.5 py-1 uppercase tracking-wider">
                   <Pause className="size-3.5" /> Pausado

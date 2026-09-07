@@ -26,15 +26,7 @@ BEGIN;
 -- ── 1. Rastro de la cancelación ──────────────────────────────────────────────
 ALTER TABLE public.queue_entries
   ADD COLUMN IF NOT EXISTS cancelled_at   TIMESTAMPTZ,
-  -- SIN foreign key a `staff` A PROPÓSITO. `queue_entries.barber_id` ya referencia
-  -- `staff`, y una SEGUNDA FK entre las mismas dos tablas vuelve ambiguo todo embed
-  -- `barber:staff(...)` de PostgREST: la query entera falla con PGRST201 (Known Risk
-  -- #15 del CLAUDE.md). Se aplicó CON la FK el 4/9/2026 a las 16:4x y dejó las tablets
-  -- de los tres locales mostrando "Esperando clientes · General 0" con gente adentro,
-  -- porque `fetchQueue` hacía `if (data)` y una respuesta nula se ve igual que un
-  -- local vacío. Se dropeó en caliente. Es un id de staff sin integridad referencial:
-  -- el staff no se borra (hay soft-delete con `deleted_at`), así que no se pierde nada.
-  ADD COLUMN IF NOT EXISTS cancelled_by   UUID,
+  ADD COLUMN IF NOT EXISTS cancelled_by   UUID REFERENCES public.staff(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS cancel_reason  TEXT;
 
 COMMENT ON COLUMN public.queue_entries.cancelled_at IS
@@ -167,9 +159,5 @@ COMMENT ON VIEW public.queue_abandonos IS
 
 REVOKE ALL ON public.queue_abandonos FROM anon, authenticated;
 GRANT SELECT ON public.queue_abandonos TO service_role;
-
--- Red de seguridad para cualquier entorno donde esta migración ya haya corrido con la
--- FK puesta (producción, 4/9/2026). Idempotente.
-ALTER TABLE public.queue_entries DROP CONSTRAINT IF EXISTS queue_entries_cancelled_by_fkey;
 
 COMMIT;

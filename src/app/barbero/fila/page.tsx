@@ -28,7 +28,7 @@ export default async function FilaPage() {
   // panel mostraba la agenda de mañana y los turnos pendientes desaparecían.
   const today = getLocalDateStr(branch?.timezone || undefined)
 
-  const [{ data: breakConfigs }, appointments, settings] = await Promise.all([
+  const [{ data: breakConfigs }, appointments, settings, { data: loyaltySettings }] = await Promise.all([
     supabase
       .from('break_configs')
       .select('*')
@@ -39,6 +39,15 @@ export default async function FilaPage() {
     // Settings efectivos de ESTA sucursal (antes tomaba siempre el default de
     // la org e ignoraba el override por sucursal).
     getAppointmentSettings(session.organization_id, session.branch_id),
+    // ¿Programa de fidelización prendido? `loyalty_settings` es sólo service role,
+    // así que se lee acá (server) y viaja como prop. Apagarlo NO borra
+    // `client_loyalty_state.tier_code`: sin este dato la tablet seguía mostrando
+    // "ORO" mientras la app y el dashboard decían que no hay categoría.
+    supabase
+      .from('loyalty_settings')
+      .select('is_enabled')
+      .eq('organization_id', session.organization_id)
+      .maybeSingle(),
   ])
 
   const operationMode = (branch?.operation_mode as 'walk_in' | 'appointments' | 'hybrid' | null) ?? 'walk_in'
@@ -55,6 +64,7 @@ export default async function FilaPage() {
       // La ventana de protección de la fila es 45 min de corte promedio + este
       // buffer: el panel la calcula con el mismo número que la DB.
       bufferMinutes={settings?.buffer_minutes ?? null}
+      loyaltyEnabled={loyaltySettings?.is_enabled === true}
     />
   )
 }

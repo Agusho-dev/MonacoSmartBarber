@@ -11,6 +11,7 @@ import { DbDownError } from '@/components/dashboard/db-down-error'
 import { BarberThemeClient } from '@/components/barber/barber-theme-client'
 import { SwRegister } from '@/components/barber/sw-register'
 import { KioskBackGuard } from '@/components/barber/kiosk-back-guard'
+import { LoyaltyResultHost } from '@/components/barber/loyalty-result-host'
 
 // Metadata scopeada a /barbero: inyecta el manifest PWA y los meta de
 // standalone SOLO en el panel (no en dashboard/kiosko/TV).
@@ -77,6 +78,8 @@ export default async function BarberLayout({
       {children}
       {session && <BarberNav />}
       <FullscreenButton />
+      {/* Tarjeta del programa de fidelización tras el cobro (store global). */}
+      <LoyaltyResultHost />
     </div>
   )
 }

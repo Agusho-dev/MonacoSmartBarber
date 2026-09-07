@@ -26,6 +26,41 @@ const DEFAULTS: TransferReceiptSettingsView = {
 }
 
 /**
+ * Lo que el cliente TRANSFIRIÓ por este corte. Es el número contra el que se
+ * mide el comprobante, y NO es `visits.amount`.
+ *
+ * La regla del circuito de comprobantes, caso por caso:
+ *   · `visits.amount` es el precio COMPLETO del servicio (mig 207) y sigue
+ *     siendo el bruto correcto para facturación, comisiones, puntos y ARCA.
+ *   · Acá se mide PLATA QUE SE MOVIÓ POR TRANSFERENCIA. La seña la cobró
+ *     Mercado Pago días antes y tiene su propio rastro en `booking_deposits`:
+ *     el comprobante que el cliente muestra en el mostrador es por el
+ *     REMANENTE (`expected_amount` del escaneo ya sale neto, ver
+ *     `complete-service-dialog.tsx → transferAmount`). Medir en bruto marcaba
+ *     "monto no coincide" comprobantes correctos y dejaba todo cobro conjunto
+ *     con seña imposible de cerrar.
+ *   · La propina suma sólo si TAMBIÉN fue por transferencia: el alias de la
+ *     tablet pide servicio + propina juntos, pero existe el corte transferido
+ *     con propina en efectivo.
+ *
+ * Piso en cero y tope en `amount`, igual que el trigger del ledger
+ * (`GREATEST(amount - prepaid_amount, 0)`) y que `close_barber_shift`: con un
+ * cupón que descuenta más que la seña el remanente daría negativo.
+ */
+function montoTransferido(v: {
+  amount?: unknown
+  prepaid_amount?: unknown
+  tip_amount?: unknown
+  tip_payment_method?: unknown
+}): number {
+  const bruto = Number(v.amount ?? 0)
+  const prepaga = Math.min(Number(v.prepaid_amount ?? 0), bruto)
+  const enMostrador = Math.max(0, bruto - prepaga)
+  const propina = v.tip_payment_method === 'transfer' ? Number(v.tip_amount ?? 0) : 0
+  return enMostrador + propina
+}
+
+/**
  * Config de comprobantes para la org del barbero logueado (panel/tablet).
  * Si no hay fila, la feature está apagada (default seguro multi-tenant).
  */
@@ -139,7 +174,7 @@ export async function getOpenJointReceipts(branchId: string): Promise<OpenJointR
   const ids = (anchors as { id: string }[]).map((a) => a.id)
   const { data: covered, error: coveredErr } = await supabase
     .from('visits')
-    .select('covering_receipt_id, amount, tip_amount, tip_payment_method')
+    .select('covering_receipt_id, amount, prepaid_amount, tip_amount, tip_payment_method')
     .in('covering_receipt_id', ids)
   // Si no podemos leer lo ya asignado, NO ofrecemos las anclas: mostrarlas con
   // `assigned = 0` invitaría a colgar cortes sobre un comprobante ya consumido.
@@ -148,8 +183,7 @@ export async function getOpenJointReceipts(branchId: string): Promise<OpenJointR
   const assignedById = new Map<string, number>()
   for (const v of covered ?? []) {
     const key = v.covering_receipt_id as string
-    const charge = Number(v.amount ?? 0) + (v.tip_payment_method === 'transfer' ? Number(v.tip_amount ?? 0) : 0)
-    assignedById.set(key, (assignedById.get(key) ?? 0) + charge)
+    assignedById.set(key, (assignedById.get(key) ?? 0) + montoTransferido(v))
   }
 
   const out: OpenJointReceipt[] = []
@@ -454,7 +488,7 @@ export async function getReconciliation(params: {
 
   let vq = supabase
     .from('visits')
-    .select(`id, amount, tip_amount, tip_payment_method, completed_at, payment_account_id, covering_receipt_id,
+    .select(`id, amount, prepaid_amount, tip_amount, tip_payment_method, completed_at, payment_account_id, covering_receipt_id,
       client:clients(name),
       barber:staff(full_name),
       account:payment_accounts(name),
@@ -516,7 +550,7 @@ export async function getReconciliation(params: {
         .in('id', coveringIds),
       supabase
         .from('visits')
-        .select('covering_receipt_id, amount, tip_amount, tip_payment_method')
+        .select('covering_receipt_id, amount, prepaid_amount, tip_amount, tip_payment_method')
         .in('covering_receipt_id', coveringIds),
     ])
     // Sin el ancla o sin la suma del grupo, un cobro conjunto se vería como
@@ -531,8 +565,10 @@ export async function getReconciliation(params: {
     }
     for (const gc of groupCuts ?? []) {
       const key = gc.covering_receipt_id as string
-      const charge = Number(gc.amount ?? 0) + (gc.tip_payment_method === 'transfer' ? Number(gc.tip_amount ?? 0) : 0)
-      groupTotalById.set(key, (groupTotalById.get(key) ?? 0) + charge)
+      // Neto de seña: el comprobante-ancla es por lo que el cliente transfirió,
+      // no por la suma de los precios de lista. Un grupo con seña medido en
+      // bruto no cerraba NUNCA (quedaba en estado 'monto' para siempre).
+      groupTotalById.set(key, (groupTotalById.get(key) ?? 0) + montoTransferido(gc))
       groupCountById.set(key, (groupCountById.get(key) ?? 0) + 1)
     }
   }
@@ -540,12 +576,13 @@ export async function getReconciliation(params: {
   const rows: ReconRow[] = []
 
   for (const v of (visits ?? []) as unknown as Record<string, unknown>[]) {
-    // Lo que el cliente transfirió de verdad = cobro + propina, cuando la propina también
-    // fue por transferencia (el alias de la tablet pide el total junto). Comparar sólo
-    // contra visits.amount marcaba como "monto no coincide" comprobantes que estaban bien.
-    const charged =
-      Number(v.amount ?? 0) +
-      (v.tip_payment_method === 'transfer' ? Number(v.tip_amount ?? 0) : 0)
+    // Lo que el cliente transfirió de verdad: precio menos la seña ya pagada por
+    // Mercado Pago, más la propina si también fue por transferencia. Ver
+    // `montoTransferido`. `chargedAmount` alimenta además "total transferido" y
+    // la brecha del tablero, y las dos preguntas son sobre plata transferida:
+    // con el bruto, el resumen le sumaba a las transferencias las señas que
+    // entraron por Mercado Pago.
+    const charged = montoTransferido(v)
 
     const coveringId = (v.covering_receipt_id as string | null) ?? null
     let receipt: ReconReceipt | null

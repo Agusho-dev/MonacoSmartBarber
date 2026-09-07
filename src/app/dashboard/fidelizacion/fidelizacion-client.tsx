@@ -1,337 +1,118 @@
 'use client'
 
-import { useState, useTransition, useEffect } from 'react'
-import { Gift, Save, Trophy, Users, AlertCircle } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
-import { Separator } from '@/components/ui/separator'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { toast } from 'sonner'
-import { updateRewardConfig } from '@/lib/actions/rewards'
-import { useBranchStore } from '@/stores/branch-store'
+// =============================================================================
+// src/app/dashboard/fidelizacion/fidelizacion-client.tsx
+// Orquestador del módulo de fidelización: sub-navegación pegajosa con ?tab= y
+// el estado compartido (settings, categorías, premios, reglas) que las
+// pestañas van actualizando cuando guardan, para no recargar la página entera.
+// =============================================================================
 
-interface Branch {
-  id: string
-  name: string
-}
-
-interface RewardConfig {
-  id: string
-  branch_id: string
-  points_per_visit: number
-  redemption_threshold: number
-  reward_description: string
-  is_active: boolean
-}
-
-interface TopClient {
-  points_balance: number
-  total_earned: number
-  total_redeemed: number
-  clients: {
-    name: string
-    phone: string
-    email: string | null
-  } | null
-  branches: {
-    name: string
-  } | null
-}
+import { useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { AlertTriangle, Gift } from 'lucide-react'
+import type {
+  LoyaltyNotificationRule, LoyaltyOverview, LoyaltyReward, LoyaltyService, LoyaltySettings, LoyaltyTier, Referral,
+} from '@/lib/types/loyalty'
+import { FidelizacionSubnav } from './components/subnav'
+import { ResumenTab } from './components/resumen-tab'
+import { CategoriasTab } from './components/categorias-tab'
+import { PuntosTab } from './components/puntos-tab'
+import { PremiosTab } from './components/premios-tab'
+import { ReferidosTab } from './components/referidos-tab'
+import { NotificacionesTab } from './components/notificaciones-tab'
+import { ClientesTab } from './components/clientes-tab'
+import { TABS, type Tab } from './components/helpers'
 
 interface Props {
-  branches: Branch[]
-  initialConfigs: RewardConfig[]
-  topClients: TopClient[]
+  initialTab?: string
+  overview: LoyaltyOverview
+  settings: LoyaltySettings
+  tiers: LoyaltyTier[]
+  rewards: LoyaltyReward[]
+  services: LoyaltyService[]
+  rules: LoyaltyNotificationRule[]
+  referrals: Referral[]
+  canManage: boolean
+  timezone: string
+  org: { name: string; logoUrl: string | null }
+  /** Errores de carga parciales: la pantalla se muestra igual y los avisa. */
+  errores: string[]
 }
 
-export function FidelizacionClient({ branches, initialConfigs, topClients }: Props) {
-  const { selectedBranchId: storeBranchId, setSelectedBranchId: setStoreBranchId } = useBranchStore()
+export function FidelizacionClient(props: Props) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const tabInicial = (TABS as readonly string[]).includes(props.initialTab ?? '') ? (props.initialTab as Tab) : 'resumen'
+  const [tab, setTab] = useState<Tab>(tabInicial)
 
-  // Initialize branch in store if not set
-  useEffect(() => {
-    if (!storeBranchId && branches.length > 0) {
-      setStoreBranchId(branches[0].id)
-    }
-  }, [storeBranchId, branches, setStoreBranchId])
+  const [settings, setSettings] = useState(props.settings)
+  const [tiers, setTiers] = useState(props.tiers)
+  const [rewards, setRewards] = useState(props.rewards)
+  const [rules, setRules] = useState(props.rules)
 
-  const selectedBranchId = storeBranchId ?? (branches[0]?.id || '')
-  
-  const currentConfig = initialConfigs.find((c) => c.branch_id === selectedBranchId) || {
-    id: 'new',
-    branch_id: selectedBranchId,
-    points_per_visit: 1,
-    redemption_threshold: 10,
-    reward_description: 'Corte gratis',
-    is_active: true,
-  }
-
-  const [formData, setFormData] = useState({
-    points_per_visit: currentConfig.points_per_visit,
-    redemption_threshold: currentConfig.redemption_threshold,
-    reward_description: currentConfig.reward_description,
-    is_active: currentConfig.is_active,
-  })
-
-  const [isPending, startTransition] = useTransition()
-
-  function handleBranchChange(branchId: string) {
-    setStoreBranchId(branchId)
-    const config = initialConfigs.find((c) => c.branch_id === branchId)
-    if (config) {
-      setFormData({
-        points_per_visit: config.points_per_visit,
-        redemption_threshold: config.redemption_threshold,
-        reward_description: config.reward_description,
-        is_active: config.is_active,
-      })
-    } else {
-      setFormData({
-        points_per_visit: 1,
-        redemption_threshold: 10,
-        reward_description: 'Corte gratis',
-        is_active: true,
-      })
-    }
-  }
-
-  function handleSave() {
-    startTransition(async () => {
-      const result = await updateRewardConfig(selectedBranchId, formData)
-      if (result.error) {
-        toast.error(result.error)
-      } else {
-        toast.success('Configuración guardada')
-        // El router revalidatePath actualizará initialConfigs en el próximo render
-      }
-    })
+  function cambiarTab(t: Tab) {
+    setTab(t)
+    const sp = new URLSearchParams(searchParams.toString())
+    sp.set('tab', t)
+    router.replace(`${pathname}?${sp.toString()}`, { scroll: false })
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight lg:text-3xl">Fidelización</h1>
-          <p className="text-muted-foreground">
-            Configurá el sistema de recompensas y mirá el ranking de clientes.
-          </p>
+    <div className="mx-auto max-w-7xl space-y-5">
+      <header className="flex items-center gap-3">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
+          <Gift className="size-5" />
         </div>
-        <div className="flex items-center gap-2">
-          <Select value={selectedBranchId} onValueChange={handleBranchChange}>
-            <SelectTrigger className="w-full bg-background sm:w-[200px]">
-              <SelectValue placeholder="Seleccionar sucursal" />
-            </SelectTrigger>
-            <SelectContent>
-              {branches.map((b) => (
-                <SelectItem key={b.id} value={b.id}>
-                  {b.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="min-w-0">
+          <h1 className="bg-gradient-to-b from-zinc-50 to-zinc-300 bg-clip-text text-xl font-bold tracking-tight text-transparent sm:text-2xl">Fidelización</h1>
+          <p className="hidden text-sm text-muted-foreground sm:block">Categorías por frecuencia, puntos con vencimiento, premios, referidos y notificaciones. Todo se configura acá; la app sólo lo muestra.</p>
+        </div>
+      </header>
+
+      <FidelizacionSubnav active={tab} onChange={cambiarTab} alerta={props.overview.errors_7d > 0} />
+
+      {props.errores.length > 0 && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <div>
+            <p className="font-medium">Parte de la información no se pudo cargar.</p>
+            <ul className="mt-1 list-disc pl-4 text-xs text-amber-200/80">{props.errores.map((e, i) => <li key={i}>{e}</li>)}</ul>
+          </div>
+        </div>
+      )}
+
+      {/*
+        Las siete pestañas quedan MONTADAS y se ocultan con `hidden`: cada una
+        inicializa su formulario desde props al montar, así que renderizarlas
+        condicionalmente tiraba los cambios sin guardar al cambiar de pestaña
+        (ir a Puntos a mirar los pts base y volver a Categorías perdía los
+        umbrales, nombres y colores editados) sin ningún aviso. Cada pestaña
+        escribe un conjunto de campos distinto, así que no se pisan entre sí.
+      */}
+      <div className="pt-1">
+        <div hidden={tab !== 'resumen'}>
+          <ResumenTab overview={props.overview} settings={settings} tiers={tiers} canManage={props.canManage} timezone={props.timezone} onSettingsChange={setSettings} />
+        </div>
+        <div hidden={tab !== 'categorias'}>
+          <CategoriasTab settings={settings} tiers={tiers} canManage={props.canManage} activa={tab === 'categorias'} onSaved={(s, t) => { setSettings(s); setTiers(t) }} />
+        </div>
+        <div hidden={tab !== 'puntos'}>
+          <PuntosTab settings={settings} tiers={tiers} services={props.services} canManage={props.canManage} onSaved={setSettings} />
+        </div>
+        <div hidden={tab !== 'premios'}>
+          <PremiosTab rewards={rewards} tiers={tiers} services={props.services} settings={settings} canManage={props.canManage} onChange={setRewards} />
+        </div>
+        <div hidden={tab !== 'referidos'}>
+          <ReferidosTab settings={settings} referrals={props.referrals} canManage={props.canManage} timezone={props.timezone} onSaved={setSettings} />
+        </div>
+        <div hidden={tab !== 'notificaciones'}>
+          <NotificacionesTab rules={rules} canManage={props.canManage} org={props.org} expiringSoonDays={settings.expiring_soon_days} onChange={setRules} />
+        </div>
+        <div hidden={tab !== 'clientes'}>
+          <ClientesTab tiers={tiers} rewards={rewards} settings={settings} canManage={props.canManage} timezone={props.timezone} />
         </div>
       </div>
-
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Gift className="size-5 text-primary" />
-              Configurar Recompensas
-            </CardTitle>
-            <CardDescription>
-              Definí cómo acumulan puntos los clientes en esta sucursal.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="flex items-center justify-between space-x-2 rounded-lg border p-4">
-              <div className="space-y-0.5">
-                <Label className="text-base">Sistema Activado</Label>
-                <p className="text-sm text-muted-foreground">
-                  Si se desactiva, no se otorgarán puntos nuevos.
-                </p>
-              </div>
-              <Switch
-                checked={formData.is_active}
-                onCheckedChange={(checked) =>
-                  setFormData({ ...formData, is_active: checked })
-                }
-              />
-            </div>
-
-            <div className="space-y-4">
-              <div className="grid gap-2">
-                <Label htmlFor="points">Puntos logrados por cada visita</Label>
-                <Input
-                  id="points"
-                  type="number"
-                  min="1"
-                  value={formData.points_per_visit}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      points_per_visit: parseInt(e.target.value) || 0,
-                    })
-                  }
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="threshold">Puntos necesarios para canjear (Precio)</Label>
-                <Input
-                  id="threshold"
-                  type="number"
-                  min="1"
-                  value={formData.redemption_threshold}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      redemption_threshold: parseInt(e.target.value) || 0,
-                    })
-                  }
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="reward">Beneficio a otorgar</Label>
-                <Input
-                  id="reward"
-                  value={formData.reward_description}
-                  onChange={(e) =>
-                    setFormData({ ...formData, reward_description: e.target.value })
-                  }
-                  placeholder="Ej: Corte gratis"
-                />
-              </div>
-            </div>
-
-            <Button className="w-full" onClick={handleSave} disabled={isPending}>
-              {isPending ? 'Guardando...' : (
-                <>
-                  <Save className="mr-2 size-4" />
-                  Guardar Configuración
-                </>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <AlertCircle className="size-5 text-muted-foreground" />
-              ¿Cómo funciona?
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm text-muted-foreground">
-            <p>
-              1. Cada vez que un barbero <strong>finaliza un servicio</strong> desde su panel,
-              el cliente suma automáticamente los puntos configurados.
-            </p>
-            <p>
-              2. Los clientes pueden ver sus puntos en la <strong>App/PWA de clientes</strong>.
-            </p>
-            <p>
-              3. Cuando el cliente presiona &quot;Canjear premio&quot; en su app, su turno activo en la sala
-              aparecerá marcado con un ícono 🎁 para el barbero.
-            </p>
-            <p>
-              4. El barbero, al finalizar el corte de ese cliente, elegirá la opción de pago <strong>Puntos</strong> y 
-              esto registrará el corte a costo 0 y debitará automáticamente los puntos del cliente.
-            </p>
-            <Separator className="my-2" />
-            <p className="font-medium text-foreground">
-              ¡Importante! Si activas o desactivas esto, los balances de los clientes se conservarán.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Trophy className="size-5 text-amber-500" />
-            Top Clientes (Global)
-          </CardTitle>
-          <CardDescription>
-            Clientes con más puntos acumulados en todas las sucursales.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {topClients.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground">
-              <Users className="mx-auto mb-3 size-8 opacity-20" />
-              <p>No hay puntos registrados todavía.</p>
-            </div>
-          ) : (
-            <>
-              {/* Vista tabla — desktop */}
-              <div className="hidden rounded-md border sm:block">
-                <div className="grid grid-cols-[1fr_200px_100px_100px_100px] gap-4 border-b bg-muted/50 p-4 font-medium">
-                  <div>Cliente</div>
-                  <div>Sucursal Principal</div>
-                  <div className="text-right">Balance</div>
-                  <div className="text-right">Ganados</div>
-                  <div className="text-right">Canjeados</div>
-                </div>
-                <div className="divide-y">
-                  {topClients.map((tc, i) => (
-                    <div
-                      key={i}
-                      className="grid grid-cols-[1fr_200px_100px_100px_100px] items-center gap-4 p-4 text-sm"
-                    >
-                      <div>
-                        <p className="font-medium">{tc.clients?.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {tc.clients?.phone}
-                        </p>
-                      </div>
-                      <div className="truncate text-muted-foreground">
-                        {tc.branches?.name || '—'}
-                      </div>
-                      <div className="text-right font-bold text-primary">
-                        {tc.points_balance} pts
-                      </div>
-                      <div className="text-right text-muted-foreground">
-                        {tc.total_earned}
-                      </div>
-                      <div className="text-right text-muted-foreground">
-                        {tc.total_redeemed}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Vista cards — mobile */}
-              <div className="space-y-3 sm:hidden">
-                {topClients.map((tc, i) => (
-                  <div key={i} className="rounded-lg border p-4">
-                    <div className="mb-2 flex items-start justify-between gap-2">
-                      <div>
-                        <p className="font-semibold">{tc.clients?.name}</p>
-                        <p className="text-xs text-muted-foreground">{tc.clients?.phone}</p>
-                        {tc.branches?.name && (
-                          <p className="text-xs text-muted-foreground">{tc.branches.name}</p>
-                        )}
-                      </div>
-                      <span className="shrink-0 text-lg font-bold text-primary">
-                        {tc.points_balance} pts
-                      </span>
-                    </div>
-                    <div className="flex gap-4 text-sm text-muted-foreground">
-                      <span>Ganados: <strong className="text-foreground">{tc.total_earned}</strong></span>
-                      <span>Canjeados: <strong className="text-foreground">{tc.total_redeemed}</strong></span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
     </div>
   )
 }

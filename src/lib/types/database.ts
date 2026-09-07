@@ -150,13 +150,10 @@ export interface Staff {
   full_name: string
   phone: string | null
   commission_pct: number
-  // `auth_user_id`, `email` y `pin` son OPCIONALES a propósito (mig 212): desde que
-  // `anon` perdió el permiso sobre esas tres columnas, ninguna pantalla que corra en
-  // el browser de una tablet las recibe — el kiosko, el panel del barbero y la
-  // pantalla de login piden columnas explícitas y no las incluyen. Marcarlas
-  // obligatorias obligaba a castear a `Staff` un objeto que no las tiene, que es
-  // justamente el error que TypeScript tiene que seguir señalando si alguien vuelve
-  // a pedirlas desde el cliente. En el servidor (service role) siguen llegando.
+  // Opcionales a propósito (mig 212): `anon` perdió el permiso sobre estas tres
+  // columnas, así que ninguna pantalla del browser las recibe. Marcarlas obligatorias
+  // obligaba a castear objetos que no las tienen — justo el error que TypeScript
+  // tiene que seguir señalando si alguien vuelve a pedirlas desde el cliente.
   auth_user_id?: string | null
   email?: string | null
   pin?: string | null
@@ -201,7 +198,8 @@ export interface Client {
   instagram: string | null
   created_at: string
   updated_at: string
-  loyalty?: { total_visits: number }[]
+  /** Embed de `client_loyalty_state`. tier_code / visits_in_window: programa de fidelización (mig 196). */
+  loyalty?: { total_visits: number; tier_code?: string | null; visits_in_window?: number }[]
   visits?: { count: number }[]
 }
 

@@ -17,6 +17,7 @@ import {
 } from '@/lib/actions/appointments'
 import { publicGetBranchServices, publicGetBranchBarbers } from '@/lib/actions/public-booking'
 import { getBranchAppointmentHours } from '@/lib/actions/appointment-hours'
+import { leerConfigSena } from '@/lib/senas/repo'
 import { requireMobileClient, isMobileAuthError } from '@/lib/mobile/auth'
 import {
   DEFAULT_TZ,
@@ -71,7 +72,7 @@ export const GET = withMobileHandler(
     const tz = branch.timezone || DEFAULT_TZ
     const serverToday = getLocalDateStr(tz)
 
-    const [services, staff, barberos, horario, orgRes, upcomingRes] = await Promise.all([
+    const [services, staff, barberos, horario, orgRes, upcomingRes, cfgSena] = await Promise.all([
       publicGetBranchServices(branch.id),
       // Con clave por usuario: detrás del CGNAT el gate por IP se comparte entre
       // clientes que no tienen nada que ver entre sí.
@@ -95,6 +96,15 @@ export const GET = withMobileHandler(
         .order('appointment_date')
         .order('start_time')
         .limit(1),
+      // Sólo para AVISAR que esta sucursal cobra seña, antes de que el cliente
+      // elija nada. El monto real lo calcula y lo escribe el servidor cuando se
+      // pide la seña (`politica.titulo`): la app no reimplementa `calcularSena`.
+      // Falla abierta —si no se puede leer, no se avisa nada y el flujo sigue
+      // igual—: un aviso perdido es un cartel de menos, no una reserva rota.
+      leerConfigSena(branch.id).catch(e => {
+        console.error('[api/mobile] turnos/[slug] leerConfigSena:', e)
+        return null
+      }),
     ])
 
     if (upcomingRes.error) {
@@ -134,6 +144,16 @@ export const GET = withMobileHandler(
       branding: {
         logo_url: orgRes.data?.logo_url ?? null,
         welcome_message: settings.welcome_message ?? null,
+      },
+      // La seña, sólo lo necesario para anunciarla: si este canal la cobra, con
+      // qué porcentaje y a partir de qué monto. NO viaja un monto calculado —el
+      // que cobra es el servidor, y dos fórmulas para la misma plata terminan
+      // diciendo números distintos.
+      deposit: {
+        enabled:
+          !!cfgSena?.is_enabled && (cfgSena.channels ?? ['app', 'web']).includes('app'),
+        percentage: Math.min(100, Math.max(1, Math.round(cfgSena?.percentage || 50))),
+        min_amount: Number(cfgSena?.min_amount ?? 0),
       },
       services,
       staff,

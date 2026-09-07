@@ -301,26 +301,35 @@ async function processRow(row: PushOutboxRow, ctx: SendContext): Promise<Outcome
     : (row.appointment_id ?? row.campaign_id ?? '')
   const deepLink = row.deep_link ?? (typeof rawData.deep_link === 'string' ? rawData.deep_link : '')
 
-  const { data: notif, error: notifErr } = await supabase
-    .from('client_notifications')
-    .insert({
-      client_id: row.client_id,
-      organization_id: row.organization_id,
-      type: NOTIFICATION_TYPE_BY_KIND[kind],
-      title: row.title,
-      body: row.body,
-      data: { ...rawData, type: payloadType, value, deep_link: deepLink },
-      deep_link: deepLink || null,
-      push_outbox_id: row.id,
-      is_read: false,
-    })
-    .select('id')
-    .single()
-  if (notifErr) {
-    // El push es lo que importa: se manda igual, sin id de bandeja, y queda registrado.
-    console.error(`[send-push] client_notifications.insert error outbox=${row.id}:`, notifErr.message)
+  // El programa de fidelización (mig 197, `loyalty_notify`) escribe la fila de bandeja ANTES de
+  // encolar el push —la bandeja in-app tiene que existir aunque el cliente no tenga token— y manda
+  // su id en `data.inbox_notification_id`: se reutiliza en vez de insertar una segunda.
+  const inboxId = typeof rawData.inbox_notification_id === 'string' && rawData.inbox_notification_id
+    ? rawData.inbox_notification_id
+    : null
+  let notificationId: string | null = inboxId
+  if (!inboxId) {
+    const { data: notif, error: notifErr } = await supabase
+      .from('client_notifications')
+      .insert({
+        client_id: row.client_id,
+        organization_id: row.organization_id,
+        type: NOTIFICATION_TYPE_BY_KIND[kind],
+        title: row.title,
+        body: row.body,
+        data: { ...rawData, type: payloadType, value, deep_link: deepLink },
+        deep_link: deepLink || null,
+        push_outbox_id: row.id,
+        is_read: false,
+      })
+      .select('id')
+      .single()
+    if (notifErr) {
+      // El push es lo que importa: se manda igual, sin id de bandeja, y queda registrado.
+      console.error(`[send-push] client_notifications.insert error outbox=${row.id}:`, notifErr.message)
+    }
+    notificationId = (notif as { id?: string } | null)?.id ?? null
   }
-  const notificationId: string | null = (notif as { id?: string } | null)?.id ?? null
 
   // Badge de iOS = no leídas del cliente (con la recién insertada). Si falla, 1.
   let badge = 1
@@ -387,8 +396,10 @@ async function processRow(row: PushOutboxRow, ctx: SendContext): Promise<Outcome
 
   if (successes > 0) return { status: 'sent' }
 
-  // No salió por ningún lado: la bandeja no puede anunciar algo que no llegó.
-  if (notificationId) await deleteNotification(notificationId)
+  // No salió por ningún lado: la bandeja no puede anunciar algo que no llegó… salvo que la fila
+  // la haya creado el programa de fidelización: esa es la notificación in-app en sí misma y vale
+  // aunque el push no exista (hoy ningún cliente tiene token FCM).
+  if (notificationId && !inboxId) await deleteNotification(notificationId)
 
   if (retryableError) return retryOrFail(row, retryableError)
   if (fatalError) return { status: 'failed', error: fatalError }

@@ -10,8 +10,10 @@ import type { NextRequest } from 'next/server'
 import { RateLimits } from '@/lib/rate-limit'
 import { isValidUUID } from '@/lib/validation'
 import { createAppointment, getAppointmentSettings } from '@/lib/actions/appointments'
+import { canalInterno } from '@/lib/appointments/canal-interno'
 import { requireMobileClient, isMobileAuthError } from '@/lib/mobile/auth'
 import { findMobileBranch, isBookable } from '@/lib/mobile/branches'
+import { senaObligatoria } from '@/lib/senas/motor'
 import {
   TIME_RE,
   badRequest,
@@ -142,6 +144,31 @@ export const POST = withMobileHandler(
       )
     }
 
+    // El paso de pago de la app es una PANTALLA, no un control: este endpoint
+    // crea el turno `confirmed` y cualquiera con su propio JWT puede pegarle
+    // directo salteándose la seña. Si la sucursal cobra seña por este canal, la
+    // reserva sólo puede nacer del webhook de Mercado Pago (`acreditarPago`),
+    // que llama a `createAppointment` con el pago ya acreditado.
+    try {
+      if (await senaObligatoria(branch.id, 'app', parsed.service_ids)) {
+        return jsonError(
+          409,
+          'DEPOSIT_REQUIRED',
+          'Esta sucursal pide una seña para reservar. Pagala y el turno queda confirmado solo.'
+        )
+      }
+    } catch (e) {
+      // No saber si hace falta seña NO habilita a reservar gratis: se corta y
+      // se dice que no se pudo verificar (Known Risk #13 — un error que no se
+      // propaga es un bug invisible, y acá el bug regala turnos).
+      console.error('[api/mobile] turnos/[slug]/book senaObligatoria:', e)
+      return jsonError(
+        503,
+        'DEPOSIT_CHECK_FAILED',
+        'No pudimos verificar si esta reserva necesita seña. Probá de nuevo en un momento.'
+      )
+    }
+
     const nombreBody = parsed.name ?? ''
     const clientName = nombreBody.length >= 2 ? nombreBody : auth.client.name
 
@@ -157,8 +184,10 @@ export const POST = withMobileHandler(
       durationMinutes: parsed.duration_minutes,
       source: 'public',
       // La app ya pasó por rate-limit por usuario y el teléfono viene del JWT:
-      // el gate por IP (compartida detrás del CGNAT) no aplica.
-      viaApp: true,
+      // el gate por IP (compartida detrás del CGNAT) no aplica. Va por el token
+      // del canal interno —que sólo existe en memoria del servidor— y no por un
+      // booleano: `viaApp: true` lo podía mandar cualquiera con el action-id.
+      canalInterno: canalInterno('app'),
     })
 
     if ('error' in result && result.error) {

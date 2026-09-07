@@ -19,7 +19,8 @@ interface AppMovilPageProps {
 
 /**
  * /dashboard/app-movil — el único lugar desde donde se gestiona la app de
- * clientes: Puntos · Catálogo · Cartelera · Notificaciones (push).
+ * clientes: Puntos · Cartelera · Notificaciones (push). El catálogo de
+ * premios vive en /dashboard/fidelizacion (la pestaña queda como enlace).
  *
  * La pestaña Notificaciones se arma con los mismos loaders que tenía
  * `/dashboard/notificaciones` (que hoy redirige acá) y se gatea por permiso
@@ -36,7 +37,6 @@ export default async function AppMovilPage({ searchParams }: AppMovilPageProps) 
   const [
     { data: branches },
     { data: configs },
-    { data: catalog },
     { data: billboard },
     perms,
   ] = await Promise.all([
@@ -46,7 +46,6 @@ export default async function AppMovilPage({ searchParams }: AppMovilPageProps) 
     branchIds.length > 0
       ? supabase.from('rewards_config').select('*').in('branch_id', branchIds)
       : Promise.resolve({ data: [] }),
-    supabase.from('reward_catalog').select('*').eq('organization_id', orgId).order('created_at', { ascending: false }),
     branchIds.length > 0
       ? supabase.from('billboard_items').select('*, branch:branches(name)').in('branch_id', branchIds).order('sort_order')
       : Promise.resolve({ data: [] }),
@@ -61,7 +60,6 @@ export default async function AppMovilPage({ searchParams }: AppMovilPageProps) 
     <AppMovilClient
       branches={branches || []}
       initialConfigs={configs || []}
-      initialCatalog={catalog || []}
       initialBillboard={(billboard as Parameters<typeof AppMovilClient>[0]['initialBillboard']) || []}
       initialTab={tab}
       notificaciones={notificaciones}

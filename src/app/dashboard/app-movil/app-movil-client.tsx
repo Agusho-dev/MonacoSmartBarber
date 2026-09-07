@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import {
   Gift,
   Save,
@@ -13,6 +14,7 @@ import {
   ImageIcon,
   BellRing,
   Lock,
+  ArrowRight,
 } from 'lucide-react'
 import { NotificacionesClient } from '@/app/dashboard/notificaciones/notificaciones-client'
 import type { ComponentProps } from 'react'
@@ -49,7 +51,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -65,24 +66,6 @@ interface RewardConfig {
   redemption_threshold: number
   reward_description: string
   is_active: boolean
-}
-
-interface CatalogItem {
-  id: string
-  name: string
-  description: string | null
-  type: string
-  discount_pct: number | null
-  is_free_service: boolean
-  stock: number | null
-  spin_probability: number | null
-  is_active: boolean
-  valid_from: string | null
-  valid_until: string | null
-  points_cost: number
-  image_url: string | null
-  category: string | null
-  created_at: string
 }
 
 interface BillboardItem {
@@ -104,7 +87,6 @@ interface BillboardItem {
 interface Props {
   branches: Branch[]
   initialConfigs: RewardConfig[]
-  initialCatalog: CatalogItem[]
   initialBillboard: BillboardItem[]
   /** Pestaña inicial (`?tab=`): `puntos | catalogo | cartelera | notificaciones`. */
   initialTab?: string
@@ -118,22 +100,11 @@ interface Props {
 
 const TABS = ['puntos', 'catalogo', 'cartelera', 'notificaciones'] as const
 
-// ── Reward type labels ───────────────────────────────────────────────────────
-
-const REWARD_TYPES: Record<string, string> = {
-  points_redemption: 'Canje por puntos',
-  spin_prize: 'Premio ruleta',
-  return_discount: 'Descuento retorno',
-  milestone_free: 'Gratis por hito',
-  manual: 'Manual',
-}
-
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export function AppMovilClient({
   branches,
   initialConfigs,
-  initialCatalog,
   initialBillboard,
   initialTab,
   notificaciones,
@@ -178,7 +149,26 @@ export function AppMovilClient({
           <PuntosTab branches={branches} initialConfigs={initialConfigs} />
         </TabsContent>
         <TabsContent value="catalogo">
-          <CatalogoTab initialCatalog={initialCatalog} />
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Gift className="size-4 text-muted-foreground" />
+                Los premios ahora se administran en Fidelización
+              </CardTitle>
+              <CardDescription>
+                El catálogo pasó a formar parte del programa de fidelización, junto con las categorías, los puntos y los referidos.
+                Ahí se crean, se editan y se activan los premios; la app los muestra tal cual quedan configurados.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild>
+                <Link href="/dashboard/fidelizacion?tab=premios">
+                  Ir a Fidelización · Premios
+                  <ArrowRight className="size-4" />
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
         </TabsContent>
         <TabsContent value="cartelera">
           <CarteleraTab branches={branches} initialBillboard={initialBillboard} />
@@ -361,418 +351,6 @@ function PuntosTab({
           </p>
         </CardContent>
       </Card>
-    </div>
-  )
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// TAB 2: Catálogo de Premios
-// ══════════════════════════════════════════════════════════════════════════════
-
-const emptyCatalogForm = {
-  name: '',
-  description: '',
-  type: 'points_redemption' as string,
-  points_cost: '0',
-  discount_pct: '',
-  is_free_service: false,
-  stock: '',
-  spin_probability: '',
-  valid_from: '',
-  valid_until: '',
-  is_active: true,
-  image_url: '',
-  // '' = automática (la app la deriva de is_free_service / discount_pct).
-  category: '',
-}
-
-function CatalogoTab({ initialCatalog }: { initialCatalog: CatalogItem[] }) {
-  const router = useRouter()
-  const supabase = createClient()
-
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState(emptyCatalogForm)
-  const [saving, setSaving] = useState(false)
-
-  function openAdd() {
-    setEditingId(null)
-    setForm(emptyCatalogForm)
-    setDialogOpen(true)
-  }
-
-  function openEdit(item: CatalogItem) {
-    setEditingId(item.id)
-    setForm({
-      name: item.name,
-      description: item.description || '',
-      type: item.type,
-      points_cost: String(item.points_cost),
-      discount_pct: item.discount_pct != null ? String(item.discount_pct) : '',
-      is_free_service: item.is_free_service,
-      stock: item.stock != null ? String(item.stock) : '',
-      spin_probability: item.spin_probability != null ? String(item.spin_probability) : '',
-      valid_from: item.valid_from ? item.valid_from.slice(0, 10) : '',
-      valid_until: item.valid_until ? item.valid_until.slice(0, 10) : '',
-      is_active: item.is_active,
-      image_url: item.image_url || '',
-      category: item.category || '',
-    })
-    setDialogOpen(true)
-  }
-
-  async function handleSave() {
-    if (!form.name.trim()) {
-      toast.error('El nombre es obligatorio')
-      return
-    }
-    setSaving(true)
-
-    const data: Record<string, unknown> = {
-      name: form.name.trim(),
-      description: form.description.trim() || null,
-      type: form.type,
-      points_cost: parseInt(form.points_cost) || 0,
-      discount_pct: form.discount_pct ? parseInt(form.discount_pct) : null,
-      is_free_service: form.is_free_service,
-      stock: form.stock ? parseInt(form.stock) : null,
-      spin_probability: form.spin_probability ? parseFloat(form.spin_probability) : null,
-      valid_from: form.valid_from || null,
-      valid_until: form.valid_until || null,
-      is_active: form.is_active,
-      image_url: form.image_url.trim() || null,
-      // NULL = automática: la app deriva Cortes/Merch de is_free_service y
-      // discount_pct. Sólo se guarda un valor cuando el dueño lo elige a mano.
-      category: form.category || null,
-    }
-
-    let error
-    if (editingId) {
-      const res = await supabase.from('reward_catalog').update(data).eq('id', editingId)
-      error = res.error
-    } else {
-      const res = await supabase.from('reward_catalog').insert(data)
-      error = res.error
-    }
-
-    setSaving(false)
-    if (error) {
-      toast.error(error.message)
-    } else {
-      toast.success(editingId ? 'Premio actualizado' : 'Premio creado')
-      setDialogOpen(false)
-      router.refresh()
-    }
-  }
-
-  async function toggleActive(item: CatalogItem) {
-    const { error } = await supabase
-      .from('reward_catalog')
-      .update({ is_active: !item.is_active })
-      .eq('id', item.id)
-    if (error) {
-      toast.error(error.message)
-    } else {
-      router.refresh()
-    }
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Catálogo de Premios</h2>
-          <p className="text-sm text-muted-foreground">
-            Premios que los clientes pueden canjear con puntos desde la app.
-          </p>
-        </div>
-        <Button onClick={openAdd} className="w-full sm:w-auto">
-          <Plus className="mr-2 size-4" />
-          Agregar Premio
-        </Button>
-      </div>
-
-      {/* Vista tabla — desktop */}
-      <div className="hidden rounded-lg border md:block">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Nombre</TableHead>
-              <TableHead>Tipo</TableHead>
-              <TableHead className="text-right">Costo (pts)</TableHead>
-              <TableHead className="text-right">Descuento</TableHead>
-              <TableHead className="text-right">Stock</TableHead>
-              <TableHead>Estado</TableHead>
-              <TableHead className="text-right">Acciones</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {initialCatalog.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
-                  No hay premios en el catálogo. Agregá uno para empezar.
-                </TableCell>
-              </TableRow>
-            ) : (
-              initialCatalog.map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell className="font-medium">{item.name}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">
-                      {REWARD_TYPES[item.type] || item.type}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">{item.points_cost}</TableCell>
-                  <TableCell className="text-right">
-                    {item.discount_pct != null ? `${item.discount_pct}%` : '—'}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {item.stock != null ? item.stock : '∞'}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={item.is_active ? 'default' : 'secondary'}>
-                      {item.is_active ? 'Activo' : 'Inactivo'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>
-                      <Pencil className="size-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => toggleActive(item)}>
-                      <Power className="size-3.5" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* Vista cards — mobile */}
-      <div className="space-y-3 md:hidden">
-        {initialCatalog.length === 0 ? (
-          <div className="rounded-lg border p-8 text-center text-muted-foreground">
-            No hay premios en el catálogo. Agregá uno para empezar.
-          </div>
-        ) : (
-          initialCatalog.map((item) => (
-            <div key={item.id} className="rounded-lg border p-4">
-              <div className="mb-2 flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-semibold leading-tight">{item.name}</p>
-                  <Badge variant="secondary" className="mt-1 text-xs">
-                    {REWARD_TYPES[item.type] || item.type}
-                  </Badge>
-                </div>
-                <Badge variant={item.is_active ? 'default' : 'secondary'} className="shrink-0">
-                  {item.is_active ? 'Activo' : 'Inactivo'}
-                </Badge>
-              </div>
-              <div className="mb-3 grid grid-cols-3 gap-2 text-sm">
-                <div>
-                  <p className="text-xs text-muted-foreground">Puntos</p>
-                  <p className="font-medium">{item.points_cost}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Descuento</p>
-                  <p className="font-medium">{item.discount_pct != null ? `${item.discount_pct}%` : '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Stock</p>
-                  <p className="font-medium">{item.stock != null ? item.stock : '∞'}</p>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="flex-1" onClick={() => openEdit(item)}>
-                  <Pencil className="mr-1.5 size-3.5" />
-                  Editar
-                </Button>
-                <Button variant="outline" size="sm" className="flex-1" onClick={() => toggleActive(item)}>
-                  <Power className="mr-1.5 size-3.5" />
-                  {item.is_active ? 'Desactivar' : 'Activar'}
-                </Button>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{editingId ? 'Editar Premio' : 'Nuevo Premio'}</DialogTitle>
-          </DialogHeader>
-
-          <div className="grid gap-4 py-2">
-            <div className="grid gap-2">
-              <Label>Nombre</Label>
-              <Input
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Ej: Corte gratis"
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Descripción</Label>
-              <Textarea
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-                placeholder="Descripción opcional del premio"
-                rows={2}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Tipo</Label>
-                <Select
-                  value={form.type}
-                  onValueChange={(val) => setForm({ ...form, type: val })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(REWARD_TYPES).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Costo en puntos</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={form.points_cost}
-                  onChange={(e) => setForm({ ...form, points_cost: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Descuento %</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={form.discount_pct}
-                  onChange={(e) => setForm({ ...form, discount_pct: e.target.value })}
-                  placeholder="Opcional"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Stock</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={form.stock}
-                  onChange={(e) => setForm({ ...form, stock: e.target.value })}
-                  placeholder="Vacío = ilimitado"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Válido desde</Label>
-                <Input
-                  type="date"
-                  value={form.valid_from}
-                  onChange={(e) => setForm({ ...form, valid_from: e.target.value })}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Válido hasta</Label>
-                <Input
-                  type="date"
-                  value={form.valid_until}
-                  onChange={(e) => setForm({ ...form, valid_until: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label>URL de imagen (app móvil)</Label>
-              <Input
-                value={form.image_url}
-                onChange={(e) => setForm({ ...form, image_url: e.target.value })}
-                placeholder="https://..."
-              />
-              <p className="text-xs text-muted-foreground">
-                Sin imagen, la app dibuja un ícono según el tipo de premio.
-              </p>
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Categoría en la app</Label>
-              <Select
-                value={form.category || 'auto'}
-                onValueChange={(val) =>
-                  setForm({ ...form, category: val === 'auto' ? '' : val })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">Automática (recomendado)</SelectItem>
-                  <SelectItem value="cortes">Cortes</SelectItem>
-                  <SelectItem value="merch">Merch</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Es la solapa donde aparece en la pantalla Premios. Automática lo
-                manda a <strong>Cortes</strong> si es servicio gratis o tiene
-                descuento, y a <strong>Merch</strong> si no. Elegila a mano sólo
-                para corregir un caso puntual. (La solapa <strong>Marcas</strong>
-                son los convenios con comercios, no se carga acá.)
-              </p>
-            </div>
-
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div>
-                <Label>Servicio gratis</Label>
-                <p className="text-xs text-muted-foreground">El premio es un servicio sin costo</p>
-              </div>
-              <Switch
-                checked={form.is_free_service}
-                onCheckedChange={(checked) =>
-                  setForm({ ...form, is_free_service: checked })
-                }
-              />
-            </div>
-
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div>
-                <Label>Activo</Label>
-                <p className="text-xs text-muted-foreground">Visible para los clientes</p>
-              </div>
-              <Switch
-                checked={form.is_active}
-                onCheckedChange={(checked) =>
-                  setForm({ ...form, is_active: checked })
-                }
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleSave} disabled={saving || !form.name.trim()}>
-              {saving ? 'Guardando...' : editingId ? 'Guardar cambios' : 'Agregar'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

@@ -216,7 +216,12 @@ export async function createManualVisit(params: {
 
   const commissionAmount = params.amount * (commissionPct / 100)
 
-  // 5. Insertar la visita manual (sin queue_entry_id)
+  // 5. Insertar la visita manual (sin queue_entry_id).
+  //    `prepaid_amount` queda en su default 0 y no se setea a mano: una visita
+  //    manual no sale de un turno, así que no hay seña que imputar. Si algún día
+  //    se carga a mano el cobro de un turno señado, el camino correcto NO es
+  //    escribir esta columna suelta —dejaría la seña en `pagada` para siempre—
+  //    sino pasar por `consumirSenaEnCobro` como hace `completeService`.
   const { data: newVisit, error: insertError } = await supabase
     .from('visits')
     .insert({
@@ -241,6 +246,18 @@ export async function createManualVisit(params: {
   if (insertError || !newVisit) {
     console.error('createManualVisit: error insertando visita', insertError)
     return { error: 'No se pudo registrar la visita manual' }
+  }
+
+  // 6. Programa de fidelización (mig 197): cierre explícito, best-effort. El trigger
+  //    del INSERT ya acreditó y recalculó la categoría; esta llamada manda las
+  //    notificaciones que dependen del importe final. NUNCA rompe el alta.
+  if (params.clientId) {
+    try {
+      const { error: loyaltyErr } = await supabase.rpc('loyalty_finalize_visit', { p_visit_id: newVisit.id })
+      if (loyaltyErr) console.error('[createManualVisit] loyalty_finalize_visit', loyaltyErr.message)
+    } catch (err) {
+      console.error('[createManualVisit] loyalty_finalize_visit', err)
+    }
   }
 
   revalidatePath('/dashboard')

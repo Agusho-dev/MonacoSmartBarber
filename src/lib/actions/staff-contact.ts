@@ -60,6 +60,8 @@ export async function prepareStaffContact(
         organization_id: orgId,
         phone: phoneClean,
         name: staff.full_name,
+        // Ficha espejo de un empleado, creada desde el dashboard (mig 210).
+        signup_source: 'staff',
       })
       .select('id')
       .single()

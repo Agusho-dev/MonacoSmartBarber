@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { isValidUUID } from '@/lib/validation'
 import { getLocalDateStr } from '@/lib/time-utils'
 import { getBarberSession } from '@/lib/actions/auth'
+import { resolverSenaDeTurnoCancelado } from '@/lib/senas/motor'
 import type { Appointment } from '@/lib/types/database'
 
 // Barber panel usa PIN auth (no JWT), por lo que todas las llamadas usan createAdminClient()
@@ -277,6 +278,17 @@ export async function markAppointmentNoShow(
     .eq('id', appointmentId)
 
   if (error) return { error: error.message }
+
+  // La seña de un ausente SE PIERDE (mig 207). Se registra como cancelación del
+  // CLIENTE con cero horas de anticipación —que es lo que efectivamente pasó—;
+  // 'staff'/'system' son las bajas que no son culpa del cliente y se devuelven.
+  // En try/catch: el turno queda marcado ausente aunque la resolución falle, y
+  // el fallo queda logueado (la seña sigue en `pagada`, o sea sin resolver).
+  try {
+    await resolverSenaDeTurnoCancelado(appointmentId, { canceladoPor: 'client', horasDeAnticipacion: 0 })
+  } catch (err) {
+    console.error(`[Senas] no se pudo resolver la seña del turno ${appointmentId}:`, err)
+  }
 
   // Cancelar queue entry asociada si existe.
   // `.eq('status','waiting')`: si el corte YA arrancó, cancelar la entrada

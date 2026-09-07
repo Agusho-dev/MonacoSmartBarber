@@ -68,6 +68,12 @@ const TEMPLATE_DEFS: RoleTemplate[] = [
             'caja.view',
             'caja.export',
             'comprobantes.view',
+            // Ve las señas y puede configurarlas, pero NO devolver: una
+            // devolución saca plata de la cuenta de Mercado Pago del local y no
+            // se puede deshacer. Ese permiso queda para el dueño, que es quien
+            // mira ese saldo.
+            'senas.view',
+            'senas.manage',
             'salary.view',
             'salary.view_commissions',
             'clients.view',
@@ -201,6 +207,10 @@ const TEMPLATE_DEFS: RoleTemplate[] = [
             'caja.view',
             'caja.export',
             'comprobantes.view',
+            // El cajero ve las señas porque son plata que YA entró y que el
+            // barbero no va a cobrar en el mostrador: sin verlas, el arqueo no
+            // le cierra.
+            'senas.view',
             'appointments.view',
         ],
     },

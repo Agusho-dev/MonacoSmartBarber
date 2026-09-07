@@ -7,6 +7,8 @@ import { getAppointmentSettings, getAppointmentStaff } from '@/lib/actions/appoi
 import { getBranchAppointmentDays } from '@/lib/actions/appointment-days'
 import { getBranchAppointmentHours } from '@/lib/actions/appointment-hours'
 import { listTemplatesForPicker } from '@/lib/actions/messaging'
+import { estadoProveedores, obtenerConfigSena } from '@/lib/actions/senas'
+import { estadoAppMercadoPago } from './actions'
 import { createAdminClient } from '@/lib/supabase/server'
 import { TurnosConfigClient } from './turnos-config-client'
 import type {
@@ -88,6 +90,7 @@ export default async function TurnosConfigPage({ searchParams }: Props) {
         templates={[]}
         hasWhatsAppChannel={false}
         org={{ nombre: '', slug: '', logoUrl: null }}
+        senas={null}
       />
     )
   }
@@ -125,7 +128,10 @@ export default async function TurnosConfigPage({ searchParams }: Props) {
       // reservar online.
       supabase
         .from('services')
-        .select('id, name, duration_minutes')
+        // `price` es para la vista previa de la seña: el número que el cliente
+        // va a leer sale del precio real de un servicio de esta sucursal, no de
+        // un ejemplo inventado.
+        .select('id, name, duration_minutes, price')
         .eq('is_active', true)
         .in('booking_mode', ['self_service', 'both'])
         .or(`branch_id.is.null,branch_id.eq.${sucursalActiva.id}`)
@@ -139,6 +145,25 @@ export default async function TurnosConfigPage({ searchParams }: Props) {
         .eq('branch_id', sucursalActiva.id)
         .maybeSingle(),
     ])
+
+  // Seña y cobros online. Van en su propio bloque (y no dentro del Promise.all
+  // de arriba) para no reordenar una tupla destructurada de nueve elementos.
+  // Las tres funciones ya chequean permiso adentro y devuelven vacío sin él, así
+  // que el gate de la pantalla se resuelve con un solo `currentUserCan`.
+  const puedeVerSenas = await currentUserCan('senas.view')
+  const [configSena, proveedoresSena, appMp, puedeConfigurarSenas] = puedeVerSenas
+    ? await Promise.all([
+        obtenerConfigSena(sucursalActiva.id),
+        estadoProveedores(),
+        estadoAppMercadoPago(),
+        currentUserCan('senas.manage'),
+      ])
+    : [
+        { config: null, error: null },
+        { proveedores: [], error: null },
+        { oauthDisponible: false, redirectUri: '', urlBase: '' },
+        false,
+      ]
 
   const barberosDeLaSucursal = (staffRows ?? []) as Array<{ id: string; full_name: string; avatar_url: string | null }>
   const idsBarberos = barberosDeLaSucursal.map(s => s.id)
@@ -211,8 +236,22 @@ export default async function TurnosConfigPage({ searchParams }: Props) {
     }
   })
 
-  const servicios: ServicioReservable[] = ((servicioRows ?? []) as Array<{ id: string; name: string; duration_minutes: number | null }>)
-    .map(s => ({ id: s.id, nombre: s.name, duracionMinutos: s.duration_minutes }))
+  const filasServicios = (servicioRows ?? []) as Array<{
+    id: string
+    name: string
+    duration_minutes: number | null
+    price: number | null
+  }>
+
+  const servicios: ServicioReservable[] = filasServicios.map(s => ({
+    id: s.id,
+    nombre: s.name,
+    duracionMinutos: s.duration_minutes,
+  }))
+
+  const serviciosConPrecio = filasServicios
+    .filter(s => s.price != null && Number(s.price) > 0)
+    .map(s => ({ id: s.id, nombre: s.name, precio: Number(s.price) }))
 
   // Horario comercial: acota la grilla de pintar a horas que existen. Sin dato
   // cargado se usa 08:00–22:00, que cubre a cualquier barbería.
@@ -262,6 +301,19 @@ export default async function TurnosConfigPage({ searchParams }: Props) {
         slug: orgRow?.slug ?? '',
         logoUrl: orgRow?.logo_url ?? null,
       }}
+      senas={
+        puedeVerSenas
+          ? {
+              puedeConfigurar: puedeConfigurarSenas,
+              config: configSena.config,
+              error: configSena.error ?? proveedoresSena.error,
+              proveedores: proveedoresSena.proveedores,
+              oauthDisponible: appMp.oauthDisponible,
+              urlBase: appMp.urlBase,
+              servicios: serviciosConPrecio,
+            }
+          : null
+      }
     />
   )
 }

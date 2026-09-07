@@ -2,28 +2,40 @@
 
 import { createAdminClient, createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { validateBranchAccess, getCurrentOrgId } from './org'
+import { validateBranchAccess } from './org'
 import { getActiveTimezone } from '@/lib/i18n'
 import { isValidUUID } from '@/lib/validation'
+import { getBarberSession } from './auth'
+import {
+  asTierChange,
+  couponErrorMessage,
+  parseReferralQr,
+  referralErrorMessage,
+  type CouponErrorExtra,
+  type LoyaltyFinalizeResult,
+} from '@/lib/loyalty-checkout'
+import { consumirSenaEnCobro } from '@/lib/senas/motor'
 
 /**
- * Resuelve si el cliente ya tiene lugar en la fila, distinguiendo **esta** sucursal de
- * las otras. La distinción no es cosmética.
+ * Resuelve si el cliente ya tiene lugar en la fila, distinguiendo **esta** sucursal
+ * de las otras. La distinción no es cosmética.
  *
  * El chequeo original preguntaba por `client_id` sin filtrar `branch_id`, así que un
  * cliente con una entrada viva en OTRA sucursal recibía `alreadyInQueue` y la tablet
- * lo mandaba a "ya tenés lugar, puesto N" — con la posición y la espera de un local en
- * el que no estaba parado. El cliente se sentaba a esperar un turno que ningún barbero
- * de ESTA sucursal podía ver, hasta que alguien le cancelaba la entrada vieja y recién
- * ahí podía anotarse. Es el "me registré y no estoy en la fila" que reportó el dueño.
+ * lo mandaba a la pantalla "ya tenés lugar, puesto 29" — con la posición y la espera
+ * de un local en el que no estaba parado. El cliente se sentaba a esperar un turno
+ * que ningún barbero de ESTA sucursal podía ver, hasta que alguien le cancelaba la
+ * entrada vieja y recién ahí podía anotarse. Es exactamente el "me registré y no
+ * estoy en la fila" que reportó el dueño (caso Rodrigo Greco, 4/9/2026: entrada viva
+ * en Paraná a las 14:18, atendido en Rondeau recién 74 minutos después).
  *
  * El índice único que de verdad existe es `idx_queue_unique_active_client` sobre
  * (client_id, **branch_id**): dos sucursales nunca chocaron entre sí. El pre-chequeo
  * era más estricto que la base.
  *
- * La entrada de la otra sucursal se cancela: la persona está físicamente acá, así que
- * allá es un fantasma que le va a hacer perder un llamado a un barbero. Queda auditada
- * con `cancel_reason = 'moved_to_other_branch'`.
+ * La entrada de la otra sucursal se cancela: la persona está físicamente acá, así
+ * que allá es un fantasma que le va a hacer perder un llamado a un barbero. Queda
+ * auditada con `cancel_reason = 'moved_to_other_branch'`.
  */
 async function resolverEntradaActiva(
   supabase: ReturnType<typeof createAdminClient>,
@@ -42,8 +54,8 @@ async function resolverEntradaActiva(
   const enOtras = filas.filter(e => e.branch_id !== branchId)
 
   if (!enEstaSucursal && enOtras.length > 0) {
-    // Sólo las que ESPERAN: si en la otra sucursal ya lo están atendiendo, el dato raro
-    // es éste y no aquél — no cortamos un corte en curso desde otro local.
+    // Sólo las que ESPERAN: si en la otra sucursal ya lo están atendiendo, el dato
+    // raro es éste y no aquél — no le cortamos un corte en curso desde otro local.
     const aCancelar = enOtras.filter(e => e.status === 'waiting').map(e => e.id)
     if (aCancelar.length > 0) {
       const { error } = await supabase
@@ -71,6 +83,14 @@ export async function checkinClient(formData: FormData) {
   const serviceId = (formData.get('service_id') as string | null) || null
   const specialFlag = formData.get('special')
   const isSpecialRequested = specialFlag === '1' || specialFlag === 'true'
+
+  // De dónde viene el alta, para `clients.signup_source` (mig 210). El default es
+  // la tablet porque es quien más clientes crea; el alta manual del dashboard
+  // manda 'staff'. NO es una bandera de confianza —no habilita ni saltea nada—:
+  // es procedencia, y por eso se valida contra una lista blanca en vez de
+  // guardarse cruda.
+  const origenPedido = (formData.get('origen') as string | null) ?? ''
+  const signupSource: 'kiosk' | 'staff' = origenPedido === 'staff' ? 'staff' : 'kiosk'
 
   // "Cliente especial": walk-in sin teléfono (un niño, un invitado, alguien que no
   // deja su número). El staff lo marca con el toggle del registro manual; por compat
@@ -155,7 +175,12 @@ export async function checkinClient(formData: FormData) {
       const virtualPhone = `00${Math.floor(Math.random() * 1e8).toString().padStart(8, '0')}`
       const { data: newClient, error } = await supabase
         .from('clients')
-        .insert({ name, phone: virtualPhone, organization_id: branchResult.organization_id })
+        .insert({
+          name,
+          phone: virtualPhone,
+          organization_id: branchResult.organization_id,
+          signup_source: signupSource,
+        })
         .select('id')
         .single()
       if (newClient) {
@@ -176,7 +201,8 @@ export async function checkinClient(formData: FormData) {
       .insert({
         name,
         phone,
-        organization_id: branchResult.organization_id
+        organization_id: branchResult.organization_id,
+        signup_source: signupSource,
       })
       .select('id')
       .single()
@@ -321,28 +347,10 @@ export async function attendNextClient(barberId: string, branchId: string, prefe
   return { success: true as const, entryId: claim.entry_id, wasDynamic: claim.was_dynamic }
 }
 
-/** Traduce los códigos de error de la RPC redeem_coupon_for_visit a texto en español. */
-function mapCouponError(code: string | undefined): string {
-  switch (code) {
-    case 'wrong_client': return 'El cupón pertenece a otro cliente'
-    case 'wrong_org': return 'El cupón es de otra organización'
-    case 'already_redeemed': return 'El cupón ya fue canjeado'
-    case 'expired': return 'El cupón está vencido'
-    case 'not_found': return 'Cupón no encontrado'
-    case 'not_available': return 'El cupón no está disponible'
-    case 'no_discount': return 'El cupón no tiene descuento aplicable'
-    case 'not_active_yet': return 'El cupón todavía no está activo (se activa un rato después de crear la cuenta)'
-    case 'wrong_weekday': return 'Este cupón solo se puede canjear de lunes a miércoles'
-    case 'visit_not_found': return 'No se encontró la visita'
-    default: return 'No se pudo aplicar el cupón'
-  }
-}
-
 export async function completeService(
   queueEntryId: string,
   paymentMethod: 'cash' | 'card' | 'transfer',
   serviceId?: string,
-  isRewardClaim: boolean = false,
   paymentAccountId?: string | null,
   extraServiceIds?: string[],
   productsToSell?: { id: string; quantity: number }[],
@@ -373,7 +381,7 @@ export async function completeService(
   // Obtener la entrada para validar que la sucursal pertenece a la org activa
   const { data: entryForValidation } = await supabase
     .from('queue_entries')
-    .select('branch_id')
+    .select('branch_id, appointment_id')
     .eq('id', queueEntryId)
     .maybeSingle()
 
@@ -381,6 +389,49 @@ export async function completeService(
 
   const orgAccess = await validateBranchAccess(entryForValidation.branch_id)
   if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+
+  // 0b. La seña (mig 207). Se resuelve ANTES de tocar la fila, y a propósito:
+  //     si acá falla algo, no se completó nada y el barbero puede reintentar sobre
+  //     un entry intacto. Resolviéndola más abajo —después de que el trigger ya
+  //     creó la visita— un fallo dejaría el corte cerrado con amount=0 y el guard
+  //     idempotente del paso 1 haría que el reintento retorne `alreadyCompleted`
+  //     sin volver a calcular nada: una visita en cero, para siempre.
+  //
+  //     FALLA CERRADA: cobrar de más es peor que no cobrar. Si no podemos saber
+  //     cuánto señó el cliente, no se cobra. (El bloque 3.6 anterior hacía lo
+  //     contrario: logueaba el error y dejaba `amount` en el precio de lista, o
+  //     sea le cobraba el turno entero a alguien que ya había pagado la mitad.)
+  //
+  //     `consumirSenaEnCobro` es idempotente HACIA ADELANTE: la seña se mueve a
+  //     `consumida` acá, antes del UPDATE de abajo, así que todo lo que falle
+  //     después (el UPDATE, el AbortError del timeout de 8s, la tablet sin wifi)
+  //     hace que el barbero reintente sobre una seña YA consumida. Ese reintento
+  //     recibe el MISMO monto, no cero — si no, el cliente pagaría la seña dos
+  //     veces: una por Mercado Pago y otra en el mostrador.
+  let prepaidAmount = 0
+  let depositId: string | null = null
+  if (entryForValidation.appointment_id) {
+    try {
+      const sena = await consumirSenaEnCobro(entryForValidation.appointment_id)
+      prepaidAmount = sena.prepaidAmount
+      depositId = sena.depositId
+      // El turno tenía seña y NO se descontó (se devolvió, se dio por perdida o
+      // cambió de estado durante el cobro). El cobro sigue —el precio completo
+      // es el correcto en esos casos— pero queda dicho por qué: "0" es la
+      // respuesta a dos preguntas distintas y sin esto nadie puede reconstruir
+      // cuál fue tres meses después.
+      if (sena.advertencia) {
+        console.warn('[completeService] seña no imputada:', {
+          queueEntryId,
+          appointmentId: entryForValidation.appointment_id,
+          motivo: sena.advertencia,
+        })
+      }
+    } catch (err) {
+      console.error('[completeService] consumirSenaEnCobro:', err)
+      return { error: 'No pudimos verificar la seña de este turno. Probá de nuevo.' }
+    }
+  }
 
   // 1. Complete the queue entry – this fires the on_queue_completed trigger
   //    which creates a visit record with amount=0 as placeholder.
@@ -414,18 +465,14 @@ export async function completeService(
     return { success: true as const, alreadyCompleted: true as const }
   }
 
-  // 1b. Si la queue entry proviene de un turno, marcarlo como completado
-  const { data: queueEntryData } = await supabase
-    .from('queue_entries')
-    .select('appointment_id')
-    .eq('id', queueEntryId)
-    .maybeSingle()
-
-  if (queueEntryData?.appointment_id) {
+  // 1b. Si la queue entry proviene de un turno, marcarlo como completado.
+  //     El appointment_id ya lo trajo la lectura de validación: era una segunda
+  //     query a la misma fila.
+  if (entryForValidation.appointment_id) {
     await supabase
       .from('appointments')
       .update({ status: 'completed' })
-      .eq('id', queueEntryData.appointment_id)
+      .eq('id', entryForValidation.appointment_id)
   }
 
   // 2. Get the visit created by the trigger
@@ -527,40 +574,30 @@ export async function completeService(
     }
   }
 
-  // 3.6 Restar prepagos ya cobrados del turno asociado (migración 109).
-  //     Si el turno ya tiene una visita de prepago (queue_entry_id IS NULL,
-  //     mismo appointment_id), esa plata ya impactó en caja; esta visita
-  //     sólo registra el remanente.
-  if (queueEntryData?.appointment_id) {
-    const { data: priorPrepayments, error: prepayErr } = await supabase
-      .from('visits')
-      .select('amount')
-      .eq('appointment_id', queueEntryData.appointment_id)
-      .is('queue_entry_id', null)
+  // 3.6 La seña NO se resta de `amount` (mig 207).
+  //     `visits.amount` es SIEMPRE el precio completo del servicio: de ahí salen la
+  //     comisión, los puntos, el comprobante de ARCA, el ticket promedio y el
+  //     conteo de cortes. Una visita "neta de seña" partía el ticket al medio y
+  //     hacía que ARCA facturara la mitad de lo vendido.
+  //     Lo que se registra es la PARTICIÓN del cobro: `prepaid_amount` es lo que
+  //     el barbero NO recibió en el mostrador, y de eso se ocupan caja y el ledger
+  //     (`fn_sync_transfer_log_from_visit` proyecta `amount - prepaid_amount`).
+  //
+  //     El neteo legacy que vivía acá —visitas de prepago con `queue_entry_id IS
+  //     NULL` y el mismo `appointment_id`, que creaba `confirmAppointmentPrepayment`—
+  //     se borró: ese camino nunca escribió una sola fila en prod (verificado el
+  //     3/9/2026: 0 filas) y murió con la mig 207. La seña no crea visita propia.
 
-    // No degradar en silencio: si asumimos "null = sin prepagos" ante un error de
-    // lectura, el cliente pagaría dos veces. Se loguea en vez de restar $0 calladamente.
-    // (Hasta la mig 168 esta query fallaba SIEMPRE con 42703: `visits.appointment_id`
-    // no existía porque la mig 109 nunca se aplicó. Ahora la columna existe y la
-    // completa el trigger `on_queue_completed` desde `queue_entries.appointment_id`.)
-    if (prepayErr) {
-      console.error('[completeService] no pude leer prepagos del turno:', prepayErr.message)
-    } else {
-      const prepaidTotal = (priorPrepayments ?? []).reduce((sum, v) => sum + Number(v.amount ?? 0), 0)
-      if (prepaidTotal > 0) {
-        amount = Math.max(0, amount - prepaidTotal)
-        // Las comisiones se calculan sobre el precio total del servicio (ya computadas
-        // arriba); el prepago es sólo una partición del cobro, no afecta la comisión.
-      }
-    }
-  }
-
-  // 4. Update the visit with correct data (amount = bruto neto de prepagos; SIN cupón
+  // 4. Update the visit with correct data (amount = precio completo; SIN cupón
   //    todavía — el descuento del cupón lo aplica la RPC abajo, atómico con el consumo).
   const visitUpdate: Record<string, unknown> = {
     payment_method: paymentMethod,
     amount,
     commission_amount: commissionAmount,
+    // Lo ya pagado por adelantado. Va en cada cobro (también en 0) para que un
+    // reintento no deje el valor de una corrida anterior.
+    prepaid_amount: prepaidAmount,
+    deposit_id: depositId,
   }
   if (serviceId) visitUpdate.service_id = serviceId
   if (paymentAccountId) visitUpdate.payment_account_id = paymentAccountId
@@ -596,40 +633,125 @@ export async function completeService(
   //     comisión queda sobre el bruto (el cupón no recorta la paga del barbero).
   //     FAIL-OPEN: si el cupón ya no es canjeable o si el write base falló, NO se
   //     consume y se cobra a precio lleno con un aviso para el barbero.
+  //     Desde la mig 196/197 el MISMO parámetro trae dos cosas distintas, que se
+  //     distinguen por prefijo: el hex de un beneficio de la app (client_rewards) o
+  //     "MNC-REF:<código>", la invitación de un amigo (referidos). Y un beneficio
+  //     puede ser merch/especial: una ENTREGA que no toca el importe.
   let couponClientRewardId: string | null = null
   let couponDiscountAmount = 0
   let couponWarning: string | null = null
-  if (couponQrCode && !isRewardClaim) {
+  // Merch/especial entregado: nombre del premio para que la tablet lo diga.
+  let couponDelivered: string | null = null
+  // Invitación aplicada: quién invitó y cuánto se descontó, para el toast.
+  let referralApplied: { referrerFirstName: string | null; discountAmount: number } | null = null
+  if (couponQrCode) {
+    const referralCode = parseReferralQr(couponQrCode)
     const cleanCoupon = couponQrCode.trim().toLowerCase()
     if (visitUpdateError) {
-      couponWarning = 'No se pudo registrar el cobro; el cupón no se canjeó'
+      couponWarning = 'No se pudo registrar el cobro; el beneficio no se aplicó'
+    } else if (referralCode) {
+      // ── Invitación de un amigo ──
+      //    apply_referral_for_visit re-valida TODO (promo vigente, código, cliente
+      //    nuevo, no auto-referido, sin otro beneficio en la visita), escribe el
+      //    descuento sobre la visita y deja el referido `pending`; el trigger de
+      //    loyalty lo completa y acredita los puntos a los dos. Mismo fail-open
+      //    que el cupón: si no aplica, se cobra a precio lleno y se avisa.
+      if (serviceSubtotal <= 0) {
+        couponWarning = 'No hay servicio para aplicar el descuento; la invitación no se usó'
+      } else {
+        // Quién escaneó (para auditoría del referido). El panel se autentica por
+        // PIN + cookie: si no hay sesión de barbero (cobro desde el dashboard), va null.
+        const barberSession = await getBarberSession()
+        const { data: refData, error: refErr } = await supabase.rpc('apply_referral_for_visit', {
+          p_code: referralCode,
+          p_visit_id: visit.id,
+          p_service_subtotal: serviceSubtotal,
+          p_staff_id: barberSession?.staff_id ?? null,
+        })
+        const row = (refData ?? {}) as {
+          success?: boolean
+          error?: string
+          discount_amount?: number | null
+          net_amount?: number | null
+          referrer_first_name?: string | null
+        }
+        if (refErr || !row.success) {
+          if (refErr) console.error('[completeService] apply_referral_for_visit error:', refErr.message)
+          couponWarning = referralErrorMessage(row.error) + '; se cobró sin descuento'
+        } else {
+          couponDiscountAmount = Number(row.discount_amount ?? 0)
+          referralApplied = { referrerFirstName: row.referrer_first_name ?? null, discountAmount: couponDiscountAmount }
+          // La RPC ya escribió el amount neto en la visita; usamos ese neto para caja/transfer.
+          amount = Number(row.net_amount ?? amount)
+        }
+      }
     } else if (!/^[0-9a-f-]{8,64}$/.test(cleanCoupon)) {
-      couponWarning = 'El código del cupón no es válido; se cobró sin descuento'
-    } else if (serviceSubtotal <= 0) {
-      couponWarning = 'No hay servicio para aplicar el descuento; el cupón no se canjeó'
+      couponWarning = 'El código del beneficio no es válido; se cobró sin descuento'
     } else {
       const { data: redeemData, error: redeemErr } = await supabase.rpc('redeem_coupon_for_visit', {
         p_qr_code: cleanCoupon,
         p_visit_id: visit.id,
         p_service_subtotal: serviceSubtotal,
       })
-      const row = (redeemData ?? {}) as {
+      const row = (redeemData ?? {}) as CouponErrorExtra & {
         success?: boolean
         error?: string
+        kind?: string | null
+        reward_name?: string | null
         discount_amount?: number | null
         net_amount?: number | null
         client_reward_id?: string
       }
       if (redeemErr || !row.success) {
         if (redeemErr) console.error('[completeService] redeem_coupon_for_visit error:', redeemErr.message)
-        couponWarning = mapCouponError(row.error) + '; se cobró sin descuento'
+        // `row` trae allowed_weekdays / service_name cuando el rechazo los tiene: el
+        // mensaje se arma con lo que dijo la RPC, no con un texto fijo.
+        couponWarning = couponErrorMessage(row.error, row) + '; se cobró sin descuento'
       } else {
         couponClientRewardId = row.client_reward_id ?? null
-        couponDiscountAmount = Number(row.discount_amount ?? 0)
-        // La RPC ya escribió el amount neto en la visita; usamos ese neto para caja/transfer.
-        amount = Number(row.net_amount ?? amount)
+        if (row.kind === 'merch' || row.kind === 'especial') {
+          // Entrega: la RPC marcó el beneficio como usado sin tocar el importe.
+          couponDelivered = row.reward_name ?? 'Beneficio'
+          couponDiscountAmount = 0
+        } else {
+          couponDiscountAmount = Number(row.discount_amount ?? 0)
+          // La RPC ya escribió el amount neto en la visita; usamos ese neto para caja/transfer.
+          amount = Number(row.net_amount ?? amount)
+        }
       }
     }
+  }
+
+  // 4.5b LA SEÑA QUEDÓ POR ENCIMA DEL PRECIO FINAL.
+  //
+  //      `redeem_coupon_for_visit` baja `visits.amount` (`GREATEST(amount -
+  //      descuento, 0)`) y NO mira `prepaid_amount`: un corte gratis o un
+  //      descuento grande sobre un turno señado deja al cliente habiendo pagado
+  //      por Mercado Pago más de lo que terminó costando el servicio. La plata
+  //      NO se descuadra —toda lectura acota (`LEAST(prepaid, amount)` en caja,
+  //      `GREATEST(amount - prepaid, 0)` en el ledger y en el cierre)— así que
+  //      el mostrador cobra 0 y nadie rinde de menos. Lo que falta es que
+  //      alguien SE ENTERE: el cliente tiene un saldo a favor que sólo se
+  //      resuelve devolviéndoselo desde Turnos → Señas.
+  //
+  //      No se toca `prepaid_amount` para "cuadrarlo": esa columna dice cuánto
+  //      cobró Mercado Pago de verdad, y pisarla borraría justamente la prueba
+  //      de que hay que devolver algo. Tampoco se bloquea el cobro — el
+  //      descuento puede ser deliberado y el cliente está en el mostrador.
+  let senaWarning: string | null = null
+  if (prepaidAmount > amount) {
+    const aFavor = Math.round((prepaidAmount - amount) * 100) / 100
+    senaWarning =
+      `El cliente pagó $${prepaidAmount} de seña y el servicio quedó en $${amount}: ` +
+      `le quedan $${aFavor} a favor. Devolveselos desde Turnos → Señas.`
+    console.warn('[completeService] seña mayor al precio final del cobro', {
+      queueEntryId,
+      visitId: visit.id,
+      depositId,
+      prepaidAmount,
+      amountFinal: amount,
+      aFavor,
+    })
   }
 
   // El registro en transfer_logs (el ledger de las cuentas de cobro) NO se escribe
@@ -670,53 +792,11 @@ export async function completeService(
     }
   }
 
-  // 5. Handle reward redemption (deduct points)
-  if (isRewardClaim && visit.client_id && visit.branch_id) {
-    const orgId = await getCurrentOrgId()
-
-    const { data: config } = await supabase
-      .from('rewards_config')
-      .select('redemption_threshold')
-      .eq('branch_id', visit.branch_id)
-      .eq('is_active', true)
-      .single()
-
-    const cost = config?.redemption_threshold || 10
-
-    // Filtrar client_points por org para evitar canjes cruzados.
-    // NO filtrar por branch_id: la fila es única por (client_id, organization_id)
-    // (idx_client_points_unique_client_org) y branch_id puede ser NULL o de otra
-    // sucursal de la misma org → filtrar por branch perdía la fila y abortaba el
-    // canje (entregaba el premio sin descontar puntos). Auditoría jun-2026 #15.
-    let cpQuery = supabase
-      .from('client_points')
-      .select('points_balance, total_redeemed')
-      .eq('client_id', visit.client_id)
-    if (orgId) cpQuery = (cpQuery as typeof cpQuery).eq('organization_id', orgId)
-    const { data: clientPoints } = await cpQuery.maybeSingle()
-
-    if (clientPoints && clientPoints.points_balance >= cost) {
-      // Insert redemption transaction
-      await supabase.from('point_transactions').insert({
-        client_id: visit.client_id,
-        visit_id: visit.id,
-        points: -cost,
-        type: 'redeemed',
-        description: 'Canje de beneficio',
-      })
-
-      // Descontar puntos escopado a org (fila única por client_id+organization_id).
-      let updateQuery = supabase
-        .from('client_points')
-        .update({
-          points_balance: clientPoints.points_balance - cost,
-          total_redeemed: (clientPoints.total_redeemed || 0) + cost,
-        })
-        .eq('client_id', visit.client_id)
-      if (orgId) updateQuery = (updateQuery as typeof updateQuery).eq('organization_id', orgId)
-      await updateQuery
-    }
-  }
+  // (El bloque 5 —canje por puntos legacy, isRewardClaim— se borró junto con la
+  //  mig 204: leía rewards_config/client_points, dos tablas que el programa de
+  //  fidelización dejó inertes, y su point_transaction sin `remaining` era
+  //  invisible para loyalty_points_balance. Si el canje de puntos en el local
+  //  vuelve, va por las RPC del programa nuevo, nunca por acá.)
 
   // 6. Auto-start SOLO del ghost de descanso si está listo.
   //
@@ -1173,6 +1253,49 @@ export async function completeService(
     console.error('[SalaryReport] Error al generar reportes de comisión:', err)
   }
 
+  // 9. Programa de fidelización (mig 197/203): cierre EXPLÍCITO de la visita.
+  //    El trigger trg_loyalty_on_visit ya corrió con cada UPDATE de amount (y ya
+  //    acreditó/recalculó); esta llamada manda las notificaciones que dependen
+  //    del importe FINAL y devuelve el resumen que la tablet le muestra al
+  //    barbero (puntos, categoría, cambio). Best-effort: NUNCA rompe el cobro.
+  //    `tier_changed` NO es "lo que hizo esta llamada": la transición ya la había
+  //    consumido el trigger antes de que finalize corriera, así que desde la mig
+  //    203 la RPC lo deriva de los eventos de la visita ('up' | 'enrolled' |
+  //    'grace' | 'down' | 'recovered' | null). Acá no se deriva nada: se toma lo
+  //    que dice la RPC y sólo se normaliza a los valores conocidos.
+  //    Sin client_id no hay programa que cerrar (walk-in anónimo / cliente especial).
+  let loyalty: LoyaltyFinalizeResult | null = null
+  if (visit.client_id) {
+    try {
+      const { data: loyaltyData, error: loyaltyErr } = await supabase.rpc('loyalty_finalize_visit', {
+        p_visit_id: visit.id,
+      })
+      if (loyaltyErr) {
+        console.error('[completeService] loyalty_finalize_visit', loyaltyErr.message)
+      } else if (loyaltyData && typeof loyaltyData === 'object') {
+        loyalty = loyaltyData as LoyaltyFinalizeResult
+        loyalty.tier_changed = asTierChange(loyalty.tier_changed)
+        // La RPC no devuelve la fecha límite de la gracia y la tablet tiene que decir
+        // "le quedan X días para mantener Oro": se lee del estado del cliente.
+        if (loyalty.enabled && loyalty.tier_changed === 'grace') {
+          const { data: st } = await supabase
+            .from('client_loyalty_state')
+            .select('grace_until')
+            .eq('client_id', visit.client_id)
+            .not('grace_until', 'is', null)
+            .limit(1)
+          const graceUntil = st?.[0]?.grace_until as string | null | undefined
+          if (graceUntil) {
+            loyalty.grace_until = graceUntil
+            loyalty.grace_days_left = Math.max(0, Math.ceil((new Date(graceUntil).getTime() - Date.now()) / 86_400_000))
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[completeService] loyalty_finalize_visit', err)
+    }
+  }
+
   revalidatePath('/barbero/fila')
   revalidatePath('/barbero/facturacion')
   revalidatePath('/barbero/rendimiento')
@@ -1186,7 +1309,19 @@ export async function completeService(
     couponApplied: couponClientRewardId != null,
     couponDiscountAmount,
     couponWarning,
+    // Merch/especial entregado con este cobro (nombre del premio) — mig 196.
+    couponDelivered,
+    // Invitación de un amigo aplicada (referidos) — mig 197.
+    referralApplied,
     jointWarning,
+    // Resumen del programa de fidelización para la tablet; null si no aplica.
+    loyalty,
+    // Seña consumida en este cobro (mig 207). La tablet lo usa para decir
+    // "cobrá $8.000: los otros $8.000 ya están señados". null = no hubo seña.
+    prepaid: depositId ? { amount: prepaidAmount, depositId } : null,
+    // La seña terminó siendo mayor que el precio final (cupón/premio aplicado
+    // sobre un turno señado): hay saldo a favor del cliente. Ver 4.5b.
+    senaWarning,
   }
 }
 
@@ -1240,12 +1375,11 @@ export async function cancelQueueEntry(
   // dejaba NINGÚN rastro —ni cuándo, ni quién, ni por qué— y eso hizo que meses de
   // clientes que se anotaban y desaparecían fueran indistinguibles de clientes que se
   // iban solos. En el panel del barbero el actor sale de la cookie `barber_session`
-  // (ahí no hay usuario de Supabase Auth); en el dashboard, del `staff` del usuario
-  // logueado. Si no se puede resolver queda NULL: `cancelled_at` y el motivo los
-  // estampa igual el trigger.
+  // (no hay usuario de Supabase Auth ahí, ver Known Risk del CLAUDE.md); en el
+  // dashboard, del `staff` del usuario logueado. Si no se puede resolver, queda NULL:
+  // el `cancelled_at` y el motivo igual se estampan por trigger.
   let actorStaffId: string | null = null
   try {
-    const { getBarberSession } = await import('./auth')
     const barberSession = await getBarberSession()
     actorStaffId = barberSession?.staff_id ?? null
     if (!actorStaffId) {
@@ -1394,9 +1528,9 @@ export async function checkinClientByFace(
     return { error: 'Cliente no encontrado' }
   }
 
-  // Mismo criterio que `checkinClient`: el "ya estás en la fila" es POR SUCURSAL. Sin
-  // el scope, la cámara reconocía al cliente y lo rebotaba mostrándole la posición de
-  // otro local. Ver `resolverEntradaActiva`.
+  // Mismo criterio que `checkinClient`: el "ya estás en la fila" es POR SUCURSAL.
+  // Sin el scope, la cámara reconocía al cliente y lo rebotaba a "ya tenés lugar"
+  // mostrándole la posición de otro local. Ver `resolverEntradaActiva`.
   const activoFace = await resolverEntradaActiva(supabase, clientId, branchId)
   if (activoFace.enEstaSucursal) {
     return {

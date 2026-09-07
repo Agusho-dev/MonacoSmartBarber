@@ -34,6 +34,14 @@ export interface CajaTicket {
   amount: number
   /** Descuento por cupón (mig 147). 0 si no hubo. Bruto = amount + discountAmount. */
   discountAmount: number
+  /**
+   * Seña pagada por adelantado por Mercado Pago (mig 207). 0 si no hubo.
+   * `amount` sigue siendo el precio COMPLETO del servicio; esto es la parte que
+   * el barbero NO recibió en el mostrador.
+   */
+  prepaidAmount: number
+  /** Lo que efectivamente pasó por el mostrador: `amount - prepaidAmount`. */
+  amountAtCounter: number
   services: CajaTicketService[]
   products: CajaTicketProduct[]
 }
@@ -49,6 +57,12 @@ export interface CajaDailySummary {
   totalCard: number
   totalTransfer: number
   accounts: CajaAccountTotal[]
+  /**
+   * Señas cobradas por adelantado (Mercado Pago) de los cortes del día. NO está
+   * dentro de los tres medios: esa plata no pasó por el mostrador.
+   * Invariante: totalCash + totalCard + totalTransfer + totalPrepaid == totalRevenue.
+   */
+  totalPrepaid: number
   totalRevenue: number
   ticketCount: number
   cashExpenses: number
@@ -61,7 +75,12 @@ export interface CajaCSVRow {
   telefono: string
   barbero: string
   barberoId: string
+  /** Precio COMPLETO del servicio (lo facturado), igual que `visits.amount`. */
   monto: number
+  /** Seña ya cobrada por Mercado Pago. 0 en el 100% de las filas históricas. */
+  sena: number
+  /** Lo que entró por el mostrador por este medio de pago: `monto - sena`. */
+  montoEnMostrador: number
   metodoPago: string
   cuenta: string
 }
@@ -105,7 +124,7 @@ export async function fetchCajaTickets(params: {
   let query = supabase
     .from('visits')
     .select(`
-      id, completed_at, amount, discount_amount, payment_method, payment_account_id,
+      id, completed_at, amount, discount_amount, prepaid_amount, payment_method, payment_account_id,
       barber_id, client_id, service_id, extra_services,
       client:clients!inner(id, name, phone),
       barber:staff!inner(full_name),
@@ -202,6 +221,12 @@ export async function fetchCajaTickets(params: {
     const barber = v.barber as unknown as { full_name: string }
     const account = v.payment_account as unknown as { name: string } | null
 
+    // La seña nunca puede superar lo que se cobró: un cupón que descuenta más
+    // que la seña dejaría el remanente en negativo. Se acota igual que el
+    // trigger del ledger (`GREATEST(amount - prepaid_amount, 0)`), así el ticket
+    // y `transfer_logs` no pueden decir cosas distintas.
+    const prepaid = Math.min(Number(v.prepaid_amount ?? 0), Number(v.amount))
+
     return {
       visitId: v.id,
       completedAt: v.completed_at,
@@ -215,6 +240,8 @@ export async function fetchCajaTickets(params: {
       paymentAccountName: account?.name ?? null,
       amount: v.amount,
       discountAmount: Number(v.discount_amount ?? 0),
+      prepaidAmount: prepaid,
+      amountAtCounter: Math.max(0, Number(v.amount) - prepaid),
       services,
       products: productsByVisit.get(v.id) ?? [],
     }
@@ -251,12 +278,16 @@ export async function fetchCajaSummary(params: {
   ] = await Promise.all([
     supabase
       .from('visits')
-      .select('amount, payment_method')
+      .select('amount, prepaid_amount, payment_method')
       .in('branch_id', branchIds)
       .gte('completed_at', start)
       .lte('completed_at', end),
     // Arqueo = FACTURACIÓN del día: acá el desglose por cuenta usa sólo `amount` (sin la
     // propina transferida), para cuadrar con totalTransfer (que viene de visits.amount).
+    // `transfer_logs.amount` YA viene neto de seña (el trigger proyecta
+    // `GREATEST(amount - prepaid_amount, 0)`), que es exactamente lo que entró a
+    // esa cuenta: por eso el desglose por cuenta cuadra contra el totalTransfer
+    // neto de abajo y no hay que restar nada dos veces.
     // La propina cuenta para el TOPE MENSUAL de la cuenta (otra pregunta, en /dashboard/cuentas),
     // no para el arqueo diario. No sumar tip_amount acá es intencional.
     supabase
@@ -283,15 +314,27 @@ export async function fetchCajaSummary(params: {
   let totalCash = 0
   let totalCard = 0
   let totalTransfer = 0
+  let totalPrepaid = 0
   let ticketCount = 0
 
+  // Los tres medios son lo que PASÓ POR EL MOSTRADOR. `visits.amount` es el
+  // precio completo del servicio; la seña ya la cobró Mercado Pago días antes,
+  // así que contarla como efectivo/tarjeta/transferencia del día haría que el
+  // arqueo le reclamara al barbero plata que nunca tuvo en la mano.
+  // Se muestra en su propia línea para que la suma siga cerrando contra la
+  // facturación del día (`totalRevenue`).
   for (const v of visits ?? []) {
     ticketCount++
     const amt = Number(v.amount)
+    // Acotada al importe cobrado, igual que el trigger del ledger: con un cupón
+    // que descuenta más que la seña, el remanente sería negativo.
+    const prepaid = Math.min(Number(v.prepaid_amount ?? 0), amt)
+    const enMostrador = amt - prepaid
+    totalPrepaid += prepaid
     switch (v.payment_method) {
-      case 'cash': totalCash += amt; break
-      case 'card': totalCard += amt; break
-      case 'transfer': totalTransfer += amt; break
+      case 'cash': totalCash += enMostrador; break
+      case 'card': totalCard += enMostrador; break
+      case 'transfer': totalTransfer += enMostrador; break
     }
   }
 
@@ -322,7 +365,10 @@ export async function fetchCajaSummary(params: {
         accountName: v.name,
         total: v.total,
       })),
-      totalRevenue: totalCash + totalCard + totalTransfer,
+      totalPrepaid,
+      // Facturación del día, completa. La seña es parte de la venta: lo que
+      // cambia es POR DÓNDE entró, no cuánto se vendió.
+      totalRevenue: totalCash + totalCard + totalTransfer + totalPrepaid,
       ticketCount,
       cashExpenses: cashExp,
     },
@@ -336,6 +382,7 @@ function emptySummary(): CajaDailySummary {
     totalCard: 0,
     totalTransfer: 0,
     accounts: [],
+    totalPrepaid: 0,
     totalRevenue: 0,
     ticketCount: 0,
     cashExpenses: 0,
@@ -370,7 +417,7 @@ export async function fetchCajaCSVData(params: {
   let query = supabase
     .from('visits')
     .select(`
-      id, completed_at, amount, payment_method, payment_account_id,
+      id, completed_at, amount, prepaid_amount, payment_method, payment_account_id,
       barber_id,
       client:clients!inner(name, phone),
       barber:staff!inner(full_name),
@@ -411,6 +458,14 @@ export async function fetchCajaCSVData(params: {
     const barber = v.barber as unknown as { full_name: string }
     const account = v.payment_account as unknown as { name: string } | null
 
+    // El export mantiene `monto` = precio completo (es la facturación, y así
+    // sigue cuadrando contra Estadísticas y contra los comprobantes de ARCA),
+    // y agrega la partición: cuánto de eso ya lo había cobrado Mercado Pago y
+    // cuánto entró de verdad por este medio de pago. Sin las dos columnas, un
+    // CSV de un barbero con señas le reclama plata que nunca tuvo en la mano.
+    // Mismo piso en cero y mismo tope que el trigger del ledger.
+    const prepaid = Math.min(Number(v.prepaid_amount ?? 0), Number(v.amount))
+
     return {
       fecha: dt.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }),
       hora: dt.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
@@ -419,6 +474,8 @@ export async function fetchCajaCSVData(params: {
       barbero: barber.full_name,
       barberoId: v.barber_id,
       monto: v.amount,
+      sena: prepaid,
+      montoEnMostrador: Math.max(0, Number(v.amount) - prepaid),
       metodoPago: paymentLabel(v.payment_method),
       cuenta: account?.name ?? (v.payment_method === 'cash' ? 'Efectivo' : '-'),
     }

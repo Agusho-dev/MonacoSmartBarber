@@ -15,6 +15,7 @@ import {
   Users,
 } from 'lucide-react'
 import { buildTurneroTheme, themeVars, type TurneroTheme } from './theme'
+import { PieLegal } from './pie-legal'
 
 // ─── Tipos ───────────────────────────────────────────────────────────
 
@@ -277,6 +278,8 @@ export function OrgLanding({ orgName, branches, branding }: Props) {
           </div>
         )}
       </div>
+
+      <PieLegal />
     </div>
   )
 }

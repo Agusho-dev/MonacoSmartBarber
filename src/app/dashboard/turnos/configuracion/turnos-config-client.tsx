@@ -49,6 +49,10 @@ import {
   type Tramo,
 } from '@/components/appointments/config/tipos'
 import { saveBranchAppointmentHours } from '@/lib/actions/appointment-hours'
+import { CobrosOnline } from '@/components/senas/cobros-online'
+import { ConfigSena, type ServicioConPrecio } from '@/components/senas/config-sena'
+import type { BranchDepositSettings } from '@/lib/senas/contrato'
+import type { ProveedorListado } from '@/lib/actions/senas'
 import { guardarConfiguracionTurnos } from './actions'
 
 interface SucursalResumen {
@@ -92,6 +96,22 @@ interface Props {
   templates: TemplateOption[]
   hasWhatsAppChannel: boolean
   org: { nombre: string; slug: string; logoUrl: string | null }
+  /**
+   * Todo lo de la seña. `null` = el usuario no tiene `senas.view` y la sección
+   * entera no se dibuja (no es que esté vacía: no le corresponde verla).
+   */
+  senas: BloqueSenas | null
+}
+
+export interface BloqueSenas {
+  puedeConfigurar: boolean
+  config: BranchDepositSettings | null
+  /** No pudimos leer. Distinto de "no hay nada configurado" (Known Risk #15). */
+  error: string | null
+  proveedores: ProveedorListado[]
+  oauthDisponible: boolean
+  urlBase: string
+  servicios: ServicioConPrecio[]
 }
 
 interface Estado {
@@ -160,6 +180,7 @@ export function TurnosConfigClient(props: Props) {
     templates,
     hasWhatsAppChannel,
     org,
+    senas,
   } = props
 
   const router = useRouter()
@@ -715,6 +736,49 @@ export function TurnosConfigClient(props: Props) {
         org={org}
         sucursales={sucursales.map(s => s.nombre)}
       />
+
+      {/* Seña y cobros online. Guardan APARTE de la barra de "Guardar cambios"
+          de esta pantalla: son otra tabla, otro permiso (`senas.manage` en vez
+          de `appointments.configure`) y otra decisión. Mezclarlos haría que
+          tocar el porcentaje de la seña quedara pendiente detrás de una
+          validación de horarios que no tiene nada que ver. */}
+      {senas && sucursalActiva && (
+        <>
+          {senas.error && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-red-500/30 bg-red-500/5 p-4">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-red-500" />
+              <div>
+                <p className="text-sm font-medium">No pudimos leer la configuración de la seña</p>
+                <p className="text-xs text-muted-foreground">{senas.error}</p>
+              </div>
+            </div>
+          )}
+
+          <CobrosOnline
+            proveedores={senas.proveedores}
+            oauthDisponible={senas.oauthDisponible}
+            urlBase={senas.urlBase}
+            soloSucursalId={sucursalActiva.id}
+            puedeConfigurar={senas.puedeConfigurar}
+          />
+
+          {senas.puedeConfigurar && (
+            <ConfigSena
+              // La `key` ata el formulario a la sucursal Y a la fila guardada:
+              // sin remontar, cambiar de sucursal dejaría el estado local de la
+              // anterior sobre datos nuevos.
+              key={`${sucursalActiva.id}:${senas.config?.id ?? 'sin-fila'}`}
+              sucursal={{ id: sucursalActiva.id, nombre: sucursalActiva.nombre }}
+              config={senas.config}
+              mpConectado={
+                senas.proveedores.find(p => p.branch_id === sucursalActiva.id)?.status === 'conectado'
+              }
+              servicios={senas.servicios}
+              horasParaCancelar={estado.reglas.horasParaCancelar}
+            />
+          )}
+        </>
+      )}
 
       {/* Barra de guardado */}
       {hayCambios && (

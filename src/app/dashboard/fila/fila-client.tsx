@@ -979,25 +979,21 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     // Evitamos clients(*) y staff(*) que traen columnas no usadas.
     // FIX #9: scopear por organization_id. Sin esto (y con la policy pública
     // queue_entries_public_read) el dashboard traía la cola de TODAS las orgs.
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('queue_entries')
       // Embeds por nombre de constraint (Known Risk #15): con dos FKs a `staff`,
       // PostgREST rechaza la query entera con PGRST201 y esto devolvía null.
       .select('*, client:clients!queue_entries_client_id_fkey(id, name, phone), barber:staff!queue_entries_barber_id_fkey(id, full_name, avatar_url)')
       .eq('organization_id', orgId)
       .in('status', ['waiting', 'in_progress'])
-      // `priority_order` = hora de llegada = el FIFO real. `position` sólo desempata:
-      // se recicla (`next_queue_position` = MAX+1 sobre las activas) y se duplica.
+      // Orden por `priority_order` (la hora de llegada = el FIFO real), NO por
+      // `position`: esa columna se recicla (`next_queue_position` = MAX+1 sobre las
+      // ACTIVAS, así que al vaciarse la fila vuelve a 1) y se repite entre entradas
+      // vivas. Ordenando por ella, el kanban dibujaba la fila en un orden que no era
+      // el de llegada — y como el drag derivaba de ese dibujo, ESE orden equivocado
+      // era el que terminaba escrito en `priority_order`.
       .order('priority_order')
       .order('position')
-    if (error) {
-      // Un fallo de lectura no es una fila vacía. Sin esto, un error de query pintaba
-      // el tablero sin nadie — que es como el dueño se enteró de un outage recién
-      // cuando los barberos le avisaron por teléfono.
-      console.error('[dashboard/fila] fetchQueue:', error.message)
-      toast.error('No pudimos leer la fila. Reintentá en unos segundos.')
-      return
-    }
     if (data) {
       const typed = data as QueueEntry[]
       setEntries(typed)
@@ -1186,6 +1182,9 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     } else {
       fd.set('phone', manualForm.phone)
     }
+    // Alta manual del dashboard: el origen que queda en `clients.signup_source`
+    // es 'staff', no la tablet (mig 210).
+    fd.set('origen', 'staff')
     if (manualForm.serviceId) fd.set('service_id', manualForm.serviceId)
     if (manualForm.barberId && manualForm.barberId !== DYNAMIC_BARBER) {
       fd.set('barber_id', manualForm.barberId)
@@ -1248,6 +1247,9 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     fd.set('name', client.name)
     fd.set('phone', client.phone)
     fd.set('branch_id', selectedBranchId)
+    // El cliente ya existe (sale del buscador), así que acá no se crea ninguna
+    // ficha; el origen viaja igual por si el alta terminara ocurriendo.
+    fd.set('origen', 'staff')
     if (searchServiceId) fd.set('service_id', searchServiceId)
     if (searchBarberId && searchBarberId !== DYNAMIC_BARBER) {
       fd.set('barber_id', searchBarberId)
@@ -1308,12 +1310,13 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       cols[b.id] = []
     }
 
-    // Orden por `priority_order` (llegada real); `position` sólo desempata. Este sort
-    // alimenta las columnas del tablero, así que pisaba el `.order('priority_order')`
-    // del fetch: el kanban dibujaba en orden de `position` —columna que se recicla y
-    // se duplica— mientras el panel del barbero y `claim_next_for_barber` ejecutaban
-    // en orden de llegada. Y como el drag deriva el orden nuevo de lo dibujado, ese
-    // orden equivocado era el que terminaba escrito.
+    // Orden por `priority_order` (llegada real), con `position` sólo de desempate.
+    // Este sort es el que alimenta las columnas del tablero, así que pisaba el
+    // `.order('priority_order')` del fetch: el kanban dibujaba la fila en orden de
+    // `position` —una columna que se recicla y se duplica— mientras el panel del
+    // barbero y `claim_next_for_barber` ejecutaban en orden de llegada. Y como el
+    // drag deriva el nuevo orden de lo que está dibujado, ese orden equivocado era
+    // el que terminaba escrito.
     const sortedEntries = [...branchEntries].sort((a, b) => {
       const pa = new Date(a.priority_order).getTime()
       const pb = new Date(b.priority_order).getTime()
@@ -1493,12 +1496,13 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       }
     }
 
-    // Renumeramos `position` (orden de dibujo) para la fila esperando DE ESTA SUCURSAL.
+    // Reconstruimos posiciones desde 1 para la fila esperando DE ESTA SUCURSAL.
     //
-    // El scope por sucursal es obligatorio, no una optimización: el fetch trae la cola
-    // de TODA la organización (`.eq('organization_id', orgId)`), así que en la vista
-    // "todas las sucursales" arrastrar una tarjeta tocaba la fila de los cuatro
-    // locales a la vez, con un ancla de tiempo compartida entre negocios distintos.
+    // El scope por sucursal es obligatorio, no una optimización: sin `selectedBranchId`
+    // el fetch trae la cola de TODA la organización (`.eq('organization_id', orgId)`),
+    // así que arrastrar una tarjeta en la vista "todas las sucursales" renumeraba —y
+    // antes rebaseaba— la fila de las cuatro sucursales a la vez, con un ancla de
+    // tiempo compartida entre locales que no tienen nada que ver entre sí.
     const branchIdDelDrag = selectedBranchId || arrastrada.branch_id
     const waitingItems = finalEntries.filter(
       e => e.status === 'waiting' && e.branch_id === branchIdDelDrag
@@ -1509,35 +1513,42 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
 
     // ── priority_order: SÓLO se le toca al que se arrastró ──────────────────────
     //
-    // `priority_order` es la hora de llegada del cliente y la clave FIFO real del
-    // sistema (`claim_next_for_barber` ordena por ella, el panel del barbero también).
+    // `priority_order` es la hora de llegada del cliente y la clave FIFO real de todo
+    // el sistema (`claim_next_for_barber` ordena por ella, el panel del barbero también).
     // Hasta el 4/9/2026 este bloque la REESCRIBÍA para toda la fila: tomaba el mínimo
     // como base y repartía base+1s, base+2s… en el orden de dibujo. Tres consecuencias,
-    // verificadas contra producción:
+    // las tres verificadas contra producción:
     //
-    //   1. Se perdía el orden de llegada DENTRO de la cola de cada barbero, que es
-    //      donde importa (`claim_next_for_barber` filtra `barber_id = yo OR barber_id
-    //      IS NULL`: un barbero nunca compite con los clientes de otro). El 4/9 en
-    //      Rondeau hubo 13 inversiones mismo-barbero y el 3/9, 8 — p. ej. Facundo
-    //      Brusco (llegó 15:13) quedó con prio 14:38:24.974 y Joaquín yotti (llegó
-    //      16:01) con 14:38:22.974, los dos de Nico Maidana: 48 min de inversión.
-    //   2. Como el ancla queda en el PASADO, los rebaseados además se le adelantan a
-    //      todo el que hizo check-in después del último drag, sin que nadie lo pida.
-    //   3. Se disparaba sin que nadie quisiera reordenar nada: `position` se recicla y
-    //      se repite, así que casi nunca vale 1..N, `entry.position !== newPos` daba
-    //      true para TODA la fila y un temblor de 5 px sobre una tarjeta (el
-    //      `activationConstraint` del MouseSensor) rebaseaba la cola entera. Medido:
-    //      17-33 entradas por día con la hora de llegada falseada, sólo en Rondeau,
-    //      con desfases de hasta 210 minutos.
+    //   1. El orden de llegada se perdía DENTRO de la cola de un mismo barbero (que
+    //      es donde importa: `claim_next_for_barber` filtra `barber_id = yo OR
+    //      barber_id IS NULL`, así que un barbero nunca compite con los clientes de
+    //      otro). El 4/9 en Rondeau hubo 13 inversiones mismo-barbero y el 3/9, 8 —
+    //      p. ej. Facundo Brusco (llegó 15:13) quedó con prio 14:38:24.974 y Joaquín
+    //      yotti (llegó 16:01) con 14:38:22.974, los dos de Nico Maidana: 48 minutos
+    //      de inversión. Y hacia afuera de la banda el daño es al revés: como el
+    //      ancla queda en el PASADO, los rebaseados se le adelantan a todo el que
+    //      hizo check-in después del último drag, sin que nadie lo haya pedido.
+    //   2. Se disparaba sin que nadie quisiera reordenar nada. `position` se recicla y
+    //      se repite (`next_queue_position` = MAX+1 sobre las activas), así que casi
+    //      nunca vale 1..N: `entry.position !== newPos` daba true para toda la fila y
+    //      un temblor de 5 px sobre una tarjeta (el `activationConstraint` del
+    //      MouseSensor) rebaseaba la cola entera. Medido: 17-33 entradas reescritas
+    //      por día sólo en Rondeau.
+    //   3. Empates exactos de `priority_order` (78 pares en prod). Ojo: NO llegan al
+    //      motor — nacen de dos pasadas distintas y para la segunda la primera fila
+    //      ya no está `waiting`, que es lo único que leen la RPC y el panel. Se
+    //      arregla de arrastre, pero no era el daño.
     //
     // Ahora se mueve UNA sola entrada, intercalando su timestamp entre sus vecinos
-    // nuevos. `position` se sigue renumerando (es dibujo), pero NO vuelve a decidir la
-    // hora de llegada de nadie.
+    // nuevos (los demás no se tocan). `position` se sigue renumerando porque es orden
+    // de dibujo y conviene tenerlo prolijo, pero NO puede volver a decidir la hora de
+    // llegada de nadie.
     const movedId = activeId !== overId ? String(activeId) : null
     const movedEntry = movedId ? waitingItems.find(e => e.id === movedId) : undefined
     // Cambiar a alguien de columna es cambiarle el BARBERO, no el lugar en la fila:
-    // conserva su hora de llegada. Sólo un reordenamiento dentro de su misma columna
-    // significa "a éste atendelo antes/después".
+    // mantiene su hora de llegada. Sólo un reordenamiento dentro de su misma columna
+    // significa "a éste atendelo antes/después", que es lo único que justifica
+    // tocarle `priority_order`.
     const dbDelMovido = movedEntry
       ? confirmedEntriesRef.current.find(e => e.id === movedEntry.id) ?? movedEntry
       : undefined
@@ -1547,7 +1558,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     if (movedEntry && !movedEntry.is_appointment && !cambioDeColumna) {
       const prioridadDe = (e: QueueEntry) => new Date(e.priority_order).getTime()
       // Vecinos walk-in en el orden nuevo. Los turnos se saltean: su `priority_order`
-      // es la hora RESERVADA, no una hora de llegada, y no sirve de cota.
+      // es la hora RESERVADA, no una hora de llegada, y no sirve como cota.
       const vecinos = waitingItems.filter(e => !e.is_appointment && !isNaN(prioridadDe(e)))
       const idx = vecinos.findIndex(e => e.id === movedEntry.id)
       const anterior = idx > 0 ? prioridadDe(vecinos[idx - 1]) : null
@@ -1556,8 +1567,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       let nuevaPrioridad: number
       if (anterior !== null && siguiente !== null) {
         nuevaPrioridad = Math.floor((anterior + siguiente) / 2)
-        // Vecinos pegados al milisegundo: no hay punto medio. Empujamos al de adelante
-        // 2 ms — mover UNA entrada es infinitamente menos daño que rebasear la fila.
+        // Vecinos pegados al milisegundo: no hay punto medio. Corremos al de adelante
+        // 1 ms —empujar a UNA entrada es infinitamente menos daño que rebasear la fila.
         if (nuevaPrioridad <= anterior || nuevaPrioridad >= siguiente) {
           nuevaPrioridad = anterior + 1
           updates.push({
@@ -1605,8 +1616,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
         return
       }
 
-      // Cambió de columna sin ser el arrastrado, o se le corrió la posición de dibujo.
-      // En ninguno de los dos casos se toca `priority_order`.
+      // Cambió de columna (barbero / pool) sin ser el arrastrado, o se le corrió la
+      // posición de dibujo. En ninguno de los dos casos se toca `priority_order`.
       const cambioBarbero =
         entry.barber_id !== dbEntry.barber_id || entry.is_dynamic !== dbEntry.is_dynamic
 
@@ -1651,9 +1662,10 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
   //
   // Antes un cliente `waiting` se cancelaba con un solo tap, sin preguntar y sin
   // deshacer. Sacar a alguien de la fila es la acción menos reversible de esta
-  // pantalla —el cliente no se entera: se queda sentado esperando un turno que ya no
-  // existe— y en producción son 4 por día los que terminan así. El panel del barbero
-  // ya confirmaba; el dashboard, que es donde además está el drag, no.
+  // pantalla —no hay `cancelled_by` que mirar después (recién existe desde la mig
+  // 211) y el cliente no se entera: se queda sentado esperando un turno que ya no
+  // existe— y en producción hay 4 clientes por día que terminan así. El panel del
+  // barbero ya confirmaba; el dashboard, que es donde además está el drag, no.
   function handleCancel(entryId: string) {
     const entry = entries.find((e) => e.id === entryId)
     if (entry && !entry.is_break) {
@@ -1678,8 +1690,9 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
 
   async function handleStartService(entry: QueueEntry) {
     if (!entry.barber_id) {
-      // Cliente del pool ("Menor espera"). Antes esto era un toast sin salida y el
-      // botón ni se dibujaba: la única acción sobre esta tarjeta era la X.
+      // Cliente del pool ("Menor espera"). Antes esto era un `toast.error` sin salida
+      // y el botón ni siquiera se dibujaba, así que la única acción disponible sobre
+      // esta tarjeta era la X. Ahora se elige el barbero acá mismo.
       setAsignarBarberoEntry(entry)
       return
     }
@@ -2144,9 +2157,10 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       )}
 
       {/* Selector de barbero para un cliente del pool ("Menor espera").
-          Los que atienden ahora quedan deshabilitados (arrancarles un segundo corte
-          choca contra `idx_queue_one_in_progress_per_barber`); los que no ficharon se
-          marcan pero se pueden elegir igual: la fila real manda sobre el fichaje. */}
+          Los barberos que atienden ahora quedan deshabilitados —arrancarles un
+          segundo corte choca contra `idx_queue_one_in_progress_per_barber`— y los
+          que no fichadaron se marcan, pero se pueden elegir igual: la fila real
+          manda sobre el fichaje. */}
       <AlertDialog
         open={!!asignarBarberoEntry}
         onOpenChange={(open) => { if (!open) setAsignarBarberoEntry(null) }}

@@ -80,6 +80,14 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
             'arca.manage': 'Configurar el facturador y el cupo de facturación',
         },
     },
+    senas: {
+        label: 'Señas',
+        permissions: {
+            'senas.view': 'Ver las señas cobradas y el estado de los cobros online',
+            'senas.manage': 'Configurar la seña por sucursal y conectar Mercado Pago',
+            'senas.refund': 'Devolver una seña por Mercado Pago',
+        },
+    },
     salary: {
         label: 'Sueldos',
         permissions: {
@@ -223,6 +231,9 @@ export const PERMISSION_DESCRIPTIONS: Record<string, string> = {
     'arca.view': 'Permite ver el facturador: el cupo del período, las ventas facturables y los comprobantes ya emitidos con su CAE.',
     'arca.emit': 'Permite emitir facturas electrónicas y notas de crédito ante ARCA. Son comprobantes fiscales reales: una vez emitidos sólo se anulan con nota de crédito.',
     'arca.manage': 'Permite configurar el facturador (CUIT, certificado, punto de venta) y definir el cupo: cuánto de lo que se vende se factura.',
+    'senas.view': 'Permite ver las señas cobradas por Mercado Pago, en qué estado está cada una y si la cuenta de cada sucursal está conectada.',
+    'senas.manage': 'Permite prender la seña por sucursal, definir el porcentaje y la política de cancelación, y conectar la cuenta de Mercado Pago.',
+    'senas.refund': 'Permite devolver una seña por Mercado Pago. Es plata que sale de la cuenta de la sucursal: va separado de configurar la seña. Una devolución es irreversible.',
 
     'salary.view': 'Permite ver los sueldos configurados para cada miembro del equipo.',
     'salary.view_commissions': 'Permite ver el detalle de comisiones generadas por atención.',

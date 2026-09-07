@@ -207,7 +207,7 @@ export async function impersonateOrg(orgId: string) {
   // Setear cookies
   const { cookies } = await import('next/headers')
   const cookieStore = await cookies()
-  cookieStore.set('active_organization', orgId, { maxAge: 60 * 60 * 24, path: '/' })
+  cookieStore.set('active_organization', orgId, { maxAge: 60 * 60 * 24, path: '/', httpOnly: true })
   cookieStore.set('platform_impersonation', '1', { maxAge: 60 * 60 * 24, path: '/' })
 
   await logAction(pa.user_id, 'impersonate', orgId, null, {})

@@ -275,6 +275,14 @@ const CASH_ACCOUNT_ID = 'cash_virtual_id'
 const CARD_ACCOUNT_ID = 'card_virtual_id'
 /** Destino virtual de los cobros por transferencia que no quedaron atados a ninguna cuenta. */
 const UNASSIGNED_TRANSFER_ID = 'unassigned_transfer_virtual_id'
+/**
+ * Destino virtual de las SEÑAS (mig 207): la mitad que el cliente pagó por
+ * Mercado Pago al reservar. No es una `payment_accounts` —la cuenta de MP es de
+ * la sucursal, no de un barbero— pero es plata cobrada y tiene que estar en
+ * algún destino, o el invariante `sum(charges) == Ingresos de Estadísticas` se
+ * rompe por el monto de todas las señas del período.
+ */
+const MP_DEPOSIT_ACCOUNT_ID = 'mp_deposit_virtual_id'
 
 export async function getAllAccountBalanceTotals(
   branchId?: string | null,
@@ -332,6 +340,7 @@ export async function getAllAccountBalanceTotals(
   // eran $626.000 de Caseros que no aparecían en ningún destino del gráfico.
   const cashCardVisitsPromise = fetchAll<{
     amount: number
+    prepaid_amount: number | null
     payment_method: string
     tip_amount: number | null
     tip_payment_method: string | null
@@ -339,7 +348,7 @@ export async function getAllAccountBalanceTotals(
     withRange(
       supabase
         .from('visits')
-        .select('amount, payment_method, tip_amount, tip_payment_method')
+        .select('amount, prepaid_amount, payment_method, tip_amount, tip_payment_method')
         .in('payment_method', ['cash', 'card'])
         .in('branch_id', scopeBranchIds),
       'completed_at'
@@ -362,11 +371,31 @@ export async function getAllAccountBalanceTotals(
       .range(from, to)
   )
 
-  // Fetch cuentas + cash/tarjeta en paralelo
-  const [{ data: accounts }, cashCardVisits, cashExpenses] = await Promise.all([
+  // Señas del período (mig 207), de CUALQUIER medio de pago del remanente. No se
+  // pueden derivar de las otras queries: en un corte pagado con transferencia la
+  // seña no está en `transfer_logs` (el trigger proyecta el remanente) y en uno
+  // pagado en efectivo está dentro de `visits.amount` junto con lo que el
+  // barbero cobró en el mostrador. El `.gt` mantiene la query en cero filas
+  // mientras no haya señas.
+  const prepaidVisitsPromise = fetchAll<{ amount: number; prepaid_amount: number | null }>((from, to) =>
+    withRange(
+      supabase
+        .from('visits')
+        .select('amount, prepaid_amount')
+        .gt('prepaid_amount', 0)
+        .in('branch_id', scopeBranchIds),
+      'completed_at'
+    )
+      .order('completed_at')
+      .range(from, to)
+  )
+
+  // Fetch cuentas + cash/tarjeta + señas en paralelo
+  const [{ data: accounts }, cashCardVisits, cashExpenses, prepaidVisits] = await Promise.all([
     accountsQuery,
     cashCardVisitsPromise,
     cashExpensesPromise,
+    prepaidVisitsPromise,
   ])
 
   const accountIds = accounts?.map(a => a.id) || []
@@ -418,11 +447,11 @@ export async function getAllAccountBalanceTotals(
     // en la org, $166.000 en Paraná (abr $96.000, may $54.000, jul $16.000), y el de julio
     // demuestra que no es un episodio histórico cerrado. Mostrarlos como destino propio hace
     // que el invariante cierre por construcción y que el dueño VEA que hay plata sin atribuir.
-    fetchAll<{ amount: number; tip_amount: number | null }>((from, to) =>
+    fetchAll<{ amount: number; prepaid_amount: number | null; tip_amount: number | null }>((from, to) =>
       withRange(
         supabase
           .from('visits')
-          .select('amount, tip_amount')
+          .select('amount, prepaid_amount, tip_amount')
           .eq('payment_method', 'transfer')
           .is('payment_account_id', null)
           .in('branch_id', scopeBranchIds),
@@ -433,12 +462,22 @@ export async function getAllAccountBalanceTotals(
     ),
   ])
 
+  /**
+   * Parte del cobro que entró por ESTE destino: el precio completo menos la seña.
+   * Acotada igual que el trigger del ledger (`GREATEST(amount - prepaid_amount, 0)`),
+   * porque un cupón que descuente más que la seña dejaría el remanente negativo.
+   */
+  const enMostrador = (v: { amount: number; prepaid_amount?: number | null }) =>
+    Math.max(0, Number(v.amount) - Number(v.prepaid_amount ?? 0))
+
   // La propina se atribuye por `tip_payment_method`, no por `payment_method`: existe el
   // caso (raro pero real) de un corte pagado en efectivo con la propina transferida.
+  // El cobro va NETO de seña: la mitad que se pagó por Mercado Pago nunca pasó por
+  // la caja ni por el posnet, y se muestra en su propio destino más abajo.
   const sumBy = (method: 'cash' | 'card') => ({
     charges: cashCardVisits
       .filter(v => v.payment_method === method)
-      .reduce((s, v) => s + Number(v.amount), 0),
+      .reduce((s, v) => s + enMostrador(v), 0),
     tips: cashCardVisits
       .filter(v => v.tip_payment_method === method)
       .reduce((s, v) => s + Number(v.tip_amount ?? 0), 0),
@@ -512,7 +551,7 @@ export async function getAllAccountBalanceTotals(
   // Transferencias que se cobraron sin elegir cuenta. Se agrega SÓLO si tiene movimiento:
   // un destino en $0 permanente sería ruido, y su presencia es justamente la señal de que
   // hay plata que hay que ir a atribuir.
-  const sinCuentaCharges = unassignedTransfers.reduce((s, v) => s + Number(v.amount), 0)
+  const sinCuentaCharges = unassignedTransfers.reduce((s, v) => s + enMostrador(v), 0)
   const sinCuentaTips = unassignedTransfers.reduce((s, v) => s + Number(v.tip_amount ?? 0), 0)
   if (sinCuentaCharges + sinCuentaTips > 0) {
     balances.push({
@@ -523,6 +562,37 @@ export async function getAllAccountBalanceTotals(
       expenses: 0,
       income: sinCuentaCharges + sinCuentaTips,
       balance: sinCuentaCharges + sinCuentaTips,
+    })
+  }
+
+  // Señas (Mercado Pago). Mismo criterio que "Transferencia sin cuenta asignada":
+  // se dibuja SÓLO si tuvo movimiento — un destino permanente en $0 es ruido en un
+  // gráfico de torta, y mientras las señas no estén prendidas no tiene nada que decir.
+  //
+  // INVARIANTE (el que hay que revisar si algún número deja de cerrar):
+  //   sum(charges de todos los destinos) == "Ingresos" del mismo período en
+  //   /dashboard/estadisticas == sum(visits.amount).
+  // Se sostiene por construcción: cada visita aporta `amount - prepaid_amount` al
+  // destino de su medio de pago y `prepaid_amount` a este, y las dos partes suman
+  // `amount`. Comprobación rápida en SQL, para un mes y una sucursal:
+  //   select sum(amount), sum(prepaid_amount), sum(amount - prepaid_amount)
+  //     from visits where branch_id = ... and completed_at >= ... and completed_at < ...;
+  // El primer número tiene que ser el de Estadísticas; el segundo, este destino.
+  const senasCharges = prepaidVisits.reduce(
+    (s, v) => s + Math.min(Number(v.prepaid_amount ?? 0), Number(v.amount)),
+    0,
+  )
+  if (senasCharges > 0) {
+    balances.push({
+      id: MP_DEPOSIT_ACCOUNT_ID,
+      name: 'Mercado Pago · seña',
+      charges: senasCharges,
+      // La seña nunca lleva propina (se cobra al reservar, antes del servicio) y
+      // de esa cuenta no se paga ningún gasto: es plata que la sucursal recibe.
+      tips: 0,
+      expenses: 0,
+      income: senasCharges,
+      balance: senasCharges,
     })
   }
 

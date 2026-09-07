@@ -41,7 +41,7 @@ export const POST = withMobileHandler('turnos/cancel', async (req: NextRequest) 
   const supabase = createAdminClient()
   const { data: appointment, error } = await supabase
     .from('appointments')
-    .select('id, client_id')
+    .select('id, client_id, cancellation_token')
     .eq('id', appointmentId)
     .maybeSingle()
 
@@ -50,7 +50,14 @@ export const POST = withMobileHandler('turnos/cancel', async (req: NextRequest) 
     return jsonError(404, 'NOT_FOUND', 'No encontramos ese turno.')
   }
 
-  const result = await cancelAppointment(appointmentId, 'client')
+  // El token de gestión de ESTA fila viaja como prueba de que la cancelación
+  // viene de un camino que verificó identidad. `cancelAppointment` no puede
+  // distinguir por sí misma una llamada interna de un POST armado a mano contra
+  // su action-id, así que la pertenencia que se acaba de comprobar por JWT hay
+  // que podérsela demostrar.
+  const result = await cancelAppointment(appointmentId, 'client', {
+    manageToken: appointment.cancellation_token,
+  })
 
   if (result.error) {
     const msg = result.error

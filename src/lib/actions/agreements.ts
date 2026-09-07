@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from './org'
+import { leerBarberSession } from '@/lib/barber-cookie'
 import { revalidatePath } from 'next/cache'
 import type { PartnerBenefit, PartnerBenefitStatus } from '@/lib/types/database'
 
@@ -56,10 +57,9 @@ async function getApproverStaffId(orgId: string): Promise<string | null> {
   // Buscar staff desde la cookie barber_session si existe
   const barberCookie = cookieStore.get('barber_session')
   if (barberCookie) {
-    try {
-      const parsed = JSON.parse(barberCookie.value)
-      if (parsed.staff_id) return parsed.staff_id
-    } catch { /* ignore */ }
+    // Cookie firmada (HMAC): sin firma válida no hay staff.
+    const parsed = leerBarberSession(barberCookie.value)
+    if (parsed?.staff_id) return parsed.staff_id
   }
 
   // O desde Supabase Auth user → staff

@@ -17,6 +17,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { cn } from '@/lib/utils'
+import { SenaBadge } from '@/components/senas/sena-badge'
 import { AlertTriangle, ArrowRight, Check, Loader2, Undo2, UserX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { Appointment, AppointmentStatus, AppointmentBlock } from '@/lib/types/database'
@@ -66,6 +67,12 @@ interface Props {
   date: string
   barbers: GridBarber[]
   appointments: Appointment[]
+  /**
+   * Monto de la seña pagada, por id de turno. Lo resuelve la agenda con una
+   * sola consulta en lote (`senasDeTurnos`): una por tarjeta serían ~60 idas y
+   * vueltas para dibujar un día.
+   */
+  senas?: Record<string, number>
   blocks?: AppointmentBlock[]
   /** Snap real de inicio de turno (`appointment_settings.slot_interval_minutes`). */
   slotInterval: number
@@ -239,10 +246,12 @@ function TarjetaTurno({
   appointment,
   compacto,
   fueraDeGrilla = null,
+  sena,
 }: {
   appointment: Appointment
   compacto: boolean
   fueraDeGrilla?: FueraDeGrilla
+  sena?: number
 }) {
   return (
     <>
@@ -250,6 +259,7 @@ function TarjetaTurno({
         {fueraDeGrilla && <AlertTriangle className="size-3 shrink-0" />}
         <span className="font-mono">{appointment.start_time.slice(0, 5)}</span>
         <span className="truncate">{appointment.client?.name ?? 'Cliente'}</span>
+        {sena != null && sena > 0 && <SenaBadge monto={sena} soloIcono className="ml-auto" />}
       </div>
       {!compacto && appointment.service?.name && (
         <div className="truncate leading-tight opacity-90">{appointment.service.name}</div>
@@ -265,6 +275,7 @@ function TurnoDraggable({
   seleccionado,
   arrastrable,
   fueraDeGrilla = null,
+  sena,
   onClick,
   onResizeStart,
 }: {
@@ -274,6 +285,7 @@ function TurnoDraggable({
   seleccionado: boolean
   arrastrable: boolean
   fueraDeGrilla?: FueraDeGrilla
+  sena?: number
   onClick?: () => void
   onResizeStart?: (e: React.PointerEvent) => void
 }) {
@@ -318,7 +330,7 @@ function TurnoDraggable({
         width: `calc(${anchoPct}% - 4px)`,
       }}
     >
-      <TarjetaTurno appointment={appointment} compacto={compacto} fueraDeGrilla={fueraDeGrilla} />
+      <TarjetaTurno appointment={appointment} compacto={compacto} fueraDeGrilla={fueraDeGrilla} sena={sena} />
       {altoPx > 52 && appointment.payment_status === 'paid' && (
         <div className="truncate text-[10px] opacity-80">Pagado</div>
       )}
@@ -345,6 +357,7 @@ function TurnoDraggable({
 export function AppointmentsGridView({
   barbers,
   appointments,
+  senas = {},
   blocks = [],
   slotInterval,
   hoursOpen,
@@ -1024,6 +1037,7 @@ export function AppointmentsGridView({
                           topPx={rect.top}
                           altoPx={rect.alto}
                           fueraDeGrilla={rect.fuera}
+                          sena={senas[c.appointment.id]}
                           seleccionado={selected?.appointmentId === c.appointment.id}
                           arrastrable={!!onAppointmentMove && !guardando}
                           onClick={() => onAppointmentClick?.(c.appointment)}

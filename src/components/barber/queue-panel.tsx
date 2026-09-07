@@ -75,9 +75,13 @@ import {
   Eye,
   MoreHorizontal,
   CalendarDays,
+  PackageCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
+import { CouponScanDialog } from './coupon-scan-dialog'
+import { LoyaltyTierChip } from './loyalty-tier-chip'
+import { findLoyaltyTier, type LoyaltyTierLite } from '@/lib/loyalty-checkout'
 import { DirectSaleDialog } from './direct-sale-dialog'
 import { ClientProfileSheet } from './client-profile-sheet'
 import { ActiveClientCard, ActiveBreakCard } from './active-client-card'
@@ -109,6 +113,8 @@ interface BarberSession {
   staff_id: string
   full_name: string
   branch_id: string
+  /** Org de la sesión (getBarberSession la trae): filtra `loyalty_tiers`. */
+  organization_id?: string
   role: string
   role_id?: string | null
   permissions?: Record<string, boolean>
@@ -126,6 +132,12 @@ interface QueuePanelProps {
   timezone?: string | null
   /** `appointment_settings.buffer_minutes`: define la ventana de protección. */
   bufferMinutes?: number | null
+  /**
+   * `loyalty_settings.is_enabled` de la org (lo lee el server: la tabla es sólo
+   * service role). Apagado → sin chips de categoría en la fila ni en el cobro,
+   * igual que la app y el dashboard; `tier_code` queda cargado en el estado.
+   */
+  loyaltyEnabled?: boolean
 }
 
 interface BreakRequestRow {
@@ -149,6 +161,7 @@ export function QueuePanel({
   operationMode = 'walk_in',
   timezone,
   bufferMinutes,
+  loyaltyEnabled = true,
 }: QueuePanelProps) {
   const [entries, setEntries] = useState<QueueEntry[]>([])
   // Turnos del día de este barbero. Arranca con el snapshot del server y se
@@ -157,8 +170,6 @@ export function QueuePanel({
   // porque es dato de agenda, no de tiempo real — Known Risk #9.
   const [todayAppointments, setTodayAppointments] = useState<Appointment[]>(appointments)
   const [loading, setLoading] = useState(true)
-  /** Mensaje visible cuando la fila NO se pudo leer (≠ fila vacía). */
-  const [queueError, setQueueError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
   const [now, setNow] = useState(Date.now())
@@ -196,6 +207,9 @@ export function QueuePanel({
   const [hiddenLoading, setHiddenLoading] = useState(false)
 
   const [directSaleOpen, setDirectSaleOpen] = useState(false)
+  // Entrega de un premio merch/especial SIN cobro (el cliente pasa a retirar la
+  // gorra): escáner en modo entrega → `deliverRewardByQr`.
+  const [deliverRewardOpen, setDeliverRewardOpen] = useState(false)
   // (mobilePanelTab eliminado: no se usaba en el render)
 
   // ── Turnos: tira compacta + agenda completa a demanda ──
@@ -216,6 +230,34 @@ export function QueuePanel({
   const prevBreakRequestCountRef = useRef<number>(0)
 
   const supabase = useMemo(() => createClient(), [])
+
+  // Categorías del programa de fidelización (mig 196): nombre y colores que definió
+  // el dueño, cargadas UNA vez por sesión. Policy pública `loyalty_tiers_public_read`
+  // (la tablet va con anon + PIN); se filtra por org para no mezclar categorías de
+  // otra organización. Sin filas (programa sin configurar) → ningún chip.
+  // Con el programa APAGADO no se consultan (quedan []): `tier_code` sigue cargado
+  // en client_loyalty_state y sin esto la tablet mostraba "ORO" mientras la app
+  // y el dashboard decían que no hay categoría.
+  const [loyaltyTiers, setLoyaltyTiers] = useState<LoyaltyTierLite[]>([])
+  useEffect(() => {
+    if (!loyaltyEnabled) return
+    let cancelled = false
+    let q = supabase
+      .from('loyalty_tiers')
+      .select('code, name, color_primary, color_secondary, text_color')
+      .eq('is_active', true)
+      .order('sort_order')
+    if (session.organization_id) q = q.eq('organization_id', session.organization_id)
+    q.then(({ data, error }) => {
+      if (error) {
+        console.error('[queue-panel] loyalty_tiers:', error.message)
+        return
+      }
+      if (!cancelled && data) setLoyaltyTiers(data as LoyaltyTierLite[])
+    })
+    return () => { cancelled = true }
+  }, [supabase, session.organization_id, loyaltyEnabled])
+
   const canManageBreaks = session.role === 'admin' || session.role === 'owner' || session.permissions?.['breaks.grant'] === true
   const canDeactivateStaff = session.role === 'admin' || session.role === 'owner' || session.permissions?.['staff.deactivate'] === true
   const canHideSelf = session.role === 'admin' || session.role === 'owner' || session.permissions?.['queue.hide_self'] === true
@@ -224,34 +266,14 @@ export function QueuePanel({
     // Query liviano: eliminamos visits(count) — era un correlated subquery por cliente
     // que generaba 177k calls/día según pg_stat_statements. El conteo ya vive en
     // clients.total_visits y en la vista client_loyalty_state.total_visits.
-    const { data, error } = await supabase
+    // tier_code / visits_in_window (mig 196) salen de la MISMA fila: cero queries extra.
+    const { data } = await supabase
       .from('queue_entries')
-      // Embeds POR NOMBRE DE CONSTRAINT, no por tabla. `queue_entries` puede tener más
-      // de una FK a `staff` (hoy `barber_id`; el 4/9/2026 se agregó `cancelled_by` y
-      // toda esta query empezó a fallar con PGRST201 "more than one relationship was
-      // found"). Con el nombre del constraint la query es inmune a que aparezca otra FK.
-      // Es el Known Risk #15 del CLAUDE.md, cobrado en vivo: las tablets de los tres
-      // locales mostraron "Esperando clientes · General 0" con gente sentada adentro.
-      .select('*, client:clients!queue_entries_client_id_fkey(id, name, phone, loyalty:client_loyalty_state(total_visits)), barber:staff!queue_entries_barber_id_fkey(id, full_name, avatar_url), service:services!queue_entries_service_id_fkey(id, name, duration_minutes, price)')
+      .select('*, client:clients(id, name, phone, loyalty:client_loyalty_state(total_visits, tier_code, visits_in_window)), barber:staff(id, full_name, avatar_url), service:services(id, name, duration_minutes, price)')
       .eq('branch_id', session.branch_id)
       .in('status', ['waiting', 'in_progress'])
-      // `priority_order` es el FIFO real (el mismo que usa `claim_next_for_barber`).
-      // `position` se recicla y se duplica entre entradas vivas: ordenar por ella
-      // mostraba un orden distinto del que el motor iba a ejecutar.
-      .order('priority_order')
       .order('position')
 
-    // Un fallo de lectura NO es una fila vacía. Sin esto, cualquier error de la query
-    // (PGRST201, RLS, red) pintaba "Esperando clientes · Cuando llegue alguien
-    // aparecerá acá" — indistinguible de un local sin gente, que es como una query
-    // rota se convirtió en tres locales parados sin que nadie supiera por qué.
-    if (error) {
-      console.error('[queue-panel] fetchQueue:', error.message)
-      setQueueError('No pudimos leer la fila. Reintentando…')
-      setLoading(false)
-      return
-    }
-    setQueueError(null)
     if (data) setEntries(data as QueueEntry[])
     setLoading(false)
   }, [supabase, session.branch_id])
@@ -566,9 +588,10 @@ export function QueuePanel({
   const myRealWaitingEntries = myWaitingEntries.filter(e => !e.is_break)
 
   /**
-   * Gente esperando que NO es de nadie, o que lleva demasiado. Es lo que hace falta
-   * para que "General" deje de ser un cajón silencioso: un cliente del pool cuyo hint
-   * no cayó en ninguna "Mi fila" sólo existe ahí, y la pestaña por defecto es "Mi fila".
+   * Gente que está esperando y NO es de nadie, o que lleva demasiado. Es lo que hace
+   * falta para que la pestaña "General" deje de ser un cajón silencioso: un cliente
+   * del pool cuyo hint no cayó en ninguna "Mi fila" sólo existe ahí, y la pestaña por
+   * defecto es "Mi fila". Con el contador en gris nadie la abría.
    */
   const alertasEnGeneral = allWaitingEntries.filter(e => {
     if (e.is_break) return false
@@ -1077,6 +1100,12 @@ export function QueuePanel({
                 <p className="truncate text-base sm:text-lg font-semibold">
                   {entry.client?.name ?? 'Cliente'}
                 </p>
+                {/* Categoría del programa de fidelización (colores del dueño). Sin
+                    categoría (programa apagado / cliente no enrolado) no hay chip. */}
+                {(() => {
+                  const tier = findLoyaltyTier(loyaltyTiers, entry.client?.loyalty?.[0]?.tier_code)
+                  return tier ? <LoyaltyTierChip tier={tier} /> : null
+                })()}
                 {/* Hora RESERVADA, tomada de la agenda. No se lee de
                     `priority_order`: en una entrada adoptada de un walk-in ése
                     es `LEAST(llegada, hora del turno)` y el badge mostraba la
@@ -1127,27 +1156,37 @@ export function QueuePanel({
                   </>
                 )}
               </div>
-              {entry.reward_claimed && (
-                <Badge variant="secondary" className="mt-1 gap-1 text-xs bg-purple-500/15 text-purple-500 hover:bg-purple-500/25 border-purple-500/20">
-                  <Gift className="size-3" />
-                  Premio reclamado
-                </Badge>
-              )}
-              <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                <Clock className="size-3" />
-                <span>{formatElapsed(entry.checked_in_at)} esperando</span>
-                {(() => {
-                  // Medido sobre 90 días de prod: la mediana de espera real es de 5 a
-                  // 12 min y el p90 no pasa de 51. Los clientes que terminaron
-                  // anotados-y-nunca-atendidos llevaban 1 a 4 HORAS mientras el local
-                  // atendía a 9-12 personas que llegaron después. La señal estaba en
-                  // pantalla, en gris, y no se veía.
-                  const min = Math.floor((now - new Date(entry.checked_in_at).getTime()) / 60000)
-                  if (min >= 70) return <span className="ml-1 font-semibold text-destructive">· lleva demasiado</span>
-                  if (min >= 40) return <span className="ml-1 font-medium text-amber-500">· se está demorando</span>
-                  return null
-                })()}
-              </div>
+              {/* La espera deja de ser un dato gris cuando se vuelve un problema.
+                  Medido sobre 90 días de producción: la mediana de espera real es de
+                  5 a 12 min y el p90 no pasa de 51; los clientes que terminaron
+                  anotados-y-nunca-atendidos habían estado esperando 1 a 4 HORAS
+                  mientras la sucursal atendía a 9-12 personas que llegaron después.
+                  O sea: la señal existía en la pantalla y no se veía. A los 40 min la
+                  tarjeta se pone ámbar y a los 70 roja, para que "a éste lo estamos
+                  dejando pasar" sea imposible de no ver de reojo. */}
+              {(() => {
+                const minutos = Math.floor((now - new Date(entry.checked_in_at).getTime()) / 60000)
+                const nivel = minutos >= 70 ? 'critico' : minutos >= 40 ? 'demorado' : 'normal'
+                return (
+                  <div
+                    className={`mt-1 flex items-center gap-1 text-xs ${
+                      nivel === 'critico'
+                        ? 'font-semibold text-destructive'
+                        : nivel === 'demorado'
+                          ? 'font-medium text-amber-500'
+                          : 'text-muted-foreground'
+                    }`}
+                  >
+                    <Clock className="size-3" />
+                    <span>{formatElapsed(entry.checked_in_at)} esperando</span>
+                    {nivel !== 'normal' && (
+                      <span className="ml-0.5">
+                        · {nivel === 'critico' ? 'lleva demasiado' : 'se está demorando'}
+                      </span>
+                    )}
+                  </div>
+                )
+              })()}
               {isGeneralQueue && entry.barber && (
                 <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                   <User className="size-3" />
@@ -1298,9 +1337,15 @@ export function QueuePanel({
                 <Scissors className="size-5" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium">
-                  {entry.client?.name ?? 'Cliente'}
-                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <p className="truncate font-medium">
+                    {entry.client?.name ?? 'Cliente'}
+                  </p>
+                  {(() => {
+                    const tier = findLoyaltyTier(loyaltyTiers, entry.client?.loyalty?.[0]?.tier_code)
+                    return tier ? <LoyaltyTierChip tier={tier} /> : null
+                  })()}
+                </div>
                 <p className="text-xs text-muted-foreground">
                   Atendido por {entry.barber?.full_name ?? 'otro barbero'}
                 </p>
@@ -1319,27 +1364,22 @@ export function QueuePanel({
   }
 
   /**
-   * Vacío de "Mi fila" ≠ vacío del local, y ninguno de los dos es "no pudimos leer".
-   * Esta pantalla decía "Esperando clientes · Cuando llegue alguien aparecerá acá" en
-   * los tres casos: con gente sentada asignada a otro barbero, con clientes del pool
-   * que no cayeron en la "Mi fila" de nadie, y con la query caída.
+   * Vacío de "Mi fila" ≠ vacío del local. Con `barber_id` propio no hay nadie pero en
+   * la fila general sí, esta pantalla decía "Esperando clientes · cuando llegue
+   * alguien aparecerá acá" — con gente sentada en el local. Y pasa de verdad: un
+   * cliente del pool ("Menor espera") queda sin pre-asignar cuando ningún barbero es
+   * elegible (nadie fichado, todos ocultos del check-in o bloqueados por fin de
+   * turno), y entonces no está en la "Mi fila" de NADIE: sólo en la pestaña General,
+   * que no es la que se abre por default.
    */
   function renderEmptyQueue() {
     const hayGenteEnElLocal = allWaitingEntries.filter(e => !e.is_break).length
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center" role="status">
-        <div className={`mb-4 flex size-16 items-center justify-center rounded-3xl ${queueError ? 'bg-destructive/15' : 'bg-muted animate-float'}`}>
-          <Scissors className={`size-8 ${queueError ? 'text-destructive' : 'text-muted-foreground/60'}`} />
+        <div className="mb-4 flex size-16 items-center justify-center rounded-3xl bg-muted animate-float">
+          <Scissors className="size-8 text-muted-foreground/60" />
         </div>
-        {queueError ? (
-          <>
-            <p className="text-base font-bold text-destructive">No pudimos leer la fila</p>
-            <p className="mt-1 max-w-[240px] text-xs text-muted-foreground">
-              Esto <span className="font-semibold">no</span> significa que no haya nadie esperando.
-              Reintentá en unos segundos o avisá en el mostrador.
-            </p>
-          </>
-        ) : hayGenteEnElLocal > 0 ? (
+        {hayGenteEnElLocal > 0 ? (
           <>
             <p className="text-base font-bold">No tenés clientes asignados</p>
             <p className="mt-1 max-w-[240px] text-xs text-muted-foreground">
@@ -1433,6 +1473,12 @@ export function QueuePanel({
             <Gift className="size-4" />
             Vender
           </Button>
+          {loyaltyEnabled && (
+            <Button variant="ghost" size="sm" onClick={() => setDeliverRewardOpen(true)}>
+              <PackageCheck className="size-4" />
+              Entregar premio
+            </Button>
+          )}
           {canHideSelf && (
             <Button variant="ghost" size="sm" onClick={handleToggleVisibility} disabled={hiddenLoading} className={hiddenFromCheckin ? 'text-amber-500' : ''}>
               {hiddenFromCheckin ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -1506,6 +1552,12 @@ export function QueuePanel({
                 <Gift className="size-4 mr-2" />
                 Venta directa
               </DropdownMenuItem>
+              {loyaltyEnabled && (
+                <DropdownMenuItem onClick={() => setDeliverRewardOpen(true)}>
+                  <PackageCheck className="size-4 mr-2" />
+                  Entregar premio
+                </DropdownMenuItem>
+              )}
               {canHideSelf && (
                 <DropdownMenuItem onClick={handleToggleVisibility} disabled={hiddenLoading}>
                   {hiddenFromCheckin ? <EyeOff className="size-4 mr-2 text-amber-500" /> : <Eye className="size-4 mr-2" />}
@@ -1618,7 +1670,9 @@ export function QueuePanel({
                   <Badge
                     variant="secondary"
                     className={`ml-2 px-1.5 py-0 min-w-5 h-5 flex items-center justify-center text-[11px] font-bold shadow-sm ${
-                      alertasEnGeneral > 0 ? 'bg-amber-500 text-black animate-pulse' : 'bg-background'
+                      alertasEnGeneral > 0
+                        ? 'bg-amber-500 text-black animate-pulse'
+                        : 'bg-background'
                     }`}
                   >
                     {allWaitingEntries.filter((e) => !e.is_break).length}
@@ -1721,7 +1775,9 @@ export function QueuePanel({
                   Fila general
                   <Badge
                     variant="secondary"
-                    className={`ml-2 px-2 text-base ${alertasEnGeneral > 0 ? 'bg-amber-500 text-black animate-pulse' : ''}`}
+                    className={`ml-2 px-2 text-base ${
+                      alertasEnGeneral > 0 ? 'bg-amber-500 text-black animate-pulse' : ''
+                    }`}
                   >
                     {allWaitingEntries.filter(e => !e.is_break).length}
                   </Badge>
@@ -1832,6 +1888,7 @@ export function QueuePanel({
       <CompleteServiceDialog
         entry={completingEntry}
         branchId={session.branch_id}
+        tiers={loyaltyTiers}
         onClose={() => setCompletingEntry(null)}
         onCompleted={async () => {
           // Refresh estándar tras finalizar. El siguiente cliente queda en
@@ -1897,6 +1954,21 @@ export function QueuePanel({
         onClose={() => setDirectSaleOpen(false)}
         onCompleted={() => {
           refreshStats()
+        }}
+      />
+
+      {/* Entrega de un premio (merch/especial) sin cobro: el mismo escáner del
+          cobro en modo entrega. Un descuento o una invitación se rechazan acá y
+          se aplican desde "Cobrar" (`needs_checkout`). */}
+      <CouponScanDialog
+        mode="delivery"
+        open={deliverRewardOpen}
+        branchId={session.branch_id}
+        clientId={null}
+        onClose={() => setDeliverRewardOpen(false)}
+        onDelivered={(rewardName) => {
+          setDeliverRewardOpen(false)
+          toast.success(`Entregado: ${rewardName}`)
         }}
       />
 

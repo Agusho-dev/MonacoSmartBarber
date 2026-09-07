@@ -4,6 +4,7 @@ import { cache } from 'react'
 import { createAdminClient } from '@/lib/supabase/server'
 import { isValidUUID } from '@/lib/validation'
 import { getCachedAuthUser } from '@/lib/auth-cache'
+import { leerBarberSession } from '@/lib/barber-cookie'
 
 /**
  * Obtiene el organization_id del usuario autenticado.
@@ -145,9 +146,16 @@ export async function setActiveOrgFromBranch(branchId: string) {
   if (!branch?.organization_id) return
 
   const cookieStore = await cookies()
+  // No pisar la org de un dashboard autenticado (mismo guard que
+  // selectOrganizationBySlug): el kiosko/TV/login de barbero no tienen sesión
+  // auth, así que para su caso real esto no cambia nada.
+  const hasAuthSession = cookieStore.getAll().some(c => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'))
+  if (hasAuthSession) return
+  // httpOnly: ningún código de browser la lee, sólo el server.
   cookieStore.set('active_organization', branch.organization_id, {
     maxAge: 60 * 60 * 24 * 365,
     path: '/',
+    httpOnly: true,
   })
 }
 
@@ -180,7 +188,7 @@ export async function selectOrganizationBySlug(slug: string) {
   // (evita pisar la org del admin cuando entra al kiosk físico)
   const hasAuthSession = cookieStore.getAll().some(c => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'))
   if (!hasAuthSession) {
-    cookieStore.set('active_organization', org.id, { maxAge: 60 * 60 * 24 * 365, path: '/' })
+    cookieStore.set('active_organization', org.id, { maxAge: 60 * 60 * 24 * 365, path: '/', httpOnly: true })
   }
 
   return { success: true, organization: org }
@@ -268,10 +276,36 @@ export async function switchOrganization(newOrgId: string) {
 
   // 3. Setear cookie
   const cookieStore = await cookies()
-  cookieStore.set('active_organization', newOrgId, { maxAge: 60 * 60 * 24 * 30, path: '/' })
+  cookieStore.set('active_organization', newOrgId, { maxAge: 60 * 60 * 24 * 30, path: '/', httpOnly: true })
 
   return { success: true }
 }
+
+/**
+ * ¿El usuario pertenece a la org? (staff activo u organization_members).
+ * Cacheado por request: getCurrentOrgId corre varias veces por render y sólo
+ * llega acá cuando la cookie no coincide con el app_metadata del usuario.
+ */
+const perteneceALaOrg = cache(async function perteneceALaOrg(authUserId: string, orgId: string): Promise<boolean> {
+  const supabase = createAdminClient()
+  const { data: staff } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('auth_user_id', authUserId)
+    .eq('organization_id', orgId)
+    .eq('is_active', true)
+    .limit(1)
+    .maybeSingle()
+  if (staff) return true
+  const { data: member } = await supabase
+    .from('organization_members')
+    .select('id')
+    .eq('user_id', authUserId)
+    .eq('organization_id', orgId)
+    .limit(1)
+    .maybeSingle()
+  return !!member
+})
 
 /**
  * Obtiene el organization_id del usuario autenticado actual.
@@ -289,21 +323,21 @@ export const getCurrentOrgId = cache(async function getCurrentOrgId(): Promise<s
   // 1. Barber PIN session (panel barbero) — no requiere llamada a Supabase Auth
   const barberSession = cookieStore.get('barber_session')
   if (barberSession) {
-    try {
-      const parsed = JSON.parse(barberSession.value)
-      // Preferir organization_id de la cookie si es UUID válido (evita DB roundtrip)
-      if (isValidUUID(parsed.organization_id)) return parsed.organization_id
-      if (isValidUUID(parsed.staff_id)) {
-        const adminClient = createAdminClient()
-        const { data: staff } = await adminClient
-          .from('staff')
-          .select('organization_id')
-          .eq('id', parsed.staff_id)
-          .eq('is_active', true)
-          .maybeSingle()
-        if (staff?.organization_id) return staff.organization_id
-      }
-    } catch { /* cookie invalida */ }
+    // La cookie va FIRMADA (HMAC, src/lib/barber-cookie.ts): un JSON escrito a
+    // mano no pasa de acá. Y aun con firma válida, el organization_id NUNCA se
+    // lee del cuerpo de la cookie: se resuelve contra `staff` (una query,
+    // cacheada por request), que además corta a un empleado dado de baja.
+    const parsed = leerBarberSession(barberSession.value)
+    if (parsed && isValidUUID(parsed.staff_id)) {
+      const adminClient = createAdminClient()
+      const { data: staff } = await adminClient
+        .from('staff')
+        .select('organization_id')
+        .eq('id', parsed.staff_id)
+        .eq('is_active', true)
+        .maybeSingle()
+      if (staff?.organization_id) return staff.organization_id
+    }
   }
 
   // 2. Supabase Auth (usuarios del dashboard) — usa cache request-scope para no
@@ -313,8 +347,19 @@ export const getCurrentOrgId = cache(async function getCurrentOrgId(): Promise<s
     if (user) {
       const activeOrg = cookieStore.get('active_organization')?.value
       if (isValidUUID(activeOrg)) {
-        console.log('[debug-branch][getCurrentOrgId] orgId desde cookie active_organization', { orgId: activeOrg, userId: user.id })
-        return activeOrg!
+        // La cookie la puede escribir el browser: sólo vale respaldada por el
+        // server. La respaldan el app_metadata del usuario (switchOrganization
+        // e impersonation lo escriben tras validar membresía, y auth.getUser()
+        // lo trae fresco del servidor: el usuario no puede tocarlo) o una fila
+        // real en staff / organization_members de ESA org. Antes se devolvía
+        // tal cual y un owner de otra org "administraba" cualquier org
+        // editando la cookie.
+        const meta = (user.app_metadata ?? {}) as { organization_id?: string; active_organization_id?: string }
+        if (activeOrg === meta.active_organization_id || activeOrg === meta.organization_id || (await perteneceALaOrg(user.id, activeOrg!))) {
+          console.log('[debug-branch][getCurrentOrgId] orgId desde cookie active_organization', { orgId: activeOrg, userId: user.id })
+          return activeOrg!
+        }
+        console.warn('[getCurrentOrgId] cookie active_organization ignorada: el usuario no pertenece a esa organización', { orgId: activeOrg, userId: user.id })
       }
       const resolved = await getOrganizationId(user.id)
       console.log('[debug-branch][getCurrentOrgId] orgId desde getOrganizationId', { orgId: resolved, userId: user.id })

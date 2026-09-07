@@ -12,6 +12,9 @@ import {
   cancelAppointmentByToken,
   getAppointmentSettings,
 } from '@/lib/actions/appointments'
+import { crearIntencionDeSena, senaObligatoria } from '@/lib/senas/motor'
+import { leerConfigSena } from '@/lib/senas/repo'
+import type { CrearSenaResult } from '@/lib/senas/contrato'
 
 // ─── Tipos públicos ──────────────────────────────────────────────────
 
@@ -363,6 +366,26 @@ export async function publicBookAppointment(
     return { error: 'Seleccioná al menos un servicio' }
   }
 
+  // El paso de pago del wizard es una PANTALLA, no un control: este export es
+  // un endpoint HTTP con un action-id que viaja en el bundle, así que un POST
+  // armado a mano —o el propio wizard si alguna vez calcula mal la seña— crea
+  // el turno `confirmed` sin haber pagado nada. Cuando la sucursal cobra seña
+  // por el canal web, la reserva sólo puede nacer del webhook de Mercado Pago.
+  try {
+    if (await senaObligatoria(input.branch_id, 'web', input.service_ids)) {
+      return {
+        error:
+          'Esta sucursal pide una seña para reservar. Volvé a empezar y vas a poder pagarla en el último paso.',
+      }
+    }
+  } catch (e) {
+    // No poder averiguarlo NO habilita a reservar gratis: es un control de
+    // plata y se corta acá (misma regla que `getAvailableSlots`, que nunca
+    // degrada a "todo libre").
+    console.error('[publicBookAppointment] senaObligatoria:', e)
+    return { error: 'No pudimos confirmar la reserva en este momento. Probá de nuevo.' }
+  }
+
   // El primero es el servicio principal (FK de la fila); el resto se persiste
   // en `appointment_services`.
   const primaryServiceId = input.service_ids[0]
@@ -420,6 +443,160 @@ export async function publicBookAppointment(
       client_is_new: 'clientIsNew' in result ? !!result.clientIsNew : true,
     },
   }
+}
+
+// ─── Seña por Mercado Pago ───────────────────────────────────────────
+
+interface PrepararSenaInput {
+  branch_id: string
+  client_phone: string
+  client_name: string
+  staff_id: string | null
+  starts_at: string       // "YYYY-MM-DD"
+  start_time: string      // "HH:MM"
+  service_ids: string[]
+  duration_minutes: number
+}
+
+/**
+ * Abre el checkout de Mercado Pago para una reserva del turnero WEB.
+ *
+ * Es la gemela de `publicBookAppointment` para las sucursales que exigen seña,
+ * y la diferencia de fondo es cuándo nace el turno: acá NO se crea nada en
+ * `appointments`. El turno lo crea el webhook cuando el pago está acreditado
+ * (`acreditarPago` → `createAppointment`, el motor de siempre). Lo único que
+ * esta acción devuelve es un link de pago.
+ *
+ * Por qué hay que crear al CLIENTE antes de cobrar: `booking_deposits.client_id`
+ * es NOT NULL —la seña es de alguien desde el primer momento, si no no hay a
+ * quién devolvérsela— y el que paga puede ser alguien que nunca vino. La ficha
+ * se hubiera creado igual dos toques después, al confirmar el turno; adelantarla
+ * además hace que el `find_client_id_by_phone` del webhook encuentre ESTA ficha
+ * en vez de fabricar una segunda.
+ *
+ * Lo que sí se evita es crear la ficha en vano: el chequeo de "¿esta sucursal
+ * pide seña por web?" va ANTES, así una sucursal sin seña no deja clientes
+ * huérfanos cada vez que alguien abre el turnero.
+ *
+ * El nombre NO se actualiza si el cliente ya existía (a diferencia de
+ * `createAppointment`): este endpoint es público y anónimo, y renombrar la ficha
+ * de otra persona sabiendo su teléfono no puede ser un efecto de "abrir un
+ * checkout". Cuando el pago se acredite, `createAppointment` lo hace por el
+ * camino de siempre.
+ */
+export async function publicPrepararSena(
+  input: PrepararSenaInput
+): Promise<CrearSenaResult> {
+  const nameClean = input.client_name.trim()
+  const phoneClean = input.client_phone.trim().replace(/\s+/g, '')
+
+  if (!isValidUUID(input.branch_id)) {
+    return { ok: false, code: 'INTERNAL', message: 'Sucursal inválida.' }
+  }
+  if (nameClean.length < 2) {
+    return { ok: false, code: 'INTERNAL', message: 'Ingresá tu nombre para continuar.' }
+  }
+  if (!/^\+?[\d\s\-]{8,15}$/.test(phoneClean)) {
+    return { ok: false, code: 'INTERNAL', message: 'Ingresá un número de teléfono válido.' }
+  }
+  if (!input.service_ids.length) {
+    return { ok: false, code: 'INTERNAL', message: 'Seleccioná al menos un servicio.' }
+  }
+
+  // Límite propio y no el del booking: cada llamada dispara una preferencia
+  // contra la API de Mercado Pago y puede crear una ficha de cliente. Es más
+  // caro que listar horarios y más barato que reservar, así que va en el medio.
+  const ip = await getClientIP()
+  const gate = await rateLimit('public_sena_prepare', `${ip}:${input.branch_id}`, {
+    limit: 8,
+    window: 60,
+  })
+  if (!gate.allowed) {
+    return { ok: false, code: 'RATE_LIMITED', message: 'Esperá un momento y volvé a intentar.' }
+  }
+
+  const supabase = createAdminClient()
+
+  const { data: branch, error: errorBranch } = await supabase
+    .from('branches')
+    .select('id, organization_id')
+    .eq('id', input.branch_id)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (errorBranch) {
+    console.error('[publicPrepararSena] branches:', errorBranch.message)
+    return { ok: false, code: 'INTERNAL', message: 'No pudimos preparar el pago. Probá de nuevo.' }
+  }
+  if (!branch) {
+    return { ok: false, code: 'NOT_BOOKABLE', message: 'Esta sucursal no está disponible.' }
+  }
+
+  let cfg
+  try {
+    cfg = await leerConfigSena(branch.id)
+  } catch (e) {
+    console.error('[publicPrepararSena] leerConfigSena:', e)
+    return { ok: false, code: 'INTERNAL', message: 'No pudimos preparar el pago. Probá de nuevo.' }
+  }
+
+  if (!cfg?.is_enabled || !cfg.channels.includes('web')) {
+    return { ok: false, code: 'SENA_NO_APLICA', message: 'Esta reserva no necesita seña.' }
+  }
+
+  // Buscar o crear la ficha. El match va por `find_client_id_by_phone` (últimos
+  // 10 dígitos, migs 149/150), la MISMA regla que usa `createAppointment`: con
+  // igualdad exacta, el cliente guardado como "+54 9 351 212-5249" que tipea
+  // "3512125249" quedaría duplicado y su turno colgaría del duplicado.
+  const { data: existingClientId, error: errorLookup } = await supabase.rpc(
+    'find_client_id_by_phone',
+    { p_org: branch.organization_id, p_phone: phoneClean }
+  )
+
+  if (errorLookup) {
+    console.error('[publicPrepararSena] find_client_id_by_phone:', errorLookup.message)
+    return { ok: false, code: 'INTERNAL', message: 'No pudimos identificarte. Probá de nuevo.' }
+  }
+
+  let clientId = (existingClientId as string | null) ?? ''
+  if (!clientId) {
+    const { data: nuevo, error: errorInsert } = await supabase
+      .from('clients')
+      .insert({
+        name: nameClean,
+        phone: phoneClean,
+        organization_id: branch.organization_id,
+        // Turnero web (mig 210): quién trajo a este cliente es un dato del
+        // negocio, no un detalle técnico — es lo que después separa a los que
+        // llegaron por publicidad de los que entraron por la puerta.
+        signup_source: 'web',
+      })
+      .select('id')
+      .single()
+
+    if (errorInsert || !nuevo) {
+      console.error('[publicPrepararSena] clients.insert:', errorInsert?.message)
+      return { ok: false, code: 'INTERNAL', message: 'No pudimos registrar tus datos. Probá de nuevo.' }
+    }
+    clientId = nuevo.id
+  }
+
+  return crearIntencionDeSena({
+    branchId: branch.id,
+    clientId,
+    barberId: input.staff_id,
+    serviceIds: input.service_ids,
+    appointmentDate: input.starts_at,
+    startTime: input.start_time,
+    durationMinutes: input.duration_minutes,
+    canal: 'web',
+    payerName: nameClean,
+    payerPhone: phoneClean,
+    // El turnero web se queda en el browser: `/pago/[id]` no rebota a ningún
+    // deep link. Sin esto la página intentaría abrir la app y el cliente que
+    // reservó desde el navegador vería una pantalla en blanco.
+    returnTo: 'web',
+  })
 }
 
 // ─── Cancelar turno por token ────────────────────────────────────────
