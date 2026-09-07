@@ -26,15 +26,35 @@
 //   · si falta `data.id` o `x-request-id`, ese par se ELIMINA del manifest
 //     entero (no queda `id:;`).
 //
-// Y una tercera, que es un bug conocido del SDK de Node de MP: el `ts` viene en
-// MILISEGUNDOS. Tratarlo como segundos hace que toda validación de antigüedad
-// rechace todo (o acepte todo, según hacia dónde se equivoque la conversión).
+// Y una tercera, la que más caro sale: LA UNIDAD DEL `ts`.
+//
+// La documentación de Mercado Pago dice milisegundos y muestra un ejemplo de 13
+// dígitos; el SDK de Node lo trata como segundos. Contra producción, el 7/9/2026,
+// las notificaciones reales llegaron en SEGUNDOS: ocho webhooks de un pago
+// verdadero se rechazaron con "29.783.600 min de desfasaje" —56 años, que es
+// exactamente la distancia entre 1970 y hoy cuando se leen segundos como
+// milisegundos— y el cliente pagó sin que se le creara el turno.
+//
+// Por eso acá no se elige una unidad: se DEDUCE de la magnitud. Un timestamp de
+// esta época tiene ~10 dígitos en segundos (1,7e9) y ~13 en milisegundos
+// (1,7e12); el umbral de 1e11 los separa con siete órdenes de margen y sigue
+// siendo válido hasta el año 5138. Si MP cambia de unidad, esto no se entera.
+//
+// El manifest sigue usando el `ts` CRUDO, tal como vino: la firma se calcula
+// sobre el string, no sobre el número. Convertir acá no la afecta.
 // =============================================================================
 
 import { createHmac, timingSafeEqual } from 'crypto'
 
 /** Cuánto puede haberse demorado una notificación antes de sospechar de un replay. */
 const TOLERANCIA_MS = 15 * 60 * 1000
+
+/**
+ * Por debajo de esto el `ts` está en segundos; por encima, en milisegundos.
+ * 1e11 son segundos hasta el año 5138 y milisegundos desde marzo de 1973: no
+ * hay timestamp real de esta era que caiga del lado equivocado.
+ */
+const UMBRAL_SEGUNDOS = 1e11
 
 export interface EntradaFirma {
     /** El header `x-signature` crudo. */
@@ -103,9 +123,12 @@ export function verificarFirmaWebhook(e: EntradaFirma): ResultadoFirma {
     const { ts, v1 } = partirSignature(header)
     if (!ts || !v1) return { ok: false, motivo: 'El header x-signature no trae ts y v1.' }
 
-    // El `ts` viene en MILISEGUNDOS. Ver el encabezado.
-    const tsMs = Number(ts)
-    if (!Number.isFinite(tsMs)) return { ok: false, motivo: 'El ts de x-signature no es un número.' }
+    // La unidad del `ts` se deduce de la magnitud, no se asume. Ver el encabezado.
+    const tsCrudo = Number(ts)
+    if (!Number.isFinite(tsCrudo) || tsCrudo <= 0) {
+        return { ok: false, motivo: 'El ts de x-signature no es un número.' }
+    }
+    const tsMs = tsCrudo < UMBRAL_SEGUNDOS ? tsCrudo * 1000 : tsCrudo
     const desfasaje = Math.abs(Date.now() - tsMs)
     if (desfasaje > TOLERANCIA_MS) {
         return {
