@@ -1,11 +1,80 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
+// La descarga del adjunto puede sumar varios segundos sobre el trabajo normal
+// del webhook. Sin este techo la ruta corre con el default de la plataforma y,
+// si la cortan a mitad, Meta reintenta la entrega y el mensaje se duplica.
+export const maxDuration = 30
+
 function getSupabase() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
+}
+
+/**
+ * Baja el adjunto de Instagram y lo guarda en el bucket `chat-media`, igual que
+ * hace el webhook de WhatsApp desde abril de 2026.
+ *
+ * Por qué: la `payload.url` que manda Meta apunta a `lookaside.fbsbx.com` con
+ * una firma que caduca a los ~3 días. Medido contra producción: un adjunto de
+ * hoy responde 200, uno de abril responde 404 "Resource has expired". Todo el
+ * material que mandaron los candidatos por Instagram se estaba perdiendo solo.
+ *
+ * Devuelve `null` ante cualquier problema y el llamador conserva la URL de Meta:
+ * perder el archivo es peor que tener un link que sirve unos días.
+ */
+async function descargarYGuardarMediaIg(
+  url: string,
+  supabase: ReturnType<typeof getSupabase>,
+  orgId: string,
+  tipoDeclarado: string,
+): Promise<{ url: string; contentType: string } | null> {
+  const EXT: Record<string, string> = {
+    'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp',
+    'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/3gpp': '3gp',
+    'audio/aac': 'aac', 'audio/mpeg': 'mp3', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a',
+    'application/pdf': 'pdf',
+  }
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(20000) })
+    if (!res.ok) {
+      console.error('[IG Media] No se pudo descargar:', res.status)
+      return null
+    }
+    const mime = res.headers.get('content-type')?.split(';')[0]?.trim() || 'application/octet-stream'
+    const buffer = await res.arrayBuffer()
+    // 50 MB es el límite del bucket; más grande lo rechaza el storage.
+    if (buffer.byteLength > 50 * 1024 * 1024) return null
+
+    const ext = EXT[mime] ?? 'bin'
+    const path = `${orgId}/instagram/${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${ext}`
+
+    const { error } = await supabase.storage
+      .from('chat-media')
+      .upload(path, buffer, { contentType: mime, upsert: false })
+    if (error) {
+      console.error('[IG Media] Error subiendo a storage:', error.message)
+      return null
+    }
+
+    const { data: pub } = supabase.storage.from('chat-media').getPublicUrl(path)
+
+    // El tipo REAL manda sobre el declarado: el fallback del webhook marca
+    // 'image' todo adjunto que no sabe mapear.
+    const contentType =
+      mime.startsWith('image/') ? 'image'
+      : mime.startsWith('video/') ? 'video'
+      : mime.startsWith('audio/') ? 'audio'
+      : mime === 'application/octet-stream' ? tipoDeclarado
+      : 'document'
+
+    return { url: pub.publicUrl, contentType }
+  } catch (e) {
+    console.error('[IG Media] Error inesperado:', (e as Error).message)
+    return null
+  }
 }
 
 // Obtener nombre / username / foto de perfil del usuario de Instagram vía Graph API.
@@ -441,7 +510,7 @@ export async function POST(req: NextRequest) {
         caption = '[Sticker]'
       }
 
-      const { error: msgErr } = await supabase.from('messages').insert({
+      const { data: msgInsertado, error: msgErr } = await supabase.from('messages').insert({
         conversation_id: convId,
         direction: isEcho ? 'outbound' : 'inbound',
         content_type: contentType,
@@ -450,9 +519,35 @@ export async function POST(req: NextRequest) {
         platform_message_id: platformMsgId,
         status: isEcho ? 'sent' : 'delivered',
         created_at: createdAt,
-      })
+      }).select('id').maybeSingle()
       if (msgErr) {
         console.error('[IG Webhook] Error insertando mensaje:', msgErr.message)
+      }
+
+      // ── Persistir el archivo en nuestro bucket ────────────────────────────
+      // Meta firma las URLs de `lookaside.fbsbx.com` por ~3 días: medido, una de
+      // hoy responde 200 y una de abril responde 404 "Resource has expired".
+      // WhatsApp nunca tuvo el problema porque su webhook baja el binario a
+      // `chat-media`; el de Instagram guardaba la URL cruda, y por eso el
+      // material que mandaban los candidatos se perdía solo.
+      //
+      // Va DESPUÉS del INSERT, no antes: la deduplicación de este webhook es un
+      // read-then-write sin índice único que la respalde (hay 5 filas duplicadas
+      // en `messages` de abril que lo prueban), así que meter ~1 s de descarga
+      // entre el chequeo y el insert ensancharía esa ventana de carrera. Bajando
+      // después, la ventana queda igual que antes de este cambio.
+      if (msgInsertado?.id && mediaUrl && mediaUrl.startsWith('https://lookaside')) {
+        const guardado = await descargarYGuardarMediaIg(mediaUrl, supabase, orgId, contentType)
+        if (guardado) {
+          mediaUrl = guardado.url
+          contentType = guardado.contentType
+          const { error: updErr } = await supabase
+            .from('messages')
+            .update({ media_url: guardado.url, content_type: guardado.contentType })
+            .eq('id', msgInsertado.id)
+          if (updErr) console.error('[IG Media] Archivo guardado pero no enlazado:', updErr.message)
+        }
+        // Si falla se conserva la URL de Meta: sirve unos días y es mejor que nada.
       }
 
       // ── Workflow Engine: solo para mensajes inbound ──

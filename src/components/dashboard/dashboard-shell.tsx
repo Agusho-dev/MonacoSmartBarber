@@ -27,6 +27,7 @@ import {
   Bot,
   FileCheck2,
   Gift,
+  IdCard,
 } from 'lucide-react'
 import {
   DndContext,
@@ -84,6 +85,7 @@ const navItems = [
   { href: '/dashboard/turnos', label: 'Turnos', icon: CalendarClock, requiredPermissions: ['appointments.view'] },
   { href: '/dashboard/sucursales', label: 'Sucursales', icon: Building2, requiredPermissions: ['branches.view'] },
   { href: '/dashboard/equipo', label: 'Equipo', icon: Scissors, requiredPermissions: ['staff.view', 'roles.manage', 'breaks.view', 'incentives.view', 'discipline.view'] },
+  { href: '/dashboard/rrhh', label: 'Recursos humanos', icon: IdCard, requiredPermissions: ['rrhh.view'] },
   { href: '/dashboard/servicios', label: 'Servicios y Productos', icon: Sparkles, requiredPermissions: ['services.view'] },
   { href: '/dashboard/clientes', label: 'Clientes', icon: Users, requiredPermissions: ['clients.view'] },
   { href: '/dashboard/mensajeria', label: 'Mensajería', icon: MessageSquare, requiredPermissions: ['clients.view'] },

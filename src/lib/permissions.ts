@@ -38,6 +38,13 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
             'staff.hide': 'Ocultar/Mostrar miembros en check-in',
         },
     },
+    rrhh: {
+        label: 'Recursos humanos',
+        permissions: {
+            'rrhh.view': 'Ver candidatos a barbero',
+            'rrhh.manage': 'Gestionar candidatos y mandarles mensajes',
+        },
+    },
     breaks: {
         label: 'Descansos',
         permissions: {
@@ -210,6 +217,9 @@ export const PERMISSION_DESCRIPTIONS: Record<string, string> = {
     'staff.edit': 'Permite modificar nombre, sucursal, PIN y datos de miembros existentes.',
     'staff.deactivate': 'Permite activar o dar de baja miembros sin eliminarlos permanentemente.',
     'staff.hide': 'Permite ocultar o mostrar un miembro en el flujo de selección del check-in.',
+
+    'rrhh.view': 'Permite ver los candidatos a barbero que escribieron por WhatsApp o Instagram, su historial y el material que mandaron.',
+    'rrhh.manage': 'Permite cambiar el estado de un candidato, cargarle datos y mandarle mensajes o difusiones. Son mensajes reales a personas reales.',
 
     'breaks.view': 'Permite ver el historial y estado actual de los descansos del equipo.',
     'breaks.grant': 'Permite autorizar y otorgar descansos a los miembros del equipo.',

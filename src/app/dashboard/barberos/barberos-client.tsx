@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, Pencil, Power, Trash2, Camera, Eye, EyeOff, Smartphone, Scissors } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
@@ -49,6 +49,8 @@ interface Props {
   todayVisits: BarberVisitRow[]
   roles: Role[]
   canHideStaff?: boolean
+  /** Alta prellenada desde Recursos humanos → "Contratar". */
+  alta?: { nombre: string; telefono: string; candidatoId: string | null } | null
 }
 
 const roleLabels: Record<UserRole, string> = {
@@ -69,7 +71,7 @@ const emptyForm = {
   is_also_barber: false,
 }
 
-export function BarberosClient({ barbers, branches, todayVisits, roles, canHideStaff }: Props) {
+export function BarberosClient({ barbers, branches, todayVisits, roles, canHideStaff, alta }: Props) {
   const router = useRouter()
   const { selectedBranchId } = useBranchStore()
 
@@ -94,13 +96,45 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, canHideS
     })
   })
 
-  function openAdd() {
+  function openAdd(prefill?: { full_name?: string; phone?: string }) {
     setEditingId(null)
-    setForm({ ...emptyForm, branch_id: selectedBranchId ?? (branches.length > 0 ? branches[0].id : ''), password: '', hasAuth: false })
+    setForm({
+      ...emptyForm,
+      branch_id: selectedBranchId ?? (branches.length > 0 ? branches[0].id : ''),
+      password: '',
+      hasAuth: false,
+      ...(prefill?.full_name ? { full_name: prefill.full_name } : {}),
+      ...(prefill?.phone ? { phone: prefill.phone } : {}),
+    })
     setAvatarFile(null)
     setAvatarPreview(null)
     setDialogOpen(true)
   }
+
+  // Alta que llega desde Recursos humanos ("Contratar"): el diálogo se abre con
+  // el nombre y el teléfono del candidato, y al guardar se vincula la ficha para
+  // que el candidato quede como contratado.
+  // El alta NO se hace desde RRHH: son cuatro llamadas encadenadas con
+  // decisiones (sucursal, PIN, rol, comisión) que esa pantalla no tiene.
+  // El id del candidato se CONGELA en un ref, no se deriva del prop.
+  // `router.replace` es una navegación soft y este segmento es dinámico
+  // (`staleTimes.dynamic = 0`), así que el server component vuelve a correr sin
+  // los searchParams y `alta` pasa a null: leyendo el prop, para cuando el
+  // usuario apretaba Guardar el id ya no existía y `marcarContratado` no corría
+  // NUNCA — el barbero recién contratado seguía en el pipeline y recibía la
+  // próxima convocatoria.
+  const candidatoRef = useRef<string | null>(null)
+  const prefillAplicado = useRef(false)
+
+  useEffect(() => {
+    if (prefillAplicado.current || !alta) return
+    prefillAplicado.current = true
+    candidatoRef.current = alta.candidatoId
+    openAdd({ full_name: alta.nombre || undefined, phone: alta.telefono || undefined })
+    // Se limpia la URL para que un F5 no vuelva a abrir el diálogo.
+    router.replace('/dashboard/barberos')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function openEdit(barber: Staff) {
     setEditingId(barber.id)
@@ -202,6 +236,18 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, canHideS
         // Auto-crear salary_configs con esquema comisión y 30% por defecto
         const { upsertSalaryConfig } = await import('@/lib/actions/salary')
         await upsertSalaryConfig(result.data.id, 'commission', 0, 30)
+
+        // Si el alta vino de "Contratar" en Recursos humanos, se cierra el
+        // círculo. Si falla, el barbero ya existe: se avisa y no se aborta.
+        if (candidatoRef.current) {
+          const { marcarContratado } = await import('@/lib/actions/rrhh')
+          const vinculo = await marcarContratado(candidatoRef.current, result.data.id)
+          if (vinculo?.error) {
+            alert('El barbero se creó, pero no se pudo marcar al candidato como contratado: ' + vinculo.error)
+          } else {
+            candidatoRef.current = null
+          }
+        }
       }
     }
 
@@ -310,7 +356,7 @@ export function BarberosClient({ barbers, branches, todayVisits, roles, canHideS
   return (
     <div className="space-y-4 lg:space-y-6">
       <div className="flex items-center justify-end">
-        <Button onClick={openAdd} size="sm" className="w-full sm:w-auto">
+        <Button onClick={() => openAdd()} size="sm" className="w-full sm:w-auto">
           <Plus className="size-4 mr-2" />
           Agregar barbero
         </Button>

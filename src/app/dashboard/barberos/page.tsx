@@ -6,7 +6,14 @@ import { getLocalDayBounds } from '@/lib/time-utils'
 import { redirect } from 'next/navigation'
 import { BarberosClient } from './barberos-client'
 
-export default async function BarberosPage() {
+export default async function BarberosPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ alta?: string; nombre?: string; telefono?: string; candidato?: string }>
+}) {
+  // Alta que llega de Recursos humanos → "Contratar". Se lee en el servidor y
+  // baja como prop: `useSearchParams` en el cliente obligaría a un Suspense.
+  const sp = await searchParams
   const orgId = await getCurrentOrgId()
   if (!orgId) redirect('/login')
   const branchIds = await getScopedBranchIds()
@@ -43,6 +50,11 @@ export default async function BarberosPage() {
       branches={branches ?? []}
       todayVisits={todayVisits ?? []}
       roles={roles ?? []}
+      alta={sp.alta === '1' ? {
+        nombre: sp.nombre ?? '',
+        telefono: sp.telefono ?? '',
+        candidatoId: sp.candidato ?? null,
+      } : null}
     />
   )
 }
