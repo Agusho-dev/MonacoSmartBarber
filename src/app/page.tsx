@@ -13,6 +13,12 @@ import { TenantSelector } from "@/components/home/tenant-selector"
  * en lugar destacado, en el primer acceso"). Acá va igual, porque `/` es la
  * primera puerta del dominio y quien llega buscando el botón por la raíz tiene
  * que encontrarlo sin adivinar una ruta.
+ *
+ * Soporte y "Eliminar mi cuenta" están por el mismo motivo. Google Play exige
+ * que el borrado de cuenta se pueda pedir desde **la web**, sin instalar la app
+ * (Data deletion URL de la ficha), y tanto Apple como Google puntúan que ese
+ * camino se encuentre desde la raíz del dominio en vez de tener que tipear la
+ * ruta. `/` es la única URL del sitio que alguien adivina.
  */
 function PieLegalPortada() {
   return (
@@ -26,6 +32,12 @@ function PieLegalPortada() {
         </Link>
         <Link href="/privacidad" className="hover:underline">
           Política de Privacidad
+        </Link>
+        <Link href="/soporte" className="hover:underline">
+          Soporte
+        </Link>
+        <Link href="/eliminar-cuenta" className="hover:underline">
+          Eliminar mi cuenta
         </Link>
       </p>
     </footer>

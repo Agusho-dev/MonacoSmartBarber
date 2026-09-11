@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Undo2 } from 'lucide-react'
+import { MONACO } from '@/app/soporte/contacto'
 import { FormularioArrepentimiento } from './formulario'
 
 export const metadata = {
@@ -38,8 +39,13 @@ export default async function ArrepentimientoPage({
   const valor = Array.isArray(crudo) ? crudo[0] : crudo
   const sucursal = valor ? valor.slice(0, 100).trim() : null
 
-  const companyName = 'Monaco Barber Studio'
-  const contactEmail = 'ignacio.baldovino@hotmail.com'
+  // El contacto sale de `@/app/soporte/contacto` y de ningún otro lado. Hasta el
+  // 10/9/2026 acá había un hotmail personal escrito a mano, distinto del que
+  // muestra la app y del de /privacidad: tres direcciones para el mismo reclamo.
+  // Apple y Google exigen que el contacto de la ficha, el de la política y el de
+  // la app coincidan, y un pedido de arrepentimiento tiene 24 horas de plazo
+  // legal para ser respondido — no puede caer en una casilla que nadie mira.
+  const contactEmail = MONACO.email
 
   return (
     <div className="min-h-screen bg-white text-gray-800">
@@ -110,7 +116,7 @@ export default async function ArrepentimientoPage({
 
         <div className="mt-10 border-t pt-8">
           <p className="text-sm leading-relaxed text-gray-500">
-            {companyName} · Córdoba, Argentina ·{' '}
+            {MONACO.companyName} · {MONACO.city} ·{' '}
             <a href={`mailto:${contactEmail}`} className="text-blue-600 hover:underline">
               {contactEmail}
             </a>
@@ -122,6 +128,10 @@ export default async function ArrepentimientoPage({
             {' · '}
             <Link href="/privacidad" className="hover:underline">
               Política de Privacidad
+            </Link>
+            {' · '}
+            <Link href="/soporte" className="hover:underline">
+              Soporte
             </Link>
           </p>
         </div>

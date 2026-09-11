@@ -1,3 +1,4 @@
+import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
@@ -10,6 +11,30 @@ import { getEntitlements } from '@/lib/actions/entitlements'
 import type { EntitlementsSnapshot } from '@/components/billing/entitlements-provider'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * Título del dashboard. Es el panel de BarberOS —el producto que se le vende a
+ * otras barberías— y es multi-tenant: no puede heredar "Monaco Barber Studio"
+ * del layout raíz, que es la marca de UN cliente.
+ *
+ * Va como string plano y NO como `{ default, template }`, a propósito. Un
+ * template ('%s | BarberOS') se aplica a toda página hija que defina su título,
+ * y hoy hay 13 que ya escriben el sufijo a mano (Caja, Calendario,
+ * Comprobantes, Cuentas, Descansos, Disciplina, Equipo, Facturación, Fila,
+ * Finanzas, Incentivos, Sueldos y Mi cuenta): quedarían "Caja | BarberOS |
+ * BarberOS". Sacarles el sufijo a esas 13 es lo correcto —es justamente lo que
+ * el template resuelve— pero son archivos de otro cluster; el día que se haga,
+ * este string pasa a `{ default: 'BarberOS', template: '%s | BarberOS' }` en el
+ * MISMO commit y no antes.
+ *
+ * Como string plano cumple igual lo que hace falta hoy: las 22 páginas del
+ * dashboard que no exportan metadata (inicio, clientes, estadísticas,
+ * mensajería, servicios, sucursales, fidelización…) heredan "BarberOS" en vez
+ * de la marca de Monaco, y las que sí la exportan quedan intactas.
+ */
+export const metadata: Metadata = {
+  title: 'BarberOS',
+}
 
 /**
  * Determina si un error capturado es un problema de conectividad/timeout y NO

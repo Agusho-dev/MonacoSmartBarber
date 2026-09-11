@@ -16,6 +16,7 @@ const PAYLOAD: SignupTokenPayload = {
   email: 'alguien@privaterelay.appleid.com',
   name: 'Nacho Baldovino',
   orgId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+  appleRefreshToken: null,
 }
 
 Deno.test('ida y vuelta: lo que se firma es lo que se lee', async () => {
@@ -57,4 +58,35 @@ Deno.test('basura y formas raras no tiran', async () => {
     const r = await verificarSignupToken(t, SECRETO)
     assertStrictEquals(r.ok, false, `debería rechazar ${JSON.stringify(t)}`)
   }
+})
+
+Deno.test('el refresh token de Apple sobrevive la ida y vuelta', async () => {
+  // Va adentro del token porque el `authorization_code` de Apple vence a los
+  // 5 minutos y la fila de `client_social_identities` recién existe después del
+  // código de WhatsApp: se canjea en `social` y el refresh token espera acá.
+  const conToken = { ...PAYLOAD, appleRefreshToken: 'rt_de_apple_123' }
+  const token = await firmarSignupToken(conToken, SECRETO, 900)
+  const r = await verificarSignupToken(token, SECRETO)
+  assertStrictEquals(r.ok, true)
+  if (!r.ok) return
+  assertEquals(r.payload.appleRefreshToken, 'rt_de_apple_123')
+})
+
+Deno.test('sin refresh token el campo vuelve como null, nunca undefined', async () => {
+  // El caller hace `if (payload.appleRefreshToken)`: `undefined` y `null` se
+  // comportan igual ahí, pero un `null` explícito deja el contrato escrito.
+  const token = await firmarSignupToken(PAYLOAD, SECRETO, 900)
+  const r = await verificarSignupToken(token, SECRETO)
+  assertStrictEquals(r.ok, true)
+  if (!r.ok) return
+  assertStrictEquals(r.payload.appleRefreshToken, null)
+})
+
+Deno.test('un token de Google jamás lleva refresh token de Apple', async () => {
+  const google = { ...PAYLOAD, provider: 'google' as const, appleRefreshToken: null }
+  const token = await firmarSignupToken(google, SECRETO, 900)
+  const r = await verificarSignupToken(token, SECRETO)
+  assertStrictEquals(r.ok, true)
+  if (!r.ok) return
+  assertStrictEquals(r.payload.appleRefreshToken, null)
 })

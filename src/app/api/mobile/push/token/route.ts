@@ -76,6 +76,25 @@ export const POST = withMobileHandler('push/token', async (req: NextRequest) => 
     return jsonError(500, 'INTERNAL', 'No pudimos registrar el dispositivo. Probá de nuevo.')
   }
 
+  // Y el MISMO token registrado a nombre de OTRO cliente. Pasa cuando un
+  // teléfono cambia de dueño (se vende, se presta, se hereda) o cuando alguien
+  // cierra sesión y entra otro: FCM le da al equipo el mismo token, porque el
+  // token es del dispositivo y de la instalación, no de la cuenta. Si la fila
+  // vieja sobrevive, `send-push` le manda al equipo las notificaciones del
+  // dueño anterior — nombre, turnos y premios de otra persona. Se borra, no se
+  // desactiva: una fila muerta con un token vivo es exactamente la que vuelve
+  // a despertarse si alguien "reactiva" tokens alguna vez.
+  const { error: ajenoError } = await supabase
+    .from('client_device_tokens')
+    .delete()
+    .eq('token', token)
+    .neq('client_id', auth.client.id)
+
+  if (ajenoError) {
+    console.error('[api/mobile] push/token cleanup ajeno:', ajenoError.message)
+    return jsonError(500, 'INTERNAL', 'No pudimos registrar el dispositivo. Probá de nuevo.')
+  }
+
   const base = {
     client_id: auth.client.id,
     token,

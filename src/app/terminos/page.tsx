@@ -1,10 +1,13 @@
+import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Undo2 } from 'lucide-react'
+import { MONACO } from '@/app/soporte/contacto'
 
-export const metadata = {
+export const metadata: Metadata = {
   title: 'Términos y condiciones — Monaco Barber Studio',
   description:
-    'Términos y condiciones de uso de la app Monaco y del sistema de turnos online, incluida la seña para reservar y el derecho de arrepentimiento.',
+    'Términos y condiciones de uso de la app Monaco y del sistema de turnos online de Monaco Barber Studio, incluida la seña para reservar y el derecho de arrepentimiento.',
+  robots: { index: true, follow: true },
 }
 
 /**
@@ -31,13 +34,20 @@ export const metadata = {
  *
  * Los textos están escritos para leerse, no para cubrirse: si algo se puede
  * decir en una frase corta, va en una frase corta.
+ *
+ * Retoques del 10/9/2026, al reescribir /privacidad para la app:
+ *  · La edad mínima pasa de 16 a 18 y coincide con la política (§9 de
+ *    /privacidad): desde la app se pagan señas por Mercado Pago, que exige
+ *    mayoría de edad. Dos documentos que se contradicen valen menos que uno.
+ *  · Un solo contacto público (`MONACO` en `soporte/contacto.tsx`): el email
+ *    de soporte que muestra la app y el WhatsApp de atención, en vez de un
+ *    hotmail personal que no aparecía en ningún otro lado.
+ *  · §9 enlaza /eliminar-cuenta (el recurso web que exige Google Play) y
+ *    promete el plazo legal (5 días hábiles, art. 16 Ley 25.326).
  */
 export default function TerminosPage() {
-  const lastUpdated = '3 de septiembre de 2026'
-  const appName = 'Monaco'
-  const companyName = 'Monaco Barber Studio'
-  const companyCity = 'Córdoba, Argentina'
-  const contactEmail = 'ignacio.baldovino@hotmail.com'
+  const lastUpdated = '10 de septiembre de 2026'
+  const { appName, companyName, city: companyCity, email: contactEmail, whatsappDisplay, whatsappUrl } = MONACO
 
   return (
     <div className="min-h-screen bg-white text-gray-800">
@@ -80,10 +90,17 @@ export default function TerminosPage() {
         <section className="mb-8">
           <h3 className="text-lg font-semibold mb-3">2. Cuenta y verificación por WhatsApp</h3>
           <ul className="list-disc list-inside text-gray-600 space-y-2 leading-relaxed">
-            <li>Para usar la App tenés que ser mayor de 16 años, o contar con autorización de tu madre, padre o tutor.</li>
+            <li>
+              Para usar la App tenés que ser <strong>mayor de 18 años</strong>. Si sos menor, la cuenta la crea y administra tu
+              madre, padre o tutor a su nombre y con su teléfono, y puede sacar turnos para vos.
+            </li>
             <li>
               La cuenta se crea con tu número de teléfono. Para verificar que el número es tuyo te enviamos un código de un solo uso
               por WhatsApp; al ingresar tu número aceptás recibir ese mensaje. El código vence a los pocos minutos y no debe compartirse con nadie.
+            </li>
+            <li>
+              También podés entrar con Google o con Apple. Son un atajo para no tipear el código cada vez: la primera vez te
+              pedimos igual verificar tu teléfono, que es lo que te identifica en el local.
             </li>
             <li>
               La sesión queda asociada al dispositivo desde el que verificaste. Si cambiás de teléfono o reinstalás la App, vas a
@@ -208,7 +225,9 @@ export default function TerminosPage() {
               <strong>dentro de las 24 horas</strong> por el mismo medio por el que nos escribiste.
             </li>
             <li>
-              También podés comunicárnoslo por WhatsApp al número de la sucursal, por correo a{' '}
+              También podés comunicárnoslo por WhatsApp al{' '}
+              <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{whatsappDisplay}</a>,
+              por correo a{' '}
               <a href={`mailto:${contactEmail}`} className="text-blue-600 hover:underline">{contactEmail}</a>, o
               acercándote al local. Cualquiera de esas vías es válida; el botón existe para que quede registro y número de
               seguimiento.
@@ -268,9 +287,10 @@ export default function TerminosPage() {
           <p className="text-gray-600 leading-relaxed">
             Tratamos tus datos conforme a la Ley 25.326 de Protección de Datos Personales de la República Argentina y a nuestra{' '}
             <Link href="/privacidad" className="text-blue-600 hover:underline">Política de Privacidad</Link>, que forma parte de
-            estos términos. Ahí explicamos qué datos recopilamos (nombre, teléfono, historial de visitas y turnos, puntos,
-            dispositivo para notificaciones, y los datos mínimos de tus pagos), para qué los usamos, con qué proveedores los
-            procesamos y cómo ejercer tus derechos de acceso, rectificación y supresión.
+            estos términos. Ahí explicamos qué datos recopilamos (nombre, teléfono, email si entrás con Google o Apple,
+            historial de visitas y turnos, puntos, dispositivo para notificaciones, los datos mínimos de tus pagos y, si lo
+            activás en la tablet del local, el reconocimiento facial), para qué los usamos, con qué proveedores los procesamos
+            y cómo ejercer tus derechos de acceso, rectificación y supresión.
           </p>
         </section>
 
@@ -280,10 +300,13 @@ export default function TerminosPage() {
             Podés eliminar tu cuenta en cualquier momento desde la App, en <strong>Perfil → Eliminar cuenta</strong>. La eliminación
             borra tu usuario, tus dispositivos registrados, tus notificaciones y tus puntos y premios pendientes, y cancela los turnos
             futuros que tengas. El historial de visitas ya realizadas y los comprobantes de pago pueden conservarse de forma
-            disociada de tu identidad por obligaciones contables y fiscales. Eliminar la cuenta no cancela ni pierde una seña
-            pendiente de devolución: escribinos y la resolvemos igual. Si no podés acceder a la App, también podés pedir la baja
-            por correo a{' '}
-            <a href={`mailto:${contactEmail}`} className="text-blue-600 hover:underline">{contactEmail}</a>.
+            disociada de tu identidad por obligaciones contables y fiscales. Si tenés una seña pagada de un turno que todavía no
+            ocurrió, primero hay que resolverla —cancelando ese turno o pidiendo la devolución— y recién después se puede eliminar
+            la cuenta: no la borramos con plata tuya sin resolver. Si no podés acceder a la App, pedí la baja desde{' '}
+            <Link href="/eliminar-cuenta" className="font-semibold text-blue-600 hover:underline">monacobarber.vercel.app/eliminar-cuenta</Link>{' '}
+            (por correo a{' '}
+            <a href={`mailto:${contactEmail}`} className="text-blue-600 hover:underline">{contactEmail}</a> o por WhatsApp) y la
+            hacemos en un máximo de 5 días hábiles. Ahí está detallado qué se borra y qué queda disociado.
           </p>
         </section>
 
@@ -326,8 +349,10 @@ export default function TerminosPage() {
           <h3 className="text-lg font-semibold mb-3">13. Soporte, reclamos y defensa del consumidor</h3>
           <p className="text-gray-600 leading-relaxed">
             Para consultas, reclamos o ayuda podés escribirnos a{' '}
-            <a href={`mailto:${contactEmail}`} className="text-blue-600 hover:underline">{contactEmail}</a>, por WhatsApp al número
-            de tu sucursal, o acercarte a cualquiera de nuestros locales. Los pedidos de arrepentimiento se responden dentro de las
+            <a href={`mailto:${contactEmail}`} className="text-blue-600 hover:underline">{contactEmail}</a>, por WhatsApp al{' '}
+            <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{whatsappDisplay}</a>,
+            o acercarte a cualquiera de nuestros locales (direcciones y horarios en{' '}
+            <Link href="/soporte" className="text-blue-600 hover:underline">monacobarber.vercel.app/soporte</Link>). Los pedidos de arrepentimiento se responden dentro de las
             24 horas; el resto de los reclamos, en un plazo máximo de 10 días hábiles. Si no quedás conforme, podés iniciar un reclamo
             ante la autoridad de aplicación de Defensa del Consumidor de tu jurisdicción o a través del Servicio de Conciliación
             Previa en las Relaciones de Consumo (COPREC).
@@ -349,7 +374,11 @@ export default function TerminosPage() {
             {' · '}
             <Link href="/privacidad" className="hover:underline">Política de Privacidad</Link>
             {' · '}
+            <Link href="/eliminar-cuenta" className="hover:underline">Eliminar tu cuenta</Link>
+            {' · '}
             <Link href="/arrepentimiento" className="hover:underline">Botón de arrepentimiento</Link>
+            {' · '}
+            <Link href="/soporte" className="hover:underline">Soporte</Link>
           </p>
         </div>
       </div>

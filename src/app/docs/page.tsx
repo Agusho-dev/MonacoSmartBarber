@@ -1,6 +1,19 @@
+import type { Metadata } from 'next'
 import fs from 'fs'
 import path from 'path'
 import Link from 'next/link'
+
+/**
+ * Documentación del producto: es BarberOS, no la barbería del cliente. La
+ * página ya decía "BarberOS" en el cuerpo y sólo la pestaña quedaba heredando
+ * "Monaco Barber Studio" del layout raíz.
+ *
+ * OJO: `/docs/[slug]` es otro archivo y sigue heredando el título raíz. Como
+ * acá no hay layout de segmento, este metadata NO cascadea a las fichas.
+ */
+export const metadata: Metadata = {
+  title: 'Documentación · BarberOS',
+}
 
 export default function DocsIndexPage() {
   const docsDir = path.join(process.cwd(), 'docs')

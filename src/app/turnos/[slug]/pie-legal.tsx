@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { FileText, Lock, Undo2 } from 'lucide-react'
+import { FileText, LifeBuoy, Lock, Undo2 } from 'lucide-react'
 
 /**
  * El pie legal del turnero público.
@@ -12,8 +12,18 @@ import { FileText, Lock, Undo2 } from 'lucide-react'
  * menú ni dentro de los términos: va en el pie de cada pantalla del turnero,
  * con borde propio y su nombre exacto.
  *
- * Los otros dos links son los de siempre (términos y privacidad) y van
- * deliberadamente más chicos: el que la ley pide destacado es uno solo.
+ * Los otros links (términos, privacidad y soporte) van deliberadamente más
+ * chicos: el que la ley pide destacado es uno solo. Soporte está desde el
+ * 10/9/2026 porque el turnero es la pantalla donde el cliente deja el teléfono y
+ * paga la seña, y hasta ahora la única salida desde acá si algo fallaba era
+ * volver a la sucursal: ni un mail, ni un WhatsApp, ni una pregunta frecuente.
+ * Es además la Support URL que mira App Review, y llegar a ella desde el flujo
+ * real de compra es lo que Apple entiende por "soporte accesible".
+ *
+ * Ninguno de estos links puede hardcodear un color: el turnero deriva toda su
+ * paleta de los tres colores de marca del dueño y la publica como custom
+ * properties `--t-*` (ver `theme.ts`). Un `text-gray-500` acá es ilegible en la
+ * mitad de las paletas.
  *
  * `sucursal` viaja como `?suc=` para que `/arrepentimiento` sepa de qué negocio
  * viene el reclamo sin preguntárselo a quien lo está haciendo. Es un dato que
@@ -62,6 +72,13 @@ export function PieLegal({ sucursal }: { sucursal?: string | null }) {
           >
             <Lock className="h-3 w-3" />
             Privacidad
+          </Link>
+          <Link
+            href="/soporte"
+            className="flex items-center gap-1.5 text-[var(--t-text-muted)] underline underline-offset-2"
+          >
+            <LifeBuoy className="h-3 w-3" />
+            Soporte
           </Link>
         </div>
       </div>

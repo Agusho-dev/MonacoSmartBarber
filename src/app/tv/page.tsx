@@ -1,9 +1,25 @@
+import type { Metadata } from 'next'
 import { createAdminClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { TvClient } from './tv-client'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * Mismo criterio que el kiosko `(tablet)`: título neutro, sin marca.
+ *
+ * El TV es la pantalla de la fila colgada en el local del cliente. Heredaba
+ * "Monaco Barber Studio", que es la marca de UNA organización sobre una
+ * superficie multi-tenant; y "BarberOS" sería el nombre del proveedor delante
+ * del cliente final. "Pantalla de fila" describe qué es, vale para cualquier
+ * organización y hace distinguibles las dos pestañas cuando el mismo equipo
+ * tiene abierto el TV y el check-in.
+ */
+export const metadata: Metadata = {
+  title: 'Pantalla de fila',
+}
+
 
 export default async function TvPage({
   searchParams,

@@ -1,4 +1,22 @@
+import type { Metadata } from "next"
 import Image from "next/image"
+
+/**
+ * Login y registro del STAFF. Es la puerta de entrada al dashboard de BarberOS
+ * —el panel entero está branded como BarberOS, incluido el logo de este mismo
+ * layout— así que heredar "Monaco Barber Studio" del layout raíz mostraba la
+ * marca de un cliente sobre el formulario con el que se da de alta cualquier
+ * otra barbería.
+ *
+ * Acá el `template` SÍ es seguro, al revés que en `/dashboard`: ni
+ * `(auth)/login` ni `(auth)/register` exportan metadata propia, así que hoy las
+ * dos resuelven al `default` y no hay ningún sufijo escrito a mano con el que
+ * duplicarse. Queda listo para que cualquiera de las dos ponga "Iniciar sesión"
+ * o "Crear cuenta" sin volver a tocar este archivo.
+ */
+export const metadata: Metadata = {
+  title: { default: "BarberOS", template: "%s · BarberOS" },
+}
 
 const FEATURES = [
   { label: "Cola en tiempo real", desc: "Gestión de turnos al instante" },

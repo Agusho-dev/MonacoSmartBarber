@@ -1,3 +1,4 @@
+import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Check, Sparkles, Crown } from 'lucide-react'
 import { createAdminClient } from '@/lib/supabase/server'
@@ -5,6 +6,18 @@ import { Button } from '@/components/ui/button'
 import { PricingToggle } from './pricing-toggle'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * `/pricing` vende BarberOS a OTRAS barberías, así que se titula con la marca
+ * del producto. Heredaba "Monaco Barber Studio" del layout raíz —la marca de un
+ * cliente— y ofrecerle a un prospecto una página de precios con el nombre de
+ * otra barbería arriba de la pestaña es un error de producto, no de SEO.
+ */
+export const metadata: Metadata = {
+  title: 'Precios · BarberOS',
+  description:
+    'Planes y módulos de BarberOS, el software de gestión para barberías: fila en tiempo real, turnos, caja, sueldos, fidelización y facturación.',
+}
 
 type PlanRow = {
   id: string

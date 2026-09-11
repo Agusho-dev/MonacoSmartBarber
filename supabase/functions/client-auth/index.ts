@@ -87,6 +87,7 @@ import {
   type IdentidadSocial,
   type ProveedorSocial,
 } from '../_shared/social-id-token.ts'
+import { canjearAuthorizationCode, estaConfigurado as appleConfigurado } from '../_shared/apple-token.ts'
 import { firmarSignupToken, verificarSignupToken, type SignupTokenPayload } from '../_shared/signup-token.ts'
 
 // ── Configuración ───────────────────────────────────────────────────────────
@@ -157,6 +158,12 @@ interface ReqBody {
   provider?: ProveedorSocial
   id_token?: string
   nonce?: string
+  /**
+   * Sólo `social` con `provider: 'apple'`. Se canjea EN EL ACTO por el refresh
+   * token que hace falta para revocar el acceso cuando el cliente borre la
+   * cuenta (Apple 5.1.1(v)): el código vence a los 5 minutos.
+   */
+  authorization_code?: string
   /** Sólo `start`/`verify`: el pase que devolvió `social`. */
   signup_token?: string
 }
@@ -317,6 +324,16 @@ async function handleSocial(ctx: CtxBase, body: ReqBody): Promise<Response> {
   }
   const identidad = verificado.identidad
 
+  // 1-bis. Apple: el `authorization_code` se canjea AHORA o no se canjea nunca
+  //    (vence a los 5 minutos). Del canje sale el refresh token, que es lo
+  //    único que acepta `POST /auth/revoke` el día que el cliente borre su
+  //    cuenta — exigencia de Apple para la guideline 5.1.1(v).
+  //
+  //    Es best-effort de punta a punta: si faltan los secrets (`APPLE_TEAM_ID`,
+  //    `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`) o Apple contesta cualquier cosa, se
+  //    loguea y se sigue. Nadie se queda sin entrar por esto.
+  const appleRefreshToken = await canjearAppleBestEffort(ctx, provider, body)
+
   // 2. ¿Ya conocemos esta identidad? La clave es (provider, subject): el email
   //    puede cambiar, el `sub` no.
   const fila = await buscarIdentidadSocial(ctx, provider, identidad.subject)
@@ -339,7 +356,7 @@ async function handleSocial(ctx: CtxBase, body: ReqBody): Promise<Response> {
       console.error(LOG, 'identidad social apunta a un cliente inexistente; se borra', ctx.log, `identidad=${fila.id}`)
       const { error: delErr } = await ctx.admin.from('client_social_identities').delete().eq('id', fila.id)
       if (delErr) console.error(LOG, 'no se pudo borrar la identidad huérfana', ctx.log, delErr.message)
-      return await responderNeedPhone(ctx, identidad, body)
+      return await responderNeedPhone(ctx, identidad, body, appleRefreshToken)
     }
 
     // 3. Login de un toque: el id_token verificado es prueba de identidad, así
@@ -358,9 +375,16 @@ async function handleSocial(ctx: CtxBase, body: ReqBody): Promise<Response> {
       return fail(500, 'AUTH_FAILED', 'No pudimos iniciar sesión. Probá de nuevo.')
     }
 
+    // El refresh token se pisa en cada ingreso con Apple: Apple emite uno
+    // nuevo por autorización y el viejo puede haber sido revocado.
+    const parche: Record<string, unknown> = {
+      last_login_at: new Date().toISOString(),
+      email: identidad.email ?? null,
+    }
+    if (appleRefreshToken) parche.apple_refresh_token = appleRefreshToken
     const { error: lastErr } = await ctx.admin
       .from('client_social_identities')
-      .update({ last_login_at: new Date().toISOString(), email: identidad.email ?? null })
+      .update(parche)
       .eq('id', fila.id)
     if (lastErr) console.error(LOG, 'update last_login_at de la identidad falló', ctx.log, lastErr.message)
 
@@ -372,11 +396,16 @@ async function handleSocial(ctx: CtxBase, body: ReqBody): Promise<Response> {
   if (!ctx.altaHabilitada) {
     return fail(403, 'SIGNUP_DISABLED', MSG_CLIENT_NOT_FOUND)
   }
-  return await responderNeedPhone(ctx, identidad, body)
+  return await responderNeedPhone(ctx, identidad, body, appleRefreshToken)
 }
 
 /** `need_phone` + el `signup_token` de 15 minutos que ata el proveedor con el OTP. */
-async function responderNeedPhone(ctx: CtxBase, identidad: IdentidadSocial, body: ReqBody): Promise<Response> {
+async function responderNeedPhone(
+  ctx: CtxBase,
+  identidad: IdentidadSocial,
+  body: ReqBody,
+  appleRefreshToken: string | null = null,
+): Promise<Response> {
   // El nombre que manda la app gana sobre el del token: en Apple el token NO
   // trae nombre nunca (llega aparte, en la credencial, y sólo en la primera
   // autorización de ese Apple ID). Si no lo guardamos ahora, no se recupera.
@@ -387,6 +416,7 @@ async function responderNeedPhone(ctx: CtxBase, identidad: IdentidadSocial, body
     email: limpiarEmail(identidad.email),
     name: nombre,
     orgId: ctx.orgId,
+    appleRefreshToken,
   }
   const token = await firmarSignupToken(payload, SIGNUP_TOKEN_SECRET, SIGNUP_TOKEN_TTL_SECONDS)
 
@@ -816,6 +846,39 @@ async function identidadVinculadaAOtro(
 }
 
 /**
+ * Canjea el `authorization_code` de Apple por un refresh token. Devuelve
+ * `null` en cualquier caso que no sea un canje exitoso, y NUNCA tira: el
+ * ingreso del cliente no puede depender de esto.
+ *
+ * Google no entra acá: su revocación la hace la propia app con
+ * `GoogleSignIn.disconnect()` al borrar la cuenta.
+ */
+async function canjearAppleBestEffort(
+  ctx: CtxBase,
+  provider: ProveedorSocial,
+  body: ReqBody,
+): Promise<string | null> {
+  if (provider !== 'apple') return null
+  const code = typeof body.authorization_code === 'string' ? body.authorization_code.trim() : ''
+  if (!code) return null
+  if (!appleConfigurado()) {
+    console.warn(
+      LOG,
+      'llegó authorization_code de Apple pero faltan APPLE_TEAM_ID/APPLE_KEY_ID/APPLE_PRIVATE_KEY: ' +
+        'no vamos a poder revocar el acceso cuando este cliente borre la cuenta',
+      ctx.log,
+    )
+    return null
+  }
+  const r = await canjearAuthorizationCode(code)
+  if (!r.ok) {
+    console.error(LOG, 'canje del authorization_code de Apple falló', ctx.log, r.motivo)
+    return null
+  }
+  return r.refreshToken
+}
+
+/**
  * Vincula la identidad social a este cliente y, si la ficha no tenía email,
  * guarda el del proveedor. Devuelve el cliente actualizado o el error a
  * contestar. Es el único lugar que escribe `client_social_identities` fuera de
@@ -870,6 +933,8 @@ async function vincularIdentidadSocial(
         name: social.name,
         raw: { linked_at: ahora, provider: social.provider },
         last_login_at: ahora,
+        // Viene del canje que hizo la acción `social`; en Google es siempre null.
+        ...(social.appleRefreshToken ? { apple_refresh_token: social.appleRefreshToken } : {}),
       },
       { onConflict: 'provider,subject' },
     )

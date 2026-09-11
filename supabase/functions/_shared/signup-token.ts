@@ -26,6 +26,25 @@ export interface SignupTokenPayload {
   name: string | null
   /** El token vale para UNA organización: se verifica contra el `org_id` del request. */
   orgId: string
+  /**
+   * **Sólo Apple.** Refresh token que ya canjeamos con el `authorization_code`
+   * de la hoja del sistema.
+   *
+   * POR QUÉ VIAJA ACÁ Y NO SE GUARDA EN LA BASE: el `authorization_code` de
+   * Apple **vence a los 5 minutos** y en el alta de un cliente nuevo todavía no
+   * existe la fila de `client_social_identities` donde guardarlo (se crea recién
+   * en `verify`, después del código de WhatsApp, que puede tardar más que eso).
+   * Así que se canjea EN EL ACTO, en la acción `social`, y el refresh token
+   * espera acá los 15 minutos que dura el pase.
+   *
+   * El `signup_token` está firmado pero NO cifrado, así que este valor es
+   * legible por la app. Es aceptable: el refresh token es de ESE usuario y no
+   * sirve para nada sin el `client_secret` de Apple, que es un JWT que sólo
+   * podemos firmar nosotros con la clave `.p8` (nunca sale del servidor). Lo
+   * único que habilita —revocar la propia autorización— el usuario ya lo puede
+   * hacer desde Ajustes de su iPhone.
+   */
+  appleRefreshToken?: string | null
 }
 
 export type ResultadoSignupToken =
@@ -41,6 +60,8 @@ interface PayloadSerializado {
   e: string | null
   n: string | null
   o: string
+  /** Refresh token de Apple, ver `SignupTokenPayload.appleRefreshToken`. */
+  art?: string | null
   iat: number
   exp: number
 }
@@ -59,6 +80,7 @@ export async function firmarSignupToken(
     e: payload.email,
     n: payload.name,
     o: payload.orgId,
+    art: payload.appleRefreshToken ?? null,
     iat: ahora,
     exp: ahora + ttlSegundos,
   }
@@ -118,6 +140,7 @@ export async function verificarSignupToken(token: string, secreto: string): Prom
       email: typeof cuerpo.e === 'string' ? cuerpo.e : null,
       name: typeof cuerpo.n === 'string' ? cuerpo.n : null,
       orgId: cuerpo.o,
+      appleRefreshToken: typeof cuerpo.art === 'string' && cuerpo.art ? cuerpo.art : null,
     },
     expiraEn: cuerpo.exp,
   }

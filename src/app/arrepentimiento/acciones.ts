@@ -3,6 +3,7 @@
 import { randomBytes } from 'node:crypto'
 import { cookies } from 'next/headers'
 
+import { MONACO } from '@/app/soporte/contacto'
 import { createAdminClient } from '@/lib/supabase/server'
 import { rateLimit, getClientIP } from '@/lib/rate-limit'
 import { isValidUUID } from '@/lib/validation'
@@ -216,7 +217,7 @@ export async function registrarArrepentimiento(
     return {
       ok: false,
       error:
-        'No pudimos registrar el pedido por un problema nuestro. Escribinos por WhatsApp a tu sucursal o a ignacio.baldovino@hotmail.com y lo resolvemos igual: tu derecho corre desde que nos lo comunicás, no desde que el formulario funcione.',
+        `No pudimos registrar el pedido por un problema nuestro. Escribinos por WhatsApp a tu sucursal o a ${MONACO.email} y lo resolvemos igual: tu derecho corre desde que nos lo comunicás, no desde que el formulario funcione.`,
     }
   }
 
@@ -284,7 +285,7 @@ export async function registrarArrepentimiento(
     return {
       ok: false,
       error:
-        'No pudimos registrar el pedido. Escribinos por WhatsApp a tu sucursal o a ignacio.baldovino@hotmail.com: tu derecho corre desde que nos lo comunicás, no desde que el formulario funcione.',
+        `No pudimos registrar el pedido. Escribinos por WhatsApp a tu sucursal o a ${MONACO.email}: tu derecho corre desde que nos lo comunicás, no desde que el formulario funcione.`,
     }
   }
 
