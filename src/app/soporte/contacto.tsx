@@ -30,14 +30,20 @@ export const MONACO = {
 /**
  * Identificación legal del responsable del tratamiento (art. 6 Ley 25.326).
  *
- * Son PLACEHOLDERS a propósito: no se inventan datos legales. El dueño los
- * completa antes de publicar; mientras sigan entre corchetes se pintan en
- * ámbar en la página (ver `Dato`) para que nadie los pase por alto.
+ * **El responsable es el dueño de Monaco, no el desarrollador.** Monaco no es
+ * una sociedad: la titularidad es de Antonio Nicolás Ramírez como persona
+ * física (CUIT con prefijo 20), así que la "razón social" es su nombre. Datos
+ * cargados por el dueño el 18/9/2026. studiOS (Ignacio Baldovino) desarrolla y
+ * publica la app, pero no decide sobre los datos de los clientes y por eso no
+ * figura acá.
+ *
+ * Si algún dato vuelve a quedar entre corchetes, `Dato` lo pinta en ámbar para
+ * que nadie lo pase por alto.
  */
 export const RESPONSABLE = {
-  razonSocial: '[RAZÓN SOCIAL]',
-  cuit: '[CUIT]',
-  domicilio: '[DOMICILIO LEGAL, Córdoba, Argentina]',
+  razonSocial: 'Antonio Nicolás Ramírez',
+  cuit: '20-39822068-5',
+  domicilio: 'Paraná 457, 9° E, Córdoba, Argentina',
 } as const
 
 /** `true` si el valor todavía es un placeholder sin completar. */
