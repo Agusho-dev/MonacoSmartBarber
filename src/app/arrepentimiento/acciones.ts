@@ -244,10 +244,30 @@ export async function registrarArrepentimiento(
   // `line-clamp-2`, así que lo accionable —a quién, por dónde y hasta cuándo—
   // va primero y el contexto después. Separadores con " · " y no saltos de
   // línea, que en un `<p>` colapsan igual.
+  //
+  // Lo accionable DEPENDE del estado de la seña (18/9/2026). Antes la alerta
+  // decía "Devolvé la seña completa" sin mirar nada, y eso incluía el caso que
+  // el dueño más teme: el cliente se atiende, y dentro de los 10 días pide la
+  // seña de vuelta. Ahí NO corresponde: la revocación deshace el contrato y
+  // obliga a restituirse lo recibido (art. 1115 CCyC); un corte hecho no se
+  // restituye y la seña ya se imputó al precio del servicio (art. 1060). La
+  // respuesta en 24 h sigue siendo obligatoria (Disp. 954/2025) — cambia lo
+  // que hay que responder, no si hay que responder.
+  const hora = sena ? String(sena.start_time).slice(0, 5) : ''
+  const atendido = sena?.status === 'consumida'
+  const yaDevuelta = sena?.status === 'sin_cupo'
+  const accion = atendido
+    ? `NO corresponde devolver: el turno ${sena?.appointment_date} ${hora} ya se atendió y la seña se imputó al precio del servicio (art. 1115 CCyC: no hay prestación que restituir). Respondele igual a ${nombre} por WhatsApp al ${telefono} antes del ${limite} y explicáselo.`
+    : yaDevuelta
+      ? `Esta seña ya se devolvió sola (el horario no tenía cupo). Confirmáselo a ${nombre} por WhatsApp al ${telefono} antes del ${limite}.`
+      : `Devolvé la seña completa a ${nombre} y respondele por WhatsApp al ${telefono} antes del ${limite}.`
+  const pagada = sena?.paid_at
+    ? `, pagada el ${new Date(String(sena.paid_at)).toLocaleDateString('es-AR', { timeZone: TZ })}`
+    : ''
   const partes = [
-    `Devolvé la seña completa a ${nombre} y respondele por WhatsApp al ${telefono} antes del ${limite}.`,
+    accion,
     sena
-      ? `Seña: $${sena.amount} (${sena.status}) del turno ${sena.appointment_date} ${String(sena.start_time).slice(0, 5)}.`
+      ? `Seña: $${sena.amount} (${sena.status}) del turno ${sena.appointment_date} ${hora}${pagada}.`
       : 'No encontramos la seña automáticamente: hay que buscarla a mano.',
     operacion ? `Operación de Mercado Pago: ${operacion}.` : null,
     detalle ? `Dice: "${detalle}"` : null,

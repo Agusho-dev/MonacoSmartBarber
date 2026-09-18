@@ -66,8 +66,25 @@ export function construirPolitica(
         ? cfg.policy_text.trim()
         : textoCancelacion(cfg, calculo, contexto)
 
+    // Redactado de nuevo el 18/9/2026 a pedido del dueño: la versión anterior
+    // ("Tenés N días para arrepentirte y pedir la devolución total, sin
+    // explicar por qué. Escribinos y te la hacemos.") se leía como una
+    // invitación, y le hacía temer que alguien se cortara y a los cinco días
+    // pidiera la seña de vuelta.
+    //
+    // Lo que NO se puede hacer es sacarlo o esconderlo: el art. 1111 CCyC exige
+    // informar el derecho "inmediatamente antes de la aceptación" y, si no se
+    // informa, el plazo de arrepentimiento NO EMPIEZA A CORRER —o sea que
+    // callarlo no acorta la ventana, la deja abierta—. Lo que sí es correcto es
+    // decir cuándo aplica: el derecho de revocación deshace un contrato y
+    // obliga a restituirse lo recibido (art. 1115); un corte ya hecho no se
+    // restituye y la seña ya se imputó al precio de ese servicio (art. 1060).
+    // Es la misma regla que `gestionar-client.tsx` aplica al esconder la
+    // ventana cuando la seña está `consumida`, y la que `acciones.ts` le
+    // explica al dueño en la alerta. Sigue siendo informativo, con plazo,
+    // mecanismo y base legal; lo que cambió es el tono.
     const arrepentimiento = cfg.arrepentimiento_days > 0
-        ? `Tenés ${cfg.arrepentimiento_days} días corridos desde el pago para arrepentirte y pedir la devolución total de los ${monto}, sin explicar por qué (art. 1110 del Código Civil y Comercial). Escribinos y te la hacemos.`
+        ? `Derecho de arrepentimiento: si el turno todavía no se atendió, tenés ${cfg.arrepentimiento_days} días corridos desde el pago para pedir la devolución de los ${monto} desde el Botón de arrepentimiento (art. 1110 CCyC).`
         : null
 
     return { titulo, detalle, cancelacion, reserva, arrepentimiento }
