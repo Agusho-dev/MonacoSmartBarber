@@ -18,8 +18,25 @@ import {
 } from '@/lib/actions/breaks'
 import { getTodayAppointmentsForStaff, markAppointmentInProgress } from '@/lib/actions/barber-turnos'
 import { getAppointmentQueueEntry } from '@/lib/actions/appointments'
+import { marcarAsesoriaVista } from '@/lib/actions/asesoria'
 import type { Appointment, QueueEntry, Staff, Client, BreakConfig, StaffSchedule } from '@/lib/types/database'
-import { assignDynamicBarbers } from '@/lib/barber-utils'
+import {
+  aceptacionesWhatsAppNuevas,
+  armarMiFila,
+  asesoriasNuevas,
+  assignDynamicBarbers,
+  esMovidaPorWhatsApp,
+  esMovidaPorWhatsAppDe,
+  leerVistaAsesoria,
+  marcasDeAceptacionWhatsApp,
+  marcasDeAsesoria,
+  serializarVistaAsesoria,
+  ultimaLlegadaVista,
+  type VistaAsesoria,
+} from '@/lib/barber-utils'
+import { avisarYRecargarPorVersion, esErrorDeVersion, TEXTO_RECARGA_MANUAL } from '@/lib/recarga-version'
+import { leerLoyaltyEmbed } from '@/lib/loyalty-embed'
+import { cn } from '@/lib/utils'
 import {
   appointmentInstantMs,
   findNextAppointment,
@@ -41,6 +58,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { CampoContadorTablet } from '@/components/barber/campo-tablet'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,7 +83,6 @@ import {
   Scissors,
   LogOut,
   X,
-  Gift,
   Coffee,
   CalendarClock,
   CheckCircle2,
@@ -76,6 +93,10 @@ import {
   MoreHorizontal,
   CalendarDays,
   PackageCheck,
+  ShoppingBag,
+  MessageCircle,
+  Zap,
+  ChevronRight,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
@@ -87,7 +108,10 @@ import { ClientProfileSheet } from './client-profile-sheet'
 import { ActiveClientCard, ActiveBreakCard } from './active-client-card'
 import { NextClientAlert } from './next-client-alert'
 import { BarberStatsBar } from './barber-stats-bar'
-import { primeAudioContext } from '@/lib/barber-feedback'
+import { AsesoriaBadge } from './asesoria-badge'
+import { AsesoriaInicioDialog, type ModoAsesoriaDialog } from './asesoria-inicio-dialog'
+import { mostrarAvisosAsesoria } from './asesoria-aviso'
+import { playAsesoriaChime, playBeep, primeAudioContext, vibrate } from '@/lib/barber-feedback'
 import {
   Dialog,
   DialogContent,
@@ -152,6 +176,74 @@ interface BreakRequestRow {
   break_config?: { name: string; duration_minutes: number } | null
 }
 
+/**
+ * La tarjeta de quien acaba de pedir asesoría lleva un anillo fucsia este
+ * tiempo (12 s): lo que el aviso anunció se encuentra de un vistazo en la fila.
+ */
+const ANILLO_ASESORIA_MS = 12_000
+
+/**
+ * Cuánto vale lo visto de la fila para los avisos de asesoría (sessionStorage):
+ * volver de Caja, Historial o Metas anuncia lo que llegó en el medio. Una vista
+ * más vieja vuelve a sembrar.
+ */
+const VIGENCIA_VISTA_ASESORIA_MS = 2 * 60 * 60_000
+
+/** Clave de sessionStorage de lo visto: por sucursal y barbero (en la misma pestaña puede entrar otro). */
+function claveVistaAsesoria(branchId: string, staffId: string): string {
+  return `msb.asesoria-vista.v1:${branchId}:${staffId}`
+}
+
+/** Lo visto guardado, o null (no hay, no sirve o no hay sessionStorage). Nunca lanza. */
+function leerVistaGuardada(clave: string): VistaAsesoria | null {
+  try {
+    return leerVistaAsesoria(window.sessionStorage.getItem(clave), Date.now(), VIGENCIA_VISTA_ASESORIA_MS)
+  } catch {
+    return null
+  }
+}
+
+/** Guarda lo visto. Sin sessionStorage (navegación privada, sitio bloqueado) no pasa nada: se vuelve a sembrar. */
+function guardarVista(clave: string, vista: VistaAsesoria) {
+  try {
+    window.sessionStorage.setItem(clave, serializarVistaAsesoria(vista, Date.now()))
+  } catch {
+    // sin sessionStorage: al volver a la fila se siembra de nuevo, como antes
+  }
+}
+
+/** Una acción del panel que no devolvió nada (falló o el panel se recarga). */
+const SIN_RESPUESTA = Symbol('sin-respuesta')
+
+/**
+ * Corre la server action de un botón del panel. Si el panel quedó con el
+ * bundle de un deploy anterior (seguridad-y-despliegue-01), avisa y recarga
+ * (src/lib/recarga-version.ts) en vez de un error genérico: reintentar no
+ * sirve, la acción ya no existe en el servidor. Ante otra falla (la red),
+ * muestra `textoError`. Nunca lanza: devuelve SIN_RESPUESTA, y el que llama
+ * apaga su spinner igual (antes «Atender» quedaba girando para siempre).
+ */
+async function correrAccion<T>(accion: () => Promise<T>, textoError: string): Promise<T | typeof SIN_RESPUESTA> {
+  try {
+    return await accion()
+  } catch (e) {
+    console.error('[queue-panel]', textoError, e)
+    if (esErrorDeVersion(e)) {
+      if (!avisarYRecargarPorVersion()) toast.error(TEXTO_RECARGA_MANUAL, { id: 'recarga-manual' })
+    } else {
+      toast.error(textoError)
+    }
+    return SIN_RESPUESTA
+  }
+}
+
+/**
+ * El staff que lee el panel con la anon key: sin teléfono ni comisión, que
+ * anon ya no puede leer (mig 224, Known Risk #34). Es `Staff` con esas dos
+ * columnas opcionales; el panel nunca las usó.
+ */
+type StaffDelPanel = Omit<Staff, 'phone' | 'commission_pct'> & Partial<Pick<Staff, 'phone' | 'commission_pct'>>
+
 export function QueuePanel({
   session,
   branchName,
@@ -164,6 +256,12 @@ export function QueuePanel({
   loyaltyEnabled = true,
 }: QueuePanelProps) {
   const [entries, setEntries] = useState<QueueEntry[]>([])
+  // true desde la primera lectura EXITOSA de la fila. `loading` no sirve para
+  // esto: se apaga aunque la lectura falle, y el aviso de asesoría tiene que
+  // sembrar lo visto con datos reales (si sembrara con la fila vacía de un
+  // error, la lectura siguiente anunciaría como nuevos a todos los que ya
+  // estaban esperando).
+  const [filaLeida, setFilaLeida] = useState(false)
   // Turnos del día de este barbero. Arranca con el snapshot del server y se
   // refresca al volver al tab / cada 60s: sin eso, un turno cargado después de
   // abrir el panel no aparecía nunca. 60s (y no el ciclo de 30s de la cola)
@@ -175,12 +273,17 @@ export function QueuePanel({
   const [now, setNow] = useState(Date.now())
   const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
   const [lastCompletedAt, setLastCompletedAt] = useState<Record<string, string>>({})
+  const [lastClockInAt, setLastClockInAt] = useState<Record<string, string>>({})
   // (mig 131) `fairBarberId` removido: el filter que ocultaba dinámicas dejó
   // un limbo cuando el ranking local difería del server. Ahora la atomicidad
   // se garantiza con FOR UPDATE SKIP LOCKED en `claim_next_for_barber`.
   const [dayStats, setDayStats] = useState({ servicesCount: 0, revenue: 0 })
-  const [otherBarbers, setOtherBarbers] = useState<Staff[]>([])
-  const [allBarbers, setAllBarbers] = useState<Staff[]>([])
+  const [otherBarbers, setOtherBarbers] = useState<StaffDelPanel[]>([])
+  const [allBarbers, setAllBarbers] = useState<StaffDelPanel[]>([])
+  // true desde la primera lectura de los barberos (con su fichaje y los datos
+  // del hint). Los avisos de asesoría la esperan: sin ella no se sabe si este
+  // barbero fichó ni quién tiene a quién en su «Mi fila».
+  const [barberosLeidos, setBarberosLeidos] = useState(false)
   const [notClockedInBarbers, setNotClockedInBarbers] = useState<Set<string>>(new Set())
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [profileClient, setProfileClient] = useState<Client | null>(null)
@@ -267,14 +370,20 @@ export function QueuePanel({
     // que generaba 177k calls/día según pg_stat_statements. El conteo ya vive en
     // clients.total_visits y en la vista client_loyalty_state.total_visits.
     // tier_code / visits_in_window (mig 196) salen de la MISMA fila: cero queries extra.
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('queue_entries')
       .select('*, client:clients(id, name, phone, loyalty:client_loyalty_state(total_visits, tier_code, visits_in_window)), barber:staff(id, full_name, avatar_url), service:services(id, name, duration_minutes, price)')
       .eq('branch_id', session.branch_id)
       .in('status', ['waiting', 'in_progress'])
       .order('position')
 
-    if (data) setEntries(data as QueueEntry[])
+    // Con error se conserva la última fila buena (Realtime vuelve a leer en el
+    // próximo evento), pero que quede rastro (Known Risk #5/#13).
+    if (error) console.error('[queue-panel] fila:', error.message)
+    if (data) {
+      setEntries(data as QueueEntry[])
+      setFilaLeida(true)
+    }
     setLoading(false)
   }, [supabase, session.branch_id])
 
@@ -291,7 +400,7 @@ export function QueuePanel({
   // Ref espejo de allBarbers para que fetchAssignmentData pueda leerlo sin
   // recrearse cuando cambia la lista de barberos (mantiene useCallback estable
   // y evita re-suscripciones del canal Realtime).
-  const allBarbersRef = useRef<Staff[]>([])
+  const allBarbersRef = useRef<StaffDelPanel[]>([])
 
   // Refresca los inputs del sort dinámico (dailyServiceCounts, lastCompletedAt)
   // Y el estado de fichaje (notClockedInBarbers). Llamado en cada evento Realtime
@@ -307,6 +416,12 @@ export function QueuePanel({
     const data = await fetchBranchAssignmentData(session.branch_id)
     setDailyServiceCounts(data.dailyServiceCounts ?? {})
     setLastCompletedAt(data.lastCompletedAt ?? {})
+    // Hora del fichaje de entrada vigente (criterio 0b del hint de Menor espera
+    // por WhatsApp). Sale de esta action —y no de la consulta de fichajes de
+    // `fetchBarbersAndSchedules`— a propósito: esa corre al abrir el panel y cada
+    // tablet la tiene de un momento distinto; ésta la refrescan TODAS en cada
+    // evento de la fila, así que todas calculan el mismo hint.
+    setLastClockInAt(data.latestClockInAt ?? {})
 
     const latestAttendance = data.latestAttendance ?? {}
     const notClocked = new Set<string>()
@@ -324,8 +439,10 @@ export function QueuePanel({
         .from('staff')
         // Columnas explícitas: el panel corre con la anon key (se autentica por PIN,
         // no por Supabase Auth), así que `select('*')` le entregaba el `pin` de todos
-        // sus compañeros a cualquiera con las devtools abiertas. Ver mig 212.
-        .select('id, full_name, branch_id, role, role_id, status, avatar_url, hidden_from_checkin, hidden_from_mobile, is_active, is_also_barber, organization_id, phone, commission_pct, created_at, updated_at, deleted_at')
+        // sus compañeros a cualquiera con las devtools abiertas. Ver mig 212. Sin
+        // `phone` ni `commission_pct` desde la mig 224: anon ya no las lee y pedirlas
+        // haría fallar la consulta entera con 42501 (Known Risk #34).
+        .select('id, full_name, branch_id, role, role_id, status, avatar_url, hidden_from_checkin, hidden_from_mobile, is_active, is_also_barber, organization_id, created_at, updated_at, deleted_at')
         .eq('branch_id', session.branch_id)
         .or('role.eq.barber,is_also_barber.eq.true')
         .eq('is_active', true)
@@ -335,22 +452,39 @@ export function QueuePanel({
         .select('*')
         .eq('day_of_week', new Date().getDay())
         .eq('is_active', true),
-      supabase
-        .from('app_settings')
-        .select('shift_end_margin_minutes, next_client_alert_minutes')
-        .maybeSingle(),
+      // Por organización: `app_settings` es legible por anon ENTERA (policy
+      // `settings_anon_read`), una fila por org. Sin el filtro `.maybeSingle()`
+      // recibía 14 filas, devolvía error (PGRST116) y el panel caía en silencio a
+      // los defaults: margen de fin de turno 35 donde Monaco configuró 15. Mismo
+      // desempate que el tick de la mig 218 si alguna vez hubiera dos filas.
+      session.organization_id
+        ? supabase
+            .from('app_settings')
+            .select('shift_end_margin_minutes, next_client_alert_minutes')
+            .eq('organization_id', session.organization_id)
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
       supabase
         .from('attendance_logs')
         .select('staff_id, action_type')
         .eq('branch_id', session.branch_id)
         .gte('recorded_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
         .order('recorded_at', { ascending: false }),
-      fetchBranchAssignmentData(session.branch_id),
+      // Server action: si falla (la red, un deploy nuevo) no se lleva puesta al
+      // resto de la carga — sin barberos no hay hint ni avisos de asesoría.
+      fetchBranchAssignmentData(session.branch_id).catch((e: unknown) => {
+        console.error('[queue-panel] datos de asignación:', e)
+        return null
+      }),
     ])
 
+    if (barbersRes.error) console.error('[queue-panel] barberos:', barbersRes.error.message)
     if (barbersRes.data) {
-      setAllBarbers(barbersRes.data as Staff[])
-      setOtherBarbers((barbersRes.data as Staff[]).filter(b => b.id !== session.staff_id))
+      const barberos = barbersRes.data as StaffDelPanel[]
+      setAllBarbers(barberos)
+      setOtherBarbers(barberos.filter(b => b.id !== session.staff_id))
 
       const latestAttendance: Record<string, string> = {}
       if (attendanceRes.data) {
@@ -361,7 +495,7 @@ export function QueuePanel({
         })
       }
       const notClocked = new Set<string>()
-      for (const b of barbersRes.data as Staff[]) {
+      for (const b of barberos) {
         if (latestAttendance[b.id] !== 'clock_in') {
           notClocked.add(b.id)
         }
@@ -373,6 +507,11 @@ export function QueuePanel({
       setSchedules(schedRes.data as StaffSchedule[])
     }
 
+    // Con error se conservan los valores que ya había (o los defaults), pero que
+    // quede rastro: este error estuvo escondido meses (Known Risk #13).
+    if (settingsRes.error) {
+      console.error('[queue-panel] app_settings:', settingsRes.error.message)
+    }
     if (settingsRes.data) {
       const settingsData = settingsRes.data as { shift_end_margin_minutes?: number; next_client_alert_minutes?: number }
       const margin = settingsData.shift_end_margin_minutes
@@ -385,9 +524,13 @@ export function QueuePanel({
       }
     }
 
-    setDailyServiceCounts(assignmentData.dailyServiceCounts ?? {})
-    setLastCompletedAt(assignmentData.lastCompletedAt ?? {})
-  }, [supabase, session.branch_id, session.staff_id])
+    if (assignmentData) {
+      setDailyServiceCounts(assignmentData.dailyServiceCounts ?? {})
+      setLastCompletedAt(assignmentData.lastCompletedAt ?? {})
+      setLastClockInAt(assignmentData.latestClockInAt ?? {})
+    }
+    if (barbersRes.data) setBarberosLeidos(true)
+  }, [supabase, session.branch_id, session.staff_id, session.organization_id])
 
   const fetchBreakRequestStatus = useCallback(async () => {
     const { data } = await getBarberActiveBreakRequest(session.staff_id)
@@ -515,7 +658,10 @@ export function QueuePanel({
       fetchQueue()
       refreshStats()
       fetchAssignmentData()
-    }, [fetchQueue, refreshStats, fetchAssignmentData]),
+      // Si la primera lectura de los barberos falló, se reintenta acá: sin ella
+      // no salen los avisos de asesoría (ver `barberosLeidos`).
+      if (!barberosLeidos) fetchBarbersAndSchedules()
+    }, [fetchQueue, refreshStats, fetchAssignmentData, barberosLeidos, fetchBarbersAndSchedules]),
     30_000
   )
 
@@ -538,12 +684,15 @@ export function QueuePanel({
   const assignmentTimeRef = useRef<number>(Date.now())
   useEffect(() => {
     assignmentTimeRef.current = Date.now()
-  }, [entries, allBarbers, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
+  }, [entries, allBarbers, dailyServiceCounts, lastCompletedAt, lastClockInAt, notClockedInBarbers])
   const assignmentTime = assignmentTimeRef.current
 
   const dynamicEntries = useMemo(() => {
-    return assignDynamicBarbers(entries, allBarbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, {})
-  }, [entries, allBarbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers])
+    // `as Staff[]`: el hint sólo lee id, visibilidad y horario, y del barbero
+    // elegido el panel muestra el nombre. El teléfono y la comisión no llegan
+    // (ver StaffDelPanel) y nadie los lee.
+    return assignDynamicBarbers(entries, allBarbers as Staff[], schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, {}, lastClockInAt)
+  }, [entries, allBarbers, schedules, assignmentTime, shiftEndMargin, dailyServiceCounts, lastCompletedAt, notClockedInBarbers, lastClockInAt])
 
   // My active break (ghost entry that is in_progress)
   const myActiveBreak = dynamicEntries.find(
@@ -554,32 +703,21 @@ export function QueuePanel({
     (e) => e.barber_id === session.staff_id && e.status === 'in_progress' && !e.is_break
   )
 
-  // "Mi fila": only entries assigned to this barber (by DB or by assignDynamicBarbers).
-  // Nunca mostramos entries con barber_id=null aquí para evitar que el mismo cliente
-  // aparezca en la fila de múltiples barberos simultáneamente.
+  // "Mi fila" (`armarMiFila`, barber-utils): lo de este barbero en el orden en
+  // que lo va a atender —sus clientes y descansos, los dinámicos que el hint le
+  // sugirió y (mig 218) los que lo esperaban a él y aceptaron Menor espera por
+  // WhatsApp—. Todo lo que cuelga de acá sale de esta lista: el "Atender" de la
+  // primera tarjeta, el contador de la pestaña, la alerta de "tu cliente te está
+  // esperando" y los walk-ins que frena la ventana de un turno.
   //
-  // (mig 131) Removido el filtro `_is_dynamically_assigned && fairBarberId !== self`:
-  // el fairness gate server-side fue eliminado porque generaba un limbo donde el
-  // cliente dinámico desaparecía de TODAS las "Mi fila" cuando el ranking cliente
-  // y server divergían (ETA vs load count). La atomicidad ya la garantiza
-  // FOR UPDATE SKIP LOCKED en `claim_next_for_barber`. Si dos paneles muestran
-  // el mismo dinámico simultáneamente, el primer tap gana — el segundo recibe
-  // un toast informativo y se asigna el siguiente.
-  const myWaitingEntries = dynamicEntries
-    .filter((e) => {
-      if (e.status !== 'waiting' || e.barber_id !== session.staff_id) return false
-      return true
-    })
-    // Orden cronológico estricto por priority_order. NO empujamos los breaks
-    // al final: un break con cuts_before_break=0 tiene priority_order menor
-    // que los clientes que llegaron después y debe verse PRIMERO. Si dos
-    // entradas tienen el mismo priority_order, desempatamos por position.
-    .sort((a, b) => {
-      const pa = new Date(a.priority_order).getTime()
-      const pb = new Date(b.priority_order).getTime()
-      if (pa !== pb) return pa - pb
-      return a.position - b.position
-    })
+  // Un mismo cliente sí puede estar en dos "Mi fila" a la vez: el dinámico cuyo
+  // hint difiere entre tablets, y a propósito el que aceptó por WhatsApp (en la
+  // del barbero que esperaba Y en la del libre que le sugiere el hint). La
+  // atomicidad la garantiza FOR UPDATE SKIP LOCKED en `claim_next_for_barber`: el
+  // primer tap gana y el segundo recibe un toast y el siguiente de su fila.
+  // (mig 131: el fairness gate que ocultaba dinámicos dejaba limbos donde el
+  // cliente no estaba en NINGUNA "Mi fila"; no volver a filtrar por ranking.)
+  const myWaitingEntries = armarMiFila(dynamicEntries, session.staff_id)
 
   // "Fila general": ALL waiting clients
   const allWaitingEntries = dynamicEntries.filter((e) => e.status === 'waiting')
@@ -655,6 +793,13 @@ export function QueuePanel({
         new Date(e.priority_order).getTime() < ghostTs
     )
   }, [entries, myPendingGhost, session.staff_id])
+  // Descanso "listo": con esto `claim_next_for_barber` arranca el DESCANSO
+  // aunque se toque "Atender" sobre un cliente (guard 0b del RPC). Sólo lo tapan
+  // los clientes propios (barber_id = yo) que llegaron antes; los del pool no.
+  // Hasta la mig 218 eso no se veía, porque con el descanso listo lo primero de
+  // "Mi fila" era siempre el descanso; ahora un cliente que me esperaba y aceptó
+  // Menor espera puede ir antes, y su "Atender" mandaría al barbero a descansar.
+  const descansoListo = !!myPendingGhost && !ghostBlockedByAssigned
   const autoStartingGhostRef = useRef<string | null>(null)
   useEffect(() => {
     if (!myPendingGhost) return
@@ -678,6 +823,210 @@ export function QueuePanel({
         autoStartingGhostRef.current = null
       })
   }, [myPendingGhost, myActiveBreak, myActiveEntry, ghostBlockedByAssigned, session.staff_id, session.branch_id, fetchQueue])
+
+  // ── Aviso: un cliente que me esperaba aceptó Menor espera por WhatsApp ──
+  // Se DERIVA comparando la fila nueva con la que este panel ya había visto
+  // (`aceptacionesWhatsAppNuevas`): ni escrituras ni consultas nuevas, porque el
+  // panel ya re-lee la fila en cada evento de Realtime (Known Risks #9/#10). La
+  // primera lectura sólo siembra: lo que ya había pasado antes de abrir el panel
+  // no se anuncia.
+  const marcasVistasRef = useRef<Map<string, string | null> | null>(null)
+  useEffect(() => {
+    const previas = marcasVistasRef.current
+    marcasVistasRef.current = marcasDeAceptacionWhatsApp(entries)
+    if (!previas) return
+    const nuevas = aceptacionesWhatsAppNuevas(previas, entries, session.staff_id)
+    if (nuevas.length === 0) return
+
+    // Regla de active-client-card: durante un corte nada de sonido, para no
+    // interrumpir al cliente que está en la silla (un descanso tampoco suena).
+    const ocupado = entries.some(
+      (e) => e.barber_id === session.staff_id && e.status === 'in_progress'
+    )
+    for (const e of nuevas) {
+      const nombre = e.client?.name?.trim() || 'Tu cliente'
+      toast(`${nombre} aceptó Menor espera por WhatsApp`, {
+        id: `menor-espera-${e.id}`,
+        description: 'Sigue en tu fila; si otro barbero se libera antes, lo atiende él.',
+        icon: <MessageCircle className="size-4 text-blue-500" aria-hidden />,
+        duration: 12_000,
+      })
+      vibrate([15, 60, 15])
+      if (!ocupado) playBeep({ frequency: 660, duration: 0.18, volume: 0.08 })
+    }
+  }, [entries, session.staff_id])
+
+  // ── Aviso: un cliente pidió asesoría (mig 217) ──
+  // Derivado igual que el de arriba, sin escrituras ni consultas nuevas (Known
+  // Risk #10): `asesoriasNuevas` compara esta lectura de la fila con la
+  // anterior. Diferencias con el de WhatsApp, a propósito:
+  //  · siembra con la primera lectura EXITOSA (`filaLeida`), no con el [] del
+  //    arranque, y lo nuevo se decide con `checked_in_at` (reloj del SERVIDOR):
+  //    recargar el panel no repite avisos de quien ya estaba esperando;
+  //  · lo visto se guarda en sessionStorage (por sucursal y barbero): volver de
+  //    Caja, Historial o Metas anuncia lo que llegó o se sumó en el medio
+  //    (hallazgo asesoria-03). Antes cada montaje volvía a sembrar y eso no se
+  //    anunciaba nunca;
+  //  · avisa también al que no lo tiene en su fila, si es de Menor espera y
+  //    este barbero está fichado, libre o cortando (aviso liviano, cortando sin
+  //    sonido: lo toma el primero). No depende del hint de cada tablet, que con
+  //    relojes distintos podía no ponerlo en la «Mi fila» de nadie.
+  const asesoriaVistaRef = useRef<VistaAsesoria | null>(null)
+  const claveVista = claveVistaAsesoria(session.branch_id, session.staff_id)
+  // Tarjetas con el anillo de "recién llegada" (12 s, ver ANILLO_ASESORIA_MS).
+  const [asesoriasRecientes, setAsesoriasRecientes] = useState<ReadonlySet<string>>(() => new Set())
+  const anillosRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const marcarAsesoriasRecientes = useCallback((ids: string[]) => {
+    setAsesoriasRecientes((prev) => {
+      const next = new Set(prev)
+      for (const id of ids) next.add(id)
+      return next
+    })
+    for (const id of ids) {
+      const anterior = anillosRef.current.get(id)
+      if (anterior) clearTimeout(anterior)
+      anillosRef.current.set(
+        id,
+        setTimeout(() => {
+          anillosRef.current.delete(id)
+          setAsesoriasRecientes((prev) => {
+            if (!prev.has(id)) return prev
+            const next = new Set(prev)
+            next.delete(id)
+            return next
+          })
+        }, ANILLO_ASESORIA_MS),
+      )
+    }
+  }, [])
+  useEffect(() => {
+    const anillos = anillosRef.current
+    return () => {
+      for (const t of anillos.values()) clearTimeout(t)
+      anillos.clear()
+    }
+  }, [])
+
+  useEffect(() => {
+    // Espera la fila Y los barberos: sin ellos no se sabe si este barbero fichó
+    // ni quién tiene a quién en su «Mi fila», y comparar antes dejaría lo que
+    // llegó en ausencia marcado como visto sin haberlo anunciado.
+    if (!filaLeida || !barberosLeidos) return
+    // Lo visto: el de este montaje o, recién montado, el que dejó guardado el
+    // anterior. Sin ninguno (primera vez, vista vieja o sin sessionStorage) se
+    // siembra: lo que ya estaba al abrir el panel no se anuncia.
+    const previa = asesoriaVistaRef.current ?? leerVistaGuardada(claveVista)
+    const vista: VistaAsesoria = {
+      marcas: marcasDeAsesoria(entries),
+      ultimaLlegada: previa ? previa.ultimaLlegada : ultimaLlegadaVista(entries),
+    }
+    asesoriaVistaRef.current = vista
+    guardarVista(claveVista, vista)
+    if (!previa) return
+
+    const yo = session.staff_id
+    // Cortando o en descanso: sin sonido (regla de active-client-card: no se
+    // interrumpe al cliente que está en la silla).
+    const ocupado = entries.some((e) => e.barber_id === yo && e.status === 'in_progress')
+    const fichado = allBarbers.some((b) => b.id === yo) && !notClockedInBarbers.has(yo)
+    const avisos = asesoriasNuevas(previa.marcas, entries, {
+      staffId: yo,
+      miFila: armarMiFila(dynamicEntries, yo),
+      recibeMenorEspera: fichado && !hiddenFromCheckin,
+      ultimaLlegadaInicial: previa.ultimaLlegada,
+    })
+    if (avisos.length === 0) return
+
+    mostrarAvisosAsesoria(avisos, ocupado)
+    // Una sola campanita aunque lleguen dos a la vez.
+    if (ocupado) {
+      vibrate(15)
+    } else {
+      playAsesoriaChime()
+      vibrate([20, 60, 20])
+    }
+    const ids = avisos.map((a) => a.entrada.id)
+    // Diferido: el estado del anillo no se toca en el cuerpo del efecto.
+    queueMicrotask(() => marcarAsesoriasRecientes(ids))
+  }, [
+    filaLeida,
+    barberosLeidos,
+    claveVista,
+    entries,
+    dynamicEntries,
+    allBarbers,
+    notClockedInBarbers,
+    hiddenFromCheckin,
+    session.staff_id,
+    marcarAsesoriasRecientes,
+  ])
+
+  // ── Pop-up de asesoría al atender ──
+  // `inicio` sale del ESTADO de la entrada en curso (pidió asesoría y nadie la
+  // confirmó), no del botón que la arrancó: cubre Atender, Reclamar, la alerta
+  // de inactividad y el inicio desde el dashboard. Cualquier cierre la confirma
+  // (`marcarAsesoriaVista`, optimista) y el id queda acá para no reabrirla.
+  // `consulta` la reabre el sello de la tarjeta del cliente actual.
+  const [asesoriasConfirmadas, setAsesoriasConfirmadas] = useState<ReadonlySet<string>>(() => new Set())
+  const [consultaAsesoriaDe, setConsultaAsesoriaDe] = useState<string | null>(null)
+  // No se abre encima de otro modal del panel: con dos diálogos hermanos
+  // apilados, al cerrar el de arriba Radix devuelve el foco a SU disparador, y
+  // este pop-up no tiene (lo abre el estado): el foco cae al <body> mientras el
+  // de abajo sigue atrapándolo. Espera a que el otro se cierre y aparece
+  // enseguida. El cobro sobre todo: si ya están cobrando, el pop-up llega tarde.
+  const hayOtroModalAbierto =
+    !!completingEntry ||
+    breakDialogOpen ||
+    breakRequestsDialogOpen ||
+    deactivateDialogOpen ||
+    directSaleOpen ||
+    deliverRewardOpen ||
+    !!stripAppointment ||
+    agendaSheetOpen ||
+    !!profileClient
+  const asesoriaSinConfirmar =
+    !!myActiveEntry &&
+    myActiveEntry.pidio_asesoria === true &&
+    !myActiveEntry.asesoria_vista_at &&
+    !asesoriasConfirmadas.has(myActiveEntry.id)
+  const modoAsesoria: ModoAsesoriaDialog | null =
+    asesoriaSinConfirmar && !hayOtroModalAbierto
+      ? 'inicio'
+      : myActiveEntry?.pidio_asesoria === true && consultaAsesoriaDe === myActiveEntry.id
+        ? 'consulta'
+        : null
+
+  function avisarAsesoriaSinRegistrar(detalle: string | null) {
+    toast.error('No pudimos registrar la asesoría. Si recargás, te la vuelve a mostrar.', {
+      id: 'asesoria-sin-registrar',
+      // El motivo sólo si dice algo más (p. ej. que venció la sesión del PIN).
+      description: detalle && detalle !== 'No pudimos registrar la asesoría.' ? detalle : undefined,
+      duration: 10_000,
+    })
+  }
+
+  function confirmarAsesoria(entryId: string) {
+    setAsesoriasConfirmadas((prev) => (prev.has(entryId) ? prev : new Set(prev).add(entryId)))
+    marcarAsesoriaVista(entryId)
+      .then((r) => {
+        if (!r.ok) avisarAsesoriaSinRegistrar(r.error)
+      })
+      .catch((e: unknown) => {
+        console.error('[queue-panel] marcarAsesoriaVista:', e)
+        // Con el bundle de un deploy anterior: se recarga y, como no quedó
+        // registrada, el pop-up vuelve a salir para confirmarla.
+        if (esErrorDeVersion(e)) {
+          if (!avisarYRecargarPorVersion()) toast.error(TEXTO_RECARGA_MANUAL, { id: 'recarga-manual' })
+          return
+        }
+        avisarAsesoriaSinRegistrar(null)
+      })
+  }
+
+  function cerrarAsesoria() {
+    if (modoAsesoria === 'inicio' && myActiveEntry) confirmarAsesoria(myActiveEntry.id)
+    setConsultaAsesoriaDe(null)
+  }
 
   // ── Next client alert logic ──
   // Track when barber becomes idle with clients waiting
@@ -810,16 +1159,19 @@ export function QueuePanel({
     const firstEntry = myRealWaitingEntries[0]
     if (!firstEntry || warningStarting) return
     setWarningStarting(true)
-    // El primero de la fila puede ser un TURNO, y los turnos no se reclaman por
-    // el camino del preferido (ver handleStartAppointment).
-    if (firstEntry.is_appointment) {
-      await handleStartAppointment(firstEntry)
-    } else {
-      await handleStartService(firstEntry.id)
+    try {
+      // El primero de la fila puede ser un TURNO, y los turnos no se reclaman por
+      // el camino del preferido (ver handleStartAppointment).
+      if (firstEntry.is_appointment) {
+        await handleStartAppointment(firstEntry)
+      } else {
+        await handleStartService(firstEntry.id)
+      }
+    } finally {
+      setShowWaitWarning(false)
+      setIdleSince(null)
+      setWarningStarting(false)
     }
-    setShowWaitWarning(false)
-    setIdleSince(null)
-    setWarningStarting(false)
   }
 
   const otherInProgress = dynamicEntries.filter(
@@ -863,18 +1215,21 @@ export function QueuePanel({
       toast.error('Este turno no está vinculado a la agenda. Avisá al mostrador.')
       return
     }
+    const appointmentId = entry.appointment_id
     setActionLoading(entry.id)
-    const result = await markAppointmentInProgress(
-      entry.appointment_id,
-      session.staff_id,
-      session.branch_id
-    )
-    if ('error' in result) toast.error(result.error)
-    await fetchQueue()
-    // La agenda también cambia (el turno pasa a "en curso"): sin esto el
-    // timeline de los modos appointments/hybrid quedaba hasta 60s atrasado.
-    refreshAppointments()
-    setActionLoading(null)
+    try {
+      const result = await correrAccion(
+        () => markAppointmentInProgress(appointmentId, session.staff_id, session.branch_id),
+        'No pudimos iniciar el turno. Revisá la conexión y probá de nuevo.',
+      )
+      if (result !== SIN_RESPUESTA && 'error' in result) toast.error(result.error)
+      await fetchQueue()
+      // La agenda también cambia (el turno pasa a "en curso"): sin esto el
+      // timeline de los modos appointments/hybrid quedaba hasta 60s atrasado.
+      refreshAppointments()
+    } finally {
+      setActionLoading(null)
+    }
   }
 
   /**
@@ -888,8 +1243,18 @@ export function QueuePanel({
       return
     }
     setLoadingApptEntryId(appointment.id)
-    const entry = await getAppointmentQueueEntry(appointment.id)
-    setLoadingApptEntryId(null)
+    // Con un error que no se atrapaba, el «Cargando…» a pantalla completa
+    // quedaba para siempre y tapaba el panel entero.
+    let entry: Awaited<ReturnType<typeof getAppointmentQueueEntry>> | typeof SIN_RESPUESTA = SIN_RESPUESTA
+    try {
+      entry = await correrAccion(
+        () => getAppointmentQueueEntry(appointment.id),
+        'No se pudo cargar la entrada de fila de este turno. Probá de nuevo.',
+      )
+    } finally {
+      setLoadingApptEntryId(null)
+    }
+    if (entry === SIN_RESPUESTA) return
     if (!entry) {
       toast.error('No se pudo cargar la entrada de fila de este turno')
       return
@@ -899,7 +1264,25 @@ export function QueuePanel({
 
   async function handleStartService(entryId: string) {
     setActionLoading(entryId)
-    const result = await attendNextClient(session.staff_id, session.branch_id, entryId)
+    try {
+      await atenderCliente(entryId)
+    } finally {
+      // Pase lo que pase, «Atender» no queda girando (antes, un error de red o
+      // de un deploy nuevo lo dejaba así hasta recargar).
+      setActionLoading(null)
+    }
+  }
+
+  async function atenderCliente(entryId: string) {
+    const result = await correrAccion(
+      () => attendNextClient(session.staff_id, session.branch_id, entryId),
+      'No pudimos tomar al cliente. Revisá la conexión y probá de nuevo.',
+    )
+    if (result === SIN_RESPUESTA) {
+      // No se sabe si llegó al servidor: la fila dice qué pasó.
+      await fetchQueue()
+      return
+    }
     if ('error' in result) {
       toast.error(result.error)
     } else if (!result.entryId) {
@@ -939,102 +1322,214 @@ export function QueuePanel({
     if (!('error' in result) && !result.entryId) {
       fetchAssignmentData()
     }
-    setActionLoading(null)
   }
 
   async function handleCancel(entryId: string) {
     setActionLoading(entryId)
-    const result = await cancelQueueEntry(entryId)
-    if ('error' in result) toast.error(result.error)
-    await fetchQueue()
-    setActionLoading(null)
+    try {
+      const result = await correrAccion(
+        () => cancelQueueEntry(entryId),
+        'No pudimos sacarlo de la fila. Revisá la conexión y probá de nuevo.',
+      )
+      if (result !== SIN_RESPUESTA && 'error' in result) toast.error(result.error)
+      await fetchQueue()
+    } finally {
+      setActionLoading(null)
+    }
   }
 
   async function handleCancelBreakRequest() {
-    if (!breakRequestId) return
+    const requestId = breakRequestId
+    if (!requestId) return
     setBreakRequestLoading(true)
-    const result = await cancelBreakRequest(breakRequestId)
-    if (result.error) {
-      toast.error(result.error)
-    } else {
-      toast.success('Solicitud de descanso cancelada')
-      setBreakRequestStatus(null)
-      setBreakRequestId(null)
+    try {
+      const result = await correrAccion(
+        () => cancelBreakRequest(requestId),
+        'No pudimos cancelar la solicitud de descanso. Probá de nuevo.',
+      )
+      if (result === SIN_RESPUESTA) return
+      if (result.error) {
+        toast.error(result.error)
+      } else {
+        toast.success('Solicitud de descanso cancelada')
+        setBreakRequestStatus(null)
+        setBreakRequestId(null)
+      }
+    } finally {
+      setBreakRequestLoading(false)
+      fetchQueue()
     }
-    setBreakRequestLoading(false)
-    fetchQueue()
   }
 
   async function handleCompleteBreak() {
     if (!myActiveBreak) return
-    setActionLoading(myActiveBreak.id)
-    const result = await completeBreakRequest(myActiveBreak.id)
-    if (result.error) {
-      toast.error(result.error)
-    } else {
-      toast.success('Descanso finalizado')
-      setBreakRequestStatus(null)
-      setBreakRequestId(null)
+    const breakId = myActiveBreak.id
+    setActionLoading(breakId)
+    try {
+      const result = await correrAccion(
+        () => completeBreakRequest(breakId),
+        'No pudimos terminar el descanso. Probá de nuevo.',
+      )
+      if (result !== SIN_RESPUESTA) {
+        if (result.error) {
+          toast.error(result.error)
+        } else {
+          toast.success('Descanso finalizado')
+          setBreakRequestStatus(null)
+          setBreakRequestId(null)
+        }
+      }
+      await fetchQueue()
+    } finally {
+      setActionLoading(null)
     }
-    await fetchQueue()
-    setActionLoading(null)
   }
 
   async function handleApproveOtherBreak(requestId: string) {
     const cuts = parseInt(approveCutsInputs[requestId] || '0', 10)
     if (isNaN(cuts) || cuts < 0) { toast.error('Número de cortes inválido'); return }
     setApproveLoading(requestId)
-    const result = await approveBreakAction(requestId, cuts)
-    if (result.error) {
-      toast.error(result.error)
-    } else {
-      toast.success('Descanso aprobado')
-      fetchPendingBreakRequests()
-      fetchQueue()
+    try {
+      const result = await correrAccion(
+        () => approveBreakAction(requestId, cuts),
+        'No pudimos aprobar el descanso. Probá de nuevo.',
+      )
+      if (result === SIN_RESPUESTA) return
+      if (result.error) {
+        toast.error(result.error)
+      } else {
+        toast.success('Descanso aprobado')
+        fetchPendingBreakRequests()
+        fetchQueue()
+      }
+    } finally {
+      setApproveLoading(null)
     }
-    setApproveLoading(null)
   }
 
   async function handleRejectOtherBreak(requestId: string) {
     setApproveLoading(requestId)
-    const result = await rejectBreakAction(requestId)
-    if (result.error) {
-      toast.error(result.error)
-    } else {
-      toast.success('Solicitud rechazada')
-      fetchPendingBreakRequests()
+    try {
+      const result = await correrAccion(
+        () => rejectBreakAction(requestId),
+        'No pudimos rechazar la solicitud. Probá de nuevo.',
+      )
+      if (result === SIN_RESPUESTA) return
+      if (result.error) {
+        toast.error(result.error)
+      } else {
+        toast.success('Solicitud rechazada')
+        fetchPendingBreakRequests()
+      }
+    } finally {
+      setApproveLoading(null)
     }
-    setApproveLoading(null)
   }
 
   async function handleDeactivateBarber(barberId: string) {
     setDeactivateLoading(barberId)
-    const { deactivateBarber } = await import('@/lib/actions/barber')
-    const result = await deactivateBarber(barberId)
-    if (result.error) {
-      toast.error(result.error)
-    } else {
-      const msg = result.reassignedCount && result.reassignedCount > 0
-        ? `Barbero desactivado. ${result.reassignedCount} cliente(s) reasignados.`
-        : 'Barbero desactivado'
-      toast.success(msg)
-      fetchBarbersAndSchedules()
-      fetchQueue()
+    try {
+      const result = await correrAccion(async () => {
+        const { deactivateBarber } = await import('@/lib/actions/barber')
+        return deactivateBarber(barberId)
+      }, 'No pudimos desactivar al barbero. Probá de nuevo.')
+      if (result === SIN_RESPUESTA) return
+      if (result.error) {
+        toast.error(result.error)
+      } else {
+        const msg = result.reassignedCount && result.reassignedCount > 0
+          ? `Barbero desactivado. ${result.reassignedCount} cliente(s) reasignados.`
+          : 'Barbero desactivado'
+        toast.success(msg)
+        fetchBarbersAndSchedules()
+        fetchQueue()
+      }
+    } finally {
+      setDeactivateLoading(null)
     }
-    setDeactivateLoading(null)
   }
 
   async function handleToggleVisibility() {
     setHiddenLoading(true)
-    const { toggleBarberVisibility } = await import('@/lib/actions/barber')
-    const result = await toggleBarberVisibility(session.staff_id)
-    if (result.error) {
-      toast.error(result.error)
-    } else {
-      setHiddenFromCheckin(result.hidden ?? false)
-      toast.success(result.hidden ? 'Te ocultaste del check-in' : 'Volviste a ser visible en el check-in')
+    try {
+      const result = await correrAccion(async () => {
+        const { toggleBarberVisibility } = await import('@/lib/actions/barber')
+        return toggleBarberVisibility(session.staff_id)
+      }, 'No pudimos cambiar tu visibilidad en el check-in. Probá de nuevo.')
+      if (result === SIN_RESPUESTA) return
+      if (result.error) {
+        toast.error(result.error)
+      } else {
+        setHiddenFromCheckin(result.hidden ?? false)
+        toast.success(result.hidden ? 'Te ocultaste del check-in' : 'Volviste a ser visible en el check-in')
+      }
+    } finally {
+      setHiddenLoading(false)
     }
-    setHiddenLoading(false)
+  }
+
+  /**
+   * «Tomar descanso» (con breaks.grant: se pide y se aprueba solo) o «Solicitar
+   * descanso». El diálogo se cierra igual si algo falla, como siempre; el error
+   * se dice y nada queda girando.
+   */
+  async function handleRequestBreak() {
+    if (!selectedBreakConfig) return
+    const configId = selectedBreakConfig
+    setBreakRequestLoading(true)
+    try {
+      if (canManageBreaks) {
+        const cuts = parseInt(selfApproveCuts, 10) || 0
+        // Request + auto-approve
+        const reqResult = await correrAccion(
+          () => requestBreak(session.staff_id, session.branch_id, configId),
+          'No pudimos pedir el descanso. Probá de nuevo.',
+        )
+        if (reqResult === SIN_RESPUESTA) return
+        if (reqResult.error) {
+          toast.error(reqResult.error)
+          return
+        }
+        // Get the request ID and approve it
+        const activa = await correrAccion(
+          () => getBarberActiveBreakRequest(session.staff_id),
+          'No pudimos confirmar el descanso. Mirá su estado arriba y probá de nuevo.',
+        )
+        if (activa === SIN_RESPUESTA || !activa.data) return
+        const req = activa.data
+        const approveResult = await correrAccion(
+          () => approveBreakAction(req.id, cuts),
+          'No pudimos aprobar el descanso. Probá de nuevo.',
+        )
+        if (approveResult === SIN_RESPUESTA) return
+        if (approveResult.error) {
+          toast.error(approveResult.error)
+        } else {
+          toast.success(cuts === 0 ? 'Descanso iniciado' : `Descanso programado en ${cuts} corte${cuts > 1 ? 's' : ''}`)
+          setBreakRequestStatus('approved')
+          setBreakRequestId(req.id)
+          fetchQueue()
+        }
+      } else {
+        const result = await correrAccion(
+          () => requestBreak(session.staff_id, session.branch_id, configId),
+          'No pudimos enviar la solicitud de descanso. Probá de nuevo.',
+        )
+        if (result === SIN_RESPUESTA) return
+        if (result.error) {
+          toast.error(result.error)
+        } else {
+          toast.success('Solicitud de descanso enviada')
+          setBreakRequestStatus('pending')
+          fetchBreakRequestStatus()
+        }
+      }
+    } finally {
+      setBreakDialogOpen(false)
+      setSelectedBreakConfig('')
+      setSelfApproveCuts('0')
+      setBreakRequestLoading(false)
+    }
   }
 
   function formatElapsed(timestamp: string) {
@@ -1088,22 +1583,68 @@ export function QueuePanel({
 
     // (isMyEntry / isReassigning eliminados — no se usan en el render actual)
 
+    // `client_loyalty_state` llega como OBJETO (relación 1:1): leído con `[0]`
+    // daba siempre undefined, "Primer Corte" salía para todos y la categoría
+    // nunca. Ver `leerLoyaltyEmbed`.
+    const loyalty = leerLoyaltyEmbed(entry.client?.loyalty)
+    // Mig 218: aceptó Menor espera por WhatsApp y sigue esperando en el pool.
+    // Si me esperaba a MÍ, está acá aunque el hint lo haya sugerido a otro
+    // (`armarMiFila`): sigue siendo mi cliente y lo atiende el primero que llegue.
+    const viaWhatsApp = esMovidaPorWhatsApp(entry)
+    const meEsperabaAMi = esMovidaPorWhatsAppDe(entry, session.staff_id)
+    const barberoQueEsperaba =
+      viaWhatsApp && !meEsperabaAMi && entry.menor_espera_barbero_original_id
+        ? (allBarbers.find((b) => b.id === entry.menor_espera_barbero_original_id)?.full_name ?? null)
+        : null
+    // Mig 217: no sabe qué hacerse y pidió que lo asesoren (fucsia en todo el panel).
+    const pidioAsesoria = entry.pidio_asesoria === true
+    const nombre = entry.client?.name ?? 'Cliente'
+    const cliente = entry.client
+
     return (
       <div key={entry.id} className="space-y-2">
-        <Card className="gap-0 py-0">
+        <Card
+          className={cn(
+            'gap-0 py-0',
+            pidioAsesoria && 'relative overflow-hidden',
+            asesoriasRecientes.has(entry.id) && 'asesoria-recien',
+          )}
+        >
+          {pidioAsesoria && (
+            <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-fuchsia-500" />
+          )}
           <CardContent className="flex items-center gap-2.5 sm:gap-4 p-3 sm:p-5 md:p-6">
             <div className="flex size-10 sm:size-14 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-secondary text-sm sm:text-xl font-bold">
               #{entry.position}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                <p className="truncate text-base sm:text-lg font-semibold">
-                  {entry.client?.name ?? 'Cliente'}
-                </p>
+                {/* El nombre abre la ficha (observaciones, Instagram y cortes con
+                    fotos, por server action: la fila no trae esas columnas).
+                    El área táctil crece hacia arriba y abajo con un
+                    pseudo-elemento, lejos de Atender y de la X. */}
+                {cliente ? (
+                  <button
+                    type="button"
+                    onClick={() => setProfileClient(cliente)}
+                    aria-label={`Ver la ficha de ${nombre}`}
+                    className="group/nombre relative -mx-1 flex min-w-0 max-w-full touch-manipulation items-center gap-0.5 rounded-md px-1 text-left outline-none before:absolute before:inset-x-0 before:-inset-y-2.5 before:content-[''] focus-visible:ring-2 focus-visible:ring-ring/50"
+                  >
+                    <span className="truncate text-base font-semibold decoration-foreground/30 underline-offset-4 group-hover/nombre:underline sm:text-lg">
+                      {nombre}
+                    </span>
+                    <ChevronRight
+                      className="size-4 shrink-0 text-muted-foreground/70 motion-safe:transition-transform group-hover/nombre:translate-x-0.5"
+                      aria-hidden
+                    />
+                  </button>
+                ) : (
+                  <p className="truncate text-base sm:text-lg font-semibold">{nombre}</p>
+                )}
                 {/* Categoría del programa de fidelización (colores del dueño). Sin
                     categoría (programa apagado / cliente no enrolado) no hay chip. */}
                 {(() => {
-                  const tier = findLoyaltyTier(loyaltyTiers, entry.client?.loyalty?.[0]?.tier_code)
+                  const tier = findLoyaltyTier(loyaltyTiers, loyalty?.tier_code)
                   return tier ? <LoyaltyTierChip tier={tier} /> : null
                 })()}
                 {/* Hora RESERVADA, tomada de la agenda. No se lee de
@@ -1129,7 +1670,9 @@ export function QueuePanel({
                   // total_visits viene de la tabla client_loyalty_state (mantenida por
                   // trigger). Reemplaza a visits(count) que era un correlated subquery
                   // por cliente y representaba ~33% del tiempo de DB (mig 124).
-                  const totalVisits = entry.client?.loyalty?.[0]?.total_visits ?? 0
+                  // Sin fila de estado = nunca tuvo una visita (verificado en prod:
+                  // los 372 clientes de Monaco sin fila tienen 0 visitas).
+                  const totalVisits = loyalty?.total_visits ?? 0
                   if (totalVisits === 0) {
                     return (
                       <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-emerald-500/15 text-emerald-500 border-emerald-500/30">
@@ -1141,18 +1684,49 @@ export function QueuePanel({
                 })()}
                 {entry.is_dynamic && (
                   <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-blue-500/15 text-blue-500 border-blue-500/30">
-                    ⚡️ Menor Espera
+                    <Zap className="fill-current" aria-hidden />
+                    Menor espera
                   </Badge>
                 )}
+                {/* Califica al de al lado: se pasó a Menor espera desde el aviso de
+                    WhatsApp. Mismo azul y sin relleno, para leerse como "Menor
+                    espera, por WhatsApp" y no como una tercera etiqueta. Entra con
+                    una animación corta: es lo que cambió en la tarjeta. */}
+                {viaWhatsApp && (
+                  <Badge
+                    variant="outline"
+                    title="Aceptó pasarse a Menor espera desde el aviso de WhatsApp"
+                    className="h-5 px-1.5 text-[10px] uppercase tracking-wider text-blue-500 border-blue-500/30 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-300"
+                  >
+                    <MessageCircle aria-hidden />
+                    Por WhatsApp
+                  </Badge>
+                )}
+                {/* Entra con la misma animación corta: puede aparecer con la
+                    tarjeta ya en pantalla (la pidió desde «Mi turno»). */}
+                {pidioAsesoria && (
+                  <AsesoriaBadge
+                    tono="claro"
+                    className="h-5 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-300"
+                  />
+                )}
               </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span>{entry.client?.phone}</span>
-                {entry.service && (
+              <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+                <span className="shrink-0">{entry.client?.phone}</span>
+                {(entry.service || pidioAsesoria) && (
                   <>
                     <span className="text-muted-foreground/40">·</span>
-                    <span className="font-medium text-foreground/70">
-                      {entry.service.name}
-                    </span>
+                    {entry.service ? (
+                      <span className="truncate font-medium text-foreground/70">
+                        {entry.service.name}
+                        {pidioAsesoria && (
+                          <span className="font-semibold text-fuchsia-700"> · pidió asesoría</span>
+                        )}
+                      </span>
+                    ) : (
+                      // Eligió la asesoría EN VEZ de un servicio: lo elige el barbero al cobrar.
+                      <span className="truncate font-semibold text-fuchsia-700">Quiere asesoría</span>
+                    )}
                   </>
                 )}
               </div>
@@ -1187,6 +1761,21 @@ export function QueuePanel({
                   </div>
                 )
               })()}
+              {/* Quien aceptó Menor espera por WhatsApp: al barbero que esperaba
+                  se le explica por qué puede desaparecerle de la fila; a los demás,
+                  a quién esperaba (si ese barbero se libera primero, lo atiende él). */}
+              {(meEsperabaAMi || barberoQueEsperaba) && (
+                <div className="mt-1 flex items-start gap-1 text-xs text-muted-foreground">
+                  <MessageCircle className="mt-0.5 size-3 shrink-0 text-blue-500" aria-hidden />
+                  {meEsperabaAMi ? (
+                    <span>Sigue en tu fila · si otro barbero se libera antes, lo atiende él</span>
+                  ) : (
+                    <span>
+                      Esperaba a <span className="font-medium text-foreground/70">{barberoQueEsperaba}</span>
+                    </span>
+                  )}
+                </div>
+              )}
               {isGeneralQueue && entry.barber && (
                 <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                   <User className="size-3" />
@@ -1241,6 +1830,11 @@ export function QueuePanel({
                   )
                 }
 
+                // Con el descanso listo, cualquier "Atender" arranca el descanso
+                // (ver `descansoListo`): mejor no ofrecer un botón que hace otra
+                // cosa. El auto-arranque de más arriba lo inicia solo.
+                if (descansoListo) return null
+
                 // Rescate de limbos del hint divergente (mig 134 + commit 1cb1a41):
                 // en General, cualquier barbero libre puede reclamar un dinámico.
                 // El claim server es pool no bloqueante (FOR UPDATE SKIP LOCKED),
@@ -1256,11 +1850,14 @@ export function QueuePanel({
                 // lo toma?). El sugerido sigue viendo "Atender" primario en
                 // Mi fila; el otro ve "Reclamar" outline en General. Si nadie
                 // está sugerido (pool puro, barber_id NULL) el botón sigue
-                // primario porque no hay a quien "robarle".
+                // primario porque no hay a quien "robarle". Tampoco es "robar"
+                // tomar al que aceptó Menor espera por WhatsApp si me esperaba
+                // a mí: conservó su lugar en MI fila.
                 const isRescueOfOtherHint =
                   isGeneralQueue &&
                   entry.barber_id != null &&
-                  entry.barber_id !== session.staff_id
+                  entry.barber_id !== session.staff_id &&
+                  !meEsperabaAMi
                 return (
                   <Button
                     size="sm"
@@ -1342,9 +1939,10 @@ export function QueuePanel({
                     {entry.client?.name ?? 'Cliente'}
                   </p>
                   {(() => {
-                    const tier = findLoyaltyTier(loyaltyTiers, entry.client?.loyalty?.[0]?.tier_code)
+                    const tier = findLoyaltyTier(loyaltyTiers, leerLoyaltyEmbed(entry.client?.loyalty)?.tier_code)
                     return tier ? <LoyaltyTierChip tier={tier} /> : null
                   })()}
+                  {entry.pidio_asesoria === true && <AsesoriaBadge tono="claro" className="h-5" />}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Atendido por {entry.barber?.full_name ?? 'otro barbero'}
@@ -1469,8 +2067,10 @@ export function QueuePanel({
               )}
             </Button>
           )}
+          {/* Bolsa y no regalo: el regalo se confundía con "Entregar premio",
+              que está al lado y hace otra cosa. */}
           <Button variant="ghost" size="sm" onClick={() => setDirectSaleOpen(true)}>
-            <Gift className="size-4" />
+            <ShoppingBag className="size-4" />
             Vender
           </Button>
           {loyaltyEnabled && (
@@ -1549,8 +2149,8 @@ export function QueuePanel({
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem onClick={() => setDirectSaleOpen(true)}>
-                <Gift className="size-4 mr-2" />
-                Venta directa
+                <ShoppingBag className="size-4 mr-2" />
+                Venta de productos
               </DropdownMenuItem>
               {loyaltyEnabled && (
                 <DropdownMenuItem onClick={() => setDeliverRewardOpen(true)}>
@@ -1752,6 +2352,7 @@ export function QueuePanel({
                     variant="mobile"
                     onComplete={() => setCompletingEntry(myActiveEntry)}
                     actionLoading={actionLoading === myActiveEntry.id}
+                    onVerAsesoria={() => setConsultaAsesoriaDe(myActiveEntry.id)}
                   />
                 ) : null}
               </div>
@@ -1857,6 +2458,7 @@ export function QueuePanel({
                 variant="desktop"
                 onComplete={() => setCompletingEntry(myActiveEntry)}
                 actionLoading={actionLoading === myActiveEntry.id}
+                onVerAsesoria={() => setConsultaAsesoriaDe(myActiveEntry.id)}
               />
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center text-center">
@@ -1880,15 +2482,25 @@ export function QueuePanel({
       {showWaitWarning && (
         <NextClientAlert
           clientName={myRealWaitingEntries[0]?.client?.name ?? null}
+          pidioAsesoria={myRealWaitingEntries[0]?.pidio_asesoria === true}
           onStart={handleWarningStartService}
           starting={warningStarting}
         />
       )}
 
+      {/* Pop-up de asesoría: se abre solo al empezar a atender a quien la pidió
+          (ver `modoAsesoria`) y se reabre en consulta desde el sello. */}
+      <AsesoriaInicioDialog
+        entry={myActiveEntry ?? null}
+        modo={modoAsesoria}
+        onCerrar={cerrarAsesoria}
+      />
+
       <CompleteServiceDialog
         entry={completingEntry}
         branchId={session.branch_id}
         tiers={loyaltyTiers}
+        staffIdDelPanel={session.staff_id}
         onClose={() => setCompletingEntry(null)}
         onCompleted={async () => {
           // Refresh estándar tras finalizar. El siguiente cliente queda en
@@ -2004,14 +2616,21 @@ export function QueuePanel({
               <div>
                 <Label className="text-sm">¿Luego de cuántos cortes?</Label>
                 <div className="flex items-center gap-2 mt-1.5">
-                  <Input
-                    type="number"
-                    min="0"
-                    step="1"
-                    className="w-24"
-                    value={selfApproveCuts}
-                    onChange={(e) => setSelfApproveCuts(e.target.value)}
-                  />
+                  {/* Con el panel girado 180° el teclado de Android sale al revés: −/+ */}
+                  <CampoContadorTablet
+                    valor={selfApproveCuts}
+                    onCambiar={setSelfApproveCuts}
+                    etiqueta="Luego de cuántos cortes"
+                  >
+                    <Input
+                      type="number"
+                      min="0"
+                      step="1"
+                      className="w-24"
+                      value={selfApproveCuts}
+                      onChange={(e) => setSelfApproveCuts(e.target.value)}
+                    />
+                  </CampoContadorTablet>
                   <span className="text-sm text-muted-foreground">cortes (0 = ahora)</span>
                 </div>
               </div>
@@ -2021,44 +2640,7 @@ export function QueuePanel({
             <Button variant="outline" onClick={() => setBreakDialogOpen(false)}>Cancelar</Button>
             <Button
               disabled={!selectedBreakConfig || breakRequestLoading}
-              onClick={async () => {
-                setBreakRequestLoading(true)
-                if (canManageBreaks) {
-                  const cuts = parseInt(selfApproveCuts, 10) || 0
-                  // Request + auto-approve
-                  const reqResult = await requestBreak(session.staff_id, session.branch_id, selectedBreakConfig)
-                  if (reqResult.error) {
-                    toast.error(reqResult.error)
-                  } else {
-                    // Get the request ID and approve it
-                    const { data: req } = await getBarberActiveBreakRequest(session.staff_id)
-                    if (req) {
-                      const approveResult = await approveBreakAction(req.id, cuts)
-                      if (approveResult.error) {
-                        toast.error(approveResult.error)
-                      } else {
-                        toast.success(cuts === 0 ? 'Descanso iniciado' : `Descanso programado en ${cuts} corte${cuts > 1 ? 's' : ''}`)
-                        setBreakRequestStatus('approved')
-                        setBreakRequestId(req.id)
-                        fetchQueue()
-                      }
-                    }
-                  }
-                } else {
-                  const result = await requestBreak(session.staff_id, session.branch_id, selectedBreakConfig)
-                  if (result.error) {
-                    toast.error(result.error)
-                  } else {
-                    toast.success('Solicitud de descanso enviada')
-                    setBreakRequestStatus('pending')
-                    fetchBreakRequestStatus()
-                  }
-                }
-                setBreakDialogOpen(false)
-                setSelectedBreakConfig('')
-                setSelfApproveCuts('0')
-                setBreakRequestLoading(false)
-              }}
+              onClick={() => void handleRequestBreak()}
             >
               <Coffee className="size-4 mr-2" />
               {canManageBreaks ? 'Iniciar' : 'Solicitar'}
@@ -2099,38 +2681,50 @@ export function QueuePanel({
                       </div>
                     </div>
                     {isPending && (
-                      <div className="flex items-center gap-2">
+                      // flex-wrap: con el panel girado el contador −/+ mide ~140 px
+                      // (el input, 80) y la fila no entraba en el diálogo: «Rechazar»
+                      // quedaba cortado por el borde (hallazgo giro-180-04). Así los
+                      // botones bajan a una segunda línea, juntos y a la derecha.
+                      <div className="flex flex-wrap items-center gap-2">
                         <Label className="text-xs whitespace-nowrap">Luego de</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          step="1"
-                          className="w-20 h-8 text-sm"
-                          value={approveCutsInputs[req.id] ?? '0'}
-                          onChange={(e) => setApproveCutsInputs(prev => ({ ...prev, [req.id]: e.target.value }))}
-                        />
+                        {/* Con el panel girado 180° el teclado de Android sale al revés: −/+ */}
+                        <CampoContadorTablet
+                          valor={approveCutsInputs[req.id] ?? '0'}
+                          onCambiar={(v) => setApproveCutsInputs(prev => ({ ...prev, [req.id]: v }))}
+                          etiqueta={`Cortes antes del descanso de ${staffName}`}
+                        >
+                          <Input
+                            type="number"
+                            min="0"
+                            step="1"
+                            className="w-20 h-8 text-sm"
+                            value={approveCutsInputs[req.id] ?? '0'}
+                            onChange={(e) => setApproveCutsInputs(prev => ({ ...prev, [req.id]: e.target.value }))}
+                          />
+                        </CampoContadorTablet>
                         <span className="text-xs text-muted-foreground">cortes</span>
-                        <div className="flex-1" />
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-green-600 border-green-500/30 hover:bg-green-500/10"
-                          onClick={() => handleApproveOtherBreak(req.id)}
-                          disabled={approveLoading === req.id}
-                        >
-                          <CheckCircle2 className="size-3.5 mr-1" />
-                          Aprobar
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-red-500 border-red-500/30 hover:bg-red-500/10"
-                          onClick={() => handleRejectOtherBreak(req.id)}
-                          disabled={approveLoading === req.id}
-                        >
-                          <XCircle className="size-3.5 mr-1" />
-                          Rechazar
-                        </Button>
+                        <div className="ml-auto flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-green-600 border-green-500/30 hover:bg-green-500/10"
+                            onClick={() => handleApproveOtherBreak(req.id)}
+                            disabled={approveLoading === req.id}
+                          >
+                            <CheckCircle2 className="size-3.5 mr-1" />
+                            Aprobar
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-500 border-red-500/30 hover:bg-red-500/10"
+                            onClick={() => handleRejectOtherBreak(req.id)}
+                            disabled={approveLoading === req.id}
+                          >
+                            <XCircle className="size-3.5 mr-1" />
+                            Rechazar
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </div>

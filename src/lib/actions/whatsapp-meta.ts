@@ -5,6 +5,7 @@ import { getCurrentOrgId } from './org'
 import { requireOrgAccessToEntity } from './guard'
 import { revalidatePath } from 'next/cache'
 import { sendToMeta, extractWhatsAppId } from '@/lib/meta-send'
+import { estadoPlantillaParaBase } from '@/lib/menor-espera/plantilla'
 
 const META_API_VERSION = 'v22.0'
 
@@ -404,8 +405,12 @@ export async function syncWhatsAppTemplates(): Promise<{
     if (next && page === MAX_PAGES - 1) truncated = true
   }
 
-  // Upsert por (channel_id, name). Guardamos todos los status (approved, pending, rejected)
-  // así el picker puede mostrar solo los approved pero el admin ve el resto.
+  // Upsert por (channel_id, name). Guardamos todos los status así el picker puede
+  // mostrar solo los approved pero el admin ve el resto. Desde la mig 222 la
+  // base admite paused/disabled/in_appeal/pending_deletion; lo que no admita se
+  // guarda como no usable (`estadoPlantillaParaBase`): antes el upsert fallaba
+  // y una plantilla pausada seguía figurando 'approved'. `data` devuelve el
+  // estado CRUDO de Meta (la card de Menor espera lo muestra tal cual).
   for (const tpl of allTemplates) {
     const { error: upsertErr } = await supabase
       .from('message_templates')
@@ -415,7 +420,7 @@ export async function syncWhatsAppTemplates(): Promise<{
           name: tpl.name,
           language: tpl.language,
           category: tpl.category,
-          status: tpl.status,
+          status: estadoPlantillaParaBase(tpl.status),
           components: tpl.components,
         },
         { onConflict: 'channel_id, name' }

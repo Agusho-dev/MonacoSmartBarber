@@ -216,15 +216,34 @@ export async function getOpenJointReceipts(branchId: string): Promise<OpenJointR
 
 const QR_TMP = (orgId: string, token: string) => `${orgId}/qr/${token}.webp`
 
-/** Crea una sesión de subida QR para la org del barbero. Devuelve el token. */
+/** La columna todavía no existe (la mig 219 no se aplicó): PostgREST 42703 / PGRST204. */
+function faltaColumna(error: { code?: string } | null | undefined): boolean {
+  return error?.code === '42703' || error?.code === 'PGRST204'
+}
+
+/**
+ * Crea una sesión de subida QR para la org del barbero. Devuelve el token.
+ *
+ * La tabla qr_photo_sessions la comparten los comprobantes y las fotos del
+ * corte: desde la mig 219 cada sesión dice para qué es (`proposito`) y vence
+ * (`expires_at`, 45 min por default). Antes un token de comprobante servía en
+ * la página de fotos y al revés, y vivía para siempre.
+ */
 export async function createReceiptUploadSession(): Promise<{ token: string } | { error: string }> {
   const ctx = await resolveReceiptContext()
   if (!ctx) return { error: 'No autorizado' }
   const supabase = createAdminClient()
   const token = randomUUID()
-  const { error } = await supabase
+  let { error } = await supabase
     .from('qr_photo_sessions')
-    .insert({ token, organization_id: ctx.organizationId })
+    .insert({ token, organization_id: ctx.organizationId, proposito: 'comprobante' })
+  if (faltaColumna(error)) {
+    // Deploy antes de la 219: el comprobante no puede quedar sin QR por eso.
+    console.warn('[createReceiptUploadSession] sin la columna proposito (falta la mig 219)')
+    ;({ error } = await supabase
+      .from('qr_photo_sessions')
+      .insert({ token, organization_id: ctx.organizationId }))
+  }
   if (error) { console.error('[createReceiptUploadSession]', error.message); return { error: 'No se pudo iniciar' } }
   return { token }
 }
@@ -253,12 +272,37 @@ export async function submitReceiptUpload(
 ): Promise<{ ok: true } | { error: string }> {
   if (!token || !base64) return { error: 'Datos incompletos' }
   const supabase = createAdminClient()
-  const { data: sess } = await supabase
+  type SesionComprobante = {
+    organization_id: string
+    is_active: boolean | null
+    proposito?: string | null
+    expires_at?: string | null
+  }
+  let sess: SesionComprobante | null = null
+  const consulta = await supabase
     .from('qr_photo_sessions')
-    .select('organization_id, is_active')
+    .select('organization_id, is_active, proposito, expires_at')
     .eq('token', token)
     .maybeSingle()
-  if (!sess || !sess.is_active) return { error: 'El código expiró. Pedile al barbero que genere uno nuevo.' }
+  if (faltaColumna(consulta.error)) {
+    // Antes de la 219 no hay propósito ni vencimiento que mirar.
+    const vieja = await supabase
+      .from('qr_photo_sessions')
+      .select('organization_id, is_active')
+      .eq('token', token)
+      .maybeSingle()
+    sess = (vieja.data as SesionComprobante | null) ?? null
+  } else {
+    if (consulta.error) console.error('[submitReceiptUpload] sesión', consulta.error.message)
+    sess = (consulta.data as SesionComprobante | null) ?? null
+    // Un token de las fotos del corte no sube comprobantes: cada QR sirve para
+    // UNA cosa. Las sesiones nuevas de comprobante dicen 'comprobante'; una sin
+    // propósito sólo puede ser una creada por el código anterior en el rato
+    // del deploy, y vence sola a los 45 minutos (la 219 cerró las viejas).
+    if (sess && sess.proposito != null && sess.proposito !== 'comprobante') sess = null
+  }
+  const vencida = !!sess?.expires_at && new Date(sess.expires_at).getTime() <= Date.now()
+  if (!sess || !sess.is_active || vencida) return { error: 'El código expiró. Pedile al barbero que genere uno nuevo.' }
 
   const { error } = await supabase.storage
     .from('transfer-receipts')

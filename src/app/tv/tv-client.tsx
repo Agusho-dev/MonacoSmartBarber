@@ -8,6 +8,8 @@ import { assignDynamicBarbers, calculateEffectiveAhead, countActiveDynamicCapabl
 import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
 import { TurnoBadge } from '@/components/appointments/turno-badge'
 import { appointmentTimeLabel } from '@/lib/queue-appointments'
+import { RecargaPorVersion } from '@/components/recarga-por-version'
+import { avisarYRecargarPorVersion, esErrorDeVersion } from '@/lib/recarga-version'
 import {
   Select,
   SelectContent,
@@ -179,6 +181,46 @@ function useAutoScroll(enabled: boolean, speed: number = 0.5) {
   return { containerRef, contentRef, needsScroll }
 }
 
+// --- Refrescos y recarga ---
+
+/**
+ * Todo el refresco de la TV son server actions. Antes de esto un fallo era una
+ * promesa rechazada sin dueño: después de un deploy (ids de las actions
+ * nuevos) la pantalla quedaba congelada con la fila de la última lectura buena
+ * y nadie se enteraba. Si el fallo es por versión, se recarga; si no, queda en
+ * la consola y la pantalla conserva lo último que tenía hasta el próximo
+ * refresco.
+ */
+function errorDeRefresco(que: string, e: unknown) {
+  if (esErrorDeVersion(e) && avisarYRecargarPorVersion()) return
+  console.error(`[tv] no se pudo refrescar ${que}:`, e)
+}
+
+/**
+ * Sucursal elegida en ESTA TV. El store de sucursal no persiste (es el mismo
+ * del dashboard), así que una recarga —la del deploy, o un F5— la volvía a la
+ * primera de la lista y la TV de un local pasaba a mostrar la fila de otro. Se
+ * guarda por pestaña (sessionStorage): sobrevive a la recarga y a la
+ * restauración de pestañas de Chrome.
+ */
+const CLAVE_SUCURSAL_TV = 'msb.tv.sucursal'
+
+function leerSucursalGuardada(): string | null {
+  try {
+    return window.sessionStorage.getItem(CLAVE_SUCURSAL_TV)
+  } catch {
+    return null
+  }
+}
+
+function guardarSucursal(id: string) {
+  try {
+    window.sessionStorage.setItem(CLAVE_SUCURSAL_TV, id)
+  } catch {
+    // sin sessionStorage: una recarga vuelve a la primera sucursal, como antes
+  }
+}
+
 // --- Tipos de datos ---
 
 interface BarberRow {
@@ -228,33 +270,52 @@ export function TvClient({
 
   const supabase = useMemo(() => createClient(), [])
 
-  // Si no hay sucursal seleccionada y hay sucursales disponibles, seleccionamos la primera
+  // Si no hay sucursal seleccionada: la que tenía esta TV antes de recargar, y si
+  // no (o ya no está entre las de la org), la primera.
   useEffect(() => {
     if (!selectedBranchId && branches.length > 0) {
-      setSelectedBranchId(branches[0].id)
+      const guardada = leerSucursalGuardada()
+      const valida = guardada && branches.some((b) => b.id === guardada) ? guardada : branches[0].id
+      setSelectedBranchId(valida)
     }
   }, [branches, selectedBranchId, setSelectedBranchId])
 
+  useEffect(() => {
+    if (selectedBranchId) guardarSucursal(selectedBranchId)
+  }, [selectedBranchId])
+
   const fetchQueue = useCallback(async () => {
-    const { refreshTvQueue } = await import('@/lib/actions/tv')
-    const { entries: data } = await refreshTvQueue(orgBranchIds)
-    if (data) setEntries(data as QueueEntry[])
+    try {
+      const { refreshTvQueue } = await import('@/lib/actions/tv')
+      const { entries: data } = await refreshTvQueue(orgBranchIds)
+      if (data) setEntries(data as QueueEntry[])
+    } catch (e) {
+      errorDeRefresco('la fila', e)
+    }
   }, [orgBranchIds])
 
   const fetchBarbers = useCallback(async () => {
-    const { refreshTvBarbers } = await import('@/lib/actions/tv')
-    const { barbers: data } = await refreshTvBarbers(orgBranchIds)
-    if (data) setLiveBarbers(data as BarberRow[])
+    try {
+      const { refreshTvBarbers } = await import('@/lib/actions/tv')
+      const { barbers: data } = await refreshTvBarbers(orgBranchIds)
+      if (data) setLiveBarbers(data as BarberRow[])
+    } catch (e) {
+      errorDeRefresco('los barberos', e)
+    }
   }, [orgBranchIds])
 
   const fetchSchedules = useCallback(async () => {
-    const { refreshTvSchedules } = await import('@/lib/actions/tv')
-    const result = await refreshTvSchedules(orgBranchIds, orgId || '')
-    setSchedules(result.schedules as StaffSchedule[])
-    if (result.shiftEndMargin >= 0) setShiftEndMargin(result.shiftEndMargin)
-    setDailyServiceCounts(result.dailyServiceCounts)
-    setLastCompletedAt(result.lastCompletedAt)
-    setLatestAttendance(result.latestAttendance)
+    try {
+      const { refreshTvSchedules } = await import('@/lib/actions/tv')
+      const result = await refreshTvSchedules(orgBranchIds, orgId || '')
+      setSchedules(result.schedules as StaffSchedule[])
+      if (result.shiftEndMargin >= 0) setShiftEndMargin(result.shiftEndMargin)
+      setDailyServiceCounts(result.dailyServiceCounts)
+      setLastCompletedAt(result.lastCompletedAt)
+      setLatestAttendance(result.latestAttendance)
+    } catch (e) {
+      errorDeRefresco('las jornadas', e)
+    }
   }, [orgBranchIds, orgId])
 
   useEffect(() => {
@@ -621,6 +682,9 @@ export function TvClient({
       <footer className="py-4 lg:py-5 2xl:py-8 text-center text-zinc-600 text-xs lg:text-sm 2xl:text-2xl font-medium tracking-[0.2em] uppercase shrink-0">
         Powered By: Barber.OS
       </footer>
+
+      {/* Después de un deploy la TV se recarga sola (nadie la toca nunca). */}
+      <RecargaPorVersion superficie="tv" />
     </div>
   )
 }

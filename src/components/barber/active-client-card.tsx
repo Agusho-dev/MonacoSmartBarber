@@ -18,7 +18,9 @@ import {
 } from 'lucide-react'
 import type { QueueEntry } from '@/lib/types/database'
 import { formatCurrency } from '@/lib/format'
-import { ClientHistory } from './client-history'
+import { useUltimosCortes, type EstadoUltimosCortes } from '@/hooks/use-ultimos-cortes'
+import { TiraUltimosCortes } from './tira-ultimos-cortes'
+import { AsesoriaBadge } from './asesoria-badge'
 import {
   Accordion,
   AccordionContent,
@@ -26,6 +28,21 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion'
 import { Separator } from '@/components/ui/separator'
+
+/**
+ * Cortes que pide la tarjeta del cliente actual. Lo exporta para que el pop-up
+ * de asesoría, que se abre a la vez, use la MISMA clave de caché de
+ * `useUltimosCortes` (una server action para los dos, no dos).
+ */
+export const CORTES_EN_TARJETA_ACTIVA = 6
+
+/**
+ * Sello de asesoría sobre el fondo del cronómetro: sólido, porque ese fondo
+ * pasa por blanco, celeste, azul, amarillo y rojo, y el tono translúcido del
+ * sello se pierde en los oscuros.
+ */
+const SELLO_SOBRE_CRONOMETRO =
+  'border-white/45 bg-fuchsia-600 text-white shadow-sm hover:bg-fuchsia-700 focus-visible:ring-white/70 focus-visible:ring-offset-0'
 
 interface ActiveClientCardProps {
   entry: QueueEntry
@@ -35,6 +52,11 @@ interface ActiveClientCardProps {
   variant?: 'desktop' | 'mobile'
   /** Disabled global del botón principal (loading state). */
   actionLoading?: boolean
+  /**
+   * El cliente pidió asesoría (mig 217): tocar el sello reabre el pop-up en
+   * modo consulta. Sin handler el sello se muestra igual, pero no es botón.
+   */
+  onVerAsesoria?: () => void
 }
 
 /** Map de tokens CSS del semáforo por etapa (definidos en globals.css).
@@ -59,6 +81,7 @@ export function ActiveClientCard({
   onComplete,
   variant = 'desktop',
   actionLoading,
+  onVerAsesoria,
 }: ActiveClientCardProps) {
   const handleStageChange = useCallback((next: TimerStage, prev: TimerStage) => {
     // Sólo haptics silenciosos durante el corte: nada de sonido para no
@@ -99,8 +122,29 @@ export function ActiveClientCard({
   }), [style, isPaused])
 
   const clientName = entry.client?.name ?? 'Cliente'
-  const serviceName = entry.service?.name ?? 'Servicio'
+  // Mig 217: quien pidió asesoría eligió eso EN VEZ de un servicio (nace sin
+  // service_id); el servicio se elige recién al cobrar.
+  const pidioAsesoria = entry.pidio_asesoria === true
+  const serviceName = entry.service?.name ?? (pidioAsesoria ? 'Asesoría' : 'Servicio')
   const servicePrice = entry.service?.price ?? 0
+
+  // UNA server action por cliente: las observaciones, el Instagram y los
+  // últimos cortes salen de la misma llamada (y de una caché compartida: la
+  // fila monta esta tarjeta dos veces, escritorio y celular, y el pop-up de
+  // asesoría usa la misma clave). La fila no trae esas columnas a propósito
+  // (KR#10/#34: el embed anónimo de clients no se ensancha).
+  const clienteId = entry.client?.id ?? null
+  const historial = useUltimosCortes(clienteId, { limite: CORTES_EN_TARJETA_ACTIVA })
+
+  const sello = pidioAsesoria ? (
+    <AsesoriaBadge
+      tono="claro"
+      tamano="md"
+      onClick={onVerAsesoria}
+      ariaLabel={`Ver el pedido de asesoría de ${clientName}`}
+      className={SELLO_SOBRE_CRONOMETRO}
+    />
+  ) : null
 
   if (variant === 'mobile') {
     return (
@@ -127,6 +171,7 @@ export function ActiveClientCard({
                 <h3 className="truncate text-xl font-black leading-tight tracking-tight">
                   {clientName}
                 </h3>
+                {sello}
                 {isPaused && (
                   <Badge className="bg-white/25 hover:bg-white/30 border-0 text-current gap-1 text-[10px] uppercase tracking-wider">
                     <Pause className="size-3" /> Pausado
@@ -155,27 +200,29 @@ export function ActiveClientCard({
           </div>
 
           <div className="px-4 pb-3">
-            <Accordion type="single" collapsible>
-              <AccordionItem value="history" className="border-none">
-                <AccordionTrigger
-                  className={cn(
-                    'group relative h-11 w-full rounded-xl bg-black/10 px-4 py-0 text-sm font-semibold',
-                    'hover:bg-black/15 hover:no-underline',
-                    'text-current flex items-center justify-center gap-2',
-                    '[&>svg]:hidden',
-                  )}
-                >
-                  <User className="size-4 opacity-70" aria-hidden />
-                  <span>Historial y ficha</span>
-                  <ChevronDown className="absolute right-4 size-4 shrink-0 transition-transform group-data-[state=open]:rotate-180 opacity-60" />
-                </AccordionTrigger>
-                <AccordionContent className="pt-3 pb-0">
-                  <ClientInfo entry={entry} />
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
+            {clienteId && (
+              <Accordion type="single" collapsible>
+                <AccordionItem value="history" className="border-none">
+                  <AccordionTrigger
+                    className={cn(
+                      'group relative h-11 w-full rounded-xl bg-black/10 px-4 py-0 text-sm font-semibold',
+                      'hover:bg-black/15 hover:no-underline',
+                      'text-current flex items-center justify-center gap-2',
+                      '[&>svg]:hidden',
+                    )}
+                  >
+                    <User className="size-4 opacity-70" aria-hidden />
+                    <span>Historial y ficha</span>
+                    <ChevronDown className="absolute right-4 size-4 shrink-0 transition-transform group-data-[state=open]:rotate-180 opacity-60" />
+                  </AccordionTrigger>
+                  <AccordionContent className="pt-3 pb-0">
+                    <ClientInfo estado={historial.estado} onReintentar={historial.reintentar} sucursalId={entry.branch_id} />
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            )}
 
-            <div className="mt-3 flex gap-2">
+            <div className={cn('flex gap-2', clienteId && 'mt-3')}>
               <Button
                 size="lg"
                 onClick={onComplete}
@@ -217,6 +264,7 @@ export function ActiveClientCard({
               <h2 className="truncate text-3xl md:text-4xl font-black leading-none tracking-tight">
                 {clientName}
               </h2>
+              {sello}
               {isPaused && (
                 <Badge className="bg-white/25 hover:bg-white/30 border-0 text-current gap-1.5 px-2.5 py-1 uppercase tracking-wider">
                   <Pause className="size-3.5" /> Pausado
@@ -255,10 +303,12 @@ export function ActiveClientCard({
           />
         </div>
 
-        {(entry.client?.notes || entry.client?.instagram) && (
+        {/* Siempre que haya cliente: antes dependía de notes/instagram, que la
+            fila no trae, y en escritorio el historial no se veía nunca. */}
+        {clienteId && (
           <>
             <Separator className="my-6 bg-black/10" />
-            <ClientInfo entry={entry} />
+            <ClientInfo estado={historial.estado} onReintentar={historial.reintentar} sucursalId={entry.branch_id} />
           </>
         )}
 
@@ -278,28 +328,43 @@ export function ActiveClientCard({
   )
 }
 
-function ClientInfo({ entry }: { entry: QueueEntry }) {
+/**
+ * Observaciones, Instagram y últimos cortes del cliente activo. Va sobre el
+ * fondo de color del cronómetro: hereda el color del texto (tono "heredado").
+ */
+function ClientInfo({
+  estado,
+  onReintentar,
+  sucursalId,
+}: {
+  estado: EstadoUltimosCortes
+  onReintentar: () => void
+  sucursalId: string
+}) {
+  const ficha = estado.tipo === 'listo' ? estado.datos.cliente : null
   return (
     <div className="space-y-3">
-      {entry.client?.instagram && (
+      {ficha?.instagram && (
         <div className="flex items-center gap-2 text-sm">
-          <Instagram className="size-4 opacity-70" />
-          <span className="font-medium">{entry.client.instagram}</span>
+          <Instagram className="size-4 opacity-70" aria-hidden />
+          <span className="font-medium">{ficha.instagram}</span>
         </div>
       )}
-      {entry.client?.notes && (
+      {ficha?.notas && (
         <div className="rounded-xl bg-black/10 p-3 text-sm leading-snug">
           <p className="mb-1 text-[11px] font-bold uppercase tracking-wider opacity-60">
             Observaciones
           </p>
-          <p className="whitespace-pre-wrap">{entry.client.notes}</p>
+          <p className="whitespace-pre-wrap">{ficha.notas}</p>
         </div>
       )}
-      {entry.client?.id && (
-        <div className="pt-1">
-          <ClientHistory clientId={entry.client.id} />
-        </div>
-      )}
+      <TiraUltimosCortes
+        estado={estado}
+        onReintentar={onReintentar}
+        variante="compacta"
+        tono="heredado"
+        sucursalActualId={sucursalId}
+      />
     </div>
   )
 }

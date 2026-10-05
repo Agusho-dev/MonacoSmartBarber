@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
+import { currentUserCan } from '@/lib/actions/permissions-gate'
 import { redirect } from 'next/navigation'
 import { ServiciosClient } from './servicios-client'
 
@@ -21,6 +22,7 @@ export default async function ServiciosPage() {
     { data: commissions },
     { data: products },
     { data: productSales },
+    puedeBorrarVisitas,
   ] = await Promise.all([
     branchIds.length > 0
       ? supabase.from('services').select('*, branch:branches(*)').or(`branch_id.in.(${branchIds.join(',')}),branch_id.is.null`).order('name')
@@ -62,6 +64,9 @@ export default async function ServiciosPage() {
           .gte('sold_at', startOfMonth)
           .order('sold_at', { ascending: false })
       : Promise.resolve({ data: [] }),
+    // El borrado lo rechaza el servidor igual (deleteVisit): esto es para no
+    // ofrecer en el historial un botón que va a fallar.
+    currentUserCan('history.delete'),
   ])
 
   return (
@@ -72,6 +77,7 @@ export default async function ServiciosPage() {
       commissions={commissions ?? []}
       products={products ?? []}
       productSales={productSales ?? []}
+      puedeBorrarVisitas={puedeBorrarVisitas}
     />
   )
 }

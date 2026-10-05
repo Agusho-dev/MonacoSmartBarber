@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, useId, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/format'
 import { Button } from '@/components/ui/button'
@@ -141,10 +141,16 @@ interface Props {
   branches: Branch[]
   barbers: Barber[]
   services: ServiceOption[]
+  /**
+   * Permiso `history.delete` (lo resuelve la página). Sin él, «Eliminar» queda
+   * deshabilitado y dice por qué: el servidor lo rechazaría igual.
+   */
+  puedeBorrarVisitas: boolean
 }
 
-export function HistorialServicios({ branches, barbers, services }: Props) {
+export function HistorialServicios({ branches, barbers, services, puedeBorrarVisitas }: Props) {
   const supabase = createClient()
+  const idAvisoSinPermisoBorrar = useId()
   const { selectedBranchId } = useBranchStore()
 
   const [visits, setVisits] = useState<VisitHistory[]>([])
@@ -394,17 +400,30 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
 
   async function handleDelete() {
     if (!editingVisit) return
+    const visitId = editingVisit.id
     setDeleting(true)
-    const result = await deleteVisit(editingVisit.id)
-    if (result.error) {
-      toast.error('Error al eliminar la visita')
-    } else {
+    try {
+      const result = await deleteVisit(visitId)
+      // El motivo real (sin permiso, no se pudieron leer o borrar los productos,
+      // la visita ya no existe…) en vez de un «Error al eliminar» genérico.
+      if (result.error) {
+        toast.error(result.error)
+        return
+      }
       toast.success('Visita eliminada')
-      setVisits((prev) => prev.filter((v) => v.id !== editingVisit.id))
+      // La visita se borró, pero algo de sus fotos quedó a medias.
+      if (result.aviso) toast.warning(result.aviso)
+      setVisits((prev) => prev.filter((v) => v.id !== visitId))
       setEditingVisit(null)
       setDeleteConfirmOpen(false)
+    } catch (e) {
+      // Un corte de red rechaza la promesa del server action: sin esto el
+      // botón quedaba en «Eliminando...» para siempre.
+      console.error('[historial] deleteVisit', e)
+      toast.error('No pudimos eliminar la visita. Revisá la conexión.')
+    } finally {
+      setDeleting(false)
     }
-    setDeleting(false)
   }
 
   // Búsqueda de clientes para el formulario manual
@@ -995,32 +1014,47 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
               </div>
 
               {/* Footer fijo */}
-              <div className="border-t px-6 py-4 flex items-center justify-between gap-3">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setDeleteConfirmOpen(true)}
-                  className="text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0"
-                >
-                  <Trash2 className="mr-1.5 size-4" />
-                  Eliminar
-                </Button>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setEditingVisit(null)}>
-                    Cancelar
+              <div className="border-t px-6 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setDeleteConfirmOpen(true)}
+                    disabled={!puedeBorrarVisitas}
+                    aria-describedby={puedeBorrarVisitas ? undefined : idAvisoSinPermisoBorrar}
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0"
+                  >
+                    <Trash2 className="mr-1.5 size-4" />
+                    Eliminar
                   </Button>
-                  <Button size="sm" onClick={handleSave} disabled={saving || !editAmount}>
-                    {saving ? 'Guardando...' : 'Guardar cambios'}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setEditingVisit(null)}>
+                      Cancelar
+                    </Button>
+                    <Button size="sm" onClick={handleSave} disabled={saving || !editAmount}>
+                      {saving ? 'Guardando...' : 'Guardar cambios'}
+                    </Button>
+                  </div>
                 </div>
+                {/* Texto y no tooltip: un botón deshabilitado no recibe el hover,
+                    y en el celular un tooltip no se ve nunca. */}
+                {!puedeBorrarVisitas && (
+                  <p id={idAvisoSinPermisoBorrar} className="mt-2 text-xs text-muted-foreground">
+                    Para eliminar visitas necesitás el permiso «Borrar visitas cobradas del historial». Pedíselo al dueño.
+                  </p>
+                )}
               </div>
             </>
           )}
         </SheetContent>
       </Sheet>
 
-      {/* Confirm delete visit */}
-      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+      {/* Confirm delete visit. Queda abierto mientras se borra («Eliminando...»)
+          y, si falla, sigue abierto para reintentar o cancelar. */}
+      <AlertDialog
+        open={deleteConfirmOpen}
+        onOpenChange={(open) => { if (!deleting) setDeleteConfirmOpen(open) }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>¿Eliminar esta visita?</AlertDialogTitle>
@@ -1038,7 +1072,12 @@ export function HistorialServicios({ branches, barbers, services }: Props) {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleDelete}
+              onClick={(e) => {
+                // Sin esto Radix cierra el diálogo al tocar y el resultado (o el
+                // error) llega con el diálogo ya cerrado.
+                e.preventDefault()
+                void handleDelete()
+              }}
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

@@ -2,10 +2,15 @@
 
 import { createAdminClient, createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { cookies } from 'next/headers'
 import { validateBranchAccess } from './org'
+import { getScopedBranchIds } from './branch-access'
 import { getActiveTimezone } from '@/lib/i18n'
 import { isValidUUID } from '@/lib/validation'
+import { formatCurrency } from '@/lib/format'
+import { leerBarberSession } from '@/lib/barber-cookie'
 import { getBarberSession } from './auth'
+import type { MotivoPedidoAsesoria } from './asesoria'
 import {
   asTierChange,
   couponErrorMessage,
@@ -15,6 +20,12 @@ import {
   type LoyaltyFinalizeResult,
 } from '@/lib/loyalty-checkout'
 import { consumirSenaEnCobro } from '@/lib/senas/motor'
+import {
+  registrarProductosDeVisita,
+  validarLineasDeProductos,
+  type LineaValidada,
+} from '@/lib/productos/venta'
+import { vincularFotosDelCobro } from '@/lib/fotos-corte/servidor'
 
 /**
  * Resuelve si el cliente ya tiene lugar en la fila, distinguiendo **esta** sucursal
@@ -44,7 +55,7 @@ async function resolverEntradaActiva(
 ) {
   const { data: activas } = await supabase
     .from('queue_entries')
-    .select('id, position, status, barber_id, branch_id')
+    .select('id, position, status, barber_id, branch_id, appointment_id')
     .eq('client_id', clientId)
     .in('status', ['waiting', 'in_progress'])
     .order('checked_in_at', { ascending: false })
@@ -74,6 +85,473 @@ async function resolverEntradaActiva(
   return { enEstaSucursal, enOtras }
 }
 
+// ─── Asesoría sin costo (mig 217) ───────────────────────────────────────────
+//
+// «¿No sabés qué hacerte?»: el cliente pide que el barbero lo asesore antes de
+// empezar. En la tablet REEMPLAZA la elección de servicio (la entrada nace con
+// `service_id` NULL y `pidio_asesoria = true`), el panel le avisa al barbero y,
+// al cobrar, el servicio pasa a ser obligatorio — o se cierra como «solo
+// asesoría», sin visita (`cerrarSoloAsesoria`). Las acciones propias de la
+// asesoría (pedirla desde «Mi turno», confirmar el pop-up, el interruptor del
+// dashboard) viven en `./asesoria`.
+
+/** `queue_entries.cancel_reason` de una asesoría que se cerró sin hacer nada. */
+const MOTIVO_SOLO_ASESORIA = 'solo_asesoria'
+
+/**
+ * ¿La sucursal ofrece asesoría? Revalida en el servidor el interruptor que la
+ * tablet ya leyó con `getCheckinData`: si el dueño la apagó mientras el cliente
+ * elegía, la marca se descarta y el check-in sigue igual que siempre.
+ *
+ * Falla ABIERTA a propósito: si no se puede leer el interruptor, se respeta el
+ * pedido (con el error en el log). El check-in nunca se bloquea por la
+ * asesoría, y lo peor que puede pasar es un aviso de más en el panel de una
+ * sucursal que la tenía apagada — contra un cliente que pidió ayuda y ningún
+ * barbero se enteró.
+ */
+async function asesoriaPermitidaEnSucursal(
+  supabase: ReturnType<typeof createAdminClient>,
+  branchId: string,
+  contexto: string,
+): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from('branches')
+      .select('asesoria_habilitada')
+      .eq('id', branchId)
+      .maybeSingle()
+    if (error) {
+      console.error(`[${contexto}] no se pudo leer el interruptor de asesoría; se respeta el pedido:`, error.message)
+      return true
+    }
+    if (!data) {
+      console.error(`[${contexto}] la sucursal no apareció al leer el interruptor de asesoría; se respeta el pedido`, { branchId })
+      return true
+    }
+    return data.asesoria_habilitada === true
+  } catch (err) {
+    console.error(
+      `[${contexto}] excepción al leer el interruptor de asesoría; se respeta el pedido:`,
+      err instanceof Error ? err.message : String(err),
+    )
+    return true
+  }
+}
+
+/**
+ * El cliente que YA tenía lugar en esta sucursal se vuelve a anotar pidiendo
+ * asesoría (la tablet lo reconoce y lo manda a «Mi turno»). Mientras espera, la
+ * marca se le suma a la entrada que ya tiene; si ya lo están atendiendo no se
+ * toca nada y la tablet le dice que se lo avise al barbero.
+ *
+ * `asesoriaPedida` = la pidió en ESTE check-in; `asesoriaSumada` = quedó en su
+ * entrada. Con las dos claves el kiosko distingue «Sumamos tu pedido…» de
+ * «Avisale a tu barbero…» sin adivinar. `asesoriaMotivo` dice por qué NO se
+ * sumó (null = se sumó o no la pidió), con los mismos valores que
+ * `pedirAsesoriaDesdeMiTurno`.
+ *
+ * Una entrada de TURNO no la recibe (motivo `turno`): un turno no tiene la
+ * salida «solo asesoría» (cancelarlo lo pasa a no_show y pierde la seña), así
+ * que la marca dejaría al barbero sin forma de cerrarlo si no se hizo nada.
+ *
+ * Esta escritura también pasa por el bucket `kiosk_asesoria` (10 por minuto por
+ * IP y sucursal, el mismo de «Mi turno»): antes se podía marcar cualquier
+ * entrada en espera a través de `checkinClientByFace`, que no tenía ningún límite.
+ */
+async function sumarAsesoriaAEntradaActiva(
+  supabase: ReturnType<typeof createAdminClient>,
+  entrada: { id: string; status: string; appointment_id?: string | null } | null,
+  pedido: { pidio: boolean; permitida: boolean },
+  branchId: string,
+  contexto: string,
+): Promise<{ asesoriaPedida: boolean; asesoriaSumada: boolean; asesoriaMotivo: MotivoPedidoAsesoria | null }> {
+  if (!pedido.pidio) return { asesoriaPedida: false, asesoriaSumada: false, asesoriaMotivo: null }
+  const noSumada = (motivo: MotivoPedidoAsesoria) => ({ asesoriaPedida: true, asesoriaSumada: false, asesoriaMotivo: motivo })
+
+  if (!entrada) return noSumada('no_activa')
+  if (entrada.status === 'in_progress') return noSumada('en_curso')
+  if (entrada.status !== 'waiting') return noSumada('no_activa')
+  if (!pedido.permitida) return noSumada('deshabilitada')
+  if (entrada.appointment_id) return noSumada('turno')
+
+  const { RateLimits } = await import('@/lib/rate-limit')
+  const gate = await RateLimits.kioskAsesoria(branchId)
+  if (!gate.allowed) return noSumada('limite')
+
+  // Condicionada a 'waiting' y a que no sea un turno: si en el medio lo
+  // empezaron a atender (el pop-up del panel lo dispararía a mitad del corte) o
+  // un check-in de turno adoptó la entrada, no se le cambia nada.
+  const { data, error } = await supabase
+    .from('queue_entries')
+    .update({ pidio_asesoria: true })
+    .eq('id', entrada.id)
+    .eq('status', 'waiting')
+    .eq('is_break', false)
+    .is('appointment_id', null)
+    .select('id')
+  if (error) {
+    console.error(`[${contexto}] no se pudo sumar la asesoría a la entrada que ya tenía:`, error.message)
+    return noSumada('error')
+  }
+  const sumada = (data?.length ?? 0) > 0
+  if (!sumada) return noSumada('no_activa')
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
+  return { asesoriaPedida: true, asesoriaSumada: true, asesoriaMotivo: null }
+}
+
+/**
+ * Quién hace una acción sobre la fila, para `cancelled_by` (mig 211): la X de
+ * «no se presentó» y el cierre «solo asesoría».
+ *
+ * En el panel del barbero el actor sale de la cookie FIRMADA `barber_session`
+ * (no hay usuario de Supabase Auth ahí) y se confirma contra `staff` activo de
+ * la organización. No se usa `getBarberSession` porque exige un fichaje de
+ * entrada vigente: después del cron de auto-clockout las acciones de la fila
+ * siguen andando (validateBranchAccess no mira el fichaje) y la salida quedaba
+ * anotada con `cancelled_by` NULL, que la mig 211 reserva para los procesos
+ * automáticos. En el dashboard, el `staff` del usuario logueado en ESA
+ * organización. Si no se puede resolver queda NULL: el `cancelled_at` y el
+ * motivo igual se estampan.
+ */
+async function resolverActorStaffId(
+  supabase: ReturnType<typeof createAdminClient>,
+  orgId: string,
+): Promise<string | null> {
+  try {
+    const cookieStore = await cookies()
+    const valorCookie = cookieStore.get('barber_session')?.value
+    if (valorCookie) {
+      const sesion = leerBarberSession(valorCookie)
+      if (sesion && isValidUUID(sesion.staff_id)) {
+        const { data: staffPanel, error: errPanel } = await supabase
+          .from('staff')
+          .select('id')
+          .eq('id', sesion.staff_id)
+          .eq('organization_id', orgId)
+          .eq('is_active', true)
+          .maybeSingle()
+        if (errPanel) console.error('[resolverActorStaffId] staff del panel:', errPanel.message)
+        if (staffPanel?.id) return staffPanel.id as string
+      }
+    }
+
+    const authClient = await createClient()
+    const { data: { user } } = await authClient.auth.getUser()
+    if (user) {
+      const { data: staffRow, error: errStaff } = await supabase
+        .from('staff')
+        .select('id')
+        .eq('auth_user_id', user.id)
+        .eq('organization_id', orgId)
+        .is('deleted_at', null)
+        .limit(1)
+        .maybeSingle()
+      if (errStaff) console.error('[resolverActorStaffId] staff del dashboard:', errStaff.message)
+      return (staffRow?.id as string | undefined) ?? null
+    }
+  } catch (err) {
+    console.error('[resolverActorStaffId]', err instanceof Error ? err.message : String(err))
+  }
+  return null
+}
+
+/**
+ * Por qué no se puede cobrar una entrada que ya salió de la fila. Distingue la
+ * asesoría cerrada sin cobro (la otra tablet ya la resolvió) de la X de «no se
+ * presentó»: son dos cosas que el barbero resuelve distinto.
+ */
+function mensajeDeEntradaCancelada(cancelReason: string | null | undefined): string {
+  return cancelReason === MOTIVO_SOLO_ASESORIA
+    ? 'Esta asesoría se cerró sin cobro desde otro dispositivo.'
+    : 'Este cliente salió de la fila: no se puede cobrar.'
+}
+
+const MENSAJE_CORTE_SIN_EMPEZAR = 'El corte de este cliente todavía no empezó: inicialo antes de cobrar.'
+
+/** Rechazo del cobro de una asesoría sin servicio PRINCIPAL (paso 0' de completeService). */
+const MENSAJE_ASESORIA_SIN_SERVICIO = 'Elegí qué le hiciste o cerralo como solo asesoría.'
+
+/** Transferencia sin cuenta en una sucursal que tiene cuentas activas (paso 0c). */
+const MENSAJE_FALTA_CUENTA = 'Falta la cuenta de cobro: recargá el panel y elegí a qué cuenta transfirió.'
+
+/** Extras por cobro. Uno real tiene uno o dos; esto es sólo una defensa del endpoint. */
+const TOPE_EXTRAS_POR_COBRO = 20
+
+const NOMBRE_DEL_METODO: Record<'cash' | 'card' | 'transfer', string> = {
+  cash: 'efectivo',
+  card: 'tarjeta',
+  transfer: 'transferencia',
+}
+
+/**
+ * Código máquina de los rechazos de `completeService`, para que la pantalla no
+ * dependa de comparar textos:
+ * - `asesoria_sin_servicio`: pidió asesoría y no vino un servicio principal.
+ * - `servicio_invalido`: un servicio que no existe, es de otra sucursal o está
+ *   dado de baja (la lista de la pantalla quedó vieja).
+ * - `falta_cuenta`: transferencia sin cuenta de cobro en una sucursal con cuentas.
+ * - `cuenta_invalida`: la cuenta elegida no es de esta sucursal.
+ * - `lectura`: no se pudo leer un dato del cobro; la entrada quedó intacta.
+ * - `visita_sin_importe`: la entrada se cerró pero no se pudo leer la visita
+ *   para escribirle el importe (NO cobrar de nuevo).
+ */
+export type CodigoRechazoCobro =
+  | 'asesoria_sin_servicio'
+  | 'servicio_invalido'
+  | 'falta_cuenta'
+  | 'cuenta_invalida'
+  | 'lectura'
+  | 'visita_sin_importe'
+
+type AdminClient = ReturnType<typeof createAdminClient>
+
+/**
+ * El staff de la cookie FIRMADA del panel (`barber_session`), o null si la
+ * request no viene del panel. Mismo criterio que `getCurrentOrgId`: con la
+ * cookie válida, manda la cookie. Que ese staff esté activo y sea de la org ya
+ * lo exige `validateBranchAccess` (resuelve la org contra `staff` activo).
+ */
+async function staffDeLaCookieDelPanel(): Promise<string | null> {
+  try {
+    const cookieStore = await cookies()
+    const valor = cookieStore.get('barber_session')?.value
+    if (!valor) return null
+    const sesion = leerBarberSession(valor)
+    return sesion && isValidUUID(sesion.staff_id) ? sesion.staff_id : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Arranca el descanso del barbero si estaba esperando a que termine este
+ * cliente. Es el paso 6 de completeService, compartido con cerrarSoloAsesoria:
+ * los dos dejan al barbero libre, y un descanso aprobado no tiene por qué
+ * esperar a que alguien toque nada.
+ *
+ * Rollback intencional del push-on-complete (estaba en mig 131): arrancar
+ * automáticamente el siguiente CLIENTE rompía el flujo natural de barbería — el
+ * cronómetro disparaba aunque el cliente no estuviera todavía en la silla,
+ * generando "cortes fantasma" que el supervisor tenía que cancelar (incidente
+ * Fabrizio/Santino vela, 2026-05-09 22:14). El descanso SÍ debe arrancar solo:
+ * el barbero ya lo solicitó y se lo aprobaron, no requiere presencia física del
+ * cliente. El siguiente cliente se inicia con tap manual de "Atender".
+ *
+ * Política: el ghost arranca si NO hay clientes ASIGNADOS específicamente a este
+ * barbero antes de él (priority menor). Los dinámicos no bloquean. Si el
+ * barbero ya tomó a otro cliente, idx_queue_one_in_progress_per_barber rechaza
+ * el arranque y no pasa nada.
+ */
+async function arrancarDescansoPendiente(
+  supabase: AdminClient,
+  barberId: string | null,
+  branchId: string,
+): Promise<boolean> {
+  if (!barberId) return false
+
+  const { data: nextGhosts, error: errGhosts } = await supabase
+    .from('queue_entries')
+    .select('id, priority_order')
+    .eq('barber_id', barberId)
+    .eq('branch_id', branchId)
+    .eq('status', 'waiting')
+    .eq('is_break', true)
+    .order('priority_order', { ascending: true })
+    .limit(1)
+  if (errGhosts) console.error('[arrancarDescansoPendiente] leer descansos:', errGhosts.message)
+  if (!nextGhosts || nextGhosts.length === 0) return false
+
+  const nextGhost = nextGhosts[0]
+  const { data: realWaitingBeforeBreak, error: errAntes } = await supabase
+    .from('queue_entries')
+    .select('id')
+    .eq('barber_id', barberId)
+    .eq('branch_id', branchId)
+    .eq('status', 'waiting')
+    .eq('is_break', false)
+    .lt('priority_order', nextGhost.priority_order)
+    .limit(1)
+  if (errAntes) {
+    console.error('[arrancarDescansoPendiente] leer clientes antes del descanso:', errAntes.message)
+    return false
+  }
+  if (realWaitingBeforeBreak && realWaitingBeforeBreak.length > 0) return false
+
+  const { error: ghostStartError } = await supabase
+    .from('queue_entries')
+    .update({
+      status: 'in_progress',
+      started_at: new Date().toISOString(),
+    })
+    .eq('id', nextGhost.id)
+    .eq('status', 'waiting')
+  if (ghostStartError) {
+    console.error('[arrancarDescansoPendiente] arrancar el descanso:', ghostStartError.message)
+    return false
+  }
+  return true
+}
+
+const BUCKET_FOTOS_DEL_CORTE = 'visit-photos'
+
+/**
+ * Cierra las sesiones de fotos de una entrada que terminó SIN visita («solo
+ * asesoría») y borra lo que se subió: la fila de qr_photo_uploads y el objeto
+ * del bucket. Sin esto, la sesión seguía aceptando fotos 45 minutos y todo lo
+ * que subía el celular quedaba huérfano, con la cara del cliente en un bucket
+ * público y sin visita a la que pertenecer (hallazgo asesoria-06).
+ *
+ * Orden, y por qué:
+ *   1. Se cierran las sesiones abiertas (is_active = false). Desde ahí
+ *      fotos_registrar_subida rechaza cualquier foto nueva (lee la sesión con
+ *      el advisory lock de la entrada tomado).
+ *   2. BARRERA: fotos_quitar_foto con un id que no existe toma ese MISMO lock y
+ *      no toca nada. Si una confirmación del celular estaba en vuelo (leyó la
+ *      sesión abierta antes del paso 1), la barrera espera a que termine; las
+ *      que lleguen después ya ven la sesión cerrada. Sin la barrera, esa foto
+ *      podía registrarse DESPUÉS de juntar la lista y quedar huérfana.
+ *   3. Se borran las filas (la fila primero y el objeto después, igual que
+ *      fotos_quitar_foto: un objeto sin fila es un archivo de más que no se
+ *      muestra en ningún lado —la limpieza de huérfanos está planeada, todavía
+ *      no existe: por eso ese caso vuelve como aviso—; una fila sin objeto es
+ *      una foto rota en la ficha).
+ *   4. Se borran los objetos, pero SÓLO los que tienen la forma que firma el
+ *      servidor: `<organization_id>/<id de SU sesión>/…`. Defensa en
+ *      profundidad: una fila plantada con la ruta de una foto ajena (o de otro
+ *      corte) no puede hacer que borremos un objeto real. Esa fila se quita
+ *      igual, pero su objeto no se toca (mismo criterio que
+ *      descartarFotosDeEntrada en src/lib/fotos-corte/servidor.ts).
+ *
+ * Best-effort: nunca lanza ni hace fallar el cierre. Devuelve un aviso para la
+ * pantalla si algo quedó a medias (null si no había fotos o salió todo).
+ */
+async function descartarFotosSinVisita(supabase: AdminClient, queueEntryId: string): Promise<string | null> {
+  const AVISO = 'La asesoría quedó cerrada, pero no pudimos borrar las fotos que se sacaron. Avisale al encargado.'
+  try {
+    const { error: errCerrar } = await supabase
+      .from('qr_photo_sessions')
+      .update({ is_active: false, closed_at: new Date().toISOString() })
+      .eq('queue_entry_id', queueEntryId)
+      .eq('proposito', 'fotos')
+      .is('visit_id', null)
+      .eq('is_active', true)
+    if (errCerrar) {
+      console.error('[descartarFotosSinVisita] cerrar sesiones:', { queueEntryId, error: errCerrar.message })
+    }
+
+    const { data: sesiones, error: errSesiones } = await supabase
+      .from('qr_photo_sessions')
+      .select('id, organization_id')
+      .eq('queue_entry_id', queueEntryId)
+      .eq('proposito', 'fotos')
+      .is('visit_id', null)
+    if (errSesiones) {
+      console.error('[descartarFotosSinVisita] leer sesiones:', { queueEntryId, error: errSesiones.message })
+      return AVISO
+    }
+    // Sesión → organización: la ruta de cada foto se valida contra la de SU sesión.
+    const orgDeSesion = new Map((sesiones ?? []).map((s) => [s.id as string, s.organization_id as string]))
+    const idsSesiones = [...orgDeSesion.keys()]
+    if (idsSesiones.length === 0) return errCerrar ? AVISO : null
+
+    // Barrera (ver el comentario de arriba). Un error acá no corta: la limpieza
+    // sigue y, en el peor caso, una foto en vuelo queda para la limpieza de
+    // sesiones vencidas sin visita.
+    const { error: errBarrera } = await supabase.rpc('fotos_quitar_foto', {
+      p_queue_entry_id: queueEntryId,
+      p_upload_id: crypto.randomUUID(),
+    })
+    if (errBarrera) {
+      console.error('[descartarFotosSinVisita] barrera:', { queueEntryId, error: errBarrera.message })
+    }
+
+    const { data: borradas, error: errBorrar } = await supabase
+      .from('qr_photo_uploads')
+      .delete()
+      .in('session_id', idsSesiones)
+      .select('storage_path, session_id')
+    if (errBorrar) {
+      console.error('[descartarFotosSinVisita] borrar filas:', { queueEntryId, error: errBorrar.message })
+      return AVISO
+    }
+
+    // Sólo se borran del bucket las rutas `<org>/<su sesión>/…`. Las demás (una
+    // fila plantada, o la forma `qr-<token>/…` del flujo viejo) ya no tienen
+    // fila, pero su objeto no se toca: no hay forma de saber de quién es.
+    const rutasPropias = new Set<string>()
+    const rutasAjenas: string[] = []
+    for (const fila of borradas ?? []) {
+      const ruta = String(fila.storage_path ?? '')
+      if (!ruta) continue
+      const sesionId = String(fila.session_id ?? '')
+      const org = orgDeSesion.get(sesionId)
+      if (org && ruta.startsWith(`${org}/${sesionId}/`)) rutasPropias.add(ruta)
+      else rutasAjenas.push(ruta)
+    }
+    if (rutasAjenas.length > 0) {
+      console.warn('[descartarFotosSinVisita] rutas que no son de su sesión: se quitó la fila, el objeto no se borra', {
+        queueEntryId,
+        rutas: rutasAjenas,
+      })
+    }
+
+    const rutas = [...rutasPropias]
+    if (rutas.length > 0) {
+      const { error: errStorage } = await supabase.storage.from(BUCKET_FOTOS_DEL_CORTE).remove(rutas)
+      if (errStorage) {
+        console.error('[descartarFotosSinVisita] borrar objetos:', { queueEntryId, rutas, error: errStorage.message })
+        return AVISO
+      }
+    }
+    return errCerrar ? AVISO : null
+  } catch (err) {
+    console.error('[descartarFotosSinVisita]', { queueEntryId, error: err instanceof Error ? err.message : String(err) })
+    return AVISO
+  }
+}
+
+/**
+ * Respuesta de un cobro que YA estaba hecho (reintento tras el timeout de 8 s,
+ * doble toque, otro dispositivo). Sin efectos sobre la plata, pero CON la
+ * visita: el diálogo todavía tiene que colgarle las fotos. Trae además el
+ * método y el importe que quedaron registrados (hallazgo asesoria-07): si otro
+ * dispositivo cobró primero, el diálogo NO tiene que colgarle su comprobante
+ * de transferencia a una visita en efectivo — ese comprobante suelto es justo
+ * la señal del doble cobro en /dashboard/comprobantes. Si la visita no aparece
+ * (o no se pudo leer), van null.
+ */
+async function respuestaCobroYaRegistrado(supabase: AdminClient, queueEntryId: string) {
+  console.warn(`[completeService] entry ${queueEntryId} ya no estaba in_progress; retorno idempotente`)
+  const { data: visitaPrevia, error: errVisitaPrevia } = await supabase
+    .from('visits')
+    .select('id, payment_method, amount')
+    .eq('queue_entry_id', queueEntryId)
+    .order('completed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (errVisitaPrevia) {
+    console.error('[completeService] visita del reintento idempotente:', errVisitaPrevia.message)
+  }
+  const visitaPreviaId = (visitaPrevia?.id as string | undefined) ?? null
+  // Fotos del corte: el reintento también las ata (idempotente). Si la primera
+  // llamada cerró el cobro y se perdió la respuesta, acá quedan en la ficha.
+  const fotos = visitaPreviaId
+    ? await vincularFotosDelCobro(supabase, queueEntryId, visitaPreviaId)
+    : { guardadas: 0 }
+  const metodo = visitaPrevia?.payment_method as string | undefined
+  return {
+    success: true as const,
+    alreadyCompleted: true as const,
+    visitId: visitaPreviaId,
+    /** Cómo quedó cobrada la visita existente (null si no se pudo leer). */
+    paymentMethod: metodo === 'cash' || metodo === 'card' || metodo === 'transfer' ? metodo : null,
+    /** Importe final registrado en la visita existente (null si no se pudo leer). */
+    amount: visitaPrevia ? Number(visitaPrevia.amount) : null,
+    fotos,
+  }
+}
+
 export async function checkinClient(formData: FormData) {
   const supabase = createAdminClient()
   const rawName = ((formData.get('name') as string | null) ?? '').trim()
@@ -83,6 +561,12 @@ export async function checkinClient(formData: FormData) {
   const serviceId = (formData.get('service_id') as string | null) || null
   const specialFlag = formData.get('special')
   const isSpecialRequested = specialFlag === '1' || specialFlag === 'true'
+
+  // Asesoría sin costo (mig 217): el cliente tocó «¿No sabés qué hacerte?» EN VEZ
+  // de elegir un servicio. Es un pedido, no una bandera de confianza: abajo se
+  // revalida contra el interruptor de la sucursal. Vale igual para el registro
+  // manual del dashboard (`origen = 'staff'`).
+  const pidioAsesoria = formData.get('asesoria') === '1'
 
   // De dónde viene el alta, para `clients.signup_source` (mig 210). El default es
   // la tablet porque es quien más clientes crea; el alta manual del dashboard
@@ -133,6 +617,13 @@ export async function checkinClient(formData: FormData) {
     return { error: 'Sucursal no encontrada o inactiva' }
   }
 
+  // El interruptor de asesoría se lee en paralelo con la búsqueda del cliente, y
+  // sólo si la pidió. Nunca rechaza (falla abierta): se puede esperar más abajo
+  // sin try/catch.
+  const asesoriaPermitidaP = pidioAsesoria
+    ? asesoriaPermitidaEnSucursal(supabase, branchId, 'checkinClient')
+    : Promise.resolve(false)
+
   let clientId: string
 
   // Cliente especial: NO buscamos duplicado. Cada walk-in sin teléfono es una persona
@@ -165,7 +656,24 @@ export async function checkinClient(formData: FormData) {
 
     const activo = await resolverEntradaActiva(supabase, clientId, branchId)
     if (activo.enEstaSucursal) {
-      return { alreadyInQueue: true, position: activo.enEstaSucursal.position, queueEntryId: activo.enEstaSucursal.id }
+      const asesoriaExistente = await sumarAsesoriaAEntradaActiva(
+        supabase,
+        activo.enEstaSucursal,
+        { pidio: pidioAsesoria, permitida: await asesoriaPermitidaP },
+        branchId,
+        'checkinClient',
+      )
+      return {
+        alreadyInQueue: true,
+        position: activo.enEstaSucursal.position,
+        queueEntryId: activo.enEstaSucursal.id,
+        // Propiedades explícitas, no spread: las pantallas leen `result.alreadyInQueue`
+        // sobre la unión inferida y TypeScript sólo completa con `?: undefined` las
+        // claves que vienen de literales.
+        asesoriaPedida: asesoriaExistente.asesoriaPedida,
+        asesoriaSumada: asesoriaExistente.asesoriaSumada,
+        asesoriaMotivo: asesoriaExistente.asesoriaMotivo,
+      }
     }
   } else if (isSpecial) {
     // Teléfono virtual único 00XXXXXXXX (mismo formato que el kiosko). Reintentamos si
@@ -217,6 +725,11 @@ export async function checkinClient(formData: FormData) {
     p_branch_id: branchId,
   })
 
+  // La asesoría queda si la pidió y la sucursal la ofrece (o no se pudo saber:
+  // falla abierta). Si queda, REEMPLAZA al servicio: la entrada nace sin él y el
+  // barbero lo elige al cobrar.
+  const asesoriaQueda = pidioAsesoria && (await asesoriaPermitidaP)
+
   // Modelo pool (mig 134): si el cliente eligió "Menor espera", la entry
   // entra con barber_id = NULL y vive en el pool compartido — la reclama el
   // primer barbero libre vía claim_next_for_barber (FIFO por priority_order,
@@ -230,7 +743,8 @@ export async function checkinClient(formData: FormData) {
       client_id: clientId,
       // null = dinámico de pool ("Menor espera"); seteado = barbero específico
       barber_id: barberId,
-      service_id: serviceId,
+      service_id: asesoriaQueda ? null : serviceId,
+      pidio_asesoria: asesoriaQueda,
       position: position ?? 1,
       status: 'waiting',
       // !barberId = eligió "Menor espera" → dinámico de pool
@@ -245,12 +759,26 @@ export async function checkinClient(formData: FormData) {
     if (queueError?.code === '23505') {
       const { data: existing } = await supabase
         .from('queue_entries')
-        .select('id, position')
+        .select('id, position, status, appointment_id')
         .eq('client_id', clientId)
         .eq('branch_id', branchId)
         .in('status', ['waiting', 'in_progress'])
         .single()
-      return { alreadyInQueue: true, position: existing?.position ?? 1, queueEntryId: existing?.id ?? '' }
+      const asesoriaExistente = await sumarAsesoriaAEntradaActiva(
+        supabase,
+        existing ?? null,
+        { pidio: pidioAsesoria, permitida: await asesoriaPermitidaP },
+        branchId,
+        'checkinClient',
+      )
+      return {
+        alreadyInQueue: true,
+        position: existing?.position ?? 1,
+        queueEntryId: existing?.id ?? '',
+        asesoriaPedida: asesoriaExistente.asesoriaPedida,
+        asesoriaSumada: asesoriaExistente.asesoriaSumada,
+        asesoriaMotivo: asesoriaExistente.asesoriaMotivo,
+      }
     }
     console.error('Insert queue entry error:', queueError)
     return { error: 'Error al agregar a la fila: ' + (queueError?.message || 'Error desconocido') }
@@ -258,7 +786,7 @@ export async function checkinClient(formData: FormData) {
 
   revalidatePath('/checkin')
   revalidatePath('/barbero/fila')
-  return { success: true, position, queueEntryId: queueEntry.id, clientId }
+  return { success: true, position, queueEntryId: queueEntry.id, clientId, asesoria: asesoriaQueda }
 }
 
 export async function startService(queueEntryId: string, barberId: string) {
@@ -279,7 +807,11 @@ export async function startService(queueEntryId: string, barberId: string) {
   const orgAccess = await validateBranchAccess(entry.branch_id)
   if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
 
-  const { error } = await supabase
+  // `.select('id')` da el rowcount: la UPDATE está condicionada a 'waiting', y
+  // con 0 filas el cliente ya no estaba esperando (otro barbero lo tomó, lo
+  // sacaron de la fila, doble toque). Antes eso volvía como éxito: el dashboard
+  // decía «Corte iniciado» sobre un corte que no había empezado.
+  const { data: iniciadas, error } = await supabase
     .from('queue_entries')
     .update({
       barber_id: barberId,
@@ -289,9 +821,15 @@ export async function startService(queueEntryId: string, barberId: string) {
     })
     .eq('id', queueEntryId)
     .eq('status', 'waiting')
+    .select('id')
 
   if (error) {
+    console.error('[startService]', { queueEntryId, error: error.message })
     return { error: 'Error al iniciar servicio' }
+  }
+
+  if (!iniciadas || iniciadas.length === 0) {
+    return { error: 'El cliente ya no está esperando: otro barbero lo tomó o salió de la fila.' }
   }
 
   revalidatePath('/barbero/fila')
@@ -366,7 +904,12 @@ export async function completeService(
   coveringReceiptId: string | null = null,
 ) {
   if (!isValidUUID(queueEntryId)) return { error: 'queueEntryId inválido' }
-  if (serviceId && !isValidUUID(serviceId)) return { error: 'serviceId inválido' }
+  // Llega del browser: un método fuera de la lista fallaba recién en el UPDATE de
+  // la visita (enum), con la entrada ya cerrada y la visita en $0.
+  if (!['cash', 'card', 'transfer'].includes(paymentMethod)) return { error: 'Elegí cómo pagó el cliente.' }
+  if (serviceId && !isValidUUID(serviceId)) {
+    return { error: 'serviceId inválido', codigo: 'servicio_invalido' as CodigoRechazoCobro }
+  }
   if (paymentAccountId && !isValidUUID(paymentAccountId)) return { error: 'paymentAccountId inválido' }
   if (coveringReceiptId && !isValidUUID(coveringReceiptId)) return { error: 'coveringReceiptId inválido' }
   if (!Number.isFinite(tipAmount) || tipAmount < 0) return { error: 'tipAmount inválido' }
@@ -374,21 +917,226 @@ export async function completeService(
     return { error: 'tipPaymentMethod inválido' }
   }
 
+  // Extras: uuids, sin repetir y acotados. Antes no se validaban: un id inválido
+  // hacía fallar la consulta de precios (22P02) y también el UPDATE de la visita
+  // (extra_services es uuid[]), y el corte quedaba cerrado en $0 sin servicio.
+  let extrasPedidos: string[] = []
+  if (extraServiceIds != null) {
+    if (
+      !Array.isArray(extraServiceIds) ||
+      extraServiceIds.length > TOPE_EXTRAS_POR_COBRO ||
+      extraServiceIds.some((id) => typeof id !== 'string' || !isValidUUID(id))
+    ) {
+      return {
+        error: 'Los servicios elegidos llegaron mal. Cerrá el cobro y volvé a abrirlo.',
+        codigo: 'servicio_invalido' as CodigoRechazoCobro,
+      }
+    }
+    extrasPedidos = [...new Set(extraServiceIds.map((id) => id.toLowerCase()))]
+  }
+
   // Use admin client because barber pin authentications do not set a Supabase Auth session
   // This causes RLS on visits and client_points to fail when the queue trigger fires using SECURITY INVOKER
   const supabase = createAdminClient()
 
-  // Obtener la entrada para validar que la sucursal pertenece a la org activa
-  const { data: entryForValidation } = await supabase
+  // Obtener la entrada para validar que la sucursal pertenece a la org activa.
+  // También trae el estado, el servicio del check-in, la marca de asesoría y el
+  // barbero: los pasos 0 a 0c deciden con ellos ANTES de tocar nada.
+  const { data: entryForValidation, error: errEntrada } = await supabase
     .from('queue_entries')
-    .select('branch_id, appointment_id')
+    .select('branch_id, appointment_id, status, cancel_reason, service_id, pidio_asesoria, barber_id, is_break')
     .eq('id', queueEntryId)
     .maybeSingle()
 
+  if (errEntrada) {
+    console.error('[completeService] leer la entrada:', { queueEntryId, error: errEntrada.message })
+    return { error: 'No pudimos leer el corte. Probá de nuevo.', codigo: 'lectura' as CodigoRechazoCobro }
+  }
   if (!entryForValidation) return { error: 'Entrada no encontrada' }
 
   const orgAccess = await validateBranchAccess(entryForValidation.branch_id)
   if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+
+  // 0. Una entrada que no está en curso no se cobra, y se dice por qué ANTES de
+  //    la seña: seguir de largo consumía la seña de un turno que nadie iba a
+  //    cobrar y después devolvía `alreadyCompleted`, o sea un «cobrado» sobre un
+  //    cliente que ya no estaba (o que todavía no había empezado).
+  if (entryForValidation.status === 'cancelled') {
+    return { error: mensajeDeEntradaCancelada(entryForValidation.cancel_reason as string | null) }
+  }
+  if (entryForValidation.status === 'waiting') {
+    return { error: MENSAJE_CORTE_SIN_EMPEZAR }
+  }
+  // Una entrada ya 'completed' es el reintento idempotente: se contesta acá,
+  // sin validar nada de lo que se iba a escribir (no se escribe nada) y sin
+  // tocar la seña ni los productos.
+  if (entryForValidation.status === 'completed') {
+    return respuestaCobroYaRegistrado(supabase, queueEntryId)
+  }
+  if (entryForValidation.is_break === true) return { error: 'Un descanso no se cobra.' }
+
+  // Servicio principal del cobro: el que eligió el barbero o, si no mandó
+  // ninguno, el que la entrada trae del check-in. Es el MISMO criterio con el que
+  // se calcula el importe (paso 3) y se escribe la visita (paso 4): un guard que
+  // contara el de la entrada mientras el importe lo ignoraba dejaría pasar una
+  // visita sin servicio y en $0.
+  const servicioDelCheckin = ((entryForValidation.service_id as string | null) ?? '').toLowerCase() || null
+  const servicioPrincipalId: string | null = serviceId?.toLowerCase() || servicioDelCheckin
+  // El principal no se cobra dos veces aunque venga también como extra.
+  const extrasUnicos = extrasPedidos.filter((id) => id !== servicioPrincipalId)
+
+  // 0'. Asesoría (mig 217): si el cliente pidió asesoría, el servicio PRINCIPAL
+  //     es obligatorio (el elegido en el cobro o el que la entrada traiga): los
+  //     extras solos no alcanzan, porque una «Barba (Adiciónalas)» de $4.000 no
+  //     es lo que se cobra por el corte que se le terminó haciendo. Si no se hizo
+  //     nada, el camino es `cerrarSoloAsesoria` (sin visita). La base tiene la
+  //     misma regla como red (trigger de la mig 221) para los paneles viejos.
+  if (entryForValidation.pidio_asesoria === true && !servicioPrincipalId) {
+    return { error: MENSAJE_ASESORIA_SIN_SERVICIO, codigo: 'asesoria_sin_servicio' as CodigoRechazoCobro }
+  }
+
+  // 0c. Precios, comisiones y cuenta de cobro: se leen y se validan ANTES de
+  //     cerrar la entrada (hallazgo seguridad-y-despliegue-06). Antes se leían
+  //     después, sin mirar el error: con la base lenta (el timeout de 8 s) la
+  //     visita quedaba en $0 y el barbero veía «cobrado». Ahora cualquier falla
+  //     de lectura devuelve un error con la entrada, la seña y los productos
+  //     intactos, y el barbero reintenta.
+  const idsDeServicios = [...new Set([...(servicioPrincipalId ? [servicioPrincipalId] : []), ...extrasUnicos])]
+  const barberoDeLaEntrada = (entryForValidation.barber_id as string | null) ?? null
+  const esTransferencia = paymentMethod === 'transfer'
+  const cuentaPedida = paymentAccountId ? paymentAccountId.toLowerCase() : null
+  const hayServicios = idsDeServicios.length > 0
+
+  const [serviciosRes, overridesRes, salarioRes, cuentasRes] = await Promise.all([
+    hayServicios
+      ? supabase
+          .from('services')
+          .select('id, branch_id, is_active, price, default_commission_pct')
+          .in('id', idsDeServicios)
+      : null,
+    hayServicios && barberoDeLaEntrada
+      ? supabase
+          .from('staff_service_commissions')
+          .select('service_id, commission_pct')
+          .eq('staff_id', barberoDeLaEntrada)
+          .in('service_id', idsDeServicios)
+      : null,
+    // salary_configs.staff_id es UNIQUE: maybeSingle no puede dar "varias filas".
+    hayServicios && barberoDeLaEntrada
+      ? supabase
+          .from('salary_configs')
+          .select('scheme, commission_pct')
+          .eq('staff_id', barberoDeLaEntrada)
+          .maybeSingle()
+      : null,
+    // Las cuentas de la sucursal (activas o no), sólo para una transferencia que
+    // trae cuenta (hay que ver que sea de acá) o que no trae ni cuenta ni
+    // comprobante-ancla (hay que ver si la sucursal tiene cuentas).
+    esTransferencia && (cuentaPedida || !coveringReceiptId)
+      ? supabase.from('payment_accounts').select('id, is_active').eq('branch_id', entryForValidation.branch_id)
+      : null,
+  ])
+
+  const errorDeLectura = serviciosRes?.error ?? overridesRes?.error ?? salarioRes?.error ?? cuentasRes?.error
+  if (errorDeLectura) {
+    console.error('[completeService] leer precios/comisiones/cuentas:', {
+      queueEntryId,
+      code: errorDeLectura.code,
+      message: errorDeLectura.message,
+    })
+    return { error: 'No pudimos calcular el cobro. Probá de nuevo.', codigo: 'lectura' as CodigoRechazoCobro }
+  }
+
+  type ServicioDelCobro = {
+    id: string
+    branch_id: string | null
+    is_active: boolean
+    price: number
+    default_commission_pct: number
+  }
+  const serviciosPorId = new Map<string, ServicioDelCobro>()
+  for (const s of (serviciosRes?.data ?? []) as ServicioDelCobro[]) serviciosPorId.set(String(s.id).toLowerCase(), s)
+  for (const id of idsDeServicios) {
+    const s = serviciosPorId.get(id)
+    if (!s) {
+      return {
+        error: 'Uno de los servicios elegidos ya no existe. Actualizá la lista y volvé a elegir.',
+        codigo: 'servicio_invalido' as CodigoRechazoCobro,
+      }
+    }
+    // branch_id NULL = servicio global (legado, hoy no hay ninguno): se acepta
+    // igual que en la lista del cobro y en services.ts.
+    if (s.branch_id && s.branch_id !== entryForValidation.branch_id) {
+      return {
+        error: 'Uno de los servicios elegidos es de otra sucursal. Actualizá la lista y volvé a elegir.',
+        codigo: 'servicio_invalido' as CodigoRechazoCobro,
+      }
+    }
+    // Dado de baja: sólo pasa el que la entrada trae del check-in (el cliente se
+    // anotó con él y lo dieron de baja durante el día: igual se hizo y se cobra).
+    if (s.is_active !== true && id !== servicioDelCheckin) {
+      return {
+        error: 'Uno de los servicios elegidos está dado de baja. Elegí otro.',
+        codigo: 'servicio_invalido' as CodigoRechazoCobro,
+      }
+    }
+  }
+
+  if (cuentasRes) {
+    const cuentasDeLaSucursal = (cuentasRes.data ?? []) as Array<{ id: string; is_active: boolean | null }>
+    if (cuentaPedida) {
+      // Una cuenta desactivada en el medio se acepta: el cliente ya transfirió ahí.
+      if (!cuentasDeLaSucursal.some((c) => String(c.id).toLowerCase() === cuentaPedida)) {
+        return {
+          error: 'La cuenta de cobro elegida no es de esta sucursal. Recargá el panel y elegí a qué cuenta transfirió.',
+          codigo: 'cuenta_invalida' as CodigoRechazoCobro,
+        }
+      }
+    } else if (cuentasDeLaSucursal.some((c) => c.is_active === true)) {
+      // Transferencia sin cuenta (y sin comprobante-ancla) en una sucursal que
+      // tiene cuentas: la plata no entraría a ningún destino (KR#30). Es lo que
+      // mandaría un diálogo viejo que no pudo leer las cuentas (hallazgo
+      // productos-y-fugas-01). Sin cuentas activas sí se acepta: es la única
+      // forma de cobrar por transferencia en esa sucursal.
+      return { error: MENSAJE_FALTA_CUENTA, codigo: 'falta_cuenta' as CodigoRechazoCobro }
+    }
+  }
+
+  const overridePorServicio = new Map<string, number>()
+  for (const o of (overridesRes?.data ?? []) as Array<{ service_id: string; commission_pct: number }>) {
+    overridePorServicio.set(String(o.service_id).toLowerCase(), Number(o.commission_pct))
+  }
+  const barberSalaryConfig = (salarioRes?.data ?? null) as { scheme: string | null; commission_pct: number | null } | null
+
+  // 0a. Productos: se validan ANTES de tocar nada (seña, entrada, visita).
+  //     Antes se completaba la entrada y recién después se procesaban: un id de
+  //     otra sucursal, un producto dado de baja o una cantidad rota dejaban el
+  //     corte cerrado con `amount` sin los productos — y el cliente ya los había
+  //     pagado: caja corta y sin forma de reintentar (el guard del paso 1 devuelve
+  //     `alreadyCompleted`). Acá un rechazo no cambió nada: el barbero saca el
+  //     producto y vuelve a cobrar sobre la entrada intacta.
+  let lineasDeProductos: LineaValidada[] = []
+  if (productsToSell != null) {
+    const validacion = await validarLineasDeProductos(supabase, entryForValidation.branch_id, productsToSell, {
+      soloActivos: true,
+    })
+    if (validacion.ok) {
+      lineasDeProductos = validacion.lineas
+    } else {
+      // Si en el medio la entrada se cerró (otro dispositivo, o la primera
+      // llamada de este mismo cobro que terminó mientras ésta validaba), no
+      // puede trabarse porque un producto se dio de baja: sigue de largo sin
+      // productos y el guard del paso 1 la devuelve como `alreadyCompleted`.
+      const { data: estadoEntrada, error: errEstado } = await supabase
+        .from('queue_entries')
+        .select('status')
+        .eq('id', queueEntryId)
+        .maybeSingle()
+      if (errEstado || !estadoEntrada || estadoEntrada.status === 'in_progress') {
+        return { error: validacion.error, productosDesactualizados: validacion.productosDesactualizados }
+      }
+    }
+  }
 
   // 0b. La seña (mig 207). Se resuelve ANTES de tocar la fila, y a propósito:
   //     si acá falla algo, no se completó nada y el barbero puede reintentar sobre
@@ -440,29 +1188,59 @@ export async function completeService(
   //    reintento de red tras AbortError de 8s, dos pestañas/dispositivos). En
   //    ese caso el trigger NO disparó de nuevo (es idempotente vía
   //    OLD.status='in_progress'), pero el RESTO de este server action SÍ correría
-  //    sus efectos colaterales (recordTransfer, processProductSales, redención
+  //    sus efectos colaterales (recordTransfer, registrarProductosDeVisita, redención
   //    de puntos, salary_reports, mensajes post-servicio) sobre la visita ya
   //    existente, duplicándolos. Cortamos acá ANTES de cualquier efecto.
   //    (Auditoría jun-2026: este doble-disparo infló caja en +272.000 ARS.)
+  //
+  //    Una asesoría (mig 217) deja escrito en la entrada el servicio que se le
+  //    hizo, en la MISMA UPDATE que la cierra: el trigger de la mig 221 rechaza
+  //    cerrar como cobrada una asesoría sin service_id (la red para los paneles
+  //    con el bundle viejo), y así este camino nunca choca con él.
+  const cierreDeLaEntrada: Record<string, unknown> = {
+    status: 'completed',
+    completed_at: new Date().toISOString(),
+  }
+  if (entryForValidation.pidio_asesoria === true && servicioPrincipalId) {
+    cierreDeLaEntrada.service_id = servicioPrincipalId
+  }
   const { data: completedRows, error } = await supabase
     .from('queue_entries')
-    .update({
-      status: 'completed',
-      completed_at: new Date().toISOString(),
-    })
+    .update(cierreDeLaEntrada)
     .eq('id', queueEntryId)
     .eq('status', 'in_progress')
     .select('id')
 
   if (error) {
     console.error('completeService error:', error)
+    if (error.hint === 'asesoria_sin_servicio') {
+      return { error: MENSAJE_ASESORIA_SIN_SERVICIO, codigo: 'asesoria_sin_servicio' as CodigoRechazoCobro }
+    }
     return { error: 'Error al completar servicio: ' + error.message }
   }
 
   if (!completedRows || completedRows.length === 0) {
+    // ¿Por qué no se cerró? Se relee: entre la lectura del paso 0 y la UPDATE la
+    // otra tablet pudo cerrarla como «solo asesoría» o sacarla de la fila, y eso
+    // NO es un cobro hecho — devolver `alreadyCompleted` le decía «cobrado» al
+    // barbero sobre un cliente sin visita.
+    const { data: estadoActual, error: errEstadoActual } = await supabase
+      .from('queue_entries')
+      .select('status, cancel_reason')
+      .eq('id', queueEntryId)
+      .maybeSingle()
+    if (errEstadoActual) {
+      console.error('[completeService] releer la entrada que no se cerró:', errEstadoActual.message)
+    }
+    if (estadoActual?.status === 'cancelled') {
+      return { error: mensajeDeEntradaCancelada(estadoActual.cancel_reason as string | null) }
+    }
+    if (estadoActual?.status === 'waiting') {
+      return { error: MENSAJE_CORTE_SIN_EMPEZAR }
+    }
+
     // Ya fue completado por una llamada previa: retorno idempotente, sin efectos.
-    console.warn(`[completeService] entry ${queueEntryId} ya no estaba in_progress; retorno idempotente`)
-    return { success: true as const, alreadyCompleted: true as const }
+    return respuestaCobroYaRegistrado(supabase, queueEntryId)
   }
 
   // 1b. Si la queue entry proviene de un turno, marcarlo como completado.
@@ -475,102 +1253,130 @@ export async function completeService(
       .eq('id', entryForValidation.appointment_id)
   }
 
-  // 2. Get the visit created by the trigger
-  const { data: visit } = await supabase
-    .from('visits')
-    .select('id, client_id, branch_id, barber_id, commission_pct, service_id')
-    .eq('queue_entry_id', queueEntryId)
-    .single()
+  // 2. La visita que creó el trigger (en la misma transacción que la UPDATE del
+  //    paso 1, así que existe). Si la lectura falla (timeout) se reintenta una
+  //    vez; si vuelve a fallar, la entrada ya está cerrada y el importe no se
+  //    pudo escribir: se dice con todas las letras en vez de un «cobrado» con la
+  //    visita en $0, y queda en el log con todo lo necesario para corregirla.
+  type VisitaDelCobro = {
+    id: string
+    client_id: string | null
+    branch_id: string
+    barber_id: string | null
+    commission_pct: number
+    service_id: string | null
+  }
+  const leerVisitaDelCobro = async (): Promise<VisitaDelCobro | null> => {
+    const { data, error: errVisita } = await supabase
+      .from('visits')
+      .select('id, client_id, branch_id, barber_id, commission_pct, service_id')
+      .eq('queue_entry_id', queueEntryId)
+      .order('completed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (errVisita) console.error('[completeService] leer la visita del cobro:', { queueEntryId, error: errVisita.message })
+    return (data as VisitaDelCobro | null) ?? null
+  }
+  const visit = (await leerVisitaDelCobro()) ?? (await leerVisitaDelCobro())
 
   if (!visit) {
-    return { error: 'Error: visita no encontrada tras completar' }
+    console.error('[completeService] VISITA_SIN_IMPORTE: la entrada se cerró y no se pudo leer la visita', {
+      queueEntryId,
+      paymentMethod,
+      servicioPrincipalId,
+      extras: extrasUnicos,
+      productos: lineasDeProductos.map((l) => ({ id: l.productId, cantidad: l.cantidad })),
+      prepaidAmount,
+      depositId,
+    })
+    return {
+      error:
+        'El corte quedó cerrado, pero no pudimos registrar el importe. No lo cobres de nuevo: avisale al encargado para que lo cargue en el historial.',
+      codigo: 'visita_sin_importe' as CodigoRechazoCobro,
+    }
+  }
+  if (visit.barber_id !== barberoDeLaEntrada) {
+    // El trigger copia el barber_id de la entrada: no debería pasar nunca. Las
+    // comisiones por servicio se leyeron (paso 0c) para el barbero de la entrada.
+    console.warn('[completeService] la visita quedó con otro barbero que la entrada', {
+      queueEntryId,
+      visitId: visit.id,
+      barberoEntrada: barberoDeLaEntrada,
+      barberoVisita: visit.barber_id,
+    })
   }
 
-  // 3. Calculate proper amount and commission from the selected service(s)
-  //    Commission priority: staff_service_commissions → services.default_commission_pct → salary_configs → staff.commission_pct
+  // 2b. Fotos del corte (mig 219): ata la sesión de fotos de esta entrada a la
+  //     visita y copia TODAS sus fotos (las de la tablet y las del celular). Las
+  //     que lleguen en los próximos minutos se suman solas a la visita. Corre en
+  //     paralelo con el resto del cobro (toca otras tablas y nunca lanza) y se
+  //     espera recién al devolver: la plata no espera a las fotos.
+  const fotosPromesa = vincularFotosDelCobro(supabase, queueEntryId, visit.id)
+
+  // 3. Importe y comisión de los servicios, con lo que se leyó y validó en el
+  //    paso 0c (ninguna consulta acá: nada puede fallar en silencio).
+  //    Comisión: staff_service_commissions → services.default_commission_pct →
+  //    salary_configs → staff.commission_pct (el que el trigger copió a la visita).
+  //    Los barberos con sueldo 'fixed' sólo cobran comisión sobre productos.
   let amount = 0
   let commissionAmount = 0
-  const allServiceIds = [
-    ...(serviceId ? [serviceId] : []),
-    ...(extraServiceIds || [])
-  ]
-
-  // Obtener esquema y comisión global: salary_configs como fuente primaria,
-  // visit.commission_pct (staff) como fallback. El `scheme` determina si se le
-  // paga comisión por servicios: los barberos con sueldo 'fixed' sólo cobran
-  // comisión sobre productos, nunca sobre servicios.
-  const { data: barberSalaryConfig } = await supabase
-    .from('salary_configs')
-    .select('scheme, commission_pct')
-    .eq('staff_id', visit.barber_id)
-    .single()
-
-  const barberScheme = barberSalaryConfig?.scheme ?? null
-  const isFixedSalary = barberScheme === 'fixed'
-
+  const isFixedSalary = barberSalaryConfig?.scheme === 'fixed'
   const globalCommPct = barberSalaryConfig?.commission_pct != null
     ? Number(barberSalaryConfig.commission_pct)
     : Number(visit.commission_pct)
 
-  if (allServiceIds.length > 0) {
-    // Paralelizar: precios de servicios y overrides de comisión son independientes entre sí
-    const [{ data: activeServices }, { data: barberOverrides }] = await Promise.all([
-      supabase
-        .from('services')
-        .select('id, price, default_commission_pct')
-        .in('id', allServiceIds),
-      supabase
-        .from('staff_service_commissions')
-        .select('service_id, commission_pct')
-        .eq('staff_id', visit.barber_id)
-        .in('service_id', allServiceIds),
-    ])
+  // Cada servicio una vez (el principal y los extras sin repetir), igual que antes.
+  for (const id of idsDeServicios) {
+    const s = serviciosPorId.get(id)
+    if (!s) continue // imposible: el paso 0c ya rechazó los que no existen
+    const price = Number(s.price)
+    amount += price
 
-    const overrideMap = new Map<string, number>()
-    if (barberOverrides) {
-      for (const o of barberOverrides) {
-        overrideMap.set(o.service_id, Number(o.commission_pct))
-      }
+    // Sueldo fijo → 0 comisión por servicio, independientemente de overrides
+    // por-servicio o por-barbero. La única vía de comisión para este
+    // esquema es la venta de productos (ver bloque 3.5).
+    if (isFixedSalary) continue
+
+    let commPct: number
+    if (overridePorServicio.has(id)) {
+      commPct = overridePorServicio.get(id)!
+    } else if (Number(s.default_commission_pct) > 0) {
+      commPct = Number(s.default_commission_pct)
+    } else {
+      commPct = globalCommPct
     }
 
-    if (activeServices) {
-      for (const s of activeServices) {
-        const price = Number(s.price)
-        amount += price
-
-        // Sueldo fijo → 0 comisión por servicio, independientemente de overrides
-        // por-servicio o por-barbero. La única vía de comisión para este
-        // esquema es la venta de productos (ver bloque 3.5).
-        if (isFixedSalary) continue
-
-        // Resolve commission: barber override → service default → salary_configs → staff
-        let commPct: number
-        if (overrideMap.has(s.id)) {
-          commPct = overrideMap.get(s.id)!
-        } else if (Number(s.default_commission_pct) > 0) {
-          commPct = Number(s.default_commission_pct)
-        } else {
-          commPct = globalCommPct
-        }
-
-        commissionAmount += price * (commPct / 100)
-      }
-    }
+    commissionAmount += price * (commPct / 100)
   }
 
   // Subtotal de servicios (principal + extras). Es la base del descuento por cupón:
   // el 20% se aplica SOLO a servicios, no a productos ni a la propina.
   const serviceSubtotal = amount
 
-  // 3.5 Calculate product prices and commissions using shared function
+  // 3.5 Productos (validados en el paso 0a): detalle con el método REAL del
+  //     cobro, stock y comisión del día, en una transacción (RPC
+  //     registrar_productos_de_visita, mig 220; sin ella, el camino TS con cada
+  //     error mirado). La comisión de productos va al reporte del día ACÁ, no en
+  //     el paso 8. Si algo falla, el importe y la comisión se suman igual —el
+  //     cliente ya pagó y la caja tiene que cerrar— y el barbero recibe
+  //     `productWarning` con qué no quedó registrado. Antes un fallo se ignoraba:
+  //     `amount` quedaba sin los productos y nadie se enteraba.
   let productCommissionAmount = 0
-  if (productsToSell && productsToSell.length > 0) {
-    const { processProductSales } = await import('./sales')
-    const productResult = await processProductSales(supabase, visit.id, visit.barber_id, visit.branch_id, productsToSell)
-    if (!('error' in productResult)) {
-      amount += productResult.totalAmount
-      productCommissionAmount = productResult.totalCommission
-      commissionAmount += productCommissionAmount
+  let productWarning: string | null = null
+  if (lineasDeProductos.length > 0) {
+    const productos = await registrarProductosDeVisita(supabase, {
+      visitId: visit.id,
+      branchId: visit.branch_id,
+      barberId: visit.barber_id,
+      paymentMethod,
+      lineas: lineasDeProductos,
+    })
+    amount += productos.total
+    productCommissionAmount = productos.comision
+    commissionAmount += productCommissionAmount
+    productWarning = productos.aviso
+    if (productWarning) {
+      console.warn('[completeService] productos con aviso', { queueEntryId, visitId: visit.id, productWarning })
     }
   }
 
@@ -599,9 +1405,25 @@ export async function completeService(
     prepaid_amount: prepaidAmount,
     deposit_id: depositId,
   }
-  if (serviceId) visitUpdate.service_id = serviceId
-  if (paymentAccountId) visitUpdate.payment_account_id = paymentAccountId
-  if (extraServiceIds && extraServiceIds.length > 0) visitUpdate.extra_services = extraServiceIds
+  if (servicioPrincipalId) visitUpdate.service_id = servicioPrincipalId
+  // La cuenta de cobro va SÓLO con transferencia. El diálogo ya lo filtra (antes
+  // mandaba la preseleccionada con cualquier método: 1.442 cobros en efectivo o
+  // tarjeta quedaron imputados a una cuenta bancaria en 60 días), pero la regla
+  // vive acá para que ninguna superficie la vuelva a romper. El ledger no se
+  // ensuciaba —el trigger sólo proyecta transferencias—; la visita sí.
+  if (cuentaPedida) {
+    if (paymentMethod === 'transfer') {
+      // Validada contra la sucursal en el paso 0c.
+      visitUpdate.payment_account_id = cuentaPedida
+    } else {
+      console.warn('[completeService] cuenta de cobro con un método que no es transferencia; se ignora', {
+        queueEntryId,
+        paymentMethod,
+        paymentAccountId,
+      })
+    }
+  }
+  if (extrasUnicos.length > 0) visitUpdate.extra_services = extrasUnicos
   if (tipAmount > 0) {
     visitUpdate.tip_amount = tipAmount
     visitUpdate.tip_payment_method = tipPaymentMethod ?? paymentMethod
@@ -614,12 +1436,33 @@ export async function completeService(
   // valida el guard de cobertura sea el neto final, y (b) si el guard (mig 165) rechaza por
   // falta de saldo, el corte quede como transfer normal (no se rompe el cierre).
 
-  const { error: visitUpdateError } = await supabase
+  // La entrada ya está cerrada: si este UPDATE no entra, la visita queda en $0.
+  // Se reintenta una vez (los valores son absolutos y los triggers de visits son
+  // idempotentes, así que repetirlo no duplica nada). Si igual falla, el barbero
+  // recibe `visitaWarning` con el importe y el método, en vez de un éxito pelado.
+  let { error: visitUpdateError } = await supabase
     .from('visits')
     .update(visitUpdate)
     .eq('id', visit.id)
   if (visitUpdateError) {
-    console.error('[completeService] error al actualizar la visita:', visitUpdateError.message)
+    console.error('[completeService] error al actualizar la visita; se reintenta:', visitUpdateError.message)
+    ;({ error: visitUpdateError } = await supabase
+      .from('visits')
+      .update(visitUpdate)
+      .eq('id', visit.id))
+  }
+  let visitaWarning: string | null = null
+  if (visitUpdateError) {
+    console.error('[completeService] VISITA_SIN_IMPORTE: no se pudo escribir el cobro en la visita', {
+      queueEntryId,
+      visitId: visit.id,
+      visitUpdate,
+      code: visitUpdateError.code,
+      message: visitUpdateError.message,
+    })
+    visitaWarning =
+      `No pudimos guardar el importe de este cobro (${formatCurrency(amount)}, ${NOMBRE_DEL_METODO[paymentMethod]}). ` +
+      'El corte quedó cerrado: no lo cobres de nuevo y avisale al encargado para que lo cargue en el historial.'
   }
 
   // 4.5 Canje de cupón de descuento (client_rewards) al confirmar el cobro.
@@ -798,60 +1641,10 @@ export async function completeService(
   //  invisible para loyalty_points_balance. Si el canje de puntos en el local
   //  vuelve, va por las RPC del programa nuevo, nunca por acá.)
 
-  // 6. Auto-start SOLO del ghost de descanso si está listo.
-  //
-  //    Rollback intencional del push-on-complete (estaba en mig 131): arrancar
-  //    automáticamente el siguiente CLIENTE rompía el flujo natural de barbería
-  //    — el cronómetro disparaba aunque el cliente no estuviera todavía en la
-  //    silla, generando "cortes fantasma" que el supervisor tenía que cancelar
-  //    (incidente Fabrizio/Santino vela, 2026-05-09 22:14).
-  //
-  //    El descanso SÍ debe arrancar automáticamente: el barbero ya lo solicitó
-  //    y aprobó, no requiere presencia física del cliente. El siguiente cliente
-  //    se inicia con tap manual de "Atender" cuando físicamente está sentado.
-  //
-  //    Política: el ghost arranca si NO hay clientes ASIGNADOS específicamente
-  //    a este barbero antes de él (priority menor). Los dinámicos no bloquean.
-  let breakAutoStarted = false
-
-  const { data: nextGhosts } = await supabase
-    .from('queue_entries')
-    .select('id, priority_order')
-    .eq('barber_id', visit.barber_id)
-    .eq('branch_id', visit.branch_id)
-    .eq('status', 'waiting')
-    .eq('is_break', true)
-    .order('priority_order', { ascending: true })
-    .limit(1)
-
-  if (nextGhosts && nextGhosts.length > 0) {
-    const nextGhost = nextGhosts[0]
-
-    const { data: realWaitingBeforeBreak } = await supabase
-      .from('queue_entries')
-      .select('id')
-      .eq('barber_id', visit.barber_id)
-      .eq('branch_id', visit.branch_id)
-      .eq('status', 'waiting')
-      .eq('is_break', false)
-      .lt('priority_order', nextGhost.priority_order)
-      .limit(1)
-
-    if (!realWaitingBeforeBreak || realWaitingBeforeBreak.length === 0) {
-      const { error: ghostStartError } = await supabase
-        .from('queue_entries')
-        .update({
-          status: 'in_progress',
-          started_at: new Date().toISOString(),
-        })
-        .eq('id', nextGhost.id)
-        .eq('status', 'waiting')
-
-      if (!ghostStartError) {
-        breakAutoStarted = true
-      }
-    }
-  }
+  // 6. Auto-start SOLO del ghost de descanso si está listo (nunca del próximo
+  //    cliente). La regla y su historia viven en `arrancarDescansoPendiente`,
+  //    que comparte cerrarSoloAsesoria.
+  const breakAutoStarted = await arrancarDescansoPendiente(supabase, visit.barber_id, visit.branch_id)
 
   // 7. Reglas post-servicio: buscar reglas con trigger_type='post_service' y programar mensajes
   if (visit.client_id) {
@@ -1170,18 +1963,17 @@ export async function completeService(
     console.log(`[PostService visit=${visit.id}] skip: visita sin client_id`)
   }
 
-  // 8. Generar/actualizar salary_reports separados: servicio y producto
+  // 8. Generar/actualizar el salary_report de comisión por SERVICIO. La de
+  //    productos ya la sumó registrarProductosDeVisita en el paso 3.5, en la misma
+  //    transacción que el detalle: acá se sumaba con lectura-modificación-escritura
+  //    sin mirar el error, y contra el índice único (staff, día, tipo) un reporte
+  //    ya liquidado ese día hacía perder la comisión en silencio.
   const serviceCommissionAmount = commissionAmount - productCommissionAmount
   try {
     const tz = await getActiveTimezone()
     const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date())
 
-    // Paralelizar los lookups de los dos reportes: son independientes entre sí.
-    // Los UPDATE/INSERT posteriores se ejecutan en serie porque dependen de cada resultado.
-    const [
-      existingServiceReport,
-      existingProductReport,
-    ] = await Promise.all([
+    const [existingServiceReport] = await Promise.all([
       serviceCommissionAmount > 0
         ? supabase
             .from('salary_reports')
@@ -1189,18 +1981,6 @@ export async function completeService(
             .eq('staff_id', visit.barber_id)
             .eq('branch_id', visit.branch_id)
             .eq('type', 'commission')
-            .eq('report_date', todayStr)
-            .eq('status', 'pending')
-            .maybeSingle()
-            .then(r => r.data)
-        : Promise.resolve(null),
-      productCommissionAmount > 0
-        ? supabase
-            .from('salary_reports')
-            .select('id, amount')
-            .eq('staff_id', visit.barber_id)
-            .eq('branch_id', visit.branch_id)
-            .eq('type', 'product_commission')
             .eq('report_date', todayStr)
             .eq('status', 'pending')
             .maybeSingle()
@@ -1223,27 +2003,6 @@ export async function completeService(
             branch_id: visit.branch_id,
             type: 'commission',
             amount: serviceCommissionAmount,
-            report_date: todayStr,
-            status: 'pending',
-          })
-      }
-    }
-
-    // 8b. Reporte de comisión por producto (separado)
-    if (productCommissionAmount > 0) {
-      if (existingProductReport) {
-        await supabase
-          .from('salary_reports')
-          .update({ amount: Number(existingProductReport.amount) + productCommissionAmount })
-          .eq('id', existingProductReport.id)
-      } else {
-        await supabase
-          .from('salary_reports')
-          .insert({
-            staff_id: visit.barber_id,
-            branch_id: visit.branch_id,
-            type: 'product_commission',
-            amount: productCommissionAmount,
             report_date: todayStr,
             status: 'pending',
           })
@@ -1322,6 +2081,15 @@ export async function completeService(
     // La seña terminó siendo mayor que el precio final (cupón/premio aplicado
     // sobre un turno señado): hay saldo a favor del cliente. Ver 4.5b.
     senaWarning,
+    // Los productos se cobraron pero algo no quedó registrado (detalle, stock o
+    // comisión del día). Ver 3.5. null = todo registrado o no hubo productos.
+    productWarning,
+    // La entrada se cerró pero el importe no quedó escrito en la visita (el
+    // UPDATE del paso 4 falló dos veces). Hay que mostrarlo SIEMPRE: la visita
+    // quedó en $0 y sólo el encargado la puede corregir. null = quedó bien.
+    visitaWarning,
+    // Fotos del corte que quedaron en la visita al cerrar (ver 2b).
+    fotos: await fotosPromesa,
   }
 }
 
@@ -1374,30 +2142,8 @@ export async function cancelQueueEntry(
   // Quién saca al cliente de la fila (mig 211). Hasta el 4/9/2026 una cancelación no
   // dejaba NINGÚN rastro —ni cuándo, ni quién, ni por qué— y eso hizo que meses de
   // clientes que se anotaban y desaparecían fueran indistinguibles de clientes que se
-  // iban solos. En el panel del barbero el actor sale de la cookie `barber_session`
-  // (no hay usuario de Supabase Auth ahí, ver Known Risk del CLAUDE.md); en el
-  // dashboard, del `staff` del usuario logueado. Si no se puede resolver, queda NULL:
-  // el `cancelled_at` y el motivo igual se estampan por trigger.
-  let actorStaffId: string | null = null
-  try {
-    const barberSession = await getBarberSession()
-    actorStaffId = barberSession?.staff_id ?? null
-    if (!actorStaffId) {
-      const authClient = await createClient()
-      const { data: { user } } = await authClient.auth.getUser()
-      if (user) {
-        const { data: staffRow } = await supabase
-          .from('staff')
-          .select('id')
-          .eq('auth_user_id', user.id)
-          .is('deleted_at', null)
-          .maybeSingle()
-        actorStaffId = staffRow?.id ?? null
-      }
-    }
-  } catch {
-    actorStaffId = null
-  }
+  // iban solos. Cookie del panel o sesión del dashboard: ver `resolverActorStaffId`.
+  const actorStaffId = await resolverActorStaffId(supabase, orgAccess)
 
   const { data: cancelledRows, error } = await supabase
     .from('queue_entries')
@@ -1460,6 +2206,143 @@ export async function cancelQueueEntry(
   return { success: true }
 }
 
+/**
+ * «No se hizo nada · Cerrar como solo asesoría» (mig 217).
+ *
+ * El cliente pidió asesoría, el barbero lo asesoró y no se hizo ningún servicio.
+ * La entrada se cierra SIN visita: `status = 'cancelled'` con
+ * `cancel_reason = 'solo_asesoria'`, `cancelled_at` y `cancelled_by` (el actor).
+ * Como no hay visita no cuenta como corte, ni como visita de fidelización, ni
+ * genera comprobante de ARCA ni pedido de reseña. Tampoco es un abandono: la
+ * vista `queue_abandonos` sólo mira entradas que nunca empezaron
+ * (`started_at IS NULL`) y ésta estuvo en curso.
+ *
+ * Sólo desde `in_progress`, sólo si pidió asesoría, nunca un descanso y nunca un
+ * turno (`appointment_id`): cancelar una entrada de turno la pasa a `no_show` por
+ * trigger, y un turno que vino se cobra con el servicio que se hizo.
+ *
+ * Idempotente: si ya estaba cerrada así (doble toque, reintento tras un timeout,
+ * la otra tablet) devuelve `{ success: true, yaCerrada: true }`.
+ *
+ * Quién puede (hallazgo asesoria-05): con la cookie del panel, SÓLO el barbero
+ * que la está atendiendo (`staff_id` de la cookie = `barber_id` de la entrada);
+ * antes cualquier panel de la sucursal cerraba sin visita el corte de otro. Sin
+ * cookie, un usuario del dashboard con acceso a la sucursal (la X de un corte en
+ * curso en /dashboard/fila).
+ *
+ * Después de cerrar (hallazgo asesoria-06):
+ *   - las sesiones de fotos de la entrada se cierran y lo que se subió se borra
+ *     (filas y objetos): no hay visita en la que guardarlo. Best-effort: si algo
+ *     queda a medias, el cierre igual vale y vuelve `aviso`;
+ *   - arranca el descanso pendiente del barbero, igual que después de cobrar
+ *     (`breakAutoStarted`).
+ */
+export async function cerrarSoloAsesoria(
+  queueEntryId: string,
+): Promise<
+  | { success: true; yaCerrada: boolean; aviso: string | null; breakAutoStarted: boolean }
+  | { error: string }
+> {
+  if (!isValidUUID(queueEntryId)) return { error: 'ID inválido' }
+  const supabase = createAdminClient()
+
+  const { data: entry, error: errEntry } = await supabase
+    .from('queue_entries')
+    .select('branch_id, barber_id, status, is_break, pidio_asesoria, appointment_id, cancel_reason')
+    .eq('id', queueEntryId)
+    .maybeSingle()
+
+  if (errEntry) {
+    console.error('[cerrarSoloAsesoria] leer la entrada:', { queueEntryId, error: errEntry.message })
+    return { error: 'No pudimos cerrar la asesoría. Probá de nuevo.' }
+  }
+  if (!entry) return { error: 'Entrada no encontrada' }
+
+  const orgAccess = await validateBranchAccess(entry.branch_id)
+  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+
+  // Quién la cierra. Con la cookie del panel manda la cookie (mismo criterio que
+  // getCurrentOrgId): aunque la tablet tenga una sesión del dashboard residual.
+  const staffPanel = await staffDeLaCookieDelPanel()
+  if (staffPanel) {
+    if (!entry.barber_id || entry.barber_id !== staffPanel) {
+      return { error: 'Sólo el barbero que lo está atendiendo puede cerrarlo como solo asesoría.' }
+    }
+  } else {
+    const permitidas = await getScopedBranchIds()
+    if (!permitidas.includes(entry.branch_id)) return { error: 'No tenés acceso a esta sucursal.' }
+  }
+
+  if (entry.status === 'cancelled' && entry.cancel_reason === MOTIVO_SOLO_ASESORIA) {
+    // Reintento u otro dispositivo: la limpieza de fotos es idempotente y se
+    // repite por si la primera quedó a medias. El descanso no: ya lo decidió el
+    // cierre que sí cerró (y el barbero pudo haber tomado a otro).
+    const aviso = await descartarFotosSinVisita(supabase, queueEntryId)
+    return { success: true, yaCerrada: true, aviso, breakAutoStarted: false }
+  }
+  if (entry.status === 'completed') return { error: 'Esta asesoría ya se cobró.' }
+  if (entry.is_break || entry.pidio_asesoria !== true) {
+    return { error: 'Este cliente no pidió asesoría: cobralo con el servicio que se hizo.' }
+  }
+  if (entry.appointment_id) return { error: 'Es un turno: cobralo con el servicio que se hizo.' }
+  if (entry.status !== 'in_progress') return { error: 'La asesoría no está en curso.' }
+
+  const actorStaffId = await resolverActorStaffId(supabase, orgAccess)
+
+  // Las mismas condiciones en la UPDATE: entre la lectura y acá la otra tablet
+  // pudo cobrarla, o un check-in de turno pudo adoptar la entrada. Desde el
+  // panel, además, que siga siendo de este barbero.
+  let cierre = supabase
+    .from('queue_entries')
+    .update({
+      status: 'cancelled',
+      cancelled_at: new Date().toISOString(),
+      cancelled_by: actorStaffId,
+      cancel_reason: MOTIVO_SOLO_ASESORIA,
+    })
+    .eq('id', queueEntryId)
+    .eq('status', 'in_progress')
+    .eq('pidio_asesoria', true)
+    .is('appointment_id', null)
+  if (staffPanel) cierre = cierre.eq('barber_id', staffPanel)
+  const { data: cerradas, error } = await cierre.select('id')
+
+  if (error) {
+    console.error('[cerrarSoloAsesoria] cerrar:', { queueEntryId, error: error.message })
+    return { error: 'No pudimos cerrar la asesoría. Probá de nuevo.' }
+  }
+
+  if (!cerradas || cerradas.length === 0) {
+    const { data: ahora, error: errAhora } = await supabase
+      .from('queue_entries')
+      .select('status, cancel_reason, appointment_id')
+      .eq('id', queueEntryId)
+      .maybeSingle()
+    if (errAhora) {
+      console.error('[cerrarSoloAsesoria] releer la entrada:', { queueEntryId, error: errAhora.message })
+      return { error: 'No pudimos cerrar la asesoría. Probá de nuevo.' }
+    }
+    if (ahora?.status === 'cancelled' && ahora.cancel_reason === MOTIVO_SOLO_ASESORIA) {
+      const aviso = await descartarFotosSinVisita(supabase, queueEntryId)
+      return { success: true, yaCerrada: true, aviso, breakAutoStarted: false }
+    }
+    if (ahora?.status === 'completed') return { error: 'Esta asesoría ya se cobró.' }
+    if (ahora?.appointment_id) return { error: 'Es un turno: cobralo con el servicio que se hizo.' }
+    return { error: 'La asesoría no está en curso.' }
+  }
+
+  // Después del cierre: nada de esto lo deshace ni lo hace fallar.
+  const [aviso, breakAutoStarted] = await Promise.all([
+    descartarFotosSinVisita(supabase, queueEntryId),
+    arrancarDescansoPendiente(supabase, (entry.barber_id as string | null) ?? null, entry.branch_id),
+  ])
+  if (aviso) console.warn('[cerrarSoloAsesoria] cierre con aviso', { queueEntryId, aviso })
+
+  revalidatePath('/barbero/fila')
+  revalidatePath('/dashboard/fila')
+  return { success: true, yaCerrada: false, aviso, breakAutoStarted }
+}
+
 export async function reassignBarber(
   queueEntryId: string,
   newBarberId: string | null
@@ -1500,11 +2383,28 @@ export async function checkinClientByFace(
   clientId: string,
   branchId: string,
   barberId: string | null,
-  serviceId: string | null = null
+  serviceId: string | null = null,
+  // Asesoría sin costo (mig 217): `true` = tocó «¿No sabés qué hacerte?» en vez de
+  // un servicio. Misma lógica y mismas claves de respuesta que `checkinClient`.
+  asesoria: boolean = false,
 ) {
   if (!isValidUUID(clientId) || !isValidUUID(branchId)) return { error: 'Datos inválidos' }
   if (barberId !== null && !isValidUUID(barberId)) barberId = null
   if (serviceId !== null && !isValidUUID(serviceId)) serviceId = null
+  // Llega del browser: sólo `true` cuenta como pedido.
+  const pidioAsesoria = asesoria === true
+
+  // Rate limit: el MISMO de checkinClient (20 por IP+sucursal cada 60 s). Esta
+  // action es pública y su id viaja en el bundle del kiosko: sin límite servía
+  // para anotar clientes arbitrarios en cualquier fila y, con `asesoria`, para
+  // marcar como «quiere asesoría» a quien ya estaba esperando (hallazgos
+  // asesoria-02 y seguridad-y-despliegue-07).
+  const { RateLimits } = await import('@/lib/rate-limit')
+  const gate = await RateLimits.kioskCheckin(branchId)
+  if (!gate.allowed) {
+    return { error: 'Demasiados check-ins en poco tiempo. Esperá un momento.' }
+  }
+
   const supabase = createAdminClient()
 
   // Operación pública del kiosko: verificar que la sucursal exista y obtener su organización
@@ -1516,6 +2416,12 @@ export async function checkinClientByFace(
     .maybeSingle()
 
   if (!branchCheck?.organization_id) return { error: 'Sucursal no encontrada o inactiva' }
+
+  // Mismo criterio que `checkinClient`: se revalida el interruptor (falla
+  // abierta, nunca rechaza) en paralelo con la búsqueda del cliente.
+  const asesoriaPermitidaP = pidioAsesoria
+    ? asesoriaPermitidaEnSucursal(supabase, branchId, 'checkinClientByFace')
+    : Promise.resolve(false)
 
   const { data: client } = await supabase
     .from('clients')
@@ -1533,16 +2439,29 @@ export async function checkinClientByFace(
   // mostrándole la posición de otro local. Ver `resolverEntradaActiva`.
   const activoFace = await resolverEntradaActiva(supabase, clientId, branchId)
   if (activoFace.enEstaSucursal) {
+    const asesoriaExistente = await sumarAsesoriaAEntradaActiva(
+      supabase,
+      activoFace.enEstaSucursal,
+      { pidio: pidioAsesoria, permitida: await asesoriaPermitidaP },
+      branchId,
+      'checkinClientByFace',
+    )
     return {
       alreadyInQueue: true,
       position: activoFace.enEstaSucursal.position,
       queueEntryId: activoFace.enEstaSucursal.id,
+      asesoriaPedida: asesoriaExistente.asesoriaPedida,
+      asesoriaSumada: asesoriaExistente.asesoriaSumada,
+      asesoriaMotivo: asesoriaExistente.asesoriaMotivo,
     }
   }
 
   const { data: position } = await supabase.rpc('next_queue_position', {
     p_branch_id: branchId,
   })
+
+  // Si la asesoría queda, reemplaza al servicio (ver `checkinClient`).
+  const asesoriaQueda = pidioAsesoria && (await asesoriaPermitidaP)
 
   // Modelo pool (mig 134): dinámico entra con barber_id = NULL. Ver checkinClient.
   const nowFace = new Date().toISOString()
@@ -1552,7 +2471,8 @@ export async function checkinClientByFace(
       branch_id: branchId,
       client_id: clientId,
       barber_id: barberId,
-      service_id: serviceId,
+      service_id: asesoriaQueda ? null : serviceId,
+      pidio_asesoria: asesoriaQueda,
       position: position ?? 1,
       status: 'waiting',
       is_dynamic: !barberId,
@@ -1565,19 +2485,34 @@ export async function checkinClientByFace(
     if (queueError?.code === '23505') {
       const { data: existing } = await supabase
         .from('queue_entries')
-        .select('id, position')
+        .select('id, position, status, appointment_id')
         .eq('client_id', clientId)
         .eq('branch_id', branchId)
         .in('status', ['waiting', 'in_progress'])
         .single()
-      return { alreadyInQueue: true, position: existing?.position ?? 1, queueEntryId: existing?.id ?? '' }
+      const asesoriaExistente = await sumarAsesoriaAEntradaActiva(
+        supabase,
+        existing ?? null,
+        { pidio: pidioAsesoria, permitida: await asesoriaPermitidaP },
+        branchId,
+        'checkinClientByFace',
+      )
+      return {
+        alreadyInQueue: true,
+        position: existing?.position ?? 1,
+        queueEntryId: existing?.id ?? '',
+        asesoriaPedida: asesoriaExistente.asesoriaPedida,
+        asesoriaSumada: asesoriaExistente.asesoriaSumada,
+        asesoriaMotivo: asesoriaExistente.asesoriaMotivo,
+      }
     }
+    console.error('[checkinClientByFace] insert queue entry:', queueError?.message)
     return { error: 'Error al agregar a la fila' }
   }
 
   revalidatePath('/checkin')
   revalidatePath('/barbero/fila')
-  return { success: true, position, queueEntryId: queueEntry.id }
+  return { success: true, position, queueEntryId: queueEntry.id, asesoria: asesoriaQueda }
 }
 
 export async function reassignMyBarber(
@@ -1688,7 +2623,6 @@ export async function updateQueueOrder(
   if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
 
   // Verificar que todas las entradas pertenecen al scope del usuario (org + sucursal permitida)
-  const { getScopedBranchIds } = await import('./branch-access')
   const scopedBranchIds = await getScopedBranchIds()
   const foreignEntry = allEntries.find(e => !scopedBranchIds.includes(e.branch_id))
   if (foreignEntry) return { error: 'Acceso denegado: entradas fuera de tu alcance' }

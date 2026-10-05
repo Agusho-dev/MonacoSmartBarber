@@ -37,9 +37,20 @@ export default async function FilaAdminPage() {
     branchIds.length > 0
       ? supabase
           .from('queue_entries')
-          .select('*, client:clients(*), barber:staff(*)')
+          // El MISMO select que el refetch de `fila-client.tsx`, columna por
+          // columna. Con `clients(*)` y `staff(*)` —y service role, que no pasa
+          // por RLS— este render le mandaba al navegador el PIN de cada barbero
+          // con alguien en la fila y el `pin_hash`, el `face_embedding` y el
+          // email de cada cliente esperando: el tablero sólo dibuja nombre,
+          // teléfono y avatar. Embeds por nombre de constraint (Known Risk #15).
+          // El `*` es de `queue_entries` y trae `pidio_asesoria` y
+          // `asesoria_vista_at` (mig 217): el sello de asesoría de las tarjetas.
+          .select('*, client:clients!queue_entries_client_id_fkey(id, name, phone), barber:staff!queue_entries_barber_id_fkey(id, full_name, avatar_url)')
           .in('branch_id', branchIds)
           .in('status', ['waiting', 'in_progress'])
+          // Mismo orden que el refetch: `priority_order` es el FIFO real y
+          // `position` sólo desempata (se recicla y se repite).
+          .order('priority_order')
           .order('position')
       : Promise.resolve({ data: [] }),
     branchIds.length > 0

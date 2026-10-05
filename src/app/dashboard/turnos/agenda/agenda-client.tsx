@@ -22,7 +22,7 @@ import {
   getAppointmentQueueEntry,
   getAppointmentSettings,
 } from '@/lib/actions/appointments'
-import { CompleteServiceDialog } from '@/components/barber/complete-service-dialog'
+import { CompleteServiceDialog, hayQueAnunciarCobro } from '@/components/barber/complete-service-dialog'
 import { senasDeTurnos } from '@/lib/actions/senas-cobro'
 import { SenaBadge } from '@/components/senas/sena-badge'
 import { formatCurrency } from '@/lib/format'
@@ -1064,9 +1064,11 @@ export function AgendaClient({ settings: orgSettings, branches }: Props) {
           entry={completingEntry}
           branchId={completingEntry.branch_id}
           onClose={() => setCompletingEntry(null)}
-          onCompleted={() => {
+          onCompleted={(resultado) => {
             setCompletingEntry(null)
-            toast.success('Servicio finalizado')
+            // Un cobro que ya estaba registrado (o cuyo importe no quedó) ya lo
+            // avisó el diálogo: «Servicio finalizado» al lado lo contradice.
+            if (hayQueAnunciarCobro(resultado)) toast.success('Servicio finalizado')
             refreshAppointments()
           }}
         />

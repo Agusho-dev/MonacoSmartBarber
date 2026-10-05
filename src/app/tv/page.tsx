@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { TvClient } from './tv-client'
+import { TV_QUEUE_SELECT } from '@/lib/tv-queue-select'
 
 export const dynamic = 'force-dynamic'
 
@@ -68,9 +69,11 @@ export default async function TvPage({
     branchIds.length > 0
       ? supabase
           .from('queue_entries')
-          // Embeds por nombre de constraint: `queue_entries` puede ganar otra FK a
-          // `staff` y PostgREST rechaza la query ENTERA con PGRST201 (Known Risk #15).
-          .select('*, client:clients!queue_entries_client_id_fkey(*), barber:staff!queue_entries_barber_id_fkey(*)')
+          // Lo que viaja acá llega como props al browser de una pantalla pública:
+          // sólo el nombre del cliente y nombre y foto del barbero, nunca `*` de
+          // `clients` ni de `staff` (PIN, teléfono, `face_embedding`…). Embeds por
+          // nombre de constraint (Known Risk #15). Ver `TV_QUEUE_SELECT`.
+          .select(TV_QUEUE_SELECT)
           .in('status', ['waiting', 'in_progress'])
           .in('branch_id', branchIds)
           // La TV es la única pantalla donde el CLIENTE ve su lugar en la fila, así
@@ -80,7 +83,7 @@ export default async function TvPage({
           // es `priority_order`, que es por lo que ordena `claim_next_for_barber`.
           .order('priority_order')
           .order('position')
-      : Promise.resolve({ data: [] }),
+      : Promise.resolve({ data: [], error: null }),
     branchIds.length > 0
       ? supabase
           .from('staff')
@@ -91,6 +94,10 @@ export default async function TvPage({
           .order('full_name')
       : Promise.resolve({ data: [] }),
   ])
+
+  // La TV arranca vacía y el primer refresco del cliente (al montar) vuelve a
+  // pedir la fila; lo que no puede pasar es que la falla no quede en ningún lado.
+  if (entriesRes.error) console.error('[tv] fila inicial', entriesRes.error.message)
 
   return (
     <TvClient

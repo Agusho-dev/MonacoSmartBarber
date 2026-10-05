@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Power, ChevronDown, ChevronUp, Percent, Trash2, Sparkles, Package, ShoppingCart, Store, User, Clock } from 'lucide-react'
+import { Plus, Pencil, Power, ChevronDown, ChevronUp, Percent, Trash2, Sparkles, Package, ShoppingCart, Store, User, Clock, AlertTriangle, Loader2, RefreshCw, Wallet } from 'lucide-react'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { formatCurrency } from '@/lib/format'
@@ -10,6 +10,8 @@ import { HistorialServicios } from './historial-servicios'
 import { ServiceTimingsDialog } from './service-timings-dialog'
 import { upsertService, toggleService, deleteService } from '@/lib/actions/services'
 import { upsertProduct, toggleProduct, deleteProduct, sellProductFromDashboard } from '@/lib/actions/products'
+import { obtenerCuentasDeCobro } from '@/lib/actions/paymentAccounts'
+import { accountRemaining, pickTransferAccount, type TransferAccountState } from '@/lib/payment-accounts'
 import type { Service, Branch, ServiceAvailability, BookingMode, StaffServiceCommission, Product, ProductSale } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -53,6 +55,8 @@ interface Props {
   commissions: StaffServiceCommission[]
   products: Product[]
   productSales: ProductSale[]
+  /** Permiso `history.delete`: sin él, el historial no ofrece «Eliminar». */
+  puedeBorrarVisitas: boolean
 }
 
 // ─── Empty forms ─────────────────────────────────────────────────────────────
@@ -82,9 +86,37 @@ const paymentMethodMap: Record<string, string> = {
   card: 'Tarjeta',
 }
 
+/**
+ * Clave de idempotencia de una apertura del diálogo de venta. Con ella, volver
+ * a confirmar después de un timeout devuelve la venta ya registrada en vez de
+ * duplicarla. `crypto.randomUUID` no existe fuera de un contexto seguro: sin
+ * clave la venta sale igual, pero sin esa protección.
+ */
+function nuevaClaveDeVenta(): string | null {
+  try {
+    return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : null
+  } catch {
+    return null
+  }
+}
+
+/** Cuentas de cobro de la venta: "no se pudieron traer" no es lo mismo que "no hay". */
+type EstadoCuentasVenta =
+  | { tipo: 'cargando' }
+  | { tipo: 'error'; mensaje: string }
+  | { tipo: 'listo'; cuentas: TransferAccountState[] }
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function ServiciosClient({ services, branches, barbers, commissions, products, productSales }: Props) {
+export function ServiciosClient({
+  services,
+  branches,
+  barbers,
+  commissions,
+  products,
+  productSales,
+  puedeBorrarVisitas,
+}: Props) {
   const router = useRouter()
   const { selectedBranchId } = useBranchStore()
 
@@ -120,6 +152,14 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
     seller_type: 'barber', barber_id: '', quantity: '1', payment_method: 'cash',
   })
   const [selling, setSelling] = useState(false)
+  // Una clave por apertura del diálogo (ver nuevaClaveDeVenta).
+  const claveVentaRef = useRef<string | null>(null)
+  // Cuenta de cobro de una venta por transferencia: la misma rotación por tope
+  // que la tablet (pickTransferAccount), con la cuenta a la vista.
+  const [cuentasVenta, setCuentasVenta] = useState<EstadoCuentasVenta>({ tipo: 'cargando' })
+  const [cuentaVenta, setCuentaVenta] = useState('')
+  const [cuentasLlenasVenta, setCuentasLlenasVenta] = useState(false)
+  const [intentoCuentasVenta, setIntentoCuentasVenta] = useState(0)
 
   // ── Filtering ──
   const filteredServices = selectedBranchId
@@ -280,6 +320,10 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
   function openSell(product: Product) {
     setSellingProduct(product)
     setSellForm({ seller_type: 'barber', barber_id: '', quantity: '1', payment_method: 'cash' })
+    // Una venta nueva = una clave nueva. Reintentar sin cerrar el diálogo reusa
+    // la misma: el servidor devuelve la venta ya registrada en vez de otra.
+    claveVentaRef.current = nuevaClaveDeVenta()
+    setCuentaVenta('')
     setSellDialogOpen(true)
   }
 
@@ -287,28 +331,102 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
     ? barbers.filter(b => !sellingProduct.branch_id || b.branch_id === sellingProduct.branch_id)
     : []
 
+  // La sucursal de la venta (la del producto; los productos globales, la primera).
+  const sucursalDeVenta = sellingProduct ? (sellingProduct.branch_id || branches[0]?.id || '') : ''
+  const ventaPorTransferencia = sellDialogOpen && sellForm.payment_method === 'transfer'
+
+  // Las cuentas se piden al elegir Transferencia (y con «Reintentar»): si una se
+  // llenó hace un minuto, tiene que verse ya la siguiente.
+  useEffect(() => {
+    if (!ventaPorTransferencia || !sucursalDeVenta) return
+    let vigente = true
+    queueMicrotask(() => {
+      if (vigente) setCuentasVenta({ tipo: 'cargando' })
+    })
+    obtenerCuentasDeCobro(sucursalDeVenta)
+      .then((r) => {
+        if (!vigente) return
+        if (!r.ok) {
+          console.error('[servicios] cuentas de cobro', r.error)
+          setCuentasVenta({ tipo: 'error', mensaje: r.error })
+          return
+        }
+        setCuentasVenta({ tipo: 'listo', cuentas: r.cuentas })
+        const pick = pickTransferAccount(r.cuentas)
+        setCuentasLlenasVenta(pick.allFull)
+        // Si la que estaba elegida sigue en la lista, se respeta.
+        setCuentaVenta((actual) => (actual && r.cuentas.some((c) => c.id === actual) ? actual : pick.account?.id ?? ''))
+      })
+      .catch((e: unknown) => {
+        if (!vigente) return
+        console.error('[servicios] cuentas de cobro', e)
+        setCuentasVenta({ tipo: 'error', mensaje: 'No pudimos traer las cuentas de cobro.' })
+      })
+    return () => {
+      vigente = false
+    }
+  }, [ventaPorTransferencia, sucursalDeVenta, intentoCuentasVenta])
+
   const isHouseSale = sellForm.seller_type === 'house'
+  // Una transferencia sin saber a qué cuenta entra no se registra: ni mientras
+  // las cuentas cargan, ni si fallaron, ni con cuentas y ninguna elegida. Sin
+  // cuentas activas en la sucursal sí (queda "sin cuenta asignada").
+  const faltaCuentaVenta =
+    sellForm.payment_method === 'transfer' &&
+    (cuentasVenta.tipo !== 'listo' || (cuentasVenta.cuentas.length > 0 && !cuentaVenta))
   const canSubmitSell = !!sellingProduct
     && Number(sellForm.quantity) >= 1
     && (isHouseSale || !!sellForm.barber_id)
+    && !faltaCuentaVenta
 
   async function handleSell() {
-    if (!sellingProduct) return
+    if (!sellingProduct || selling) return
     if (!isHouseSale && !sellForm.barber_id) return
+    if (faltaCuentaVenta) return
     setSelling(true)
     const qty = Number(sellForm.quantity) || 1
-    const result = await sellProductFromDashboard({
-      product_id: sellingProduct.id,
-      barber_id: isHouseSale ? null : sellForm.barber_id,
-      branch_id: sellingProduct.branch_id || branches[0]?.id || '',
-      quantity: qty,
-      payment_method: sellForm.payment_method,
-    })
-    setSelling(false)
-    if (result.error) { toast.error(result.error); return }
-    toast.success(`Venta registrada: ${qty}x ${sellingProduct.name}`)
-    setSellDialogOpen(false)
-    router.refresh()
+    const claveDeEstaVenta = claveVentaRef.current
+    try {
+      const result = await sellProductFromDashboard({
+        product_id: sellingProduct.id,
+        barber_id: isHouseSale ? null : sellForm.barber_id,
+        branch_id: sucursalDeVenta,
+        quantity: qty,
+        payment_method: sellForm.payment_method,
+        payment_account_id: sellForm.payment_method === 'transfer' ? cuentaVenta || null : null,
+        clave: claveDeEstaVenta,
+      })
+      if (!result.success) {
+        toast.error(result.error)
+        // La sucursal tiene cuentas y la venta salía sin ninguna: se vuelven a pedir.
+        if (result.codigo === 'falta_cuenta') setIntentoCuentasVenta((n) => n + 1)
+        return
+      }
+      // El total es el que quedó registrado (el precio lo pone el servidor).
+      toast.success(
+        result.yaRegistrada
+          ? `Esa venta ya había quedado registrada: ${formatCurrency(result.total)}`
+          : `Venta registrada: ${qty}x ${sellingProduct.name} · ${formatCurrency(result.total)}`,
+      )
+      // La venta salió pero algo no quedó como debía (stock, comisión del día).
+      if (result.aviso) toast.warning(result.aviso, { duration: 12000 })
+      setSellDialogOpen(false)
+      router.refresh()
+    } catch (e) {
+      // El server action rechazó (red, deploy nuevo): no sabemos si llegó a
+      // registrarse. Con la clave de este diálogo, confirmar otra vez es seguro;
+      // sin clave, no se promete nada.
+      console.error('[servicios] venta de producto', e)
+      toast.error(
+        claveDeEstaVenta
+          ? 'No pudimos confirmar la venta. Revisá la conexión y volvé a tocar «Confirmar venta»: si ya había quedado registrada, no se duplica.'
+          : 'No pudimos confirmar la venta. Revisá la conexión antes de volver a cargarla.',
+        { duration: 12000 },
+      )
+    } finally {
+      // Pase lo que pase, el botón nunca queda en "Registrando..." (KR#25).
+      setSelling(false)
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -460,7 +578,12 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
           </div>
 
           {/* Historial de servicios */}
-          <HistorialServicios branches={branches} barbers={barbers} services={services} />
+          <HistorialServicios
+            branches={branches}
+            barbers={barbers}
+            services={services}
+            puedeBorrarVisitas={puedeBorrarVisitas}
+          />
         </TabsContent>
 
         {/* ════════════════════════ TAB: PRODUCTOS ════════════════════════ */}
@@ -858,9 +981,10 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Sell product dialog */}
-      <Dialog open={sellDialogOpen} onOpenChange={setSellDialogOpen}>
-        <DialogContent className="sm:max-w-sm">
+      {/* Sell product dialog. Mientras se registra no se cierra: cerrarlo y
+          volver a abrirlo genera otra clave, y un reintento ahí sí duplicaría. */}
+      <Dialog open={sellDialogOpen} onOpenChange={(open) => { if (!open && selling) return; setSellDialogOpen(open) }}>
+        <DialogContent className="sm:max-w-sm" showCloseButton={!selling}>
           <DialogHeader>
             <DialogTitle>Registrar venta</DialogTitle>
             <DialogDescription>
@@ -927,6 +1051,68 @@ export function ServiciosClient({ services, branches, barbers, commissions, prod
                 </Select>
               </div>
             </div>
+            {/* Cuenta de cobro: sólo en transferencia. Sin ella la plata no entra a
+                ningún destino (la caja y el tope de la cuenta no se enteran). */}
+            {sellForm.payment_method === 'transfer' && (
+              cuentasVenta.tipo === 'cargando' ? (
+                <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+                  Buscando las cuentas de cobro…
+                </p>
+              ) : cuentasVenta.tipo === 'error' ? (
+                <div role="alert" className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <p className="text-xs">
+                      {cuentasVenta.mensaje} Sin saber a qué cuenta entró, la transferencia no se puede registrar.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 border-amber-500/50"
+                      onClick={() => setIntentoCuentasVenta((n) => n + 1)}
+                    >
+                      <RefreshCw className="mr-1.5 size-3.5" aria-hidden />
+                      Reintentar
+                    </Button>
+                  </div>
+                </div>
+              ) : cuentasVenta.cuentas.length === 0 ? (
+                <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                  Esta sucursal no tiene cuentas de cobro activas: la transferencia queda registrada sin cuenta asignada.
+                </p>
+              ) : (
+                <div className="grid gap-2">
+                  <Label className="flex items-center gap-1.5">
+                    <Wallet className="size-3.5 text-muted-foreground" aria-hidden />
+                    Cuenta que recibió la transferencia
+                  </Label>
+                  <Select value={cuentaVenta} onValueChange={setCuentaVenta}>
+                    <SelectTrigger><SelectValue placeholder="Elegí la cuenta" /></SelectTrigger>
+                    <SelectContent>
+                      {cuentasVenta.cuentas.map((c) => {
+                        const margen = accountRemaining(c)
+                        return (
+                          <SelectItem key={c.id} value={c.id}>
+                            <span className="font-medium">{c.name}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {c.is_full ? 'Llegó al tope' : margen !== null ? `Le entran ${formatCurrency(margen)}` : 'Sin tope'}
+                            </span>
+                          </SelectItem>
+                        )
+                      })}
+                    </SelectContent>
+                  </Select>
+                  {cuentasLlenasVenta && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Todas las cuentas de la sucursal llegaron al tope del mes: se registra igual en la elegida.
+                    </p>
+                  )}
+                </div>
+              )
+            )}
             {sellingProduct && (
               <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">
                 <div className="flex justify-between">

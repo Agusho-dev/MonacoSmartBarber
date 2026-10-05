@@ -58,6 +58,7 @@ import {
   IDLE_MS_NEUTRAL,
   IDLE_MS_PERSONAL,
 } from '@/components/checkin/use-idle-reset'
+import { useKioskoEnReposo } from '@/components/checkin/use-kiosko-en-reposo'
 import { enrollFaceDescriptor, saveFacePhoto } from '@/lib/face-recognition'
 import type { FaceMatchResult } from '@/lib/face-recognition'
 import type { AppointmentInfo } from '@/lib/actions/kiosk-turnos'
@@ -252,6 +253,10 @@ export function TurnosCheckinFlow({
     resetKey: step,
     onIdle,
   })
+
+  // Recarga por versión: después de un deploy, el kiosko se recarga solo
+  // únicamente en su pantalla inicial y sin nada en vuelo (ver el hook).
+  useKioskoEnReposo(step === 'home' && !isConfirming && !isLooking)
 
   // ── Reconocimiento facial ──
 

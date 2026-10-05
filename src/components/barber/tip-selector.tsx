@@ -8,6 +8,7 @@ import { formatCurrency } from '@/lib/format'
 import { Banknote, ArrowRightLeft, CreditCard, Heart, X, type LucideIcon } from 'lucide-react'
 import { vibrate } from '@/lib/barber-feedback'
 import type { PaymentMethod } from '@/lib/types/database'
+import { CampoMontoTablet } from '@/components/barber/campo-tablet'
 
 interface TipSelectorProps {
   baseAmount: number
@@ -124,23 +125,35 @@ export function TipSelector({
       </div>
 
       {customOpen && (
-        <div className="flex gap-2">
-          <Input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            placeholder="Ej: 1500"
-            value={customValue}
-            onChange={(e) => setCustomValue(e.target.value.replace(/[^0-9]/g, ''))}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCustomConfirm() } }}
-            className="h-12 text-base font-semibold tabular-nums"
-            aria-label="Monto de propina personalizado"
-            autoFocus
-          />
-          <Button type="button" onClick={handleCustomConfirm} disabled={!customValue} className="h-12 px-5">
-            Confirmar
-          </Button>
-        </div>
+        // Con el panel girado 180° el teclado de Android sale al revés (el 6 se
+        // lee 9): ahí se carga con el teclado del panel. Sin giro, el input de siempre.
+        <CampoMontoTablet
+          valor={customValue}
+          onCambiar={setCustomValue}
+          etiqueta="Monto de propina personalizado"
+          autoAbrir
+          maxDigitos={7}
+          onConfirmar={handleCustomConfirm}
+          textoConfirmar="Confirmar propina"
+        >
+          <div className="flex gap-2">
+            <Input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder="Ej: 1500"
+              value={customValue}
+              onChange={(e) => setCustomValue(e.target.value.replace(/[^0-9]/g, ''))}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCustomConfirm() } }}
+              className="h-12 text-base font-semibold tabular-nums"
+              aria-label="Monto de propina personalizado"
+              autoFocus
+            />
+            <Button type="button" onClick={handleCustomConfirm} disabled={!customValue} className="h-12 px-5">
+              Confirmar
+            </Button>
+          </div>
+        </CampoMontoTablet>
       )}
 
       {hasTip && (

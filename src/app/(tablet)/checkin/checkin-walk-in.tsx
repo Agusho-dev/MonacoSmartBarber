@@ -4,8 +4,11 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import Image from 'next/image'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
+import { esErrorDeVersion, avisarYRecargarPorVersion, TEXTO_RECARGA_MANUAL } from '@/lib/recarga-version'
 import { checkinClient, checkinClientByFace, reassignMyBarber } from '@/lib/actions/queue'
+import { pedirAsesoriaDesdeMiTurno } from '@/lib/actions/asesoria'
 import {
   lookupAppointmentByPhone,
   lookupAppointmentForClient,
@@ -15,7 +18,7 @@ import type { AppointmentInfo } from '@/lib/actions/kiosk-turnos'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { registerBarberClockIn, registerBarberClockOut } from '@/lib/actions/attendance'
-import { verifyBarberPin } from '@/lib/actions/auth'
+import { verificarPinStaffEnKiosko } from '@/lib/actions/rostro-staff'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -49,6 +52,7 @@ import {
   Clock,
   AlertCircle,
   Users,
+  MessageCircle,
 } from 'lucide-react'
 import type { Branch, Staff, QueueEntry, Visit, Service, StaffSchedule } from '@/lib/types/database'
 import {
@@ -67,6 +71,12 @@ import {
 } from '@/lib/barber-utils'
 import { FaceCamera } from '@/components/checkin/face-camera'
 import { FaceEnrollment } from '@/components/checkin/face-enrollment'
+import {
+  AsesoriaKioskBand,
+  AsesoriaKioskChip,
+  AsesoriaKioskMensaje,
+  AsesoriaKioskPedirBoton,
+} from '@/components/checkin/asesoria-kiosk-band'
 import {
   TerminalAmbient,
   TerminalGlobalStyles,
@@ -91,8 +101,9 @@ import {
   IDLE_MS_NEUTRAL,
   IDLE_MS_PERSONAL,
 } from '@/components/checkin/use-idle-reset'
+import { useKioskoEnReposo } from '@/components/checkin/use-kiosko-en-reposo'
 import type { FaceMatchResult } from '@/lib/face-recognition'
-import { saveFacePhoto, enrollFaceDescriptor, enrollStaffFaceDescriptor, saveStaffFacePhoto } from '@/lib/face-recognition'
+import { saveFacePhoto, enrollFaceDescriptor, registrarRostroDelStaff } from '@/lib/face-recognition'
 import type { WalkInHandoff } from '@/components/checkin/turnos-flow'
 import { cn } from '@/lib/utils'
 import { resolveCheckinBackground } from '@/lib/checkin-bg'
@@ -134,9 +145,14 @@ const KEYPAD = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const
 // pública, con la anon key que viaja en el bundle. Pedía el PIN de los barberos y
 // no lo usa para nada (la tarjeta sólo dibuja nombre, avatar y estado). Ver mig 212.
 // El embed va por nombre de constraint para que una FK futura a `staff` no rompa la
-// query entera con PGRST201 (Known Risk #15).
+// query entera con PGRST201 (Known Risk #15). Tampoco `commission_pct`: la mig 224
+// se la saca a anon y una columna revocada da 42501 y deja la consulta vacía
+// (Known Risk #34).
 const QUEUE_ENTRY_SELECT =
-  '*, barber:staff!queue_entries_barber_id_fkey(id, full_name, status, is_active, branch_id, role, commission_pct, avatar_url, created_at, updated_at)'
+  '*, barber:staff!queue_entries_barber_id_fkey(id, full_name, status, is_active, branch_id, role, avatar_url, created_at, updated_at)'
+
+/** Lo que el paso "Soy barbero" -> PIN lee de cada miembro del staff (sin teléfono ni comisión, mig 224). */
+type StaffDelPin = Omit<Staff, 'phone' | 'commission_pct'>
 
 /**
  * Ventana de inactividad por pantalla (0 = sin timeout).
@@ -174,6 +190,130 @@ const IDLE_MS_POR_PASO: Record<Step, number> = {
   staff_action_confirm: IDLE_MS_PERSONAL,
   staff_pin: IDLE_MS_PERSONAL,
   staff_face_enroll: IDLE_MS_NEUTRAL,
+}
+
+// ─── Asesoría sin costo (mig 217) ───────────────────────────────────────────
+
+/**
+ * El interruptor de asesoría de la sucursal, tal como lo maneja el kiosko.
+ *
+ * `loadBarberData` pone `loadingBarbers` en true en CADA recarga (al montar, al
+ * reconectar y en cada evento de Realtime de la fila o del staff), y la grilla
+ * de servicios es `flex-1 auto-rows-fr`: si la banda «¿No sabés qué hacerte?»
+ * dependiera de la carga, parpadearía y movería todos los botones bajo el dedo.
+ * Por eso vive en su propio estado:
+ *
+ * - `servidor`: el último valor CONFIRMADO por una respuesta exitosa de
+ *   `getCheckinData` (null = todavía ninguna). Una recarga fallida no lo toca.
+ * - `enPantalla`: lo que dibuja el paso actual. Cada paso arranca con el último
+ *   valor confirmado y su PRIMERA lectura exitosa lo puede corregir (así, si el
+ *   dueño la acaba de prender, el próximo cliente ya la ve); las siguientes
+ *   —las de Realtime, mientras el cliente elige— no lo mueven.
+ * - `fijado`: ya hubo esa primera lectura en este paso.
+ *
+ * Sobrevive a `reset()` a propósito: es un dato de la sucursal, no del cliente.
+ */
+interface InterruptorAsesoria {
+  servidor: boolean | null
+  enPantalla: boolean
+  fijado: boolean
+}
+
+/**
+ * Qué dice «Mi turno» sobre la asesoría después de un pedido (al reanotarse o
+ * con el botón): `sumada` = quedó en su entrada; el resto, por qué no quedó.
+ */
+type AvisoAsesoriaMiTurno = 'sumada' | 'avisale' | 'turno' | 'limite'
+
+/** Lo que el cliente tiene que hacer cuando su pedido no pudo quedar en la fila. */
+const TEXTO_AVISALE_ASESORIA = 'Avisale a tu barbero que querés asesoría.'
+
+/**
+ * La entrada es de un TURNO: el servidor no le suma la asesoría (un turno no
+ * tiene la salida «solo asesoría»; hallazgo asesoria-04). Mismo texto que
+ * devuelve `pedirAsesoriaDesdeMiTurno`.
+ */
+const TEXTO_ASESORIA_TURNO = 'Como tenés turno, pedile la asesoría a tu barbero cuando te atienda.'
+
+/** Demasiados pedidos seguidos desde esta tablet (bucket `kiosk_asesoria`). */
+const TEXTO_ASESORIA_LIMITE = 'Esperá un momento y volvé a intentar, o avisale a tu barbero que querés asesoría.'
+
+/** El texto de «Mi turno» para cada motivo por el que el pedido NO quedó. */
+const TEXTO_ASESORIA_NO_SUMADA: Record<Exclude<AvisoAsesoriaMiTurno, 'sumada'>, string> = {
+  avisale: TEXTO_AVISALE_ASESORIA,
+  turno: TEXTO_ASESORIA_TURNO,
+  limite: TEXTO_ASESORIA_LIMITE,
+}
+
+/**
+ * Respuesta `alreadyInQueue` de `checkinClient` / `checkinClientByFace`:
+ * `asesoriaSumada` = quedó en la entrada que ya tenía; `asesoriaPedida` sin
+ * sumar = la pidió y no quedó, y `asesoriaMotivo` dice por qué (los mismos
+ * valores que `pedirAsesoriaDesdeMiTurno`). Ya lo atienden, la sucursal la
+ * apagó o falló la base terminan en «Avisale a tu barbero…».
+ */
+function avisoAsesoriaYaEnFila(r: {
+  asesoriaPedida?: boolean
+  asesoriaSumada?: boolean
+  asesoriaMotivo?: string | null
+}): AvisoAsesoriaMiTurno | null {
+  if (r.asesoriaSumada) return 'sumada'
+  if (!r.asesoriaPedida) return null
+  if (r.asesoriaMotivo === 'turno') return 'turno'
+  if (r.asesoriaMotivo === 'limite') return 'limite'
+  return 'avisale'
+}
+
+/**
+ * A quién le avisamos de la asesoría (hallazgo asesoria-03). Con un barbero
+ * elegido, a ése; con Menor espera, a los barberos (el aviso va a los libres).
+ * Nunca «ya lo sabe»: el aviso puede no llegar en el momento (el barbero está
+ * en otra pantalla del panel, o el reloj de su tablet está corrido); lo seguro
+ * es el sello en su tarjeta y el pop-up al empezar el corte.
+ */
+function aQuienLeAvisamos(barbero: { nombre: string | null } | null): string {
+  if (!barbero) return 'les avisamos a los barberos'
+  return barbero.nombre ? `le avisamos a ${barbero.nombre}` : 'le avisamos a tu barbero'
+}
+
+/**
+ * Aviso flotante del kiosko (sonner, el Toaster del layout raíz). El id por
+ * texto evita apilar el mismo aviso: con el bundle viejo, cada evento de
+ * Realtime de la fila vuelve a fallar igual.
+ */
+function avisoFlotante(texto: string) {
+  toast.error(texto, { id: `checkin:${texto}` })
+}
+
+/**
+ * Recarga por versión (`src/lib/recarga-version.ts`). Una server action que
+ * falla con «Server Action … was not found» quiere decir que esta tablet quedó
+ * con el bundle de un deploy anterior: reintentar no sirve, hay que recargar.
+ *
+ * Si `e` es eso, avisa («Hay una versión nueva del sistema: recargando…») y
+ * recarga; si la guarda no lo deja (ya se recargó por lo mismo hace menos de
+ * 10 min), muestra con `mostrar` el texto para recargar a mano. Devuelve true y
+ * el llamador corta ahí, sin su mensaje genérico. Si no, devuelve false.
+ */
+function cortarSiEsVersionVieja(e: unknown, mostrar: (texto: string) => void): boolean {
+  if (!esErrorDeVersion(e)) return false
+  if (!avisarYRecargarPorVersion()) mostrar(TEXTO_RECARGA_MANUAL)
+  return true
+}
+
+/**
+ * `getCheckinData` (servicios, barberos, fila y el interruptor de asesoría).
+ * null = no se pudo leer: el error de versión ya disparó la recarga y el resto
+ * queda en la consola (la pantalla conserva lo último que tenía).
+ */
+async function leerDatosDelKiosko(branchId: string) {
+  try {
+    const { getCheckinData } = await import('@/lib/actions/kiosk')
+    return await getCheckinData(branchId)
+  } catch (e) {
+    if (!cortarSiEsVersionVieja(e, avisoFlotante)) console.error('[checkin] getCheckinData:', e)
+    return null
+  }
 }
 
 function formatPhone(digits: string): string {
@@ -241,6 +381,14 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [now, setNow] = useState(Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
+  /** Menor espera por WhatsApp (mig 218) en esta sucursal: microcopia del paso de barbero. */
+  const [menorEspera, setMenorEspera] = useState({ aviso: false, minutos: 45 })
+  /** Asesoría sin costo (mig 217): el interruptor de la sucursal. Ver `InterruptorAsesoria`. */
+  const [asesoria, setAsesoria] = useState<InterruptorAsesoria>({
+    servidor: null,
+    enPantalla: false,
+    fijado: false,
+  })
   const [notClockedInBarbers, setNotClockedInBarbers] = useState<Set<string>>(new Set())
   const [barberNextArrival, setBarberNextArrival] = useState<Record<string, string>>({})
 
@@ -293,17 +441,43 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
   const [staffActionDone, setStaffActionDone] = useState(false)
 
   // Staff PIN + face enrollment state
-  const [staffPinBarbers, setStaffPinBarbers] = useState<Staff[]>([])
+  const [staffPinBarbers, setStaffPinBarbers] = useState<StaffDelPin[]>([])
   const [staffPinLoading, setStaffPinLoading] = useState(false)
-  const [staffPinSelected, setStaffPinSelected] = useState<Staff | null>(null)
+  const [staffPinSelected, setStaffPinSelected] = useState<StaffDelPin | null>(null)
   const [staffPinValue, setStaffPinValue] = useState('')
   const [staffPinError, setStaffPinError] = useState('')
   const [staffPinSubmitting, setStaffPinSubmitting] = useState(false)
   const [staffEnrollId, setStaffEnrollId] = useState<string | null>(null)
   const [staffEnrollName, setStaffEnrollName] = useState('')
+  // Permiso firmado (5 min) que emite `verificarPinStaffEnKiosko` con el PIN
+  // correcto: sin él, el servidor no acepta registrar una cara.
+  const [staffEnrollPermiso, setStaffEnrollPermiso] = useState<string | null>(null)
 
   const [services, setServices] = useState<Service[]>([])
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null)
+  /** Tocó «¿No sabés qué hacerte?» EN VEZ de un servicio: el check-in va con `asesoria`. */
+  const [pidioAsesoria, setPidioAsesoria] = useState(false)
+  /**
+   * Cartel de éxito: `confirmada` si el servidor dejó la marca en la entrada;
+   * `avisale` si la pidió y no quedó (la sucursal la apagó mientras elegía).
+   */
+  const [asesoriaEnExito, setAsesoriaEnExito] = useState<'confirmada' | 'avisale' | null>(null)
+  /**
+   * Barbero con el que quedó anotado en ESTA atención (null = Menor espera): el
+   * cartel de éxito dice a quién le avisamos de la asesoría. Lo actualiza
+   * «Cambiar barbero».
+   */
+  const [barberoElegidoId, setBarberoElegidoId] = useState<string | null>(null)
+  /** «Mi turno»: resultado del pedido de asesoría (ver `AvisoAsesoriaMiTurno`). */
+  const [avisoAsesoriaMiTurno, setAvisoAsesoriaMiTurno] = useState<AvisoAsesoriaMiTurno | null>(null)
+  /** «Pedir asesoría» en vuelo: pausa el auto-reset de «Mi turno» hasta que haya respuesta. */
+  const [pidiendoAsesoria, setPidiendoAsesoria] = useState(false)
+  /**
+   * Identidad de la atención en curso: `reset()` la incrementa. Si el cliente
+   * toca «Atrás» mientras se manda su pedido de asesoría, la respuesta que llega
+   * después se descarta en vez de pintársela al próximo cliente.
+   */
+  const atencionRef = useRef(0)
   const [showBarberPreference, setShowBarberPreference] = useState(false)
   const [globalCheckinBg, setGlobalCheckinBg] = useState('#3f3f46')
 
@@ -370,7 +544,11 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
           }
       }
     }
-    loadBranches()
+    loadBranches().catch((e: unknown) => {
+      // Una pestaña restaurada horas después de un deploy (bfcache) arranca con
+      // el bundle viejo: sus actions ya no existen y la recarga lo resuelve.
+      if (!cortarSiEsVersionVieja(e, avisoFlotante)) console.error('[checkin] cargar las sucursales:', e)
+    })
     // searchParams es estable (only read once on mount)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -385,8 +563,13 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
     async (branchId: string) => {
       setLoadingBarbers(true)
 
-      const { getCheckinData } = await import('@/lib/actions/kiosk')
-      const res = await getCheckinData(branchId)
+      // Antes, un rechazo de la action (red, bundle viejo) dejaba `loadingBarbers`
+      // en true para siempre: el spinner nunca se iba.
+      const res = await leerDatosDelKiosko(branchId)
+      if (!res) {
+        setLoadingBarbers(false)
+        return
+      }
 
       if (res.error || !res.staff) {
         setLoadingBarbers(false)
@@ -406,6 +589,21 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
         if (typeof sd.shift_end_margin_minutes === 'number' && sd.shift_end_margin_minutes >= 0) {
           setShiftEndMargin(sd.shift_end_margin_minutes)
         }
+      }
+      if (res.menorEspera) setMenorEspera(res.menorEspera)
+
+      // Asesoría (mig 217): sólo una respuesta exitosa toca el interruptor (las
+      // fallidas ya volvieron arriba). La primera del paso fija lo que se ve;
+      // las de Realtime sólo actualizan `servidor` para el paso siguiente.
+      if (res.asesoria) {
+        const habilitada = res.asesoria.habilitada === true
+        setAsesoria((a) =>
+          a.fijado
+            ? a.servidor === habilitada
+              ? a
+              : { ...a, servidor: habilitada }
+            : { servidor: habilitada, enPantalla: habilitada, fijado: true }
+        )
       }
 
       if (res.staff) {
@@ -577,7 +775,9 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
       // Lista de columnas explícita: `select('*')` arrastraba `pin`, `email` y
       // `auth_user_id` hasta el browser de una tablet pública. Con la anon key —que
       // viaja en el bundle— se leían 36 PINs de 14 organizaciones. Ver mig 212.
-      .select('id, full_name, branch_id, role, role_id, status, avatar_url, hidden_from_checkin, hidden_from_mobile, is_active, is_also_barber, organization_id, phone, commission_pct, created_at, updated_at, deleted_at')
+      // Sin `phone` ni `commission_pct` (mig 224): la pantalla no los usa y anon
+      // ya no los lee; nombrarlos daría 42501 y la lista quedaría vacía.
+      .select('id, full_name, branch_id, role, role_id, status, avatar_url, hidden_from_checkin, hidden_from_mobile, is_active, is_also_barber, organization_id, created_at, updated_at, deleted_at')
       .eq('branch_id', selectedBranch.id)
       .in('role', ['barber', 'admin', 'owner'])
       .eq('is_active', true)
@@ -593,7 +793,50 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
     setStep(next)
     setError('')
     setShowBarberPreference(false)
+    // Asesoría: el paso nuevo arranca con el último valor confirmado y su
+    // primera lectura exitosa lo puede corregir (ver `InterruptorAsesoria`).
+    setAsesoria((a) => {
+      const enPantalla = a.servidor ?? a.enPantalla
+      return !a.fijado && a.enPantalla === enPantalla
+        ? a
+        : { servidor: a.servidor, enPantalla, fijado: false }
+    })
   }, [])
+
+  /**
+   * PIN del staff en "Soy barbero". El servidor lo verifica con límite de
+   * intentos y, si es correcto, devuelve el permiso para registrar la cara
+   * (src/lib/actions/rostro-staff.ts). Un error de red no deja el teclado
+   * trabado: se avisa y se puede volver a intentar.
+   */
+  const verificarPinDelStaff = (staffId: string, pin: string) => {
+    const branchId = selectedBranch?.id
+    if (!branchId) {
+      setStaffPinError('Elegí la sucursal de nuevo.')
+      setStaffPinValue('')
+      return
+    }
+    setStaffPinSubmitting(true)
+    verificarPinStaffEnKiosko({ staffId, pin, branchId })
+      .then((res) => {
+        if (!res.ok) {
+          setStaffPinError(res.error)
+          setStaffPinValue('')
+          return
+        }
+        setStaffEnrollId(res.staffId)
+        setStaffEnrollName(res.staffName)
+        setStaffEnrollPermiso(res.permiso)
+        goTo('staff_face_enroll')
+      })
+      .catch((err: unknown) => {
+        setStaffPinValue('')
+        if (cortarSiEsVersionVieja(err, setStaffPinError)) return
+        console.error('[kiosko] verificarPinStaffEnKiosko:', err)
+        setStaffPinError('No pudimos verificar el PIN. Probá de nuevo.')
+      })
+      .finally(() => setStaffPinSubmitting(false))
+  }
 
   /**
    * Lleva a la pantalla del turno propio. Único camino a `manage_turn`, que
@@ -608,11 +851,16 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
    * con la misma fórmula que el cartel de éxito (misma cuenta en las dos
    * pantallas). Si algo de esto falla igual navegamos: la pantalla se banca no
    * tener los datos, y quedarse callado era peor.
+   *
+   * `avisoAsesoria` trae lo que contestó el server si el cliente se volvió a
+   * anotar pidiendo asesoría (mig 217); sin él, «Mi turno» arranca limpio.
    */
   const irAMiTurno = useCallback(
-    async (entryId: string | null, yaEstaba: boolean) => {
+    async (entryId: string | null, yaEstaba: boolean, avisoAsesoria: AvisoAsesoriaMiTurno | null = null) => {
       setYaEstabaEnFila(yaEstaba)
       setMiEsperaEnFila('')
+      setAvisoAsesoriaMiTurno(avisoAsesoria)
+      setPidiendoAsesoria(false)
 
       if (entryId) {
         try {
@@ -676,12 +924,20 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
     setStaffPinSubmitting(false)
     setStaffEnrollId(null)
     setStaffEnrollName('')
+    setStaffEnrollPermiso(null)
+    setBarberoElegidoId(null)
     setBarberNextArrival({})
     setAppointment(null)
     setConfirmingArrival(false)
     setTooEarlyStartsAt(null)
     setAppointmentConfirmed(false)
     setAdoptedQueueEntry(false)
+    // Asesoría: todo lo del cliente se va; el interruptor de la sucursal queda.
+    setPidioAsesoria(false)
+    setAsesoriaEnExito(null)
+    setAvisoAsesoriaMiTurno(null)
+    setPidiendoAsesoria(false)
+    atencionRef.current += 1
 
     // En el kiosko híbrido la fila es un desvío: al terminar, el control vuelve
     // al flujo de turnos. Sin `onExit` (kiosko walk-in puro) se queda en home.
@@ -701,15 +957,18 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
   // Ahora el timer se deriva del `step`: al entrar a una pantalla terminal (y sin estar
   // el usuario eligiendo barbero) se agenda exactamente uno; al salir o al entrar al
   // sub-flujo de cambio de barbero, el cleanup lo cancela; al volver, se reagenda solo.
+  // «Pedir asesoría» en vuelo también pausa «Mi turno», y cada resultado nuevo
+  // (`avisoAsesoriaMiTurno`) reinicia la cuenta: el mensaje queda a la vista los
+  // 5 s enteros, en sincronía con la barra, que se vuelve a montar con él.
   useEffect(() => {
     const onTerminalScreen =
       (step === 'success' && !changingBarberInSuccess) ||
-      (step === 'manage_turn' && !changingBarberInManage) ||
+      (step === 'manage_turn' && !changingBarberInManage && !pidiendoAsesoria) ||
       (step === 'staff_action_confirm' && staffActionDone)
     if (!onTerminalScreen) return
     const t = setTimeout(() => reset(), RESET_DELAY_MS)
     return () => clearTimeout(t)
-  }, [step, changingBarberInSuccess, changingBarberInManage, staffActionDone, reset])
+  }, [step, changingBarberInSuccess, changingBarberInManage, pidiendoAsesoria, avisoAsesoriaMiTurno, staffActionDone, reset])
 
   // ── Timeout de inactividad en las pantallas intermedias ──
   // El auto-reset de arriba sólo cubre las pantallas terminales, así que un
@@ -728,21 +987,39 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
   useIdleReset({
     // Nunca cortar en medio de una operación en vuelo (check-in, lookup, PIN):
     // el timer se reprograma solo cuando termina.
-    enabled: idleMs > 0 && !submitting && !lookingUp && !staffPinSubmitting && !confirmingArrival,
+    enabled:
+      idleMs > 0 && !submitting && !lookingUp && !staffPinSubmitting && !confirmingArrival && !pidiendoAsesoria,
     timeoutMs: idleMs,
     resetKey: step,
     onIdle: reset,
   })
 
+  // ── Reposo (recarga por versión) ──
+  // Después de un deploy, el kiosko se recarga solo cuando está en reposo: su
+  // pantalla inicial (o el selector de sucursal) sin nada en vuelo. Como desvío
+  // del kiosko de turnos (`onExit`) nunca: ahí el reposo es la pantalla de
+  // turnos, que se marca sola. Apenas el cliente toca algo, la marca se va.
+  useKioskoEnReposo(
+    !onExit &&
+      (step === 'home' || step === 'branch') &&
+      !submitting &&
+      !lookingUp &&
+      !staffPinSubmitting &&
+      !confirmingArrival &&
+      !pidiendoAsesoria
+  )
+
   // ── Turno de hoy (sólo `conTurnos`) ──
 
   /**
    * Mira si el cliente identificado tiene turno HOY en esta sucursal y, si lo
-   * tiene, lo lleva a confirmar la llegada. Devuelve `true` cuando navegó.
+   * tiene, lo lleva a confirmar la llegada. Devuelve `true` cuando ya resolvió:
+   * navegó, o la tablet se va a recargar porque quedó con el bundle viejo.
    *
    * Falla ABIERTA hacia la fila: si la búsqueda se cae (red, rate-limit), el
    * cliente sigue el walk-in normal en vez de quedarse trabado — peor que no
-   * registrarle el turno es no atenderlo.
+   * registrarle el turno es no atenderlo. La excepción es el bundle viejo: ahí
+   * ninguna action anda, y seguir por la fila sólo lo llevaría a fallar al final.
    */
   const buscarTurnoDeHoy = useCallback(
     async (clientId: string): Promise<boolean> => {
@@ -755,7 +1032,8 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
           goTo('appointment')
           return true
         }
-      } catch {
+      } catch (e) {
+        if (cortarSiEsVersionVieja(e, avisoFlotante)) return true
         // ver arriba: seguimos por la fila
       }
       return false
@@ -768,7 +1046,7 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
    * busca por los últimos 10 dígitos: un cliente guardado como "+54 9 351 …"
    * que reservó por la web tiene turno y acá figuraría como "primera vez".
    * Antes de darlo por nuevo, preguntamos por su turno. Devuelve `true` si
-   * navegó a la pantalla del turno.
+   * navegó a la pantalla del turno (o la tablet se va a recargar por versión).
    */
   const buscarTurnoPorTelefono = useCallback(
     async (ph: string): Promise<boolean> => {
@@ -789,7 +1067,8 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
           goTo('appointment')
           return true
         }
-      } catch {
+      } catch (e) {
+        if (cortarSiEsVersionVieja(e, avisoFlotante)) return true
         // seguimos por la fila
       }
       return false
@@ -826,8 +1105,8 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
         return
       }
       setError(result.error)
-    } catch {
-      setError('No pudimos confirmar la llegada. Intentá de nuevo.')
+    } catch (e) {
+      if (!cortarSiEsVersionVieja(e, setError)) setError('No pudimos confirmar la llegada. Intentá de nuevo.')
     } finally {
       setConfirmingArrival(false)
     }
@@ -853,9 +1132,11 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
       localStorage.setItem(LOCALSTORAGE_KEY, JSON.stringify(branch))
     } catch { /* ignore */ }
     // Setear cookie de org para que futuros loads filtren correctamente
-    import('@/lib/actions/org').then(({ setActiveOrgFromBranch }) => {
-      setActiveOrgFromBranch(branch.id)
-    })
+    import('@/lib/actions/org')
+      .then(({ setActiveOrgFromBranch }) => setActiveOrgFromBranch(branch.id))
+      .catch((e: unknown) => {
+        if (!cortarSiEsVersionVieja(e, avisoFlotante)) console.error('[checkin] fijar la organización:', e)
+      })
     // El modo de operación (walk_in / appointments / hybrid) lo resuelve el
     // server component leyendo ?branch=. Elegir la sucursal sólo en estado
     // local dejaba a una sucursal con turnos atascada para siempre en el flujo
@@ -970,7 +1251,13 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
         setIsReturning(false)
         setHasExistingFace(false)
       }
-    } catch {
+    } catch (e) {
+      // Con el bundle viejo NO se lo da por cliente nuevo: le pediríamos el
+      // nombre a alguien que ya existe y el check-in fallaría igual al final.
+      if (cortarSiEsVersionVieja(e, avisoFlotante)) {
+        setLookingUp(false)
+        return
+      }
       setName('')
       setIsReturning(false)
     }
@@ -1154,11 +1441,14 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
       setError('')
 
       try {
+        // Con asesoría el servicio no viaja: la asesoría lo reemplaza (el
+        // servidor igual lo descarta si la marca queda).
         const result = await checkinClientByFace(
           faceClientId,
           selectedBranch.id,
           chosenBarberId,
-          selectedServiceId
+          pidioAsesoria ? null : selectedServiceId,
+          pidioAsesoria
         )
 
         if ('error' in result && result.error) {
@@ -1171,7 +1461,7 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
           // El spinner se apaga recién al cambiar de pantalla: soltarlo antes
           // dejaba el botón "vivo" mientras se leía el turno, invitando a un
           // segundo toque.
-          await irAMiTurno(result.queueEntryId || null, true)
+          await irAMiTurno(result.queueEntryId || null, true, avisoAsesoriaYaEnFila(result))
           setSubmitting(false)
           return
         }
@@ -1180,16 +1470,20 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
         if ('queueEntryId' in result) {
           setQueueEntryId(result.queueEntryId as string)
         }
+        setAsesoriaEnExito(pidioAsesoria ? (result.asesoria === true ? 'confirmada' : 'avisale') : null)
+        setBarberoElegidoId(chosenBarberId)
         setSubmitting(false)
         goTo('success')
-      } catch {
-        setError('Error al registrar. Intentá de nuevo.')
+      } catch (e) {
+        // Bundle viejo: avisa y recarga en vez del «Error al registrar» de
+        // siempre, que invitaba a reintentar algo que no iba a andar nunca.
+        if (!cortarSiEsVersionVieja(e, setError)) setError('Error al registrar. Intentá de nuevo.')
         setSubmitting(false)
       }
     },
     // goTo/irAMiTurno son estables (useCallback); el auto-reset lo maneja el effect declarativo
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedBranch, faceClientId, submitting, selectedServiceId]
+    [selectedBranch, faceClientId, submitting, selectedServiceId, pidioAsesoria]
   )
 
   // ── Confirm ──
@@ -1212,7 +1506,11 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
         if (chosenBarberId) {
           fd.append('barber_id', chosenBarberId)
         }
-        if (selectedServiceId) {
+        // Asesoría sin costo (mig 217): reemplaza al servicio. El servidor
+        // revalida el interruptor de la sucursal antes de dejar la marca.
+        if (pidioAsesoria) {
+          fd.append('asesoria', '1')
+        } else if (selectedServiceId) {
           fd.append('service_id', selectedServiceId)
         }
 
@@ -1228,7 +1526,7 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
           // El spinner se apaga recién al cambiar de pantalla: soltarlo antes
           // dejaba el botón "vivo" mientras se leía el turno, invitando a un
           // segundo toque.
-          await irAMiTurno(result.queueEntryId || null, true)
+          await irAMiTurno(result.queueEntryId || null, true, avisoAsesoriaYaEnFila(result))
           setSubmitting(false)
           return
         }
@@ -1237,19 +1535,28 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
         if ('queueEntryId' in result) {
           setQueueEntryId(result.queueEntryId as string)
         }
+        setAsesoriaEnExito(pidioAsesoria ? (result.asesoria === true ? 'confirmada' : 'avisale') : null)
 
         const newClientId = result.clientId || faceClientId
 
         // If we captured face data during this flow, save it now to the real client
         if (wantsEnrollment && capturedFaceDescriptors.length > 0 && newClientId) {
-          const savePromises: Promise<boolean>[] = capturedFaceDescriptors.map((d, i) =>
-            enrollFaceDescriptor(newClientId, d, 'checkin', i === 0 ? 0.99 : 0, selectedBranch.id) // placeholder score for best descriptor
-          )
-          if (capturedFacePhoto) {
-            savePromises.push(saveFacePhoto(newClientId, capturedFacePhoto, selectedBranch.id).then((url) => url !== null))
+          // La cara es un extra: el cliente YA quedó en la fila. Antes, un fallo
+          // al guardarla caía en el catch de abajo y la tablet decía «Error al
+          // registrar» a alguien que estaba anotado; ahora sigue al éxito, que le
+          // vuelve a ofrecer «Registrar tu cara».
+          try {
+            const savePromises: Promise<boolean>[] = capturedFaceDescriptors.map((d, i) =>
+              enrollFaceDescriptor(newClientId, d, 'checkin', i === 0 ? 0.99 : 0, selectedBranch.id) // placeholder score for best descriptor
+            )
+            if (capturedFacePhoto) {
+              savePromises.push(saveFacePhoto(newClientId, capturedFacePhoto, selectedBranch.id).then((url) => url !== null))
+            }
+            await Promise.all(savePromises)
+            setHasExistingFace(true)
+          } catch (e) {
+            console.error('[checkin] guardar la cara del cliente nuevo:', e)
           }
-          await Promise.all(savePromises)
-          setHasExistingFace(true)
           setWantsEnrollment(false)
           setFaceClientId(newClientId)
         }
@@ -1258,16 +1565,18 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
           setFaceClientId(newClientId)
         }
 
+        setBarberoElegidoId(chosenBarberId)
         setSubmitting(false)
         goTo('success')
-      } catch {
-        setError('Error al registrar. Intentá de nuevo.')
+      } catch (e) {
+        // Bundle viejo: ver `handleFaceConfirmBarber`.
+        if (!cortarSiEsVersionVieja(e, setError)) setError('Error al registrar. Intentá de nuevo.')
         setSubmitting(false)
       }
     },
     // goTo es estable (useCallback); el auto-reset lo maneja el effect declarativo
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedBranch, name, phone, submitting, faceClientId, handleFaceConfirmBarber, wantsEnrollment, capturedFaceDescriptors, capturedFacePhoto, selectedServiceId]
+    [selectedBranch, name, phone, submitting, faceClientId, handleFaceConfirmBarber, wantsEnrollment, capturedFaceDescriptors, capturedFacePhoto, selectedServiceId, pidioAsesoria]
   )
 
   const handleReassign = useCallback(
@@ -1286,6 +1595,8 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
         if ('error' in result && result.error) {
           setError(result.error)
         } else {
+          // El cartel de éxito nombra a quién le avisamos de la asesoría.
+          setBarberoElegidoId(newBarberId)
           setChangingBarberInSuccess(false)
           setChangingBarberInManage(false)
           if (myQueueEntry) {
@@ -1298,14 +1609,63 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
             if (data) setMyQueueEntry(data as unknown as QueueEntry)
           }
         }
-      } catch {
-        setError('Error al cambiar barbero')
+      } catch (e) {
+        if (!cortarSiEsVersionVieja(e, setError)) setError('Error al cambiar barbero')
       } finally {
         setSubmitting(false)
       }
     },
     [myQueueEntry, faceClientId]
   )
+
+  /**
+   * «Pedir asesoría» desde «Mi turno» (mig 217): el cliente que ya espera se suma
+   * la marca. Misma prueba de posesión que «Cambiar barbero» (el `client_id` de
+   * SU entrada). Cualquier no termina en una indicación concreta: con turno,
+   * «pedísela a tu barbero cuando te atienda»; con demasiados pedidos seguidos,
+   * «esperá un momento»; el resto (ya lo atienden, la sucursal la apagó, red),
+   * «Avisale a tu barbero…».
+   */
+  const pedirAsesoriaEnMiTurno = useCallback(async () => {
+    const entrada = myQueueEntry
+    if (!entrada || pidiendoAsesoria) return
+    const ownerClientId = entrada.client_id ?? faceClientId
+    if (!ownerClientId) {
+      setAvisoAsesoriaMiTurno('avisale')
+      return
+    }
+
+    const atencion = atencionRef.current
+    setPidiendoAsesoria(true)
+    let aviso: AvisoAsesoriaMiTurno = 'avisale'
+    try {
+      const r = await pedirAsesoriaDesdeMiTurno(entrada.id, ownerClientId)
+      // El cliente se fue (tocó «Atrás») mientras esperábamos: no es de nadie.
+      if (atencion !== atencionRef.current) return
+      if ('success' in r) {
+        aviso = 'sumada'
+        setMyQueueEntry((e) => (e && e.id === entrada.id ? { ...e, pidio_asesoria: true } : e))
+      } else if (r.motivo === 'en_curso') {
+        // Ya lo están atendiendo: la tarjeta pasa a «¡Ya es tu turno!».
+        setMyQueueEntry((e) => (e && e.id === entrada.id ? { ...e, status: 'in_progress' } : e))
+      } else if (r.motivo === 'deshabilitada') {
+        // Confirmado por el servidor: el botón no se le ofrece al próximo
+        // cliente. La banda del paso de servicio se acomoda sola al entrar.
+        setAsesoria((a) => (a.servidor === false ? a : { ...a, servidor: false }))
+      } else if (r.motivo === 'turno') {
+        aviso = 'turno'
+      } else if (r.motivo === 'limite') {
+        aviso = 'limite'
+      }
+    } catch (err) {
+      if (atencion !== atencionRef.current) return
+      // Bundle viejo: la tablet se recarga sola; mientras tanto el cliente ve
+      // «Avisale a tu barbero…», que siempre funciona.
+      if (!cortarSiEsVersionVieja(err, avisoFlotante)) console.error('[checkin] pedirAsesoriaDesdeMiTurno:', err)
+    }
+    setAvisoAsesoriaMiTurno(aviso)
+    setPidiendoAsesoria(false)
+  }, [myQueueEntry, pidiendoAsesoria, faceClientId])
 
   const goToBarberStep = () => {
     if (!name.trim()) return
@@ -1372,7 +1732,8 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
       case 'barber':
         return () => goTo('service_selection')
       case 'face_enroll':
-        return () => goTo('name')
+        // Desde el cartel de éxito, «Atrás» vuelve al cartel (ver FaceEnrollment).
+        return () => goTo(queueEntryId ? 'success' : 'name')
       case 'success':
         if (changingBarberInSuccess) {
           // Volver a la pantalla de éxito; el effect declarativo reagenda el auto-reset
@@ -1403,6 +1764,41 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
   const bgInfo = resolveCheckinBackground(effectiveCheckinBgRaw)
   const branchBg = { background: bgInfo.css, color: bgInfo.isLight ? '#18181b' : '#f4f4f5' }
   const isLightBg = bgInfo.isLight
+  const varianteAsesoria = isLightBg ? 'clara' : 'oscura'
+
+  // ── Asesoría en «Mi turno» ──
+  // Esta pantalla no llama a `getCheckinData`, así que el interruptor sale del
+  // último valor confirmado y, si todavía no hubo ninguno (tablet recién
+  // abierta), de la fila de la sucursal que `getPublicBranches` ya trajo entera
+  // al resolverla: cero consultas extra. El servidor lo revalida igual al pedir.
+  const ofreceAsesoriaEnMiTurno = asesoria.servidor ?? (selectedBranch?.asesoria_habilitada === true)
+  const miEntradaPidioAsesoria = myQueueEntry?.pidio_asesoria === true
+  // El chip va en la tarjeta si la entrada ya la traía; si se acaba de sumar,
+  // va junto al mensaje, donde estaba el botón (nada se corre bajo el dedo).
+  const chipAsesoriaEnTarjeta = miEntradaPidioAsesoria && avisoAsesoriaMiTurno !== 'sumada'
+  /** Por qué el pedido no quedó (texto), o null. Si la entrada ya la traía, no se contradice. */
+  const asesoriaNoSumadaEnMiTurno =
+    avisoAsesoriaMiTurno !== null && avisoAsesoriaMiTurno !== 'sumada' && !miEntradaPidioAsesoria
+      ? TEXTO_ASESORIA_NO_SUMADA[avisoAsesoriaMiTurno]
+      : null
+  // Un TURNO no la ofrece (hallazgo asesoria-04): no tiene la salida «solo
+  // asesoría» (cancelarlo lo pasa a no_show y pierde la seña). El servidor la
+  // rechaza igual con motivo `turno`.
+  const puedePedirAsesoria =
+    ofreceAsesoriaEnMiTurno &&
+    avisoAsesoriaMiTurno === null &&
+    myQueueEntry?.status === 'waiting' &&
+    !myQueueEntry.is_break &&
+    !myQueueEntry.appointment_id &&
+    !miEntradaPidioAsesoria
+  /** «Sumamos tu pedido…»: a quién le avisamos, según con quién está anotado. */
+  const destinoAsesoriaMiTurno = myQueueEntry?.barber_id
+    ? { nombre: myQueueEntry.barber?.full_name?.trim() || null }
+    : null
+  /** Cartel de éxito: el barbero con el que quedó anotado (null = Menor espera). */
+  const destinoAsesoriaExito = barberoElegidoId
+    ? { nombre: barbers.find((b) => b.id === barberoElegidoId)?.full_name?.trim() || null }
+    : null
 
   const backButton = handleBack ? (
     <button
@@ -1755,6 +2151,21 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
               <DialogDescription className={cn('text-sm md:text-base', isLightBg ? 'text-zinc-500' : 'text-violet-300/70')}>
                 Seleccioná con quién te querés atender
               </DialogDescription>
+              {/* Mig 218: elegir a un barbero puntual no lo ata a esperarlo. Se dice
+                  acá, al elegir, sólo si la sucursal lo tiene prendido y el cliente
+                  tiene un WhatsApp de verdad: a un "Especial" (00XXXXXXXX) nunca se
+                  le escribe (misma regla que el tick: `is_real_phone` + 10 dígitos). */}
+              {step === 'barber' && menorEspera.aviso && /^[1-9]\d{9,}$/.test(phone.replace(/\D/g, '')) && (
+                <p className={cn('mt-2 flex items-start gap-2 text-xs md:text-sm leading-snug', isLightBg ? 'text-zinc-500' : 'text-white/55')}>
+                  <MessageCircle
+                    className={cn('mt-0.5 size-3.5 md:size-4 shrink-0', isLightBg ? 'text-emerald-600' : 'text-emerald-300/80')}
+                    aria-hidden
+                  />
+                  <span>
+                    Si tu espera pasa los {menorEspera.minutos} min y se libera otro barbero, te escribimos por WhatsApp para ofrecerte Menor espera.
+                  </span>
+                </p>
+              )}
             </DialogHeader>
 
             <div className={cn(
@@ -2608,9 +3019,19 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
               setCapturedFacePhoto(photo)
               goTo('service_selection')
             }}
-            onComplete={() => goTo('service_selection')}
-            onSkip={() => {
+            // Desde «Registrar tu cara» del cartel de éxito (ya está en la fila:
+            // `queueEntryId`) se vuelve al cartel, no a «¿Qué te vas a hacer?»:
+            // eso lo invitaba a anotarse otra vez.
+            onComplete={() => {
+              if (queueEntryId) {
+                setHasExistingFace(true)
+                goTo('success')
+                return
+              }
               goTo('service_selection')
+            }}
+            onSkip={() => {
+              goTo(queueEntryId ? 'success' : 'service_selection')
             }}
           />
         </div>
@@ -2655,7 +3076,10 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                 Todavía no hay servicios cargados
               </p>
               <Button
-                onClick={() => goTo('barber')}
+                onClick={() => {
+                  setPidioAsesoria(false)
+                  goTo('barber')
+                }}
                 className={cn(
                   'h-14 px-8 rounded-2xl text-lg font-semibold',
                   isLightBg
@@ -2675,6 +3099,10 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
               services.length <= 6 && 'grid-cols-1',
               services.length > 6 && services.length <= 12 && 'grid-cols-1 md:grid-cols-2',
               services.length > 12 && 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3',
+              // Con la banda de asesoría abajo, la grilla no se encoge por
+              // debajo de sus filas: si no entran, la página scrollea en vez de
+              // que los servicios se dibujen encima de la banda.
+              asesoria.enPantalla && 'min-h-fit',
             )}
           >
             {services.map(s => (
@@ -2682,6 +3110,7 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                 key={s.id}
                 onClick={() => {
                   setSelectedServiceId(s.id)
+                  setPidioAsesoria(false)
                   goTo('barber')
                 }}
                 className={cn(
@@ -2719,6 +3148,24 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
               </button>
             ))}
           </div>
+
+          {/* Asesoría sin costo (mig 217): la alternativa a elegir un servicio.
+              Depende SÓLO de `asesoria.enPantalla`, nunca de `loadingBarbers`:
+              no se desmonta en las recargas de Realtime, su alto está reservado
+              y, como vive dentro del contenedor del paso (key con `animKey`),
+              su entrada anima una sola vez por paso. */}
+          {asesoria.enPantalla && (
+            <AsesoriaKioskBand
+              variante={varianteAsesoria}
+              animarEntrada
+              onElegir={() => {
+                setSelectedServiceId(null)
+                setPidioAsesoria(true)
+                goTo('barber')
+              }}
+              className="md:max-w-3xl"
+            />
+          )}
         </div>
       )}
 
@@ -2734,9 +3181,19 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
             <p className={cn('text-sm md:text-lg', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
               {name} · {selectedBranch?.name}
             </p>
+            {pidioAsesoria && (
+              <AsesoriaKioskChip variante={varianteAsesoria} className="mt-2">
+                Asesoría sin costo
+              </AsesoriaKioskChip>
+            )}
           </div>
 
-          {loadingBarbers ? (
+          {/* Spinner sólo en la PRIMERA carga: `loadBarberData` prende
+              `loadingBarbers` en cada evento de Realtime, y con
+              `loadingBarbers ? spinner : lista` la lista —y el diálogo «Elegí tu
+              barbero», que vive adentro— se desmontaban bajo el dedo cada vez
+              que cambiaba la fila de la sucursal. */}
+          {loadingBarbers && barbers.length === 0 ? (
             <div className="flex items-center justify-center py-10 md:py-16">
               <Loader2 className="size-8 animate-spin text-muted-foreground" />
             </div>
@@ -2812,6 +3269,18 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                       </p>
                     )
                   )}
+                  {/* Asesoría (mig 217): lo que confirmó el servidor, no lo que se
+                      tocó. Dice A QUIÉN le avisamos, sin prometer que «ya lo sabe»
+                      (hallazgo asesoria-03). */}
+                  {asesoriaEnExito && (
+                    <AsesoriaKioskMensaje variante={varianteAsesoria} tono={asesoriaEnExito} className="mt-3">
+                      {asesoriaEnExito === 'avisale'
+                        ? TEXTO_AVISALE_ASESORIA
+                        : destinoAsesoriaExito
+                          ? `Pediste asesoría: ${aQuienLeAvisamos(destinoAsesoriaExito)} y te va a recomendar antes de empezar.`
+                          : `Pediste asesoría: ${aQuienLeAvisamos(null)} y el que te atienda te va a recomendar antes de empezar.`}
+                    </AsesoriaKioskMensaje>
+                  )}
                   {appointmentConfirmed && adoptedQueueEntry && (
                     <p className={cn('text-sm md:text-base mt-2', isLightBg ? 'text-cyan-700' : 'text-cyan-200/80')}>
                       Ya estabas en la fila: tu turno quedó sumado a ese lugar.
@@ -2885,7 +3354,8 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                 </p>
               </div>
 
-              {loadingBarbers ? (
+              {/* Spinner sólo en la primera carga (ver el paso de barbero). */}
+              {loadingBarbers && barbers.length === 0 ? (
                 <div className="flex items-center justify-center py-10 md:py-16">
                   <Loader2 className="size-8 animate-spin text-muted-foreground" />
                 </div>
@@ -2978,8 +3448,15 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                     const staffId = staffFaceMatch.clientId
                     if (!staffId) { setError('Barbero no encontrado'); return }
 
-                    const res = await registerBarberClockIn(staffId, branchId, true)
-                    if (res.error) { setError(res.error); return }
+                    // Antes, un rechazo (red, bundle viejo) no decía nada: el
+                    // botón parecía no andar.
+                    try {
+                      const res = await registerBarberClockIn(staffId, branchId, true)
+                      if (res.error) { setError(res.error); return }
+                    } catch (e) {
+                      if (!cortarSiEsVersionVieja(e, setError)) setError('No pudimos registrar la entrada. Probá de nuevo.')
+                      return
+                    }
 
                     setStaffAction('clock_in')
                     setStaffActionDone(true)
@@ -2997,8 +3474,13 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                     const staffId = staffFaceMatch.clientId
                     if (!staffId) { setError('Barbero no encontrado'); return }
 
-                    const res = await registerBarberClockOut(staffId, branchId, true)
-                    if (res.error) { setError(res.error); return }
+                    try {
+                      const res = await registerBarberClockOut(staffId, branchId, true)
+                      if (res.error) { setError(res.error); return }
+                    } catch (e) {
+                      if (!cortarSiEsVersionVieja(e, setError)) setError('No pudimos registrar la salida. Probá de nuevo.')
+                      return
+                    }
 
                     setStaffAction('clock_out')
                     setStaffActionDone(true)
@@ -3172,19 +3654,7 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                       setStaffPinValue(next)
                       setStaffPinError('')
                       if (next.length === 4) {
-                        setStaffPinSubmitting(true)
-                        verifyBarberPin(staffPinSelected.id, next).then((res) => {
-                          if (res.error) {
-                            setStaffPinError(res.error)
-                            setStaffPinValue('')
-                            setStaffPinSubmitting(false)
-                          } else if ('success' in res && res.success) {
-                            setStaffEnrollId(res.staffId)
-                            setStaffEnrollName(res.staffName)
-                            setStaffPinSubmitting(false)
-                            goTo('staff_face_enroll')
-                          }
-                        })
+                        verificarPinDelStaff(staffPinSelected.id, next)
                       }
                     }}
                     className={cn('h-14 text-2xl', terminalKeypadKey)}
@@ -3212,19 +3682,7 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                     setStaffPinValue(next)
                     setStaffPinError('')
                     if (next.length === 4) {
-                      setStaffPinSubmitting(true)
-                      verifyBarberPin(staffPinSelected.id, next).then((res) => {
-                        if (res.error) {
-                          setStaffPinError(res.error)
-                          setStaffPinValue('')
-                          setStaffPinSubmitting(false)
-                        } else if ('success' in res && res.success) {
-                          setStaffEnrollId(res.staffId)
-                          setStaffEnrollName(res.staffName)
-                          setStaffPinSubmitting(false)
-                          goTo('staff_face_enroll')
-                        }
-                      })
+                      verificarPinDelStaff(staffPinSelected.id, next)
                     }
                   }}
                   className={cn('h-14 text-2xl', terminalKeypadKey)}
@@ -3261,14 +3719,11 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
             clientName={staffEnrollName}
             source="checkin"
             captureOnly
-            onCapture={async (descriptors, photo) => {
-              const saves = descriptors.map((d, i) =>
-                enrollStaffFaceDescriptor(staffEnrollId!, d, 'checkin', i === 0 ? 0.99 : 0)
-              )
-              if (photo) {
-                saves.push(saveStaffFacePhoto(staffEnrollId!, photo).then(() => true))
-              }
-              await Promise.all(saves)
+            onCapture={async (descriptors) => {
+              const guardado = staffEnrollPermiso
+                ? await registrarRostroDelStaff(staffEnrollPermiso, descriptors, { calidad: 0.99, origen: 'checkin' })
+                : ({ ok: false, error: 'Volvé a ingresar tu PIN.' } as const)
+              setStaffEnrollPermiso(null)
 
               setStaffFaceMatch({
                 clientId: staffEnrollId!,
@@ -3278,6 +3733,11 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                 distance: 0,
               })
               goTo('staff_action_confirm')
+              // Después de goTo (que limpia el error): queda a la vista en la
+              // pantalla de entrada/salida.
+              if (!guardado.ok) {
+                setError(`No pudimos guardar tu rostro: ${guardado.error} Igual podés fichar.`)
+              }
             }}
             onComplete={() => {
               setStaffFaceMatch({
@@ -3360,6 +3820,10 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                   </>
                 )}
 
+                {chipAsesoriaEnTarjeta && (
+                  <AsesoriaKioskChip variante={varianteAsesoria}>Pediste asesoría</AsesoriaKioskChip>
+                )}
+
                 {myQueueEntry?.barber && (
                   <div className={cn('w-full p-3 md:p-4 mt-1', isLightBg ? 'rounded-xl border border-zinc-200 bg-zinc-50' : terminalGlassCardInner)}>
                     <div className="flex items-center gap-3 justify-center">
@@ -3381,6 +3845,7 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                 {myQueueEntry?.status === 'waiting' && (
                   <Button
                     onClick={() => setChangingBarberInManage(true)}
+                    disabled={pidiendoAsesoria}
                     variant="outline"
                     className={cn(
                       'h-11 md:h-12 text-sm md:text-base rounded-xl w-full max-w-xs',
@@ -3393,13 +3858,44 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                     Cambiar barbero
                   </Button>
                 )}
+
+                {/* Asesoría (mig 217): botón, confirmación o «avisale», siempre en
+                    el mismo lugar y con el mismo alto mínimo, así el resultado
+                    reemplaza al botón sin correr nada de la pantalla. */}
+                {(avisoAsesoriaMiTurno === 'sumada' || asesoriaNoSumadaEnMiTurno || puedePedirAsesoria) && (
+                  <div className="flex w-full min-h-[5rem] flex-col items-center justify-center gap-2">
+                    {avisoAsesoriaMiTurno === 'sumada' ? (
+                      <>
+                        <AsesoriaKioskChip variante={varianteAsesoria}>Pediste asesoría</AsesoriaKioskChip>
+                        <AsesoriaKioskMensaje variante={varianteAsesoria} tono="confirmada" conIcono={false}>
+                          {`Sumamos tu pedido de asesoría: ${aQuienLeAvisamos(destinoAsesoriaMiTurno)}.`}
+                        </AsesoriaKioskMensaje>
+                      </>
+                    ) : asesoriaNoSumadaEnMiTurno ? (
+                      <AsesoriaKioskMensaje variante={varianteAsesoria} tono="avisale">
+                        {asesoriaNoSumadaEnMiTurno}
+                      </AsesoriaKioskMensaje>
+                    ) : (
+                      <AsesoriaKioskPedirBoton
+                        variante={varianteAsesoria}
+                        onPedir={pedirAsesoriaEnMiTurno}
+                        enviando={pidiendoAsesoria}
+                      />
+                    )}
+                  </div>
+                )}
               </div>
 
-              {/* Countdown bar */}
+              {/* Countdown bar. Mientras se manda el pedido de asesoría el timer
+                  está en pausa y la barra también; con la respuesta, la `key`
+                  la vuelve a montar y arranca entera, igual que el timer. */}
               <div className={isLightBg ? 'w-full max-w-xs h-1 rounded-full bg-zinc-200 overflow-hidden border border-zinc-300' : terminalProgressTrack}>
                 <div
+                  key={`cuenta-${avisoAsesoriaMiTurno ?? 'inicial'}`}
                   className={isLightBg ? 'h-full rounded-full origin-left bg-gradient-to-r from-cyan-500 via-zinc-700 to-violet-500' : terminalProgressFill}
-                  style={{ animation: `checkin-countdown ${RESET_DELAY_MS}ms linear forwards` }}
+                  style={{
+                    animation: `checkin-countdown ${RESET_DELAY_MS}ms linear forwards ${pidiendoAsesoria ? 'paused' : 'running'}`,
+                  }}
                 />
               </div>
               <p className={cn('text-xs md:text-sm text-center', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>Volviendo al inicio...</p>
@@ -3410,7 +3906,8 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                 <h2 className={cn(terminalH2, isLightBg && 'text-zinc-900')}>Cambiar barbero</h2>
               </div>
 
-              {loadingBarbers || !myQueueEntry ? (
+              {/* Spinner sólo en la primera carga (ver el paso de barbero). */}
+              {(loadingBarbers && barbers.length === 0) || !myQueueEntry ? (
                 <div className="flex items-center justify-center py-10 md:py-16">
                   <Loader2 className="size-8 animate-spin text-muted-foreground" />
                 </div>

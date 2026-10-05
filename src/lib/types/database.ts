@@ -1,3 +1,5 @@
+import type { LoyaltyEmbed } from '@/lib/loyalty-embed'
+
 export type UserRole = 'owner' | 'admin' | 'receptionist' | 'barber'
 export type QueueStatus = 'waiting' | 'in_progress' | 'completed' | 'cancelled'
 export type PaymentMethod = 'cash' | 'card' | 'transfer'
@@ -22,7 +24,15 @@ export type MessageContentType = 'text' | 'image' | 'video' | 'audio' | 'documen
 export type MessageStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'failed'
 export type ConversationStatus = 'open' | 'inactive' | 'closed' | 'archived'
 export type TemplateCategory = 'marketing' | 'utility' | 'authentication'
-export type TemplateStatus = 'pending' | 'approved' | 'rejected'
+/** El CHECK de message_templates.status desde la mig 222: los estados reales que devuelve Meta. */
+export type TemplateStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'paused'
+  | 'disabled'
+  | 'in_appeal'
+  | 'pending_deletion'
 export type ScheduledMessageStatus = 'pending' | 'sent' | 'failed' | 'cancelled'
 
 // Workflow automation types
@@ -109,6 +119,14 @@ export interface Branch {
   timezone: string
   google_review_url?: string | null
   checkin_bg_color: string | null
+  /** Mig 218: ofrecer Menor espera por WhatsApp en esta sucursal (nace apagado). */
+  menor_espera_aviso?: boolean
+  /**
+   * Mig 217: ofrecer «¿No sabés qué hacerte? Pedí asesoría» en la tablet de
+   * check-in de esta sucursal (nace apagado). Lo escribe sólo
+   * `actualizarAsesoriaSucursal` (`@/lib/actions/asesoria`).
+   */
+  asesoria_habilitada: boolean
   created_at: string
   updated_at: string
   /** Presente cuando el query incluye el embed `organizations(name, logo_url)` (p. ej. getPublicBranches). */
@@ -198,8 +216,13 @@ export interface Client {
   instagram: string | null
   created_at: string
   updated_at: string
-  /** Embed de `client_loyalty_state`. tier_code / visits_in_window: programa de fidelización (mig 196). */
-  loyalty?: { total_visits: number; tier_code?: string | null; visits_in_window?: number }[]
+  /**
+   * Embed de `client_loyalty_state`. tier_code / visits_in_window: programa de
+   * fidelización (mig 196). PostgREST lo trae como OBJETO (UNIQUE client_id, 1:1),
+   * no como lista: leelo SIEMPRE con `leerLoyaltyEmbed` (src/lib/loyalty-embed.ts).
+   * El tipo admite las dos formas a propósito, para que `loyalty?.[0]` no compile.
+   */
+  loyalty?: LoyaltyEmbed | LoyaltyEmbed[] | null
   visits?: { count: number }[]
 }
 
@@ -297,6 +320,46 @@ export interface QueueEntry {
   paused_at: string | null
   /** Migración 101: segundos acumulados en pausa durante este corte. */
   paused_duration_seconds: number
+  /**
+   * Mig 218: cuándo el cliente aceptó por WhatsApp pasarse a Menor espera.
+   * `claim_next_for_barber` NO la resetea (is_dynamic sí): es la del chip «Por
+   * WhatsApp». Desde la mig 222, asignarle un barbero concreto mientras espera
+   * la borra junto con `menor_espera_barbero_original_id` (trigger
+   * trg_queue_entry_menor_espera_marca); la medición vive en
+   * fila_ofertas_menor_espera. Opcional: no existe hasta aplicar la 218.
+   */
+  dynamic_via_whatsapp_at?: string | null
+  /**
+   * Mig 218: el barbero que esperaba cuando aceptó pasarse a Menor espera. SIN
+   * FK (Known Risk #15): no se embebe, se cruza en memoria. Mientras la entrada
+   * siga `waiting` en el pool, el panel la muestra también en la «Mi fila» de
+   * este barbero, en su lugar («conservás tu lugar»).
+   */
+  menor_espera_barbero_original_id?: string | null
+  /**
+   * Mig 217: el cliente pidió asesoría sin costo en la tablet (no sabe qué
+   * hacerse). Normalmente con `service_id` NULL: la eligió EN VEZ de un servicio.
+   * Sólo se prende (check-in o «Mi turno»), nunca se apaga.
+   */
+  pidio_asesoria: boolean
+  /**
+   * Mig 217: cuándo el barbero de la entrada confirmó el pop-up de asesoría
+   * (`marcarAsesoriaVista`). NULL con `pidio_asesoria` y status `in_progress` =
+   * el pop-up se le vuelve a mostrar. Quién la confirmó es el `barber_id` de la
+   * entrada: no hay columna «vista por» (Known Risk #15, sin otra FK a staff).
+   */
+  asesoria_vista_at: string | null
+  /** Mig 211: cuándo salió de la fila (lo estampa el trigger si no viene). */
+  cancelled_at: string | null
+  /** Mig 211: staff que la sacó. SIN FK (Known Risk #15). NULL = proceso automático. */
+  cancelled_by: string | null
+  /**
+   * Mig 211/217: por qué salió de la fila. Valores conocidos: `no_show` (la X),
+   * `expired_overnight` (cron), `moved_to_other_branch`, `break_cancelado`,
+   * `cuenta_eliminada` (mig 215), `solo_asesoria` (se asesoró y no se hizo
+   * ningún servicio: cierre SIN visita, mig 217) y `desconocido_pre_211`.
+   */
+  cancel_reason: string | null
   created_at: string
   client?: Client
   barber?: Staff
@@ -416,6 +479,10 @@ export interface AppSettings {
   review_message_template: string | null
   wa_api_url: string | null
   checkin_bg_color: string
+  /** Mig 218: minutos de espera a partir de los cuales se ofrece Menor espera por WhatsApp (20..120). */
+  menor_espera_minutos?: number
+  /** Mig 218: nombre de la plantilla de Meta del aviso (default `fila_menor_espera`). */
+  menor_espera_plantilla?: string
   updated_at: string
 }
 

@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
-import { Toaster } from "@/components/ui/sonner"
+import { ToasterRaiz } from "@/components/ui/toaster-raiz"
 import "./globals.css"
 
 const geistSans = Geist({
@@ -56,7 +56,9 @@ export default function RootLayout({
     <html lang="es" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`} suppressHydrationWarning>
         {children}
-        <Toaster />
+        {/* En /barbero no: el panel monta su propio Toaster dentro de la caja que
+            se gira 180° (GiroPanelRaiz). Dos Toaster duplicarían cada aviso. */}
+        <ToasterRaiz />
       </body>
     </html>
   )

@@ -1,5 +1,3 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
-
 /** Lo que sale de comprimir: los bytes y con qué tipo hay que subirlos. */
 export interface ImagenComprimida {
   blob: Blob
@@ -67,45 +65,95 @@ export async function compressToWebP(
   }
 }
 
-/** Extensión que corresponde a un content-type de imagen. */
-export function extensionDe(contentType: string): string {
-  const sub = contentType.split('/')[1]?.split(';')[0] ?? 'bin'
-  return sub === 'jpeg' ? 'jpg' : sub
-}
+// ─── Fotos del corte ────────────────────────────────────────────────────────
 
-export async function uploadVisitPhotos(
-  supabase: SupabaseClient,
-  visitId: string,
-  imagenes: ImagenComprimida[]
-): Promise<string[]> {
-  const paths: string[] = []
-  for (const img of imagenes) {
-    // El nombre sigue al tipo REAL. Antes todo se llamaba `.webp` aunque los
-    // bytes fueran PNG, y el `contentType` declarado tampoco coincidía: en el
-    // bucket quedaron archivos `.webp` servidos como `image/png`.
-    const filename = `${crypto.randomUUID()}.${extensionDe(img.contentType)}`
-    const path = `${visitId}/${filename}`
-    const { error } = await supabase.storage
-      .from('visit-photos')
-      .upload(path, img.blob, {
-        contentType: img.contentType,
-        cacheControl: '31536000',
-      })
-    if (error) {
-      console.error('[uploadVisitPhotos]', error.message)
-      continue
+/** Resultado de comprimir una foto del corte: o los bytes listos para subir, o por qué no. */
+export type FotoDeCorteComprimida =
+  | { ok: true; blob: Blob; contentType: 'image/webp' | 'image/jpeg'; ancho: number; alto: number }
+  | { ok: false; motivo: 'formato' | 'pesada' }
+
+/** Codifica el canvas; null si el navegador no pudo. */
+function codificar(canvas: HTMLCanvasElement, tipo: string, calidad: number): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    try {
+      canvas.toBlob((b) => resolve(b), tipo, calidad)
+    } catch {
+      resolve(null)
     }
-    paths.push(path)
-  }
-  return paths
+  })
 }
 
-export function getPhotoUrl(
-  supabase: SupabaseClient,
-  path: string
-): string {
-  const { data } = supabase.storage.from('visit-photos').getPublicUrl(path)
-  return data.publicUrl
+/**
+ * Comprime una foto del corte para subirla. Es distinta de `compressToWebP` a
+ * propósito, y NO la reemplaza (esa la usan premios, campañas, avatares y
+ * comprobantes, donde un PNG con transparencia tiene que seguir siendo PNG):
+ *
+ *   · **WebP y, si el navegador no lo codifica, JPEG 0,82.** Safari (el iPhone
+ *     del barbero que escanea el QR) no codifica WebP y `toBlob` caía a PNG:
+ *     las dos fotos del 27/8/2026 pesaban 2,0 y 2,1 MB. En JPEG son ~250 KB.
+ *   · **Si la imagen no se puede decodificar (un HEIC desde una Mac), NO se
+ *     sube nada** y se dice por qué. Subir el original sólo servía para que el
+ *     servidor o el bucket lo rechazaran después, en silencio.
+ *   · **Respeta la orientación de la cámara (EXIF) y nunca endereza nada más.**
+ *     Con el panel girado 180° la foto igual sale derecha: la toma la cámara
+ *     nativa con la tablet en la mano (ver src/lib/giro-panel/camara.ts).
+ *   · El canvas descarta el EXIF al recodificar, incluido el GPS del celular.
+ */
+export async function comprimirFotoDeCorte(
+  archivo: File | Blob,
+  opciones: { ladoMaximo?: number; calidad?: number; bytesMaximos?: number } = {},
+): Promise<FotoDeCorteComprimida> {
+  const ladoMaximo = opciones.ladoMaximo ?? 1600
+  const calidad = opciones.calidad ?? 0.82
+  const bytesMaximos = opciones.bytesMaximos ?? 4 * 1024 * 1024
+
+  let bitmap: ImageBitmap | null = null
+  try {
+    bitmap = await createImageBitmap(archivo, { imageOrientation: 'from-image' })
+  } catch {
+    try {
+      // Navegadores que no aceptan el diccionario de opciones.
+      bitmap = await createImageBitmap(archivo)
+    } catch {
+      bitmap = null
+    }
+  }
+  if (!bitmap) return { ok: false, motivo: 'formato' }
+
+  try {
+    // Dos intentos: el normal y, si todavía pesa de más, uno más chico.
+    for (const [lado, q] of [[ladoMaximo, calidad], [Math.round(ladoMaximo * 0.75), Math.min(calidad, 0.7)]] as const) {
+      const ratio = Math.min(lado / bitmap.width, lado / bitmap.height, 1)
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(bitmap.width * ratio))
+      canvas.height = Math.max(1, Math.round(bitmap.height * ratio))
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return { ok: false, motivo: 'formato' }
+      // Fondo blanco: una foto no lleva transparencia y JPEG la pintaría negra.
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+
+      let blob = await codificar(canvas, 'image/webp', q)
+      if (!blob || blob.type !== 'image/webp') blob = await codificar(canvas, 'image/jpeg', q)
+      if (!blob || (blob.type !== 'image/webp' && blob.type !== 'image/jpeg')) return { ok: false, motivo: 'formato' }
+
+      if (blob.size <= bytesMaximos) {
+        return {
+          ok: true,
+          blob,
+          contentType: blob.type as 'image/webp' | 'image/jpeg',
+          ancho: canvas.width,
+          alto: canvas.height,
+        }
+      }
+    }
+    return { ok: false, motivo: 'pesada' }
+  } catch {
+    return { ok: false, motivo: 'formato' }
+  } finally {
+    bitmap.close()
+  }
 }
 
 // La subida del avatar del barbero se mudó a `src/lib/actions/uploads.ts`.

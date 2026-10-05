@@ -5,6 +5,7 @@ import { AlertDialog as AlertDialogPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { useContenedorPortal } from "@/components/ui/contenedor-portal"
 
 function AlertDialog({
   ...props
@@ -21,10 +22,18 @@ function AlertDialogTrigger({
 }
 
 function AlertDialogPortal({
+  container,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Portal>) {
+  // En el panel del barbero, #giro-portales (gira con el panel 180°); en el
+  // resto de la app no hay contexto y Radix usa <body>, como siempre.
+  const capa = useContenedorPortal()
   return (
-    <AlertDialogPrimitive.Portal data-slot="alert-dialog-portal" {...props} />
+    <AlertDialogPrimitive.Portal
+      data-slot="alert-dialog-portal"
+      container={container ?? capa ?? undefined}
+      {...props}
+    />
   )
 }
 
@@ -36,7 +45,13 @@ function AlertDialogOverlay({
     <AlertDialogPrimitive.Overlay
       data-slot="alert-dialog-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/50 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+        // z-[110]: el mismo plano que Dialog. En z-50, un AlertDialog abierto
+        // DESDE un Dialog (Gestionar barberos → Desactivar) quedaba debajo del
+        // overlay del Dialog: no se podía tocar ni cerrar y la tablet se
+        // congelaba. Con el mismo z-index manda el orden del DOM, y el que se
+        // abre después queda arriba. Select, DropdownMenu y Popover (z-[110],
+        // portaleados después) siguen saliendo por encima.
+        "fixed inset-0 z-[110] bg-black/50 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
         className
       )}
       {...props}
@@ -51,6 +66,10 @@ function AlertDialogContent({
 }: React.ComponentProps<typeof AlertDialogPrimitive.Content> & {
   size?: "default" | "sm"
 }) {
+  // Sin el filtro de avisos de Dialog/Sheet (ignorar-avisos.ts): Radix ya ignora
+  // en un AlertDialog todo toque afuera (ni siquiera acepta los handlers), así
+  // que tocar la X o el "Reintentar" de un aviso no lo cierra. Que el toque
+  // llegue al aviso lo resuelve globals.css.
   return (
     <AlertDialogPortal>
       <AlertDialogOverlay />
@@ -58,7 +77,8 @@ function AlertDialogContent({
         data-slot="alert-dialog-content"
         data-size={size}
         className={cn(
-          "group/alert-dialog-content fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 data-[size=sm]:max-w-xs data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[size=default]:sm:max-w-lg",
+          // z-[110]: ver AlertDialogOverlay.
+          "group/alert-dialog-content fixed top-[50%] left-[50%] z-[110] grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 data-[size=sm]:max-w-xs data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[size=default]:sm:max-w-lg",
           className
         )}
         {...props}

@@ -29,9 +29,14 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { createClient } from '@/lib/supabase/client'
-import { cancelQueueEntry, updateQueueOrder, createBreakEntry, startService, checkinClient } from '@/lib/actions/queue'
+import { cancelQueueEntry, updateQueueOrder, createBreakEntry, startService, checkinClient, cerrarSoloAsesoria } from '@/lib/actions/queue'
+import { asesoriaHabilitadaEnSucursal, type MotivoPedidoAsesoria } from '@/lib/actions/asesoria'
 import { searchClients } from '@/lib/actions/clients'
-import { CompleteServiceDialog } from '@/components/barber/complete-service-dialog'
+import { CompleteServiceDialog, hayQueAnunciarCobro } from '@/components/barber/complete-service-dialog'
+import { AsesoriaBadge } from '@/components/barber/asesoria-badge'
+import { RecargaPorVersion } from '@/components/recarga-por-version'
+import { avisarYRecargarPorVersion, esErrorDeVersion, TEXTO_RECARGA_MANUAL } from '@/lib/recarga-version'
+import { descartarFotosDelCobro } from '@/stores/fotos-corte-store'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,7 +51,7 @@ import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { TurnoBadge } from '@/components/appointments/turno-badge'
 import type { Appointment, QueueEntry, StaffStatus, StaffSchedule, Staff, BreakConfig, Service } from '@/lib/types/database'
-import { isBarberBlockedByShiftEnd } from '@/lib/barber-utils'
+import { esMovidaPorWhatsApp, isBarberBlockedByShiftEnd } from '@/lib/barber-utils'
 import { appointmentTimeLabel, findNextAppointment, type NextAppointmentInfo } from '@/lib/queue-appointments'
 import { getLocalDateStr } from '@/lib/time-utils'
 import { Button } from '@/components/ui/button'
@@ -69,10 +74,11 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Clock, User, Scissors, X, Pause, GripVertical, Zap, UserPlus, Play, Check, ChevronDown, Search, FileEdit, ExternalLink, Sparkles, Info, CalendarClock } from 'lucide-react'
+import { Clock, User, Scissors, X, Pause, GripVertical, Zap, UserPlus, Play, Check, ChevronDown, Search, FileEdit, ExternalLink, Sparkles, Info, CalendarClock, MessageCircle, MessageCircleQuestionMark } from 'lucide-react'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -104,6 +110,31 @@ interface FilaClientProps {
 type ColumnId = string // 'breaks', 'dynamic', or barber.id
 
 /**
+ * Valor del desplegable de servicio del registro manual que significa «pidió
+ * asesoría» (mig 217). Como en la tablet, la asesoría REEMPLAZA al servicio:
+ * se manda `asesoria=1` y ningún `service_id`.
+ */
+const OPCION_ASESORIA = '__asesoria__'
+
+/**
+ * Una acción del tablero falló porque esta pestaña quedó con el bundle de un
+ * deploy anterior (la PC del mostrador queda abierta todo el día): reintentar
+ * no sirve, la acción ya no existe en el servidor. Avisa y recarga
+ * (src/lib/recarga-version.ts) y devuelve true; false = no era eso.
+ */
+function recargarSiEsVersion(e: unknown): boolean {
+  if (!esErrorDeVersion(e)) return false
+  if (!avisarYRecargarPorVersion()) toast.error(TEXTO_RECARGA_MANUAL, { id: 'recarga-manual' })
+  return true
+}
+
+/** Una acción que no volvió (la red o un deploy nuevo): se dice, nunca en silencio. */
+function avisarAccionFallida(e: unknown, texto: string) {
+  console.error('[fila]', texto, e)
+  if (!recargarSiEsVersion(e)) toast.error(texto)
+}
+
+/**
  * Detección de colisiones personalizada para el kanban horizontal.
  * Prioriza pointerWithin (el puntero está DENTRO de un droppable) para que
  * arrastrar a una fila vacía funcione correctamente. Si no hay coincidencia
@@ -122,6 +153,31 @@ const kanbanCollisionDetection: CollisionDetection = (args) => {
   return closestCenter(args)
 }
 
+// ─── Asesoría en el registro manual ──────────────────────────────────────────
+
+/** «Pidió asesoría» al pie del desplegable de servicio del registro (mig 217). */
+function OpcionAsesoriaDelRegistro() {
+  return (
+    <>
+      <SelectSeparator />
+      <SelectItem value={OPCION_ASESORIA}>
+        <MessageCircleQuestionMark className="text-fuchsia-300" aria-hidden />
+        Pidió asesoría · sin costo
+      </SelectItem>
+    </>
+  )
+}
+
+/** Qué pasa con un cliente anotado pidiendo asesoría, dicho debajo del desplegable. */
+function AyudaAsesoriaDelRegistro() {
+  return (
+    <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+      <MessageCircleQuestionMark className="mt-px size-3.5 shrink-0 text-fuchsia-300" aria-hidden />
+      No sabe qué hacerse: le avisamos en el panel del barbero y él elige el servicio al cobrar.
+    </p>
+  )
+}
+
 // ─── Sortable QueueCard ────────────────────────────────────────────────────────
 
 interface QueueCardProps {
@@ -132,6 +188,8 @@ interface QueueCardProps {
   actionLoading: string | null
   selectedBranchId: string | null
   getBranchName: (id: string) => string
+  /** Nombre de un barbero por id (para "esperaba a X" de Menor espera por WhatsApp). */
+  getBarberName?: (id: string) => string | undefined
   timezone: string
 }
 
@@ -143,6 +201,7 @@ function QueueCard({
   actionLoading,
   selectedBranchId,
   getBranchName,
+  getBarberName,
   timezone,
 }: QueueCardProps) {
   // Los turnos no se arrastran. `handleDragEnd` renumera y reescribe
@@ -175,6 +234,16 @@ function QueueCard({
 
   const isBreak = entry.is_break
   const displayName = isBreak ? 'Descanso' : (entry.client?.name ?? 'Cliente')
+  // Mig 218: aceptó por WhatsApp pasarse a Menor espera y sigue en el pool. La
+  // recepción tiene que saber a quién esperaba: conservó su lugar en la fila de
+  // ese barbero, que lo sigue viendo en su panel y lo puede tomar primero.
+  const viaWhatsApp = esMovidaPorWhatsApp(entry)
+  const esperabaA =
+    viaWhatsApp && entry.menor_espera_barbero_original_id
+      ? getBarberName?.(entry.menor_espera_barbero_original_id)
+      : undefined
+  // Mig 217: pidió asesoría sin costo en la tablet (no sabe qué hacerse).
+  const pidioAsesoria = !isBreak && entry.pidio_asesoria === true
 
   function explainNoDrag() {
     toast.info('Los turnos se mueven desde la agenda, no desde la fila', {
@@ -294,6 +363,31 @@ function QueueCard({
               <span className="truncate">{formatElapsed(entry.checked_in_at)}</span>
             </span>
           </div>
+          {/* Renglón propio y no un chip más en la línea de arriba: esa línea ya
+              va al límite de ancho (teléfono, sucursal, espera) y lo truncaría.
+              Asesoría y «Por WhatsApp» comparten el renglón y bajan solos si no
+              entran juntos. */}
+          {(pidioAsesoria || viaWhatsApp) && (
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
+              {pidioAsesoria && (
+                <span
+                  className="inline-flex"
+                  title="Pidió asesoría sin costo: no sabe qué hacerse. El barbero lo ve al empezar a atenderlo."
+                >
+                  <AsesoriaBadge tono="oscuro" />
+                </span>
+              )}
+              {viaWhatsApp && (
+                <span
+                  className="flex w-fit max-w-full items-start gap-1 rounded bg-sky-500/10 px-1.5 py-px text-[10px] font-medium leading-tight text-sky-300"
+                  title="Aceptó pasarse a Menor espera desde el aviso de WhatsApp. Conserva su lugar en la fila."
+                >
+                  <MessageCircle className="mt-px size-2.5 shrink-0" aria-hidden />
+                  <span>Por WhatsApp{esperabaA ? ` · esperaba a ${esperabaA}` : ''}</span>
+                </span>
+              )}
+            </div>
+          )}
           {isAppointment && (
             <a
               href="/dashboard/turnos/agenda"
@@ -361,6 +455,9 @@ function InProgressCard({
 }) {
   const isBreak = entry.is_break
   const displayName = isBreak ? 'Descanso' : (entry.client?.name ?? 'Cliente')
+  // Mig 217: el sello sigue en curso para que la recepción sepa que el barbero
+  // tiene que elegir el servicio al cobrar (o cerrarla como solo asesoría).
+  const pidioAsesoria = !isBreak && entry.pidio_asesoria === true
 
   return (
     <div className="w-full group relative rounded-xl border border-green-500/30 bg-green-950/20 shadow-md overflow-hidden min-w-0">
@@ -378,6 +475,18 @@ function InProgressCard({
               <Clock className="size-3 shrink-0" />
               <span className="truncate">{entry.started_at ? formatElapsed(entry.started_at) : 'En curso'}</span>
             </span>
+            {pidioAsesoria && (
+              <span
+                className="inline-flex shrink-0"
+                title={
+                  entry.asesoria_vista_at
+                    ? 'Pidió asesoría · su barbero ya vio el aviso'
+                    : 'Pidió asesoría · su barbero todavía no confirmó el aviso'
+                }
+              >
+                <AsesoriaBadge tono="oscuro" />
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -679,18 +788,22 @@ function DynamicColumn({
   entries,
   formatElapsed,
   onCancel,
+  onStartService,
   actionLoading,
   selectedBranchId,
   getBranchName,
+  getBarberName,
   timezone,
 }: {
   id: ColumnId
   entries: QueueEntry[]
   formatElapsed: (ts: string) => string
   onCancel: (id: string) => void
+  onStartService?: (entry: QueueEntry) => void
   actionLoading: string | null
   selectedBranchId: string | null
   getBranchName: (id: string) => string
+  getBarberName?: (id: string) => string | undefined
   timezone: string
 }) {
   const { setNodeRef } = useSortable({
@@ -719,9 +832,11 @@ function DynamicColumn({
               entry={entry}
               formatElapsed={formatElapsed}
               onCancel={onCancel}
+              onStartService={onStartService}
               actionLoading={actionLoading}
               selectedBranchId={selectedBranchId}
               getBranchName={getBranchName}
+              getBarberName={getBarberName}
               timezone={timezone}
             />
           ))}
@@ -963,6 +1078,9 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
   const [searchServiceId, setSearchServiceId] = useState('')
   const [searchBarberId, setSearchBarberId] = useState(DYNAMIC_BARBER)
   const [searchCheckinLoading, setSearchCheckinLoading] = useState(false)
+  // Asesoría (mig 217): el interruptor de la sucursal elegida, leído al abrir el
+  // registro. Guarda de qué sucursal es: cambiar de sucursal no hereda el valor.
+  const [asesoriaSucursal, setAsesoriaSucursal] = useState<{ branchId: string; habilitada: boolean } | null>(null)
 
   const supabase = useMemo(() => createClient(), [])
 
@@ -983,6 +1101,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       .from('queue_entries')
       // Embeds por nombre de constraint (Known Risk #15): con dos FKs a `staff`,
       // PostgREST rechaza la query entera con PGRST201 y esto devolvía null.
+      // El `*` trae `pidio_asesoria` y `asesoria_vista_at` (mig 217) sin
+      // consultas extra: el sello de asesoría sale de la misma fila.
       .select('*, client:clients!queue_entries_client_id_fkey(id, name, phone), barber:staff!queue_entries_barber_id_fkey(id, full_name, avatar_url)')
       .eq('organization_id', orgId)
       .in('status', ['waiting', 'in_progress'])
@@ -1031,7 +1151,18 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
           .select('*')
           .eq('day_of_week', localDow)
           .eq('is_active', true),
-        supabase.from('app_settings').select('shift_end_margin_minutes').maybeSingle(),
+        // Por organización: `app_settings` se lee entera con cualquier rol (policy
+        // `settings_anon_read`), una fila por org. Sin el filtro `.maybeSingle()`
+        // recibía 14 filas, devolvía error y el tablero usaba el margen de fin de
+        // turno por defecto (35) donde Monaco configuró 15: marcaba "Fin de turno"
+        // 20 minutos antes de tiempo.
+        supabase
+          .from('app_settings')
+          .select('shift_end_margin_minutes')
+          .eq('organization_id', orgId)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
         supabase
           .from('visits')
           .select('barber_id')
@@ -1051,6 +1182,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       ])
 
     if (schedRes.data) setSchedules(schedRes.data as StaffSchedule[])
+    if (settingsRes.error) console.error('[fila] app_settings:', settingsRes.error.message)
     if (settingsRes.data) {
       const margin = (settingsRes.data as { shift_end_margin_minutes?: number })
         .shift_end_margin_minutes
@@ -1069,7 +1201,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       })
       setLatestAttendance(latest)
     }
-  }, [supabase, timezone])
+  }, [supabase, timezone, orgId])
 
   /**
    * Agenda del día de las sucursales visibles. Se usa sólo para anunciar el
@@ -1162,6 +1294,94 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       .then(({ data }) => { if (data) setServices(data as Service[]) })
   }, [supabase])
 
+  // ── Asesoría en el registro manual (mig 217) ──────────────────────────────
+  // «Pidió asesoría» se ofrece sólo si la sucursal la tiene prendida, igual que
+  // en la tablet. Se pregunta cada vez que se abre un registro (el dueño la
+  // prende y apaga desde Configuración). Falla CERRADA: sin el interruptor
+  // confirmado no se ofrece, y el servidor la vuelve a validar al anotar.
+  const dialogoDeAltaAbierto = manualDialogOpen || searchDialogOpen
+  useEffect(() => {
+    if (!dialogoDeAltaAbierto || !selectedBranchId) return
+    let vigente = true
+    asesoriaHabilitadaEnSucursal(selectedBranchId)
+      .then((habilitada) => {
+        if (vigente) setAsesoriaSucursal({ branchId: selectedBranchId, habilitada })
+      })
+      .catch((e: unknown) => {
+        console.error('[fila] interruptor de asesoría', e)
+        if (vigente) setAsesoriaSucursal({ branchId: selectedBranchId, habilitada: false })
+      })
+    return () => {
+      vigente = false
+    }
+  }, [dialogoDeAltaAbierto, selectedBranchId])
+  const asesoriaDisponible =
+    !!selectedBranchId && asesoriaSucursal?.branchId === selectedBranchId && asesoriaSucursal.habilitada
+  // Lo elegido en cada desplegable, sin una «asesoría» que la sucursal ya no ofrece.
+  const servicioManual =
+    manualForm.serviceId === OPCION_ASESORIA && !asesoriaDisponible ? '' : manualForm.serviceId
+  const servicioBuscado = searchServiceId === OPCION_ASESORIA && !asesoriaDisponible ? '' : searchServiceId
+
+  /** Pone el servicio o el pedido de asesoría en el FormData de `checkinClient`. */
+  function cargarServicioOAsesoria(fd: FormData, valor: string): boolean {
+    if (valor === OPCION_ASESORIA) {
+      fd.set('asesoria', '1')
+      return true
+    }
+    if (valor) fd.set('service_id', valor)
+    return false
+  }
+
+  /**
+   * El cliente ya tenía lugar: si pidió asesoría, qué pasó con el pedido.
+   * `asesoriaMotivo` dice por qué NO se sumó (null = se sumó o no la pidió).
+   */
+  function avisarYaEnFila(r: {
+    asesoriaPedida?: boolean
+    asesoriaSumada?: boolean
+    asesoriaMotivo?: MotivoPedidoAsesoria | null
+  }) {
+    const titulo = 'El cliente ya está en la fila'
+    if (r.asesoriaSumada) {
+      toast.info(titulo, { description: 'Sumamos su pedido de asesoría: le avisamos en el panel del barbero.' })
+      return
+    }
+    if (!r.asesoriaPedida) {
+      toast.info(titulo)
+      return
+    }
+    switch (r.asesoriaMotivo) {
+      case 'turno':
+        // Un turno no tiene la salida «solo asesoría»: la marca no se le suma.
+        toast.info(titulo, { description: 'Tiene turno: la asesoría se la pide a su barbero cuando lo atienda.' })
+        return
+      case 'limite':
+        toast.warning(titulo, {
+          description: 'No pudimos sumar su pedido de asesoría: esperá un momento y volvé a intentar.',
+        })
+        return
+      case 'en_curso':
+        toast.info(titulo, { description: 'Ya lo están atendiendo: avisale a su barbero que quiere asesoría.' })
+        return
+      case 'deshabilitada':
+        toast.info(titulo, { description: 'La sucursal tiene la asesoría apagada: avisale a su barbero.' })
+        return
+      default:
+        toast.info(titulo, { description: 'Avisale a su barbero que quiere asesoría.' })
+    }
+  }
+
+  /** Alta hecha. Si pidió asesoría y el servidor la descartó (la apagaron en el medio), se dice. */
+  function avisarAlta(titulo: string, pidioAsesoria: boolean, asesoriaQuedo: boolean) {
+    if (pidioAsesoria && !asesoriaQuedo) {
+      toast.warning(titulo, { description: 'Quedó sin el pedido de asesoría: la sucursal la tiene apagada.' })
+    } else if (pidioAsesoria) {
+      toast.success(titulo, { description: 'Pidió asesoría: le avisamos en el panel del barbero.' })
+    } else {
+      toast.success(titulo)
+    }
+  }
+
   // ── Handlers registro manual ──────────────────────────────────────────────
   const handleManualCheckin = async () => {
     if (!selectedBranchId) {
@@ -1185,18 +1405,30 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     // Alta manual del dashboard: el origen que queda en `clients.signup_source`
     // es 'staff', no la tablet (mig 210).
     fd.set('origen', 'staff')
-    if (manualForm.serviceId) fd.set('service_id', manualForm.serviceId)
+    // La asesoría reemplaza al servicio, como en la tablet (mig 217).
+    const pideAsesoria = cargarServicioOAsesoria(fd, servicioManual)
     if (manualForm.barberId && manualForm.barberId !== DYNAMIC_BARBER) {
       fd.set('barber_id', manualForm.barberId)
     }
-    const result = await checkinClient(fd)
-    setManualLoading(false)
+    let result: Awaited<ReturnType<typeof checkinClient>>
+    try {
+      result = await checkinClient(fd)
+    } catch (e) {
+      avisarAccionFallida(e, 'No pudimos registrar al cliente. Revisá la conexión y probá de nuevo.')
+      return
+    } finally {
+      setManualLoading(false)
+    }
     if (result.error) {
       toast.error(result.error)
     } else if (result.alreadyInQueue) {
-      toast.info('El cliente ya está en la fila')
+      avisarYaEnFila(result)
     } else {
-      toast.success(manualForm.isSpecial ? 'Cliente especial agregado a la fila' : 'Cliente registrado en la fila')
+      avisarAlta(
+        manualForm.isSpecial ? 'Cliente especial agregado a la fila' : 'Cliente registrado en la fila',
+        pideAsesoria,
+        result.asesoria === true,
+      )
       setManualForm({ phone: '', name: '', serviceId: '', barberId: DYNAMIC_BARBER, isSpecial: false })
       setManualDialogOpen(false)
     }
@@ -1212,8 +1444,15 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     }
     setSearchLoading(true)
     setSearchExecuted(true)
-    const result = await searchClients(trimmed)
-    setSearchLoading(false)
+    let result: Awaited<ReturnType<typeof searchClients>>
+    try {
+      result = await searchClients(trimmed)
+    } catch (e) {
+      avisarAccionFallida(e, 'No pudimos buscar clientes. Revisá la conexión y probá de nuevo.')
+      return
+    } finally {
+      setSearchLoading(false)
+    }
     if (result.error) {
       toast.error(result.error)
     } else {
@@ -1250,18 +1489,25 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     // El cliente ya existe (sale del buscador), así que acá no se crea ninguna
     // ficha; el origen viaja igual por si el alta terminara ocurriendo.
     fd.set('origen', 'staff')
-    if (searchServiceId) fd.set('service_id', searchServiceId)
+    const pideAsesoria = cargarServicioOAsesoria(fd, servicioBuscado)
     if (searchBarberId && searchBarberId !== DYNAMIC_BARBER) {
       fd.set('barber_id', searchBarberId)
     }
-    const result = await checkinClient(fd)
-    setSearchCheckinLoading(false)
+    let result: Awaited<ReturnType<typeof checkinClient>>
+    try {
+      result = await checkinClient(fd)
+    } catch (e) {
+      avisarAccionFallida(e, 'No pudimos registrar al cliente. Revisá la conexión y probá de nuevo.')
+      return
+    } finally {
+      setSearchCheckinLoading(false)
+    }
     if (result.error) {
       toast.error(result.error)
     } else if (result.alreadyInQueue) {
-      toast.info('El cliente ya está en la fila')
+      avisarYaEnFila(result)
     } else {
-      toast.success(`${client.name} registrado en la fila`)
+      avisarAlta(`${client.name} registrado en la fila`, pideAsesoria, result.asesoria === true)
       setSearchQuery('')
       setSearchResults([])
       setSelectedSearchClient(null)
@@ -1470,14 +1716,19 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
 
         const branchId = selectedBranchId || config.branch_id
         setActionLoading('creating-break')
-        const result = await createBreakEntry(branchId, targetColId, config.name)
-        if ('error' in result) {
-          toast.error(result.error)
-        } else {
-          toast.success('Descanso asignado al barbero')
+        try {
+          const result = await createBreakEntry(branchId, targetColId, config.name)
+          if ('error' in result) {
+            toast.error(result.error)
+          } else {
+            toast.success('Descanso asignado al barbero')
+          }
+        } catch (e) {
+          avisarAccionFallida(e, 'No pudimos asignar el descanso. Probá de nuevo.')
+        } finally {
+          await fetchQueue()
+          setActionLoading(null)
         }
-        await fetchQueue()
-        setActionLoading(null)
       }
       return
     }
@@ -1645,13 +1896,22 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       confirmedEntriesRef.current = locallyUpdated
 
       // Fire-and-forget: la UI ya está actualizada, no bloquear el drag
-      updateQueueOrder(updates).then((result) => {
-        if ('error' in result) {
-          toast.error(result.error)
+      updateQueueOrder(updates).then(
+        (result) => {
+          if ('error' in result) {
+            toast.error(result.error)
+            setEntries(originalEntries)
+            confirmedEntriesRef.current = originalEntries
+          }
+        },
+        (e: unknown) => {
+          // Sin respuesta: el orden de la pantalla no está confirmado. Se vuelve
+          // al anterior y se dice (antes quedaba el optimista sin avisar).
+          avisarAccionFallida(e, 'No pudimos guardar el nuevo orden de la fila. Probá de nuevo.')
           setEntries(originalEntries)
           confirmedEntriesRef.current = originalEntries
-        }
-      })
+        },
+      )
     } else {
       setEntries(finalEntries)
     }
@@ -1681,11 +1941,64 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
   async function doCancel(entryId: string) {
     const isBreak = entries.find((e) => e.id === entryId)?.is_break ?? false
     setActionLoading(entryId)
-    const result = await cancelQueueEntry(entryId, { allowInProgress: true })
-    if ('error' in result) toast.error(result.error)
-    else toast.success(isBreak ? 'Descanso cancelado' : 'Turno cancelado')
-    await fetchQueue()
-    setActionLoading(null)
+    try {
+      const result = await cancelQueueEntry(entryId, { allowInProgress: true })
+      if ('error' in result) toast.error(result.error)
+      else toast.success(isBreak ? 'Descanso cancelado' : 'Turno cancelado')
+    } catch (e) {
+      avisarAccionFallida(e, 'No pudimos sacarlo de la fila. Revisá la conexión y probá de nuevo.')
+    } finally {
+      await fetchQueue()
+      setActionLoading(null)
+    }
+  }
+
+  /**
+   * «Solo asesoría» desde la X de un corte en curso (mig 217): si el cliente se
+   * asesoró y no se hizo nada, la entrada se cierra SIN visita y queda anotada
+   * como asesoría (`cancel_reason = 'solo_asesoria'`), no como un corte
+   * cancelado. Es la misma acción que el cobro ofrece al barbero.
+   */
+  async function doCerrarSoloAsesoria(entryId: string) {
+    setActionLoading(entryId)
+    try {
+      const r = await cerrarSoloAsesoria(entryId)
+      if ('error' in r) {
+        // Entre otros, «No tenés acceso a esta sucursal.» (fuera del alcance del rol).
+        toast.error(r.error)
+      } else {
+        // Las fotos de ese corte no van a ninguna ficha. El servidor ya intentó
+        // borrarlas; esto lo reintenta (también lo que subió el celular), suelta
+        // lo que este dispositivo tuviera del cobro y avisa con Reintentar sólo
+        // si vuelve a fallar.
+        //
+        // El `aviso` del servidor (es sobre esas fotos) se muestra recién cuando
+        // el reintento termina, y sólo si el reintento no lo dijo ni lo resolvió:
+        // si borró algo, lo que había quedado ya está resuelto; si falló, ya hay
+        // un aviso persistente con Reintentar y serían dos por lo mismo. Queda el
+        // caso que el reintento no ve: el servidor borró las filas pero no los
+        // archivos, y sin filas no hay nada que reintentar desde acá.
+        const avisoDelServidor = r.aviso
+        if (avisoDelServidor) console.warn('[fila] cerrarSoloAsesoria con aviso (lo reintenta descartarFotosDelCobro):', avisoDelServidor)
+        void descartarFotosDelCobro(entryId).then((descarte) => {
+          if (avisoDelServidor && descarte.quitadas === 0 && descarte.fallidas === 0) {
+            toast.warning(avisoDelServidor, { duration: 12000 })
+          }
+        })
+        toast.success('Asesoría cerrada sin cobro', {
+          description: r.yaCerrada
+            ? 'Ya se había cerrado desde otro dispositivo.'
+            : r.breakAutoStarted
+              ? 'Arrancó el descanso pendiente del barbero.'
+              : undefined,
+        })
+      }
+    } catch (e) {
+      avisarAccionFallida(e, 'No pudimos cerrar la asesoría. Revisá la conexión y probá de nuevo.')
+    } finally {
+      await fetchQueue()
+      setActionLoading(null)
+    }
   }
 
   async function handleStartService(entry: QueueEntry) {
@@ -1697,11 +2010,16 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       return
     }
     setActionLoading(entry.id)
-    const result = await startService(entry.id, entry.barber_id)
-    if ('error' in result) toast.error(result.error)
-    else toast.success('Corte iniciado')
-    await fetchQueue()
-    setActionLoading(null)
+    try {
+      const result = await startService(entry.id, entry.barber_id)
+      if ('error' in result) toast.error(result.error)
+      else toast.success('Corte iniciado')
+    } catch (e) {
+      avisarAccionFallida(e, 'No pudimos iniciar el corte. Revisá la conexión y probá de nuevo.')
+    } finally {
+      await fetchQueue()
+      setActionLoading(null)
+    }
   }
 
   function handleCompleteService(entry: QueueEntry) {
@@ -1720,6 +2038,27 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
   function getBranchName(branchId: string) {
     return branches.find((b) => b.id === branchId)?.name ?? ''
   }
+
+  function getBarberName(barberId: string) {
+    return liveBarbers.find((b) => b.id === barberId)?.full_name
+  }
+
+  // Cliente del pool que se pasó desde el aviso de WhatsApp (mig 218): el
+  // selector "¿Quién lo atiende?" dice a quién esperaba y lo marca en la lista,
+  // porque conservó su lugar en la fila de ese barbero.
+  // Un corte en curso que pidió asesoría (y no es un turno): la X ofrece además
+  // cerrarlo como «solo asesoría», que es lo que pasó si no se hizo nada.
+  const cancelarAsesoriaEnCurso =
+    cancelConfirmEntry?.status === 'in_progress' &&
+    cancelConfirmEntry.pidio_asesoria === true &&
+    !cancelConfirmEntry.appointment_id &&
+    !cancelConfirmEntry.is_break
+
+  const asignarViaWhatsApp = !!asignarBarberoEntry && esMovidaPorWhatsApp(asignarBarberoEntry)
+  const asignarEsperabaA =
+    asignarViaWhatsApp && asignarBarberoEntry?.menor_espera_barbero_original_id
+      ? getBarberName(asignarBarberoEntry.menor_espera_barbero_original_id)
+      : undefined
 
   const dropAnimation = {
     duration: 250,
@@ -1748,6 +2087,10 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
         fetchQueue() // reset visual state
       }}
     >
+      {/* La PC del mostrador queda en esta pantalla todo el día: después de un
+          deploy se recarga sola cuando está ociosa (sin diálogos abiertos, sin
+          nada escrito a medias, un minuto sin tocarla). Ver src/lib/recarga-version.ts. */}
+      <RecargaPorVersion superficie="panel" />
       <div className="flex flex-col gap-2 lg:gap-4 p-1 max-md:pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:h-[calc(100dvh-9rem)] lg:h-[calc(100dvh-9.5rem)] md:overflow-hidden">
 
         {/* Encabezado y Descansos (Top Bar) */}
@@ -1863,7 +2206,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
                   <div className="flex flex-col gap-1.5">
                     <Label>Servicio</Label>
                     <Select
-                      value={manualForm.serviceId}
+                      value={servicioManual}
                       onValueChange={(v) => setManualForm((f) => ({ ...f, serviceId: v }))}
                     >
                       <SelectTrigger>
@@ -1877,8 +2220,10 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
                               {s.name}
                             </SelectItem>
                           ))}
+                        {asesoriaDisponible && <OpcionAsesoriaDelRegistro />}
                       </SelectContent>
                     </Select>
+                    {servicioManual === OPCION_ASESORIA && <AyudaAsesoriaDelRegistro />}
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <Label>Barbero</Label>
@@ -1978,7 +2323,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
                       </p>
                       <div className="flex flex-col gap-1.5">
                         <Label>Servicio</Label>
-                        <Select value={searchServiceId} onValueChange={setSearchServiceId}>
+                        <Select value={servicioBuscado} onValueChange={setSearchServiceId}>
                           <SelectTrigger>
                             <SelectValue placeholder="Seleccionar servicio (opcional)" />
                           </SelectTrigger>
@@ -1990,8 +2335,10 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
                                   {s.name}
                                 </SelectItem>
                               ))}
+                            {asesoriaDisponible && <OpcionAsesoriaDelRegistro />}
                           </SelectContent>
                         </Select>
+                        {servicioBuscado === OPCION_ASESORIA && <AyudaAsesoriaDelRegistro />}
                       </div>
                       <div className="flex flex-col gap-1.5">
                         <Label>Barbero</Label>
@@ -2094,14 +2441,20 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
 
             {/* Columna Dinámicos (Sticky a la izquierda) */}
             <div className="md:sticky md:left-0 z-30 flex md:shrink-0 md:shadow-[4px_0_24px_-8px_rgba(0,0,0,0.8)] bg-zinc-950">
+              {/* `onStartService` también acá: el commit 2b42cc5 le agregó a las
+                  tarjetas del pool el botón que abre "¿Quién lo atiende?", pero esta
+                  columna —la única donde viven— nunca recibió el handler, así que el
+                  botón no se dibujaba y lo único posible seguía siendo la X. */}
               <DynamicColumn
                 id="__dynamic__"
                 entries={columnsData['__dynamic__']}
                 formatElapsed={formatElapsed}
                 onCancel={handleCancel}
+                onStartService={handleStartService}
                 actionLoading={actionLoading}
                 selectedBranchId={selectedBranchId}
                 getBranchName={getBranchName}
+                getBarberName={getBarberName}
                 timezone={timezone}
               />
             </div>
@@ -2148,9 +2501,12 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
           entry={completingEntry}
           branchId={completingEntry.branch_id}
           onClose={() => setCompletingEntry(null)}
-          onCompleted={async () => {
+          onCompleted={async (resultado) => {
             setCompletingEntry(null)
-            toast.success('Corte finalizado')
+            // La asesoría cerrada sin cobro, el cobro que ya estaba registrado y
+            // el que no pudo guardar el importe los avisa el diálogo: «Corte
+            // finalizado» sólo para un cobro de ahora que quedó bien.
+            if (hayQueAnunciarCobro(resultado)) toast.success('Corte finalizado')
             await fetchQueue()
           }}
         />
@@ -2172,7 +2528,21 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
               <strong>{asignarBarberoEntry?.client?.name ?? 'El cliente'}</strong> eligió
               &ldquo;Menor espera&rdquo;, así que no tiene barbero asignado. Elegí uno para
               arrancar el corte.
+              {asignarViaWhatsApp && (
+                <>
+                  {' '}Se pasó desde el aviso de WhatsApp
+                  {asignarEsperabaA ? <>: esperaba a <strong>{asignarEsperabaA}</strong>.</> : '.'}
+                </>
+              )}
             </AlertDialogDescription>
+            {/* Mig 217: el panel del barbero elegido le muestra el pedido al
+                empezar (sale del estado de la entrada, no del botón que la inició). */}
+            {asignarBarberoEntry?.pidio_asesoria && (
+              <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <AsesoriaBadge tono="oscuro" />
+                <span>Pidió asesoría: el barbero que elijas ve el aviso al empezar.</span>
+              </p>
+            )}
           </AlertDialogHeader>
           <div className="grid max-h-[45vh] gap-2 overflow-y-auto py-1">
             {filteredBarbers
@@ -2181,6 +2551,9 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
                 const ocupado = entries.some(
                   e => e.barber_id === barbero.id && e.status === 'in_progress'
                 )
+                const loEsperaba =
+                  asignarViaWhatsApp &&
+                  asignarBarberoEntry?.menor_espera_barbero_original_id === barbero.id
                 return (
                   <Button
                     key={barbero.id}
@@ -2192,14 +2565,24 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
                       if (!entry) return
                       setAsignarBarberoEntry(null)
                       setActionLoading(entry.id)
-                      const result = await startService(entry.id, barbero.id)
-                      if ('error' in result) toast.error(result.error)
-                      else toast.success(`Corte iniciado con ${barbero.full_name}`)
-                      await fetchQueue()
-                      setActionLoading(null)
+                      try {
+                        const result = await startService(entry.id, barbero.id)
+                        if ('error' in result) toast.error(result.error)
+                        else toast.success(`Corte iniciado con ${barbero.full_name}`)
+                      } catch (e) {
+                        avisarAccionFallida(e, 'No pudimos iniciar el corte. Revisá la conexión y probá de nuevo.')
+                      } finally {
+                        await fetchQueue()
+                        setActionLoading(null)
+                      }
                     }}
                   >
-                    <span className="flex-1 truncate font-medium">{barbero.full_name}</span>
+                    <span className="flex-1 truncate font-medium">
+                      {barbero.full_name}
+                      {loEsperaba && (
+                        <span className="ml-1.5 text-xs font-normal text-sky-400">· lo esperaba</span>
+                      )}
+                    </span>
                     {ocupado ? (
                       <span className="text-xs text-muted-foreground">atendiendo</span>
                     ) : notClockedInBarbers.has(barbero.id) ? (
@@ -2232,6 +2615,12 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
               {cancelConfirmEntry?.status === 'in_progress' ? (
                 <>
                   <strong>{cancelConfirmEntry?.client?.name ?? 'El cliente'}</strong> ya está siendo atendido. Si lo cancelás, ese corte <strong>no se va a cobrar ni registrar</strong> y saldrá de la fila.
+                  {cancelarAsesoriaEnCurso && (
+                    <>
+                      {' '}Pidió asesoría: si se asesoró y no se hizo nada, cerralo como <strong>solo asesoría</strong> y
+                      queda registrado así, no como un corte cancelado.
+                    </>
+                  )}
                 </>
               ) : (
                 <>
@@ -2242,6 +2631,19 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Volver</AlertDialogCancel>
+            {cancelarAsesoriaEnCurso && (
+              <AlertDialogAction
+                variant="outline"
+                onClick={() => {
+                  const id = cancelConfirmEntry?.id
+                  setCancelConfirmEntry(null)
+                  if (id) void doCerrarSoloAsesoria(id)
+                }}
+              >
+                <MessageCircleQuestionMark className="text-fuchsia-300" aria-hidden />
+                Cerrar como solo asesoría
+              </AlertDialogAction>
+            )}
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => {

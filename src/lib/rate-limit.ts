@@ -86,6 +86,16 @@ export const RateLimits = {
     return rateLimit('kiosk_reassign', `${ip}:${branchId}`, { limit: 10, window: 60 })
   },
 
+  // Sumar «quiere asesoría» a una entrada que YA espera (mig 217): desde «Mi
+  // turno» (pedirAsesoriaDesdeMiTurno) y desde un check-in repetido
+  // (checkinClient / checkinClientByFace). 10 por IP+branch cada 60s: todos los
+  // clientes del local comparten la IP de la tablet, y bucket propio para no
+  // comerle el cupo a los cambios de barbero.
+  kioskAsesoria: async (branchId: string) => {
+    const ip = await getClientIP()
+    return rateLimit('kiosk_asesoria', `${ip}:${branchId}`, { limit: 10, window: 60 })
+  },
+
   // Review submit: 1 por token (tokens son únicos, redundante pero defensa extra)
   reviewSubmit: async (token: string) => {
     return rateLimit('review_submit', token, { limit: 3, window: 300 })
@@ -171,5 +181,26 @@ export const RateLimits = {
   // justo cuando el pago está por acreditarse.
   mobileSenaEstado: async (userId: string) => {
     return rateLimit('mobile_sena_estado', userId, { limit: 60, window: 60 })
+  },
+
+  // ─── Fotos del corte desde el celular (`/upload/[token]`, mig 219) ─────
+  // Página pública: la llave es el token del QR. Los celulares de los barberos
+  // salen por el wifi del local, así que varios comparten IP: los topes por IP
+  // son holgados y el ajustado es el del token.
+
+  // Estado de la sesión: la página pregunta cada 5 s mientras está a la vista.
+  fotosCelularEstado: async () => {
+    const ip = await getClientIP()
+    return rateLimit('fotos_celular_estado', ip, { limit: 60, window: 60 })
+  },
+
+  // Subidas: cada foto son dos llamadas (pedir la URL y confirmar). 12 fotos
+  // con sus reintentos entran de sobra en 60 cada 10 minutos.
+  fotosCelularSubidaPorToken: async (token: string) => {
+    return rateLimit('fotos_celular_subida_token', token, { limit: 60, window: 600 })
+  },
+  fotosCelularSubidaPorIp: async () => {
+    const ip = await getClientIP()
+    return rateLimit('fotos_celular_subida_ip', ip, { limit: 150, window: 600 })
   },
 }

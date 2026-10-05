@@ -5,6 +5,8 @@ import { XIcon } from "lucide-react"
 import { Dialog as SheetPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { useContenedorPortal } from "@/components/ui/contenedor-portal"
+import { ignorandoAvisos } from "@/components/ui/ignorar-avisos"
 
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />
@@ -23,9 +25,19 @@ function SheetClose({
 }
 
 function SheetPortal({
+  container,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Portal>) {
-  return <SheetPrimitive.Portal data-slot="sheet-portal" {...props} />
+  // En el panel del barbero, #giro-portales (gira con el panel 180°); en el
+  // resto de la app no hay contexto y Radix usa <body>, como siempre.
+  const capa = useContenedorPortal()
+  return (
+    <SheetPrimitive.Portal
+      data-slot="sheet-portal"
+      container={container ?? capa ?? undefined}
+      {...props}
+    />
+  )
 }
 
 function SheetOverlay({
@@ -49,6 +61,9 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
+  onPointerDownOutside,
+  onInteractOutside,
+  onFocusOutside,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
@@ -72,6 +87,11 @@ function SheetContent({
           className
         )}
         {...props}
+        // Tocar un aviso (su X, "Reintentar") no cierra la hoja: ver
+        // ignorar-avisos.ts. Primero corre el handler del consumidor.
+        onPointerDownOutside={ignorandoAvisos(onPointerDownOutside)}
+        onInteractOutside={ignorandoAvisos(onInteractOutside)}
+        onFocusOutside={ignorandoAvisos(onFocusOutside)}
       >
         {children}
         {showCloseButton && (

@@ -6,6 +6,8 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { useContenedorPortal } from "@/components/ui/contenedor-portal"
+import { ignorandoAvisos } from "@/components/ui/ignorar-avisos"
 
 function Dialog({
   ...props
@@ -20,9 +22,19 @@ function DialogTrigger({
 }
 
 function DialogPortal({
+  container,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
-  return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />
+  // En el panel del barbero, #giro-portales (gira con el panel 180°); en el
+  // resto de la app no hay contexto y Radix usa <body>, como siempre.
+  const capa = useContenedorPortal()
+  return (
+    <DialogPrimitive.Portal
+      data-slot="dialog-portal"
+      container={container ?? capa ?? undefined}
+      {...props}
+    />
+  )
 }
 
 function DialogClose({
@@ -52,6 +64,9 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  onPointerDownOutside,
+  onInteractOutside,
+  onFocusOutside,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
@@ -66,6 +81,11 @@ function DialogContent({
           className
         )}
         {...props}
+        // Tocar un aviso (su X, "Reintentar") no cierra el diálogo: ver
+        // ignorar-avisos.ts. Primero corre el handler del consumidor.
+        onPointerDownOutside={ignorandoAvisos(onPointerDownOutside)}
+        onInteractOutside={ignorandoAvisos(onInteractOutside)}
+        onFocusOutside={ignorandoAvisos(onFocusOutside)}
       >
         {children}
         {showCloseButton && (

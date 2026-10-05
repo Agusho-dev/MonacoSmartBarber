@@ -17,6 +17,7 @@ import type { ExtractedReceipt } from '@/lib/receipts/schema'
 import type { ReceiptEngine, ReceiptStatus } from '@/lib/types/database'
 import { vibrate, playSuccessBeep, playWarnBeep, primeAudioContext } from '@/lib/barber-feedback'
 import { formatCurrency } from '@/lib/format'
+import { dibujarFrame, framesAlReves, girarImagen180 } from '@/lib/giro-panel/camara'
 
 export interface ReceiptScanResult {
   receiptId: string
@@ -142,17 +143,58 @@ function blobToBase64(blob: Blob): Promise<string> {
   })
 }
 
-function frameToWebp(video: HTMLVideoElement, maxW: number, quality: number): Promise<Blob> {
+/**
+ * `girar180`: con el panel girado por CSS (tablet montada al revés), Chrome
+ * entrega el frame según la rotación del DISPLAY y llega con el mundo al revés.
+ * Se endereza acá para que Tesseract/la IA lean el texto derecho y el admin vea
+ * el comprobante derecho (src/lib/giro-panel/camara.ts).
+ */
+function frameToWebp(video: HTMLVideoElement, maxW: number, quality: number, girar180 = false): Promise<Blob> {
   const vw = video.videoWidth || 1280
   const vh = video.videoHeight || 960
   const ratio = Math.min(maxW / vw, 1)
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(vw * ratio)
   canvas.height = Math.round(vh * ratio)
-  canvas.getContext('2d')!.drawImage(video, 0, 0, canvas.width, canvas.height)
+  dibujarFrame(canvas.getContext('2d')!, video, 0, 0, vw, vh, 0, 0, canvas.width, canvas.height, girar180)
   return new Promise((resolve, reject) =>
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('capture failed'))), 'image/webp', quality),
   )
+}
+
+/**
+ * La IA no leyó NADA del comprobante: ni el monto ni ningún dato con texto
+ * (operación, fecha, nombres, alias). Es la firma de una imagen dada vuelta —o
+ * ilegible—; si leyó algo, la orientación estaba bien y girarla no va a hacer
+ * aparecer el monto (sólo pisaría lo que sí leyó con una lectura vacía).
+ * Banco/canal no cuentan: el modelo los completa a veces sin poder leer.
+ */
+function lecturaVacia(e: ExtractedReceipt | null): boolean {
+  if (!e) return true
+  return (
+    e.amount == null &&
+    !e.operationNumber &&
+    !e.datetime &&
+    !e.senderName &&
+    !e.senderCbuAlias &&
+    !e.recipientName &&
+    !e.recipientCbuAlias
+  )
+}
+
+/** Tesseract en la tablet (motor gratis). `onProgreso` recibe 0..1 mientras reconoce. */
+async function leerConTesseract(blob: Blob, onProgreso: (p: number) => void): Promise<ExtractedReceipt | null> {
+  try {
+    const Tesseract = (await import('tesseract.js')).default
+    const { data } = await Tesseract.recognize(blob, 'spa', {
+      logger: (m: { status: string; progress: number }) => {
+        if (m.status === 'recognizing text') onProgreso(m.progress)
+      },
+    })
+    return parseComprobanteAR(data.text)
+  } catch {
+    return null // → needs_review
+  }
 }
 
 export function ReceiptScanDialog({
@@ -203,7 +245,13 @@ export function ReceiptScanDialog({
 
   // ── Procesa un frame capturado: OCR (si corresponde) + endpoint ──
   const processCapture = useCallback(
-    async (blob: Blob, method: 'front_camera' | 'gallery' | 'qr_upload') => {
+    async (
+      captured: Blob,
+      method: 'front_camera' | 'gallery' | 'qr_upload',
+      /** El frame se enderezó 180° porque el panel estaba girado por CSS. */
+      enderezado = false,
+    ) => {
+      let blob = captured
       setPhase('reading')
       setFrozenUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev)
@@ -213,44 +261,59 @@ export function ReceiptScanDialog({
       stopLoop()
 
       try {
-        const base64 = await blobToBase64(blob)
-
         // Motor GRATIS: Tesseract corre en la tablet, sin costo de servidor.
         let parsed: ExtractedReceipt | null = null
         if (engine === 'ocr') {
           setOcrProgress(0)
-          try {
-            const Tesseract = (await import('tesseract.js')).default
-            const { data } = await Tesseract.recognize(blob, 'spa', {
-              logger: (m: { status: string; progress: number }) => {
-                if (m.status === 'recognizing text') setOcrProgress(m.progress)
-              },
-            })
-            parsed = parseComprobanteAR(data.text)
-          } catch {
-            parsed = null // → needs_review
+          parsed = await leerConTesseract(blob, setOcrProgress)
+          // Red de seguridad del giro: cómo orienta Chrome los frames con la tablet
+          // al revés sale de leer Chromium, no de una prueba en el dispositivo. Si
+          // con el frame enderezado no aparece el monto, se prueba UNA vez con el
+          // frame dado vuelta y, si ahí lo encuentra, se queda con esa versión.
+          if (enderezado && parsed?.amount == null) {
+            try {
+              const girado = await girarImagen180(blob)
+              setOcrProgress(0)
+              const segundo = await leerConTesseract(girado, setOcrProgress)
+              if (segundo?.amount != null) {
+                console.info('[giro] el comprobante se leyó con el frame girado: revisar la orientación de la cámara')
+                blob = girado
+                parsed = segundo
+                setFrozenUrl((prev) => {
+                  if (prev) URL.revokeObjectURL(prev)
+                  return URL.createObjectURL(girado)
+                })
+              }
+            } catch {
+              // sin segundo intento: sigue con lo que se leyó (o needs_review)
+            }
           }
           setOcrProgress(null)
         }
 
-        const res = await fetch('/api/comprobantes/ocr', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            engine,
-            imageBase64: base64,
-            mediaType: 'image/webp',
-            branchId,
-            barberId,
-            expectedAmount,
-            paymentAccountId,
-            clientId,
-            captureMethod: method,
-            parsed,
-            priorReceiptId: priorReceiptId.current,
-            coversGroup: coversGroup === true,
-          }),
-        })
+        // Con priorReceiptId el endpoint ACTUALIZA ese comprobante (todavía sin
+        // visita) en vez de crear otro: así un reintento no deja huérfanos.
+        const enviar = async (imagen: Blob, parsedOcr: ExtractedReceipt | null) =>
+          fetch('/api/comprobantes/ocr', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              engine,
+              imageBase64: await blobToBase64(imagen),
+              mediaType: 'image/webp',
+              branchId,
+              barberId,
+              expectedAmount,
+              paymentAccountId,
+              clientId,
+              captureMethod: method,
+              parsed: parsedOcr,
+              priorReceiptId: priorReceiptId.current,
+              coversGroup: coversGroup === true,
+            }),
+          })
+
+        const res = await enviar(blob, parsed)
 
         if (!res.ok) {
           const j = (await res.json().catch(() => ({}))) as { error?: string; code?: string }
@@ -259,8 +322,40 @@ export function ReceiptScanDialog({
           return
         }
 
-        const json = (await res.json()) as ReceiptScanResult
+        let json = (await res.json()) as ReceiptScanResult
         priorReceiptId.current = json.receiptId
+
+        // Red de seguridad del giro para el motor de IA (la del OCR está arriba):
+        // si con el frame enderezado la IA no leyó nada, se manda UNA vez la
+        // imagen dada vuelta al MISMO comprobante. Cuesta una lectura más y sólo
+        // en este caso. Si tampoco lee, el comprobante queda en revisión con la
+        // imagen girada (el endpoint guarda la última): es el precio de la red,
+        // y casi siempre es una foto ilegible de cualquier lado.
+        if (engine === 'ai' && enderezado && lecturaVacia(json.extracted)) {
+          try {
+            const girado = await girarImagen180(blob)
+            const res2 = await enviar(girado, null)
+            if (res2.ok) {
+              const json2 = (await res2.json()) as ReceiptScanResult
+              priorReceiptId.current = json2.receiptId
+              json = json2
+              if (json2.extracted?.amount != null) {
+                console.info('[giro] el comprobante se leyó con el frame girado: revisar la orientación de la cámara')
+                setFrozenUrl((prev) => {
+                  if (prev) URL.revokeObjectURL(prev)
+                  return URL.createObjectURL(girado)
+                })
+              }
+            } else {
+              // El comprobante quedó como lo guardó la primera lectura (en revisión).
+              console.warn('[giro] el reintento con la imagen girada falló:', res2.status)
+            }
+          } catch (e) {
+            // Sin segundo intento: sigue con la primera lectura (en revisión).
+            console.warn('[giro] no se pudo reintentar con la imagen girada:', e)
+          }
+        }
+
         setResult(json)
         setPhase('result')
 
@@ -282,8 +377,10 @@ export function ReceiptScanDialog({
     if (!video || video.readyState < 2) return
     stopLoop()
     try {
-      const blob = await frameToWebp(video, 1280, 0.85)
-      await processCapture(blob, 'front_camera')
+      // Se lee del store en el momento de capturar (no de un ref sincronizado por efecto).
+      const enderezar = framesAlReves()
+      const blob = await frameToWebp(video, 1280, 0.85, enderezar)
+      await processCapture(blob, 'front_camera', enderezar)
     } catch {
       setCamError('No se pudo capturar. Reintentá.')
     }
@@ -316,7 +413,12 @@ export function ReceiptScanDialog({
       if (vw / vh > targetAR) { sw = vh * targetAR; sx = (vw - sw) / 2 }
       else { sh = vw / targetAR; sy = (vh - sh) / 2 }
       const ctx = canvas.getContext('2d', { willReadFrequently: true })!
-      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, SMALL_W, SMALL_H)
+      // Con el panel girado el frame llega al revés: se endereza ANTES de
+      // analizarlo, o la banda que ignora la luz del techo (SKIP_TOP) quedaría
+      // abajo y las pistas de "subí/bajá el celular" saldrían invertidas. Se
+      // pregunta en cada tick: el primero ya sale bien y girar con el escáner
+      // abierto no reinicia el loop.
+      dibujarFrame(ctx, video, sx, sy, sw, sh, 0, 0, SMALL_W, SMALL_H, framesAlReves())
       const { data } = ctx.getImageData(0, 0, SMALL_W, SMALL_H)
 
       const res = analyzeFrame(data, SMALL_W, SMALL_H, brightBufRef.current!, labelBufRef.current!, stackBufRef.current)
@@ -486,8 +588,10 @@ export function ReceiptScanDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Viewport de cámara / frame congelado */}
-        <div className="relative aspect-[3/4] w-full overflow-hidden bg-black">
+        {/* Viewport de cámara / frame congelado. data-giro-camara: con el panel
+            girado, globals.css contra-gira el <video> (el frame congelado ya se
+            enderezó al capturar). */}
+        <div data-giro-camara className="relative aspect-[3/4] w-full overflow-hidden bg-black">
           {/* Video en vivo (invite) */}
           <video
             ref={videoRef}

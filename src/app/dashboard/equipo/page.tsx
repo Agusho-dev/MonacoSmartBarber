@@ -9,6 +9,13 @@ import { EquipoClient } from './equipo-client'
 import type { Metadata } from 'next'
 import type { Role } from '@/lib/types/database'
 
+// Todas las columnas de staff MENOS `pin`. Esta página lee staff con la sesión
+// del usuario (`authenticated`), y desde la mig 224b ese rol ya no tiene permiso
+// sobre el PIN: un `select('*')` daría 42501 y la página no cargaría. El PIN
+// se edita en /dashboard/barberos, que va con service role.
+const COLUMNAS_STAFF =
+    'id, auth_user_id, branch_id, role, full_name, email, commission_pct, is_active, created_at, updated_at, status, phone, role_id, avatar_url, hidden_from_checkin, organization_id, deleted_at, is_also_barber, hidden_from_mobile'
+
 export const metadata: Metadata = {
     title: 'Equipo | BarberOS',
 }
@@ -51,7 +58,7 @@ export default async function EquipoPage() {
     if (authUser) {
         const { data: staffData } = await supabase
             .from('staff')
-            .select('*')
+            .select(COLUMNAS_STAFF)
             .eq('auth_user_id', authUser.id)
             .eq('is_active', true)
             .single()
@@ -85,7 +92,7 @@ export default async function EquipoPage() {
         { data: calendarBarbers },
     ] = await Promise.all([
         branchIds.length > 0
-            ? supabase.from('staff').select('*, branch:branches(*)').eq('organization_id', orgId).in('branch_id', branchIds).is('deleted_at', null).order('full_name')
+            ? supabase.from('staff').select(`${COLUMNAS_STAFF}, branch:branches(*)`).eq('organization_id', orgId).in('branch_id', branchIds).is('deleted_at', null).order('full_name')
             : Promise.resolve({ data: [] }),
         branchIds.length > 0
             ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', branchIds).eq('is_active', true).order('name')

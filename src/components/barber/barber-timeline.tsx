@@ -11,6 +11,7 @@ import { AppointmentDetailSheet } from './appointment-detail-sheet'
 import { CompleteServiceDialog } from './complete-service-dialog'
 import { getTodayAppointmentsForStaff } from '@/lib/actions/barber-turnos'
 import { getAppointmentQueueEntry } from '@/lib/actions/appointments'
+import { avisarYRecargarPorVersion, esErrorDeVersion, TEXTO_RECARGA_MANUAL } from '@/lib/recarga-version'
 import type { Appointment, QueueEntry } from '@/lib/types/database'
 
 interface BarberSession {
@@ -104,14 +105,28 @@ export function BarberTimeline({ session, initialAppointments }: BarberTimelineP
       return
     }
     setCompletingAppointmentId(appt.id)
-    const entry = await getAppointmentQueueEntry(appt.id)
-    if (!entry) {
-      toast.error('No se pudo cargar la entrada de fila para completar el servicio')
+    try {
+      const entry = await getAppointmentQueueEntry(appt.id)
+      if (!entry) {
+        toast.error('No se pudo cargar la entrada de fila para completar el servicio')
+        return
+      }
+      setCompletingEntry(entry as QueueEntry)
+    } catch (e) {
+      console.error('[BarberTimeline] getAppointmentQueueEntry', e)
+      // Deploy nuevo con el panel en el bundle anterior: la acción ya no existe
+      // en el servidor y reintentar no sirve. Se avisa y se recarga
+      // (src/lib/recarga-version.ts).
+      if (esErrorDeVersion(e)) {
+        if (!avisarYRecargarPorVersion()) toast.error(TEXTO_RECARGA_MANUAL, { id: 'recarga-manual' })
+        return
+      }
+      toast.error('No pudimos abrir el cobro de este turno. Revisá la conexión y probá de nuevo.')
+    } finally {
+      // Pase lo que pase, el «Cargando...» a pantalla completa se va: antes un
+      // rechazo de red o de versión lo dejaba tapando el panel para siempre.
       setCompletingAppointmentId(null)
-      return
     }
-    setCompletingEntry(entry as QueueEntry)
-    setCompletingAppointmentId(null)
   }
 
   // Métricas del día derivadas de los appointments
@@ -237,6 +252,7 @@ export function BarberTimeline({ session, initialAppointments }: BarberTimelineP
         <CompleteServiceDialog
           entry={completingEntry}
           branchId={session.branch_id}
+          staffIdDelPanel={session.staff_id}
           onClose={() => setCompletingEntry(null)}
           onCompleted={() => {
             setCompletingEntry(null)

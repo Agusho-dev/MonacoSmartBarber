@@ -1,12 +1,26 @@
 import type { NextConfig } from "next";
 import path from "node:path";
 
+/**
+ * Versión de ESTE deployment, horneada en el bundle del navegador y en el del
+ * servidor (`src/lib/version-app.ts`). La compara la recarga por versión del
+ * panel, el kiosko y la TV contra `/api/version` para darse cuenta de que quedó
+ * un bundle viejo abierto después de un deploy.
+ *
+ * Vacía fuera de Vercel (desarrollo, build local): ahí la recarga queda apagada.
+ */
+const VERSION_APP = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || "";
+
 const nextConfig: NextConfig = {
   // Fijar el workspace root explícitamente: hay un package-lock.json huérfano
   // en el directorio padre (MSB_FULL/) que hacía que Turbopack inferiera mal
   // el root y rompiera la resolución de tailwindcss.
   turbopack: {
     root: path.resolve(__dirname),
+  },
+
+  env: {
+    NEXT_PUBLIC_VERSION_APP: VERSION_APP,
   },
 
   /* config options here */
@@ -17,15 +31,21 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizePackageImports: ['lucide-react', 'date-fns', '@radix-ui/react-icons', 'recharts'],
     serverActions: {
-      // El default es 1 MB y las fotos que sube el dueño salen de un iPhone:
-      // 2–5 MB cada una. Al pasarse, Next rechaza la llamada ANTES de que
-      // llegue al servidor, la promesa se rechaza y la pantalla se queda
-      // colgada — así se murió la carga de la foto de un barbero.
+      // El default de Next es 1 MB. Se subió cuando la foto de un barbero
+      // (2–5 MB, salida de un iPhone) viajaba por server action y, al pasarse,
+      // Next rechazaba la llamada antes de llegar al servidor y la pantalla
+      // quedaba colgada.
       //
-      // Es un colchón, no el arreglo: las imágenes se comprimen en el browser
-      // antes de mandarlas (un avatar termina en ~30 KB). Esto cubre el caso
-      // en que el browser no pueda decodificar el archivo (un HEIC de iPhone)
-      // y haya que subir el original.
+      // En producción este número NO es el techo: Vercel corta cualquier cuerpo
+      // de más de 4,5 MB antes de que llegue a Next (413
+      // FUNCTION_PAYLOAD_TOO_LARGE), así que los 8 MB sólo aplican en un
+      // `next start` local. Por eso ningún archivo grande puede depender de una
+      // server action: las fotos del corte suben directo a Storage con una URL
+      // firmada (mig 219, src/lib/fotos-corte/subida.ts) y no pasan por acá, y
+      // los avatares y logos se comprimen en el browser antes de mandarlos (un
+      // avatar termina en ~30 KB). Lo que queda cubierto es el caso raro de un
+      // archivo que el browser no sabe decodificar (un HEIC de iPhone) y se
+      // manda el original: hasta 4,5 MB llega; más grande, Vercel lo rechaza.
       bodySizeLimit: '8mb',
     },
   },

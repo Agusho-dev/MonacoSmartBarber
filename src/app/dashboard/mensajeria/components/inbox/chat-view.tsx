@@ -705,17 +705,31 @@ function TemplateBubble({ msg, isOut, tail, templates }: { msg: Message; isOut: 
   const footer = components?.find((c) => c.type === 'FOOTER')
   const buttons = components?.find((c) => c.type === 'BUTTONS')
 
+  // El texto que de verdad le llegó al cliente, con las variables puestas (lo
+  // guardan, por ejemplo, los avisos de Menor espera). El BODY de la definición
+  // tiene {{1}}…{{4}}: quien contesta desde el inbox no sabría qué barbero,
+  // cuántos minutos ni qué sucursal se le ofreció. Las plantillas que no lo
+  // guardan dejan '[Template: nombre]' y siguen mostrando la definición.
+  const renderizado = msg.content && !msg.content.startsWith('[Template:') ? msg.content : null
+
   if (!components) {
     return (
       <div className={`wa-bubble ${bubbleFill(isOut, tail)} max-w-[65%]`}>
         <div className="flex items-center gap-1.5 mb-1">
           <FileText className="size-3.5 opacity-60" />
-          <span className="text-xs font-medium opacity-70">Plantilla</span>
+          <span className="text-xs font-medium opacity-70">{renderizado ? `Plantilla · ${msg.template_name}` : 'Plantilla'}</span>
         </div>
-        <p className="font-medium text-sm">
-          {msg.template_name}
-          <TextMeta msg={msg} isOut={isOut} />
-        </p>
+        {renderizado ? (
+          <p className="whitespace-pre-wrap text-[14px] leading-[1.4]">
+            {renderizado}
+            <TextMeta msg={msg} isOut={isOut} />
+          </p>
+        ) : (
+          <p className="font-medium text-sm">
+            {msg.template_name}
+            <TextMeta msg={msg} isOut={isOut} />
+          </p>
+        )}
       </div>
     )
   }
@@ -726,8 +740,8 @@ function TemplateBubble({ msg, isOut, tail, templates }: { msg: Message; isOut: 
         {header?.text && (
           <div className="px-2.5 pt-2 pb-0.5"><p className="font-bold text-sm">{header.text}</p></div>
         )}
-        {body?.text && (
-          <div className="px-2.5 py-1"><p className="whitespace-pre-wrap text-[14px] leading-[1.4]">{body.text}</p></div>
+        {(renderizado ?? body?.text) && (
+          <div className="px-2.5 py-1"><p className="whitespace-pre-wrap text-[14px] leading-[1.4]">{renderizado ?? body?.text}</p></div>
         )}
         {footer?.text && (
           <div className="px-2.5 pb-1"><p className="text-[11px] text-[#e9edef]/50">{footer.text}</p></div>

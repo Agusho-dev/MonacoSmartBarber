@@ -2,8 +2,8 @@
 
 import { useState, lazy, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil, Trash2, Clock, MapPin, Loader2, CheckCircle2 } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
+import { Plus, Pencil, Trash2, Clock, MapPin, Loader2, CheckCircle2, Power } from 'lucide-react'
+import { createBranch, updateBranch, deleteBranch } from '@/lib/actions/branches'
 import type { Branch } from '@/lib/types/database'
 
 const LocationPickerMap = lazy(() =>
@@ -50,7 +50,6 @@ const emptyForm = {
 
 export function SucursalesClient({ branches }: Props) {
   const router = useRouter()
-  const supabase = createClient()
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -60,6 +59,10 @@ export function SucursalesClient({ branches }: Props) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deletingBranch, setDeletingBranch] = useState<Branch | null>(null)
   const [deleting, setDeleting] = useState(false)
+  // Motivo por el que no se puede borrar (tiene historial): el diálogo ofrece
+  // desactivarla en vez de borrarla.
+  const [bloqueoBorrado, setBloqueoBorrado] = useState<string | null>(null)
+  const [cambiandoEstado, setCambiandoEstado] = useState<string | null>(null)
   const [geocoding, setGeocoding] = useState(false)
   const [, setGeocodeStatus] = useState<'idle' | 'ok' | 'error'>('idle')
 
@@ -121,50 +124,95 @@ export function SucursalesClient({ branches }: Props) {
 
   function openDelete(branch: Branch) {
     setDeletingBranch(branch)
+    setBloqueoBorrado(null)
     setDeleteDialogOpen(true)
   }
 
+  // El alta y la edición van por server actions (createBranch / updateBranch):
+  // antes el browser insertaba directo en la tabla, sin organization_id y sin
+  // mirar el error, así que la policy lo rechazaba (403) y el diálogo se cerraba
+  // como si hubiera guardado (4/10/2026).
   async function handleSave() {
+    if (saving) return
     setSaving(true)
-    const data = {
-      name: form.name,
-      address: form.address || null,
-      phone: form.phone || null,
-      latitude: form.latitude ? parseFloat(form.latitude) : null,
-      longitude: form.longitude ? parseFloat(form.longitude) : null,
-      business_hours_open: form.business_hours_open,
-      business_hours_close: form.business_hours_close,
-      business_days: form.business_days,
-    }
+    try {
+      const data = {
+        name: form.name,
+        address: form.address || null,
+        phone: form.phone || null,
+        latitude: form.latitude ? parseFloat(form.latitude) : null,
+        longitude: form.longitude ? parseFloat(form.longitude) : null,
+        business_hours_open: form.business_hours_open,
+        business_hours_close: form.business_hours_close,
+        business_days: form.business_days,
+      }
 
-    if (editingId) {
-      await supabase.from('branches').update(data).eq('id', editingId)
-    } else {
-      await supabase.from('branches').insert(data)
+      const r = editingId ? await updateBranch(editingId, data) : await createBranch(data)
+      if ('ok' in r && r.ok) {
+        if (editingId) {
+          toast.success('Cambios guardados')
+        } else {
+          toast.success(`Sucursal ${form.name.trim()} creada`, {
+            description: 'Ya aparece en el selector de sucursales. Sumale el equipo, los servicios y las cuentas de cobro.',
+            duration: 8000,
+          })
+        }
+        setDialogOpen(false)
+        router.refresh()
+        return
+      }
+      toast.error('message' in r && r.message ? r.message : 'No pudimos guardar la sucursal.')
+    } catch (e) {
+      console.error('[sucursales] guardar', e)
+      toast.error('No pudimos guardar la sucursal. Revisá la conexión y probá de nuevo.')
+    } finally {
+      setSaving(false)
     }
-
-    setSaving(false)
-    setDialogOpen(false)
-    router.refresh()
   }
 
   async function handleDelete() {
-    if (!deletingBranch) return
+    if (!deletingBranch || deleting) return
     setDeleting(true)
-    const { error } = await supabase
-      .from('branches')
-      .delete()
-      .eq('id', deletingBranch.id)
+    try {
+      const r = await deleteBranch(deletingBranch.id)
+      if ('ok' in r) {
+        toast.success('Sucursal eliminada')
+        setDeleteDialogOpen(false)
+        setDeletingBranch(null)
+        router.refresh()
+        return
+      }
+      if (r.error === 'con_historial') {
+        setBloqueoBorrado(r.message)
+        return
+      }
+      toast.error(r.message)
+    } catch (e) {
+      console.error('[sucursales] eliminar', e)
+      toast.error('No pudimos eliminar la sucursal. Revisá la conexión y probá de nuevo.')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
-    setDeleting(false)
-    setDeleteDialogOpen(false)
-    setDeletingBranch(null)
-
-    if (error) {
-      toast.error('No se pudo eliminar la sucursal. Puede tener datos asociados.')
-    } else {
-      toast.success('Sucursal eliminada')
-      router.refresh()
+  async function cambiarEstado(branch: Branch, activa: boolean) {
+    if (cambiandoEstado) return
+    setCambiandoEstado(branch.id)
+    try {
+      const r = await updateBranch(branch.id, { is_active: activa })
+      if ('ok' in r && r.ok) {
+        toast.success(activa ? `${branch.name} está activa de nuevo` : `${branch.name} quedó desactivada`)
+        setDeleteDialogOpen(false)
+        setDeletingBranch(null)
+        router.refresh()
+        return
+      }
+      toast.error('message' in r ? r.message : 'No pudimos cambiar el estado de la sucursal.')
+    } catch (e) {
+      console.error('[sucursales] estado', e)
+      toast.error('No pudimos cambiar el estado de la sucursal. Revisá la conexión.')
+    } finally {
+      setCambiandoEstado(null)
     }
   }
 
@@ -216,10 +264,23 @@ export function SucursalesClient({ branches }: Props) {
               </div>
               <CardAction>
                 <div className="flex items-center gap-1">
+                  {!branch.is_active && (
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={() => cambiarEstado(branch, true)}
+                      disabled={cambiandoEstado === branch.id}
+                      aria-label={`Reactivar ${branch.name}`}
+                      title="Reactivar"
+                    >
+                      {cambiandoEstado === branch.id ? <Loader2 className="size-3 animate-spin" /> : <Power className="size-3" />}
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => openEdit(branch)}
+                    aria-label={`Editar ${branch.name}`}
                   >
                     <Pencil className="size-3" />
                   </Button>
@@ -228,6 +289,7 @@ export function SucursalesClient({ branches }: Props) {
                     size="icon-xs"
                     onClick={() => openDelete(branch)}
                     className="text-red-400"
+                    aria-label={`Eliminar ${branch.name}`}
                   >
                     <Trash2 className="size-3" />
                   </Button>
@@ -432,22 +494,51 @@ export function SucursalesClient({ branches }: Props) {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog: Confirmar eliminación */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+      {/* Dialog: Confirmar eliminación (o desactivar, si tiene historial) */}
+      <Dialog
+        open={deleteDialogOpen}
+        onOpenChange={(abierto) => {
+          if (deleting || cambiandoEstado) return
+          setDeleteDialogOpen(abierto)
+        }}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Eliminar sucursal</DialogTitle>
+            <DialogTitle>{bloqueoBorrado ? 'No se puede eliminar' : 'Eliminar sucursal'}</DialogTitle>
             <DialogDescription>
-              ¿Estás seguro de que querés eliminar <strong>{deletingBranch?.name}</strong>? Esta acción no se puede deshacer.
+              {bloqueoBorrado ? (
+                bloqueoBorrado
+              ) : (
+                <>
+                  ¿Querés eliminar <strong>{deletingBranch?.name}</strong>? Sólo se puede borrar una sucursal
+                  sin movimientos ni equipo; si ya se usó, te vamos a ofrecer desactivarla.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={deleting || cambiandoEstado !== null}
+            >
               Cancelar
             </Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
-              {deleting ? 'Eliminando...' : 'Eliminar'}
-            </Button>
+            {bloqueoBorrado ? (
+              deletingBranch?.is_active ? (
+                <Button
+                  variant="destructive"
+                  onClick={() => deletingBranch && cambiarEstado(deletingBranch, false)}
+                  disabled={cambiandoEstado !== null}
+                >
+                  {cambiandoEstado ? 'Desactivando...' : 'Desactivar sucursal'}
+                </Button>
+              ) : null
+            ) : (
+              <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+                {deleting ? 'Eliminando...' : 'Eliminar'}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

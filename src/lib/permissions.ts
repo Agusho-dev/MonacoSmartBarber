@@ -120,6 +120,12 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
             'products.sell': 'Registrar ventas de productos',
         },
     },
+    history: {
+        label: 'Historial de servicios',
+        permissions: {
+            'history.delete': 'Borrar visitas cobradas del historial',
+        },
+    },
     stats: {
         label: 'Estadísticas',
         permissions: {
@@ -257,6 +263,8 @@ export const PERMISSION_DESCRIPTIONS: Record<string, string> = {
     'services.manage': 'Permite crear, editar y eliminar servicios del catálogo.',
     'products.manage': 'Permite crear, editar y eliminar productos del inventario.',
     'products.sell': 'Permite registrar ventas de productos desde el panel.',
+
+    'history.delete': 'Permite borrar una visita ya cobrada desde el historial de Servicios y Productos. La plata, la comisión y la visita desaparecen de Caja, Estadísticas y Finanzas: es sólo para corregir una carga equivocada. Las visitas con productos vendidos no se pueden borrar. Dueños y administradores lo tienen siempre.',
 
     'stats.view': 'Permite acceder a los reportes y estadísticas históricas del negocio.',
 

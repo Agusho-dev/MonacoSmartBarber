@@ -29,7 +29,7 @@ Vistas disponibles (todas ya filtradas por tu organización; SOLO lectura, un ú
 - v_assistant_points(client_id, branch_id, points_balance, total_earned, total_redeemed)
 - v_assistant_staff(id, branch_id, full_name, role, commission_pct, is_active, status, is_also_barber)
 - v_assistant_appointments(id, branch_id, client_id, barber_id, service_id, appointment_date, start_time, end_time, duration_minutes, status, source, payment_status, payment_amount)
-- v_assistant_queue(id, branch_id, client_id, barber_id, status, position, checked_in_at, started_at, completed_at, created_at)
+- v_assistant_queue(id, branch_id, client_id, barber_id, status, position, checked_in_at, started_at, completed_at, created_at, pidio_asesoria, cancel_reason) — pidio_asesoria = el cliente pidió asesoría sin costo en la tablet; cancel_reason = 'solo_asesoria' significa que se asesoró y no se hizo nada (cierre sin visita: no es un corte ni un abandono)
 - v_assistant_services(id, branch_id, name, price, duration_minutes, is_active, availability, default_commission_pct)
 - v_assistant_products(id, branch_id, name, cost, sale_price, stock, is_active)
 - v_assistant_product_sales(id, branch_id, product_id, barber_id, quantity, unit_price, commission_amount, payment_method, sold_at)

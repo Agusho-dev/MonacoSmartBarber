@@ -12,6 +12,7 @@ import { closeBarberShift, type BarberDaySummary } from '@/lib/actions/shift'
 import { logoutBarber } from '@/lib/actions/auth'
 import { cn } from '@/lib/utils'
 import { vibrate, playSuccessBeep } from '@/lib/barber-feedback'
+import { CampoMontoTablet } from '@/components/barber/campo-tablet'
 
 interface CerrarTurnoClientProps {
   summary: BarberDaySummary
@@ -197,16 +198,25 @@ export function CerrarTurnoClient({
           <p className="mt-0.5 text-xs text-muted-foreground">
             Opcional. Te avisamos si hay diferencia con lo esperado.
           </p>
-          <Input
-            id="cash-counted"
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            placeholder="0"
-            value={cashCountedStr}
-            onChange={(e) => setCashCountedStr(e.target.value.replace(/[^0-9]/g, ''))}
-            className="mt-3 h-14 text-2xl font-black tabular-nums tracking-tight"
-          />
+          {/* Con el panel girado 180° el teclado de Android sale al revés y el 6 se
+              lee 9: ahí se cuenta con el teclado del panel. Sin giro, el input de siempre. */}
+          <CampoMontoTablet
+            valor={cashCountedStr}
+            onCambiar={setCashCountedStr}
+            etiqueta="¿Cuánto contaste en efectivo?"
+            className="mt-3"
+          >
+            <Input
+              id="cash-counted"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder="0"
+              value={cashCountedStr}
+              onChange={(e) => setCashCountedStr(e.target.value.replace(/[^0-9]/g, ''))}
+              className="mt-3 h-14 text-2xl font-black tabular-nums tracking-tight"
+            />
+          </CampoMontoTablet>
           {cashCounted !== null && (
             <div
               className={cn(

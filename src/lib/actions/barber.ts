@@ -306,9 +306,24 @@ export async function fetchBarberDayStats(staffId: string, branchId: string) {
   return { servicesCount, revenue }
 }
 
-export async function fetchBranchAssignmentData(branchId: string) {
+/**
+ * Datos de asignación de la sucursal para el panel del barbero (los refresca en
+ * cada evento de la fila, todas las tablets a la vez).
+ *
+ * `latestClockInAt` (staffId → `recorded_at` ISO): la hora del fichaje de
+ * entrada VIGENTE de cada barbero, o sea la de su último log del día cuando ese
+ * log es un `clock_in`. Un barbero que ya fichó la salida no aparece. El panel
+ * lo usa para el hint de Menor espera (quién está libre desde cuándo) y lo lee
+ * de forma defensiva, así que en los retornos tempranos va vacío.
+ */
+export async function fetchBranchAssignmentData(branchId: string): Promise<{
+  dailyServiceCounts: Record<string, number>
+  lastCompletedAt: Record<string, string>
+  latestAttendance: Record<string, string>
+  latestClockInAt: Record<string, string>
+}> {
   const orgId = await getCurrentOrgId()
-  if (!orgId) return { dailyServiceCounts: {}, lastCompletedAt: {}, latestAttendance: {} }
+  if (!orgId) return { dailyServiceCounts: {}, lastCompletedAt: {}, latestAttendance: {}, latestClockInAt: {} }
 
   const supabase = createAdminClient()
 
@@ -319,7 +334,7 @@ export async function fetchBranchAssignmentData(branchId: string) {
     .eq('id', branchId)
     .eq('organization_id', orgId)
     .maybeSingle()
-  if (!branchCheck) return { dailyServiceCounts: {}, lastCompletedAt: {}, latestAttendance: {} }
+  if (!branchCheck) return { dailyServiceCounts: {}, lastCompletedAt: {}, latestAttendance: {}, latestClockInAt: {} }
 
   const dayStart = new Date()
   dayStart.setHours(0, 0, 0, 0)
@@ -348,7 +363,7 @@ export async function fetchBranchAssignmentData(branchId: string) {
       .limit(200),
     supabase
       .from('attendance_logs')
-      .select('staff_id, action_type')
+      .select('staff_id, action_type, recorded_at')
       .eq('branch_id', branchId)
       .gte('recorded_at', dayStart.toISOString())
       .order('recorded_at', { ascending: false }),
@@ -366,10 +381,16 @@ export async function fetchBranchAssignmentData(branchId: string) {
     }
   }
 
+  // Los logs vienen del más nuevo al más viejo: el primero de cada barbero es el
+  // vigente. Si es una entrada, su hora es la de `latestClockInAt`.
   const latestAttendance: Record<string, string> = {}
-  for (const log of (attendanceRes.data ?? []) as { staff_id: string; action_type: string }[]) {
+  const latestClockInAt: Record<string, string> = {}
+  for (const log of (attendanceRes.data ?? []) as { staff_id: string; action_type: string; recorded_at: string }[]) {
     if (!latestAttendance[log.staff_id]) {
       latestAttendance[log.staff_id] = log.action_type
+      if (log.action_type === 'clock_in' && log.recorded_at) {
+        latestClockInAt[log.staff_id] = log.recorded_at
+      }
     }
   }
 
@@ -377,6 +398,7 @@ export async function fetchBranchAssignmentData(branchId: string) {
     dailyServiceCounts,
     lastCompletedAt,
     latestAttendance,
+    latestClockInAt,
   }
 }
 

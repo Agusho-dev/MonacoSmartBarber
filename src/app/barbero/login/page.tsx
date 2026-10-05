@@ -21,10 +21,12 @@ import {
 } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Scissors, ArrowLeft, Delete, Loader2, ScanFace, LogIn, LogOut } from "lucide-react"
+import { Scissors, ArrowLeft, Delete, Loader2, ScanFace, LogIn, LogOut, RotateCw } from "lucide-react"
 
 type Step = "branch" | "barber" | "pin"
 type LoginBlock = null | "needs_face_registration" | "needs_clock_in"
+/** Lo único que dibuja esta pantalla de cada barbero: su nombre (y su id para el PIN). */
+type BarberoDeLogin = Pick<Staff, "id" | "full_name">
 
 function getInitials(name: string) {
   return name
@@ -39,12 +41,14 @@ export default function BarberLoginPage() {
   const [step, setStep] = useState<Step>("branch")
   const [branches, setBranches] = useState<Branch[]>([])
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null)
-  const [barbers, setBarbers] = useState<Staff[]>([])
-  const [selectedBarber, setSelectedBarber] = useState<Staff | null>(null)
+  const [barbers, setBarbers] = useState<BarberoDeLogin[]>([])
+  const [selectedBarber, setSelectedBarber] = useState<BarberoDeLogin | null>(null)
   const [pin, setPin] = useState("")
   const [error, setError] = useState("")
   const [loadingBranches, setLoadingBranches] = useState(true)
   const [loadingBarbers, setLoadingBarbers] = useState(false)
+  const [barbersError, setBarbersError] = useState(false)
+  const [reintentoBarberos, setReintentoBarberos] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [loginBlock, setLoginBlock] = useState<LoginBlock>(null)
   const [orgInfo, setOrgInfo] = useState<{ name: string; logo_url: string | null } | null>(null)
@@ -62,24 +66,40 @@ export default function BarberLoginPage() {
 
   useEffect(() => {
     if (!selectedBranch) return
+    let cancelado = false
     setLoadingBarbers(true)
+    setBarbersError(false)
     const supabase = createClient()
     supabase
       .from("staff")
-      // Columnas explícitas: esta pantalla corre en el browser con la anon key, y
-      // `select("*")` traía el `pin` de cada barbero a la misma página donde se pide
-      // el PIN. Desde la mig 212 `anon` ya no tiene permiso sobre esa columna, así
-      // que además de inseguro un `*` acá devolvería 42501 y dejaría la lista vacía.
-      .select("id, full_name, branch_id, role, role_id, status, avatar_url, hidden_from_checkin, hidden_from_mobile, is_active, is_also_barber, organization_id, phone, commission_pct, created_at, updated_at, deleted_at")
+      // Sólo lo que la pantalla dibuja. Corre en el browser con la anon key: con
+      // `select("*")` viajaba el `pin` de cada barbero a la misma página donde se
+      // pide (mig 212), y hasta este cambio viajaban también su teléfono y su
+      // comisión, que esta pantalla no usa. La mig 224 le saca esas dos columnas a
+      // `anon`: una consulta anónima que las nombre da 42501 y se queda sin la
+      // lista ENTERA (Known Risk #34), así que no hay que volver a pedirlas acá.
+      .select("id, full_name")
       .eq("branch_id", selectedBranch.id)
       .eq("role", "barber")
       .eq("is_active", true)
       .order("full_name")
-      .then(({ data }) => {
-        setBarbers(data ?? [])
+      .then(({ data, error: errorLista }) => {
+        if (cancelado) return
+        // Un error NO es "no hay barberos": antes caía en ese cartel y nadie se
+        // enteraba de que la consulta había fallado (así se vio el 10/9).
+        if (errorLista) {
+          console.error("[barbero/login] lista de barberos:", errorLista.message)
+          setBarbers([])
+          setBarbersError(true)
+        } else {
+          setBarbers((data ?? []) as BarberoDeLogin[])
+        }
         setLoadingBarbers(false)
       })
-  }, [selectedBranch])
+    return () => {
+      cancelado = true
+    }
+  }, [selectedBranch, reintentoBarberos])
 
   const handleBranchSelect = (branchId: string) => {
     const branch = branches.find((b) => b.id === branchId)
@@ -94,7 +114,7 @@ export default function BarberLoginPage() {
     }
   }
 
-  const handleBarberSelect = (barber: Staff) => {
+  const handleBarberSelect = (barber: BarberoDeLogin) => {
     setSelectedBarber(barber)
     setPin("")
     setError("")
@@ -252,6 +272,21 @@ export default function BarberLoginPage() {
               {Array.from({ length: 6 }).map((_, i) => (
                 <Skeleton key={i} className="h-28 w-full rounded-xl" />
               ))}
+            </div>
+          ) : barbersError ? (
+            <div className="flex flex-col items-center gap-3 text-center">
+              <p className="text-sm text-destructive">
+                No pudimos cargar los barberos de esta sucursal.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => setReintentoBarberos((n) => n + 1)}
+              >
+                <RotateCw className="size-3.5" />
+                Reintentar
+              </Button>
             </div>
           ) : barbers.length === 0 ? (
             <p className="text-center text-sm text-muted-foreground">

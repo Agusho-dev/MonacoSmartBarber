@@ -56,7 +56,33 @@ const OFFLINE_HTML = `<!doctype html>
     padding: 12px 22px; border-radius: 12px;
   }
   button:active { transform: scale(.98); }
+  /* Tablet montada al revés: misma regla que el panel (src/lib/giro-panel). */
+  html[data-giro="css"] body { transform: rotate(180deg); }
 </style>
+<script>
+  // Giro 180° del panel: la página sin red tiene que salir derecha igual que el
+  // panel. Espeja necesitaCss() de src/lib/giro-panel/nucleo.ts y la MISMA clave
+  // de localStorage (es el mismo origen). Si la regla cambia allá, cambia acá.
+  (function () {
+    try {
+      var raw = window.localStorage.getItem('msb.panel.giro.v1')
+      if (!raw) return
+      var p = JSON.parse(raw)
+      if (!p || typeof p !== 'object') return
+      var o = p.objetivo, re = /^(portrait|landscape)-(primary|secondary)$/
+      if (typeof o !== 'string' || !re.test(o) || p.sistemaGira === true) return
+      var op = /-primary$/.test(o) ? o.replace('-primary', '-secondary') : o.replace('-secondary', '-primary')
+      var aplicar = function () {
+        var t = window.screen && screen.orientation ? screen.orientation.type : null
+        if (typeof t !== 'string' || !re.test(t)) t = null
+        if (!t || t === op) document.documentElement.setAttribute('data-giro', 'css')
+        else document.documentElement.removeAttribute('data-giro')
+      }
+      aplicar()
+      if (window.screen && screen.orientation) screen.orientation.addEventListener('change', aplicar)
+    } catch (e) {}
+  })()
+</script>
 </head>
 <body>
   <div class="ring" aria-hidden="true"></div>

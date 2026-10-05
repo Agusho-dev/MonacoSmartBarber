@@ -12,7 +12,7 @@ import {
   getAppointmentQueueEntry,
 } from '@/lib/actions/appointments'
 import type { Appointment, QueueEntry } from '@/lib/types/database'
-import { CompleteServiceDialog } from '@/components/barber/complete-service-dialog'
+import { CompleteServiceDialog, hayQueAnunciarCobro } from '@/components/barber/complete-service-dialog'
 import { ConfirmPrepaymentDialog } from '@/components/appointments/confirm-prepayment-dialog'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
@@ -227,9 +227,11 @@ export function AppointmentList({ appointments, staffId, noShowToleranceMinutes 
           entry={completingEntry}
           branchId={completingEntry.branch_id}
           onClose={() => setCompletingEntry(null)}
-          onCompleted={() => {
+          onCompleted={(resultado) => {
             setCompletingEntry(null)
-            toast.success('Servicio finalizado')
+            // Un cobro que ya estaba registrado (o cuyo importe no quedó) ya lo
+            // avisó el diálogo: «Servicio finalizado» al lado lo contradice.
+            if (hayQueAnunciarCobro(resultado)) toast.success('Servicio finalizado')
             router.refresh()
           }}
         />

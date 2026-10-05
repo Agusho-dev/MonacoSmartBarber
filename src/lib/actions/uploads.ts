@@ -3,7 +3,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getCurrentOrgId } from './org'
-import { getBarberSession } from './auth'
 import { currentUserCan } from './permissions-gate'
 import { isValidUUID } from '@/lib/validation'
 
@@ -22,11 +21,17 @@ import { isValidUUID } from '@/lib/validation'
  *     por Supabase Auth: `getUser()` devuelve null SIEMPRE y la función cortaba
  *     en su primer `if` sin decir nada. Último upload por QR: 18/abr/2026.
  *
- * Acá las dos corren en el servidor con la service role, se autentican por el
- * camino que de verdad usa cada pantalla (sesión de dashboard o cookie de
- * barbero) y **devuelven el error**. Es la regla del Known Risk #13: si una
- * función de la que depende un dato se puede caer en silencio, se cae en
- * silencio para siempre.
+ * Acá corren en el servidor con la service role, se autentican por el camino
+ * que de verdad usa cada pantalla (sesión de dashboard o cookie de barbero) y
+ * **devuelven el error**. Es la regla del Known Risk #13: si una función de la
+ * que depende un dato se puede caer en silencio, se cae en silencio para siempre.
+ *
+ * Las fotos del corte (QR, cámara y galería del cobro) ya no viven acá: suben
+ * directo a Storage con URL firmada y las registra el servidor por sesión de
+ * cobro (mig 219, src/lib/fotos-corte/servidor.ts). Las acciones de sesión QR
+ * que había (createQrPhotoSession, deactivateQrPhotoSession, getQrPhotoUploads)
+ * se borraron: la última no tenía llamadores y las otras dos abrían una sesión
+ * por apertura del diálogo, sin atarla a ningún cobro.
  */
 
 const AVATARS = 'staff-avatars'
@@ -127,84 +132,4 @@ export async function uploadStaffAvatar(
   revalidatePath('/dashboard/barberos')
   revalidatePath('/dashboard/fila')
   return { url }
-}
-
-// ─── Sesión de fotos por QR (panel del barbero) ──────────────────────
-
-type SesionOk = { id: string; token: string }
-type SesionError = { error: string }
-
-/**
- * Abre una sesión para que el barbero mande fotos desde su celular.
- *
- * La organización sale de la **cookie de la sesión de barbero**, que es cómo se
- * autentica ese panel. Antes salía de `supabase.auth.getUser()`, que en el
- * panel del barbero es null por diseño.
- */
-export async function createQrPhotoSession(): Promise<SesionOk | SesionError> {
-  const session = await getBarberSession()
-  if (!session) return { error: 'Tu sesión venció. Volvé a entrar con tu PIN.' }
-
-  const supabase = createAdminClient()
-  const token = crypto.randomUUID()
-
-  const { data, error } = await supabase
-    .from('qr_photo_sessions')
-    .insert({ token, organization_id: session.organization_id })
-    .select('id')
-    .single()
-
-  if (error || !data) {
-    console.error('[createQrPhotoSession]', error?.message)
-    return { error: 'No pudimos generar el código QR. Probá de nuevo.' }
-  }
-
-  return { id: data.id, token }
-}
-
-/** Cierra la sesión: el link del QR deja de aceptar fotos. */
-export async function deactivateQrPhotoSession(sessionId: string): Promise<void> {
-  if (!isValidUUID(sessionId)) return
-
-  const session = await getBarberSession()
-  if (!session) return
-
-  const supabase = createAdminClient()
-  const { error } = await supabase
-    .from('qr_photo_sessions')
-    .update({ is_active: false })
-    .eq('id', sessionId)
-    .eq('organization_id', session.organization_id)
-
-  if (error) console.error('[deactivateQrPhotoSession]', error.message)
-}
-
-/**
- * Fotos ya subidas en una sesión.
- *
- * El panel las escucha por Realtime, pero el Realtime del panel del barbero
- * corre con la anon key y `qr_photo_uploads` sólo le da SELECT a `anon` — o
- * sea que puede llegar a perderse un evento. Esto le da una forma de
- * reconciliar sin depender del canal.
- */
-export async function getQrPhotoUploads(sessionId: string): Promise<string[]> {
-  if (!isValidUUID(sessionId)) return []
-
-  const session = await getBarberSession()
-  if (!session) return []
-
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('qr_photo_uploads')
-    .select('storage_path, qr_photo_sessions!inner(organization_id)')
-    .eq('session_id', sessionId)
-    .eq('qr_photo_sessions.organization_id', session.organization_id)
-    .order('created_at')
-
-  if (error) {
-    console.error('[getQrPhotoUploads]', error.message)
-    return []
-  }
-
-  return (data ?? []).map(r => r.storage_path as string)
 }

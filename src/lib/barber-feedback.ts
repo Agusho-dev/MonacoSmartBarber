@@ -94,3 +94,49 @@ export function playSuccessBeep(): void {
   playBeep({ frequency: 880, duration: 0.15, volume: 0.10 })
   setTimeout(() => playBeep({ frequency: 1320, duration: 0.18, volume: 0.10 }), 90)
 }
+
+/**
+ * Una nota con ataque suave (sin el "clic" de arrancar a volumen pleno),
+ * agendada en el reloj del AudioContext: el intervalo entre notas es exacto
+ * aunque el hilo principal esté ocupado re-dibujando la fila.
+ */
+function nota(
+  ctx: AudioContext,
+  frequency: number,
+  inicio: number,
+  duration: number,
+  volume: number,
+  type: OscillatorType,
+): void {
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.type = type
+  osc.frequency.value = frequency
+  gain.gain.setValueAtTime(0.0001, inicio)
+  gain.gain.linearRampToValueAtTime(volume, inicio + 0.012)
+  gain.gain.exponentialRampToValueAtTime(0.001, inicio + duration)
+  osc.start(inicio)
+  osc.stop(inicio + duration + 0.02)
+}
+
+/**
+ * Campanita del pedido de asesoría (mig 217): dos notas triangulares que suben
+ * (sol → re). Es distinta a propósito de los beeps del cronómetro, de la alerta
+ * de "tu cliente te está esperando" y de la campana de los descansos, para que
+ * el barbero la reconozca sin mirar. El panel la toca sólo si el barbero está
+ * libre: durante un corte no se suena (regla de active-client-card).
+ */
+export function playAsesoriaChime(): void {
+  const ctx = getAudioContext()
+  if (!ctx) return
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {})
+  try {
+    const t = ctx.currentTime
+    nota(ctx, 784, t, 0.22, 0.08, 'triangle')
+    nota(ctx, 1175, t + 0.14, 0.32, 0.07, 'triangle')
+  } catch {
+    // noop
+  }
+}

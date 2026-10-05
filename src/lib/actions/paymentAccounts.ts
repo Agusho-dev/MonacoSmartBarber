@@ -79,13 +79,19 @@ export async function getPaymentAccountsMonthIncome(): Promise<
 }
 
 /**
- * Estado de las cuentas ACTIVAS de una sucursal (la que recibe el cobro sale de
- * `pickTransferAccount`). La tablet del barbero llama a la misma RPC directo desde
- * el browser: corre con rol anon (el panel se autentica por PIN, no por Supabase Auth).
+ * Resultado de `obtenerCuentasDeCobro`. "No pudimos traer las cuentas" NO es
+ * lo mismo que "esta sucursal no tiene cuentas": con la lista vacía la tablet
+ * dejaba registrar una transferencia sin cuenta (plata que no aparece en ningún
+ * destino, KR#30) y el barbero no tenía cómo saber que faltaba un dato.
  */
-export async function getTransferAccountsState(branchId: string): Promise<TransferAccountState[]> {
+export type ResultadoCuentasDeCobro =
+  | { ok: true; cuentas: TransferAccountState[] }
+  | { ok: false; error: string }
+
+/** Lectura compartida por los dos exports de abajo (no es un endpoint). */
+async function leerCuentasDeCobro(branchId: string, contexto: string): Promise<ResultadoCuentasDeCobro> {
   const orgId = await validateBranchAccess(branchId)
-  if (!orgId) return []
+  if (!orgId) return { ok: false, error: 'No tenés acceso a las cuentas de esta sucursal.' }
 
   const supabase = createAdminClient()
   const { data, error } = await supabase.rpc('get_transfer_accounts_state', {
@@ -93,15 +99,44 @@ export async function getTransferAccountsState(branchId: string): Promise<Transf
   })
 
   if (error) {
-    console.error('[getTransferAccountsState]', error.message)
-    return []
+    console.error(`[${contexto}]`, { branchId, code: error.code, message: error.message })
+    return { ok: false, error: 'No pudimos traer las cuentas de cobro.' }
   }
 
-  return ((data ?? []) as TransferAccountState[]).map((a) => ({
-    ...a,
-    monthly_limit: a.monthly_limit != null ? Number(a.monthly_limit) : null,
-    month_income: Number(a.month_income ?? 0),
-  }))
+  return {
+    ok: true,
+    cuentas: ((data ?? []) as TransferAccountState[]).map((a) => ({
+      ...a,
+      monthly_limit: a.monthly_limit != null ? Number(a.monthly_limit) : null,
+      month_income: Number(a.month_income ?? 0),
+    })),
+  }
+}
+
+/**
+ * Estado de las cuentas ACTIVAS de una sucursal (la que recibe el cobro sale de
+ * `pickTransferAccount`), para el cobro, la venta directa del panel y la venta
+ * del dashboard. La RPC lee transfer_logs con service role (la tablet se
+ * autentica por PIN, no por Supabase Auth, y la RPC no está expuesta a anon).
+ */
+export async function obtenerCuentasDeCobro(branchId: string): Promise<ResultadoCuentasDeCobro> {
+  return leerCuentasDeCobro(branchId, 'obtenerCuentasDeCobro')
+}
+
+/**
+ * CONTRATO VIEJO, congelado a propósito: devuelve el ARRAY (vacío si no hay
+ * acceso o si la RPC falla), exactamente como en HEAD. Lo siguen llamando las
+ * tablets que tengan abierto un bundle anterior al deploy: si una server action
+ * viva cambia de forma, el bundle viejo pega al MISMO id y recibe la forma
+ * nueva — pickTransferAccount tiraba «accounts is not iterable», el alias
+ * desaparecía y la transferencia se registraba sin cuenta, sin ningún aviso
+ * (hallazgo productos-y-fugas-01). Código nuevo: `obtenerCuentasDeCobro`.
+ *
+ * @deprecated Usar `obtenerCuentasDeCobro`, que distingue "no pudimos traerlas" de "no hay".
+ */
+export async function getTransferAccountsState(branchId: string): Promise<TransferAccountState[]> {
+  const r = await leerCuentasDeCobro(branchId, 'getTransferAccountsState')
+  return r.ok ? r.cuentas : []
 }
 
 export async function upsertPaymentAccount(formData: FormData) {

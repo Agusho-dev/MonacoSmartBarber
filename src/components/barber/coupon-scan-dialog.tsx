@@ -262,7 +262,10 @@ export function CouponScanDialog({
             </div>
           </div>
         ) : (
-          <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-black">
+          /* data-giro-camara: con el panel girado, globals.css contra-gira el
+             <video> del escáner. Leer un QR no depende de la rotación y el
+             recuadro guía es simétrico: no hay nada más que enderezar. */
+          <div data-giro-camara className="relative aspect-square w-full overflow-hidden rounded-xl bg-black">
             {open && (
               <Scanner
                 key={facingMode}

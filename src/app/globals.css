@@ -673,3 +673,169 @@
   .scan-laser, .reticle-breathe, .scan-dot, .animate-scan-amount { animation: none !important; }
   .scan-laser { opacity: 0.4; top: 50%; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Panel del barbero girado 180° (tablets montadas con el cargador arriba).
+   html[data-giro="css"] lo ponen el script pre-paint de /barbero/layout.tsx y
+   src/lib/giro-panel/store.ts (la regla vive en src/lib/giro-panel/nucleo.ts).
+   Sin ese atributo, #giro-raiz, #giro-scroll y #giro-portales son divs inertes
+   y el documento scrollea como siempre.
+   Va FUERA de @layer a propósito: así les gana a las utilidades de Tailwind sin
+   !important (los estilos sin capa ganan a los de cualquier capa).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Se gira una caja FIJA del tamaño de la ventana, no el body: el elemento con
+   transform es el containing block de TODOS los position:fixed de adentro (la
+   barra, los overlays, los toasts), que así siguen pegados al borde de la
+   pantalla que corresponde para el barbero. Por eso el scroll pasa a
+   #giro-scroll: girar algo que scrollea arrastraría los fixed con el scroll.
+   NO sacar #giro-scroll. */
+html[data-giro='css'],
+html[data-giro='css'] body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none; /* sin pull-to-refresh: en este modo tiraría al revés */
+}
+html[data-giro='css'] #giro-raiz {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  transform: rotate(180deg);
+}
+html[data-giro='css'] #giro-scroll {
+  position: absolute;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Selects y menús viven en <body>, el marco REAL de la pantalla: ahí floating-ui
+   mide bien, y el wrapper de shadcn ya les pidió el lado y la alineación
+   opuestos. Acá sólo se gira el contenido sobre su centro. `rotate` es una
+   propiedad aparte de `transform`: compone con la animación de entrada en vez
+   de pisarla. Como el giro se aplica DESPUÉS del translate de la animación, el
+   deslizamiento de entrada sale al revés: se invierte por lado para que la
+   lista siga saliendo DESDE el botón. */
+html[data-giro='css'] [data-giro-flotante] {
+  rotate: 180deg;
+  transform-origin: center;
+}
+html[data-giro='css'] [data-giro-flotante][data-side='top'] { --tw-enter-translate-y: calc(var(--spacing) * -2); }
+html[data-giro='css'] [data-giro-flotante][data-side='bottom'] { --tw-enter-translate-y: calc(var(--spacing) * 2); }
+html[data-giro='css'] [data-giro-flotante][data-side='left'] { --tw-enter-translate-x: calc(var(--spacing) * -2); }
+html[data-giro='css'] [data-giro-flotante][data-side='right'] { --tw-enter-translate-x: calc(var(--spacing) * 2); }
+
+/* Cámaras: con la tablet al revés y el display sin rotar, Chrome entrega los
+   frames según la rotación del DISPLAY; adentro de la UI girada el preview se
+   vería invertido. Se contra-gira el <video> (compone con el scaleX(-1) del
+   espejo del comprobante). Lo que se analiza o se guarda se endereza en JS
+   (src/lib/giro-panel/camara.ts). Toda cámara nueva del panel lleva
+   data-giro-camara en su visor. */
+html[data-giro='css'] [data-giro-camara] video {
+  rotate: 180deg;
+}
+
+/* Campos de plata y cantidad (src/components/barber/campo-tablet.tsx): el
+   teclado de Android no gira, así que con el panel girado se muestra el teclado
+   del panel. Lo alterna el CSS y no React para que una recarga ya salga bien. */
+.giro-solo-css { display: none; }
+html[data-giro='css'] .giro-solo-css { display: block; }
+html[data-giro='css'] .giro-solo-normal { display: none; }
+
+/* Mini-ilustración de "Dar vuelta 180°" (control-pantalla.tsx): el contenido de
+   la tablet de la derecha gira una vez al abrir la hoja. */
+.giro-ilus-contenido { transform-box: view-box; }
+.giro-ilus-contenido[data-girado] { transform: rotate(180deg); }
+@media (prefers-reduced-motion: no-preference) {
+  .giro-ilus-contenido[data-girado] {
+    animation: giro-ilus 800ms cubic-bezier(0.6, 0, 0.3, 1) 450ms both;
+  }
+}
+@keyframes giro-ilus {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(180deg); }
+}
+
+/* Animación del giro: SÓLO cuando el barbero toca el botón (el store pone
+   html[data-giro-anim] alrededor de una View Transition). El snapshot nuevo es
+   el viejo girado 180°: arrancarlo en ±180° hace la animación continua, con una
+   escala que baja a mitad de camino para que una pantalla apaisada no se corte
+   al pasar por los 90°. Con reduced-motion o sin la API, el cambio es inmediato. */
+@media (prefers-reduced-motion: no-preference) {
+  html[data-giro-anim]::view-transition { background: oklch(0.16 0 0); }
+  html[data-giro-anim]::view-transition-old(root) { animation: none; opacity: 0; }
+  html[data-giro-anim='horario']::view-transition-new(root) {
+    animation: giro-panel-horario 600ms cubic-bezier(0.6, 0, 0.3, 1) both;
+  }
+  html[data-giro-anim='antihorario']::view-transition-new(root) {
+    animation: giro-panel-antihorario 600ms cubic-bezier(0.6, 0, 0.3, 1) both;
+  }
+}
+@keyframes giro-panel-horario {
+  from { transform: rotate(-180deg); }
+  50%  { transform: rotate(-90deg) scale(0.6); }
+  to   { transform: none; }
+}
+@keyframes giro-panel-antihorario {
+  from { transform: rotate(180deg); }
+  50%  { transform: rotate(90deg) scale(0.6); }
+  to   { transform: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Avisos (sonner) tocables con un diálogo abierto — en todas las superficies.
+   Mientras hay un Dialog, Sheet o AlertDialog modal, Radix pone
+   pointer-events:none en <body> y sólo se lo devuelve al diálogo. El Toaster lo
+   heredaba (sonner sólo apaga los avisos invisibles) y el toque ATRAVESABA el
+   aviso: tocar la X o "Reintentar" caía en el overlay (y cerraba el cobro) o en
+   el botón de abajo (y apretaba "Cobrar"). Esto le devuelve los toques a los
+   avisos visibles; la otra mitad es que Dialog y Sheet no tomen ese toque como
+   "afuera" (src/components/ui/ignorar-avisos.ts). Las dos hacen falta: con sólo
+   esta regla la acción corre y el diálogo igual se cierra.
+   ═══════════════════════════════════════════════════════════════════════════ */
+[data-sonner-toast]:not([data-visible='false']) {
+  pointer-events: auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Asesoría sin costo (mig 217) — panel del barbero.
+   Fucsia = asesoría en todo el panel (violeta turnos, ámbar descansos y
+   demoras, verde corte en curso y primer corte, azul/amarillo Menor espera).
+   Lo usan queue-panel.tsx (.asesoria-recien) y asesoria-inicio-dialog.tsx
+   (.asesoria-respira). Sin animación con prefers-reduced-motion.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Anillo de "recién llegada" en la tarjeta de la fila: lo pone el aviso de
+   llegada y queue-panel lo saca a los 12 s. Outline y no box-shadow: no pisa la
+   sombra de la Card ni ocupa lugar, y el overflow-hidden de la Card (por el
+   acento fucsia) no lo recorta. Con reduced-motion queda el anillo quieto. */
+.asesoria-recien {
+  outline: 2px solid oklch(66.7% 0.295 322.15 / 0.7);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .asesoria-recien {
+    /* 8 latidos de 1,5 s = los 12 s que dura la clase. */
+    animation: asesoria-anillo 1.5s cubic-bezier(0.22, 1, 0.36, 1) 8;
+  }
+}
+@keyframes asesoria-anillo {
+  0%   { outline-offset: 0;   outline-color: oklch(66.7% 0.295 322.15 / 0.9); }
+  70%  { outline-offset: 7px; outline-color: oklch(66.7% 0.295 322.15 / 0); }
+  100% { outline-offset: 2px; outline-color: oklch(66.7% 0.295 322.15 / 0.7); }
+}
+
+/* Ícono del pop-up de asesoría: "respira" (escala 1 → 1.04) con un halo blanco
+   que se abre y se desvanece, cada 2,4 s. El halo nace con radio 0 debajo del
+   ícono, así que el reinicio del ciclo no se ve. */
+@media (prefers-reduced-motion: no-preference) {
+  .asesoria-respira {
+    animation: asesoria-respira 2.4s ease-in-out infinite;
+  }
+}
+@keyframes asesoria-respira {
+  0%   { transform: scale(1);    box-shadow: 0 0 0 0 oklch(1 0 0 / 0.45); }
+  50%  { transform: scale(1.04); }
+  100% { transform: scale(1);    box-shadow: 0 0 0 18px oklch(1 0 0 / 0); }
+}

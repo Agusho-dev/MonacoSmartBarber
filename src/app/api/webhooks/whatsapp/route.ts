@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+// Estáticos y mínimos a propósito: son el salvavidas del corte de Menor espera
+// cuando el módulo del webhook no carga (ver más abajo).
+import { pareceBotonMenorEspera } from '@/lib/menor-espera/plantilla'
+import { salvavidasBotonMenorEspera } from '@/lib/menor-espera/salvavidas'
 
 function getSupabase() {
   return createClient(
@@ -271,6 +275,58 @@ async function verifyHmacSignature(
   return hexSig === expectedSig
 }
 
+// ── Firma de Meta: MEDIR antes de exigir (mig 222) ──────────────────────────
+// Un app_secret equivocado cortaría TODO el inbound (reseñas, IA, inbox), como
+// en el apagón del 25/ago. Por eso el webhook sigue aceptando todo y sólo
+// REGISTRA, por org y por día, cuántos POST validan la firma con el app_secret
+// guardado (whatsapp_webhook_firmas). Lo único que depende de la firma es el
+// corte de Menor espera: sin firma válida no mueve a nadie de la fila ni
+// registra bajas. Exigirla para todo el webhook es otra decisión, con números.
+type FirmaWebhook = 'valida' | 'invalida' | 'sin_firma' | 'sin_secreto'
+
+async function evaluarFirma(
+  body: string,
+  signature: string | null,
+  appSecret: string | null | undefined,
+): Promise<FirmaWebhook> {
+  if (!signature) return 'sin_firma'
+  if (!appSecret?.trim()) return 'sin_secreto'
+  try {
+    return (await verifyHmacSignature(body, signature, appSecret)) ? 'valida' : 'invalida'
+  } catch (e) {
+    console.error('[WA Webhook] verificando la firma:', e)
+    return 'invalida'
+  }
+}
+
+let avisoSinRegistroFirmas = false
+
+/** Un UPDATE de una fila chica por POST y org. Nunca lanza ni frena el webhook. */
+async function registrarFirma(
+  supabase: ReturnType<typeof getSupabase>,
+  orgId: string,
+  firma: FirmaWebhook,
+  mensajes: number,
+): Promise<void> {
+  try {
+    const { error } = await supabase.rpc('whatsapp_webhook_registrar', {
+      p_organization_id: orgId,
+      p_firma: firma,
+      p_mensajes: mensajes,
+    })
+    if (error) {
+      if (error.code === 'PGRST202') {
+        if (!avisoSinRegistroFirmas) console.warn('[WA Webhook] falta la migración 222: la firma no se registra')
+        avisoSinRegistroFirmas = true
+      } else {
+        console.error('[WA Webhook] registrando la firma:', error.message)
+      }
+    }
+  } catch (e) {
+    console.error('[WA Webhook] registrando la firma:', e)
+  }
+}
+
 // GET: Meta verifica el webhook con un challenge
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
@@ -353,6 +409,17 @@ export async function POST(req: NextRequest) {
 
   const signature = req.headers.get('x-hub-signature-256')
 
+  // Una evaluación y un registro de la firma por org y por POST (mig 222), con
+  // los mensajes entrantes que trae para ese número (los acuses no cuentan).
+  const firmaPorOrg = new Map<string, FirmaWebhook>()
+  const mensajesPorNumero = new Map<string, number>()
+  for (const e of body.entry ?? []) {
+    for (const c of e.changes ?? []) {
+      const numero = c.field === 'messages' ? c.value?.metadata?.phone_number_id : undefined
+      if (numero) mensajesPorNumero.set(numero, (mensajesPorNumero.get(numero) ?? 0) + (c.value?.messages?.length ?? 0))
+    }
+  }
+
   for (const entry of body.entry ?? []) {
     for (const change of entry.changes ?? []) {
       if (change.field !== 'messages') continue
@@ -370,16 +437,20 @@ export async function POST(req: NextRequest) {
 
       if (!waConfig) continue
 
-      // Verificar HMAC si app_secret está configurado
-      // TODO: hacer estricto una vez confirmado que funciona
-      if (waConfig.app_secret && signature) {
-        const valid = await verifyHmacSignature(rawBody, signature, waConfig.app_secret)
-        if (!valid) {
+      const orgId = waConfig.organization_id
+
+      // Verificar HMAC si app_secret está configurado. NO es estricto (ver
+      // evaluarFirma): se registra para medir y sólo el corte de Menor espera
+      // depende del resultado.
+      let firma = firmaPorOrg.get(orgId)
+      if (!firma) {
+        firma = await evaluarFirma(rawBody, signature, waConfig.app_secret)
+        firmaPorOrg.set(orgId, firma)
+        if (firma === 'invalida') {
           console.warn('[WA Webhook] HMAC no coincide — verificar app_secret. Continuando de todas formas.')
         }
+        await registrarFirma(supabase, orgId, firma, mensajesPorNumero.get(phoneNumberId) ?? 0)
       }
-
-      const orgId = waConfig.organization_id
 
       // Canal WhatsApp de la org. Matcheamos por organization_id porque los canales
       // pueden ser org-wide (branch_id = null) o legacy por sucursal.
@@ -576,6 +647,48 @@ export async function POST(req: NextRequest) {
         })
         if (waMsgErr) {
           console.error('[WA Webhook] Error insertando mensaje:', waMsgErr.message, 'content_type:', contentType)
+        }
+
+        // ── Menor espera por WhatsApp (migs 218/222): corte ANTES del motor ──
+        // La respuesta al aviso se resuelve acá y no sigue: en el motor, el botón
+        // se lo comería una reseña en waiting_reply o dispararía la Bienvenida a
+        // alguien que está sentado en el local. El mensaje ya quedó en el inbox
+        // (INSERT de arriba). Sólo con la firma de Meta verificada mueve a alguien
+        // o registra una baja. Detalle en src/lib/menor-espera/webhook.ts.
+        const meWaConfig = {
+          whatsapp_access_token: waConfig.whatsapp_access_token ?? null,
+          whatsapp_phone_id: waConfig.whatsapp_phone_id ?? null,
+        }
+        try {
+          const { manejarRespuestaMenorEspera } = await import('@/lib/menor-espera/webhook')
+          const resuelto = await manejarRespuestaMenorEspera({
+            supabase,
+            orgId,
+            conversationId: convId,
+            from,
+            message,
+            textoMensaje: text,
+            waConfig: meWaConfig,
+            firmaValida: firma === 'valida',
+          })
+          if (resuelto) continue
+        } catch (meErr) {
+          console.error('[WA Webhook] Menor espera:', meErr)
+          // Un botón nuestro nunca cae al motor, aunque el módulo no haya cargado:
+          // queda una alerta y, con firma válida, el cliente sabe que no se pudo.
+          if (pareceBotonMenorEspera(message)) {
+            await salvavidasBotonMenorEspera({
+              supabase,
+              orgId,
+              conversationId: convId,
+              from,
+              button: message.button,
+              firmaValida: firma === 'valida',
+              waConfig: meWaConfig,
+              motivo: 'no cargó el módulo de Menor espera',
+            })
+            continue
+          }
         }
 
         // ── Workflow Engine: evaluar reglas y workflows ──

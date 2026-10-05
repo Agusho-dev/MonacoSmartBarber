@@ -1,6 +1,20 @@
 // Procesa mensajes programados pendientes vía Meta Cloud API o microservicio Baileys.
 // Ejecutado por pg_cron cada 1 minuto.
 //
+// OJO: ESTE ARCHIVO NO ES LO QUE CORRE EN PRODUCCIÓN (3/10/2026). La deployada es la
+// v16 (28/abr/2026): arma los componentes como {type, parameters} (descarta
+// sub_type/index de los botones) y no guarda el wamid. Este archivo tenía además
+// un `continue` dentro del callback async de processWithConcurrency (SyntaxError:
+// BOOT_ERROR 503 en TODAS las invocaciones = ningún WhatsApp programado sale). Ya
+// está corregido, pero ANTES de deployar:
+//   1. `deno lint index.ts` y `deno check index.ts` sin errores;
+//   2. guardar la v16 para volver atrás (get_edge_function);
+//   3. deployar fuera del horario del local (9 a 21) y mirar net._http_response
+//      (sólo 200) y scheduled_messages durante 30 min: reseñas, turnos y
+//      difusiones pasan todos por acá.
+// El aviso de Menor espera (mig 218) NO depende de este deploy: viaja sólo con
+// parámetros de BODY, que la v16 sí manda bien.
+//
 // CAMBIOS Migración 119/120/121/122 (Ola 3 perf audit):
 // 1. Atomic claim vía claim_pending_messages() RPC: incrementa attempts y marca processing,
 //    FOR UPDATE SKIP LOCKED evita double-send entre cron runs solapados.
@@ -10,6 +24,7 @@
 //    al pg_cron job 'workflow-housekeeping-5min' (corre cada 5 min en lugar de cada 1).
 // 5. Patron obligatorio CLAUDE.md: chequear error de cada .insert()/.update().
 
+// deno-lint-ignore no-import-prefix -- así se deploya hoy (sin deno.json); cambiarlo es otro deploy.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const supabase = createClient(
@@ -31,12 +46,15 @@ interface TemplateParamComponent {
    * (un template con botón "Cancelar turno" viaja por acá).
    */
   sub_type?: string
-  index?: number
+  /** Meta lo documenta como string ("0"); se acepta número por compatibilidad. */
+  index?: number | string
   parameters?: TemplateParamItem[]
 }
 interface TemplateParamItem {
   type: string
   text?: string
+  /** Quick reply con payload propio: `{ type: 'payload', payload: '…' }`. */
+  payload?: string
   image?: unknown
   document?: unknown
   video?: unknown
@@ -67,7 +85,7 @@ interface MetaTemplatePayload {
     components?: Array<{
       type: string
       sub_type?: string
-      index?: number
+      index?: string
       parameters: Array<Record<string, unknown>>
     }>
   }
@@ -163,7 +181,10 @@ Deno.serve(async (req: Request) => {
         await persistResult(msg, false, errorMsg, false /* willRetry */, 'permanent')
         results.push({ id: msg.id, sent: false, error: errorMsg, retry: false })
         trackBroadcast(broadcastCounters, msg.broadcast_id, false, msg.client_id, errorMsg)
-        continue
+        // `return` y no `continue`: esto es el callback async de
+        // processWithConcurrency, no un loop. `continue` acá es un SyntaxError
+        // que tumba la función entera al arrancar (BOOT_ERROR 503).
+        return
       }
 
       // Obtener config del microservicio WA (con cache)
@@ -436,9 +457,12 @@ function buildTemplatePayload(
       // copian cuando existen y se omiten cuando no, para no ensuciar los
       // componentes de body con claves que Meta no espera.
       ...(comp.sub_type ? { sub_type: comp.sub_type } : {}),
-      ...(typeof comp.index === 'number' ? { index: comp.index } : {}),
+      // Meta documenta `index` como string; mandarlo número es apostar a que lo
+      // tolere. 0 es un índice válido: no usar un chequeo de truthiness.
+      ...(comp.index !== undefined && comp.index !== null ? { index: String(comp.index) } : {}),
       parameters: comp.parameters?.map((p: TemplateParamItem) => {
         if (p.type === 'text') return { type: 'text', text: p.text || '' }
+        if (p.type === 'payload') return { type: 'payload', payload: String(p.payload ?? '') }
         if (p.type === 'image') return { type: 'image', image: p.image }
         if (p.type === 'document') return { type: 'document', document: p.document }
         if (p.type === 'video') return { type: 'video', video: p.video }
@@ -476,7 +500,8 @@ async function recordInConversation(
     return
   }
 
-  const phoneNorm = normalizePhone(msg.phone)
+  // Sólo se llega acá con un envío exitoso, que exige teléfono.
+  const phoneNorm = normalizePhone(msg.phone ?? '')
   const phoneSuffix = phoneNorm.slice(-10)
   const allChannelIds = waChannels.map(c => c.id)
 
@@ -609,7 +634,7 @@ async function recordInConversation(
 
 function trackBroadcast(
   counters: Map<string, { sentClients: string[]; failedClients: Array<{ clientId: string; error: string | null }> }>,
-  broadcastId: string | null,
+  broadcastId: string | null | undefined,
   sent: boolean,
   clientId: string | null | undefined,
   errorMsg: string | null,

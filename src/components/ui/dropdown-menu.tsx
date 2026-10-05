@@ -5,6 +5,8 @@ import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react"
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { useGiroCss } from "@/hooks/use-giro-panel"
+import { ALINEACION_OPUESTA, LADO_OPUESTO } from "@/lib/giro-panel/nucleo"
 
 function DropdownMenu({
   ...props
@@ -34,13 +36,25 @@ function DropdownMenuTrigger({
 function DropdownMenuContent({
   className,
   sideOffset = 4,
+  side,
+  align,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+  // Panel del barbero girado 180° por CSS: el menú sigue en <body> (el marco
+  // real de la pantalla) con el lado y la alineación opuestos, y globals.css gira
+  // el contenido sobre su centro ([data-giro-flotante]). DropdownMenuSubContent
+  // NO se puede invertir: Radix le fija el lado DESPUÉS de aplicar los props. En
+  // /barbero no hay submenús; si algún día hacen falta, van como ítems planos.
+  // Fuera de /barbero `giro` es siempre false: nada cambia.
+  const giro = useGiroCss()
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
+        side={giro ? LADO_OPUESTO[side ?? "bottom"] : side}
+        align={giro ? ALINEACION_OPUESTA[align ?? "center"] : align}
+        data-giro-flotante={giro ? "" : undefined}
         className={cn(
           "z-[110] max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
           className

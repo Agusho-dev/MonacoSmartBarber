@@ -2231,11 +2231,31 @@ export async function getAppointmentQueueEntry(appointmentId: string) {
   const access = await assertBranchAccess(appointment.branch_id)
   if (!access.ok) return null
 
-  const { data: entry } = await supabase
+  // Columnas explícitas en los embeds. Esto vuelve al browser —también al del
+  // panel del barbero, una tablet compartida del salón— y con `clients(*)` /
+  // `staff(*)` viajaban el `pin_hash`, el `face_embedding`, el email y las notas
+  // del cliente y el PIN en texto plano del barbero (lo que cerró la mig 212).
+  // El único consumidor es `CompleteServiceDialog`: del cliente lee el nombre y
+  // la categoría (`loyalty`, el mismo embed que trae la fila del panel) y del
+  // barbero no lee nada (usa `barber_id` de la entrada); nombre y foto quedan
+  // para que la entrada tenga la forma de las de la fila. Embeds por nombre de
+  // constraint (Known Risk #15): una segunda FK hacia `staff` o `clients`
+  // tumbaría el cobro de todos los turnos con PGRST201.
+  const { data: entry, error } = await supabase
     .from('queue_entries')
-    .select('*, client:clients(*), barber:staff(*)')
+    .select(
+      '*, client:clients!queue_entries_client_id_fkey(id, name, loyalty:client_loyalty_state!client_loyalty_state_client_id_fkey(total_visits, tier_code, visits_in_window)), barber:staff!queue_entries_barber_id_fkey(id, full_name, avatar_url)'
+    )
     .eq('id', appointment.queue_entry_id)
     .single()
+
+  // Los consumidores sólo distinguen "hay entrada / no hay" y para el segundo
+  // caso ya dicen "no se encontró la entrada de fila". Una entrada que no existe
+  // (PGRST116) es eso; cualquier otro error es una falla que tiene que quedar en
+  // el log en vez de disfrazarse de "no encontrada".
+  if (error && error.code !== 'PGRST116') {
+    console.error('[getAppointmentQueueEntry]', { appointmentId, error: error.message })
+  }
 
   return entry
 }

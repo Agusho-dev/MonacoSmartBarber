@@ -4,6 +4,7 @@ import * as React from 'react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import type { TemplateStatus } from '@/lib/types/database'
 
 export interface TemplateOption {
   id: string
@@ -34,13 +35,20 @@ interface TemplatePickerSelectProps {
   showPending?: boolean
 }
 
+/*
+ * Un texto y una variante por cada estado que admite message_templates.status
+ * (mig 222). El `satisfies` hace que un estado nuevo en TemplateStatus sin su
+ * etiqueta no compile; lo que no esté acá igual se muestra crudo.
+ */
 const STATUS_LABEL: Record<string, string> = {
   approved: 'Aprobada',
   pending: 'Pendiente',
   rejected: 'Rechazada',
   paused: 'Pausada',
   disabled: 'Desactivada',
-}
+  in_appeal: 'En apelación',
+  pending_deletion: 'Borrándose',
+} satisfies Record<TemplateStatus, string>
 
 const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   approved: 'default',
@@ -48,7 +56,9 @@ const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | '
   rejected: 'destructive',
   paused: 'outline',
   disabled: 'outline',
-}
+  in_appeal: 'outline',
+  pending_deletion: 'outline',
+} satisfies Record<TemplateStatus, 'default' | 'secondary' | 'destructive' | 'outline'>
 
 export function TemplatePickerSelect({
   templates,

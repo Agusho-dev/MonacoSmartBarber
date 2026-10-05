@@ -135,12 +135,12 @@ export async function matchFaceInDB(
   targetRole: 'client' | 'staff' = 'client',
   orgId?: string | null
 ): Promise<FaceMatchResult | null> {
-  const supabase = createClient()
-
   const descriptorArray = Array.from(descriptor)
-  const rpcName = targetRole === 'staff' ? 'match_staff_face_descriptor' : 'match_face_descriptor'
 
-  const { data, error } = await supabase.rpc(rpcName, {
+  if (targetRole === 'staff') return matchStaffEnServidor(descriptorArray, orgId)
+
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('match_face_descriptor', {
     query_descriptor: JSON.stringify(descriptorArray),
     match_threshold: MATCH_THRESHOLD,
     max_results: 1,
@@ -156,6 +156,46 @@ export async function matchFaceInDB(
     clientPhone: best.client_phone,
     facePhotoUrl: best.face_photo_url,
     distance: best.distance,
+  }
+}
+
+/**
+ * Identificación del STAFF por la cara: va por el servidor
+ * (`identificarStaffPorRostro`), no por la RPC con la anon key. La RPC
+ * devolvía el teléfono del barbero y, sin org, buscaba en todas; la migración
+ * 223 se la saca a anon. Sin org no se busca: el kiosko siempre la tiene (la
+ * sucursal elegida) y sin ella la búsqueda no tiene sentido.
+ *
+ * Cualquier falla devuelve null, que la cámara cuenta como "no te reconozco":
+ * a los tres intentos el kiosko pasa al PIN. Nunca deja la cámara colgada.
+ */
+async function matchStaffEnServidor(
+  descriptor: number[],
+  orgId?: string | null,
+): Promise<FaceMatchResult | null> {
+  if (!orgId) {
+    console.error('[matchFaceInDB] identificación de staff sin organización: se pide el PIN')
+    return null
+  }
+  try {
+    const { identificarStaffPorRostro } = await import('@/lib/actions/rostro-staff')
+    const res = await identificarStaffPorRostro({ descriptor, orgId })
+    if (!res.ok) {
+      console.error('[matchFaceInDB] staff:', res.error)
+      return null
+    }
+    if (!res.staff) return null
+    return {
+      clientId: res.staff.id,
+      clientName: res.staff.nombre,
+      // El teléfono del barbero ya no sale de la base hacia la tablet.
+      clientPhone: '',
+      facePhotoUrl: null,
+      distance: res.staff.distancia,
+    }
+  } catch (err) {
+    console.error('[matchFaceInDB] staff:', err)
+    return null
   }
 }
 
@@ -206,49 +246,35 @@ export async function saveFacePhoto(
   return data.publicUrl
 }
 
-export async function enrollStaffFaceDescriptor(
-  staffId: string,
-  descriptor: Float32Array,
-  source: 'checkin' | 'barber' = 'barber',
-  qualityScore = 0
-): Promise<boolean> {
-  const supabase = createClient()
-  const descriptorArray = Array.from(descriptor)
-
-  const { error } = await supabase.from('staff_face_descriptors').insert({
-    staff_id: staffId,
-    descriptor: JSON.stringify(descriptorArray),
-    quality_score: qualityScore,
-    source,
-  })
-
-  return !error
-}
-
-export async function saveStaffFacePhoto(
-  staffId: string,
-  photoBlob: Blob
-): Promise<string | null> {
-  const supabase = createClient()
-  const filename = `${staffId}/${crypto.randomUUID()}-staff.webp`
-
-  const { error: uploadError } = await supabase.storage
-    .from('face-references')
-    .upload(filename, photoBlob, {
-      contentType: 'image/webp',
-      cacheControl: '31536000',
-      upsert: false,
+/**
+ * Registra la cara del barbero que acaba de verificar su PIN en el kiosko.
+ *
+ * `permiso` es el que devuelve `verificarPinStaffEnKiosko` (5 minutos de vida):
+ * el servidor saca de ahí quién es el barbero, así que este camino no confía en
+ * ningún id que mande el browser. Manda todas las capturas en UNA llamada.
+ *
+ * Nunca tira: un error de red o del servidor vuelve como `{ ok: false, error }`
+ * con un texto para mostrar.
+ */
+export async function registrarRostroDelStaff(
+  permiso: string,
+  descriptores: Float32Array[],
+  opciones: { calidad?: number; origen?: 'checkin' | 'barber' } = {},
+): Promise<{ ok: true; guardados: number } | { ok: false; error: string }> {
+  try {
+    const { registrarRostroStaff } = await import('@/lib/actions/rostro-staff')
+    const res = await registrarRostroStaff({
+      permiso,
+      descriptores: descriptores.map((d) => Array.from(d)),
+      calidad: opciones.calidad,
+      origen: opciones.origen ?? 'checkin',
     })
-
-  if (uploadError) return null
-
-  const { data } = supabase.storage
-    .from('face-references')
-    .getPublicUrl(filename)
-
-  // We don't have face_photo_url on staff table yet, so we just return the URL for now 
-  // or could optionally update if we add that column later.
-  return data.publicUrl
+    if (!res.ok) console.error('[registrarRostroDelStaff]', res.error)
+    return res
+  } catch (err) {
+    console.error('[registrarRostroDelStaff]', err)
+    return { ok: false, error: 'No pudimos guardar tu rostro. Revisá la conexión y probá de nuevo.' }
+  }
 }
 
 export function captureFrameAsBlob(

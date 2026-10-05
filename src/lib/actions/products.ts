@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { directProductSale } from '@/lib/actions/sales'
 import { getCurrentOrgId, validateBranchAccess } from './org'
 import { getScopedBranchIds } from './branch-access'
+import type { ResultadoVentaDirecta } from '@/lib/productos/reglas'
 
 const REVALIDATE_PATH = '/dashboard/servicios'
 
@@ -202,6 +203,16 @@ export async function getProductSales(branchId?: string, startDate?: string, end
 /**
  * Venta de producto desde el dashboard.
  * Usa directProductSale para crear visita phantom + salary_report + descontar stock.
+ *
+ * Los campos nuevos van DENTRO del objeto, no como parámetros: la aridad de una
+ * server action es parte de su id, y así un dashboard abierto con el bundle
+ * viejo sigue llamando a esta misma action (sin cuenta ni clave).
+ *  - `payment_account_id`: a qué cuenta transfirió (sólo con transferencia).
+ *    Sin cuenta, una transferencia se rechaza si la sucursal tiene cuentas
+ *    activas (`codigo: 'falta_cuenta'`).
+ *  - `clave`: un uuid por apertura del diálogo. Un reintento tras un timeout
+ *    con la misma clave devuelve la venta ya registrada en vez de duplicar
+ *    visita, stock y comisión (hallazgo productos-y-fugas-05).
  */
 export async function sellProductFromDashboard(data: {
     product_id: string
@@ -209,13 +220,22 @@ export async function sellProductFromDashboard(data: {
     branch_id: string
     quantity: number
     payment_method: 'cash' | 'transfer' | 'card'
-}) {
+    payment_account_id?: string | null
+    clave?: string | null
+}): Promise<ResultadoVentaDirecta> {
+    if (!data || typeof data !== 'object') return { error: 'Datos inválidos.' }
+    const cuenta =
+        data.payment_method === 'transfer' && typeof data.payment_account_id === 'string' && data.payment_account_id
+            ? data.payment_account_id
+            : null
+    const clave = typeof data.clave === 'string' && data.clave ? data.clave : null
     return directProductSale(
         data.branch_id,
         data.barber_id,
         data.payment_method,
         [{ id: data.product_id, quantity: data.quantity }],
-        null
+        cuenta,
+        clave,
     )
 }
 

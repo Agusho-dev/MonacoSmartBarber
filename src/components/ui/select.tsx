@@ -5,6 +5,8 @@ import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react"
 import { Select as SelectPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { useGiroCss } from "@/hooks/use-giro-panel"
+import { ALINEACION_OPUESTA, LADO_OPUESTO } from "@/lib/giro-panel/nucleo"
 
 function Select({
   ...props
@@ -55,8 +57,18 @@ function SelectContent({
   children,
   position = "item-aligned",
   align = "center",
+  side,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
+  // Panel del barbero girado 180° por CSS. La lista sigue en <body>, que es el
+  // marco REAL de la pantalla: ahí floating-ui mide y ubica bien. Se le pide el
+  // lado y la alineación opuestos ("abajo del botón" para el barbero es "arriba"
+  // en la pantalla física) y globals.css gira el contenido sobre su centro
+  // ([data-giro-flotante]). item-aligned no se puede girar: alinea el ítem
+  // ELEGIDO sobre el botón y el giro lo mandaría al extremo opuesto, por eso se
+  // fuerza popper. Fuera de /barbero `giro` es siempre false: nada cambia.
+  const giro = useGiroCss()
+  const pos = giro ? "popper" : position
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
@@ -64,19 +76,21 @@ function SelectContent({
         className={cn(
           // z-[110]: por encima de nav fija (z-50), bottom nav (z-40) y botón fullscreen (z-[100])
           "relative z-[110] max-h-(--radix-select-content-available-height) min-w-[8rem] origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border bg-popover text-popover-foreground shadow-md data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
-          position === "popper" &&
+          pos === "popper" &&
             "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
           className
         )}
-        position={position}
-        align={align}
+        position={pos}
+        align={giro ? ALINEACION_OPUESTA[align] : align}
+        side={giro ? LADO_OPUESTO[side ?? "bottom"] : side}
+        data-giro-flotante={giro ? "" : undefined}
         {...props}
       >
         <SelectScrollUpButton />
         <SelectPrimitive.Viewport
           className={cn(
             "p-1",
-            position === "popper" &&
+            pos === "popper" &&
               "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)] scroll-my-1"
           )}
         >
