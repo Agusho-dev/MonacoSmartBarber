@@ -163,8 +163,39 @@ Los cobros por transferencia entran a cuentas bancarias personales de los barber
 - **`transfer_logs` es una proyección de `visits` mantenida por trigger** (`trg_visits_sync_transfer_log`). NO escribir el ledger a mano: cualquier escritura sobre `visits` (incluida la edición del historial, que va DIRECTO desde el browser) lo sincroniza. FK `visit_id` en `ON DELETE CASCADE`.
 - Ingreso real de la cuenta = `amount + tip_amount` (la propina transferida entra a la misma cuenta; `amount` queda como la facturación que concilia caja y comprobantes).
 - El tope lo consumen **sólo las acreditaciones**. Sueldos/gastos pagados desde la cuenta bajan el saldo (`expense_tickets`), no el tope.
-- El acumulado **se deriva** de `transfer_logs` vía `get_transfer_accounts_state(branch)` (grant a `anon`: el panel del barbero se autentica por PIN) y `get_payment_accounts_month_income(branch_ids[])`. No hay contador denormalizado: el viejo (`accumulated_today` + `increment_account_accumulated`) nunca escribió un peso —la RPC fallaba con 42702— y por eso la rotación nunca funcionó.
+- El acumulado **se deriva** de `transfer_logs` vía `get_transfer_accounts_state(branch)` (sólo `service_role`: la tablet la pide por server action) y `get_payment_accounts_month_income(branch_ids[])`. Desde la tablet: `obtenerCuentasDeCobro(branchId)` devuelve `{ok, cuentas} | {ok:false, error}`; `getTransferAccountsState` quedó con el contrato viejo (array) sólo para bundles viejos. `completeService` y la venta directa rechazan una transferencia sin cuenta cuando la sucursal tiene cuentas activas. No hay contador denormalizado: el viejo (`accumulated_today` + `increment_account_accumulated`) nunca escribió un peso —la RPC fallaba con 42702— y por eso la rotación nunca funcionó.
 - Regla de rotación única: `src/lib/payment-accounts.ts → pickTransferAccount()`, compartida por tablet y dashboard.
+
+### Oct/2026: asesoría, menor espera, fotos del corte, productos, sucursales (migraciones 216–225)
+
+El detalle (modelo, decisiones y qué NO hacer) está en el `CLAUDE.md` raíz. Mapa del código:
+
+- **Asesoría sin costo**: `src/lib/actions/asesoria.ts` (interruptor por sucursal, «Mi turno», `marcarAsesoriaVista`, métricas), `cerrarSoloAsesoria` y los guards de `completeService` en `queue.ts`, `src/components/checkin/asesoria-kiosk-band.tsx`, `src/components/barber/asesoria-{badge,aviso,inicio-dialog}.tsx`, `src/components/dashboard/asesoria-card.tsx`. Helpers puros del aviso en `barber-utils.ts` (`marcasDeAsesoria`, `asesoriasNuevas`). Trigger de red en la base: `trg_queue_asesoria_exige_servicio` (221).
+- **Menor espera por WhatsApp**: `src/lib/menor-espera/*` (el corte del webhook vive en `webhook.ts` y `salvavidas.ts`, y se llama desde `src/app/api/webhooks/whatsapp/route.ts` ANTES del motor), `src/lib/actions/menor-espera.ts`, `src/components/dashboard/menor-espera-card.tsx`. «Mi fila» con los movidos: `armarMiFila` en `barber-utils.ts`.
+- **Fotos del corte**: `src/lib/fotos-corte/*` (servidor, contrato, subida, textos), `src/app/api/fotos-corte/entradas/[id]/route.ts` (tablet y dashboard), `src/lib/actions/fotos-corte.ts` (celular), `src/stores/fotos-corte-store.ts`, `src/components/barber/{fotos-del-cobro,qr-fotos-dialog,tira-ultimos-cortes,visor-fotos}.tsx`, `/upload/[token]`. Historial: `getUltimosCortesDelCliente` en `visit-history.ts`.
+- **Productos**: `src/lib/productos/{reglas,venta}.ts` (server-only), `listarProductosParaCobro` en `sales.ts`, `useProductosDeSucursal` + `SelectorProductos`. La tablet NO lee `products` con la anon key.
+- **Sucursales**: `createBranch`/`updateBranch`/`deleteBranch` en `src/lib/actions/branches.ts` (permiso `branches.manage`). Una sucursal con historial NO se borra: se desactiva. Nada de escribir `branches` desde el browser.
+- **Fugas cerradas**: el kiosko, la TV y el cobro de turnos piden columnas explícitas (`STAFF_KIOSKO_COLS`, `TV_QUEUE_SELECT` en `src/lib/tv-queue-select.ts`); identificar y registrar la cara del staff y verificar su PIN va por `src/lib/actions/rostro-staff.ts` (permiso HMAC de 5 min). `client_loyalty_state` se embebe como OBJETO: leer con `leerLoyaltyEmbed` (`src/lib/loyalty-embed.ts`). `app_settings` siempre con `.eq('organization_id', …)`.
+- **Permisos nuevos**: `history.delete` (borrar visitas del historial; los roles «Encargado» no lo tienen hasta que el dueño se lo dé).
+
+### Panel del barbero girado 180° (`src/lib/giro-panel`)
+
+1. Una sola regla, `necesitaCss()` en `nucleo.ts`, espejada a mano en `script-pre-paint.ts` y en el `OFFLINE_HTML` de `public/sw.js`: si cambia una, cambian las tres. Preferencia POR TABLET en `localStorage` (`msb.panel.giro.v1`), sin flag por org.
+2. La estructura `#giro-raiz > #giro-scroll + #giro-portales + Toaster` está SIEMPRE en `/barbero` y es inerte sin `html[data-giro='css']`. No hacerla depender de nada: el layout de `/barbero` se vuelve a ejecutar en cada server action que revalida, y un árbol distinto remontaría el panel en pleno cobro.
+3. En `/barbero` nunca `createPortal(document.body)`: los overlays van por `Dialog`/`Sheet`/`AlertDialog` de `@/components/ui` (portalean a `#giro-portales`). `Select` y `DropdownMenu` ya invierten lado y alineación; `Popover`, `Tooltip` y `DropdownMenuSubContent` NO giran.
+4. En modo CSS se corta la propagación de `touchmove` (react-remove-scroll lee el gesto al revés): usar pointer events.
+5. Cámaras: `data-giro-camara` en el visor; sólo los escáneres con la tablet fija enderezan frames (`camara.ts`). Las fotos con la tablet en la mano van por la cámara nativa y nunca se enderezan.
+6. Campos de plata o cantidad en el panel: `CampoMontoTablet` / `CampoContadorTablet` (`src/components/barber/campo-tablet.tsx`): el teclado de Android girado invierte el 6 y el 9.
+7. El root layout no dibuja Toaster en `/barbero` (`ToasterRaiz`); el panel tiene el suyo. Con un diálogo abierto, los toasts se pueden tocar sin cerrarlo (`src/components/ui/ignorar-avisos.ts` + CSS en `globals.css`).
+8. En dev, el SW de `/barbero` cachea los chunks: desregistrarlo para ver cambios.
+
+### Recarga por versión (después de cada deploy)
+
+`/api/version` devuelve el commit del deployment y `NEXT_PUBLIC_VERSION_APP` (next.config) lo hornea en el bundle. `RecargaPorVersion` (montado en el panel, el kiosko, la TV y `/dashboard/fila`) recarga con `src/lib/recarga-version.ts` SÓLO en reposo: visible, online, sin `[role=dialog]`/`[role=alertdialog]` abiertos (salvo `data-recarga-permitida`), sin foco en un campo, sin `html[data-subiendo-fotos]`, 60 s sin tocar; el kiosko además exige `html[data-kiosko-en-reposo]`. Una recarga por versión cada 10 min como máximo. En los `catch` de server actions: `esErrorDeVersion(e)` → `avisarYRecargarPorVersion()` (o `TEXTO_RECARGA_MANUAL` si la guarda no deja). No fijar `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` (ver Known Risk #38 del CLAUDE.md raíz).
+
+### Listas que se recargan por Realtime
+
+Una lista que se vuelve a leer en cada evento de Realtime NO se reemplaza por un spinner mientras recarga. Con `loading ? spinner : lista`, la lista —y cualquier diálogo que viva adentro— se desmonta bajo el dedo en cada cambio de la fila. El spinner va sólo en la primera carga (`loading && items.length === 0`). Pasaba en el paso de barbero del kiosko y en sus dos «Cambiar barbero» (arreglado el 4/oct/2026); la banda de asesoría del kiosko sigue la misma regla.
 
 ### Edge Functions
 
@@ -191,7 +222,7 @@ Los crons se disparan desde **pg_cron en Supabase** (ver migración 087) haciend
 
 ## SQL Migrations
 
-Located in `supabase/migrations/`, numbered sequentially (currently `001` through `056`). Always use `IF NOT EXISTS`/`IF EXISTS` for idempotency. Comments in Spanish. Migrations 030–036 added mobile app support; 047–051 added multi-tenant org support. Changes to those tables affect the Flutter mobile app (`../Monaco-mobile`).
+Located in `supabase/migrations/`, numbered sequentially (through `225` at oct/2026). Las escritas pero NO aplicadas (con gate) viven en `supabase/migrations_pendientes/` con un README del orden: no moverlas a `migrations/` hasta aplicarlas. Always use `IF NOT EXISTS`/`IF EXISTS` for idempotency. Comments in Spanish. Migrations 030–036 added mobile app support; 047–051 added multi-tenant org support. Changes to those tables affect the Flutter mobile app (`../Monaco-mobile`).
 
 ## Environment Variables
 

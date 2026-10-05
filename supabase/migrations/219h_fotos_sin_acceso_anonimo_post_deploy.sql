@@ -1,4 +1,4 @@
--- NO APLICADA. Ver supabase/migrations_pendientes/README.md para el orden y el gate.
+-- APLICADA en prod el 4/10/2026, inmediatamente después del deploy d31840e (schema_migrations «219h_fotos_sin_acceso_anonimo_post_deploy»).
 -- ============================================================================
 -- 219h — Fotos del corte: después del deploy, nada anónimo en tablas de fotos
 -- ============================================================================

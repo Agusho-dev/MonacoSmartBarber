@@ -1,4 +1,4 @@
--- NO APLICADA. Ver supabase/migrations_pendientes/README.md para el orden y el gate.
+-- APLICADA en prod el 4/10/2026, inmediatamente después del deploy d31840e (schema_migrations «224b_staff_pin_sin_authenticated»).
 -- ============================================================================
 -- 224b — El PIN del staff deja de ser legible con CUALQUIER sesión de la app
 -- ============================================================================

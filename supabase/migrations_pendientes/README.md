@@ -12,10 +12,10 @@ Cuando se aplica una, se mueve a `supabase/migrations/` con el encabezado
 
 ## Orden
 
+Ya aplicadas (4/10/2026, después del deploy `d31840e`): `219h` y `224b` — están en `supabase/migrations/`.
+
 | Archivo | Cuándo | Qué cierra |
 |---|---|---|
-| `219h_fotos_sin_acceso_anonimo_post_deploy.sql` | **Inmediatamente después del deploy**, en la misma ventana fuera de horario | Todo lo anónimo que queda en las tablas de fotos (el flujo QR de HEAD muere con el deploy igual) |
-| `224b_staff_pin_sin_authenticated.sql` | **Después del deploy** que cambia `src/app/dashboard/equipo/page.tsx` | **Crítico:** hoy cualquier JWT de la app de clientes (alta propia con Google/Apple) lee el PIN del staff de todas las orgs |
 | `216b_productos_sin_lectura_anonima.sql` | **Gate**: todas las tablets y PCs recargadas + 24 h de local abierto con 0 GET anónimos a `/rest/v1/products` | Catálogo con costo y comisión legible por anon |
 | `219b_fotos_sin_acceso_anonimo.sql` | **Gate**: 24 h con el local abierto y todo recargado (ver el query del encabezado) | La subida anónima al bucket `visit-photos`, lo único que el bundle viejo sigue usando |
 | `223_rostros_staff_sin_anon.sql` | **Gate**: el commit deployado ya no usa `enrollStaffFaceDescriptor` ni `verifyBarberPin`, tablets recargadas y prueba positiva de alta de cara en Test | Biometría del staff: tabla y RPC sólo para `service_role` |

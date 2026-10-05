@@ -65,7 +65,7 @@ por barbero). **No hay fairness gate** y **no hay push-on-complete** (ver §5.4 
 | **ghost de descanso** | entry con `is_break = true`. El descanso del barbero, respeta el orden FIFO de su fila personal. |
 | **claim atómico** | la transacción (`claim_next_for_barber`) que mueve un entry `waiting → in_progress`, setea `barber_id`, `started_at`, `is_dynamic = false`. |
 | **hint visual** | la pre-asignación local de `assignDynamicBarbers` (cliente). Informativa; el server no la respeta ni la necesita. |
-| **Mi fila** | sección del panel barbero: específicos asignados a ese barbero (+ los dinámicos que su hint local le sugiere mostrar). |
+| **Mi fila** | sección del panel barbero (`armarMiFila`, barber-utils): específicos asignados a ese barbero, los dinámicos que su hint local le sugiere y (mig 218) los que lo esperaban a él y aceptaron Menor espera por WhatsApp, en su lugar por `priority_order`. Un cliente movido puede estar en dos «Mi fila» a la vez (el original y el del hint): gana el primer «Atender» (SKIP LOCKED). |
 | **Fila general** | vista admin `/dashboard/fila`, todos los entries del scope. |
 
 > **Histórico (ya no aplican)**: *fairness gate* (mig 129, revertido mig 131),
@@ -194,6 +194,14 @@ kiosk/TV.
 **Realtime**: el panel suscribe `queue_entries`, `staff`, `break_requests`
 filtrados por `branch_id`; cada evento dispara refresh
 (`fetchQueue + refreshStats + fetchAssignmentData`).
+
+> **Criterio 0b de `compareBarbersForDynamic` (mig 218, oct/2026).** SÓLO para entradas con
+> `dynamic_via_whatsapp_at` (aceptaron Menor espera por WhatsApp): entre barberos igual de libres
+> gana el que tuvo actividad en la última hora (corte en curso, corte cerrado o fichaje, vía
+> `latestClockInAt` de `fetchBranchAssignmentData`). Va después de «libre gana a ocupado», así
+> que nunca prefiere a uno ocupado. Para el resto de las entradas el ranking no cambia
+> (verificado contra HEAD con 2.000 filas al azar). Asignar la entrada a un barbero concreto
+> mientras espera borra la marca de WhatsApp (trigger `trg_queue_entry_menor_espera_marca`, mig 222).
 
 ### 5.3 Atender un cliente (manual)
 
