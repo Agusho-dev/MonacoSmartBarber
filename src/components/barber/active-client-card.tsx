@@ -3,31 +3,17 @@
 import { useCallback, useMemo, type CSSProperties } from 'react'
 import { cn } from '@/lib/utils'
 import { useTimerStage, useCrossesThreshold, type TimerStage } from '@/hooks/use-timer-stage'
-import { LiveTimerText } from './live-timer-text'
 import { vibrate } from '@/lib/barber-feedback'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
-import {
-  Check,
-  Pause,
-  User,
-  Instagram,
-  Coffee,
-  ChevronDown,
-} from 'lucide-react'
+import { Check, Pause, Instagram, Coffee } from 'lucide-react'
 import type { QueueEntry } from '@/lib/types/database'
 import { formatCurrency } from '@/lib/format'
 import { useUltimosCortes, type EstadoUltimosCortes } from '@/hooks/use-ultimos-cortes'
 import { TiraUltimosCortes } from './tira-ultimos-cortes'
 import { AsesoriaBadge } from './asesoria-badge'
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/ui/accordion'
-import { Separator } from '@/components/ui/separator'
+import { ReglaMinutos } from './fila/regla-minutos'
+import { MinutosEnVivo } from './fila/minutos-en-vivo'
+import { Sello } from './fila/sello'
 
 /**
  * Cortes que pide la tarjeta del cliente actual. Lo exporta para que el pop-up
@@ -42,15 +28,18 @@ export const CORTES_EN_TARJETA_ACTIVA = 6
  * sello se pierde en los oscuros.
  */
 const SELLO_SOBRE_CRONOMETRO =
-  'border-white/45 bg-fuchsia-600 text-white shadow-sm hover:bg-fuchsia-700 focus-visible:ring-white/70 focus-visible:ring-offset-0'
+  'h-7 border-white/45 bg-fuchsia-600 text-white shadow-sm hover:bg-fuchsia-700 focus-visible:ring-white/70 focus-visible:ring-offset-0'
+
+/** Minuto en que el semáforo llega al rojo: donde termina la regla. */
+const FIN_DEL_SEMAFORO_MIN = 45
+/** Cambios de color del semáforo (use-timer-stage): marcas altas de la regla. */
+const CAMBIOS_DE_COLOR_MIN = [25, 30, 35]
 
 interface ActiveClientCardProps {
   entry: QueueEntry
-  /** Handler de "Finalizar servicio" — abre el dialog de cobro. */
+  /** Handler de "Finalizar" — abre el diálogo de cobro. */
   onComplete: () => void
-  /** Variante visual: desktop (panel lateral) o mobile (sticky footer). */
-  variant?: 'desktop' | 'mobile'
-  /** Disabled global del botón principal (loading state). */
+  /** Disabled del botón principal (loading state). */
   actionLoading?: boolean
   /**
    * El cliente pidió asesoría (mig 217): tocar el sello reabre el pop-up en
@@ -59,7 +48,7 @@ interface ActiveClientCardProps {
   onVerAsesoria?: () => void
 }
 
-/** Map de tokens CSS del semáforo por etapa (definidos en globals.css).
+/** Tokens CSS del semáforo por etapa (definidos en globals.css).
  *  Sólo los colores comunican el estado: nunca etiquetamos en palabras
  *  para que el cliente no perciba que el barbero está "apurado". */
 const STAGE_STYLE: Record<TimerStage, { bg: string; fg: string; glow: string }> = {
@@ -71,19 +60,25 @@ const STAGE_STYLE: Record<TimerStage, { bg: string; fg: string; glow: string }> 
 }
 
 /**
- * Recuadro del cliente activo. Su fondo cambia de color según el tiempo
- * transcurrido, permitiendo al barbero ver de una ojeada cómo viene:
- *   0-25min blanco · 25-30 celeste · 30-35 azul · 35-45 amarillo · 45+ rojo.
- * Las transiciones son smooth (CSS); los milestones disparan haptics + beep.
+ * La ficha que está en la silla. Es una cartulina cuyo color ES el semáforo:
+ *   0–25 min blanco · 25–30 celeste · 30–35 azul · 35–45 amarillo · 45+ rojo.
+ * Los minutos son lo más grande de la pantalla (se leen desde la silla) y la
+ * regla de abajo muestra cuánto falta para el próximo color. Los cambios de
+ * color son suaves (CSS) y los cruces de umbral vibran (sin sonido: hay un
+ * cliente sentado).
+ *
+ * Nada de cifras que el cliente pueda comparar con el cronómetro: ni la
+ * duración del servicio ni números en la regla (principio "nunca dejar mal
+ * parado al barbero"). Y el texto va a color pleno: en el azul y el rojo, el
+ * texto atenuado con opacidad quedaba por debajo de 3:1.
  */
 export function ActiveClientCard({
   entry,
   onComplete,
-  variant = 'desktop',
   actionLoading,
   onVerAsesoria,
 }: ActiveClientCardProps) {
-  const handleStageChange = useCallback((next: TimerStage, prev: TimerStage) => {
+  const handleStageChange = useCallback((next: TimerStage) => {
     // Sólo haptics silenciosos durante el corte: nada de sonido para no
     // interrumpir la experiencia del cliente.
     switch (next) {
@@ -100,7 +95,6 @@ export function ActiveClientCard({
         vibrate([220, 120, 220])
         break
     }
-    void prev // silence unused
   }, [])
 
   const { stage, isPaused } = useTimerStage({
@@ -111,8 +105,6 @@ export function ActiveClientCard({
   })
 
   const style = STAGE_STYLE[stage]
-
-  const serviceDurationMin = entry.service?.duration_minutes ?? null
 
   const cardStyle = useMemo<CSSProperties>(() => ({
     // El componente sólo pinta estas 3 variables; CSS se encarga del resto.
@@ -129,202 +121,95 @@ export function ActiveClientCard({
   const servicePrice = entry.service?.price ?? 0
 
   // UNA server action por cliente: las observaciones, el Instagram y los
-  // últimos cortes salen de la misma llamada (y de una caché compartida: la
-  // fila monta esta tarjeta dos veces, escritorio y celular, y el pop-up de
-  // asesoría usa la misma clave). La fila no trae esas columnas a propósito
-  // (KR#10/#34: el embed anónimo de clients no se ensancha).
+  // últimos cortes salen de la misma llamada (y de una caché compartida con el
+  // pop-up de asesoría, que usa la misma clave). La fila no trae esas columnas
+  // a propósito (KR#10/#34: el embed anónimo de clients no se ensancha).
   const clienteId = entry.client?.id ?? null
   const historial = useUltimosCortes(clienteId, { limite: CORTES_EN_TARJETA_ACTIVA })
 
-  const sello = pidioAsesoria ? (
-    <AsesoriaBadge
-      tono="claro"
-      tamano="md"
-      onClick={onVerAsesoria}
-      ariaLabel={`Ver el pedido de asesoría de ${clientName}`}
-      className={SELLO_SOBRE_CRONOMETRO}
-    />
-  ) : null
-
-  if (variant === 'mobile') {
-    return (
-      <Card
-        className={cn(
-          'timer-card border-none gap-0 py-0 overflow-hidden rounded-2xl',
-          stage === 'danger' && !isPaused && 'timer-card--danger',
-        )}
-        style={cardStyle}
-        role="region"
-        aria-label={`Servicio activo con ${clientName}`}
-      >
-        <CardContent className="p-0">
-          <div className="flex items-start gap-3 p-4">
-            <div
-              className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-black/10 text-base font-bold"
-              style={{ color: 'inherit' }}
-              aria-hidden
-            >
-              #{entry.position}
-            </div>
-            <div className="min-w-0 flex-1 py-0.5">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <h3 className="truncate text-xl font-black leading-tight tracking-tight">
-                  {clientName}
-                </h3>
-                {sello}
-                {isPaused && (
-                  <Badge className="bg-white/25 hover:bg-white/30 border-0 text-current gap-1 text-[10px] uppercase tracking-wider">
-                    <Pause className="size-3" /> Pausado
-                  </Badge>
-                )}
-              </div>
-              <p className="mt-0.5 truncate text-[13px] font-semibold opacity-85">
-                {serviceName}
-                {servicePrice > 0 && <span className="ml-1 opacity-70">· {formatCurrency(servicePrice)}</span>}
-              </p>
-            </div>
-            <div className="text-right shrink-0">
-              <LiveTimerText
-                startedAt={entry.started_at}
-                pausedDurationSeconds={entry.paused_duration_seconds ?? 0}
-                pausedAt={entry.paused_at}
-                className="block text-[44px] leading-none font-black tracking-tighter tabular-nums"
-                ariaLabel="Tiempo transcurrido"
-              />
-              {serviceDurationMin !== null && serviceDurationMin > 0 && (
-                <p className="mt-1 text-[11px] font-semibold uppercase tracking-widest opacity-60">
-                  ETA {serviceDurationMin} min
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="px-4 pb-3">
-            {clienteId && (
-              <Accordion type="single" collapsible>
-                <AccordionItem value="history" className="border-none">
-                  <AccordionTrigger
-                    className={cn(
-                      'group relative h-11 w-full rounded-xl bg-black/10 px-4 py-0 text-sm font-semibold',
-                      'hover:bg-black/15 hover:no-underline',
-                      'text-current flex items-center justify-center gap-2',
-                      '[&>svg]:hidden',
-                    )}
-                  >
-                    <User className="size-4 opacity-70" aria-hidden />
-                    <span>Historial y ficha</span>
-                    <ChevronDown className="absolute right-4 size-4 shrink-0 transition-transform group-data-[state=open]:rotate-180 opacity-60" />
-                  </AccordionTrigger>
-                  <AccordionContent className="pt-3 pb-0">
-                    <ClientInfo estado={historial.estado} onReintentar={historial.reintentar} sucursalId={entry.branch_id} />
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
-            )}
-
-            <div className={cn('flex gap-2', clienteId && 'mt-3')}>
-              <Button
-                size="lg"
-                onClick={onComplete}
-                disabled={actionLoading}
-                className="h-14 flex-1 text-base font-black uppercase tracking-wide bg-black text-white hover:bg-black/90 border-0 shadow-lg"
-                aria-label="Finalizar servicio"
-              >
-                <Check className="mr-2 size-5" />
-                Finalizar
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  // Desktop
   return (
-    <Card
+    // Entra a la ranura (silla-entra) una vez por cliente: el panel la monta con
+    // `key={entry.id}`, así una nueva lectura de la fila no repite la animación.
+    <section
       className={cn(
-        'timer-card border-none gap-0 py-0 overflow-hidden rounded-3xl',
+        'timer-card silla-entra relative overflow-hidden rounded-[1.75rem]',
         stage === 'danger' && !isPaused && 'timer-card--danger',
       )}
       style={cardStyle}
-      role="region"
       aria-label={`Servicio activo con ${clientName}`}
     >
-      <CardContent className="p-7 md:p-8">
-        <div className="flex items-center gap-4">
-          <div
-            className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-black/10 text-xl font-bold"
-            aria-hidden
-          >
-            #{entry.position}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="truncate text-3xl md:text-4xl font-black leading-none tracking-tight">
-                {clientName}
-              </h2>
-              {sello}
-              {isPaused && (
-                <Badge className="bg-white/25 hover:bg-white/30 border-0 text-current gap-1.5 px-2.5 py-1 uppercase tracking-wider">
-                  <Pause className="size-3.5" /> Pausado
-                </Badge>
-              )}
-            </div>
-            <p className="mt-1.5 text-lg font-semibold opacity-85">
+      <div className="p-5 sm:p-7">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1 pt-1">
+            <h2 className="text-[2.25rem] font-bold leading-[1.08] tracking-[-0.02em] [overflow-wrap:anywhere] max-sm:text-[1.625rem]">
+              {clientName}
+            </h2>
+            <p className="mt-1.5 text-xl font-bold max-sm:text-lg">
               {serviceName}
-              {servicePrice > 0 && <span className="ml-2 opacity-70">· {formatCurrency(servicePrice)}</span>}
+              {servicePrice > 0 && <span className="font-semibold"> · {formatCurrency(servicePrice)}</span>}
             </p>
+            {(pidioAsesoria || isPaused) && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {pidioAsesoria && (
+                  <AsesoriaBadge
+                    tono="claro"
+                    tamano="md"
+                    onClick={onVerAsesoria}
+                    ariaLabel={`Ver el pedido de asesoría de ${clientName}`}
+                    className={SELLO_SOBRE_CRONOMETRO}
+                  />
+                )}
+                {isPaused && (
+                  <Sello tono="heredado" className="h-7">
+                    <Pause aria-hidden /> En pausa
+                  </Sello>
+                )}
+              </div>
+            )}
           </div>
-        </div>
-
-        <div className="mt-7 flex items-end justify-between gap-4">
-          <div>
-            {serviceDurationMin !== null && serviceDurationMin > 0 && (
-              <p className="text-xs font-bold uppercase tracking-[0.2em] opacity-60">
-                ETA {serviceDurationMin} min
-              </p>
-            )}
-            {entry.client?.phone && (
-              <p className="mt-2 text-sm opacity-60">{entry.client.phone}</p>
-            )}
-            {isPaused && (
-              <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-black/10 px-3 py-1 text-[11px] font-bold uppercase tracking-wider">
-                <Pause className="size-3" /> En pausa
-              </span>
-            )}
-          </div>
-          <LiveTimerText
-            startedAt={entry.started_at}
-            pausedDurationSeconds={entry.paused_duration_seconds ?? 0}
-            pausedAt={entry.paused_at}
-            className="text-[68px] md:text-[84px] leading-none font-black tracking-tighter tabular-nums"
-            ariaLabel="Tiempo transcurrido"
+          <MinutosEnVivo
+            inicio={entry.started_at}
+            pausaSegundos={entry.paused_duration_seconds ?? 0}
+            pausadoDesde={entry.paused_at}
+            className="block shrink-0 whitespace-nowrap text-[5.5rem] leading-[0.9] tracking-[-0.05em] max-sm:text-[3.25rem]"
+            claseUnidad="text-[0.3em] tracking-normal"
+            ariaLabel="Tiempo de servicio"
           />
         </div>
 
-        {/* Siempre que haya cliente: antes dependía de notes/instagram, que la
-            fila no trae, y en escritorio el historial no se veía nunca. */}
-        {clienteId && (
-          <>
-            <Separator className="my-6 bg-black/10" />
-            <ClientInfo estado={historial.estado} onReintentar={historial.reintentar} sucursalId={entry.branch_id} />
-          </>
+        {/* En rojo ya no hay próximo color: la regla sólo diría "te pasaste". */}
+        {stage !== 'danger' && (
+          <ReglaMinutos
+            className="mt-6"
+            inicio={entry.started_at}
+            pausaSegundos={entry.paused_duration_seconds ?? 0}
+            pausadoDesde={entry.paused_at}
+            maximo={FIN_DEL_SEMAFORO_MIN}
+            marcas={CAMBIOS_DE_COLOR_MIN}
+            conCifras={false}
+          />
         )}
 
-        <div className="mt-7 flex flex-wrap gap-3">
-          <Button
-            size="lg"
-            onClick={onComplete}
-            disabled={actionLoading}
-            className="h-16 flex-1 bg-black text-white hover:bg-black/90 border-0 text-xl font-black uppercase tracking-wide shadow-xl"
-          >
-            <Check className="mr-2 size-6" />
-            Finalizar servicio
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+        {/* Siempre que haya cliente: observaciones, Instagram y sus últimos
+            cortes con fotos, para repetir lo que se hizo la vez pasada. */}
+        {clienteId && (
+          <div className="mt-5 border-t border-current/15 pt-5">
+            <ClientInfo estado={historial.estado} onReintentar={historial.reintentar} sucursalId={entry.branch_id} />
+          </div>
+        )}
+
+        <Button
+          size="lg"
+          onClick={onComplete}
+          disabled={actionLoading}
+          className="mt-6 h-16 w-full touch-manipulation rounded-2xl border-0 bg-black text-lg font-bold text-white shadow-[0_14px_30px_-14px_oklch(0_0_0/0.6)] hover:bg-black/90 motion-safe:active:scale-[0.99] [&_svg]:size-6"
+          aria-label="Finalizar servicio"
+        >
+          <Check aria-hidden />
+          Finalizar
+        </Button>
+      </div>
+    </section>
   )
 }
 
@@ -345,16 +230,14 @@ function ClientInfo({
   return (
     <div className="space-y-3">
       {ficha?.instagram && (
-        <div className="flex items-center gap-2 text-sm">
-          <Instagram className="size-4 opacity-70" aria-hidden />
-          <span className="font-medium">{ficha.instagram}</span>
+        <div className="flex items-center gap-2 text-base font-semibold">
+          <Instagram className="size-4" aria-hidden />
+          <span>{ficha.instagram}</span>
         </div>
       )}
       {ficha?.notas && (
-        <div className="rounded-xl bg-black/10 p-3 text-sm leading-snug">
-          <p className="mb-1 text-[11px] font-bold uppercase tracking-wider opacity-60">
-            Observaciones
-          </p>
+        <div className="rounded-2xl bg-black/10 p-3.5 text-base font-medium leading-snug">
+          <p className="mb-1 text-sm font-bold">Observaciones</p>
           <p className="whitespace-pre-wrap">{ficha.notas}</p>
         </div>
       )}
@@ -370,8 +253,9 @@ function ClientInfo({
 }
 
 /**
- * Active card específica para cuando el barbero está en descanso.
- * Mantiene coherencia visual con la del corte activo pero usa palette ámbar.
+ * La silla en descanso: cartulina ámbar (ámbar = descansos en todo el panel),
+ * anaranjada para no confundirse con el amarillo 35–45 min del semáforo. Los
+ * minutos y una regla hasta el final del descanso. Pasado el tiempo, roja.
  */
 export function ActiveBreakCard({
   startedAt,
@@ -387,48 +271,59 @@ export function ActiveBreakCard({
   const isOverdue = useCrossesThreshold(startedAt, durationMinutes)
 
   return (
-    <Card
+    <section
       className={cn(
-        'timer-card border-none gap-0 py-0 overflow-hidden rounded-2xl md:rounded-3xl',
+        'timer-card silla-entra relative overflow-hidden rounded-[1.75rem]',
         isOverdue && 'timer-card--danger',
       )}
       style={{
-        ['--timer-bg' as string]: isOverdue ? 'var(--timer-danger-bg)' : 'oklch(0.94 0.09 85)',
-        ['--timer-fg' as string]: isOverdue ? 'var(--timer-danger-fg)' : 'oklch(0.25 0.05 60)',
-        ['--timer-glow' as string]: isOverdue ? 'var(--timer-danger-glow)' : 'oklch(0.78 0.12 85 / 0.35)',
+        ['--timer-bg' as string]: isOverdue ? 'var(--timer-danger-bg)' : 'oklch(0.9 0.085 70)',
+        ['--timer-fg' as string]: isOverdue ? 'var(--timer-danger-fg)' : 'oklch(0.25 0.05 50)',
+        ['--timer-glow' as string]: isOverdue ? 'var(--timer-danger-glow)' : 'oklch(0.75 0.12 70 / 0.35)',
       } as CSSProperties}
-      role="region"
       aria-label="Descanso activo"
     >
-      <CardContent className="p-5 md:p-7">
-        <div className="flex items-center gap-3 md:gap-4">
-          <div className="flex size-12 md:size-16 shrink-0 items-center justify-center rounded-xl md:rounded-2xl bg-black/10">
-            <Coffee className="size-6 md:size-8" />
+      <div className="p-5 sm:p-7">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-4">
+            <span className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-black/10 max-sm:size-12">
+              <Coffee className="size-7 max-sm:size-6" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-[2.25rem] font-bold leading-[1.08] tracking-[-0.02em] max-sm:text-[1.625rem]">
+                {isOverdue ? 'Se pasó el descanso' : 'Descanso'}
+              </h2>
+              <p className="mt-1 text-xl font-bold max-sm:text-lg">
+                {isOverdue
+                  ? 'Ya pasó el tiempo asignado'
+                  : durationMinutes
+                    ? `${durationMinutes} min · disfrutalo`
+                    : 'Disfrutalo'}
+              </p>
+            </div>
           </div>
-          <div className="flex-1">
-            <h3 className="text-xl md:text-3xl font-black leading-none tracking-tight">
-              {isOverdue ? 'Tiempo de demora' : 'Descanso'}
-            </h3>
-            <p className="mt-1 text-sm md:text-base opacity-75">
-              {isOverdue ? 'Superaste el tiempo asignado' : 'Disfrutá tu descanso'}
-            </p>
-          </div>
-          <LiveTimerText
-            startedAt={startedAt}
-            className="text-4xl md:text-6xl font-black tabular-nums tracking-tighter"
+          <MinutosEnVivo
+            inicio={startedAt}
+            className="block shrink-0 whitespace-nowrap text-[5.5rem] leading-[0.9] tracking-[-0.05em] max-sm:text-[3.25rem]"
+            claseUnidad="text-[0.3em] tracking-normal"
             ariaLabel="Tiempo de descanso"
           />
         </div>
+
+        {durationMinutes != null && durationMinutes > 0 && (
+          <ReglaMinutos className="mt-6" inicio={startedAt} maximo={durationMinutes} />
+        )}
+
         <Button
           size="lg"
           onClick={onComplete}
           disabled={actionLoading}
-          className="mt-5 h-14 md:h-16 w-full bg-black text-white hover:bg-black/90 border-0 text-base md:text-xl font-black uppercase tracking-wide shadow-lg"
+          className="mt-6 h-16 w-full touch-manipulation rounded-2xl border-0 bg-black text-lg font-bold text-white shadow-[0_14px_30px_-14px_oklch(0_0_0/0.6)] hover:bg-black/90 motion-safe:active:scale-[0.99] [&_svg]:size-6"
         >
-          <Check className="mr-2 size-5" />
-          Finalizar descanso
+          <Check aria-hidden />
+          Terminar descanso
         </Button>
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   )
 }

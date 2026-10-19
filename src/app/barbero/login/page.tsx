@@ -2,26 +2,16 @@
 
 import { useState, useEffect, useCallback } from "react"
 import Image from "next/image"
+import { unstable_rethrow } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { loginWithPin } from "@/lib/actions/auth"
 import type { Branch, Staff } from "@/lib/types/database"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Scissors, ArrowLeft, Delete, Loader2, ScanFace, LogIn, LogOut, RotateCw } from "lucide-react"
+import { VisorHora } from "@/components/barber/reloj/visor-hora"
+import { avisarYRecargarPorVersion, esErrorDeVersion, TEXTO_RECARGA_MANUAL } from "@/lib/recarga-version"
+import { cn } from "@/lib/utils"
+import { Scissors, ArrowLeft, Delete, Loader2, ScanFace, LogIn, LogOut, RotateCw, MapPin } from "lucide-react"
 
 type Step = "branch" | "barber" | "pin"
 type LoginBlock = null | "needs_face_registration" | "needs_clock_in"
@@ -132,11 +122,27 @@ export default function BarberLoginPage() {
       formData.append("staff_id", selectedBarber.id)
       formData.append("pin", currentPin)
 
-      const result = await loginWithPin(formData) as {
+      let result: {
         error?: string
         needsFaceRegistration?: boolean
         needsClockIn?: boolean
       } | undefined
+      try {
+        result = await loginWithPin(formData)
+      } catch (e) {
+        // La redirección a la fila (PIN correcto) la maneja Next: no es un error.
+        unstable_rethrow(e)
+        console.error("[barbero/login] loginWithPin:", e)
+        // Antes, una falla de red dejaba el teclado deshabilitado para siempre.
+        if (esErrorDeVersion(e)) {
+          if (!avisarYRecargarPorVersion()) setError(TEXTO_RECARGA_MANUAL)
+        } else {
+          setError("No pudimos verificar el PIN. Revisá la conexión y probá de nuevo.")
+        }
+        setPin("")
+        setSubmitting(false)
+        return
+      }
 
       if (result?.needsFaceRegistration) {
         setLoginBlock("needs_face_registration")
@@ -185,12 +191,17 @@ export default function BarberLoginPage() {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center p-4">
-      <div className="mb-8 flex flex-col items-center gap-2">
+    // Pantalla de bloqueo del reloj: la hora grande arriba (acá no está la
+    // banda del panel) y abajo quién entra. Mide el alto que deja la reserva de
+    // la barra del layout, así la pantalla no scrollea.
+    <div className="flex min-h-[calc(100dvh-var(--alto-nav)-env(safe-area-inset-bottom))] flex-col items-center px-4 pb-6 pt-[clamp(3rem,8vh,6.5rem)]">
+      <VisorHora tamano="grande" />
+
+      <div className="mt-7 flex items-center gap-3">
         {orgInfo?.logo_url ? (
           <Image
             src={orgInfo.logo_url}
-            alt={orgInfo.name}
+            alt=""
             width={48}
             height={48}
             className="size-12 rounded-full object-cover"
@@ -198,234 +209,231 @@ export default function BarberLoginPage() {
             unoptimized
           />
         ) : (
-          <div className="flex size-12 items-center justify-center rounded-full border border-muted-foreground/25">
-            <Scissors className="size-5 text-foreground" />
-          </div>
+          <span className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground">
+            <Scissors className="size-5" aria-hidden />
+          </span>
         )}
-        <h1 className="text-lg font-semibold tracking-tight">
-          {orgInfo?.name || 'BarberOS'}
-        </h1>
+        <h1 className="text-lg font-semibold tracking-[-0.01em]">{orgInfo?.name || "BarberOS"}</h1>
       </div>
 
-      {step !== "branch" && (
-        <button
-          onClick={goBack}
-          className="mb-4 flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="size-4" />
-          Volver
-        </button>
-      )}
+      <div className="mt-8 flex w-full flex-1 flex-col items-center sm:mt-10">
+        {step !== "branch" && (
+          <button
+            onClick={goBack}
+            className="mb-5 flex h-11 items-center gap-1.5 rounded-full px-4 text-[0.9375rem] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" />
+            Volver
+          </button>
+        )}
 
-      {step === "branch" && (
-        <Card className="w-full max-w-sm">
-          <CardHeader className="text-center">
-            <CardTitle>Seleccionar sucursal</CardTitle>
-            <CardDescription>
-              Elegí la sucursal donde trabajás hoy
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loadingBranches ? (
-              <Skeleton className="h-9 w-full" />
-            ) : branches.length === 0 ? (
-              <div className="flex flex-col items-center gap-3">
-                <p className="text-center text-sm text-muted-foreground">
-                  No hay sucursales disponibles
-                </p>
-                <form action="/api/clear-org" method="POST">
-                  <Button variant="outline" size="sm" type="submit" className="gap-1.5">
-                    <LogOut className="size-3.5" />
-                    Cambiar barbería
-                  </Button>
-                </form>
-              </div>
-            ) : (
-              <Select onValueChange={handleBranchSelect}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Seleccionar sucursal..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches.map((branch) => (
-                    <SelectItem key={branch.id} value={branch.id}>
-                      {branch.name}
-                    </SelectItem>
+        {step === "branch" && (
+          <div className="w-full max-w-md">
+            <h2 className="text-center text-2xl font-bold tracking-[-0.02em]">¿Dónde trabajás hoy?</h2>
+            <div className="mt-6">
+              {loadingBranches ? (
+                <div className="grid gap-3">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <Skeleton key={i} className="h-16 w-full rounded-2xl bg-card" />
                   ))}
-                </SelectContent>
-              </Select>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {step === "barber" && (
-        <div className="w-full max-w-lg">
-          <div className="mb-6 text-center">
-            <h2 className="text-lg font-semibold">¿Quién sos?</h2>
-            <p className="text-sm text-muted-foreground">
-              {selectedBranch?.name}
-            </p>
+                </div>
+              ) : branches.length === 0 ? (
+                <div className="flex flex-col items-center gap-3">
+                  <p className="text-center text-[0.9375rem] text-muted-foreground">
+                    No hay sucursales disponibles
+                  </p>
+                  <form action="/api/clear-org" method="POST">
+                    <Button variant="outline" type="submit" className="h-11 gap-1.5 rounded-xl bg-card">
+                      <LogOut className="size-4" />
+                      Cambiar barbería
+                    </Button>
+                  </form>
+                </div>
+              ) : (
+                // Una sucursal = un toque (antes, un desplegable: dos toques y
+                // una lista chica para el dedo).
+                <div className="grid gap-3">
+                  {branches.map((branch) => (
+                    <button
+                      key={branch.id}
+                      onClick={() => handleBranchSelect(branch.id)}
+                      className="flex h-16 items-center gap-3 rounded-2xl border border-border/80 bg-card px-5 text-left text-lg font-semibold shadow-[0_8px_22px_-18px_oklch(0.2_0.012_260/0.5)] transition-colors hover:bg-muted/60 active:scale-[0.99] motion-safe:transition-transform"
+                    >
+                      <MapPin className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+                      {branch.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
+        )}
 
-          {loadingBarbers ? (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-28 w-full rounded-xl" />
-              ))}
+        {step === "barber" && (
+          <div className="w-full max-w-2xl">
+            <div className="mb-6 text-center">
+              <h2 className="text-2xl font-bold tracking-[-0.02em]">¿Quién sos?</h2>
+              <p className="mt-1 text-[0.9375rem] text-muted-foreground">{selectedBranch?.name}</p>
             </div>
-          ) : barbersError ? (
-            <div className="flex flex-col items-center gap-3 text-center">
-              <p className="text-sm text-destructive">
-                No pudimos cargar los barberos de esta sucursal.
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-                onClick={() => setReintentoBarberos((n) => n + 1)}
-              >
-                <RotateCw className="size-3.5" />
-                Reintentar
-              </Button>
-            </div>
-          ) : barbers.length === 0 ? (
-            <p className="text-center text-sm text-muted-foreground">
-              No hay barberos en esta sucursal
-            </p>
-          ) : (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {barbers.map((barber) => (
-                <button
-                  key={barber.id}
-                  onClick={() => handleBarberSelect(barber)}
-                  className="flex flex-col items-center gap-3 rounded-xl border bg-card p-5 transition-colors hover:bg-accent active:scale-[0.98]"
-                >
-                  <div className="flex size-14 items-center justify-center rounded-full bg-muted text-lg font-bold text-foreground">
-                    {getInitials(barber.full_name)}
-                  </div>
-                  <span className="text-center text-sm font-medium leading-tight">
-                    {barber.full_name}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
-      {step === "pin" && selectedBarber && (
-        <div className="flex w-full max-w-xs flex-col items-center">
-          {loginBlock ? (
-            <div className="flex flex-col items-center gap-5 text-center animate-in fade-in zoom-in-95 duration-300">
-              <div
-                className={`flex size-20 items-center justify-center rounded-full border-2 ${
-                  loginBlock === "needs_face_registration"
-                    ? "border-blue-500/30 bg-blue-500/10"
-                    : "border-amber-500/30 bg-amber-500/10"
-                }`}
-              >
-                {loginBlock === "needs_face_registration" ? (
-                  <ScanFace className="size-10 text-blue-400" strokeWidth={1.5} />
-                ) : (
-                  <LogIn className="size-10 text-amber-400" strokeWidth={1.5} />
-                )}
+            {loadingBarbers ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="h-36 w-full rounded-2xl bg-card" />
+                ))}
               </div>
-
-              <div>
-                <h2 className="text-xl font-bold">
-                  {loginBlock === "needs_face_registration"
-                    ? "Registrá tu rostro"
-                    : "No hiciste el check-in"}
-                </h2>
-                <p className="mt-2 text-sm text-muted-foreground max-w-[260px]">
-                  {loginBlock === "needs_face_registration"
-                    ? "Es tu primera vez. Dirigite a la tablet de check-in y registrá tu rostro en la sección \"Soy barbero\"."
-                    : "Antes de ingresar al panel, registrá tu entrada en la tablet de check-in con la opción \"Soy barbero\"."}
+            ) : barbersError ? (
+              <div className="flex flex-col items-center gap-3 text-center">
+                <p className="text-[0.9375rem] text-destructive">
+                  No pudimos cargar los barberos de esta sucursal.
                 </p>
-              </div>
-
-              <Button
-                onClick={() => {
-                  setLoginBlock(null)
-                  setPin("")
-                  setError("")
-                }}
-                variant="outline"
-                className="mt-2"
-              >
-                <ArrowLeft className="mr-2 size-4" />
-                Volver a intentar
-              </Button>
-            </div>
-          ) : (
-            <>
-              <div className="mb-6 flex flex-col items-center gap-1">
-                <div className="mb-2 flex size-16 items-center justify-center rounded-full bg-muted text-xl font-bold">
-                  {getInitials(selectedBarber.full_name)}
-                </div>
-                <h2 className="text-lg font-semibold">
-                  {selectedBarber.full_name}
-                </h2>
-                <p className="text-sm text-muted-foreground">Ingresá tu PIN</p>
-              </div>
-
-              <div className="mb-6 flex gap-3">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className={`size-4 rounded-full border-2 transition-colors ${
-                      i < pin.length
-                        ? "border-foreground bg-foreground"
-                        : "border-muted-foreground/40"
-                    }`}
-                  />
-                ))}
-              </div>
-
-              {error && (
-                <div className="mb-4 rounded-md bg-destructive/10 px-3 py-2 text-center text-sm text-destructive">
-                  {error}
-                </div>
-              )}
-
-              {submitting && (
-                <Loader2 className="mb-4 size-5 animate-spin text-muted-foreground" />
-              )}
-
-              <div className="grid w-full grid-cols-3 gap-3">
-                {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => (
-                  <Button
-                    key={digit}
-                    variant="outline"
-                    onClick={() => handlePinDigit(digit)}
-                    disabled={submitting}
-                    className="h-16 text-2xl font-medium"
-                  >
-                    {digit}
-                  </Button>
-                ))}
-                <div />
                 <Button
                   variant="outline"
-                  onClick={() => handlePinDigit("0")}
-                  disabled={submitting}
-                  className="h-16 text-2xl font-medium"
+                  className="h-11 gap-1.5 rounded-xl bg-card"
+                  onClick={() => setReintentoBarberos((n) => n + 1)}
                 >
-                  0
-                </Button>
-                <Button
-                  variant="ghost"
-                  onClick={handlePinDelete}
-                  disabled={submitting || pin.length === 0}
-                  className="h-16"
-                >
-                  <Delete className="size-6" />
+                  <RotateCw className="size-4" />
+                  Reintentar
                 </Button>
               </div>
-            </>
-          )}
-        </div>
-      )}
+            ) : barbers.length === 0 ? (
+              <p className="text-center text-[0.9375rem] text-muted-foreground">
+                No hay barberos en esta sucursal
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {barbers.map((barber) => (
+                  <button
+                    key={barber.id}
+                    onClick={() => handleBarberSelect(barber)}
+                    className="flex flex-col items-center gap-3 rounded-2xl border border-border/80 bg-card px-4 py-6 shadow-[0_8px_22px_-18px_oklch(0.2_0.012_260/0.5)] transition-colors hover:bg-muted/60 active:scale-[0.98] motion-safe:transition-transform"
+                  >
+                    <span className="flex size-16 items-center justify-center rounded-full bg-primary text-xl font-semibold text-primary-foreground">
+                      {getInitials(barber.full_name)}
+                    </span>
+                    <span className="text-center text-base font-semibold leading-tight">
+                      {barber.full_name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {step === "pin" && selectedBarber && (
+          <div className="flex w-full max-w-sm flex-col items-center">
+            {loginBlock ? (
+              <div className="flex flex-col items-center gap-5 text-center animate-in fade-in zoom-in-95 duration-300">
+                <div
+                  className={cn(
+                    "flex size-20 items-center justify-center rounded-full border-2",
+                    loginBlock === "needs_face_registration"
+                      ? "border-blue-500/30 bg-blue-500/10 text-blue-700"
+                      : "border-amber-500/40 bg-amber-400/15 text-amber-800",
+                  )}
+                >
+                  {loginBlock === "needs_face_registration" ? (
+                    <ScanFace className="size-10" strokeWidth={1.5} />
+                  ) : (
+                    <LogIn className="size-10" strokeWidth={1.5} />
+                  )}
+                </div>
+
+                <div>
+                  <h2 className="text-2xl font-bold tracking-[-0.02em]">
+                    {loginBlock === "needs_face_registration"
+                      ? "Registrá tu rostro"
+                      : "No hiciste el check-in"}
+                  </h2>
+                  <p className="mt-2 max-w-[300px] text-[0.9375rem] text-muted-foreground">
+                    {loginBlock === "needs_face_registration"
+                      ? "Es tu primera vez. Dirigite a la tablet de check-in y registrá tu rostro en la sección \"Soy barbero\"."
+                      : "Antes de ingresar al panel, registrá tu entrada en la tablet de check-in con la opción \"Soy barbero\"."}
+                  </p>
+                </div>
+
+                <Button
+                  onClick={() => {
+                    setLoginBlock(null)
+                    setPin("")
+                    setError("")
+                  }}
+                  variant="outline"
+                  className="mt-2 h-12 rounded-xl bg-card px-5"
+                >
+                  <ArrowLeft className="size-4" />
+                  Volver a intentar
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div className="mb-6 flex flex-col items-center gap-1">
+                  <span className="mb-2 flex size-16 items-center justify-center rounded-full bg-primary text-xl font-semibold text-primary-foreground">
+                    {getInitials(selectedBarber.full_name)}
+                  </span>
+                  <h2 className="text-xl font-bold tracking-[-0.01em]">{selectedBarber.full_name}</h2>
+                  <p className="text-[0.9375rem] text-muted-foreground">Ingresá tu PIN</p>
+                </div>
+
+                <div className="mb-6 flex h-5 items-center gap-4" aria-label={`${pin.length} de 4 dígitos`}>
+                  {submitting ? (
+                    <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                  ) : (
+                    Array.from({ length: 4 }).map((_, i) => (
+                      <span
+                        key={i}
+                        className={cn(
+                          "size-4 rounded-full border-2 transition-colors",
+                          i < pin.length ? "border-foreground bg-foreground" : "border-foreground/25",
+                        )}
+                      />
+                    ))
+                  )}
+                </div>
+
+                {error && (
+                  <div role="alert" className="mb-5 rounded-xl bg-destructive/10 px-4 py-2.5 text-center text-[0.9375rem] font-medium text-destructive">
+                    {error}
+                  </div>
+                )}
+
+                <div className="grid w-full grid-cols-3 gap-3">
+                  {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => (
+                    <Button
+                      key={digit}
+                      variant="outline"
+                      onClick={() => handlePinDigit(digit)}
+                      disabled={submitting}
+                      className="h-[4.5rem] rounded-2xl bg-card text-[1.75rem] font-medium shadow-[0_6px_16px_-14px_oklch(0.2_0.012_260/0.6)] active:scale-[0.97]"
+                    >
+                      {digit}
+                    </Button>
+                  ))}
+                  <div />
+                  <Button
+                    variant="outline"
+                    onClick={() => handlePinDigit("0")}
+                    disabled={submitting}
+                    className="h-[4.5rem] rounded-2xl bg-card text-[1.75rem] font-medium shadow-[0_6px_16px_-14px_oklch(0.2_0.012_260/0.6)] active:scale-[0.97]"
+                  >
+                    0
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={handlePinDelete}
+                    disabled={submitting || pin.length === 0}
+                    aria-label="Borrar"
+                    className="h-[4.5rem] rounded-2xl"
+                  >
+                    <Delete className="size-7" />
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

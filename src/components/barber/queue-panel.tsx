@@ -36,7 +36,6 @@ import {
 } from '@/lib/barber-utils'
 import { avisarYRecargarPorVersion, esErrorDeVersion, TEXTO_RECARGA_MANUAL } from '@/lib/recarga-version'
 import { leerLoyaltyEmbed } from '@/lib/loyalty-embed'
-import { cn } from '@/lib/utils'
 import {
   appointmentInstantMs,
   findNextAppointment,
@@ -48,24 +47,11 @@ import { AppointmentStrip } from '@/components/barber/appointment-strip'
 import { AppointmentDetailSheet } from '@/components/barber/appointment-detail-sheet'
 import { UpcomingAppointmentBanner } from '@/components/barber/upcoming-appointment-banner'
 import { NextAppointmentNotice } from '@/components/barber/next-appointment-notice'
-import { TurnoBadge } from '@/components/appointments/turno-badge'
-import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { CampoContadorTablet } from '@/components/barber/campo-tablet'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -77,38 +63,33 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import { DisposicionFila, ColumnasFila } from './fila/disposicion-fila'
+import { Ranura, SillaCargando, SillaDescansoProximo, SillaVacia } from './fila/silla'
+import { CabeceraFila } from './fila/cabecera-fila'
+import { CortandoAhora, SeccionFila, TramoVacio } from './fila/secciones'
 import {
-  Clock,
-  User,
-  Scissors,
-  LogOut,
-  X,
+  FichaDescansoEnFila,
+  TarjetaEspera,
+  type AccionEntrada,
+  type TarjetaEsperaProps,
+} from './fila/tarjeta-espera'
+import { Sello } from './fila/sello'
+import {
   Coffee,
-  CalendarClock,
   CheckCircle2,
   XCircle,
   Power,
-  EyeOff,
-  Eye,
-  MoreHorizontal,
   CalendarDays,
-  PackageCheck,
-  ShoppingBag,
   MessageCircle,
-  Zap,
-  ChevronRight,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { CompleteServiceDialog } from './complete-service-dialog'
 import { CouponScanDialog } from './coupon-scan-dialog'
-import { LoyaltyTierChip } from './loyalty-tier-chip'
 import { findLoyaltyTier, type LoyaltyTierLite } from '@/lib/loyalty-checkout'
 import { DirectSaleDialog } from './direct-sale-dialog'
 import { ClientProfileSheet } from './client-profile-sheet'
 import { ActiveClientCard, ActiveBreakCard } from './active-client-card'
 import { NextClientAlert } from './next-client-alert'
-import { BarberStatsBar } from './barber-stats-bar'
-import { AsesoriaBadge } from './asesoria-badge'
 import { AsesoriaInicioDialog, type ModoAsesoriaDialog } from './asesoria-inicio-dialog'
 import { mostrarAvisosAsesoria } from './asesoria-aviso'
 import { playAsesoriaChime, playBeep, primeAudioContext, vibrate } from '@/lib/barber-feedback'
@@ -725,19 +706,6 @@ export function QueuePanel({
   // Real waiting clients for this barber (non-break)
   const myRealWaitingEntries = myWaitingEntries.filter(e => !e.is_break)
 
-  /**
-   * Gente que está esperando y NO es de nadie, o que lleva demasiado. Es lo que hace
-   * falta para que la pestaña "General" deje de ser un cajón silencioso: un cliente
-   * del pool cuyo hint no cayó en ninguna "Mi fila" sólo existe ahí, y la pestaña por
-   * defecto es "Mi fila". Con el contador en gris nadie la abría.
-   */
-  const alertasEnGeneral = allWaitingEntries.filter(e => {
-    if (e.is_break) return false
-    const sinDueño = !e.barber_id
-    const demorado = now - new Date(e.checked_in_at).getTime() >= 40 * 60 * 1000
-    return sinDueño || demorado
-  }).length
-
   // Un turno cuyo cliente YA está en la fila no deja al barbero frenado: la
   // ventana de protección bloquea walk-ins, pero `claim_next_for_barber` sí le
   // entrega al del turno. Por eso se cuentan aparte de los walk-ins.
@@ -1192,9 +1160,10 @@ export function QueuePanel({
     return next.minutesUntil <= 15 ? next.appointment : null
   }, [todayAppointments, operationMode, now, timezone])
 
-  // La tira de turnos reemplaza al timeline dentro del panel en modo hybrid.
+  // La tira de turnos reemplaza al timeline dentro del panel (hybrid, y walk_in
+  // con algún turno cargado: antes ése sólo se veía en una pestaña del celular).
   // Sin turnos hoy no ocupa un solo píxel: la cola walk-in es la pantalla.
-  const showAppointmentStrip = operationMode === 'hybrid' && todayAppointments.length > 0
+  const showAppointmentStrip = operationMode !== 'appointments' && todayAppointments.length > 0
 
   /**
    * Arranca un TURNO. NO pasa por `attendNextClient`.
@@ -1532,658 +1501,306 @@ export function QueuePanel({
     }
   }
 
-  function formatElapsed(timestamp: string) {
-    const elapsed = now - new Date(timestamp).getTime()
-    if (isNaN(elapsed) || elapsed < 0) return '0m 0s'
-    const totalSeconds = Math.floor(elapsed / 1000)
-    const hours = Math.floor(totalSeconds / 3600)
-    const minutes = Math.floor((totalSeconds % 3600) / 60)
-    const seconds = totalSeconds % 60
-    if (hours > 0) return `${hours}h ${minutes}m`
-    return `${minutes}m ${seconds}s`
-  }
+  // ── Fichas del tarjetero ──
+  // Qué se puede hacer con cada ficha. Son las MISMAS reglas que tenía el botón
+  // de cada tarjeta (sólo se movieron acá para que la silla y el tarjetero no
+  // puedan decir cosas distintas):
+  //  · cortando o en descanso, ninguna ficha tiene botón;
+  //  · un TURNO no se toma con "Atender": ese botón llama al claim con
+  //    `preferredEntryId` y ese camino del RPC filtra `is_appointment = false`,
+  //    así que devolvía vacío siempre ("El cliente ya no está disponible"). Va
+  //    por "Iniciar turno", que arranca ESE turno y nada más. Un descanso
+  //    pendiente con prioridad anterior va primero (misma regla que el RPC:
+  //    `q.priority_order < v_pending_break_priority` en los caminos [A]/[B]). Se
+  //    ofrece sobre el primero de mi fila o sobre uno cuya hora ya llegó (ahí el
+  //    motor le da precedencia absoluta sobre los walk-ins); antes de su hora,
+  //    como secundario: adelantarlo es una decisión del barbero;
+  //  · con el descanso listo, cualquier "Atender" arrancaría el descanso (ver
+  //    `descansoListo`): mejor no ofrecer un botón que hace otra cosa;
+  //  · en el resto del local, cualquier barbero libre puede tomar un dinámico o
+  //    un cliente sin barbero (rescate de limbos del hint divergente, mig 134 +
+  //    commit 1cb1a41; el claim es pool no bloqueante con FOR UPDATE SKIP
+  //    LOCKED). Si el hint apunta a OTRO barbero el botón es "Reclamar",
+  //    secundario, para evitar la duda del 2026-05-26 (dos barberos libres +
+  //    mismo cliente → ¿quién lo toma?). Tampoco es "robar" tomar al que aceptó
+  //    Menor espera por WhatsApp si me esperaba a mí: conservó su lugar en MI
+  //    fila.
+  function accionDe(entry: QueueEntry, esDelLocal: boolean): AccionEntrada | null {
+    if (myActiveEntry || myActiveBreak) return null
+    const isMyMainTap = entry.id === myWaitingEntries[0]?.id
 
-  function renderGhostBreakEntry(entry: QueueEntry) {
-    // Count real waiting clients ahead of this ghost for this barber.
-    // Usamos `priority_order` (FIFO real del backend), no `position` (UI-mutable
-    // por drag&drop) — sino el contador queda desincronizado tras un reorder.
-    const ghostPriorityTs = new Date(entry.priority_order).getTime()
-    const myRealWaiting = entries.filter(
-      e => e.status === 'waiting' && !e.is_break && e.barber_id === session.staff_id
-        && new Date(e.priority_order).getTime() < ghostPriorityTs,
-    ).length
-
-    return (
-      <Card key={entry.id} className="gap-0 py-0 border-amber-500/30 bg-amber-500/5">
-        <CardContent className="flex items-center gap-4 p-5 md:p-6">
-          <div className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600">
-            <Coffee className="size-6" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-lg font-semibold text-amber-600">Tu descanso</p>
-            <p className="text-sm text-muted-foreground">
-              {myRealWaiting === 0
-                ? 'Siguiente en atenderse'
-                : `En ${myRealWaiting} corte${myRealWaiting > 1 ? 's' : ''}`}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  function renderQueueEntry(entry: QueueEntry, isGeneralQueue: boolean = false) {
-    // Render ghost break entries differently
-    if (entry.is_break) {
-      if (entry.barber_id === session.staff_id) {
-        return renderGhostBreakEntry(entry)
+    if (entry.is_appointment) {
+      if (entry.barber_id !== session.staff_id) return null
+      if (
+        myPendingGhost &&
+        new Date(myPendingGhost.priority_order).getTime() <= new Date(entry.priority_order).getTime()
+      ) {
+        return null
       }
-      return null // Don't show other barbers' ghost breaks
+      const isDue = appointmentStartMsOf(entry) <= now
+      if (!isMyMainTap && !isDue) return null
+      return { tipo: 'turno', aTiempo: isDue }
     }
 
-    // (isMyEntry / isReassigning eliminados — no se usan en el render actual)
+    if (descansoListo) return null
 
-    // `client_loyalty_state` llega como OBJETO (relación 1:1): leído con `[0]`
-    // daba siempre undefined, "Primer Corte" salía para todos y la categoría
-    // nunca. Ver `leerLoyaltyEmbed`.
-    const loyalty = leerLoyaltyEmbed(entry.client?.loyalty)
-    // Mig 218: aceptó Menor espera por WhatsApp y sigue esperando en el pool.
-    // Si me esperaba a MÍ, está acá aunque el hint lo haya sugerido a otro
+    const generalClaimAllowed = esDelLocal && (entry.is_dynamic || !entry.barber_id)
+    if (!isMyMainTap && !generalClaimAllowed) return null
+    const isRescueOfOtherHint =
+      esDelLocal &&
+      entry.barber_id != null &&
+      entry.barber_id !== session.staff_id &&
+      !esMovidaPorWhatsAppDe(entry, session.staff_id)
+    return isRescueOfOtherHint ? { tipo: 'reclamar' } : { tipo: 'atender' }
+  }
+
+  function propsDeFicha(
+    entry: QueueEntry,
+    variante: TarjetaEsperaProps['variante'],
+    { orden, delLocal = variante === 'local' }: { orden?: number; delLocal?: boolean } = {},
+  ): TarjetaEsperaProps {
+    // Del resto del local (no de mi fila): rige la regla de rescate de `accionDe`.
+    const esDelLocal = delLocal
+    const accion = accionDe(entry, esDelLocal)
+    // Mig 218: aceptó Menor espera por WhatsApp y sigue esperando en el pool. Si
+    // me esperaba a MÍ, está en mi fila aunque el hint lo haya sugerido a otro
     // (`armarMiFila`): sigue siendo mi cliente y lo atiende el primero que llegue.
-    const viaWhatsApp = esMovidaPorWhatsApp(entry)
     const meEsperabaAMi = esMovidaPorWhatsAppDe(entry, session.staff_id)
     const barberoQueEsperaba =
-      viaWhatsApp && !meEsperabaAMi && entry.menor_espera_barbero_original_id
+      esMovidaPorWhatsApp(entry) && !meEsperabaAMi && entry.menor_espera_barbero_original_id
         ? (allBarbers.find((b) => b.id === entry.menor_espera_barbero_original_id)?.full_name ?? null)
         : null
-    // Mig 217: no sabe qué hacerse y pidió que lo asesoren (fucsia en todo el panel).
-    const pidioAsesoria = entry.pidio_asesoria === true
-    const nombre = entry.client?.name ?? 'Cliente'
+    // `client_loyalty_state` llega como OBJETO (relación 1:1). Ver `leerLoyaltyEmbed`.
+    const loyalty = leerLoyaltyEmbed(entry.client?.loyalty)
     const cliente = entry.client
+    return {
+      entrada: entry,
+      variante,
+      orden,
+      minutosEsperando: (now - new Date(entry.checked_in_at).getTime()) / 60_000,
+      // Hora del dispositivo, como el visor de arriba: las dos tienen que coincidir.
+      llegada: formatHourMinute(entry.checked_in_at),
+      // Sin categoría (programa apagado / cliente no enrolado) no hay chip.
+      tier: findLoyaltyTier(loyaltyTiers, loyalty?.tier_code),
+      // Hora RESERVADA, tomada de la agenda: en una entrada adoptada de un
+      // walk-in `priority_order` es la hora en que el cliente entró al local.
+      horaTurno: entry.is_appointment ? formatHourMinute(appointmentStartMsOf(entry), timezone) : null,
+      asesoriaReciente: asesoriasRecientes.has(entry.id),
+      notaWhatsApp: meEsperabaAMi
+        ? { tipo: 'me-esperaba' }
+        : barberoQueEsperaba
+          ? { tipo: 'esperaba-a', barbero: barberoQueEsperaba }
+          : null,
+      atiendeCon: esDelLocal ? (entry.barber?.full_name ?? null) : null,
+      delLocal: variante === 'silla' && esDelLocal,
+      accion,
+      motivoSinAccion: !accion && myPendingGhost ? 'Primero va tu descanso: arranca solo.' : null,
+      ocupada: actionLoading === entry.id,
+      onAccion: accion
+        ? () => {
+            if (accion.tipo === 'turno') void handleStartAppointment(entry)
+            else void handleStartService(entry.id)
+          }
+        : undefined,
+      onAusente: () => void handleCancel(entry.id),
+      // El nombre abre la ficha (observaciones, Instagram y cortes con fotos,
+      // por server action: la fila no trae esas columnas).
+      onVerFicha: cliente ? () => setProfileClient(cliente) : undefined,
+    }
+  }
 
-    return (
-      <div key={entry.id} className="space-y-2">
-        <Card
-          className={cn(
-            'gap-0 py-0',
-            pidioAsesoria && 'relative overflow-hidden',
-            asesoriasRecientes.has(entry.id) && 'asesoria-recien',
-          )}
-        >
-          {pidioAsesoria && (
-            <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-fuchsia-500" />
-          )}
-          <CardContent className="flex items-center gap-2.5 sm:gap-4 p-3 sm:p-5 md:p-6">
-            <div className="flex size-10 sm:size-14 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-secondary text-sm sm:text-xl font-bold">
-              #{entry.position}
+  // Mi descanso pendiente en la fila: cuántos clientes míos van antes. Se cuenta
+  // con `priority_order` (FIFO real del backend), no con `position`.
+  function cortesAntesDelDescanso(ghost: QueueEntry): number {
+    const ghostPriorityTs = new Date(ghost.priority_order).getTime()
+    return entries.filter(
+      (e) =>
+        e.status === 'waiting' &&
+        !e.is_break &&
+        e.barber_id === session.staff_id &&
+        new Date(e.priority_order).getTime() < ghostPriorityTs,
+    ).length
+  }
+
+  // ── La silla ──
+  // Libre, lo primero de "Mi fila" sube a la silla: si es un cliente, con su
+  // "Atender" en grande; si es mi descanso, el aviso de que arranca solo. Lo que
+  // sube no se repite abajo, en el tarjetero.
+  const sillaLibre = !myActiveEntry && !myActiveBreak
+  const primeroDeMiFila = myWaitingEntries[0] ?? null
+  const subeALaSilla = sillaLibre && primeroDeMiFila ? primeroDeMiFila : null
+  const restoDeMiFila = subeALaSilla ? myWaitingEntries.slice(1) : myWaitingEntries
+  const idsDeMiFila = new Set(myWaitingEntries.map((e) => e.id))
+  // El resto del local: lo que espera y no está en mi fila (los descansos de
+  // los demás no se muestran). Va a la vista, debajo de lo propio, y no en una
+  // pestaña: la pestaña "General" era un cajón silencioso —la abierta por
+  // defecto era "Mi fila"— y un cliente del pool cuyo hint no cayó en la "Mi
+  // fila" de nadie sólo existía ahí. Lo que hay que mirar (sin barbero, o
+  // esperando hace 40 min o más) se marca en el título del tramo.
+  const esperandoEnElLocal = allWaitingEntries.filter((e) => !e.is_break && !idsDeMiFila.has(e.id))
+  // Mi fila vacía y alguien del local que puedo ATENDER (sin barbero: el que el
+  // hint no le dio a nadie; no los que están sugeridos a otro, que son
+  // "Reclamar"): sube a mi silla con su Atender, en vez de dejarlo en un renglón
+  // del tercer tramo mientras yo estoy libre. Es el limbo que la pestaña
+  // "General" escondía. El claim es atómico: si otro barbero lo toma antes, el
+  // segundo toque recibe el aviso de siempre.
+  const delLocalALaSilla =
+    sillaLibre && !primeroDeMiFila
+      ? (esperandoEnElLocal.find((e) => accionDe(e, true)?.tipo === 'atender') ?? null)
+      : null
+  const restoDelLocal = delLocalALaSilla
+    ? esperandoEnElLocal.filter((e) => e.id !== delLocalALaSilla.id)
+    : esperandoEnElLocal
+  const sinBarberoEnElLocal = restoDelLocal.filter((e) => !e.barber_id).length
+  const demoradosEnElLocal = restoDelLocal.filter(
+    (e) => now - new Date(e.checked_in_at).getTime() >= 40 * 60 * 1000,
+  ).length
+
+  const silla = loading ? (
+    <SillaCargando />
+  ) : myActiveBreak ? (
+    <ActiveBreakCard
+      key={myActiveBreak.id}
+      startedAt={myActiveBreak.started_at}
+      durationMinutes={breakDurationMinutes}
+      onComplete={handleCompleteBreak}
+      actionLoading={actionLoading === myActiveBreak.id}
+    />
+  ) : myActiveEntry ? (
+    <ActiveClientCard
+      key={myActiveEntry.id}
+      entry={myActiveEntry}
+      onComplete={() => setCompletingEntry(myActiveEntry)}
+      actionLoading={actionLoading === myActiveEntry.id}
+      onVerAsesoria={() => setConsultaAsesoriaDe(myActiveEntry.id)}
+    />
+  ) : subeALaSilla?.is_break ? (
+    <SillaDescansoProximo key={subeALaSilla.id} />
+  ) : subeALaSilla ? (
+    <TarjetaEspera key={subeALaSilla.id} {...propsDeFicha(subeALaSilla, 'silla')} />
+  ) : delLocalALaSilla ? (
+    <TarjetaEspera key={delLocalALaSilla.id} {...propsDeFicha(delLocalALaSilla, 'silla', { delLocal: true })} />
+  ) : (
+    <SillaVacia esperandoEnElLocal={restoDelLocal.length} />
+  )
+
+  const filas = (
+    <>
+      {/* Con la silla vacía la silla ya dice que no hay nadie: el tramo sobra. */}
+      {(loading || !sillaLibre || subeALaSilla) && (
+        <SeccionFila id="fila-tuya" titulo="Tu fila" cantidad={loading ? undefined : myRealWaitingEntries.length}>
+          {loading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <Skeleton key={i} className="h-28 w-full rounded-[1.25rem] bg-card" />
+              ))}
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                {/* El nombre abre la ficha (observaciones, Instagram y cortes con
-                    fotos, por server action: la fila no trae esas columnas).
-                    El área táctil crece hacia arriba y abajo con un
-                    pseudo-elemento, lejos de Atender y de la X. */}
-                {cliente ? (
-                  <button
-                    type="button"
-                    onClick={() => setProfileClient(cliente)}
-                    aria-label={`Ver la ficha de ${nombre}`}
-                    className="group/nombre relative -mx-1 flex min-w-0 max-w-full touch-manipulation items-center gap-0.5 rounded-md px-1 text-left outline-none before:absolute before:inset-x-0 before:-inset-y-2.5 before:content-[''] focus-visible:ring-2 focus-visible:ring-ring/50"
-                  >
-                    <span className="truncate text-base font-semibold decoration-foreground/30 underline-offset-4 group-hover/nombre:underline sm:text-lg">
-                      {nombre}
-                    </span>
-                    <ChevronRight
-                      className="size-4 shrink-0 text-muted-foreground/70 motion-safe:transition-transform group-hover/nombre:translate-x-0.5"
-                      aria-hidden
-                    />
-                  </button>
+          ) : restoDeMiFila.length === 0 ? (
+            <TramoVacio>{subeALaSilla ? 'Nadie más en tu fila.' : 'Nadie esperando en tu fila.'}</TramoVacio>
+          ) : (
+            <div className="space-y-3">
+              {restoDeMiFila.map((e) => {
+                const orden = myWaitingEntries.indexOf(e) + 1
+                return e.is_break ? (
+                  <FichaDescansoEnFila key={e.id} cortesAntes={cortesAntesDelDescanso(e)} />
                 ) : (
-                  <p className="truncate text-base sm:text-lg font-semibold">{nombre}</p>
-                )}
-                {/* Categoría del programa de fidelización (colores del dueño). Sin
-                    categoría (programa apagado / cliente no enrolado) no hay chip. */}
-                {(() => {
-                  const tier = findLoyaltyTier(loyaltyTiers, loyalty?.tier_code)
-                  return tier ? <LoyaltyTierChip tier={tier} /> : null
-                })()}
-                {/* Hora RESERVADA, tomada de la agenda. No se lee de
-                    `priority_order`: en una entrada adoptada de un walk-in ése
-                    es `LEAST(llegada, hora del turno)` y el badge mostraba la
-                    hora en que el cliente entró al local, no la que reservó. */}
-                {entry.is_appointment && (
-                  <TurnoBadge
-                    time={formatHourMinute(appointmentStartMsOf(entry), timezone)}
-                    className="h-5"
-                  />
-                )}
-                {(() => {
-                  const phone = entry.client?.phone ?? ''
-                  const isKid = phone.startsWith('00') && phone.length === 10
-                  if (isKid) {
-                    return (
-                      <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-amber-500/15 text-amber-500 border-amber-500/30">
-                        Especial
-                      </Badge>
-                    )
-                  }
-                  // total_visits viene de la tabla client_loyalty_state (mantenida por
-                  // trigger). Reemplaza a visits(count) que era un correlated subquery
-                  // por cliente y representaba ~33% del tiempo de DB (mig 124).
-                  // Sin fila de estado = nunca tuvo una visita (verificado en prod:
-                  // los 372 clientes de Monaco sin fila tienen 0 visitas).
-                  const totalVisits = loyalty?.total_visits ?? 0
-                  if (totalVisits === 0) {
-                    return (
-                      <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-emerald-500/15 text-emerald-500 border-emerald-500/30">
-                        Primer Corte
-                      </Badge>
-                    )
-                  }
-                  return null
-                })()}
-                {entry.is_dynamic && (
-                  <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-wider bg-blue-500/15 text-blue-500 border-blue-500/30">
-                    <Zap className="fill-current" aria-hidden />
-                    Menor espera
-                  </Badge>
-                )}
-                {/* Califica al de al lado: se pasó a Menor espera desde el aviso de
-                    WhatsApp. Mismo azul y sin relleno, para leerse como "Menor
-                    espera, por WhatsApp" y no como una tercera etiqueta. Entra con
-                    una animación corta: es lo que cambió en la tarjeta. */}
-                {viaWhatsApp && (
-                  <Badge
-                    variant="outline"
-                    title="Aceptó pasarse a Menor espera desde el aviso de WhatsApp"
-                    className="h-5 px-1.5 text-[10px] uppercase tracking-wider text-blue-500 border-blue-500/30 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-300"
-                  >
-                    <MessageCircle aria-hidden />
-                    Por WhatsApp
-                  </Badge>
-                )}
-                {/* Entra con la misma animación corta: puede aparecer con la
-                    tarjeta ya en pantalla (la pidió desde «Mi turno»). */}
-                {pidioAsesoria && (
-                  <AsesoriaBadge
-                    tono="claro"
-                    className="h-5 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-300"
-                  />
-                )}
-              </div>
-              <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
-                <span className="shrink-0">{entry.client?.phone}</span>
-                {(entry.service || pidioAsesoria) && (
-                  <>
-                    <span className="text-muted-foreground/40">·</span>
-                    {entry.service ? (
-                      <span className="truncate font-medium text-foreground/70">
-                        {entry.service.name}
-                        {pidioAsesoria && (
-                          <span className="font-semibold text-fuchsia-700"> · pidió asesoría</span>
-                        )}
-                      </span>
-                    ) : (
-                      // Eligió la asesoría EN VEZ de un servicio: lo elige el barbero al cobrar.
-                      <span className="truncate font-semibold text-fuchsia-700">Quiere asesoría</span>
-                    )}
-                  </>
-                )}
-              </div>
-              {/* La espera deja de ser un dato gris cuando se vuelve un problema.
-                  Medido sobre 90 días de producción: la mediana de espera real es de
-                  5 a 12 min y el p90 no pasa de 51; los clientes que terminaron
-                  anotados-y-nunca-atendidos habían estado esperando 1 a 4 HORAS
-                  mientras la sucursal atendía a 9-12 personas que llegaron después.
-                  O sea: la señal existía en la pantalla y no se veía. A los 40 min la
-                  tarjeta se pone ámbar y a los 70 roja, para que "a éste lo estamos
-                  dejando pasar" sea imposible de no ver de reojo. */}
-              {(() => {
-                const minutos = Math.floor((now - new Date(entry.checked_in_at).getTime()) / 60000)
-                const nivel = minutos >= 70 ? 'critico' : minutos >= 40 ? 'demorado' : 'normal'
-                return (
-                  <div
-                    className={`mt-1 flex items-center gap-1 text-xs ${
-                      nivel === 'critico'
-                        ? 'font-semibold text-destructive'
-                        : nivel === 'demorado'
-                          ? 'font-medium text-amber-500'
-                          : 'text-muted-foreground'
-                    }`}
-                  >
-                    <Clock className="size-3" />
-                    <span>{formatElapsed(entry.checked_in_at)} esperando</span>
-                    {nivel !== 'normal' && (
-                      <span className="ml-0.5">
-                        · {nivel === 'critico' ? 'lleva demasiado' : 'se está demorando'}
-                      </span>
-                    )}
-                  </div>
+                  <TarjetaEspera key={e.id} {...propsDeFicha(e, 'propia', { orden })} />
                 )
-              })()}
-              {/* Quien aceptó Menor espera por WhatsApp: al barbero que esperaba
-                  se le explica por qué puede desaparecerle de la fila; a los demás,
-                  a quién esperaba (si ese barbero se libera primero, lo atiende él). */}
-              {(meEsperabaAMi || barberoQueEsperaba) && (
-                <div className="mt-1 flex items-start gap-1 text-xs text-muted-foreground">
-                  <MessageCircle className="mt-0.5 size-3 shrink-0 text-blue-500" aria-hidden />
-                  {meEsperabaAMi ? (
-                    <span>Sigue en tu fila · si otro barbero se libera antes, lo atiende él</span>
-                  ) : (
-                    <span>
-                      Esperaba a <span className="font-medium text-foreground/70">{barberoQueEsperaba}</span>
-                    </span>
-                  )}
-                </div>
-              )}
-              {isGeneralQueue && entry.barber && (
-                <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                  <User className="size-3" />
-                  <span>Se atiende con <span className="font-medium text-foreground/70">{entry.barber.full_name}</span></span>
-                </div>
-              )}
+              })}
             </div>
-            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-              {(() => {
-                if (myActiveEntry || myActiveBreak) return null
-                const isMyMainTap = entry.id === myWaitingEntries[0]?.id
+          )}
+        </SeccionFila>
+      )}
 
-                // ── TURNOS ──
-                // Un turno NO se toma con "Atender": ese botón llama al claim con
-                // `preferredEntryId` y ese camino del RPC filtra `is_appointment =
-                // false`, así que devolvía vacío siempre y la tarjeta quedaba
-                // muerta ("El cliente ya no está disponible"). Va por su propio
-                // botón, que arranca ESE turno y nada más.
-                if (entry.is_appointment) {
-                  if (entry.barber_id !== session.staff_id) return null
-                  // Un descanso pendiente con prioridad anterior va primero:
-                  // misma regla que el RPC (`q.priority_order <
-                  // v_pending_break_priority` en los caminos [A]/[B]).
-                  if (
-                    myPendingGhost &&
-                    new Date(myPendingGhost.priority_order).getTime() <=
-                      new Date(entry.priority_order).getTime()
-                  ) {
-                    return null
-                  }
-                  const isDue = appointmentStartMsOf(entry) <= now
-                  // También se muestra cuando el turno NO es la primera tarjeta
-                  // pero su hora ya llegó: en ese momento el motor le da
-                  // precedencia absoluta sobre los walk-ins, así que la acción
-                  // tiene que estar sobre el turno y no sobre el walk-in que lo
-                  // precede en la lista. Antes de su hora el botón queda
-                  // secundario: adelantarlo es una decisión del barbero (el
-                  // cliente está ahí), no lo que haría la fila sola.
-                  if (!isMyMainTap && !isDue) return null
-                  return (
-                    <Button
-                      size="sm"
-                      variant={isDue ? 'default' : 'outline'}
-                      className="h-10 px-3 sm:h-14 sm:px-6 text-sm sm:text-lg"
-                      onClick={() => handleStartAppointment(entry)}
-                      disabled={actionLoading === entry.id}
-                      title={isDue ? undefined : 'Todavía no es la hora del turno'}
-                    >
-                      <CalendarClock className="size-4 sm:size-5 mr-1.5 sm:mr-2" />
-                      <span>Iniciar turno</span>
-                    </Button>
-                  )
-                }
-
-                // Con el descanso listo, cualquier "Atender" arranca el descanso
-                // (ver `descansoListo`): mejor no ofrecer un botón que hace otra
-                // cosa. El auto-arranque de más arriba lo inicia solo.
-                if (descansoListo) return null
-
-                // Rescate de limbos del hint divergente (mig 134 + commit 1cb1a41):
-                // en General, cualquier barbero libre puede reclamar un dinámico.
-                // El claim server es pool no bloqueante (FOR UPDATE SKIP LOCKED),
-                // así que el "rescate" es seguro a nivel datos. Sin esto, hints
-                // contradictorios entre tablets dejaban al cliente fuera de
-                // "Mi fila" de TODOS y nadie podía tocar Atender.
-                const generalClaimAllowed =
-                  isGeneralQueue && (entry.is_dynamic || !entry.barber_id)
-                if (!isMyMainTap && !generalClaimAllowed) return null
-                // Rescate visual: en General, si el hint apunta a OTRO barbero,
-                // el botón pasa a secundario ("Reclamar") para evitar la duda
-                // del 2026-05-26 (dos barberos libres + mismo cliente → ¿quién
-                // lo toma?). El sugerido sigue viendo "Atender" primario en
-                // Mi fila; el otro ve "Reclamar" outline en General. Si nadie
-                // está sugerido (pool puro, barber_id NULL) el botón sigue
-                // primario porque no hay a quien "robarle". Tampoco es "robar"
-                // tomar al que aceptó Menor espera por WhatsApp si me esperaba
-                // a mí: conservó su lugar en MI fila.
-                const isRescueOfOtherHint =
-                  isGeneralQueue &&
-                  entry.barber_id != null &&
-                  entry.barber_id !== session.staff_id &&
-                  !meEsperabaAMi
-                return (
-                  <Button
-                    size="sm"
-                    variant={isRescueOfOtherHint ? 'outline' : 'default'}
-                    className="h-10 px-3 sm:h-14 sm:px-6 text-sm sm:text-lg"
-                    onClick={() => handleStartService(entry.id)}
-                    disabled={actionLoading === entry.id}
-                  >
-                    <Scissors className="size-4 sm:size-5 mr-1.5 sm:mr-2" />
-                    <span>
-                      {isRescueOfOtherHint ? 'Reclamar' : 'Atender'}
-                    </span>
-                  </Button>
-                )
-              })()}
-
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    disabled={actionLoading === entry.id}
-                    className="size-10 sm:size-14 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    title="No se presentó / Ausente"
-                  >
-                    <X className="size-4 sm:size-6" />
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>¿El cliente no se presentó?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Esto marcará a <strong>{entry.client?.name ?? 'Cliente'}</strong> como Ausente y lo quitará de la fila de espera de forma permanente.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Volver</AlertDialogCancel>
-                    <AlertDialogAction
-                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      onClick={() => handleCancel(entry.id)}
-                    >
-                      Sí, cancelar turno
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </div>
-          </CardContent>
-        </Card>
-
-
-      </div>
-    )
-  }
-
-  function renderInProgressOthers() {
-    if (otherInProgress.length === 0) return null
-    return (
-      <>
-        <div className="flex items-center gap-3 pt-4">
-          <Separator className="flex-1" />
-          <span className="whitespace-nowrap text-xs text-muted-foreground">
-            En atención por otros barberos
-          </span>
-          <Separator className="flex-1" />
-        </div>
-        {otherInProgress.map((entry) => (
-          <Card
-            key={entry.id}
-            className="gap-0 border-dashed py-0 opacity-60"
-          >
-            <CardContent className="flex items-center gap-4 p-4">
-              <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-secondary">
-                <Scissors className="size-5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <p className="truncate font-medium">
-                    {entry.client?.name ?? 'Cliente'}
-                  </p>
-                  {(() => {
-                    const tier = findLoyaltyTier(loyaltyTiers, leerLoyaltyEmbed(entry.client?.loyalty)?.tier_code)
-                    return tier ? <LoyaltyTierChip tier={tier} /> : null
-                  })()}
-                  {entry.pidio_asesoria === true && <AsesoriaBadge tono="claro" className="h-5" />}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Atendido por {entry.barber?.full_name ?? 'otro barbero'}
-                </p>
-                {entry.started_at && (
-                  <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                    <Clock className="size-3" />
-                    <span>{formatElapsed(entry.started_at)}</span>
-                  </div>
+      {!loading && restoDelLocal.length > 0 && (
+        <SeccionFila
+          id="fila-local"
+          titulo="En el local"
+          cantidad={restoDelLocal.length}
+          aviso={
+            (sinBarberoEnElLocal > 0 || demoradosEnElLocal > 0) && (
+              <span className="flex flex-wrap gap-1.5">
+                {sinBarberoEnElLocal > 0 && (
+                  <Sello tono="azul">
+                    {sinBarberoEnElLocal} sin barbero
+                  </Sello>
                 )}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </>
-    )
-  }
-
-  /**
-   * Vacío de "Mi fila" ≠ vacío del local. Con `barber_id` propio no hay nadie pero en
-   * la fila general sí, esta pantalla decía "Esperando clientes · cuando llegue
-   * alguien aparecerá acá" — con gente sentada en el local. Y pasa de verdad: un
-   * cliente del pool ("Menor espera") queda sin pre-asignar cuando ningún barbero es
-   * elegible (nadie fichado, todos ocultos del check-in o bloqueados por fin de
-   * turno), y entonces no está en la "Mi fila" de NADIE: sólo en la pestaña General,
-   * que no es la que se abre por default.
-   */
-  function renderEmptyQueue() {
-    const hayGenteEnElLocal = allWaitingEntries.filter(e => !e.is_break).length
-    return (
-      <div className="flex flex-col items-center justify-center py-16 text-center" role="status">
-        <div className="mb-4 flex size-16 items-center justify-center rounded-3xl bg-muted animate-float">
-          <Scissors className="size-8 text-muted-foreground/60" />
-        </div>
-        {hayGenteEnElLocal > 0 ? (
-          <>
-            <p className="text-base font-bold">No tenés clientes asignados</p>
-            <p className="mt-1 max-w-[240px] text-xs text-muted-foreground">
-              Pero hay {hayGenteEnElLocal} {hayGenteEnElLocal === 1 ? 'persona esperando' : 'personas esperando'} en
-              el local. Mirá <span className="font-semibold text-foreground">General</span> para tomar al próximo.
-            </p>
-          </>
-        ) : (
-          <>
-            <p className="text-base font-bold">Esperando clientes</p>
-            <p className="mt-1 max-w-[220px] text-xs text-muted-foreground">
-              Cuando llegue alguien aparecerá acá.
-            </p>
-          </>
-        )}
-        {dayStats.servicesCount > 0 && (
-          <p className="mt-3 text-[11px] font-semibold text-muted-foreground">
-            Hoy: {dayStats.servicesCount} corte{dayStats.servicesCount === 1 ? '' : 's'}
-          </p>
-        )}
-      </div>
-    )
-  }
-  return (
-    // 5rem = el `pb-20` de `/barbero/layout.tsx`, que reserva el lugar de la nav
-    // fija. Con 4rem el documento medía 1rem más que la ventana: la página
-    // scrolleaba sola y el contenido se metía debajo del header sticky (así se
-    // veía cortado el resumen de turnos contra el borde de arriba).
-    <div
-      className="flex h-[calc(100dvh-5rem)] flex-col bg-background"
-      onPointerDown={primeAudioContext}
-    >
-      {/* Top bar */}
-      <header className="sticky top-0 z-20 flex items-center justify-between border-b bg-background/95 backdrop-blur px-3 py-2.5 md:px-5">
-        <div className="flex items-center gap-2.5">
-          <div className="flex size-8 sm:size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Scissors className="size-3.5 sm:size-4" />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <p className="font-semibold leading-none text-sm sm:text-base">{session.full_name}</p>
-              {hiddenFromCheckin && (
-                <Badge variant="outline" className="h-4 px-1 text-[9px] uppercase tracking-wider bg-amber-500/15 text-amber-500 border-amber-500/30">
-                  <EyeOff className="size-2.5 mr-0.5" />
-                  Oculto
-                </Badge>
-              )}
-            </div>
-            <p className="mt-0.5 text-xs text-muted-foreground">{branchName}</p>
-          </div>
-        </div>
-
-        {/* Stats del día — visible entre el nombre y los controles */}
-        <div className="hidden md:block mx-4 flex-1">
-          <BarberStatsBar servicesCount={dayStats.servicesCount} />
-        </div>
-
-        {/* Desktop: all buttons inline */}
-        <div className="hidden sm:flex items-center gap-2">
-          {!breakRequestStatus && !myActiveBreak && breakConfigs.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={() => setBreakDialogOpen(true)}>
-              <Coffee className="size-4" />
-              Descanso
-            </Button>
-          )}
-          {breakRequestStatus === 'pending' && (
-            <Button variant="ghost" size="sm" className="text-yellow-500" onClick={handleCancelBreakRequest} disabled={breakRequestLoading}>
-              <Coffee className="size-4 mr-1" />
-              Solicitado
-              <X className="size-3 ml-1" />
-            </Button>
-          )}
-          {breakRequestStatus === 'approved' && !myActiveBreak && (
-            <Badge variant="outline" className="bg-green-500/15 text-green-600 border-green-500/30">
-              <Coffee className="size-3 mr-1" />
-              Aprobado
-            </Badge>
-          )}
-          {canManageBreaks && (
-            <Button variant="ghost" size="sm" onClick={() => { fetchPendingBreakRequests(); setBreakRequestsDialogOpen(true) }} className="relative">
-              <Coffee className="size-4" />
-              Gestionar
-              {pendingBreakRequests.length > 0 && (
-                <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
-                  {pendingBreakRequests.length}
-                </span>
-              )}
-            </Button>
-          )}
-          {/* Bolsa y no regalo: el regalo se confundía con "Entregar premio",
-              que está al lado y hace otra cosa. */}
-          <Button variant="ghost" size="sm" onClick={() => setDirectSaleOpen(true)}>
-            <ShoppingBag className="size-4" />
-            Vender
-          </Button>
-          {loyaltyEnabled && (
-            <Button variant="ghost" size="sm" onClick={() => setDeliverRewardOpen(true)}>
-              <PackageCheck className="size-4" />
-              Entregar premio
-            </Button>
-          )}
-          {canHideSelf && (
-            <Button variant="ghost" size="sm" onClick={handleToggleVisibility} disabled={hiddenLoading} className={hiddenFromCheckin ? 'text-amber-500' : ''}>
-              {hiddenFromCheckin ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              {hiddenFromCheckin ? 'Oculto' : 'Visible'}
-            </Button>
-          )}
-          {canDeactivateStaff && otherBarbers.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={() => setDeactivateDialogOpen(true)}>
-              <Power className="size-4" />
-              Barberos
-            </Button>
-          )}
-          <form action={logoutBarber}>
-            <Button variant="ghost" size="sm" type="submit">
-              <LogOut className="size-4" />
-              Salir
-            </Button>
-          </form>
-        </div>
-
-        {/* Mobile: break status + overflow menu */}
-        <div className="flex sm:hidden items-center gap-1.5">
-          {/* Break status — always visible on mobile */}
-          {!breakRequestStatus && !myActiveBreak && breakConfigs.length > 0 && (
-            <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => setBreakDialogOpen(true)}>
-              <Coffee className="size-4" />
-            </Button>
-          )}
-          {breakRequestStatus === 'pending' && (
-            <Button variant="ghost" size="sm" className="h-8 px-2 text-yellow-500" onClick={handleCancelBreakRequest} disabled={breakRequestLoading}>
-              <Coffee className="size-4" />
-              <X className="size-3 ml-0.5" />
-            </Button>
-          )}
-          {breakRequestStatus === 'approved' && !myActiveBreak && (
-            <Badge variant="outline" className="h-6 px-1.5 bg-green-500/15 text-green-600 border-green-500/30 text-[10px]">
-              <Coffee className="size-3 mr-0.5" />
-              OK
-            </Badge>
-          )}
-          {canManageBreaks && pendingBreakRequests.length > 0 && (
-            <button
-              onClick={() => { fetchPendingBreakRequests(); setBreakRequestsDialogOpen(true) }}
-              className="relative flex size-8 items-center justify-center rounded-md hover:bg-muted/50"
-            >
-              <Coffee className="size-4" />
-              <span className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
-                {pendingBreakRequests.length}
+                {demoradosEnElLocal > 0 && (
+                  <Sello tono="ambar">
+                    {demoradosEnElLocal} {demoradosEnElLocal === 1 ? 'demorado' : 'demorados'}
+                  </Sello>
+                )}
               </span>
-            </button>
-          )}
+            )
+          }
+        >
+          <div className="space-y-2">
+            {restoDelLocal.map((e) => (
+              <TarjetaEspera key={e.id} {...propsDeFicha(e, 'local')} />
+            ))}
+          </div>
+        </SeccionFila>
+      )}
 
-          {/* Overflow dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 w-8 px-0">
-                <MoreHorizontal className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-44">
-              {canManageBreaks && (
-                <DropdownMenuItem onClick={() => { fetchPendingBreakRequests(); setBreakRequestsDialogOpen(true) }}>
-                  <Coffee className="size-4 mr-2" />
-                  Gestionar descansos
-                  {pendingBreakRequests.length > 0 && (
-                    <Badge className="ml-auto h-4 px-1 text-[10px] bg-amber-500">{pendingBreakRequests.length}</Badge>
-                  )}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onClick={() => setDirectSaleOpen(true)}>
-                <ShoppingBag className="size-4 mr-2" />
-                Venta de productos
-              </DropdownMenuItem>
-              {loyaltyEnabled && (
-                <DropdownMenuItem onClick={() => setDeliverRewardOpen(true)}>
-                  <PackageCheck className="size-4 mr-2" />
-                  Entregar premio
-                </DropdownMenuItem>
-              )}
-              {canHideSelf && (
-                <DropdownMenuItem onClick={handleToggleVisibility} disabled={hiddenLoading}>
-                  {hiddenFromCheckin ? <EyeOff className="size-4 mr-2 text-amber-500" /> : <Eye className="size-4 mr-2" />}
-                  {hiddenFromCheckin ? 'Volver a ser visible' : 'Ocultarme del check-in'}
-                </DropdownMenuItem>
-              )}
-              {canDeactivateStaff && otherBarbers.length > 0 && (
-                <DropdownMenuItem onClick={() => setDeactivateDialogOpen(true)}>
-                  <Power className="size-4 mr-2" />
-                  Gestionar barberos
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              <form action={logoutBarber}>
-                <DropdownMenuItem asChild>
-                  <button type="submit" className="w-full flex items-center text-destructive focus:text-destructive">
-                    <LogOut className="size-4 mr-2" />
-                    Cerrar sesión
-                  </button>
-                </DropdownMenuItem>
-              </form>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </header>
+    </>
+  )
 
+  // Quién está cortando en el local. Contexto: en vertical va al final del
+  // tarjetero; apaisada, debajo de la silla (que si no deja un hueco vacío).
+  const cortandoAhora = loading ? null : (
+    <CortandoAhora
+      cortes={otherInProgress.map((e) => ({
+        id: e.id,
+        barbero: e.barber?.full_name ?? 'Otro barbero',
+        cliente: e.client?.name ?? 'Cliente',
+        minutos: e.started_at ? (now - new Date(e.started_at).getTime()) / 60_000 : null,
+        tier: findLoyaltyTier(loyaltyTiers, leerLoyaltyEmbed(e.client?.loyalty)?.tier_code),
+        pidioAsesoria: e.pidio_asesoria === true,
+      }))}
+    />
+  )
+
+  const yo = allBarbers.find((b) => b.id === session.staff_id)
+
+  const cabecera = (
+    <CabeceraFila
+      nombre={session.full_name}
+      sucursal={branchName}
+      avatarUrl={yo?.avatar_url ?? null}
+      cortesHoy={dayStats.servicesCount}
+      oculto={hiddenFromCheckin}
+      descanso={
+        myActiveBreak
+          ? { estado: 'en-curso' }
+          : breakRequestStatus === 'pending'
+            ? { estado: 'solicitado', cargando: breakRequestLoading, onCancelar: () => void handleCancelBreakRequest() }
+            : breakRequestStatus === 'approved'
+              ? { estado: 'aprobado' }
+              : breakConfigs.length > 0 && !breakRequestStatus
+                ? { estado: 'libre', onPedir: () => setBreakDialogOpen(true) }
+                : { estado: 'sin-configurar' }
+      }
+      gestionDescansos={
+        canManageBreaks
+          ? {
+              pendientes: pendingBreakRequests.length,
+              onAbrir: () => {
+                fetchPendingBreakRequests()
+                setBreakRequestsDialogOpen(true)
+              },
+            }
+          : null
+      }
+      onVender={() => setDirectSaleOpen(true)}
+      onEntregarPremio={loyaltyEnabled ? () => setDeliverRewardOpen(true) : null}
+      visibilidad={canHideSelf ? { cargando: hiddenLoading, onAlternar: () => void handleToggleVisibility() } : null}
+      onGestionarBarberos={canDeactivateStaff && otherBarbers.length > 0 ? () => setDeactivateDialogOpen(true) : null}
+      accionSalir={logoutBarber}
+    />
+  )
+
+  const avisos = (
+    <>
       {/* Banner de turno próximo — solo modo hybrid */}
       {operationMode === 'hybrid' && upcomingAppointmentForBanner && (
         <UpcomingAppointmentBanner
@@ -2212,10 +1829,8 @@ export function QueuePanel({
         />
       )}
 
-      {/* ── MODO HYBRID: los turnos son una franja de 72px, no medio panel ──
-          Va afuera del <main> a propósito: en `sm:` el main pasa a `flex-row`
-          (fila + cliente actual, lado a lado) y la tira tiene que cruzar el
-          ancho completo por encima de los dos. */}
+      {/* Los turnos del día son una franja, no medio panel. Sin turnos hoy no
+          ocupa un solo píxel: la fila es la pantalla. */}
       {showAppointmentStrip && (
         <AppointmentStrip
           appointments={todayAppointments}
@@ -2225,258 +1840,21 @@ export function QueuePanel({
           onOpenAgenda={() => setAgendaSheetOpen(true)}
         />
       )}
+    </>
+  )
 
-      <main className="flex flex-1 flex-col overflow-hidden sm:flex-row">
-
-        {/* ── MODO APPOINTMENTS: solo timeline, sin tab de cola ── */}
-        {operationMode === 'appointments' && (
-          <div className="flex flex-1 flex-col overflow-hidden">
-            <BarberTimeline
-              session={session}
-              initialAppointments={appointments}
-            />
+  return (
+    <>
+      <DisposicionFila cabecera={cabecera} avisos={avisos} onPointerDown={primeAudioContext}>
+        {operationMode === 'appointments' ? (
+          // Modo turnos: la agenda ES el panel, sin fila.
+          <div className="h-full overflow-hidden">
+            <BarberTimeline session={session} initialAppointments={appointments} />
           </div>
+        ) : (
+          <ColumnasFila silla={<Ranura>{silla}</Ranura>} filas={filas} bajoLaSilla={cortandoAhora} />
         )}
-
-        {/* ── MODO WALK_IN e HYBRID: la cola ES la pantalla ──
-            Hybrid usa exactamente el mismo layout que walk_in (el que las tres
-            sucursales productivas usan todo el día) y suma los turnos arriba en
-            la tira. El split 60/40 anterior le daba al timeline dos tercios del
-            alto de una tablet vertical incluso con la agenda vacía. */}
-        {operationMode !== 'appointments' && (
-          <>
-        {/* ── MOBILE: unified layout ── */}
-        <div className="flex flex-1 flex-col overflow-hidden sm:hidden bg-background">
-          {/* Stats compactos mobile */}
-          {dayStats.servicesCount > 0 && (
-            <div className="border-b bg-card/80 px-3 py-2">
-              <BarberStatsBar
-                servicesCount={dayStats.servicesCount}
-                className="justify-center"
-              />
-            </div>
-          )}
-          <Tabs defaultValue="my-queue" className="flex flex-1 flex-col overflow-hidden h-full">
-            <div className="px-3 pt-3 pb-2 bg-card border-b">
-              <TabsList className="w-full h-11 bg-muted/80 p-1">
-                <TabsTrigger value="my-queue" className="flex-1 text-sm h-9">
-                  Mi fila
-                  <Badge variant="secondary" className="ml-2 px-1.5 py-0 min-w-5 h-5 flex items-center justify-center text-[11px] font-bold shadow-sm bg-background">
-                    {myWaitingEntries.filter((e) => !e.is_break).length}
-                  </Badge>
-                </TabsTrigger>
-                <TabsTrigger value="general-queue" className="flex-1 text-sm h-9">
-                  General
-                  <Badge
-                    variant="secondary"
-                    className={`ml-2 px-1.5 py-0 min-w-5 h-5 flex items-center justify-center text-[11px] font-bold shadow-sm ${
-                      alertasEnGeneral > 0
-                        ? 'bg-amber-500 text-black animate-pulse'
-                        : 'bg-background'
-                    }`}
-                  >
-                    {allWaitingEntries.filter((e) => !e.is_break).length}
-                  </Badge>
-                </TabsTrigger>
-                {/* En hybrid los turnos viven en la tira de arriba: una pestaña
-                    más diciendo lo mismo sólo roba ancho a "Mi fila". */}
-                {operationMode === 'walk_in' && appointments.length > 0 && (
-                  <TabsTrigger value="appointments" className="flex-1 text-sm h-9">
-                    Turnos
-                    <Badge variant="secondary" className="ml-2 px-1.5 py-0 min-w-5 h-5 flex items-center justify-center text-[11px] font-bold shadow-sm bg-background">
-                      {appointments.filter((a) => ['confirmed', 'checked_in'].includes(a.status)).length}
-                    </Badge>
-                  </TabsTrigger>
-                )}
-              </TabsList>
-            </div>
-
-            <TabsContent value="my-queue" className="mt-0 flex-1 overflow-hidden bg-muted/10">
-              <ScrollArea className="h-full">
-                <div className="space-y-3 p-3 pb-8">
-                  {loading ? (
-                    Array.from({ length: 3 }).map((_, i) => (
-                      <Skeleton key={i} className="h-[72px] w-full rounded-xl" />
-                    ))
-                  ) : myWaitingEntries.length === 0 ? (
-                    renderEmptyQueue()
-                  ) : (
-                    myWaitingEntries.map((e) => renderQueueEntry(e, false))
-                  )}
-                  {!loading && renderInProgressOthers()}
-                </div>
-              </ScrollArea>
-            </TabsContent>
-            <TabsContent value="general-queue" className="mt-0 flex-1 overflow-hidden bg-muted/10">
-              <ScrollArea className="h-full">
-                <div className="space-y-3 p-3 pb-8">
-                  {loading ? (
-                    Array.from({ length: 3 }).map((_, i) => (
-                      <Skeleton key={i} className="h-[72px] w-full rounded-xl" />
-                    ))
-                  ) : allWaitingEntries.length === 0 ? (
-                    renderEmptyQueue()
-                  ) : (
-                    allWaitingEntries.map((e) => renderQueueEntry(e, true))
-                  )}
-                  {!loading && renderInProgressOthers()}
-                </div>
-              </ScrollArea>
-            </TabsContent>
-            {operationMode === 'walk_in' && appointments.length > 0 && (
-              <TabsContent value="appointments" className="mt-0 flex-1 overflow-hidden bg-muted/10">
-                <div className="h-full overflow-hidden">
-                  <BarberTimeline
-                    session={session}
-                    initialAppointments={appointments}
-                  />
-                </div>
-              </TabsContent>
-            )}
-          </Tabs>
-
-          {/* TIMER ABAJO (Sticky Footer para cliente/break activo) */}
-          {(myActiveEntry || myActiveBreak) && (
-            <div className="shrink-0 max-h-[60vh] overflow-y-auto border-t border-border/50 bg-background/80 backdrop-blur z-10 pb-safe">
-              <div className="p-3 sm:p-4">
-                {myActiveBreak ? (
-                  <ActiveBreakCard
-                    startedAt={myActiveBreak.started_at}
-                    durationMinutes={breakDurationMinutes}
-                    onComplete={handleCompleteBreak}
-                    actionLoading={actionLoading === myActiveBreak.id}
-                  />
-                ) : myActiveEntry ? (
-                  <ActiveClientCard
-                    entry={myActiveEntry}
-                    variant="mobile"
-                    onComplete={() => setCompletingEntry(myActiveEntry)}
-                    actionLoading={actionLoading === myActiveEntry.id}
-                    onVerAsesoria={() => setConsultaAsesoriaDe(myActiveEntry.id)}
-                  />
-                ) : null}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ── DESKTOP: side-by-side layout ── */}
-        {/* Queue list */}
-        <section className="hidden sm:flex min-h-0 flex-1 flex-col overflow-hidden border-r">
-          <Tabs defaultValue="my-queue" className="flex flex-1 flex-col overflow-hidden">
-            <div className="px-3 py-2 md:px-5">
-              <TabsList className="w-full">
-                <TabsTrigger value="my-queue" className="flex-1 py-2 md:py-3 text-base md:text-lg">
-                  Mi fila
-                  <Badge variant="secondary" className="ml-2 px-2 text-base">
-                    {myWaitingEntries.filter(e => !e.is_break).length}
-                  </Badge>
-                </TabsTrigger>
-                <TabsTrigger value="general-queue" className="flex-1 py-2 md:py-3 text-base md:text-lg">
-                  Fila general
-                  <Badge
-                    variant="secondary"
-                    className={`ml-2 px-2 text-base ${
-                      alertasEnGeneral > 0 ? 'bg-amber-500 text-black animate-pulse' : ''
-                    }`}
-                  >
-                    {allWaitingEntries.filter(e => !e.is_break).length}
-                  </Badge>
-                </TabsTrigger>
-              </TabsList>
-            </div>
-            <Separator />
-
-            <TabsContent
-              value="my-queue"
-              className="mt-0 flex-1 overflow-hidden"
-            >
-              <ScrollArea className="h-full">
-                <div className="space-y-2 p-4 md:p-6">
-                  {loading ? (
-                    Array.from({ length: 3 }).map((_, i) => (
-                      <Skeleton key={i} className="h-[88px] w-full rounded-xl" />
-                    ))
-                  ) : myWaitingEntries.length === 0 ? (
-                    renderEmptyQueue()
-                  ) : (
-                    myWaitingEntries.map((e) => renderQueueEntry(e, false))
-                  )}
-                  {!loading && renderInProgressOthers()}
-                </div>
-              </ScrollArea>
-            </TabsContent>
-
-            <TabsContent
-              value="general-queue"
-              className="mt-0 flex-1 overflow-hidden"
-            >
-              <ScrollArea className="h-full">
-                <div className="space-y-2 p-4 md:p-6">
-                  {loading ? (
-                    Array.from({ length: 3 }).map((_, i) => (
-                      <Skeleton key={i} className="h-[88px] w-full rounded-xl" />
-                    ))
-                  ) : allWaitingEntries.length === 0 ? (
-                    renderEmptyQueue()
-                  ) : (
-                    allWaitingEntries.map((e) => renderQueueEntry(e, true))
-                  )}
-                  {!loading && renderInProgressOthers()}
-                </div>
-              </ScrollArea>
-            </TabsContent>
-          </Tabs>
-        </section>
-
-        {/* Current client / Active break — desktop only */}
-        <section className="hidden sm:flex shrink-0 flex-col sm:w-[340px] md:w-[400px] lg:w-[460px]">
-          <div className="px-5 py-4 md:px-6 md:py-5">
-            <h2 className="text-xl md:text-2xl font-black tracking-tight">
-              {myActiveBreak ? 'En descanso' : myActiveEntry ? 'Cliente actual' : 'Sin cliente'}
-            </h2>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              {myActiveBreak
-                ? 'Tomate el tiempo que necesites'
-                : myActiveEntry
-                  ? 'El color de abajo indica tu ritmo'
-                  : 'Seleccioná un cliente de la fila'}
-            </p>
-          </div>
-          <Separator />
-          <div className="flex flex-1 flex-col p-4 md:p-5">
-            {myActiveBreak ? (
-              <ActiveBreakCard
-                startedAt={myActiveBreak.started_at}
-                durationMinutes={breakDurationMinutes}
-                onComplete={handleCompleteBreak}
-                actionLoading={actionLoading === myActiveBreak.id}
-              />
-            ) : myActiveEntry ? (
-              <ActiveClientCard
-                entry={myActiveEntry}
-                variant="desktop"
-                onComplete={() => setCompletingEntry(myActiveEntry)}
-                actionLoading={actionLoading === myActiveEntry.id}
-                onVerAsesoria={() => setConsultaAsesoriaDe(myActiveEntry.id)}
-              />
-            ) : (
-              <div className="flex flex-1 flex-col items-center justify-center text-center">
-                <div className="flex size-20 items-center justify-center rounded-3xl bg-muted animate-float">
-                  <Scissors className="size-10 text-muted-foreground/50" />
-                </div>
-                <p className="mt-4 text-lg font-bold">Listo para atender</p>
-                <p className="mt-1 max-w-[260px] text-sm text-muted-foreground">
-                  Cuando un cliente entre a tu fila, apretá <span className="font-semibold text-foreground">Atender</span> para empezar.
-                </p>
-              </div>
-            )}
-          </div>
-        </section>
-          </>
-        )}
-        {/* ── FIN MODO WALK_IN / HYBRID ── */}
-      </main>
+      </DisposicionFila>
 
       {/* Next client waiting warning overlay */}
       {showWaitWarning && (
@@ -2805,6 +2183,6 @@ export function QueuePanel({
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   )
 }

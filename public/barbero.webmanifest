@@ -10,8 +10,8 @@
   "display": "standalone",
   "display_override": ["fullscreen", "standalone"],
   "orientation": "any",
-  "background_color": "#f2f2f2",
-  "theme_color": "#f2f2f2",
+  "background_color": "#eff1f4",
+  "theme_color": "#eff1f4",
   "categories": ["business", "productivity"],
   "prefer_related_applications": false,
   "icons": [

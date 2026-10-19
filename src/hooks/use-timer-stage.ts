@@ -23,7 +23,12 @@ function resolveStage(minutes: number): TimerStage {
   return 'ok'
 }
 
-function computeMinutes(
+/**
+ * Minutos de servicio transcurridos (descontando las pausas). Exportada para la
+ * regla de minutos de la tarjeta del cliente actual: tiene que medir EXACTAMENTE
+ * lo mismo que el semáforo, o la aguja y el color dirían cosas distintas.
+ */
+export function computeMinutes(
   startedAt: string | null | undefined,
   pausedDurationSeconds: number,
   pausedAt: string | null | undefined,

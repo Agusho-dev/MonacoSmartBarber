@@ -13,6 +13,7 @@ import { KioskBackGuard } from '@/components/barber/kiosk-back-guard'
 import { LoyaltyResultHost } from '@/components/barber/loyalty-result-host'
 import { GiroPanelRaiz } from '@/components/barber/giro-panel-raiz'
 import { ControlPantalla } from '@/components/barber/control-pantalla'
+import { BandaReloj } from '@/components/barber/reloj/banda-reloj'
 import { SCRIPT_GIRO_PRE_PAINT } from '@/lib/giro-panel/script-pre-paint'
 
 // Metadata scopeada a /barbero: inyecta el manifest PWA y los meta de
@@ -28,8 +29,9 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  // El panel es tema claro (bg #f2f2f2): status bar acorde en standalone/TWA.
-  themeColor: '#f2f2f2',
+  // El panel es tema claro (esmalte #eff1f4 = --background de .barber-theme):
+  // status bar acorde en standalone/TWA.
+  themeColor: '#eff1f4',
 }
 
 /**
@@ -78,6 +80,7 @@ export default async function BarberLayout({
           <GiroPanelRaiz>
             <div className="barber-theme min-h-dvh bg-background text-foreground">
               <BarberThemeClient />
+              <BandaReloj />
               <DbDownError context="getBarberSession()" />
             </div>
           </GiroPanelRaiz>
@@ -94,12 +97,18 @@ export default async function BarberLayout({
     <>
       <ScriptGiroPrePaint />
       <GiroPanelRaiz>
-        <div className="barber-theme min-h-dvh bg-background text-foreground pb-20">
+        {/* El padding de abajo reserva el lugar de la barra fija (--alto-nav, en
+            globals.css). En el PIN no hay barra, pero el lugar sobra igual: esa
+            pantalla centra su contenido en el alto disponible. */}
+        <div className="barber-theme min-h-dvh bg-background text-foreground pb-[calc(var(--alto-nav)+env(safe-area-inset-bottom))]">
           <BarberThemeClient />
           <SwRegister />
           <KioskBackGuard />
           <WakeLock />
           <OfflineBanner />
+          {/* La hora, arriba y en todas las pantallas: con la tablet en pantalla
+              completa la barra de Android (y su reloj) no se ve. */}
+          <BandaReloj />
           {children}
           {/* "Pantalla" (girar 180° / pantalla completa) reemplaza al FullscreenButton
               en el panel: con sesión es un ítem de la barra; en el PIN, una pastilla. */}

@@ -83,26 +83,49 @@
   color-scheme: dark;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Panel del barbero — el "reloj fichador" (rediseño oct/2026).
+   La tablet de cada puesto es un reloj de fichar: la hora vive en su propio
+   visor arriba, el cliente en la silla es la ficha que se está marcando (el
+   color de la cartulina ES el semáforo) y la fila es el tarjetero. Esmalte
+   claro de fondo (decisión del dueño: el panel sigue siendo claro), cartulina
+   blanca, tinta grafito y un solo visor oscuro. Las cifras que miden algo
+   (hora, cronómetro, esperas, llegadas) van en Geist Mono: son medición.
+   Vocabulario de color que ya significa algo en todo el sistema y no se toca:
+   violeta turnos · fucsia asesoría · azul Menor espera · verde corte en curso
+   y primer corte · ámbar descansos y demoras · rojo crítico.
+   ═══════════════════════════════════════════════════════════════════════════ */
 .barber-theme,
 .barber-theme-root {
-  --background: oklch(0.96 0 0);
-  --foreground: oklch(0.14 0 0);
+  --background: oklch(0.958 0.004 250);
+  --foreground: oklch(0.2 0.012 260);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.14 0 0);
+  --card-foreground: oklch(0.2 0.012 260);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.14 0 0);
-  --primary: oklch(0.14 0 0);
-  --primary-foreground: oklch(0.96 0 0);
-  --secondary: oklch(0.9 0 0);
-  --secondary-foreground: oklch(0.14 0 0);
-  --muted: oklch(0.9 0 0);
-  --muted-foreground: oklch(0.4 0 0);
-  --accent: oklch(0.9 0 0);
-  --accent-foreground: oklch(0.14 0 0);
+  --popover-foreground: oklch(0.2 0.012 260);
+  --primary: oklch(0.22 0.012 260);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.93 0.005 250);
+  --secondary-foreground: oklch(0.2 0.012 260);
+  --muted: oklch(0.93 0.005 250);
+  --muted-foreground: oklch(0.45 0.012 260);
+  --accent: oklch(0.93 0.005 250);
+  --accent-foreground: oklch(0.2 0.012 260);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.85 0 0);
-  --input: oklch(0.85 0 0);
-  --ring: oklch(0.14 0 0);
+  --border: oklch(0.875 0.006 250);
+  --input: oklch(0.875 0.006 250);
+  --ring: oklch(0.22 0.012 260);
+
+  /* Visor del reloj: la única ventana oscura del panel. */
+  --visor-bg: oklch(0.205 0.012 260);
+  --visor-fg: oklch(0.965 0.012 95);
+  --visor-borde: oklch(0.13 0.01 260);
+
+  /* Alturas que reparten la pantalla de la fila (banda del reloj arriba,
+     barra de secciones abajo). Las usan el layout, la fila y los encabezados
+     pegajosos de las otras pantallas. */
+  --alto-banda: 4.75rem;
+  --alto-nav: 5.25rem;
   --chart-1: oklch(0.95 0 0);
   --chart-2: oklch(0.7 0 0);
   --chart-3: oklch(0.5 0 0);
@@ -838,4 +861,106 @@ html[data-giro='css'] .giro-solo-normal { display: none; }
   0%   { transform: scale(1);    box-shadow: 0 0 0 0 oklch(1 0 0 / 0.45); }
   50%  { transform: scale(1.04); }
   100% { transform: scale(1);    box-shadow: 0 0 0 18px oklch(1 0 0 / 0); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Reloj fichador — piezas del panel del barbero (ver el bloque de tokens de
+   .barber-theme más arriba). Lo usan src/components/barber/reloj/* y
+   src/components/barber/fila/*.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* En el celular la banda y la barra son más bajas: la pantalla es la mitad. */
+@media (max-width: 639px) {
+  .barber-theme,
+  .barber-theme-root {
+    --alto-banda: 3.5rem;
+    --alto-nav: 4.5rem;
+  }
+}
+
+/* El visor: una ventana grafito hundida en el esmalte, con las cifras en
+   marfil. Sin brillo ni halo: es un display, no un cartel de neón. */
+.visor-hora {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--visor-bg);
+  color: var(--visor-fg);
+  border: 1px solid var(--visor-borde);
+  box-shadow:
+    inset 0 2px 5px oklch(0 0 0 / 0.45),
+    inset 0 -1px 0 oklch(1 0 0 / 0.07),
+    0 1px 0 oklch(1 0 0 / 0.9),
+    0 2px 6px -2px oklch(0.2 0.012 260 / 0.25);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1, 'zero' 0;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+/* Los dos puntos laten, como los de un reloj de fichar: dicen "esto está
+   vivo" sin mover ninguna cifra. Lento y suave (cada 2 s): está a la vista
+   todo el día, en el rabillo del ojo de alguien que está cortando. */
+.visor-dos-puntos {
+  display: inline-block;
+  translate: 0 -0.06em;
+  animation: visor-latido 2s ease-in-out infinite;
+}
+@keyframes visor-latido {
+  0%, 55%  { opacity: 1; }
+  75%, 85% { opacity: 0.3; }
+  100%     { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .visor-dos-puntos { animation: none; }
+}
+
+/* La silla: lo que entra a la ranura del reloj (empezar a atender, terminar,
+   arrancar el descanso) entra desde arriba, una sola vez. */
+@keyframes silla-entra {
+  from { opacity: 0; transform: translateY(-14px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .silla-entra { animation: silla-entra 320ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+}
+
+/* Fichas del tarjetero: una ficha nueva en la fila asoma desde la izquierda. */
+@keyframes ficha-asoma {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ficha-asoma { animation: ficha-asoma 260ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+}
+
+
+/* La ranura: la boca grafito del reloj de la que cuelga la ficha de la silla.
+   La boca es más ancha que la ficha (como la de un reloj de verdad) y la tapa
+   por arriba; las esquinas de arriba de la ficha van casi rectas porque están
+   adentro. El clip-path recorta SÓLO por arriba: la ficha nace desde adentro
+   al entrar y las sombras de los costados y de abajo quedan enteras. */
+.ranura {
+  position: relative;
+  padding-top: 0.4375rem;
+  clip-path: inset(0 -3rem -5rem -3rem);
+}
+.ranura-boca {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  z-index: 2;
+  height: 0.75rem;
+  border-radius: 9999px;
+  background: var(--visor-bg);
+  box-shadow:
+    inset 0 -3px 4px oklch(0 0 0 / 0.6),
+    inset 0 1px 0 oklch(1 0 0 / 0.08),
+    0 1px 0 oklch(1 0 0 / 0.95);
+}
+.ranura > :not(.ranura-boca) {
+  margin-inline: 0.625rem;
+  border-top-left-radius: 0.625rem;
+  border-top-right-radius: 0.625rem;
 }

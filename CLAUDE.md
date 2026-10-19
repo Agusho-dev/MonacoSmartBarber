@@ -24,7 +24,7 @@ No test framework is configured. Database migrations are applied with `supabase 
 | Interface | Route prefix | Auth method | Layout |
 |---|---|---|---|
 | Admin dashboard | `/dashboard/*` | Supabase Auth (email+password) | Sidebar shell |
-| Barber panel | `/barbero/*` | PIN → cookie (`barber_session`) | Dark theme, wake-lock |
+| Barber panel | `/barbero/*` | PIN → cookie (`barber_session`) | Tema claro "reloj fichador" (DESIGN.md), hora arriba, wake-lock |
 | Check-in kiosk | `/(tablet)/checkin` | Public (branch selection) | Fullscreen tablet |
 | TV display | `/tv` | Public | Queue monitor |
 | Review page | `/review/[token]` | Public token | Standalone |
@@ -188,6 +188,19 @@ El detalle (modelo, decisiones y qué NO hacer) está en el `CLAUDE.md` raíz. M
 6. Campos de plata o cantidad en el panel: `CampoMontoTablet` / `CampoContadorTablet` (`src/components/barber/campo-tablet.tsx`): el teclado de Android girado invierte el 6 y el 9.
 7. El root layout no dibuja Toaster en `/barbero` (`ToasterRaiz`); el panel tiene el suyo. Con un diálogo abierto, los toasts se pueden tocar sin cerrarlo (`src/components/ui/ignorar-avisos.ts` + CSS en `globals.css`).
 8. En dev, el SW de `/barbero` cachea los chunks: desregistrarlo para ver cambios.
+
+### Panel del barbero: el "reloj fichador" (rediseño oct/2026)
+
+Sistema visual en `DESIGN.md` (raíz del repo); contexto de producto en `PRODUCT.md`. Lo que hay que saber para tocar el panel:
+
+- **La hora va arriba en TODAS las pantallas** (`src/components/barber/reloj/banda-reloj.tsx`, montada en `src/app/barbero/layout.tsx`, en todas las ramas). Existe porque el panel corre en pantalla completa y eso esconde el reloj de Android: los barberos salían de pantalla completa sólo para ver la hora. Es la hora del DISPOSITIVO, se actualiza al borde de cada minuto y al volver de reposo, y en el servidor no se pinta (`useSyncExternalStore` con snapshot de servidor null). Decisión del dueño: al lado de la hora no va nada. En el PIN no hay banda: esa pantalla es la de bloqueo, con `VisorHora tamano="grande"`.
+- **Alturas:** `--alto-banda` y `--alto-nav` (en `.barber-theme`, `globals.css`, con override en celular). La fila mide `100dvh − --alto-banda − --alto-nav − safe-area` y el documento no scrollea; las otras pantallas usan `EncabezadoPantalla` (`src/components/barber/encabezado-pantalla.tsx`), que se pega con `top-[var(--alto-banda)]`. Un `sticky top-0` nuevo queda tapado por la banda.
+- **La fila no tiene pestañas:** "Tu fila", "En el local" y "Cortando ahora" en una columna (apaisada: silla a la izquierda). La pestaña "General" era un cajón que nadie abría. Componentes en `src/components/barber/fila/*`; `queue-panel.tsx` es el contenedor (datos, efectos, acciones, diálogos) y arma las fichas con `propsDeFicha`.
+- **Los botones de cada ficha los decide `accionDe` en `queue-panel.tsx`**, con las mismas reglas que tenía la tarjeta vieja (turnos por su hora real, `descansoListo`, rescate de dinámicos con "Reclamar"). La silla y el tarjetero leen de ahí: no duplicar esa lógica en un componente.
+- **La silla:** libre, sube lo primero de "Mi fila" (el cliente con Atender a todo el ancho, o el descanso que arranca solo); con "Mi fila" vacía sube el primero del local SIN barbero que se pueda atender (`accionDe(e, true)?.tipo === 'atender'`). Lo que sube no se repite abajo.
+- **El corte se mide en minutos ("32 min"), no "32:01"** (`fila/minutos-en-vivo.tsx`): con la hora arriba, un m:ss se leía como otra hora. Sin duración del servicio ni cifras en la regla de minutos: el cliente sentado ve la tablet.
+- **El semáforo y el fondo claro son intocables** (dueño). Pendiente de su decisión: el texto chico sobre la etapa azul da 3,5:1 (ver DESIGN.md).
+- Sin teléfono del cliente en las fichas (el cliente de la silla ve la pantalla); la ficha completa se abre tocando el nombre.
 
 ### Recarga por versión (después de cada deploy)
 

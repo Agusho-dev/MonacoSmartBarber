@@ -34,6 +34,7 @@ import {
 } from '@/lib/giro-panel/avisos'
 import { vibrate } from '@/lib/barber-feedback'
 import { cn } from '@/lib/utils'
+import { claseItemNav } from './barber-nav'
 
 /** Lo que tarda la hoja en empezar a irse antes de girar: la animación no arrastra media hoja. */
 const ESPERA_CIERRE_HOJA_MS = 220
@@ -90,12 +91,12 @@ export function ControlPantalla({ variante }: { variante: 'nav' | 'flotante' }) 
   const icono = (
     <span className="relative inline-flex">
       {giro.bloqueando ? (
-        <Loader2 aria-hidden className="size-5 animate-spin" />
+        <Loader2 aria-hidden className="size-[1.375rem] animate-spin max-sm:size-5" />
       ) : (
         <Tablet
           aria-hidden
           className={cn(
-            'size-5 motion-safe:transition-transform motion-safe:duration-500 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]',
+            'size-[1.375rem] max-sm:size-5 motion-safe:transition-transform motion-safe:duration-500 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]',
             girada && 'rotate-180',
           )}
         />
@@ -115,13 +116,12 @@ export function ControlPantalla({ variante }: { variante: 'nav' | 'flotante' }) 
           aria-haspopup="dialog"
           aria-expanded={abierta}
           aria-label={girada ? 'Pantalla de la tablet (dada vuelta)' : 'Pantalla de la tablet'}
-          className={cn(
-            'flex min-w-[4rem] flex-col items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-muted/50 max-[400px]:min-w-0 max-[400px]:px-1.5',
-            abierta ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
-          )}
+          // Mismo ítem que las secciones de la barra, pero nunca "activo": no es
+          // una pantalla, abre una hoja.
+          className={cn(claseItemNav(false), abierta && 'bg-muted text-foreground')}
         >
           {icono}
-          <span className="leading-none">Pantalla</span>
+          <span>Pantalla</span>
         </button>
       ) : (
         <button
