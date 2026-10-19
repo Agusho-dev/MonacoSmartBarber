@@ -97,6 +97,30 @@ export async function deleteIncentiveRule(id: string) {
   return { success: true }
 }
 
+/**
+ * Muestra u oculta la sección Metas en el panel del barbero de una sucursal
+ * (`branches.metas_en_panel`, mig 226). No toca las reglas ni los logros: el
+ * dueño los sigue cargando y registrando igual, sólo que el barbero no los ve.
+ */
+export async function guardarMetasEnPanel(branchId: string, visible: boolean) {
+  if (typeof visible !== 'boolean') return { error: 'Dato inválido' }
+  const orgId = await validateBranchAccess(branchId)
+  if (!orgId) return { error: 'No autorizado' }
+
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('branches')
+    .update({ metas_en_panel: visible })
+    .eq('id', branchId)
+    .eq('organization_id', orgId)
+    .select('id')
+  if (error) return { error: error.message }
+  if (!data?.length) return { error: 'Sucursal no encontrada' }
+
+  revalidatePath('/dashboard/incentivos')
+  return { success: true }
+}
+
 export async function logAchievement(staffId: string, ruleId: string, periodLabel: string, amountEarned: number, notes?: string) {
   const supabase = createAdminClient()
   // Verificar que la regla pertenece a una branch de la org

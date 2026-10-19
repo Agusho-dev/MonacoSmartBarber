@@ -73,7 +73,7 @@ Sin rótulos chicos arriba de un título (eyebrows): el título habla solo.
 
 - **Fila**: vertical = una columna (silla arriba, tarjetero abajo: Tu fila · En el local · Cortando ahora). Apaisada (≥1024px) = silla y "Cortando ahora" a la izquierda, tarjetero a la derecha, cada uno con su scroll. En la ficha del corte no van ni la duración del servicio ni el número de la TV.
 - **PIN**: pantalla de bloqueo — la hora grande, la marca, sucursales como botones de un toque, teclado de 72px.
-- **Metas**: tarjeta perforada — un agujero por corte hasta 60; más, una barra. **Sin el total de cortes del mes** (decisión del dueño): cada meta llega del servidor con su avance ya acotado a su umbral y dice cuánto falta para ella.
+- **Metas**: tarjeta perforada — un agujero por corte hasta 60; más, una barra. **Sin el total de cortes del mes** (decisión del dueño): cada meta llega del servidor con su avance ya acotado a su umbral y dice cuánto falta para ella. La sección se apaga por sucursal (Rondeau y Paraná, desde el dashboard): sin ella la barra queda con cuatro.
 - **Asistencia**: la tarjeta de fichaje del mes — un renglón por día con sus marcas de entrada y salida.
 - **Historial**: libro de marcas por día (hora · cliente y servicio · duración · cobro), sin conteo por día: sumados, daban el total del mes.
 - **Caja**: el efectivo a entregar en el visor grafito; el detalle como ticket con renglones punteados.

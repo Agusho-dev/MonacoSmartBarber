@@ -1,7 +1,13 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { upsertIncentiveRule, toggleIncentiveRule, deleteIncentiveRule, logAchievement } from '@/lib/actions/incentives'
+import {
+  upsertIncentiveRule,
+  toggleIncentiveRule,
+  deleteIncentiveRule,
+  logAchievement,
+  guardarMetasEnPanel,
+} from '@/lib/actions/incentives'
 import { formatCurrency } from '@/lib/format'
 import type { IncentiveRule, IncentiveAchievement, IncentiveMetric, IncentivePeriod } from '@/lib/types/database'
 import { Button } from '@/components/ui/button'
@@ -36,9 +42,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Trophy, Plus, Pencil, Trash2, CheckCircle2 } from 'lucide-react'
+import { Trophy, Plus, Pencil, Trash2, CheckCircle2, Tablet } from 'lucide-react'
 import { toast } from 'sonner'
 import { useBranchStore } from '@/stores/branch-store'
+import { cn } from '@/lib/utils'
 
 interface BarberBasic {
   id: string
@@ -50,7 +57,15 @@ interface AchievementWithRule extends Omit<IncentiveAchievement, 'rule'> {
   rule?: { name: string } | null
 }
 
+/** Una sucursal con su interruptor de Metas en el panel (mig 226). */
+interface SucursalMetas {
+  id: string
+  name: string
+  metas_en_panel: boolean
+}
+
 interface Props {
+  branches: SucursalMetas[]
   rules: IncentiveRule[]
   barbers: BarberBasic[]
   achievements: AchievementWithRule[]
@@ -75,7 +90,7 @@ const EMPTY_FORM = {
   period: 'monthly' as IncentivePeriod,
 }
 
-export function IncentivosClient({ rules, barbers, achievements, defaultPeriod }: Props) {
+export function IncentivosClient({ branches, rules, barbers, achievements, defaultPeriod }: Props) {
   const { selectedBranchId } = useBranchStore()
   const [selectedPeriod, setSelectedPeriod] = useState(defaultPeriod)
   const [ruleDialog, setRuleDialog] = useState(false)
@@ -165,6 +180,8 @@ export function IncentivosClient({ rules, barbers, achievements, defaultPeriod }
           Nueva regla
         </Button>
       </div>
+
+      <MetasEnPanel branches={branches} />
 
       <Tabs defaultValue="reglas">
         <TabsList>
@@ -370,5 +387,77 @@ export function IncentivosClient({ rules, barbers, achievements, defaultPeriod }
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+/**
+ * Metas en la tablet del barbero, por sucursal (`branches.metas_en_panel`, mig
+ * 226). Apagarla no toca las reglas ni los logros: el barbero simplemente no
+ * ve la sección. Optimista: el interruptor responde al toque y vuelve atrás si
+ * el guardado falla.
+ */
+function MetasEnPanel({ branches }: { branches: SucursalMetas[] }) {
+  const [visibles, setVisibles] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(branches.map((b) => [b.id, b.metas_en_panel])),
+  )
+  const [guardando, setGuardando] = useState<string | null>(null)
+
+  if (branches.length === 0) return null
+
+  async function cambiar(sucursal: SucursalMetas, visible: boolean) {
+    setVisibles((v) => ({ ...v, [sucursal.id]: visible }))
+    setGuardando(sucursal.id)
+    try {
+      const r = await guardarMetasEnPanel(sucursal.id, visible)
+      if (r.error) {
+        setVisibles((v) => ({ ...v, [sucursal.id]: !visible }))
+        toast.error(r.error)
+      } else {
+        toast.success(visible ? `Metas visible en ${sucursal.name}` : `Metas oculta en ${sucursal.name}`)
+      }
+    } catch {
+      setVisibles((v) => ({ ...v, [sucursal.id]: !visible }))
+      toast.error('No se pudo guardar. Probá de nuevo.')
+    } finally {
+      setGuardando(null)
+    }
+  }
+
+  return (
+    <section aria-labelledby="metas-en-panel" className="rounded-xl border bg-card p-4 sm:p-5">
+      <div className="flex items-start gap-3">
+        <Tablet className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
+        <div className="min-w-0">
+          <h2 id="metas-en-panel" className="font-semibold">Metas en la tablet del barbero</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Apagada, los barberos de esa sucursal no ven la sección Metas en su panel. Las reglas y los logros
+            siguen funcionando igual.
+          </p>
+        </div>
+      </div>
+      <ul className="mt-4 divide-y rounded-lg border">
+        {branches.map((b) => {
+          const visible = visibles[b.id] ?? b.metas_en_panel
+          return (
+            <li key={b.id} className="flex items-center justify-between gap-3 px-3 py-2.5 sm:px-4">
+              <label htmlFor={`metas-panel-${b.id}`} className="min-w-0 truncate text-sm font-medium">
+                {b.name}
+              </label>
+              <div className="flex shrink-0 items-center gap-2.5">
+                <span className={cn('text-xs', visible ? 'text-muted-foreground' : 'font-medium text-foreground')}>
+                  {visible ? 'Visible' : 'Oculta'}
+                </span>
+                <Switch
+                  id={`metas-panel-${b.id}`}
+                  checked={visible}
+                  disabled={guardando === b.id}
+                  onCheckedChange={(v) => void cambiar(b, v)}
+                />
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }

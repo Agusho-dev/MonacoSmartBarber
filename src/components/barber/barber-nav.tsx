@@ -48,8 +48,19 @@ export function claseItemNav(activo: boolean, conExtremo = true) {
  * anclado con absolute tapaba "Caja"—. Debajo de md las columnas se disuelven
  * (display: contents) y el extremo es un ítem más del reparto.
  */
-export function BarberNav({ extremo }: { extremo?: React.ReactNode }) {
+export function BarberNav({
+    extremo,
+    mostrarMetas,
+}: {
+    extremo?: React.ReactNode
+    /**
+     * La sección Metas se puede apagar por sucursal (`branches.metas_en_panel`,
+     * mig 226; el dueño la apagó en Rondeau y Paraná). Lo resuelve el layout.
+     */
+    mostrarMetas: boolean
+}) {
     const pathname = usePathname()
+    const items = mostrarMetas ? navItems : navItems.filter((item) => item.href !== '/barbero/metas')
 
     return (
         <nav
@@ -59,7 +70,7 @@ export function BarberNav({ extremo }: { extremo?: React.ReactNode }) {
             <div className="flex h-[var(--alto-nav)] items-center justify-around gap-1 px-2 md:grid md:grid-cols-[1fr_auto_1fr] md:px-4">
                 <div aria-hidden className="hidden md:block" />
                 <div className="contents md:flex md:items-center md:justify-center md:gap-2">
-                    {navItems.map((item) => {
+                    {items.map((item) => {
                         const isActive = pathname === item.href
                         return (
                             <Link

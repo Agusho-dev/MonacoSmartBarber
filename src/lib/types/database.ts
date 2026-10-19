@@ -127,6 +127,12 @@ export interface Branch {
    * `actualizarAsesoriaSucursal` (`@/lib/actions/asesoria`).
    */
   asesoria_habilitada: boolean
+  /**
+   * Mig 226: el panel del barbero muestra la sección Metas en esta sucursal
+   * (nace prendido; el dueño lo apagó en Rondeau y Paraná). Lo escribe sólo
+   * `guardarMetasEnPanel` (`@/lib/actions/incentives`).
+   */
+  metas_en_panel?: boolean
   created_at: string
   updated_at: string
   /** Presente cuando el query incluye el embed `organizations(name, logo_url)` (p. ej. getPublicBranches). */

@@ -292,6 +292,11 @@ export function EquipoClient({
                 )}
                 {activeTab === 'incentivos' && (
                     <IncentivosClient
+                        branches={(branches as Branch[]).map((b) => ({
+                            id: b.id,
+                            name: b.name,
+                            metas_en_panel: b.metas_en_panel !== false,
+                        }))}
                         rules={incentiveRules as Parameters<typeof IncentivosClient>[0]['rules']}
                         barbers={
                             (barbers as unknown[])

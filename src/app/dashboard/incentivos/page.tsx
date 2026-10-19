@@ -18,7 +18,7 @@ export default async function IncentivosPage() {
   const today = new Date()
   const defaultPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
 
-  const [{ data: _branches }, { data: rules }, { data: barbers }, { data: achievements }] = await Promise.all([
+  const [{ data: branches }, { data: rules }, { data: barbers }, { data: achievements }] = await Promise.all([
     branchIds.length > 0
       ? supabase.from('branches').select('*').eq('organization_id', orgId).in('id', branchIds).eq('is_active', true).order('name')
       : Promise.resolve({ data: [] }),
@@ -33,6 +33,11 @@ export default async function IncentivosPage() {
 
   return (
     <IncentivosClient
+      branches={(branches ?? []).map((b) => ({
+        id: b.id as string,
+        name: b.name as string,
+        metas_en_panel: (b.metas_en_panel as boolean | undefined) !== false,
+      }))}
       rules={rules ?? []}
       barbers={
         (barbers ?? []).map((b) => ({

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 
 import { BarberNav } from '@/components/barber/barber-nav'
 import { getBarberSession } from '@/lib/actions/auth'
+import { metasVisiblesEnSucursal } from '@/lib/metas-en-panel'
 
 import { WakeLock } from '@/components/ui/wake-lock'
 import { OfflineBanner } from '@/components/barber/offline-banner'
@@ -93,6 +94,11 @@ export default async function BarberLayout({
     throw err
   }
 
+  // Metas se apaga por sucursal (mig 226). Sólo cambia qué ítems tiene la
+  // barra: no toca la estructura del árbol (ver el OJO de arriba). Si la
+  // lectura falla, la sección no se muestra (metasVisiblesEnSucursal no tira).
+  const mostrarMetas = session ? await metasVisiblesEnSucursal(session.branch_id) : false
+
   return (
     <>
       <ScriptGiroPrePaint />
@@ -113,7 +119,7 @@ export default async function BarberLayout({
           {/* "Pantalla" (girar 180° / pantalla completa) reemplaza al FullscreenButton
               en el panel: con sesión es un ítem de la barra; en el PIN, una pastilla. */}
           {session ? (
-            <BarberNav extremo={<ControlPantalla variante="nav" />} />
+            <BarberNav extremo={<ControlPantalla variante="nav" />} mostrarMetas={mostrarMetas} />
           ) : (
             <ControlPantalla variante="flotante" />
           )}
