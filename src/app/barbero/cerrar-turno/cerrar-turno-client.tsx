@@ -19,6 +19,8 @@ interface CerrarTurnoClientProps {
   summary: BarberDaySummary
   barberName: string
   branchName: string
+  /** Zona de la sucursal (la hora del cierre anterior sale igual en servidor y tablet). */
+  timeZone: string
   previousClose: {
     cashCounted: number | null
     cashDiff: number | null
@@ -31,6 +33,7 @@ export function CerrarTurnoClient({
   summary,
   barberName,
   branchName,
+  timeZone,
   previousClose,
 }: CerrarTurnoClientProps) {
   const router = useRouter()
@@ -217,7 +220,7 @@ export function CerrarTurnoClient({
             {previousClose && (
               <p className="mt-2 text-center text-sm text-muted-foreground">
                 Ya cerraste hoy a las{' '}
-                {new Date(previousClose.closedAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}.
+                {new Date(previousClose.closedAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone })}.
                 Se actualizarán los números.
               </p>
             )}

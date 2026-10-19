@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import type { Metadata } from 'next'
 import { getBarberSession } from '@/lib/actions/auth'
 import { fetchBarberHistory } from '@/lib/actions/barber-panel'
+import { createAdminClient } from '@/lib/supabase/server'
 import { HistorialClient } from './historial-client'
 
 export const dynamic = 'force-dynamic'
@@ -30,7 +31,12 @@ export default async function HistorialPage() {
     const session = await getBarberSession()
     if (!session) redirect('/barbero/login')
 
-    const history = await fetchBarberHistory(session.staff_id, session.branch_id)
+    // Zona de la sucursal para agrupar y formatear igual en el servidor (UTC en
+    // Vercel) y en la tablet.
+    const [history, { data: branch }] = await Promise.all([
+        fetchBarberHistory(session.staff_id, session.branch_id),
+        createAdminClient().from('branches').select('timezone').eq('id', session.branch_id).maybeSingle(),
+    ])
     const rawVisits = (history.visits ?? []) as unknown as RawVisit[]
     const normalized = {
         visits: rawVisits.map((v) => ({
@@ -45,5 +51,11 @@ export default async function HistorialPage() {
         })),
     }
 
-    return <HistorialClient session={session} history={normalized} />
+    return (
+        <HistorialClient
+            session={session}
+            history={normalized}
+            timeZone={branch?.timezone ?? 'America/Argentina/Buenos_Aires'}
+        />
+    )
 }

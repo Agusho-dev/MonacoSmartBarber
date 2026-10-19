@@ -40,7 +40,9 @@ export function DisposicionFila({
  * la izquierda, que es por donde empieza a leer el ojo.
  *
  * `bajoLaSilla` es contexto ("Cortando ahora"): en vertical cierra el tarjetero;
- * apaisada va debajo de la silla, que si no deja media columna vacía.
+ * apaisada va debajo de la silla, que si no deja media columna vacía. Es una
+ * función de dónde va: se dibuja en los dos lugares (uno oculto por CSS) y cada
+ * uno necesita sus propios ids.
  */
 export function ColumnasFila({
   silla,
@@ -50,7 +52,7 @@ export function ColumnasFila({
 }: {
   silla: React.ReactNode
   filas: React.ReactNode
-  bajoLaSilla?: React.ReactNode
+  bajoLaSilla?: (lugar: 'silla' | 'filas') => React.ReactNode
   className?: string
 }) {
   return (
@@ -62,11 +64,11 @@ export function ColumnasFila({
     >
       <div className="px-4 pb-6 pt-1 sm:px-6 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pb-8">
         {silla}
-        {bajoLaSilla && <div className="mt-8 hidden lg:block">{bajoLaSilla}</div>}
+        {bajoLaSilla && <div className="mt-8 hidden lg:block">{bajoLaSilla('silla')}</div>}
       </div>
       <div className="space-y-7 px-4 pb-10 sm:px-6 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pt-1">
         {filas}
-        {bajoLaSilla && <div className="lg:hidden">{bajoLaSilla}</div>}
+        {bajoLaSilla && <div className="lg:hidden">{bajoLaSilla('filas')}</div>}
       </div>
     </div>
   )

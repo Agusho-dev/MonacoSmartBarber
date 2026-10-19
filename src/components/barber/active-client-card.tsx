@@ -128,11 +128,11 @@ export function ActiveClientCard({
   const historial = useUltimosCortes(clienteId, { limite: CORTES_EN_TARJETA_ACTIVA })
 
   return (
-    // Entra a la ranura (silla-entra) una vez por cliente: el panel la monta con
-    // `key={entry.id}`, así una nueva lectura de la fila no repite la animación.
+    // Entra a la ranura una vez por cliente: la animación de entrada la pone la
+    // ranura en su envoltorio (no acá: pisaría el latido del rojo).
     <section
       className={cn(
-        'timer-card silla-entra relative overflow-hidden rounded-[1.75rem]',
+        'timer-card relative overflow-hidden rounded-[1.75rem]',
         stage === 'danger' && !isPaused && 'timer-card--danger',
       )}
       style={cardStyle}
@@ -273,7 +273,7 @@ export function ActiveBreakCard({
   return (
     <section
       className={cn(
-        'timer-card silla-entra relative overflow-hidden rounded-[1.75rem]',
+        'timer-card relative overflow-hidden rounded-[1.75rem]',
         isOverdue && 'timer-card--danger',
       )}
       style={{

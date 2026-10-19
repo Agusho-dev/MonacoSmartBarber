@@ -96,10 +96,10 @@ export function VisorHora({
     <time
       className={cn('visor-hora select-none', TAMANOS[tamano], className)}
       dateTime={listo ? `${hora}:${minutos}` : undefined}
-      aria-label={listo ? `Son las ${hora}:${minutos}` : 'Hora'}
     >
-      {/* Sin hora todavía: el lugar queda reservado y vacío, sin parpadeo de cifras. */}
-      <span aria-hidden className={cn('inline-flex items-center', !listo && 'invisible')}>
+      {/* Sin hora todavía: el lugar queda reservado y vacío, sin parpadeo de
+          cifras (`invisible` también la saca del árbol de accesibilidad). */}
+      <span className={cn('inline-flex items-center', !listo && 'invisible')}>
         <span>{hora}</span>
         <span className="visor-dos-puntos">:</span>
         <span>{minutos}</span>

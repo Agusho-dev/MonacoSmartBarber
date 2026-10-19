@@ -917,7 +917,10 @@ html[data-giro='css'] .giro-solo-normal { display: none; }
 }
 
 /* La silla: lo que entra a la ranura del reloj (empezar a atender, terminar,
-   arrancar el descanso) entra desde arriba, una sola vez. */
+   arrancar el descanso) entra desde arriba, una sola vez. Estas dos entradas
+   van SIEMPRE en un envoltorio y nunca en la ficha misma: con la misma
+   especificidad, la última regla de `animation` gana y apagaba el latido del
+   rojo (.timer-card--danger) y el anillo de asesoría (.asesoria-recien). */
 @keyframes silla-entra {
   from { opacity: 0; transform: translateY(-14px) scale(0.985); }
   to   { opacity: 1; transform: none; }
@@ -959,8 +962,10 @@ html[data-giro='css'] .giro-solo-normal { display: none; }
     inset 0 1px 0 oklch(1 0 0 / 0.08),
     0 1px 0 oklch(1 0 0 / 0.95);
 }
-.ranura > :not(.ranura-boca) {
+.ranura-ficha {
   margin-inline: 0.625rem;
+}
+.ranura-ficha > * {
   border-top-left-radius: 0.625rem;
   border-top-right-radius: 0.625rem;
 }

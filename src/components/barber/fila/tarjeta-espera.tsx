@@ -6,17 +6,6 @@ import type { LoyaltyTierLite } from '@/lib/loyalty-checkout'
 import { leerLoyaltyEmbed } from '@/lib/loyalty-embed'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog'
 import { TurnoBadge } from '@/components/appointments/turno-badge'
 import { AsesoriaBadge } from '../asesoria-badge'
 import { LoyaltyTierChip } from '../loyalty-tier-chip'
@@ -69,7 +58,13 @@ export interface TarjetaEsperaProps {
   /** Hay una acción en curso sobre esta entrada (atender, ausente…). */
   ocupada?: boolean
   onAccion?: () => void
-  onAusente: () => void
+  /**
+   * Pide confirmar que no se presentó. El diálogo lo dibuja el PANEL, no la
+   * ficha: la misma entrada pasa de "Tu fila" a la silla (o del local a la
+   * silla) y se vuelve a montar, y un diálogo que viviera adentro se cerraba
+   * solo bajo el dedo (regla de "Listas que se recargan por Realtime").
+   */
+  onNoVino: () => void
   /** Abre la ficha del cliente (observaciones, Instagram, cortes con fotos). */
   onVerFicha?: () => void
 }
@@ -87,8 +82,14 @@ const FONDO_ESPERA: Record<NivelEspera, string> = {
 }
 
 export function TarjetaEspera(props: TarjetaEsperaProps) {
-  if (props.variante === 'local') return <RenglonLocal {...props} />
-  return props.variante === 'silla' ? <FichaEnSilla {...props} /> : <FichaPropia {...props} />
+  if (props.variante === 'silla') return <FichaEnSilla {...props} />
+  // La entrada (`ficha-asoma`) va en un envoltorio: sobre la ficha misma pisaría
+  // la animación del anillo de asesoría (`asesoria-recien`).
+  return (
+    <div className="ficha-asoma">
+      {props.variante === 'local' ? <RenglonLocal {...props} /> : <FichaPropia {...props} />}
+    </div>
+  )
 }
 
 // ─── Piezas compartidas ──────────────────────────────────────────────────────
@@ -330,7 +331,7 @@ function BotonAccion({
   )
 }
 
-/** "No se presentó": confirma antes, porque saca al cliente de la fila para siempre. */
+/** "No se presentó": abre la confirmación del panel (saca al cliente de la fila para siempre). */
 function BotonAusente({
   props,
   estilo,
@@ -339,51 +340,30 @@ function BotonAusente({
   estilo: 'icono' | 'texto'
 }) {
   const nombre = nombreDe(props.entrada)
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        {estilo === 'icono' ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            disabled={props.ocupada}
-            aria-label={`${nombre} no se presentó`}
-            title="No se presentó / Ausente"
-            className="size-11 shrink-0 rounded-xl text-muted-foreground hover:bg-red-500/10 hover:text-red-700 [&_svg]:size-5"
-          >
-            <X />
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            variant="ghost"
-            disabled={props.ocupada}
-            className="h-12 rounded-xl px-4 text-[0.9375rem] font-semibold text-muted-foreground hover:bg-red-500/10 hover:text-red-700"
-          >
-            <X aria-hidden className="size-4" />
-            No vino
-          </Button>
-        )}
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>¿{nombre} no se presentó?</AlertDialogTitle>
-          <AlertDialogDescription>
-            Lo marca como ausente y lo saca de la fila. No se puede deshacer.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Volver</AlertDialogCancel>
-          <AlertDialogAction
-            className="bg-destructive text-white hover:bg-destructive/90"
-            onClick={props.onAusente}
-          >
-            Sí, no vino
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+  return estilo === 'icono' ? (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      disabled={props.ocupada}
+      onClick={props.onNoVino}
+      aria-label={`${nombre} no se presentó`}
+      title="No se presentó / Ausente"
+      className="size-11 shrink-0 rounded-xl text-muted-foreground hover:bg-red-500/10 hover:text-red-700 [&_svg]:size-5"
+    >
+      <X />
+    </Button>
+  ) : (
+    <Button
+      type="button"
+      variant="ghost"
+      disabled={props.ocupada}
+      onClick={props.onNoVino}
+      className="h-12 rounded-xl px-4 text-[0.9375rem] font-semibold text-muted-foreground hover:bg-red-500/10 hover:text-red-700"
+    >
+      <X aria-hidden className="size-4" />
+      No vino
+    </Button>
   )
 }
 
@@ -413,7 +393,7 @@ function FichaEnSilla(props: TarjetaEsperaProps) {
     <article
       aria-label={`Sigue ${nombreDe(entrada)}`}
       className={cn(
-        'silla-entra relative rounded-[1.75rem] border-2 border-dashed p-5 sm:p-7',
+        'relative rounded-[1.75rem] border-2 border-dashed p-5 sm:p-7',
         asesoria ? 'border-fuchsia-500/45 bg-[oklch(0.975_0.016_330)]' : 'border-foreground/20 bg-secondary',
         asesoriaReciente && 'asesoria-recien',
       )}
@@ -469,7 +449,7 @@ function FichaPropia(props: TarjetaEsperaProps) {
     <article
       aria-label={`${orden ? `${orden}º en tu fila: ` : ''}${nombreDe(entrada)}`}
       className={cn(
-        'ficha-asoma flex items-start gap-3 rounded-[1.25rem] border p-4 shadow-[0_8px_22px_-18px_oklch(0.2_0.012_260/0.5)] sm:gap-4 sm:p-5',
+        'flex items-start gap-3 rounded-[1.25rem] border p-4 shadow-[0_8px_22px_-18px_oklch(0.2_0.012_260/0.5)] sm:gap-4 sm:p-5',
         claseCartulina(entrada, asesoriaReciente),
       )}
     >
@@ -524,7 +504,7 @@ function RenglonLocal(props: TarjetaEsperaProps) {
     <article
       aria-label={nombreDe(entrada)}
       className={cn(
-        'ficha-asoma flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border px-4 py-3',
+        'flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border px-4 py-3',
         claseCartulina(entrada, asesoriaReciente),
       )}
     >
@@ -574,7 +554,7 @@ export function FichaDescansoEnFila({ cortesAntes }: { cortesAntes: number }) {
         <p className="text-lg font-semibold leading-tight text-amber-900">Tu descanso</p>
         <p className="mt-0.5 text-[0.9375rem] text-amber-900/75">
           {cortesAntes === 0
-            ? 'Arranca cuando termines este corte'
+            ? 'Es lo próximo de tu fila'
             : `Después de ${cortesAntes} ${cortesAntes === 1 ? 'cliente' : 'clientes'} más`}
         </p>
       </div>

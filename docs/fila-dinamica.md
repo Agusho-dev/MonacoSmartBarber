@@ -327,10 +327,13 @@ pre-asignación).
 
 ## 7. UI y componentes
 
-- **Panel barbero `/barbero/fila`**: `QueuePanel` (orchestrator, Realtime),
-  `ActiveClientCard`/`ActiveBreakCard`, `BarberTimeline`, `NextClientAlert`
-  (alerta sonora si idle > `next_client_alert_minutes`),
-  `CompleteServiceDialog`, `BarberStatsBar`.
+- **Panel barbero `/barbero/fila`**: `QueuePanel` (orchestrator, Realtime;
+  decide los botones de cada ficha en `accionDe`), la silla
+  (`ActiveClientCard`/`ActiveBreakCard` o la ficha del que sigue) y el
+  tarjetero sin pestañas de `src/components/barber/fila/*` (Tu fila · En el
+  local · Cortando ahora), `BarberTimeline`, `NextClientAlert` (alerta sonora
+  si idle > `next_client_alert_minutes`), `CompleteServiceDialog`. La hora va
+  arriba en todas las pantallas (`BandaReloj`). Ver `DESIGN.md`.
 - **Dashboard `/dashboard/fila`**: `FilaClient` kanban (breaks, pool dinámico,
   una columna por barbero); drag&drop reasigna; ▶ inicia; finaliza; cancela.
 - **TV `/tv`**: read-only, colas/ETAs/ranking, Realtime.

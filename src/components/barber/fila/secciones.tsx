@@ -62,11 +62,15 @@ export interface CorteDeOtro {
   pidioAsesoria: boolean
 }
 
-/** Quién está cortando ahora en el local: chico y apagado, es contexto. */
-export function CortandoAhora({ cortes }: { cortes: CorteDeOtro[] }) {
+/**
+ * Quién está cortando ahora en el local: chico y apagado, es contexto. `id`
+ * propio porque el tramo se monta en dos lugares (uno oculto según la
+ * orientación) y el título no puede repetir id.
+ */
+export function CortandoAhora({ id, cortes }: { id: string; cortes: CorteDeOtro[] }) {
   if (cortes.length === 0) return null
   return (
-    <SeccionFila id="fila-cortando" titulo="Cortando ahora" cantidad={cortes.length}>
+    <SeccionFila id={id} titulo="Cortando ahora" cantidad={cortes.length}>
       <ul className="grid gap-2 sm:grid-cols-2">
         {cortes.map((c) => (
           <li

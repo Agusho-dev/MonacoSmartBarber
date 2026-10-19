@@ -20,6 +20,8 @@ interface HistoryData {
 interface HistorialClientProps {
     session: { staff_id: string; full_name: string; branch_id: string; role: string }
     history: HistoryData
+    /** Zona de la sucursal: las fechas y horas salen iguales en el servidor y en la tablet. */
+    timeZone: string
 }
 
 const PAYMENT_ICONS: Record<string, React.ElementType> = {
@@ -34,8 +36,8 @@ const PAYMENT_LABELS: Record<string, string> = {
     transfer: 'Transferencia',
 }
 
-function formatTime(iso: string) {
-    return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+function formatTime(iso: string, timeZone: string) {
+    return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone })
 }
 
 function getDurationMinutes(startIso: string, endIso: string): number {
@@ -53,13 +55,14 @@ function formatDuration(minutes: number): string {
  * El libro de marcas: cada corte del mes como un renglón (hora de cierre,
  * cliente y servicio, cuánto duró y cómo se cobró), agrupado por día.
  */
-export function HistorialClient({ session, history }: HistorialClientProps) {
+export function HistorialClient({ session, history, timeZone }: HistorialClientProps) {
     const grouped = new Map<string, typeof history.visits>()
     for (const v of history.visits) {
         const dateKey = new Date(v.completed_at).toLocaleDateString('es-AR', {
             weekday: 'long',
             day: 'numeric',
             month: 'long',
+            timeZone,
         })
         if (!grouped.has(dateKey)) grouped.set(dateKey, [])
         grouped.get(dateKey)!.push(v)
@@ -99,7 +102,7 @@ export function HistorialClient({ session, history }: HistorialClientProps) {
                                                 className="flex items-center gap-4 border-b border-border/60 px-4 py-3.5 last:border-b-0 sm:px-5"
                                             >
                                                 <span className="w-12 shrink-0 font-mono text-[0.9375rem] font-semibold tabular-nums">
-                                                    {formatTime(v.completed_at)}
+                                                    {formatTime(v.completed_at, timeZone)}
                                                 </span>
                                                 <div className="min-w-0 flex-1">
                                                     <p className="truncate text-base font-semibold">{v.client?.name ?? 'Cliente'}</p>

@@ -64,7 +64,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { DisposicionFila, ColumnasFila } from './fila/disposicion-fila'
-import { Ranura, SillaCargando, SillaDescansoProximo, SillaVacia } from './fila/silla'
+import { Ranura, SillaCargando, SillaDescansoProximo, SillaSinLeer, SillaVacia } from './fila/silla'
 import { CabeceraFila } from './fila/cabecera-fila'
 import { CortandoAhora, SeccionFila, TramoVacio } from './fila/secciones'
 import {
@@ -193,6 +193,18 @@ function guardarVista(clave: string, vista: VistaAsesoria) {
   }
 }
 
+/**
+ * HH:MM con la hora del DISPOSITIVO, como el visor de arriba (las llegadas de la
+ * fila tienen que coincidir con él). Uno solo para todo el panel: el panel se
+ * vuelve a dibujar cada 5 s y crear un formateador por ficha en cada vuelta es
+ * trabajo tirado.
+ */
+const FORMATO_HORA_DISPOSITIVO = new Intl.DateTimeFormat('es-AR', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+
 /** Una acción del panel que no devolvió nada (falló o el panel se recarga). */
 const SIN_RESPUESTA = Symbol('sin-respuesta')
 
@@ -250,6 +262,11 @@ export function QueuePanel({
   const [todayAppointments, setTodayAppointments] = useState<Appointment[]>(appointments)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  // "¿No se presentó?" de una ficha. El diálogo es UNO y vive acá, no en la
+  // ficha: la misma entrada se dibuja en la silla, en "Tu fila" o en "En el
+  // local", y al pasar de un tramo al otro la ficha se vuelve a montar —un
+  // diálogo adentro se cerraba solo bajo el dedo—.
+  const [noVinoId, setNoVinoId] = useState<string | null>(null)
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
   const [now, setNow] = useState(Date.now())
   const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
@@ -942,7 +959,13 @@ export function QueuePanel({
   // este pop-up no tiene (lo abre el estado): el foco cae al <body> mientras el
   // de abajo sigue atrapándolo. Espera a que el otro se cierre y aparece
   // enseguida. El cobro sobre todo: si ya están cobrando, el pop-up llega tarde.
+  // La entrada del "no vino", mientras siga esperando: si otra tablet la tomó o
+  // la sacó, el diálogo se cierra solo (como cuando vivía en la ficha y la
+  // ficha desaparecía) y nunca se confirma sobre alguien que ya no espera.
+  const noVinoDe = noVinoId ? (allWaitingEntries.find((e) => e.id === noVinoId && !e.is_break) ?? null) : null
+
   const hayOtroModalAbierto =
+    !!noVinoDe ||
     !!completingEntry ||
     breakDialogOpen ||
     breakRequestsDialogOpen ||
@@ -1579,7 +1602,7 @@ export function QueuePanel({
       orden,
       minutosEsperando: (now - new Date(entry.checked_in_at).getTime()) / 60_000,
       // Hora del dispositivo, como el visor de arriba: las dos tienen que coincidir.
-      llegada: formatHourMinute(entry.checked_in_at),
+      llegada: FORMATO_HORA_DISPOSITIVO.format(new Date(entry.checked_in_at)),
       // Sin categoría (programa apagado / cliente no enrolado) no hay chip.
       tier: findLoyaltyTier(loyaltyTiers, loyalty?.tier_code),
       // Hora RESERVADA, tomada de la agenda: en una entrada adoptada de un
@@ -1602,7 +1625,7 @@ export function QueuePanel({
             else void handleStartService(entry.id)
           }
         : undefined,
-      onAusente: () => void handleCancel(entry.id),
+      onNoVino: () => setNoVinoId(entry.id),
       // El nombre abre la ficha (observaciones, Instagram y cortes con fotos,
       // por server action: la fila no trae esas columnas).
       onVerFicha: cliente ? () => setProfileClient(cliente) : undefined,
@@ -1658,6 +1681,8 @@ export function QueuePanel({
 
   const silla = loading ? (
     <SillaCargando />
+  ) : !filaLeida ? (
+    <SillaSinLeer onReintentar={() => void fetchQueue()} />
   ) : myActiveBreak ? (
     <ActiveBreakCard
       key={myActiveBreak.id}
@@ -1745,10 +1770,18 @@ export function QueuePanel({
     </>
   )
 
+  // Qué está en la silla: al cambiar, la ficha entra de nuevo por la ranura.
+  const claveSilla = loading
+    ? 'cargando'
+    : !filaLeida
+      ? 'sin-leer'
+      : (myActiveBreak?.id ?? myActiveEntry?.id ?? subeALaSilla?.id ?? delLocalALaSilla?.id ?? 'vacia')
+
   // Quién está cortando en el local. Contexto: en vertical va al final del
   // tarjetero; apaisada, debajo de la silla (que si no deja un hueco vacío).
-  const cortandoAhora = loading ? null : (
+  const cortandoAhora = (lugar: 'silla' | 'filas') => (loading ? null : (
     <CortandoAhora
+      id={`fila-cortando-${lugar}`}
       cortes={otherInProgress.map((e) => ({
         id: e.id,
         barbero: e.barber?.full_name ?? 'Otro barbero',
@@ -1758,7 +1791,7 @@ export function QueuePanel({
         pidioAsesoria: e.pidio_asesoria === true,
       }))}
     />
-  )
+  ))
 
   const yo = allBarbers.find((b) => b.id === session.staff_id)
 
@@ -1852,7 +1885,7 @@ export function QueuePanel({
             <BarberTimeline session={session} initialAppointments={appointments} />
           </div>
         ) : (
-          <ColumnasFila silla={<Ranura>{silla}</Ranura>} filas={filas} bajoLaSilla={cortandoAhora} />
+          <ColumnasFila silla={<Ranura clave={claveSilla}>{silla}</Ranura>} filas={filas} bajoLaSilla={cortandoAhora} />
         )}
       </DisposicionFila>
 
@@ -1891,7 +1924,7 @@ export function QueuePanel({
           // El cobro puede haber cerrado un TURNO: sin esto la tira seguía
           // mostrándolo "En curso" hasta el refresco de 60s. En walk_in no hay
           // agenda que refrescar, así que no gastamos la query.
-          if (operationMode !== 'walk_in') refreshAppointments()
+          if (showAppointmentStrip || operationMode !== 'walk_in') refreshAppointments()
         }}
       />
 
@@ -1967,6 +2000,36 @@ export function QueuePanel({
         isOpen={!!profileClient}
         onClose={() => setProfileClient(null)}
       />
+
+      {/* ¿No se presentó? (ver `noVinoId`) */}
+      <AlertDialog
+        open={!!noVinoDe}
+        onOpenChange={(abierto) => {
+          if (!abierto) setNoVinoId(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿{noVinoDe?.client?.name?.trim() || 'El cliente'} no se presentó?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Lo marca como ausente y lo saca de la fila. No se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Volver</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={() => {
+                const id = noVinoDe?.id
+                setNoVinoId(null)
+                if (id) void handleCancel(id)
+              }}
+            >
+              Sí, no vino
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Break request dialog */}
       <Dialog open={breakDialogOpen} onOpenChange={setBreakDialogOpen}>

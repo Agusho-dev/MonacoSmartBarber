@@ -26,6 +26,8 @@ interface AttendanceData {
 interface AsistenciaClientProps {
     session: { staff_id: string; full_name: string; branch_id: string; role: string }
     attendance: AttendanceData
+    /** Zona de la sucursal: las fechas y horas salen iguales en el servidor y en la tablet. */
+    timeZone: string
 }
 
 type Marca = AttendanceData['logs'][number]
@@ -38,22 +40,23 @@ const CONSECUENCIAS: Record<string, string> = {
     warning: 'Apercibimiento',
 }
 
-function horaDe(iso: string) {
-    return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+function horaDe(iso: string, timeZone: string) {
+    return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone })
 }
 
-/** Las marcas del mes agrupadas por día (el más reciente arriba) y en orden dentro del día. */
-function porDia(logs: Marca[]) {
-    const dias = new Map<string, { fecha: Date; marcas: Marca[] }>()
+/** Las marcas del mes agrupadas por día de la sucursal (el más reciente arriba) y en orden dentro del día. */
+function porDia(logs: Marca[], timeZone: string) {
+    const claveDeDia = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
+    const dias = new Map<string, { clave: string; fecha: Date; marcas: Marca[] }>()
     for (const log of logs) {
         const fecha = new Date(log.recorded_at)
-        const clave = fecha.toDateString()
-        const dia = dias.get(clave) ?? { fecha, marcas: [] }
+        const clave = claveDeDia.format(fecha)
+        const dia = dias.get(clave) ?? { clave, fecha, marcas: [] }
         dia.marcas.push(log)
         dias.set(clave, dia)
     }
     return [...dias.values()]
-        .sort((a, b) => b.fecha.getTime() - a.fecha.getTime())
+        .sort((a, b) => b.clave.localeCompare(a.clave))
         .map((d) => ({
             ...d,
             marcas: [...d.marcas].sort(
@@ -66,8 +69,8 @@ function porDia(logs: Marca[]) {
  * La tarjeta de fichaje del mes: un renglón por día con sus marcas de entrada y
  * salida, como la que se perforaba en el reloj. Arriba, faltas y tardanzas.
  */
-export function AsistenciaClient({ session, attendance }: AsistenciaClientProps) {
-    const dias = porDia(attendance.logs)
+export function AsistenciaClient({ session, attendance, timeZone }: AsistenciaClientProps) {
+    const dias = porDia(attendance.logs, timeZone)
     const perfecta = attendance.absences === 0 && attendance.lates === 0
 
     return (
@@ -125,6 +128,7 @@ export function AsistenciaClient({ session, attendance }: AsistenciaClientProps)
                                                 {new Date(`${event.event_date.slice(0, 10)}T12:00:00`).toLocaleDateString('es-AR', {
                                                     day: 'numeric',
                                                     month: 'short',
+                                                    timeZone,
                                                 })}
                                             </span>
                                         </div>
@@ -151,17 +155,17 @@ export function AsistenciaClient({ session, attendance }: AsistenciaClientProps)
                             </div>
                         ) : (
                             <ol className="overflow-hidden rounded-[1.25rem] border border-border/80 bg-card">
-                                {dias.map(({ fecha, marcas }) => (
+                                {dias.map(({ clave, fecha, marcas }) => (
                                     <li
-                                        key={fecha.toDateString()}
+                                        key={clave}
                                         className="flex items-start gap-4 border-b border-border/60 px-4 py-3.5 last:border-b-0 sm:px-5"
                                     >
                                         <div className="w-14 shrink-0 pt-1">
                                             <p className="text-[0.8125rem] font-semibold capitalize text-muted-foreground">
-                                                {fecha.toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '')}
+                                                {fecha.toLocaleDateString('es-AR', { weekday: 'short', timeZone }).replace('.', '')}
                                             </p>
                                             <p className="font-mono text-2xl font-semibold leading-none tabular-nums">
-                                                {fecha.getDate()}
+                                                {fecha.toLocaleDateString('es-AR', { day: 'numeric', timeZone })}
                                             </p>
                                         </div>
                                         <div className="flex min-w-0 flex-1 flex-wrap gap-2">
@@ -178,7 +182,7 @@ export function AsistenciaClient({ session, attendance }: AsistenciaClientProps)
                                                     <span className="text-[0.8125rem] font-medium">
                                                         {m.action_type === 'clock_in' ? 'Entrada' : 'Salida'}
                                                     </span>
-                                                    <span className="font-mono tabular-nums text-foreground">{horaDe(m.recorded_at)}</span>
+                                                    <span className="font-mono tabular-nums text-foreground">{horaDe(m.recorded_at, timeZone)}</span>
                                                     {m.face_verified && (
                                                         <ScanFace className="size-4 text-emerald-700" aria-label="Con reconocimiento facial" />
                                                     )}

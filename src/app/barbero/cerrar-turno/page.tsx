@@ -53,6 +53,7 @@ export default async function CerrarTurnoPage() {
       summary={summary}
       barberName={session.full_name}
       branchName={branch?.name ?? 'Sucursal'}
+      timeZone={tz}
       previousClose={closedToday && existingClose ? {
         cashCounted: existingClose.cash_counted !== null ? Number(existingClose.cash_counted) : null,
         cashDiff: existingClose.cash_diff !== null ? Number(existingClose.cash_diff) : null,
