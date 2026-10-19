@@ -30,10 +30,6 @@ export const CORTES_EN_TARJETA_ACTIVA = 6
 const SELLO_SOBRE_CRONOMETRO =
   'h-7 border-white/45 bg-fuchsia-600 text-white shadow-sm hover:bg-fuchsia-700 focus-visible:ring-white/70 focus-visible:ring-offset-0'
 
-/** Minuto en que el semáforo llega al rojo: donde termina la regla. */
-const FIN_DEL_SEMAFORO_MIN = 45
-/** Cambios de color del semáforo (use-timer-stage): marcas altas de la regla. */
-const CAMBIOS_DE_COLOR_MIN = [25, 30, 35]
 
 interface ActiveClientCardProps {
   entry: QueueEntry
@@ -62,15 +58,15 @@ const STAGE_STYLE: Record<TimerStage, { bg: string; fg: string; glow: string }> 
 /**
  * La ficha que está en la silla. Es una cartulina cuyo color ES el semáforo:
  *   0–25 min blanco · 25–30 celeste · 30–35 azul · 35–45 amarillo · 45+ rojo.
- * Los minutos son lo más grande de la pantalla (se leen desde la silla) y la
- * regla de abajo muestra cuánto falta para el próximo color. Los cambios de
- * color son suaves (CSS) y los cruces de umbral vibran (sin sonido: hay un
- * cliente sentado).
+ * Los minutos son lo más grande de la pantalla (se leen desde la silla). Los
+ * cambios de color son suaves (CSS) y los cruces de umbral vibran (sin sonido:
+ * hay un cliente sentado).
  *
- * Nada de cifras que el cliente pueda comparar con el cronómetro: ni la
- * duración del servicio ni números en la regla (principio "nunca dejar mal
- * parado al barbero"). Y el texto va a color pleno: en el azul y el rojo, el
- * texto atenuado con opacidad quedaba por debajo de 3:1.
+ * Nada que le haga sentir al cliente que el corte va contra reloj: ni la
+ * duración del servicio ni una línea de progreso (la hubo y el dueño la sacó:
+ * "el cliente puede sentir que el barbero se está apurando"). El color ya le
+ * dice al barbero cómo viene. Y el texto va a color pleno: en el azul y el
+ * rojo, el texto atenuado con opacidad quedaba por debajo de 3:1.
  */
 export function ActiveClientCard({
   entry,
@@ -177,19 +173,6 @@ export function ActiveClientCard({
           />
         </div>
 
-        {/* En rojo ya no hay próximo color: la regla sólo diría "te pasaste". */}
-        {stage !== 'danger' && (
-          <ReglaMinutos
-            className="mt-6"
-            inicio={entry.started_at}
-            pausaSegundos={entry.paused_duration_seconds ?? 0}
-            pausadoDesde={entry.paused_at}
-            maximo={FIN_DEL_SEMAFORO_MIN}
-            marcas={CAMBIOS_DE_COLOR_MIN}
-            conCifras={false}
-          />
-        )}
-
         {/* Siempre que haya cliente: observaciones, Instagram y sus últimos
             cortes con fotos, para repetir lo que se hizo la vez pasada. */}
         {clienteId && (
@@ -255,7 +238,8 @@ function ClientInfo({
 /**
  * La silla en descanso: cartulina ámbar (ámbar = descansos en todo el panel),
  * anaranjada para no confundirse con el amarillo 35–45 min del semáforo. Los
- * minutos y una regla hasta el final del descanso. Pasado el tiempo, roja.
+ * minutos y una regla hasta el final del descanso: acá sí, porque el descanso
+ * es del barbero y no hay nadie en la silla. Pasado el tiempo, roja.
  */
 export function ActiveBreakCard({
   startedAt,
