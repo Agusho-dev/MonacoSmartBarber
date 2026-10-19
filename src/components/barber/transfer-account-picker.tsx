@@ -9,7 +9,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { formatCurrency } from '@/lib/format'
+import { cn } from '@/lib/utils'
 import { AliasCopyHero } from './alias-copy-hero'
+import { claseAviso, useTonoDelTema } from './cobro/tono'
 import { accountRemaining, type TransferAccountState } from '@/lib/payment-accounts'
 
 interface TransferAccountPickerProps {
@@ -41,6 +43,7 @@ export function TransferAccountPicker({
   amountText,
   showAliasHero = true,
 }: TransferAccountPickerProps) {
+  const tono = useTonoDelTema()
   if (accounts.length === 0) return null
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? accounts[0]
@@ -49,8 +52,8 @@ export function TransferAccountPicker({
     <div className="space-y-3">
       {/* El sistema rotó solo: la(s) cuenta(s) anterior(es) llegaron a su tope del mes. */}
       {rotatedFrom.length > 0 && !allFull && (
-        <div className="flex items-start gap-2 rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-sky-700 dark:text-sky-300">
-          <RefreshCw className="size-4 shrink-0 mt-0.5" />
+        <div className={cn('flex items-start gap-2.5 rounded-2xl border p-3.5 text-[0.9375rem] leading-snug', claseAviso('celeste', tono))}>
+          <RefreshCw className="mt-0.5 size-4 shrink-0" aria-hidden />
           <p>
             <span className="font-semibold">{rotatedFrom.map((a) => a.name).join(', ')}</span>{' '}
             {rotatedFrom.length === 1 ? 'llegó' : 'llegaron'} al tope del mes. Cobrá en la cuenta de abajo.
@@ -60,8 +63,8 @@ export function TransferAccountPicker({
 
       {/* Ninguna cuenta con margen: se cobra igual, pero el admin tiene que saberlo. */}
       {allFull && (
-        <div className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
-          <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+        <div className={cn('flex items-start gap-2.5 rounded-2xl border p-3.5 text-[0.9375rem] leading-snug', claseAviso('ambar', tono))}>
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
           <p>
             Todas las cuentas de la sucursal llegaron al tope del mes. Podés cobrar igual acá, o pedir el
             pago en efectivo y avisarle al admin.
@@ -71,12 +74,12 @@ export function TransferAccountPicker({
 
       {accounts.length > 1 && (
         <div>
-          <p className="mb-1.5 text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-            <Wallet className="size-3.5" />
+          <p id="cobro-cuenta" className="mb-2 flex items-center gap-1.5 text-[0.9375rem] font-medium">
+            <Wallet className="size-4 text-muted-foreground" aria-hidden />
             Cuenta de cobro
           </p>
           <Select value={selectedAccountId} onValueChange={onSelect}>
-            <SelectTrigger className="h-11 w-full text-sm">
+            <SelectTrigger className="h-12 w-full rounded-xl text-base" aria-labelledby="cobro-cuenta">
               <SelectValue placeholder="Seleccionar cuenta..." />
             </SelectTrigger>
             <SelectContent>
@@ -85,7 +88,7 @@ export function TransferAccountPicker({
                 return (
                   <SelectItem key={acc.id} value={acc.id}>
                     <span className="font-medium">{acc.name}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">
+                    <span className="ml-2 text-sm text-muted-foreground">
                       {acc.is_full
                         ? 'Llegó al tope'
                         : remaining !== null
@@ -102,7 +105,7 @@ export function TransferAccountPicker({
 
       {showAliasHero &&
         (!selectedAccount?.alias_or_cbu ? (
-          <div className="rounded-2xl border border-dashed border-amber-500/40 bg-amber-500/5 p-4 text-center text-sm text-amber-700 dark:text-amber-400">
+          <div className={cn('rounded-2xl border border-dashed p-4 text-center text-[0.9375rem]', claseAviso('ambar', tono))}>
             Esta cuenta no tiene alias configurado. Avisá a tu admin.
           </div>
         ) : (

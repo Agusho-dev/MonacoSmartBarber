@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import { Banknote, CreditCard, ArrowRightLeft, type LucideIcon } from 'lucide-react'
 import { vibrate } from '@/lib/barber-feedback'
 import type { PaymentMethod } from '@/lib/types/database'
+import { CLASE_OPCION, claseEstadoOpcion } from './cobro/piezas-cobro'
 
 // El valor 'points' (canje legacy pre-mig 204) se eliminó: el canje en el local
 // va por el escáner de beneficios de la tablet, nunca por un método de pago.
@@ -28,6 +29,11 @@ interface PaymentMethodButtonsProps {
   className?: string
 }
 
+/**
+ * Los tres medios de cobro, compartidos por el cobro de un servicio y la venta
+ * directa. El elegido queda en grafito lleno y del mismo tamaño que los otros
+ * (antes crecía un 2 % y empujaba a los de al lado).
+ */
 export function PaymentMethodButtons({
   value,
   onChange,
@@ -36,13 +42,7 @@ export function PaymentMethodButtons({
   const options: PaymentOption[] = DEFAULT_OPTIONS
 
   return (
-    <div
-      className={cn(
-        'grid grid-cols-3 gap-2 sm:gap-3',
-        '[&>*]:min-w-0',
-        className,
-      )}
-    >
+    <div className={cn('grid grid-cols-3 gap-2.5 sm:gap-3 [&>*]:min-w-0', className)}>
       {options.map((opt) => {
         const Icon = opt.icon
         const selected = value === opt.value
@@ -55,24 +55,23 @@ export function PaymentMethodButtons({
               onChange(opt.value)
             }}
             className={cn(
-              'group flex flex-col items-center justify-center gap-1.5 rounded-2xl border-2 px-2 py-3 sm:p-4 min-h-[88px]',
-              'transition-all duration-200 min-w-0',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-              selected
-                ? 'border-primary bg-primary text-primary-foreground shadow-lg scale-[1.02]'
-                : 'border-border bg-card hover:border-primary/40 hover:bg-primary/5',
+              'flex min-h-24 min-w-0 flex-col items-center justify-center gap-1.5 rounded-2xl px-1 py-3 sm:min-h-[6.5rem] sm:px-2',
+              CLASE_OPCION,
+              claseEstadoOpcion(selected),
             )}
             aria-pressed={selected}
           >
-            <Icon className={cn('size-7 sm:size-9 transition-transform shrink-0', selected && 'scale-110')} />
-            <span className="text-[13px] sm:text-base font-bold leading-tight text-center truncate max-w-full">
+            <Icon className="size-7 shrink-0" aria-hidden />
+            {/* En el celular, 13 px y apretado: si no, "Transferencia" no entra en
+                un tercio de pantalla. En la tablet, 17. */}
+            <span className="max-w-full truncate text-center text-[0.8125rem] font-semibold leading-tight tracking-[-0.02em] sm:text-[1.0625rem] sm:tracking-normal">
               {opt.label}
             </span>
             {opt.hint && (
               <span
                 className={cn(
-                  'hidden sm:block text-[11px] font-medium leading-tight',
-                  selected ? 'opacity-80' : 'text-muted-foreground',
+                  'hidden text-[0.8125rem] leading-tight sm:block',
+                  selected ? 'opacity-75' : 'text-muted-foreground',
                 )}
               >
                 {opt.hint}

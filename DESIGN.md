@@ -9,7 +9,7 @@ La tablet de cada puesto es un reloj de fichar:
 - **La hora vive en su visor**, arriba, en todas las pantallas (`BandaReloj` en el layout). Sólo la hora: decisión del dueño.
 - **El cliente en la silla es la ficha que se está marcando.** La cartulina de esa ficha cambia de color con el semáforo del corte.
 - **La fila es el tarjetero**: fichas de cartulina blanca, una debajo de la otra, sin pestañas.
-- **La máquina es grafito; todo lo demás es cartulina.** Hay exactamente dos piezas oscuras: el visor de la hora y la ranura de la que cuelga la ficha de la silla (en Caja, el visor muestra el efectivo a entregar).
+- **La máquina es grafito; todo lo demás es cartulina.** Hay exactamente dos piezas oscuras: el visor de la hora y la ranura de la que cuelga la ficha de la silla. El visor también muestra la plata cuando es LA cifra de la pantalla: en Caja, el efectivo a entregar; en el cobro, lo que hay que cobrar.
 
 Rechaza el dashboard genérico de pestañas y tarjetas grises: la pestaña "General" escondía a los clientes sin barbero.
 
@@ -66,15 +66,16 @@ Sin rótulos chicos arriba de un título (eyebrows): el título habla solo.
 - **Regla del descanso** (`fila/regla-minutos.tsx`): de 0 a la duración del descanso, con una aguja y los minutos de referencia. **Sólo en el descanso.** En el corte no hay ninguna línea de progreso: el dueño la sacó porque el cliente sentado siente que el barbero se apura; ahí el color del semáforo alcanza.
 - **Sello** (`fila/sello.tsx`): la marca chica de la ficha; un tono por palabra del vocabulario de color.
 - **Encabezado de pantalla** (`encabezado-pantalla.tsx`): Metas, Asistencia, Historial, Caja; se pega debajo de la banda.
+- **Cobro** (`complete-service-dialog.tsx` + `cobro/`): el título es el nombre del cliente y debajo va el paso ("Paso 1 de 2 · Qué se hizo" / "Cómo paga"). Todo se elige con un toque —servicio, extras, medio de pago, propina— y lo elegido queda en grafito lleno, sin agrandarse (`CLASE_OPCION` + `claseEstadoOpcion`). El monto va en el visor (`VisorMonto`). Una barra fija abajo tiene siempre el total y el paso siguiente: con transferencia y comprobante obligatorio, el paso siguiente es "Confirmar con escaneo". El alias es un ticket punteado (la plata todavía no entró) que se parte en los puntos, nunca con guion. El cobro también se abre en el dashboard, que es oscuro: los avisos de color van con `claseAviso(color, tono)` (`cobro/tono.ts`), **nunca con `dark:`** (el `@custom-variant dark` exige un `.dark` que la app no pone: un `dark:` no se aplica nunca).
 - **Barra de secciones** (`barber-nav.tsx`): la sección activa es una pastilla grafito llena (se ve desde la silla); "Pantalla" comparte el estilo pero nunca queda activa.
 
 ## Pantallas
 
 - **Fila**: vertical = una columna (silla arriba, tarjetero abajo: Tu fila · En el local · Cortando ahora). Apaisada (≥1024px) = silla y "Cortando ahora" a la izquierda, tarjetero a la derecha, cada uno con su scroll. En la ficha del corte no van ni la duración del servicio ni el número de la TV.
 - **PIN**: pantalla de bloqueo — la hora grande, la marca, sucursales como botones de un toque, teclado de 72px.
-- **Metas**: tarjeta perforada — un agujero por corte hasta 60; más, una barra.
+- **Metas**: tarjeta perforada — un agujero por corte hasta 60; más, una barra. **Sin el total de cortes del mes** (decisión del dueño): cada meta llega del servidor con su avance ya acotado a su umbral y dice cuánto falta para ella.
 - **Asistencia**: la tarjeta de fichaje del mes — un renglón por día con sus marcas de entrada y salida.
-- **Historial**: libro de marcas por día (hora · cliente y servicio · duración · cobro).
+- **Historial**: libro de marcas por día (hora · cliente y servicio · duración · cobro), sin conteo por día: sumados, daban el total del mes.
 - **Caja**: el efectivo a entregar en el visor grafito; el detalle como ticket con renglones punteados.
 
 ## Movimiento

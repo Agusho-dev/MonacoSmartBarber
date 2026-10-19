@@ -11,6 +11,9 @@ import { useFotosDelCobro } from '@/hooks/use-fotos-del-cobro'
 import type { FotoDelCobro } from '@/stores/fotos-corte-store'
 import { QrFotosDialog } from './qr-fotos-dialog'
 import { VisorFotos, type FotoDelVisor } from './visor-fotos'
+import { TituloCobro } from './cobro/piezas-cobro'
+import { claseTextoAviso, useTonoDelTema } from './cobro/tono'
+import { Sello } from './fila/sello'
 
 interface FotosDelCobroProps {
   /** La entrada de la fila que se está cobrando. La sesión de fotos se ata a ella. */
@@ -33,6 +36,7 @@ interface FotosDelCobroProps {
  */
 export function FotosDelCobro({ entradaId, abierto, deshabilitado = false }: FotosDelCobroProps) {
   const f = useFotosDelCobro(entradaId, abierto)
+  const tono = useTonoDelTema()
   const inputCamara = useRef<HTMLInputElement>(null)
   const inputGaleria = useRef<HTMLInputElement>(null)
   const [fotoAbierta, setFotoAbierta] = useState<number | null>(null)
@@ -61,20 +65,23 @@ export function FotosDelCobro({ entradaId, abierto, deshabilitado = false }: Fot
 
   return (
     <section aria-labelledby="cobro-fotos">
-      <div className="mb-3 flex items-baseline justify-between gap-2">
-        <p id="cobro-fotos" className="text-sm font-medium">
-          Fotos del corte <span className="text-muted-foreground">(opcional)</span>
-        </p>
-        {f.fotos.length > 0 && (
-          <span className="text-xs tabular-nums text-muted-foreground">
-            {f.resumen.listas + f.resumen.enCurso}/{TOPE_FOTOS_POR_CORTE}
-          </span>
-        )}
-      </div>
+      <TituloCobro
+        id="cobro-fotos"
+        opcional
+        detalle={
+          f.fotos.length > 0 && (
+            <span className="font-mono text-[0.9375rem] tabular-nums text-muted-foreground">
+              {f.resumen.listas + f.resumen.enCurso}/{TOPE_FOTOS_POR_CORTE}
+            </span>
+          )
+        }
+      >
+        Fotos del corte
+      </TituloCobro>
 
       {/* Tres caminos. El del celular va primero: saca mejores fotos y no hay
           que andar con la tablet en la mano. */}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-2.5 pt-1">
         <Mosaico
           icono={<Smartphone className="size-6" aria-hidden />}
           titulo="Con tu celular"
@@ -150,31 +157,31 @@ export function FotosDelCobro({ entradaId, abierto, deshabilitado = false }: Fot
       )}
 
       {/* Estado en palabras: lo que la tira dice con íconos. */}
-      <div className="mt-2 space-y-1" aria-live="polite">
+      <div className="mt-2.5 space-y-1.5" aria-live="polite">
         {f.resumen.enCurso > 0 ? (
-          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Loader2 className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
+          <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <Loader2 className="size-4 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
             Subiendo {cantidadDeFotos(f.resumen.enCurso)}… Podés cobrar igual: terminan solas.
           </p>
         ) : f.resumen.listas > 0 ? (
-          <p className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
-            <Check className="size-3.5 shrink-0" aria-hidden />
+          <p className={cn('flex items-center gap-1.5 text-sm font-medium', claseTextoAviso('verde', tono))}>
+            <Check className="size-4 shrink-0" aria-hidden />
             {cantidadDeFotos(f.resumen.listas)} {f.resumen.listas === 1 ? 'lista' : 'listas'}
           </p>
         ) : null}
         {f.resumen.enTope && (
-          <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+          <p className={cn('text-sm font-medium', claseTextoAviso('ambar', tono))}>
             Llegaste al máximo de {TOPE_FOTOS_POR_CORTE} fotos por corte.
           </p>
         )}
         {f.resumen.conError > 0 && ultimoError && (
-          <p className="flex items-start gap-1.5 text-xs text-destructive" role="alert">
-            <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden />
+          <p className="flex items-start gap-1.5 text-sm text-destructive" role="alert">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
             {ultimoError}
           </p>
         )}
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
+        <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <ShieldCheck className="size-4 shrink-0" aria-hidden />
           Siempre con permiso del cliente. Quedan en su ficha para la próxima visita.
         </p>
       </div>
@@ -216,7 +223,7 @@ function Mosaico({
       onClick={onClick}
       disabled={deshabilitado}
       className={cn(
-        'relative flex min-h-[92px] flex-col items-center justify-center gap-1 rounded-2xl border-2 px-1.5 py-3 text-center outline-none',
+        'relative flex min-h-24 flex-col items-center justify-center gap-1 rounded-2xl border-2 px-1.5 py-3 text-center outline-none',
         'transition-[background-color,border-color,transform] duration-150 motion-safe:active:scale-[0.97] motion-reduce:transition-none',
         'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         'disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100',
@@ -228,13 +235,13 @@ function Mosaico({
       )}
     >
       {destacado && (
-        <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-foreground">
+        <Sello tono="tinta" className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap">
           Recomendado
-        </span>
+        </Sello>
       )}
       {icono}
-      <span className="text-sm font-semibold leading-tight">{titulo}</span>
-      <span className="text-[11px] leading-tight text-muted-foreground">{detalle}</span>
+      <span className="text-[0.9375rem] font-semibold leading-tight">{titulo}</span>
+      <span className="text-[0.8125rem] leading-tight text-muted-foreground">{detalle}</span>
     </button>
   )
 }

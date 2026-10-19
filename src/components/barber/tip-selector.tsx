@@ -5,10 +5,11 @@ import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { formatCurrency } from '@/lib/format'
-import { Banknote, ArrowRightLeft, CreditCard, Heart, X, type LucideIcon } from 'lucide-react'
+import { Banknote, ArrowRightLeft, CreditCard, X, type LucideIcon } from 'lucide-react'
 import { vibrate } from '@/lib/barber-feedback'
 import type { PaymentMethod } from '@/lib/types/database'
 import { CampoMontoTablet } from '@/components/barber/campo-tablet'
+import { CLASE_OPCION, TituloCobro, claseEstadoOpcion } from './cobro/piezas-cobro'
 
 interface TipSelectorProps {
   baseAmount: number
@@ -32,6 +33,11 @@ const TIP_METHOD_OPTIONS: { value: PaymentMethod; label: string; icon: LucideIco
   { value: 'card', label: 'Tarjeta', icon: CreditCard },
 ]
 
+/**
+ * La propina en tinta, como toda la plata del panel (DESIGN.md): sin corazón
+ * rojo. Un monto cargado a mano queda a la vista en su propio botón ("Otro ·
+ * $1.500"); antes, confirmado, ningún botón decía cuánto se había puesto.
+ */
 export function TipSelector({
   baseAmount,
   value,
@@ -45,6 +51,7 @@ export function TipSelector({
 
   const hasTip = value > 0
   const effectiveMethod = method ?? serviceMethod
+  const esMontoPropio = hasTip && !quickAmounts.includes(value)
 
   const handleSelectQuick = (amount: number) => {
     vibrate(10)
@@ -69,26 +76,28 @@ export function TipSelector({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Heart className="size-4 text-rose-500" aria-hidden />
-          <p className="text-sm font-semibold">Propina</p>
-          <span className="text-xs text-muted-foreground">(opcional)</span>
-        </div>
-        {hasTip && (
-          <button
-            type="button"
-            onClick={handleClear}
-            className="text-xs font-semibold text-muted-foreground hover:text-foreground flex items-center gap-1"
-            aria-label="Quitar propina"
-          >
-            <X className="size-3" /> Quitar
-          </button>
-        )}
-      </div>
+    <section aria-labelledby="cobro-propina">
+      <TituloCobro
+        id="cobro-propina"
+        opcional
+        className="items-center"
+        detalle={
+          hasTip && (
+            <button
+              type="button"
+              onClick={handleClear}
+              className="-my-2 flex min-h-11 items-center gap-1.5 rounded-xl px-2.5 text-[0.9375rem] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Quitar propina"
+            >
+              <X className="size-4" aria-hidden /> Quitar
+            </button>
+          )
+        }
+      >
+        Propina
+      </TituloCobro>
 
-      <div className="flex flex-wrap gap-2">
+      <div role="group" aria-labelledby="cobro-propina" className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         {quickAmounts.map((amount) => {
           const active = value === amount
           return (
@@ -97,11 +106,9 @@ export function TipSelector({
               type="button"
               onClick={() => handleSelectQuick(amount)}
               className={cn(
-                'rounded-full border-2 px-4 py-2 text-sm font-bold tabular-nums transition-all',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                active
-                  ? 'border-primary bg-primary text-primary-foreground shadow scale-105'
-                  : 'border-border bg-card hover:border-primary/40',
+                'flex h-14 items-center justify-center rounded-2xl px-3 font-mono text-[1.0625rem] font-semibold tabular-nums',
+                CLASE_OPCION,
+                claseEstadoOpcion(active),
               )}
               aria-pressed={active}
             >
@@ -112,56 +119,68 @@ export function TipSelector({
         <button
           type="button"
           onClick={() => setCustomOpen((v) => !v)}
+          aria-expanded={customOpen}
           className={cn(
-            'rounded-full border-2 px-4 py-2 text-sm font-bold transition-all',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+            'flex h-14 min-w-0 flex-col items-center justify-center rounded-2xl px-3',
+            CLASE_OPCION,
             customOpen
-              ? 'border-primary bg-primary/10'
-              : 'border-border bg-card hover:border-primary/40',
+              ? 'border-foreground bg-card text-foreground'
+              : claseEstadoOpcion(esMontoPropio),
           )}
         >
-          Otro monto
+          {esMontoPropio && !customOpen ? (
+            <>
+              <span className="text-[0.8125rem] leading-tight opacity-75">Otro monto</span>
+              <span className="font-mono text-[1.0625rem] font-semibold leading-tight tabular-nums">
+                {formatCurrency(value)}
+              </span>
+            </>
+          ) : (
+            <span className="text-[0.9375rem] font-semibold">Otro monto</span>
+          )}
         </button>
       </div>
 
       {customOpen && (
         // Con el panel girado 180° el teclado de Android sale al revés (el 6 se
         // lee 9): ahí se carga con el teclado del panel. Sin giro, el input de siempre.
-        <CampoMontoTablet
-          valor={customValue}
-          onCambiar={setCustomValue}
-          etiqueta="Monto de propina personalizado"
-          autoAbrir
-          maxDigitos={7}
-          onConfirmar={handleCustomConfirm}
-          textoConfirmar="Confirmar propina"
-        >
-          <div className="flex gap-2">
-            <Input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              placeholder="Ej: 1500"
-              value={customValue}
-              onChange={(e) => setCustomValue(e.target.value.replace(/[^0-9]/g, ''))}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCustomConfirm() } }}
-              className="h-12 text-base font-semibold tabular-nums"
-              aria-label="Monto de propina personalizado"
-              autoFocus
-            />
-            <Button type="button" onClick={handleCustomConfirm} disabled={!customValue} className="h-12 px-5">
-              Confirmar
-            </Button>
-          </div>
-        </CampoMontoTablet>
+        <div className="mt-2.5">
+          <CampoMontoTablet
+            valor={customValue}
+            onCambiar={setCustomValue}
+            etiqueta="Monto de propina personalizado"
+            autoAbrir
+            maxDigitos={7}
+            onConfirmar={handleCustomConfirm}
+            textoConfirmar="Confirmar propina"
+          >
+            <div className="flex gap-2.5">
+              <Input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                placeholder="Ej: 1500"
+                value={customValue}
+                onChange={(e) => setCustomValue(e.target.value.replace(/[^0-9]/g, ''))}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCustomConfirm() } }}
+                className="h-14 rounded-2xl font-mono text-lg font-semibold tabular-nums"
+                aria-label="Monto de propina personalizado"
+                autoFocus
+              />
+              <Button type="button" onClick={handleCustomConfirm} disabled={!customValue} className="h-14 rounded-2xl px-6 text-base">
+                Confirmar
+              </Button>
+            </div>
+          </CampoMontoTablet>
+        </div>
       )}
 
       {hasTip && (
-        <div className="space-y-2 rounded-xl bg-muted/50 p-3">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+        <div className="mt-4">
+          <p id="cobro-propina-medio" className="mb-2 text-[0.9375rem] font-medium">
             ¿Cómo la recibe?
           </p>
-          <div className="grid grid-cols-3 gap-2">
+          <div role="group" aria-labelledby="cobro-propina-medio" className="grid grid-cols-3 gap-2.5">
             {TIP_METHOD_OPTIONS.map((opt) => {
               const Icon = opt.icon
               const active = effectiveMethod === opt.value
@@ -171,21 +190,23 @@ export function TipSelector({
                   type="button"
                   onClick={() => { vibrate(8); onChange(value, opt.value) }}
                   className={cn(
-                    'flex flex-col items-center gap-1 rounded-lg border-2 p-2 text-xs font-semibold transition-all',
-                    active
-                      ? 'border-primary bg-primary text-primary-foreground shadow'
-                      : 'border-transparent bg-background hover:border-primary/40',
+                    'flex min-h-[4.25rem] min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 sm:px-1.5',
+                    CLASE_OPCION,
+                    claseEstadoOpcion(active),
                   )}
                   aria-pressed={active}
                 >
-                  <Icon className="size-4" />
-                  {opt.label}
+                  <Icon className="size-5 shrink-0" aria-hidden />
+                  {/* Mismo criterio que los medios de cobro: en el celular, 13 px apretado. */}
+                  <span className="max-w-full truncate text-[0.8125rem] font-semibold leading-tight tracking-[-0.02em] sm:text-[0.9375rem] sm:tracking-normal">
+                    {opt.label}
+                  </span>
                 </button>
               )
             })}
           </div>
         </div>
       )}
-    </div>
+    </section>
   )
 }

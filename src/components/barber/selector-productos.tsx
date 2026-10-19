@@ -24,6 +24,7 @@ import {
   type ProductoParaCobro,
 } from '@/lib/productos/reglas'
 import type { EstadoProductos } from '@/hooks/use-productos-de-sucursal'
+import { claseAviso, claseTextoAviso, useTonoDelTema } from './cobro/tono'
 
 interface SelectorProductosProps {
   estado: EstadoProductos
@@ -59,6 +60,7 @@ export function SelectorProductos({
   deshabilitado = false,
   className,
 }: SelectorProductosProps) {
+  const tono = useTonoDelTema()
   if (estado.tipo === 'cargando') return <EstadoCargando variante={variante} className={className} />
   if (estado.tipo === 'error') {
     return <EstadoError mensaje={estado.mensaje} onReintentar={onReintentar} className={className} />
@@ -91,7 +93,7 @@ export function SelectorProductos({
       {estado.errorAlActualizar && (
         <div
           role="status"
-          className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 py-1 pl-3 pr-1 text-xs text-amber-700 dark:text-amber-400"
+          className={cn('flex items-center gap-2 rounded-xl border py-1 pl-3 pr-1 text-sm', claseAviso('ambar', tono))}
         >
           <AlertTriangle className="size-4 shrink-0" aria-hidden />
           <span className="min-w-0 flex-1">No pudimos actualizar la lista: algún precio o stock puede estar viejo.</span>
@@ -126,9 +128,9 @@ export function SelectorProductos({
       </ul>
 
       {variante === 'compacta' && unidades > 0 && (
-        <p className="text-right text-xs text-muted-foreground tabular-nums">
+        <p className="text-right text-sm text-muted-foreground tabular-nums">
           {unidades} {unidades === 1 ? 'unidad' : 'unidades'} ·{' '}
-          <span className="font-semibold text-foreground">
+          <span className="font-mono font-semibold text-foreground">
             {formatCurrency(totalDeLineas(estado.productos, vigentes))}
           </span>
         </p>
@@ -185,12 +187,12 @@ function TarjetaProducto({ producto, cantidad, onCantidad, compacta, deshabilita
         <span
           className={cn(
             'line-clamp-2 break-words pr-7 font-semibold leading-tight',
-            compacta ? 'text-sm' : 'text-base',
+            compacta ? 'text-[0.9375rem]' : 'text-base',
           )}
         >
           {producto.name}
         </span>
-        <span className={cn('font-bold tabular-nums', compacta ? 'text-sm' : 'text-lg')}>
+        <span className={cn('font-mono font-semibold tabular-nums', compacta ? 'text-[0.9375rem]' : 'text-lg')}>
           {formatCurrency(producto.sale_price)}
         </span>
         <ChipStock stock={producto.stock} cantidad={cantidad} />
@@ -268,13 +270,14 @@ function TarjetaProducto({ producto, cantidad, onCantidad, compacta, deshabilita
  * encargado.
  */
 function ChipStock({ stock, cantidad }: { stock: number | null; cantidad: number }) {
+  const tono = useTonoDelTema()
   if (stock === null) return null
 
   if (stock <= 0 || cantidad > stock) {
     // Hace salto de línea en vez de truncarse: en un teléfono la tarjeta mide
     // ~165 px y "Sin stock en el s…" ya no dice nada.
     return (
-      <span className="mt-0.5 inline-flex max-w-full items-start gap-1 rounded-lg bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium leading-snug text-amber-700 dark:text-amber-400">
+      <span className={cn('mt-0.5 inline-flex max-w-full items-start gap-1 rounded-lg bg-amber-500/15 px-2 py-0.5 text-xs font-medium leading-snug', claseTextoAviso('ambar', tono))}>
         <AlertTriangle className="mt-px size-3 shrink-0" aria-hidden />
         <span>
           {stock <= 0 ? 'Sin stock en el sistema' : `${stock === 1 ? 'Queda 1' : `Quedan ${stock}`} en el sistema`}
@@ -284,7 +287,7 @@ function ChipStock({ stock, cantidad }: { stock: number | null; cantidad: number
   }
 
   return (
-    <span className="mt-0.5 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium leading-tight text-muted-foreground">
+    <span className="mt-0.5 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium leading-tight text-muted-foreground">
       {stock === 1 ? 'Queda 1' : `Quedan ${stock}`}
     </span>
   )
@@ -320,19 +323,17 @@ function EstadoError({
   onReintentar: () => void
   className?: string
 }) {
+  const tono = useTonoDelTema()
   return (
     <div
       role="alert"
-      className={cn(
-        'flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-400',
-        className,
-      )}
+      className={cn('flex items-start gap-3 rounded-2xl border p-3.5', claseAviso('ambar', tono), className)}
     >
       <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold">{TITULO_ERROR}</p>
         {/* El motivo sólo si dice algo más (sesión vencida, sin acceso). */}
-        {mensaje !== TITULO_ERROR && <p className="mt-0.5 text-xs opacity-90">{mensaje}</p>}
+        {mensaje !== TITULO_ERROR && <p className="mt-0.5 text-sm opacity-90">{mensaje}</p>}
       </div>
       <Button
         type="button"
@@ -352,14 +353,14 @@ function EstadoVacio({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        'flex items-start gap-3 rounded-xl border border-dashed p-3 text-muted-foreground',
+        'flex items-start gap-3 rounded-2xl border border-dashed p-3.5 text-muted-foreground',
         className,
       )}
     >
       <Package className="mt-0.5 size-5 shrink-0" aria-hidden />
-      <p className="text-sm">
+      <p className="text-[0.9375rem]">
         Esta sucursal no tiene productos activos.
-        <span className="mt-0.5 block text-xs">Se cargan desde el panel, en Servicios y Productos.</span>
+        <span className="mt-0.5 block text-sm">Se cargan desde el panel, en Servicios y Productos.</span>
       </p>
     </div>
   )

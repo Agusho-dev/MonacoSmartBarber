@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Copy, Check, Wallet } from 'lucide-react'
+import { Copy, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { vibrate, playSuccessBeep } from '@/lib/barber-feedback'
 
@@ -11,14 +11,35 @@ interface AliasCopyHeroProps {
   alias: string
   /** Nombre del titular de la cuenta. */
   accountName?: string
-  /** Monto a cobrar (se muestra arriba del alias). */
+  /** Monto a cobrar (se muestra debajo del alias). */
   amountText?: string
 }
 
 /**
- * Hero gigante con el ALIAS para transferencias. Una sola ojeada, copiar con
- * un tap. Diseñado para que el cliente pueda verlo desde el otro lado del
- * mostrador.
+ * Un alias largo se parte en los puntos y nunca con un guion: con
+ * `hyphens-auto` "un.alias.largo" se leía "un.alias.lar-go", y un guion que el
+ * cliente tipea a mano es otro alias (o ninguno). Si un tramo igual no entra
+ * (un CBU de 22 dígitos), se corta donde haga falta, sin guion.
+ */
+function partirEnLosPuntos(alias: string) {
+  const tramos = alias.split('.')
+  return tramos.map((tramo, i) => (
+    <Fragment key={i}>
+      {tramo}
+      {i < tramos.length - 1 && (
+        <>
+          .<wbr />
+        </>
+      )}
+    </Fragment>
+  ))
+}
+
+/**
+ * El alias para transferir, como un ticket del reloj: cartulina con filete
+ * punteado —en el panel, punteado es "todavía no se marcó": la plata no
+ * entró— y el alias grande, para dictarlo o para que el cliente lo lea desde
+ * la silla. Debajo del troquel, el monto en cifras de medir. Copiar, de un toque.
  */
 export function AliasCopyHero({
   alias,
@@ -55,39 +76,32 @@ export function AliasCopyHero({
   }
 
   return (
-    <div
-      className={cn(
-        'alias-hero relative overflow-hidden rounded-2xl sm:rounded-3xl p-4 sm:p-7 text-center',
-        'shadow-[0_20px_60px_-20px_oklch(0.78_0.12_85/0.4)]',
-      )}
+    <section
+      aria-label="Alias para transferir"
+      className="rounded-[1.5rem] border-2 border-dashed border-foreground/25 bg-card px-5 pb-5 pt-4 text-center"
     >
-      <div className="flex items-center justify-center gap-1.5 text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.18em] text-black/55">
-        <Wallet className="size-3 sm:size-3.5" />
+      <p className="text-[0.9375rem] text-muted-foreground">
         Dictale este alias
-      </div>
-
-      {accountName && (
-        <p className="mt-1 text-xs sm:text-sm font-semibold text-black/70">
-          {accountName}
-        </p>
-      )}
+        {accountName && (
+          <>
+            {' · '}
+            <span className="font-semibold text-foreground">{accountName}</span>
+          </>
+        )}
+      </p>
 
       <p
-        className={cn(
-          'mt-3 sm:mt-4 font-black tracking-tight text-black',
-          'text-[clamp(22px,7vw,48px)] leading-[1.05]',
-          'select-all break-words hyphens-auto',
-        )}
-        style={{ wordBreak: 'break-word' }}
+        className="mt-2 select-all text-[clamp(1.75rem,7vw,3rem)] font-bold leading-[1.08] tracking-[-0.02em] hyphens-none [overflow-wrap:anywhere]"
         aria-label={`Alias: ${alias}`}
       >
-        {alias || '—'}
+        {alias ? partirEnLosPuntos(alias) : '—'}
       </p>
 
       {amountText && (
-        <p className="mt-2 sm:mt-3 text-sm sm:text-base font-semibold text-black/70">
-          Monto: <span className="font-black text-black tabular-nums">{amountText}</span>
-        </p>
+        <div className="mt-4 flex items-baseline justify-between gap-3 border-t-2 border-dashed border-foreground/15 pt-3 text-left">
+          <span className="text-[0.9375rem] text-muted-foreground">Monto a transferir</span>
+          <span className="font-mono text-xl font-semibold tabular-nums">{amountText}</span>
+        </div>
       )}
 
       <Button
@@ -95,26 +109,23 @@ export function AliasCopyHero({
         size="lg"
         onClick={handleCopy}
         className={cn(
-          'mt-4 h-14 sm:h-16 w-full text-base sm:text-lg font-black uppercase tracking-wider border-0',
-          'shadow-lg transition-all',
-          copied
-            ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-            : 'bg-black text-white hover:bg-black/90',
+          'mt-4 h-14 w-full rounded-2xl text-lg font-bold [&_svg]:size-5',
+          copied && 'bg-emerald-600 text-white hover:bg-emerald-700',
         )}
         aria-live="polite"
       >
         {copied ? (
           <>
-            <Check className="mr-2 size-5 sm:size-6 shrink-0" />
-            ¡Copiado!
+            <Check />
+            Copiado
           </>
         ) : (
           <>
-            <Copy className="mr-2 size-5 sm:size-6 shrink-0" />
+            <Copy />
             Copiar alias
           </>
         )}
       </Button>
-    </div>
+    </section>
   )
 }

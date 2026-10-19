@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState, useRef, useMemo, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useState, useRef, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { cerrarSoloAsesoria, completeService, type CodigoRechazoCobro } from '@/lib/actions/queue'
 // `obtenerCuentasDeCobro` y no `getTransferAccountsState`: ésa quedó congelada
@@ -15,7 +15,7 @@ import { invalidarUltimosCortes } from '@/hooks/use-ultimos-cortes'
 import { primerNombre } from '@/lib/fotos-corte/textos'
 import { vibrate } from '@/lib/barber-feedback'
 import { FotosDelCobro } from './fotos-del-cobro'
-import { AsesoriaBadge, type TonoAsesoriaBadge } from './asesoria-badge'
+import { AsesoriaBadge } from './asesoria-badge'
 import type { QueueEntry, Service, PaymentMethod } from '@/lib/types/database'
 import { useProductosDeSucursal } from '@/hooks/use-productos-de-sucursal'
 import { lineasVigentes, totalDeLineas } from '@/lib/productos/reglas'
@@ -23,6 +23,7 @@ import { SelectorProductos } from './selector-productos'
 import { pickTransferAccount, type TransferAccountState } from '@/lib/payment-accounts'
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -38,7 +39,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
@@ -46,7 +46,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
 import {
   X,
   ArrowRight,
@@ -64,6 +63,7 @@ import {
   Wallet,
   RefreshCw,
   MessageCircleQuestionMark,
+  Plus,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -74,6 +74,9 @@ import { TipSelector } from './tip-selector'
 import { CouponScanDialog, type AppliedCoupon } from './coupon-scan-dialog'
 import { ReceiptScanDialog, type ReceiptScanResult } from './receipt-scan-dialog'
 import { LoyaltyTierChip } from './loyalty-tier-chip'
+import { Sello } from './fila/sello'
+import { CLASE_OPCION, PasoDelCobro, TituloCobro, VisorMonto, claseEstadoOpcion } from './cobro/piezas-cobro'
+import { claseAviso, claseTextoAviso, useTonoDelTema } from './cobro/tono'
 import { useLoyaltyResultStore } from '@/stores/loyalty-result-store'
 import {
   benefitAppliesToServices,
@@ -109,6 +112,21 @@ const SIN_SERVICIOS: Service[] = []
 
 /** Hasta cuántos servicios principales se muestran como botones; con más, un desplegable. */
 const MAX_CHIPS_PRINCIPALES = 6
+
+/**
+ * Hasta cuántos extras se muestran como botones que se prenden y se apagan;
+ * con más, un desplegable. Al 19/oct/2026 ninguna sucursal tiene más de 4.
+ */
+const MAX_EXTRAS_EN_BOTONES = 9
+
+/** Un servicio para elegir (principal o extra): un toque, sin desplegable. */
+function claseOpcionCobro(elegido: boolean): string {
+  return cn(
+    'relative flex min-h-[4.5rem] min-w-0 flex-col items-start justify-center gap-1 rounded-2xl px-3.5 py-3 text-left',
+    CLASE_OPCION,
+    claseEstadoOpcion(elegido),
+  )
+}
 
 /**
  * El texto con el que `completeService` rechaza una asesoría sin servicio (paso
@@ -180,22 +198,6 @@ function recargarSiEsVersion(e: unknown): boolean {
   return true
 }
 
-/*
- * El tema de la pantalla donde se dibuja el cobro, para el tono del sello de
- * asesoría. El diálogo se usa en el panel del barbero (claro: `barber-theme-root`
- * en <html>, que es lo que también pinta los portales) y en el dashboard
- * (oscuro). No sirve `dark:`: la app nunca pone la clase `.dark`, el oscuro es
- * el default de `:root`.
- */
-function suscribirTema(aviso: () => void): () => void {
-  const observador = new MutationObserver(aviso)
-  observador.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-  return () => observador.disconnect()
-}
-const temaDelDocumento = (): TonoAsesoriaBadge =>
-  document.documentElement.classList.contains('barber-theme-root') ? 'claro' : 'oscuro'
-const temaDelServidor = (): TonoAsesoriaBadge => 'oscuro'
-
 interface CompleteServiceDialogProps {
   entry: QueueEntry | null
   branchId: string
@@ -228,8 +230,9 @@ export function CompleteServiceDialog({
   staffIdDelPanel = null,
 }: CompleteServiceDialogProps) {
   const supabase = useMemo(() => createClient(), [])
-  // Claro en el panel del barbero, oscuro en el dashboard (ver suscribirTema).
-  const tono = useSyncExternalStore(suscribirTema, temaDelDocumento, temaDelServidor)
+  // Claro en el panel del barbero, oscuro en el dashboard (ver cobro/tono.ts):
+  // el sello de asesoría y los avisos de color se eligen con esto, no con `dark:`.
+  const tono = useTonoDelTema()
 
   // Servicios activos de la sucursal (una sola lectura, dos listas):
   //  · principales = availability 'checkin' | 'both' — lo que se elige como el
@@ -1117,16 +1120,16 @@ export function CompleteServiceDialog({
   const avisoSena = !entry?.appointment_id ? null : senaCargando && !sena ? (
     // Mientras el dato viaja, el número grande todavía puede estar de más. Se
     // dice en una línea: no bloquea nada, pero el barbero sabe que falta un dato.
-    <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-      <Loader2 className="size-3.5 animate-spin" />
+    <p role="status" className="flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
+      <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
       Verificando si este turno tiene seña…
     </p>
   ) : senaError ? (
-    <div className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-400">
-      <AlertTriangle className="mt-0.5 size-5 shrink-0" />
+    <div role="alert" className={cn('flex items-start gap-3 rounded-2xl border p-3.5', claseAviso('ambar', tono))}>
+      <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold">No pudimos verificar si este turno tiene seña</p>
-        <p className="text-xs opacity-90">
+        <p className="text-[0.9375rem] font-semibold">No pudimos verificar si este turno tiene seña</p>
+        <p className="text-sm opacity-90">
           Si el cliente señó por Mercado Pago, cobrarle el total sería cobrarle de más. Reintentá antes de cerrar.
         </p>
       </div>
@@ -1134,7 +1137,7 @@ export function CompleteServiceDialog({
         type="button"
         size="sm"
         variant="outline"
-        className="shrink-0 border-amber-500/50"
+        className="h-11 shrink-0 border-amber-500/50"
         disabled={senaCargando}
         onClick={() => { if (entry?.appointment_id) cargarSena(entry.appointment_id) }}
       >
@@ -1174,6 +1177,9 @@ export function CompleteServiceDialog({
     selectedPayment === 'transfer' &&
     !isJointCovered &&
     (cuentas.tipo !== 'listo' || (cuentas.cuentas.length > 0 && !selectedAccountId))
+  // Lo que sigue es escanear el comprobante: la barra de abajo ofrece eso en
+  // lugar de un «Cobrar» apagado (al aceptar el escaneo, el cobro se cierra solo).
+  const pideEscaneo = needsReceipt && !receiptScan
 
   return (
     <>
@@ -1182,31 +1188,43 @@ export function CompleteServiceDialog({
         cerrarComoSoloAsesoria, así que ninguna superficie puede abrir otro
         cliente con una promesa pendiente ni heredar `loading`. */}
     <Dialog open={!!entry} onOpenChange={(open) => { if (!open && !ocupado) onClose() }}>
-      <DialogContent showCloseButton={!ocupado} className="sm:max-w-xl max-h-[90dvh] overflow-y-auto p-5 sm:p-6 gap-3 sm:gap-4">
-        <DialogHeader>
-          <DialogTitle>
-            {step === 1 ? 'Detalles del corte' : 'Cobro'}
+      {/* Tres partes: de quién es y en qué paso está; lo que se completa (con
+          scroll); y una barra fija abajo con el total y el paso siguiente.
+          Antes el botón quedaba al fondo del scroll y, con productos o fotos,
+          había que bajar a buscarlo. */}
+      <DialogContent
+        showCloseButton={false}
+        className="flex max-h-[92dvh] flex-col gap-0 overflow-hidden rounded-[1.75rem] p-0 sm:max-w-2xl"
+      >
+        <DialogHeader className="relative shrink-0 gap-0 border-b px-5 pb-4 pr-16 pt-5 text-left sm:px-7 sm:pr-20 sm:pt-6">
+          <DialogTitle className="text-[1.75rem] font-bold leading-tight tracking-[-0.02em] [overflow-wrap:anywhere] max-sm:text-2xl">
+            {entry?.client?.name ?? 'Cliente'}
           </DialogTitle>
-          <DialogDescription>
-            {step === 1
-              ? `Cliente: ${entry?.client?.name}`
-              : 'Seleccioná el método de pago'}
+          <DialogDescription asChild>
+            <PasoDelCobro paso={step} />
           </DialogDescription>
           {(esAsesoria || clientTier) && (
-            <div className="flex flex-wrap items-center justify-center gap-2 pt-0.5 sm:justify-start">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               {esAsesoria && <AsesoriaBadge tono={tono} tamano="md" />}
               {clientTier && (
                 <LoyaltyTierChip tier={clientTier} visits={clientLoyalty?.visits_in_window ?? null} size="md" />
               )}
             </div>
           )}
+          {/* La X del diálogo base mide 16 px; acá, 48. Con el cobro en vuelo
+              no está: no se puede salir (ver arriba). */}
+          {!ocupado && (
+            <DialogClose className="absolute right-3 top-3 flex size-12 items-center justify-center rounded-2xl text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring sm:right-4 sm:top-4">
+              <X className="size-6" aria-hidden />
+              <span className="sr-only">Cerrar</span>
+            </DialogClose>
+          )}
         </DialogHeader>
 
-        <Separator />
-
-        <>
+        {/* key: cada paso arranca arriba de todo, no donde quedó el scroll del otro. */}
+        <div key={step} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-6 sm:px-7">
           {step === 1 ? (
-            <div className="space-y-5">
+            <div className="space-y-8">
               {/* Servicio principal. Se dibuja SIEMPRE: antes vivía adentro de
                   `services.length > 0` (la lista de EXTRAS), así que en una
                   sucursal sin extras no se veía ni el servicio del check-in. */}
@@ -1216,38 +1234,37 @@ export function CompleteServiceDialog({
               >
                 {esAsesoria ? (
                   <div className="mb-3">
-                    <p id="cobro-servicio-principal" className="text-base font-semibold leading-tight">
+                    <h3 id="cobro-servicio-principal" className="text-[1.0625rem] font-semibold tracking-[-0.01em]">
                       ¿Qué le hiciste?
-                    </p>
-                    <p id="cobro-servicio-ayuda" className="mt-1 text-xs text-muted-foreground">
+                    </h3>
+                    <p id="cobro-servicio-ayuda" className="mt-1 text-[0.9375rem] text-muted-foreground">
                       Pidió asesoría: elegí el servicio principal que le terminaste haciendo.
                     </p>
                   </div>
                 ) : (
-                  <p id="cobro-servicio-principal" className="mb-2 text-sm font-medium">
-                    Servicio principal{' '}
-                    {servicioEditable && <span className="text-muted-foreground">(opcional)</span>}
-                  </p>
+                  <TituloCobro id="cobro-servicio-principal" opcional={servicioEditable}>
+                    Servicio
+                  </TituloCobro>
                 )}
 
                 {!servicioEditable ? (
                   /* Lo eligió en la tablet de check-in: queda fijo. */
-                  <div className="flex items-center gap-2 rounded-lg border bg-muted/50 px-4 py-3">
-                    <span className="text-base font-medium">
+                  <div className="flex items-center gap-3 rounded-2xl border-2 border-border bg-card px-4 py-3.5">
+                    <span className="min-w-0 flex-1 truncate text-lg font-semibold">
                       {mainService?.name ?? 'Servicio seleccionado'}
                     </span>
-                    <span className="text-sm text-muted-foreground">
-                      — ${mainServicePrice}
+                    <span className="shrink-0 font-mono text-lg font-semibold tabular-nums">
+                      {formatCurrency(Number(mainServicePrice) || 0)}
                     </span>
-                    <Badge variant="outline" className="ml-auto text-xs">
-                      Pre-seleccionado
-                    </Badge>
+                    <Sello tono="neutro" title="Lo eligió en la tablet de check-in">
+                      Del check-in
+                    </Sello>
                   </div>
                 ) : opcionesPrincipales.length > 0 ? (
                   opcionesPrincipales.length <= MAX_CHIPS_PRINCIPALES ? (
                     /* Pocos servicios (el caso de todas las sucursales): un toque,
                        sin abrir un desplegable. */
-                    <div role="group" aria-labelledby="cobro-servicio-principal" className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    <div role="group" aria-labelledby="cobro-servicio-principal" className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
                       {opcionesPrincipales.map((s) => {
                         const elegido = selectedService === s.id
                         return (
@@ -1257,28 +1274,20 @@ export function CompleteServiceDialog({
                             aria-pressed={elegido}
                             disabled={ocupado}
                             onClick={() => elegirPrincipal(s.id)}
-                            className={cn(
-                              'relative flex min-h-16 min-w-0 flex-col items-start justify-center gap-0.5 rounded-2xl border-2 px-3 py-2.5 text-left outline-none',
-                              'motion-safe:transition-[background-color,border-color,color,transform] motion-safe:duration-150 motion-safe:active:scale-[0.98]',
-                              'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-                              'disabled:cursor-not-allowed disabled:opacity-50',
-                              elegido
-                                ? 'border-primary bg-primary text-primary-foreground shadow-md'
-                                : 'border-border bg-card hover:border-primary/40 hover:bg-primary/5',
-                            )}
+                            className={claseOpcionCobro(elegido)}
                           >
-                            <span className="line-clamp-2 pr-5 text-sm font-bold leading-tight">{s.name}</span>
-                            <span className={cn('text-xs tabular-nums', elegido ? 'opacity-80' : 'text-muted-foreground')}>
+                            <span className="line-clamp-2 pr-5 text-base font-semibold leading-tight">{s.name}</span>
+                            <span className={cn('font-mono text-sm font-semibold tabular-nums', elegido ? 'opacity-80' : 'text-muted-foreground')}>
                               {formatCurrency(Number(s.price) || 0)}
                             </span>
-                            {elegido && <Check className="absolute right-2.5 top-2.5 size-4" aria-hidden />}
+                            {elegido && <Check className="absolute right-3 top-3 size-4" aria-hidden />}
                           </button>
                         )
                       })}
                     </div>
                   ) : (
                     <Select value={selectedService} onValueChange={elegirPrincipal} disabled={ocupado}>
-                      <SelectTrigger className="h-14 w-full text-lg" aria-labelledby="cobro-servicio-principal">
+                      <SelectTrigger className="h-14 w-full rounded-2xl text-lg" aria-labelledby="cobro-servicio-principal">
                         <SelectValue placeholder={esAsesoria ? 'Elegí lo que le hiciste' : 'Seleccionar servicio principal'} />
                       </SelectTrigger>
                       <SelectContent>
@@ -1292,13 +1301,13 @@ export function CompleteServiceDialog({
                   )
                 ) : cargandoServicios ? (
                   /* El lugar de los botones, para que nada salte cuando llegan. */
-                  <div role="status" aria-label="Cargando servicios" className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <div role="status" aria-label="Cargando servicios" className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
                     {[0, 1, 2].map((i) => (
-                      <div key={i} className="h-16 rounded-2xl border-2 border-border bg-muted/40 motion-safe:animate-pulse" />
+                      <div key={i} className="h-[4.5rem] rounded-2xl border-2 border-border bg-muted/40 motion-safe:animate-pulse" />
                     ))}
                   </div>
                 ) : !errorServicios ? (
-                  <p className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">
+                  <p className="rounded-2xl border border-dashed px-4 py-3 text-[0.9375rem] text-muted-foreground">
                     Esta sucursal no tiene servicios principales activos.
                   </p>
                 ) : null}
@@ -1306,19 +1315,11 @@ export function CompleteServiceDialog({
                 {/* No se pudieron traer los servicios: se dice, con salida. Sin
                     esto el cobro quedaba sin nada que elegir y sin explicación. */}
                 {errorServicios && (
-                  <div
-                    role="alert"
-                    className={cn(
-                      'mt-2 flex items-start gap-3 rounded-xl border p-3',
-                      tono === 'claro'
-                        ? 'border-amber-500/40 bg-amber-500/10 text-amber-800'
-                        : 'border-amber-500/30 bg-amber-500/10 text-amber-300',
-                    )}
-                  >
+                  <div role="alert" className={cn('mt-2 flex items-start gap-3 rounded-2xl border p-3.5', claseAviso('ambar', tono))}>
                     <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden />
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold">No pudimos traer los servicios de la sucursal</p>
-                      <p className="text-xs opacity-90">Revisá la conexión y reintentá.</p>
+                      <p className="text-[0.9375rem] font-semibold">No pudimos traer los servicios de la sucursal</p>
+                      <p className="text-sm opacity-90">Revisá la conexión y reintentá.</p>
                     </div>
                     <Button
                       type="button"
@@ -1344,7 +1345,7 @@ export function CompleteServiceDialog({
                       if (entry) setConfirmarSoloAsesoriaDe(entry.id)
                     }}
                     className={cn(
-                      'mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed px-3 py-2.5 text-sm font-medium text-muted-foreground outline-none',
+                      'mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-dashed px-3 py-2.5 text-[0.9375rem] font-medium text-muted-foreground outline-none',
                       'border-fuchsia-500/40 hover:border-fuchsia-500/70 hover:bg-fuchsia-500/5 hover:text-foreground',
                       'focus-visible:ring-2 focus-visible:ring-fuchsia-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
                       'disabled:cursor-not-allowed disabled:opacity-50 motion-safe:transition-colors',
@@ -1359,51 +1360,100 @@ export function CompleteServiceDialog({
                 )}
               </section>
 
-              {/* Extra Services */}
+              {/* Extras: con pocos (todas las sucursales tienen 4 o menos), un
+                  botón por extra que se prende y se apaga de un toque. Antes era
+                  un desplegable —abrir, buscar, elegir— por cada uno. */}
               {services.length > 0 && (
-                <div>
-                  <p className="mb-2 text-sm font-medium">
-                    Servicios extra{' '}
-                    <span className="text-muted-foreground">(opcional)</span>
-                  </p>
-                  {extraServices.length > 0 && (
-                    <div className="mb-2 flex flex-wrap gap-1.5">
-                      {extraServices.map((id) => {
-                        const s = services.find((x) => x.id === id)
-                        if (!s) return null
-                        return (
-                          <Badge key={id} variant="secondary" className="gap-1 px-2 py-1 text-sm bg-white/5 border-white/10 hover:bg-white/10">
-                            {s.name} (+${s.price})
-                            <button type="button" onClick={() => setExtraServices((prev) => prev.filter((x) => x !== id))} className="ml-1 text-muted-foreground hover:text-white">
-                              <X className="size-3" />
-                            </button>
-                          </Badge>
-                        )
-                      })}
-                    </div>
-                  )}
-                  <Select
-                    value=""
-                    onValueChange={(id) => {
-                      if (id && !extraServices.includes(id) && id !== selectedService) {
-                        setExtraServices((prev) => [...prev, id])
-                      }
-                    }}
-                  >
-                    <SelectTrigger className="h-14 w-full text-lg">
-                      <SelectValue placeholder="Agregar extra..." />
-                    </SelectTrigger>
-                    <SelectContent>
+                <section aria-labelledby="cobro-extras">
+                  <TituloCobro id="cobro-extras" opcional>
+                    Extras
+                  </TituloCobro>
+                  {services.length <= MAX_EXTRAS_EN_BOTONES ? (
+                    <div role="group" aria-labelledby="cobro-extras" className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
                       {services
-                        .filter((s) => s.id !== selectedService && !extraServices.includes(s.id))
-                        .map((service) => (
-                          <SelectItem key={service.id} value={service.id}>
-                            {service.name} — +${service.price}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                        .filter((s) => s.id !== selectedService)
+                        .map((s) => {
+                          const elegido = extraServices.includes(s.id)
+                          return (
+                            <button
+                              key={s.id}
+                              type="button"
+                              aria-pressed={elegido}
+                              disabled={ocupado}
+                              onClick={() => {
+                                vibrate(8)
+                                setExtraServices((prev) =>
+                                  prev.includes(s.id) ? prev.filter((x) => x !== s.id) : [...prev, s.id],
+                                )
+                              }}
+                              className={claseOpcionCobro(elegido)}
+                            >
+                              <span className="line-clamp-2 pr-5 text-base font-semibold leading-tight">{s.name}</span>
+                              <span className={cn('font-mono text-sm font-semibold tabular-nums', elegido ? 'opacity-80' : 'text-muted-foreground')}>
+                                +{formatCurrency(Number(s.price) || 0)}
+                              </span>
+                              {elegido ? (
+                                <Check className="absolute right-3 top-3 size-4" aria-hidden />
+                              ) : (
+                                <Plus className="absolute right-3 top-3 size-4 text-muted-foreground" aria-hidden />
+                              )}
+                            </button>
+                          )
+                        })}
+                    </div>
+                  ) : (
+                    <>
+                      {extraServices.length > 0 && (
+                        <div className="mb-2.5 flex flex-wrap gap-2">
+                          {extraServices.map((id) => {
+                            const s = services.find((x) => x.id === id)
+                            if (!s) return null
+                            return (
+                              <span
+                                key={id}
+                                className="inline-flex h-11 items-center gap-1.5 rounded-xl border-2 border-primary bg-primary pl-3 pr-1 text-[0.9375rem] font-semibold text-primary-foreground"
+                              >
+                                {s.name}
+                                <span className="font-mono text-sm tabular-nums opacity-80">
+                                  +{formatCurrency(Number(s.price) || 0)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setExtraServices((prev) => prev.filter((x) => x !== id))}
+                                  aria-label={`Quitar ${s.name}`}
+                                  className="flex size-9 items-center justify-center rounded-lg opacity-80 hover:bg-white/15 hover:opacity-100"
+                                >
+                                  <X className="size-4" />
+                                </button>
+                              </span>
+                            )
+                          })}
+                        </div>
+                      )}
+                      <Select
+                        value=""
+                        onValueChange={(id) => {
+                          if (id && !extraServices.includes(id) && id !== selectedService) {
+                            setExtraServices((prev) => [...prev, id])
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-14 w-full rounded-2xl text-lg" aria-labelledby="cobro-extras">
+                          <SelectValue placeholder="Agregar extra..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {services
+                            .filter((s) => s.id !== selectedService && !extraServices.includes(s.id))
+                            .map((service) => (
+                              <SelectItem key={service.id} value={service.id}>
+                                {service.name} — +{formatCurrency(Number(service.price) || 0)}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </>
+                  )}
+                </section>
               )}
 
               {/* Productos — la sección se ve SIEMPRE, con sus estados. Antes se
@@ -1411,9 +1461,9 @@ export function CompleteServiceDialog({
                   que la lectura estaba rota: nadie vio un error, sólo dejó de
                   haber productos. */}
               <section aria-labelledby="cobro-productos">
-                <p id="cobro-productos" className="mb-2 text-sm font-medium">
-                  Productos <span className="text-muted-foreground">(opcional)</span>
-                </p>
+                <TituloCobro id="cobro-productos" opcional>
+                  Productos
+                </TituloCobro>
                 <SelectorProductos
                   variante="compacta"
                   estado={productos.estado}
@@ -1430,32 +1480,26 @@ export function CompleteServiceDialog({
                 <FotosDelCobro key={entry.id} entradaId={entry.id} abierto={!!entry} deshabilitado={ocupado} />
               )}
 
-              {/* Client notes */}
-              <div>
-                <p className="mb-2 text-sm font-medium">Notas del cliente</p>
+              <section aria-labelledby="cobro-notas">
+                <TituloCobro id="cobro-notas">Notas del cliente</TituloCobro>
                 <textarea
+                  aria-labelledby="cobro-notas"
                   value={clientNotes}
                   onChange={(e) => setClientNotes(e.target.value)}
                   placeholder="Ej: Prefiere degradé bajo, alérgico a ciertos productos..."
                   rows={3}
-                  className="min-h-[100px] w-full resize-none rounded-lg border bg-transparent p-4 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="min-h-[100px] w-full resize-none rounded-2xl border-2 border-border bg-card p-4 text-base placeholder:text-muted-foreground focus:border-foreground/40 focus:outline-none"
                 />
-              </div>
-
-              {/* Subtotal */}
-              <div className="flex justify-between items-center py-2 px-1 border-t mt-4">
-                <span className="font-semibold text-lg">Subtotal</span>
-                <span className="font-bold text-xl">${totalPrice}</span>
-              </div>
+              </section>
 
               {/* La seña se avisa desde el PASO 1. El bloque grande vive en el
                   paso 2, junto al monto, pero para entonces el barbero ya armó
                   el ticket y —si sumó extras— ya le dijo un precio al cliente.
                   Acá va discreto: informa, no interrumpe. */}
               {senaAplicada > 0 && (
-                <div className="-mt-2 flex items-center gap-2 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sky-700 dark:text-sky-300">
-                  <Wallet className="size-4 shrink-0" />
-                  <p className="text-xs leading-snug">
+                <div className={cn('flex items-center gap-2.5 rounded-2xl border px-4 py-3', claseAviso('celeste', tono))}>
+                  <Wallet className="size-5 shrink-0" aria-hidden />
+                  <p className="text-[0.9375rem] leading-snug">
                     <span className="font-semibold">Ya pagó {formatCurrency(senaAplicada)} de seña</span> al reservar.
                     En el mostrador se cobran {formatCurrency(aCobrarAhora)}.
                   </p>
@@ -1463,35 +1507,9 @@ export function CompleteServiceDialog({
               )}
 
               {avisoSena}
-
-              {/* Con asesoría no se pasa al cobro sin el servicio principal que
-                  se le hizo: el servidor lo rechazaría igual, y es mejor decirlo
-                  acá. Los extras solos no alcanzan, y se dice si eso es lo que
-                  pasa (si no, el barbero ve una barba elegida y el botón apagado). */}
-              <div className="space-y-2">
-                <Button
-                  className="h-14 w-full text-lg"
-                  size="lg"
-                  disabled={ocupado || faltaServicioAsesoria}
-                  aria-describedby={faltaServicioAsesoria ? 'cobro-falta-servicio' : undefined}
-                  onClick={() => {
-                    if (!faltaServicioAsesoria) setStep(2)
-                  }}
-                >
-                  Continuar al cobro
-                  <ArrowRight className="ml-2 size-5" />
-                </Button>
-                {faltaServicioAsesoria && (
-                  <p id="cobro-falta-servicio" className="text-center text-xs text-muted-foreground">
-                    {extrasElegidos.length > 0
-                      ? 'Los extras solos no alcanzan: elegí arriba el servicio principal que le hiciste.'
-                      : 'Elegí qué le hiciste para seguir'}
-                  </p>
-                )}
-              </div>
             </div>
           ) : (
-            <div className="space-y-5">
+            <div className="space-y-7">
               {/* Beneficio — UN solo escáner: QR de la app (descuento / merch / especial)
                   o invitación de un amigo (MNC-REF:). Un solo beneficio por cobro: con
                   uno aplicado el botón desaparece y queda la X para quitarlo. */}
@@ -1499,30 +1517,29 @@ export function CompleteServiceDialog({
                 appliedCoupon && benefitView ? (
                   <div
                     className={cn(
-                      'flex items-center gap-3 rounded-lg border p-3',
-                      benefitView.tone === 'referral'
-                        ? 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300'
-                        : benefitView.tone === 'mismatch'
-                          ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
-                          : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+                      'flex items-center gap-3 rounded-2xl border p-3.5',
+                      claseAviso(
+                        benefitView.tone === 'referral' ? 'celeste' : benefitView.tone === 'mismatch' ? 'ambar' : 'verde',
+                        tono,
+                      ),
                     )}
                   >
                     {benefitView.tone === 'referral'
-                      ? <UserPlus className="size-5 shrink-0" />
+                      ? <UserPlus className="size-5 shrink-0" aria-hidden />
                       : benefitView.tone === 'delivery'
-                        ? <Package className="size-5 shrink-0" />
-                        : <TicketPercent className="size-5 shrink-0" />}
+                        ? <Package className="size-5 shrink-0" aria-hidden />
+                        : <TicketPercent className="size-5 shrink-0" aria-hidden />}
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold">{benefitView.title}</p>
-                      <p className="text-xs opacity-90">{benefitView.detail}</p>
+                      <p className="truncate text-[0.9375rem] font-semibold">{benefitView.title}</p>
+                      <p className="text-sm opacity-90">{benefitView.detail}</p>
                     </div>
                     <button
                       type="button"
                       onClick={() => setAppliedCoupon(null)}
-                      className="rounded-md p-1 opacity-80 hover:bg-black/10 hover:opacity-100"
+                      className="flex size-11 shrink-0 items-center justify-center rounded-xl opacity-80 hover:bg-black/10 hover:opacity-100"
                       aria-label="Quitar beneficio"
                     >
-                      <X className="size-4" />
+                      <X className="size-5" />
                     </button>
                   </div>
                 ) : (
@@ -1530,10 +1547,14 @@ export function CompleteServiceDialog({
                     type="button"
                     variant="outline"
                     size="lg"
-                    className="h-12 w-full border-emerald-500/40 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
+                    className={cn(
+                      'h-12 w-full rounded-2xl border-2 text-base font-semibold [&_svg]:size-5',
+                      tono === 'claro' ? 'border-emerald-600/40' : 'border-emerald-500/40',
+                      claseTextoAviso('verde', tono),
+                    )}
                     onClick={() => setCouponScanOpen(true)}
                   >
-                    <QrCode className="mr-2 size-5" />
+                    <QrCode />
                     Escanear QR · Beneficio o invitación
                   </Button>
                 )
@@ -1546,19 +1567,19 @@ export function CompleteServiceDialog({
                   grande, cobra el total y el cliente paga una vez y media el
                   servicio. */}
               {senaAplicada > 0 && (
-                <div className="rounded-2xl border-2 border-sky-500/50 bg-sky-500/10 px-4 py-3 text-center">
-                  <p className="flex items-center justify-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-sky-700 dark:text-sky-300">
-                    <Wallet className="size-3.5" />
+                <div className={cn('rounded-2xl border-2 px-4 py-3.5 text-center', claseAviso('celeste', tono))}>
+                  <p className="flex items-center justify-center gap-1.5 text-[0.9375rem] font-semibold">
+                    <Wallet className="size-4" aria-hidden />
                     Ya pagó seña
                   </p>
-                  <p className="mt-1 text-2xl font-black leading-none tabular-nums text-sky-700 dark:text-sky-300">
+                  <p className="mt-1 font-mono text-2xl font-semibold leading-none tabular-nums">
                     {formatCurrency(senaAplicada)}
                   </p>
-                  <p className="mt-1 text-xs text-sky-700/90 dark:text-sky-300/90">
+                  <p className="mt-1.5 text-sm">
                     Lo pagó por Mercado Pago al reservar el turno. No se lo cobres de nuevo.
                   </p>
                   {senaPagada > senaAplicada && (
-                    <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+                    <p className={cn('mt-1 text-sm font-medium', claseTextoAviso('ambar', tono))}>
                       Había señado {formatCurrency(senaPagada)}, más de lo que sale este cobro. Avisá en el mostrador
                       para devolverle la diferencia.
                     </p>
@@ -1566,18 +1587,16 @@ export function CompleteServiceDialog({
                 </div>
               )}
 
-              {/* Monto GIGANTE */}
-              <div className="-mt-1 rounded-2xl border bg-muted/30 px-4 py-4 sm:px-6 sm:py-5 text-center">
-                <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
-                  {senaAplicada > 0 ? 'A cobrar ahora' : 'Monto a cobrar'}
-                </p>
-                <p className="mt-1 text-[clamp(44px,11vw,80px)] font-black leading-none tracking-tighter tabular-nums break-all">
-                  {formatCurrency(aCobrarAhora + tipAmount)}
-                </p>
+              {/* El monto, en el visor del reloj (oscuro en los dos temas: sus
+                  colores de adentro son fijos). */}
+              <VisorMonto
+                etiqueta={senaAplicada > 0 ? 'A cobrar ahora' : 'A cobrar'}
+                monto={formatCurrency(aCobrarAhora + tipAmount)}
+              >
                 {couponDiscount > 0 && (
-                  <p className="mt-1 text-sm">
-                    <span className="text-muted-foreground line-through">{formatCurrency(totalPrice + tipAmount)}</span>
-                    <span className="ml-2 font-semibold text-emerald-600 dark:text-emerald-400">
+                  <p className="text-[0.9375rem]">
+                    <span className="opacity-70 line-through">{formatCurrency(totalPrice + tipAmount)}</span>
+                    <span className="ml-2 font-semibold text-emerald-300">
                       −{couponPct}% {appliedCoupon?.kind === 'referral' ? 'invitación' : 'beneficio'}
                     </span>
                   </p>
@@ -1590,38 +1609,36 @@ export function CompleteServiceDialog({
                     cliente. Acá cada renglón dice qué es, y el último es el
                     mismo `aCobrarAhora + propina` del número grande y del botón. */}
                 {senaAplicada > 0 ? (
-                  <div className="mx-auto mt-3 max-w-[280px] space-y-1 text-xs sm:text-sm">
+                  <div className="mx-auto mt-1 max-w-[300px] space-y-1 text-sm">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-muted-foreground">Precio total</span>
-                      <span className="tabular-nums">{formatCurrency(totalAfterDiscount)}</span>
+                      <span className="opacity-75">Precio total</span>
+                      <span className="font-mono tabular-nums">{formatCurrency(totalAfterDiscount)}</span>
                     </div>
-                    <div className="flex items-center justify-between gap-3 text-sky-700 dark:text-sky-300">
+                    <div className="flex items-center justify-between gap-3 text-sky-300">
                       <span>Seña ya pagada</span>
-                      <span className="font-semibold tabular-nums">−{formatCurrency(senaAplicada)}</span>
+                      <span className="font-mono font-semibold tabular-nums">−{formatCurrency(senaAplicada)}</span>
                     </div>
                     {tipAmount > 0 && (
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-muted-foreground">Propina</span>
-                        <span className="tabular-nums">+{formatCurrency(tipAmount)}</span>
+                        <span className="opacity-75">Propina</span>
+                        <span className="font-mono tabular-nums">+{formatCurrency(tipAmount)}</span>
                       </div>
                     )}
-                    <div className="flex items-center justify-between gap-3 border-t pt-1 font-semibold">
+                    <div className="flex items-center justify-between gap-3 border-t border-white/15 pt-1 font-semibold">
                       <span>A cobrar ahora</span>
-                      <span className="tabular-nums">{formatCurrency(aCobrarAhora + tipAmount)}</span>
+                      <span className="font-mono tabular-nums">{formatCurrency(aCobrarAhora + tipAmount)}</span>
                     </div>
                   </div>
                 ) : tipAmount > 0 ? (
-                  <p className="mt-1 text-xs sm:text-sm text-muted-foreground">
-                    {formatCurrency(aCobrarAhora)} servicio · <span className="font-semibold text-foreground">{formatCurrency(tipAmount)}</span> propina
+                  <p className="text-[0.9375rem] opacity-80">
+                    <span className="font-mono tabular-nums">{formatCurrency(aCobrarAhora)}</span> servicio ·{' '}
+                    <span className="font-mono font-semibold tabular-nums opacity-100">{formatCurrency(tipAmount)}</span> propina
                   </p>
                 ) : null}
-              </div>
+              </VisorMonto>
 
-              {/* Payment method */}
-              <div>
-                <p className="mb-3 text-sm font-bold uppercase tracking-wider text-muted-foreground">
-                  Método de pago
-                </p>
+              <section aria-labelledby="cobro-metodo">
+                <TituloCobro id="cobro-metodo">Cómo paga</TituloCobro>
                 <PaymentMethodButtons
                   value={selectedPayment}
                   onChange={(m) => {
@@ -1633,26 +1650,23 @@ export function CompleteServiceDialog({
                     setSelectedPayment(m)
                   }}
                 />
-              </div>
+              </section>
 
               {/* Transfer: rotación + alias gigante (componente compartido con venta directa).
                   Sin saber a qué cuenta entra la plata no se cobra por transferencia:
                   ni mientras las cuentas cargan, ni si no se pudieron traer. */}
               {selectedPayment === 'transfer' && !isJointCovered && (
                 cuentas.tipo === 'cargando' ? (
-                  <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+                  <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
                     Buscando la cuenta de cobro…
                   </p>
                 ) : cuentas.tipo === 'error' ? (
-                  <div
-                    role="alert"
-                    className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-400"
-                  >
+                  <div role="alert" className={cn('flex items-start gap-3 rounded-2xl border p-3.5', claseAviso('ambar', tono))}>
                     <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden />
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold">No pudimos traer las cuentas de cobro</p>
-                      <p className="text-xs opacity-90">
+                      <p className="text-[0.9375rem] font-semibold">No pudimos traer las cuentas de cobro</p>
+                      <p className="text-sm opacity-90">
                         Sin saber a qué cuenta entra la transferencia no se puede cobrar así. Reintentá o cobrá por otro medio.
                       </p>
                     </div>
@@ -1668,7 +1682,7 @@ export function CompleteServiceDialog({
                     </Button>
                   </div>
                 ) : paymentAccounts.length === 0 ? (
-                  <p className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+                  <p className={cn('flex items-start gap-2 rounded-2xl border p-3.5 text-[0.9375rem]', claseAviso('ambar', tono))}>
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
                     Esta sucursal no tiene cuentas de cobro activas: la transferencia queda registrada sin cuenta asignada.
                   </p>
@@ -1684,170 +1698,164 @@ export function CompleteServiceDialog({
                 )
               )}
 
-              {/* Comprobante de transferencia (obligatorio si la org lo activó) */}
+              {/* Comprobante de transferencia (obligatorio si la org lo activó).
+                  Escanearlo es el paso que sigue, así que su botón va en la barra
+                  de abajo, donde siempre está lo siguiente; acá queda el estado. */}
               {showTransferReceipt && (
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   {isJointCovered ? (
                     /* El corte se cuelga de una transferencia que pagó otro → sin escaneo. */
-                    <div className={cn('rounded-xl border p-3',
-                      jointOverAssigned
-                        ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400'
-                        : 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300')}>
+                    <div className={cn('rounded-2xl border p-3.5', claseAviso(jointOverAssigned ? 'ambar' : 'celeste', tono))}>
                       <div className="flex items-center gap-3">
-                        <Link2 className="size-5 shrink-0" />
+                        <Link2 className="size-5 shrink-0" aria-hidden />
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold">Cobrado junto a otra transferencia</p>
-                          <p className="truncate text-xs opacity-90">
+                          <p className="text-[0.9375rem] font-semibold">Cobrado junto a otra transferencia</p>
+                          <p className="truncate text-sm opacity-90">
                             {formatCurrency(jointCovering!.amount)}
                             {jointCovering!.barberName ? ` · ${jointCovering!.barberName}` : ''}
                             {jointCovering!.accountName ? ` · ${jointCovering!.accountName}` : ''}
                           </p>
                         </div>
-                        <button type="button" onClick={() => setJointCovering(null)} className="shrink-0 text-xs underline opacity-80">
+                        <button type="button" onClick={() => setJointCovering(null)} className="min-h-11 shrink-0 px-2 text-sm font-semibold underline opacity-80">
                           Cambiar
                         </button>
                       </div>
                       {jointOverAssigned && (
-                        <p className="mt-2 flex items-center gap-1.5 text-xs font-medium">
-                          <AlertTriangle className="size-3.5 shrink-0" />
+                        <p className="mt-2 flex items-center gap-1.5 text-sm font-medium">
+                          <AlertTriangle className="size-4 shrink-0" aria-hidden />
                           Ese comprobante ya no alcanza para {formatCurrency(chargeAmount)} (quedan {formatCurrency(jointCovering!.remaining)}). Cambiá de comprobante o escaneá el de este cobro.
                         </p>
                       )}
                     </div>
                   ) : receiptScan ? (
                     receiptScan.status === 'verified' ? (
-                      <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-700 dark:text-emerald-300">
-                        <Check className="size-5 shrink-0" />
+                      <div className={cn('flex items-center gap-3 rounded-2xl border p-3.5', claseAviso('verde', tono))}>
+                        <Check className="size-5 shrink-0" aria-hidden />
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold">
+                          <p className="text-[0.9375rem] font-semibold">
                             {scanAsGroup ? 'Comprobante conjunto verificado' : 'Comprobante verificado'}
                           </p>
                           {receiptScan.extracted?.amount != null && (
-                            <p className="text-xs opacity-90">
+                            <p className="text-sm opacity-90">
                               {formatCurrency(receiptScan.extracted.amount)} leído{scanAsGroup ? ' · cubre varios cortes' : ''}
                             </p>
                           )}
                         </div>
-                        <button type="button" onClick={() => setScanOpen(true)} className="shrink-0 text-xs underline opacity-80">
+                        <button type="button" onClick={() => setScanOpen(true)} className="min-h-11 shrink-0 px-2 text-sm font-semibold underline opacity-80">
                           Re-escanear
                         </button>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-400">
-                        <AlertTriangle className="size-5 shrink-0" />
+                      <div className={cn('flex items-center gap-3 rounded-2xl border p-3.5', claseAviso('ambar', tono))}>
+                        <AlertTriangle className="size-5 shrink-0" aria-hidden />
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold">
+                          <p className="text-[0.9375rem] font-semibold">
                             {receiptScan.status === 'duplicate' && 'Comprobante ya usado'}
                             {receiptScan.status === 'amount_mismatch' && 'El monto no coincide'}
                             {receiptScan.status === 'needs_review' && 'Comprobante en revisión'}
                           </p>
-                          <p className="text-xs opacity-90">Se registrará igual para conciliar.</p>
+                          <p className="text-sm opacity-90">Se registrará igual para conciliar.</p>
                         </div>
-                        <button type="button" onClick={() => setScanOpen(true)} className="shrink-0 text-xs underline opacity-80">
+                        <button type="button" onClick={() => setScanOpen(true)} className="min-h-11 shrink-0 px-2 text-sm font-semibold underline opacity-80">
                           Re-escanear
                         </button>
                       </div>
                     )
                   ) : (
-                    <>
-                      <Button
+                    /* Cobro conjunto: una transferencia paga varios cortes */
+                    !jointMode ? (
+                      <button
                         type="button"
-                        onClick={() => { setScanAsGroup(false); setScanOpen(true) }}
-                        disabled={faltaCuenta}
-                        size="lg"
-                        className="h-14 w-full bg-emerald-600 font-bold text-white hover:bg-emerald-700"
+                        onClick={() => { setJointMode(true); void loadJointOptions() }}
+                        className="mx-auto flex min-h-11 items-center gap-1.5 px-2 text-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
                       >
-                        <ScanLine className="mr-2 size-5" /> Confirmar con escaneo
-                      </Button>
+                        <Users className="size-4" aria-hidden /> Se pagó junto a otro corte
+                      </button>
+                    ) : (
+                      <div
+                        className={cn(
+                          'space-y-2.5 rounded-2xl border p-3.5',
+                          tono === 'claro' ? 'border-sky-600/25 bg-sky-500/[0.05]' : 'border-sky-500/25 bg-sky-500/[0.06]',
+                        )}
+                      >
+                        <p className={cn('text-[0.9375rem] font-semibold', claseTextoAviso('celeste', tono))}>
+                          Una transferencia, varios cortes
+                        </p>
 
-                      {/* Cobro conjunto: una transferencia paga varios cortes */}
-                      {!jointMode ? (
-                        <button
-                          type="button"
-                          onClick={() => { setJointMode(true); void loadJointOptions() }}
-                          className="mx-auto flex items-center gap-1.5 py-0.5 text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                        {/* Rol A: este barbero recibió la transferencia */}
+                        <Button
+                          type="button" variant="outline"
+                          className="h-auto w-full justify-start gap-2.5 rounded-xl py-3"
+                          onClick={() => { setScanAsGroup(true); setScanOpen(true) }}
+                          disabled={faltaCuenta}
                         >
-                          <Users className="size-3.5" /> Se pagó junto a otro corte
-                        </button>
-                      ) : (
-                        <div className="space-y-2.5 rounded-xl border border-sky-500/25 bg-sky-500/[0.04] p-3">
-                          <p className="text-xs font-semibold text-sky-700 dark:text-sky-300">
-                            Una transferencia, varios cortes
-                          </p>
-
-                          {/* Rol A: este barbero recibió la transferencia */}
-                          <Button
-                            type="button" variant="outline"
-                            className="h-auto w-full justify-start gap-2 py-2.5"
-                            onClick={() => { setScanAsGroup(true); setScanOpen(true) }}
-                            disabled={faltaCuenta}
-                          >
-                            <ScanLine className="size-4 shrink-0 text-emerald-600" />
-                            <span className="text-left text-[13px] font-semibold leading-tight">
-                              Recibí yo la transferencia
-                              <span className="block text-[11px] font-normal text-muted-foreground">
-                                Escaneo el comprobante (cubre los dos cortes)
-                              </span>
+                          <ScanLine className="size-5 shrink-0 text-emerald-600" aria-hidden />
+                          <span className="text-left text-[0.9375rem] font-semibold leading-tight">
+                            Recibí yo la transferencia
+                            <span className="block text-sm font-normal text-muted-foreground">
+                              Escaneo el comprobante (cubre los dos cortes)
                             </span>
-                          </Button>
+                          </span>
+                        </Button>
 
-                          {/* Rol B: lo pagó otro corte → elegir de la lista */}
-                          <div className="space-y-1.5">
-                            <p className="px-0.5 text-[11px] font-medium text-muted-foreground">…o ya lo pagó otro corte:</p>
-                            {jointLoading ? (
-                              <div className="flex items-center gap-2 px-1 py-2 text-xs text-muted-foreground">
-                                <Loader2 className="size-3.5 animate-spin" /> Buscando transferencias…
-                              </div>
-                            ) : jointOptions.length === 0 ? (
-                              <p className="px-1 py-1 text-[11px] text-muted-foreground">
-                                No hay transferencias conjuntas abiertas. El que recibió la plata tiene que cerrar su corte primero.
-                              </p>
-                            ) : (
-                              jointOptions.map((o) => {
-                                const enough = o.remaining + 1 >= chargeAmount
-                                return (
-                                  <button
-                                    key={o.id} type="button" disabled={!enough}
-                                    onClick={() => pickJointCovering(o)}
-                                    className={cn(
-                                      'flex w-full items-center gap-2 rounded-lg border border-border p-2.5 text-left transition-colors',
-                                      enough ? 'hover:bg-sky-500/10' : 'cursor-not-allowed opacity-50',
-                                    )}
-                                  >
-                                    <Link2 className="size-4 shrink-0 text-sky-600" />
-                                    <div className="min-w-0 flex-1">
-                                      <p className="text-[13px] font-semibold tabular-nums">
-                                        {formatCurrency(o.amount)}{' '}
-                                        <span className="font-normal text-muted-foreground">· quedan {formatCurrency(o.remaining)}</span>
-                                      </p>
-                                      <p className="truncate text-[11px] text-muted-foreground">
-                                        {o.barberName ?? 'Barbero'}{o.accountName ? ` · ${o.accountName}` : ''}
-                                      </p>
-                                    </div>
-                                    {enough
-                                      ? <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
-                                      : <span className="shrink-0 text-[10px] text-muted-foreground">no alcanza</span>}
-                                  </button>
-                                )
-                              })
-                            )}
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <button type="button" onClick={loadJointOptions} className="text-[11px] text-muted-foreground underline underline-offset-2">
-                              Actualizar
-                            </button>
-                            <button type="button" onClick={() => setJointMode(false)} className="text-[11px] text-muted-foreground">
-                              Cancelar
-                            </button>
-                          </div>
+                        {/* Rol B: lo pagó otro corte → elegir de la lista */}
+                        <div className="space-y-1.5">
+                          <p className="px-0.5 text-sm font-medium text-muted-foreground">…o ya lo pagó otro corte:</p>
+                          {jointLoading ? (
+                            <div className="flex items-center gap-2 px-1 py-2 text-sm text-muted-foreground">
+                              <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden /> Buscando transferencias…
+                            </div>
+                          ) : jointOptions.length === 0 ? (
+                            <p className="px-1 py-1 text-sm text-muted-foreground">
+                              No hay transferencias conjuntas abiertas. El que recibió la plata tiene que cerrar su corte primero.
+                            </p>
+                          ) : (
+                            jointOptions.map((o) => {
+                              const enough = o.remaining + 1 >= chargeAmount
+                              return (
+                                <button
+                                  key={o.id} type="button" disabled={!enough}
+                                  onClick={() => pickJointCovering(o)}
+                                  className={cn(
+                                    'flex min-h-14 w-full items-center gap-2.5 rounded-xl border border-border bg-card p-3 text-left transition-colors',
+                                    enough ? 'hover:bg-sky-500/10' : 'cursor-not-allowed opacity-50',
+                                  )}
+                                >
+                                  <Link2 className="size-4 shrink-0 text-sky-600" aria-hidden />
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-[0.9375rem] font-semibold">
+                                      <span className="font-mono tabular-nums">{formatCurrency(o.amount)}</span>{' '}
+                                      <span className="font-normal text-muted-foreground">
+                                        · quedan <span className="font-mono tabular-nums">{formatCurrency(o.remaining)}</span>
+                                      </span>
+                                    </p>
+                                    <p className="truncate text-sm text-muted-foreground">
+                                      {o.barberName ?? 'Barbero'}{o.accountName ? ` · ${o.accountName}` : ''}
+                                    </p>
+                                  </div>
+                                  {enough
+                                    ? <ArrowRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                                    : <span className="shrink-0 text-sm text-muted-foreground">no alcanza</span>}
+                                </button>
+                              )
+                            })
+                          )}
                         </div>
-                      )}
-                    </>
+
+                        <div className="flex items-center justify-between">
+                          <button type="button" onClick={loadJointOptions} className="min-h-11 px-1 text-sm text-muted-foreground underline underline-offset-2">
+                            Actualizar
+                          </button>
+                          <button type="button" onClick={() => setJointMode(false)} className="min-h-11 px-1 text-sm text-muted-foreground">
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )
                   )}
-                  {!isJointCovered && (
-                    <p className="text-center text-xs text-muted-foreground">
-                      Obligatorio para cobrar por transferencia
+                  {pideEscaneo && (
+                    <p className="text-center text-sm text-muted-foreground">
+                      Obligatorio para cobrar por transferencia: escaneá el comprobante con el botón de abajo.
                     </p>
                   )}
                 </div>
@@ -1866,34 +1874,87 @@ export function CompleteServiceDialog({
 
               {/* Nota del barbero para esta visita */}
               {selectedPayment && (
-                <div>
-                  <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Nota para este corte <span className="normal-case font-normal">(opcional — solo vos la ves)</span>
-                  </p>
+                <section aria-labelledby="cobro-nota-barbero">
+                  <TituloCobro id="cobro-nota-barbero" opcional>
+                    Nota para este corte
+                  </TituloCobro>
                   <textarea
+                    aria-labelledby="cobro-nota-barbero"
                     value={barberNote}
                     onChange={(e) => setBarberNote(e.target.value.slice(0, 500))}
-                    placeholder="Ej: quiso un poco más corto de lo habitual, probar producto X la próxima..."
+                    placeholder="Sólo la ves vos. Ej: quiso un poco más corto de lo habitual…"
                     rows={2}
-                    className="w-full resize-none rounded-lg border bg-transparent p-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="w-full resize-none rounded-2xl border-2 border-border bg-card p-3.5 text-[0.9375rem] placeholder:text-muted-foreground focus:border-foreground/40 focus:outline-none"
                   />
-                </div>
+                </section>
               )}
+            </div>
+          )}
+        </div>
 
-              <div className="flex gap-2 sm:gap-3">
+        {/* La barra de abajo: siempre a la vista, con el total y el paso siguiente. */}
+        <div className="shrink-0 border-t bg-background px-5 pb-5 pt-4 sm:px-7">
+          {step === 1 ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-4">
+                <div className="shrink-0">
+                  <p className="text-sm text-muted-foreground">Subtotal</p>
+                  <p className="font-mono text-2xl font-semibold leading-tight tabular-nums">{formatCurrency(totalPrice)}</p>
+                </div>
+                {/* Con asesoría no se pasa al cobro sin el servicio principal que
+                    se le hizo: el servidor lo rechazaría igual, y es mejor decirlo
+                    acá. Los extras solos no alcanzan, y se dice si eso es lo que
+                    pasa (si no, el barbero ve una barba elegida y el botón apagado). */}
                 <Button
-                  variant="outline"
+                  className="h-14 min-w-0 flex-1 rounded-2xl text-lg font-bold [&_svg]:size-5"
                   size="lg"
-                  className="h-14 sm:h-16 w-14 sm:w-auto sm:px-5 sm:text-base shrink-0"
-                  onClick={() => setStep(1)}
-                  disabled={loading}
-                  aria-label="Volver a detalles"
+                  disabled={ocupado || faltaServicioAsesoria}
+                  aria-describedby={faltaServicioAsesoria ? 'cobro-falta-servicio' : undefined}
+                  onClick={() => {
+                    if (!faltaServicioAsesoria) setStep(2)
+                  }}
                 >
-                  <ArrowLeft className="size-5" />
-                  <span className="hidden sm:inline ml-2">Atrás</span>
+                  Continuar al cobro
+                  <ArrowRight />
                 </Button>
+              </div>
+              {faltaServicioAsesoria && (
+                <p id="cobro-falta-servicio" className="text-center text-sm text-muted-foreground">
+                  {extrasElegidos.length > 0
+                    ? 'Los extras solos no alcanzan: elegí arriba el servicio principal que le hiciste.'
+                    : 'Elegí qué le hiciste para seguir'}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="flex gap-2.5 sm:gap-3">
+              <Button
+                variant="outline"
+                size="lg"
+                className="h-14 w-14 shrink-0 rounded-2xl sm:w-auto sm:px-5 sm:text-base [&_svg]:size-5"
+                onClick={() => setStep(1)}
+                disabled={loading}
+                aria-label="Volver a detalles"
+              >
+                <ArrowLeft />
+                <span className="hidden sm:inline">Atrás</span>
+              </Button>
+              {pideEscaneo ? (
+                /* Transferencia con comprobante obligatorio: lo que sigue es
+                   escanearlo (al aceptar el escaneo, el cobro se cierra solo). */
                 <Button
-                  className="h-14 sm:h-16 flex-1 text-base sm:text-lg font-black uppercase tracking-wide min-w-0"
+                  type="button"
+                  size="lg"
+                  onClick={() => { setScanAsGroup(false); setScanOpen(true) }}
+                  disabled={faltaCuenta || loading}
+                  className="h-14 min-w-0 flex-1 rounded-2xl bg-emerald-600 text-lg font-bold text-white hover:bg-emerald-700 [&_svg]:size-5"
+                >
+                  <ScanLine />
+                  <span className="truncate">Confirmar con escaneo</span>
+                </Button>
+              ) : (
+                <Button
+                  className="h-14 min-w-0 flex-1 rounded-2xl text-lg font-bold"
                   size="lg"
                   onClick={() => finishService()}
                   disabled={loading || !selectedPayment || (needsReceipt && !receiptScan) || jointOverAssigned || faltaCuenta}
@@ -1907,16 +1968,16 @@ export function CompleteServiceDialog({
                         le cobraba dos veces la seña. Es el mismo `aCobrarAhora` que se
                         imputa en `visits.prepaid_amount` y que proyecta el ledger. */}
                     {loading
-                      ? 'Procesando...'
+                      ? 'Procesando…'
                       : `Cobrar ${formatCurrency(aCobrarAhora + tipAmount)}`}
                   </span>
                 </Button>
-              </div>
+              )}
             </div>
           )}
-        </>
+        </div>
       </DialogContent>
-    </Dialog >
+    </Dialog>
 
     {/* Confirmación de «Cerrar como solo asesoría». Es un AlertDialog: Radix no lo
         cierra con un toque afuera (tampoco con uno en un aviso) y le da el foco a
@@ -1939,12 +2000,7 @@ export function CompleteServiceDialog({
         </AlertDialogHeader>
         {fotosADescartar > 0 && (
           <p
-            className={cn(
-              'flex items-start gap-2 rounded-xl border px-3 py-2.5 text-sm',
-              tono === 'claro'
-                ? 'border-amber-500/40 bg-amber-500/10 text-amber-800'
-                : 'border-amber-500/30 bg-amber-500/10 text-amber-300',
-            )}
+            className={cn('flex items-start gap-2 rounded-xl border px-3 py-2.5 text-sm', claseAviso('ambar', tono))}
           >
             <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
             {fotosADescartar === 1
