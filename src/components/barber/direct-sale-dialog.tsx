@@ -334,14 +334,15 @@ export function DirectSaleDialog({
                 Esta sucursal no tiene cuentas de cobro activas: la transferencia queda registrada sin cuenta asignada.
               </p>
             ) : (
+              // Sin selector: se cobra en la cuenta que decide el sistema (dueño,
+              // 19/oct/2026), y por eso se muestra el alias, que antes no estaba
+              // porque la cuenta se elegía en el desplegable.
               <TransferAccountPicker
                 accounts={cuentas.cuentas}
                 selectedAccountId={cuentaElegida}
-                onSelect={setCuentaElegida}
                 rotatedFrom={rotatedFrom}
                 allFull={allAccountsFull}
                 amountText={formatCurrency(total)}
-                showAliasHero={false}
               />
             ))}
 

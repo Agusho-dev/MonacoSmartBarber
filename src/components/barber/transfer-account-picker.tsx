@@ -16,32 +16,41 @@ import { accountRemaining, type TransferAccountState } from '@/lib/payment-accou
 
 interface TransferAccountPickerProps {
   accounts: TransferAccountState[]
+  /** La cuenta que eligió el sistema (`pickTransferAccount`) o, en el dashboard, el dueño. */
   selectedAccountId: string
-  onSelect: (id: string) => void
+  onSelect?: (id: string) => void
+  /**
+   * Si se puede cambiar la cuenta a mano. En el panel del barbero NUNCA
+   * (decisión del dueño, 19/oct/2026): se cobra en la que decide el sistema,
+   * que rota sola cuando una cuenta llega a su tope. Sólo el dashboard la
+   * habilita, para el dueño. Por defecto, cerrado.
+   */
+  puedeElegirCuenta?: boolean
   /** Cuentas que el sistema salteó por estar llenas (aviso de que rotó). */
   rotatedFrom: TransferAccountState[]
   /** Todas las cuentas activas llegaron al tope: se cobra igual, pero hay que avisar. */
   allFull: boolean
-  /** Monto a mostrar en el hero del alias (total a transferir, propina incluida). */
+  /** Monto a mostrar en el ticket del alias (total a transferir, propina incluida). */
   amountText: string
-  /** Si false, no dibuja el hero del alias (la venta directa no lo usa). */
-  showAliasHero?: boolean
 }
 
 /**
- * Selector de cuenta de cobro para transferencias, compartido por el cobro de un
- * servicio (complete-service-dialog) y la venta directa (direct-sale-dialog), para
- * que las dos superficies nunca vuelvan a mostrar cosas distintas. Incluye el aviso
- * de rotación por tope y, opcionalmente, el hero gigante con el alias.
+ * La cuenta de cobro de una transferencia, compartida por el cobro de un
+ * servicio (complete-service-dialog) y la venta directa (direct-sale-dialog),
+ * para que las dos superficies nunca muestren cosas distintas: el aviso de
+ * rotación por tope y el ticket con el alias. El selector de cuenta sólo
+ * aparece con `puedeElegirCuenta` (el dashboard): en el panel del barbero,
+ * hasta el 19/oct/2026, era la puerta por la que un barbero podía cobrar en
+ * una cuenta que no era la que tocaba.
  */
 export function TransferAccountPicker({
   accounts,
   selectedAccountId,
   onSelect,
+  puedeElegirCuenta = false,
   rotatedFrom,
   allFull,
   amountText,
-  showAliasHero = true,
 }: TransferAccountPickerProps) {
   const tono = useTonoDelTema()
   if (accounts.length === 0) return null
@@ -72,7 +81,7 @@ export function TransferAccountPicker({
         </div>
       )}
 
-      {accounts.length > 1 && (
+      {puedeElegirCuenta && onSelect && accounts.length > 1 && (
         <div>
           <p id="cobro-cuenta" className="mb-2 flex items-center gap-1.5 text-[0.9375rem] font-medium">
             <Wallet className="size-4 text-muted-foreground" aria-hidden />
@@ -103,18 +112,17 @@ export function TransferAccountPicker({
         </div>
       )}
 
-      {showAliasHero &&
-        (!selectedAccount?.alias_or_cbu ? (
-          <div className={cn('rounded-2xl border border-dashed p-4 text-center text-[0.9375rem]', claseAviso('ambar', tono))}>
-            Esta cuenta no tiene alias configurado. Avisá a tu admin.
-          </div>
-        ) : (
-          <AliasCopyHero
-            alias={selectedAccount.alias_or_cbu}
-            accountName={selectedAccount.name}
-            amountText={amountText}
-          />
-        ))}
+      {!selectedAccount?.alias_or_cbu ? (
+        <div className={cn('rounded-2xl border border-dashed p-4 text-center text-[0.9375rem]', claseAviso('ambar', tono))}>
+          Esta cuenta no tiene alias configurado. Avisá a tu admin.
+        </div>
+      ) : (
+        <AliasCopyHero
+          alias={selectedAccount.alias_or_cbu}
+          accountName={selectedAccount.name}
+          amountText={amountText}
+        />
+      )}
     </div>
   )
 }

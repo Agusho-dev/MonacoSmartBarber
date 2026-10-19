@@ -1,8 +1,8 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import Image from 'next/image'
-import { AlertTriangle, Camera, Check, Images, Loader2, RotateCw, ShieldCheck, Smartphone, X } from 'lucide-react'
+import { AlertTriangle, Check, Loader2, QrCode, RotateCw, ShieldCheck, Smartphone, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { vibrate } from '@/lib/barber-feedback'
 import { cantidadDeFotos } from '@/lib/fotos-corte/textos'
@@ -13,7 +13,6 @@ import { QrFotosDialog } from './qr-fotos-dialog'
 import { VisorFotos, type FotoDelVisor } from './visor-fotos'
 import { TituloCobro } from './cobro/piezas-cobro'
 import { claseTextoAviso, useTonoDelTema } from './cobro/tono'
-import { Sello } from './fila/sello'
 
 interface FotosDelCobroProps {
   /** La entrada de la fila que se está cobrando. La sesión de fotos se ata a ella. */
@@ -25,20 +24,19 @@ interface FotosDelCobroProps {
 }
 
 /**
- * "Fotos del corte" en el cobro: con el celular (QR, recomendado), con la
- * cámara de la tablet o desde la galería.
+ * "Fotos del corte" en el cobro: SÓLO con el celular del barbero (QR). Decisión
+ * del dueño (19/oct/2026): la cámara de las tablets es mala y su galería no
+ * tiene fotos de cortes, así que la Cámara y la Galería de la tablet se
+ * sacaron. La subida desde el dispositivo sigue en el hook (`f.agregar`), sin
+ * botón: si algún día cambian las tablets, se vuelve a ofrecer acá.
  *
- * Las fotos se suben en segundo plano apenas se eligen y el cobro NO las
- * espera: si siguen subiendo cuando se toca Cobrar, terminan solas y quedan en
- * la ficha (ver fotos-corte-store). La cámara es la NATIVA (<input capture>):
- * se orienta sola por sensor y EXIF, y nunca se endereza nada aunque el panel
- * esté girado 180° (src/lib/giro-panel/camara.ts).
+ * Las fotos del celular llegan a la tira solas y el cobro NO las espera: si
+ * siguen subiendo cuando se toca Cobrar, terminan solas y quedan en la ficha
+ * (ver fotos-corte-store).
  */
 export function FotosDelCobro({ entradaId, abierto, deshabilitado = false }: FotosDelCobroProps) {
   const f = useFotosDelCobro(entradaId, abierto)
   const tono = useTonoDelTema()
-  const inputCamara = useRef<HTMLInputElement>(null)
-  const inputGaleria = useRef<HTMLInputElement>(null)
   const [fotoAbierta, setFotoAbierta] = useState<number | null>(null)
 
   const listas = useMemo(() => f.fotos.filter((x) => x.estado === 'lista'), [f.fotos])
@@ -57,12 +55,6 @@ export function FotosDelCobro({ entradaId, abierto, deshabilitado = false }: Fot
   const bloqueado = deshabilitado || f.resumen.enTope
   const ultimoError = [...f.fotos].reverse().find((x) => x.estado === 'error')?.error ?? null
 
-  const elegir = (archivos: FileList | null) => {
-    if (!archivos || archivos.length === 0) return
-    vibrate(8)
-    f.agregar(archivos)
-  }
-
   return (
     <section aria-labelledby="cobro-fotos">
       <TituloCobro
@@ -79,60 +71,30 @@ export function FotosDelCobro({ entradaId, abierto, deshabilitado = false }: Fot
         Fotos del corte
       </TituloCobro>
 
-      {/* Tres caminos. El del celular va primero: saca mejores fotos y no hay
-          que andar con la tablet en la mano. */}
-      <div className="grid grid-cols-3 gap-2.5 pt-1">
-        <Mosaico
-          icono={<Smartphone className="size-6" aria-hidden />}
-          titulo="Con tu celular"
-          detalle="Escaneá el QR"
-          destacado
-          deshabilitado={bloqueado}
-          onClick={() => {
-            vibrate(8)
-            f.qr.abrir()
-          }}
-        />
-        <Mosaico
-          icono={<Camera className="size-6" aria-hidden />}
-          titulo="Cámara"
-          detalle="De la tablet"
-          deshabilitado={bloqueado}
-          onClick={() => inputCamara.current?.click()}
-        />
-        <Mosaico
-          icono={<Images className="size-6" aria-hidden />}
-          titulo="Galería"
-          detalle="Elegir fotos"
-          deshabilitado={bloqueado}
-          onClick={() => inputGaleria.current?.click()}
-        />
-      </div>
-
-      <input
-        ref={inputCamara}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        tabIndex={-1}
-        onChange={(e) => {
-          elegir(e.target.files)
-          e.target.value = ''
+      {/* Un solo camino: el celular del barbero, por QR. */}
+      <button
+        type="button"
+        disabled={bloqueado}
+        onClick={() => {
+          vibrate(8)
+          f.qr.abrir()
         }}
-      />
-      <input
-        ref={inputGaleria}
-        type="file"
-        accept="image/*"
-        multiple
-        className="hidden"
-        tabIndex={-1}
-        onChange={(e) => {
-          elegir(e.target.files)
-          e.target.value = ''
-        }}
-      />
+        className={cn(
+          'flex w-full items-center gap-4 rounded-2xl border-2 border-foreground bg-card px-4 py-3.5 text-left outline-none',
+          'motion-safe:transition-[background-color,transform] motion-safe:duration-150 motion-safe:active:scale-[0.99]',
+          'hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+          'disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100',
+        )}
+      >
+        <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+          <Smartphone className="size-6" aria-hidden />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-base font-semibold leading-tight">Sacalas con tu celular</span>
+          <span className="mt-0.5 block text-sm text-muted-foreground">Escaneá el QR con la cámara del celular</span>
+        </span>
+        <QrCode className="size-6 shrink-0 text-muted-foreground" aria-hidden />
+      </button>
 
       {f.fotos.length > 0 && (
         <ul
@@ -199,50 +161,6 @@ export function FotosDelCobro({ entradaId, abierto, deshabilitado = false }: Fot
       />
       <VisorFotos fotos={fotosDelVisor} indice={fotoAbierta} onIndice={setFotoAbierta} />
     </section>
-  )
-}
-
-function Mosaico({
-  icono,
-  titulo,
-  detalle,
-  destacado = false,
-  deshabilitado,
-  onClick,
-}: {
-  icono: React.ReactNode
-  titulo: string
-  detalle: string
-  destacado?: boolean
-  deshabilitado: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={deshabilitado}
-      className={cn(
-        'relative flex min-h-24 flex-col items-center justify-center gap-1 rounded-2xl border-2 px-1.5 py-3 text-center outline-none',
-        'transition-[background-color,border-color,transform] duration-150 motion-safe:active:scale-[0.97] motion-reduce:transition-none',
-        'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-        'disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100',
-        // El recomendado se distingue por el borde y la sombra, no por un
-        // fondo gris: en el panel claro un mosaico gris se lee como apagado.
-        destacado
-          ? 'border-foreground bg-card shadow-sm hover:bg-muted/40'
-          : 'border-border bg-card hover:bg-muted/60',
-      )}
-    >
-      {destacado && (
-        <Sello tono="tinta" className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap">
-          Recomendado
-        </Sello>
-      )}
-      {icono}
-      <span className="text-[0.9375rem] font-semibold leading-tight">{titulo}</span>
-      <span className="text-[0.8125rem] leading-tight text-muted-foreground">{detalle}</span>
-    </button>
   )
 }
 

@@ -1691,6 +1691,10 @@ export function CompleteServiceDialog({
                     accounts={paymentAccounts}
                     selectedAccountId={selectedAccountId}
                     onSelect={setSelectedAccountId}
+                    // En el panel del barbero se cobra en la cuenta que decide el
+                    // sistema y no se puede cambiar (dueño, 19/oct/2026). El
+                    // dashboard no pasa staffIdDelPanel: ahí el dueño sí elige.
+                    puedeElegirCuenta={!staffIdDelPanel}
                     rotatedFrom={rotatedFrom}
                     allFull={allAccountsFull}
                     amountText={formatCurrency(transferAmount)}
