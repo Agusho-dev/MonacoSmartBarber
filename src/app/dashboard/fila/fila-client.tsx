@@ -56,9 +56,13 @@ import {
   appointmentTimeLabel,
   findNextAppointment,
   formatHourMinute,
+  protectionWindowMinutes,
   type NextAppointmentInfo,
 } from '@/lib/queue-appointments'
 import { getLocalDateStr } from '@/lib/time-utils'
+import { computeMinutes } from '@/hooks/use-timer-stage'
+import { formatoEspera, nivelEspera, type NivelEspera } from '@/components/barber/fila/espera'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -83,7 +87,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Clock, User, Scissors, X, Pause, GripVertical, Zap, UserPlus, Play, Check, ChevronDown, Search, FileEdit, ExternalLink, Sparkles, Info, CalendarClock, MessageCircle, MessageCircleQuestionMark } from 'lucide-react'
+import { Clock, User, Scissors, X, Pause, GripVertical, Zap, UserPlus, Play, Check, ChevronDown, Search, FileEdit, ExternalLink, Sparkles, Info, CalendarClock, MessageCircle, MessageCircleQuestionMark, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -188,10 +192,49 @@ function AyudaAsesoriaDelRegistro() {
 // ─── Sortable QueueCard ────────────────────────────────────────────────────────
 
 /**
- * Hora RESERVADA de una entrada de turno, leída de la agenda del día (la
- * provee el tablero). `null` si el turno no está en la agenda cargada.
+ * Lo que las tarjetas leen del tablero sin pasarlo por cada columna: la hora
+ * RESERVADA de un turno (de la agenda del día; `null` si el turno no está en la
+ * agenda cargada) y el reloj de 5 s con el que se miden esperas y cortes.
  */
-const HoraDeTurnoContext = createContext<((entry: QueueEntry) => string | null) | null>(null)
+interface Tablero {
+  horaDeTurno: (entry: QueueEntry) => string | null
+  /** Instante (ms) de la hora reservada de un turno; sin la agenda, `priority_order`. */
+  inicioDeTurno: (entry: QueueEntry) => number
+  ahora: number
+}
+
+const TableroContext = createContext<Tablero | null>(null)
+
+/** Minutos desde un instante (0 sin dato, con un dato inválido o futuro). */
+function minutosDesde(iso: string | null | undefined, ahora: number): number {
+  if (!iso) return 0
+  const t = new Date(iso).getTime()
+  if (!Number.isFinite(t)) return 0
+  return Math.max(0, (ahora - t) / 60_000)
+}
+
+/** La espera se colorea con los umbrales del panel: ámbar a los 40 min, rojo a los 70. */
+const TEXTO_ESPERA: Record<NivelEspera, string> = {
+  normal: 'text-muted-foreground',
+  demorado: 'text-amber-300',
+  critico: 'text-red-400',
+}
+
+const BARRA_ESPERA: Record<NivelEspera, string> = {
+  normal: 'bg-white/30',
+  demorado: 'bg-amber-400',
+  critico: 'bg-red-500',
+}
+
+/** Los minutos del corte con el semáforo del panel (ámbar desde los 35, rojo desde los 45). */
+function claseMinutosDeCorte(minutos: number): string {
+  if (minutos >= 45) return 'text-red-400'
+  if (minutos >= 35) return 'text-amber-300'
+  return 'text-foreground'
+}
+
+/** Nada que nazca en los botones de una tarjeta arranca un arrastre (ver la nota en las acciones). */
+const frenarArrastre = (e: React.SyntheticEvent) => e.stopPropagation()
 
 interface QueueCardProps {
   entry: QueueEntry
@@ -204,11 +247,12 @@ interface QueueCardProps {
   /** Nombre de un barbero por id (para "esperaba a X" de Menor espera por WhatsApp). */
   getBarberName?: (id: string) => string | undefined
   timezone: string
+  /** Es el próximo cliente de su carril (o de Dinámicos). */
+  sigue?: boolean
 }
 
 function QueueCard({
   entry,
-  formatElapsed,
   onCancel,
   onStartService,
   actionLoading,
@@ -216,6 +260,7 @@ function QueueCard({
   getBranchName,
   getBarberName,
   timezone,
+  sigue = false,
 }: QueueCardProps) {
   // Los turnos no se arrastran. `handleDragEnd` renumera y reescribe
   // `priority_order` (que en un turno es su hora reservada, la clave de toda la
@@ -257,7 +302,12 @@ function QueueCard({
       : undefined
   // Mig 217: pidió asesoría sin costo en la tablet (no sabe qué hacerse).
   const pidioAsesoria = !isBreak && entry.pidio_asesoria === true
-  const horaDeTurno = useContext(HoraDeTurnoContext)
+  const tablero = useContext(TableroContext)
+  const minutos = minutosDesde(entry.checked_in_at, tablero?.ahora ?? 0)
+  const nivel = nivelEspera(minutos)
+  // La pista de un dinámico (a quién se lo sugirió el hint): sólo informa.
+  const pista = entry.is_dynamic && entry.barber?.full_name ? entry.barber.full_name.split(' ')[0] : null
+  const conChips = (!selectedBranchId && !!entry.branch_id) || !!pista || pidioAsesoria || viaWhatsApp || isAppointment
 
   function explainNoDrag() {
     toast.info('Los turnos se mueven desde la agenda, no desde la fila', {
@@ -303,88 +353,109 @@ function QueueCard({
       {...(isAppointment ? {} : listeners)}
       onPointerDown={isAppointment ? handleAppointmentPointerDown : undefined}
       title={isAppointment ? 'Los turnos se mueven desde la agenda, no desde la fila' : undefined}
-      className={[
-        'w-full group relative rounded-xl border transition-colors duration-150 overflow-hidden',
+      className={cn(
+        // Sin selección de texto ni el menú de "guardar imagen" de iOS al
+        // mantenerla apretada: ése es el gesto que la levanta en la tablet.
+        // `shrink-0`: en Dinámicos (una columna de alto fijo) las tarjetas se
+        // achicaban para entrar y les cortaba el segundo renglón.
+        'group relative w-full min-w-0 shrink-0 select-none overflow-hidden rounded-xl border touch-manipulation [-webkit-touch-callout:none]',
+        'transition-[border-color,background-color,opacity] duration-150',
         isAppointment ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
-        isDragging ? 'opacity-40 scale-[0.98] z-50' : 'bg-zinc-900/80',
-        isBreak
-          ? 'border-amber-900/50 bg-amber-950/30'
-          : isAppointment
-            ? 'border-violet-500/40 bg-violet-950/25'
-            : 'border-zinc-800 hover:border-zinc-700',
-      ].join(' ')}
+        isDragging
+          ? 'z-50 border-dashed border-white/25 bg-transparent opacity-50'
+          : isBreak
+            ? 'border-amber-500/25 bg-amber-500/[0.06] hover:border-amber-400/50'
+            : isAppointment
+              ? 'border-violet-400/30 bg-violet-500/[0.07]'
+              : sigue
+                ? 'border-white/25 bg-white/[0.07] hover:border-white/40'
+                : 'border-white/[0.08] bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.05]',
+      )}
     >
-      <div className="flex items-center gap-2.5 px-3 py-2.5">
-        {/* Handle visual (en un turno pasa a ser el ícono de reservado: no arrastra) */}
-        <div
-          className={
+      <div className="flex items-start gap-2 py-2.5 pl-2 pr-1.5">
+        {/* Manija (en un turno, el ícono de reservado: no se arrastra) */}
+        <span
+          className={cn(
+            'mt-0.5 shrink-0 transition-colors',
             isAppointment
-              ? 'shrink-0 text-violet-400'
-              : 'shrink-0 text-zinc-700/50 group-hover:text-zinc-500 transition-colors'
-          }
+              ? 'text-violet-300/80'
+              : isBreak
+                ? 'text-amber-400/60 group-hover:text-amber-300'
+                : 'text-white/25 group-hover:text-white/60',
+          )}
+          aria-hidden
         >
           {isAppointment ? <CalendarClock className="size-4" /> : <GripVertical className="size-4" />}
-        </div>
+        </span>
 
-        {/* Badge */}
-        <div
-          className={[
-            'flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold',
-            isBreak
-              ? 'bg-amber-500/20 text-amber-400'
-              : isAppointment
-                ? 'bg-violet-500/20 text-violet-300'
-                : 'bg-zinc-800 text-zinc-300',
-          ].join(' ')}
-        >
-          {isBreak ? <Pause className="size-3.5" /> : `#${entry.position}`}
-        </div>
-
-        {/* Datos */}
-        <div className="min-w-0 flex-1 flex flex-col justify-center">
+        <div className="min-w-0 flex-1">
           <p
-            className={`truncate text-sm font-medium ${
-              isBreak ? 'text-amber-200' : 'text-zinc-200'
-            }`}
+            className={cn(
+              'flex min-w-0 items-center gap-1.5 text-[0.9375rem] font-semibold leading-tight',
+              isBreak ? 'text-amber-200' : 'text-foreground',
+            )}
           >
-            {displayName}
+            {isBreak && <Pause className="size-3.5 shrink-0 text-amber-300" aria-hidden />}
+            <span className="truncate">{displayName}</span>
           </p>
-          <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 mt-0.5 min-w-0 overflow-hidden">
-            {/* La hora RESERVADA sale de la agenda (`HoraDeTurnoContext`): en una
+
+          {/* El número en la fila, "sigue" para el próximo, la espera (con el
+              color del panel) y el teléfono si queda lugar. */}
+          <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="shrink-0 rounded-md bg-white/[0.07] px-1.5 py-px font-mono text-[11px] font-semibold tabular-nums text-foreground/75">
+              #{entry.position}
+            </span>
+            {sigue && !isBreak && (
+              <span
+                className="shrink-0 rounded-md bg-foreground px-1.5 py-px text-[11px] font-semibold text-background"
+                title="Es el próximo de este carril"
+              >
+                Sigue
+              </span>
+            )}
+            {/* La hora RESERVADA sale de la agenda (`TableroContext`): en una
                 entrada adoptada de un walk-in, `priority_order` es la hora de
                 llegada (mig 170) y la tarjeta mostraba esa. Sin el turno en la
                 agenda cargada, `priority_order` es la mejor aproximación. */}
             {isAppointment && (
               <TurnoBadge
-                time={horaDeTurno?.(entry) ?? appointmentTimeLabel(entry, timezone)}
+                time={tablero?.horaDeTurno(entry) ?? appointmentTimeLabel(entry, timezone)}
                 className="text-violet-300 dark:text-violet-300"
               />
             )}
+            {/* En un turno manda la hora reservada: la espera no entra al lado. */}
+            {!isBreak && !isAppointment && (
+              <span
+                className={cn('inline-flex shrink-0 items-center gap-1 font-mono text-xs font-semibold tabular-nums', TEXTO_ESPERA[nivel])}
+                title="Tiempo esperando"
+              >
+                <Clock className="size-3" aria-hidden />
+                {formatoEspera(minutos)}
+              </span>
+            )}
             {!isBreak && !isAppointment && entry.client?.phone && (
-              <span className="truncate shrink-0 max-w-[80px]">{entry.client.phone}</span>
+              <span className="min-w-0 truncate">{entry.client.phone}</span>
             )}
-            {!selectedBranchId && (
-              <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-px text-[10px] text-zinc-400 truncate max-w-[60px]">
-                {getBranchName(entry.branch_id)}
-              </span>
-            )}
-            {entry.is_dynamic && entry.barber?.full_name && (
-              <span className="shrink-0 inline-flex items-center gap-0.5 rounded bg-yellow-500/10 px-1.5 py-px text-[10px] text-yellow-400 truncate max-w-[90px]">
-                <Zap className="size-2.5 shrink-0" />
-                <span className="truncate">{entry.barber.full_name.split(' ')[0]}</span>
-              </span>
-            )}
-            <span className="flex shrink-0 items-center gap-1 ml-auto min-w-0">
-              <Clock className="size-3 shrink-0" />
-              <span className="truncate">{formatElapsed(entry.checked_in_at)}</span>
-            </span>
           </div>
-          {/* Renglón propio y no un chip más en la línea de arriba: esa línea ya
-              va al límite de ancho (teléfono, sucursal, espera) y lo truncaría.
-              Asesoría y «Por WhatsApp» comparten el renglón y bajan solos si no
-              entran juntos. */}
-          {(pidioAsesoria || viaWhatsApp) && (
-            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
+
+          {/* Lo que no siempre está va abajo, en su propio renglón, y baja solo
+              si no entra: sucursal, la pista de un dinámico, asesoría, WhatsApp. */}
+          {conChips && (
+            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1">
+              {!selectedBranchId && entry.branch_id && (
+                <span className="max-w-[7rem] truncate rounded-md bg-white/[0.06] px-1.5 py-px text-[10px] text-muted-foreground">
+                  {getBranchName(entry.branch_id)}
+                </span>
+              )}
+              {pista && (
+                <span
+                  className="inline-flex max-w-[7rem] items-center gap-0.5 rounded-md bg-yellow-500/10 px-1.5 py-px text-[10px] text-yellow-300"
+                  title="Sugerido para este barbero (lo toma igual el primero que se libere)"
+                >
+                  <Zap className="size-2.5 shrink-0" aria-hidden />
+                  <span className="truncate">{pista}</span>
+                </span>
+              )}
               {pidioAsesoria && (
                 <span
                   className="inline-flex"
@@ -395,24 +466,24 @@ function QueueCard({
               )}
               {viaWhatsApp && (
                 <span
-                  className="flex w-fit max-w-full items-start gap-1 rounded bg-sky-500/10 px-1.5 py-px text-[10px] font-medium leading-tight text-sky-300"
+                  className="flex w-fit max-w-full items-start gap-1 rounded-md bg-sky-500/10 px-1.5 py-px text-[10px] font-medium leading-tight text-sky-300"
                   title="Aceptó pasarse a Menor espera desde el aviso de WhatsApp. Conserva su lugar en la fila."
                 >
                   <MessageCircle className="mt-px size-2.5 shrink-0" aria-hidden />
                   <span>Por WhatsApp{esperabaA ? ` · esperaba a ${esperabaA}` : ''}</span>
                 </span>
               )}
+              {isAppointment && (
+                <a
+                  href="/dashboard/turnos/agenda"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="inline-flex w-fit items-center gap-1 text-[10px] text-violet-300/80 transition-colors hover:text-violet-200"
+                >
+                  <ExternalLink className="size-2.5 shrink-0" aria-hidden />
+                  Se mueve desde la agenda
+                </a>
+              )}
             </div>
-          )}
-          {isAppointment && (
-            <a
-              href="/dashboard/turnos/agenda"
-              onPointerDown={(e) => e.stopPropagation()}
-              className="mt-1 inline-flex w-fit items-center gap-1 text-[10px] text-violet-400/80 transition-colors hover:text-violet-300"
-            >
-              <ExternalLink className="size-2.5 shrink-0" />
-              Se mueve desde la agenda
-            </a>
           )}
         </div>
 
@@ -421,9 +492,10 @@ function QueueCard({
             apretar ▶ o la X moviendo apenas el mouse (o un toque largo en la
             tablet) arrastraba la tarjeta en vez de apretar el botón. */}
         <div
-          className="flex items-center gap-1 shrink-0"
-          onMouseDown={(e) => e.stopPropagation()}
-          onTouchStart={(e) => e.stopPropagation()}
+          className="flex shrink-0 items-center"
+          onMouseDown={frenarArrastre}
+          onTouchStart={frenarArrastre}
+          onPointerDown={frenarArrastre}
         >
           {/* El botón verde también va en las tarjetas del pool ("Menor espera",
               barber_id NULL). Sin esto, la ÚNICA acción posible sobre un cliente que
@@ -435,27 +507,38 @@ function QueueCard({
               variant="ghost"
               size="icon"
               onClick={(e) => { e.stopPropagation(); onStartService(entry); }}
-              onPointerDown={(e) => e.stopPropagation()}
               disabled={actionLoading === entry.id}
-              className="size-7 text-green-400"
+              className="size-8 rounded-lg text-emerald-400 hover:bg-emerald-500/15 hover:text-emerald-300"
               title={entry.barber_id ? 'Iniciar corte' : 'Asignar barbero y atender'}
+              aria-label={entry.barber_id ? `Iniciar el corte de ${displayName}` : `Elegir barbero para ${displayName}`}
             >
-              <Play className="size-3.5" />
+              <Play className="size-4" />
             </Button>
           )}
           <Button
             variant="ghost"
             size="icon"
             onClick={(e) => { e.stopPropagation(); onCancel(entry.id); }}
-            onPointerDown={(e) => e.stopPropagation()}
             disabled={actionLoading === entry.id}
-            className="size-7 text-red-400"
-            title="Cancelar"
+            className="size-8 rounded-lg text-muted-foreground hover:bg-red-500/15 hover:text-red-400"
+            title={isBreak ? 'Cancelar el descanso' : 'Sacar de la fila'}
+            aria-label={isBreak ? 'Cancelar el descanso' : `Sacar a ${displayName} de la fila`}
           >
-            <X className="size-3.5" />
+            <X className="size-4" />
           </Button>
         </div>
       </div>
+
+      {/* La espera dibujada por el borde de abajo: se llena a las 2 h, así un
+          carril largo se lee de reojo (quién se está quedando atrás). */}
+      {!isBreak && !isDragging && (
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-white/[0.04]">
+          <span
+            className={cn('block h-full', BARRA_ESPERA[nivel])}
+            style={{ width: `${Math.max(4, Math.min(1, minutos / 120) * 100)}%` }}
+          />
+        </span>
+      )}
     </div>
   )
 }
@@ -465,7 +548,6 @@ function QueueCard({
 
 function InProgressCard({
   entry,
-  formatElapsed,
   onCancel,
   onComplete,
   actionLoading,
@@ -481,23 +563,46 @@ function InProgressCard({
   // Mig 217: el sello sigue en curso para que la recepción sepa que el barbero
   // tiene que elegir el servicio al cobrar (o cerrarla como solo asesoría).
   const pidioAsesoria = !isBreak && entry.pidio_asesoria === true
+  const tablero = useContext(TableroContext)
+  const ahora = tablero?.ahora ?? 0
+  // Los minutos del corte se miden igual que en el panel del barbero (sin las
+  // pausas); los del descanso, desde que arrancó.
+  const minutos = isBreak
+    ? minutosDesde(entry.started_at, ahora)
+    : (computeMinutes(entry.started_at, entry.paused_duration_seconds ?? 0, entry.paused_at, ahora) ?? 0)
+  const enPausa = !isBreak && !!entry.paused_at
 
   return (
-    <div className="w-full group relative rounded-xl border border-green-500/30 bg-green-950/20 shadow-md overflow-hidden min-w-0">
-      <div className="flex items-center gap-2.5 px-3 py-2.5">
-        <div className="shrink-0 text-green-500/50 w-4 flex justify-center">
-          <Scissors className="size-4" />
-        </div>
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold bg-green-500/20 text-green-400">
-          {isBreak ? <Pause className="size-3.5" /> : `#${entry.position}`}
-        </div>
-        <div className="min-w-0 flex-1 flex flex-col justify-center">
-          <p className="truncate text-sm font-medium text-green-400">{displayName}</p>
-          <div className="flex items-center gap-1.5 text-[11px] text-green-500/70 mt-0.5 min-w-0 overflow-hidden">
-            <span className="flex shrink-0 items-center gap-1 min-w-0">
-              <Clock className="size-3 shrink-0" />
-              <span className="truncate">{entry.started_at ? formatElapsed(entry.started_at) : 'En curso'}</span>
+    <div
+      className={cn(
+        'relative w-full min-w-0 overflow-hidden rounded-xl border',
+        isBreak ? 'border-amber-400/35 bg-amber-500/[0.08]' : 'border-emerald-400/35 bg-emerald-500/[0.08]',
+      )}
+    >
+      <div className="flex items-center gap-2 py-2.5 pl-2.5 pr-1.5">
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide">
+            {isBreak ? (
+              <Pause className="size-3.5 shrink-0 text-amber-300" aria-hidden />
+            ) : (
+              <Scissors className="size-3.5 shrink-0 text-emerald-300" aria-hidden />
+            )}
+            <span className={isBreak ? 'text-amber-300' : enPausa ? 'text-amber-300' : 'text-emerald-300'}>
+              {isBreak ? 'En descanso' : enPausa ? 'En pausa' : 'Cortando'}
             </span>
+            <span
+              className={cn(
+                'ml-auto font-mono text-[0.9375rem] font-semibold normal-case tracking-normal tabular-nums',
+                isBreak ? 'text-amber-200' : claseMinutosDeCorte(minutos),
+              )}
+              title={isBreak ? 'Minutos de descanso' : 'Minutos de corte'}
+            >
+              {Math.floor(minutos)}
+              <span className="ml-0.5 font-sans text-[0.7em] font-medium">min</span>
+            </span>
+          </p>
+          <p className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+            <span className="max-w-full truncate text-[0.9375rem] font-semibold text-foreground">{displayName}</span>
             {pidioAsesoria && (
               <span
                 className="inline-flex shrink-0"
@@ -510,9 +615,9 @@ function InProgressCard({
                 <AsesoriaBadge tono="oscuro" />
               </span>
             )}
-          </div>
+          </p>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex shrink-0 items-center gap-0.5">
           {!isBreak && onComplete && (
             <Button
               variant="ghost"
@@ -520,10 +625,11 @@ function InProgressCard({
               onClick={(e) => { e.stopPropagation(); onComplete(entry); }}
               onPointerDown={(e) => e.stopPropagation()}
               disabled={actionLoading === entry.id}
-              className="size-7 text-emerald-400"
-              title="Finalizar corte"
+              className="size-8 rounded-lg bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 hover:text-emerald-200"
+              title="Cobrar y finalizar el corte"
+              aria-label={`Cobrar el corte de ${displayName}`}
             >
-              <Check className="size-3.5" />
+              <Check className="size-4" />
             </Button>
           )}
           <Button
@@ -532,10 +638,11 @@ function InProgressCard({
             onClick={(e) => { e.stopPropagation(); onCancel(entry.id); }}
             onPointerDown={(e) => e.stopPropagation()}
             disabled={actionLoading === entry.id}
-            className="size-7 text-red-400"
-            title="Cancelar"
+            className="size-8 rounded-lg text-muted-foreground hover:bg-red-500/15 hover:text-red-400"
+            title={isBreak ? 'Terminar el descanso' : 'Cancelar el corte'}
+            aria-label={isBreak ? 'Terminar el descanso' : `Cancelar el corte de ${displayName}`}
           >
-            <X className="size-3.5" />
+            <X className="size-4" />
           </Button>
         </div>
       </div>
@@ -563,30 +670,17 @@ function BreakTemplateCard({ config }: { config: BreakConfig }) {
       style={{ transform: CSS.Translate.toString(transform) }}
       {...attributes}
       {...listeners}
-      className={[
-        'w-full cursor-grab active:cursor-grabbing group relative rounded-xl border border-amber-500/30 bg-amber-950/20 shadow-sm transition-all duration-150',
-        isDragging ? 'opacity-40 scale-[0.98] z-50' : 'hover:border-amber-500/50',
-      ].join(' ')}
+      aria-label={`Arrastrar ${config.name} (${config.duration_minutes} min) al carril de un barbero`}
+      className={cn(
+        'group inline-flex h-9 w-full cursor-grab select-none items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/[0.08] pl-2.5 pr-3.5 text-amber-200 touch-manipulation active:cursor-grabbing',
+        'transition-[border-color,opacity] duration-150',
+        isDragging ? 'opacity-40' : 'hover:border-amber-400/60',
+      )}
     >
-      <div className="flex items-center gap-2.5 px-3 py-2.5">
-        <div className="shrink-0 text-amber-700/50 group-hover:text-amber-600 transition-colors">
-          <GripVertical className="size-4" />
-        </div>
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold bg-amber-500/20 text-amber-500">
-          <Pause className="size-3.5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-amber-200">
-            {config.name}
-          </p>
-          <div className="flex items-center gap-2 text-[11px] text-amber-500/70 mt-0.5">
-            <span className="flex shrink-0 items-center gap-1">
-              <Clock className="size-3" />
-              {config.duration_minutes} min
-            </span>
-          </div>
-        </div>
-      </div>
+      <GripVertical className="size-3.5 shrink-0 text-amber-500/50 transition-colors group-hover:text-amber-300" aria-hidden />
+      <Pause className="size-3.5 shrink-0 text-amber-300" aria-hidden />
+      <span className="min-w-0 flex-1 truncate text-sm font-medium">{config.name}</span>
+      <span className="shrink-0 font-mono text-xs tabular-nums text-amber-300/80">{config.duration_minutes}′</span>
     </div>
   )
 }
@@ -788,20 +882,55 @@ function KanbanColumn({
 function DragGhost({ entry }: { entry: QueueEntry }) {
   const isBreak = entry.is_break
   const displayName = isBreak ? 'Descanso' : (entry.client?.name ?? 'Cliente')
+  const tablero = useContext(TableroContext)
+  const minutos = minutosDesde(entry.checked_in_at, tablero?.ahora ?? 0)
   return (
-    <div className="flex items-center gap-2.5 rounded-xl border border-primary/50 bg-zinc-800/95 px-3.5 py-2.5 shadow-2xl shadow-black/70 rotate-[2deg] scale-105 opacity-90 w-[270px]">
-      <div
-        className={`flex size-7 shrink-0 items-center justify-center rounded-md text-xs font-bold ${
-          isBreak ? 'bg-amber-500/25 text-amber-400' : 'bg-zinc-700 text-zinc-200'
-        }`}
-      >
-        {isBreak ? <Pause className="size-3" /> : `#${entry.position}`}
-      </div>
-      <span className="truncate text-sm font-semibold text-white">
-        {displayName}
+    <div className="flex w-[264px] items-center gap-2.5 rounded-xl border border-white/25 bg-card px-3 py-2.5 shadow-[0_24px_48px_-12px_rgb(0_0_0/0.85)] motion-safe:rotate-[1.5deg]">
+      {isBreak ? (
+        <Pause className="size-4 shrink-0 text-amber-300" aria-hidden />
+      ) : (
+        <GripVertical className="size-4 shrink-0 text-white/50" aria-hidden />
+      )}
+      <span className="shrink-0 rounded-md bg-white/[0.08] px-1.5 py-px font-mono text-[11px] font-semibold tabular-nums text-foreground/75">
+        #{entry.position}
       </span>
+      <span className="min-w-0 flex-1 truncate text-[0.9375rem] font-semibold text-foreground">{displayName}</span>
+      {!isBreak && (
+        <span className={cn('shrink-0 font-mono text-xs font-semibold tabular-nums', TEXTO_ESPERA[nivelEspera(minutos)])}>
+          {formatoEspera(minutos)}
+        </span>
+      )}
     </div>
   )
+}
+
+/**
+ * Quién "sigue" en el carril de un barbero, con las reglas de
+ * `claim_next_for_barber` (mig 170) para que la etiqueta no prometa lo que el
+ * motor no hace: un descanso pendiente adelante va primero (no sigue ningún
+ * cliente); un turno cuya hora llegó, antes que los walk-ins; con un turno
+ * dentro de la ventana de protección, el del turno si ya está (y si no, nadie:
+ * el barbero lo espera); si no, el primer walk-in. La hora del turno sale de la
+ * agenda, no de `priority_order` (en una entrada adoptada es la de llegada).
+ */
+function quienSigue(
+  entries: QueueEntry[],
+  tablero: Tablero | null,
+  proximoTurno?: NextAppointmentInfo | null,
+): string | undefined {
+  if (entries[0]?.is_break) return undefined
+  if (!tablero) return entries.find((e) => !e.is_break && !e.is_appointment)?.id
+  const { ahora, inicioDeTurno } = tablero
+  const turnos = entries
+    .filter((e) => e.is_appointment && !e.is_break)
+    .sort((a, b) => inicioDeTurno(a) - inicioDeTurno(b))
+  const vencido = turnos.find((e) => inicioDeTurno(e) <= ahora)
+  if (vencido) return vencido.id
+  const ventana = protectionWindowMinutes() * 60_000
+  if (proximoTurno && proximoTurno.startsAtMs <= ahora + ventana) {
+    return turnos.find((e) => inicioDeTurno(e) <= ahora + ventana)?.id
+  }
+  return entries.find((e) => !e.is_break && !e.is_appointment)?.id
 }
 
 // ─── Dynamic Column (Top-to-Bottom) ─────────────────────────────────────────
@@ -817,6 +946,7 @@ function DynamicColumn({
   getBranchName,
   getBarberName,
   timezone,
+  destacado = false,
 }: {
   id: ColumnId
   entries: QueueEntry[]
@@ -828,6 +958,8 @@ function DynamicColumn({
   getBranchName: (id: string) => string
   getBarberName?: (id: string) => string | undefined
   timezone: string
+  /** Hay algo arrastrándose sobre esta columna. */
+  destacado?: boolean
 }) {
   const { setNodeRef } = useSortable({
     id,
@@ -835,19 +967,29 @@ function DynamicColumn({
   })
 
   const entryIds = useMemo(() => entries.map((e) => e.id), [entries])
+  const sigueId = entries.find((e) => !e.is_break)?.id
 
   return (
     <div
       ref={setNodeRef}
-      className="flex flex-col w-full md:w-[260px] md:shrink-0 bg-zinc-950 border-b md:border-b-0 md:border-r border-zinc-800/80"
+      className={cn(
+        'flex w-full flex-col border-b border-white/[0.07] bg-background transition-colors duration-150 md:w-[280px] md:shrink-0 md:border-b-0 md:border-r',
+        destacado && 'bg-yellow-400/[0.04] md:shadow-[inset_0_3px_0_0_rgb(250_204_21/0.6)]',
+      )}
     >
-      <div className="p-3 md:p-4 border-b border-zinc-800/80 bg-zinc-950 sticky top-0 z-40 shadow-sm">
-        <div className="flex items-center gap-2 h-6">
-          <Zap className="size-4 text-yellow-400" />
-          <h3 className="font-semibold text-zinc-100 text-sm md:text-base">Dinámicos</h3>
+      <div className="sticky top-0 z-40 border-b border-white/[0.07] bg-background/95 px-3 py-3 backdrop-blur md:px-4">
+        <div className="flex items-center gap-2">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-yellow-400/10">
+            <Zap className="size-4 text-yellow-300" aria-hidden />
+          </span>
+          <h3 className="text-[0.9375rem] font-semibold text-foreground">Dinámicos</h3>
+          <span className="ml-auto rounded-full bg-white/[0.07] px-2 py-0.5 font-mono text-xs font-semibold tabular-nums text-foreground/80">
+            {entries.length}
+          </span>
         </div>
+        <p className="mt-1 text-xs text-muted-foreground">Menor espera · lo toma el primero libre</p>
       </div>
-      <div className="flex-1 p-2 md:p-3 flex flex-col gap-2 md:gap-3 md:min-h-[500px]">
+      <div className="flex flex-1 flex-col gap-2 p-2 md:min-h-[500px] md:p-3">
         <SortableContext items={entryIds} strategy={verticalListSortingStrategy}>
           {entries.map((entry) => (
             <QueueCard
@@ -861,12 +1003,18 @@ function DynamicColumn({
               getBranchName={getBranchName}
               getBarberName={getBarberName}
               timezone={timezone}
+              sigue={entry.id === sigueId}
             />
           ))}
         </SortableContext>
         {entries.length === 0 && (
-          <div className="flex flex-1 items-center justify-center border-2 border-dashed border-zinc-800/40 rounded-xl text-zinc-600 min-h-[100px]">
-            <p className="text-xs font-medium">Soltar aquí</p>
+          <div
+            className={cn(
+              'flex min-h-[100px] flex-1 items-center justify-center rounded-xl border border-dashed text-xs font-medium transition-colors',
+              destacado ? 'border-yellow-400/50 text-yellow-200' : 'border-white/10 text-muted-foreground',
+            )}
+          >
+            Soltá acá para Menor espera
           </div>
         )}
       </div>
@@ -893,6 +1041,8 @@ function BarberRow({
   getBranchName,
   timezone,
   nextAppointment,
+  cortesHoy = 0,
+  destacado = false,
 }: {
   barber: BarberRow
   entries: QueueEntry[]
@@ -910,6 +1060,10 @@ function BarberRow({
   getBranchName: (id: string) => string
   timezone: string
   nextAppointment?: NextAppointmentInfo | null
+  /** Cortes cobrados hoy. */
+  cortesHoy?: number
+  /** Hay algo arrastrándose sobre este carril. */
+  destacado?: boolean
 }) {
   const { setNodeRef } = useSortable({
     id: barber.id,
@@ -932,94 +1086,119 @@ function BarberRow({
     )
   const isUnavailable = isHidden || isNotClocked || !!isShiftEnd
 
+  // El estado del barbero: la etiqueta y el anillo de la foto dicen lo mismo.
+  // Verde cortando, ámbar descanso o fin de turno, blanco libre (lo que el
+  // mostrador tiene que mirar), gris si no está para la fila.
   let statusText: string
   let statusClass: string
-  let dotClass: string
+  let anillo: string
 
   if (isHidden) {
     statusText = 'Oculto en check-in'
-    statusClass = 'text-zinc-500'
-    dotClass = 'bg-zinc-600'
+    statusClass = 'text-muted-foreground'
+    anillo = 'ring-white/15'
   } else if (isNotClocked) {
     statusText = 'Sin entrada'
-    statusClass = 'text-zinc-500'
-    dotClass = 'bg-zinc-600'
+    statusClass = 'text-muted-foreground'
+    anillo = 'ring-white/15'
   } else if (isShiftEnd) {
     statusText = 'Fin de turno'
-    statusClass = 'text-amber-400'
-    dotClass = 'bg-amber-500'
+    statusClass = 'text-amber-300'
+    anillo = 'ring-amber-500/60'
   } else if (inProgressEntry) {
     statusText = inProgressEntry.is_break ? 'En descanso' : 'Atendiendo'
-    statusClass = inProgressEntry.is_break ? 'text-amber-400' : 'text-green-400'
-    dotClass = inProgressEntry.is_break ? 'bg-amber-500' : 'bg-green-500'
+    statusClass = inProgressEntry.is_break ? 'text-amber-300' : 'text-emerald-300'
+    anillo = inProgressEntry.is_break ? 'ring-amber-400' : 'ring-emerald-400'
   } else {
     statusText = 'Disponible'
-    statusClass = 'text-zinc-400'
-    dotClass = 'bg-emerald-500'
+    statusClass = 'text-foreground'
+    anillo = 'ring-foreground/80'
   }
 
   const entryIds = useMemo(() => entries.map((e) => e.id), [entries])
+  const tablero = useContext(TableroContext)
+  const sigueId = quienSigue(entries, tablero, nextAppointment)
+  const enEspera = entries.filter((e) => !e.is_break).length
 
   return (
-    <div className={`flex flex-col md:flex-row md:min-h-[100px] md:items-stretch border-b border-zinc-800/80 ${isUnavailable ? 'opacity-60' : ''}`}>
-      {/* ── Info Barbero (Celda Fija y Sticky) ── */}
-      <div className="md:sticky md:left-[260px] z-20 w-full md:w-[200px] md:shrink-0 border-b md:border-b-0 md:border-r border-zinc-800/80 bg-zinc-950 px-3 py-2 md:p-3 flex items-center justify-start md:shadow-[8px_0_16px_-12px_rgba(0,0,0,0.8)]">
-        <div className="flex flex-row items-center gap-2.5 md:gap-3 text-left w-full">
-          <div className="relative h-10 w-10 md:h-12 md:w-12 shrink-0">
-            <div className="h-full w-full rounded-full bg-zinc-800 overflow-hidden ring-2 ring-zinc-800">
-              {barber.avatar_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={barber.avatar_url}
-                  alt={barber.full_name}
-                  className="h-full w-full object-cover"
-                  style={{ objectPosition: 'center 15%' }}
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center">
-                  <User className="size-6 text-zinc-500" />
-                </div>
-              )}
-            </div>
-            <div className={`absolute -right-0.5 -bottom-0.5 size-3.5 rounded-full ring-2 ring-zinc-900 z-10 ${dotClass}`} />
-          </div>
-          
-          <div className="min-w-0 flex-1">
-            <h3 className="truncate font-bold text-zinc-100 text-sm">{barber.full_name}</h3>
-            <p className={`truncate text-xs mt-0.5 font-medium ${statusClass}`}>{statusText}</p>
-            {/* Próximo turno del día: hasta acá el dashboard no tenía forma de
-                saber que a este barbero le entra alguien con hora reservada. */}
-            {nextAppointment && (
-              <p
-                className="mt-1 flex items-center gap-1 text-[11px] font-medium text-violet-400"
-                title={`Próximo turno ${nextAppointment.timeLabel} · ${nextAppointment.appointment.client?.name ?? 'Cliente'}`}
-              >
-                <CalendarClock className="size-3 shrink-0" />
-                <span className="truncate">
-                  Turno {nextAppointment.timeLabel} · {nextAppointment.appointment.client?.name ?? 'Cliente'}
-                </span>
-                {nextAppointment.minutesUntil <= 60 && (
-                  <span className="shrink-0 rounded bg-violet-500/15 px-1 py-px text-[10px] tabular-nums text-violet-300">
-                    {nextAppointment.minutesUntil <= 1 ? 'ahora' : `${nextAppointment.minutesUntil}m`}
-                  </span>
-                )}
-              </p>
+    <div
+      className={cn(
+        'flex flex-col border-b border-white/[0.07] transition-colors duration-150 md:min-h-[96px] md:flex-row md:items-stretch',
+        isUnavailable && !destacado && 'opacity-60',
+        destacado && 'bg-white/[0.06]',
+      )}
+    >
+      {/* ── El barbero (celda fija, pegada a la izquierda al scrollear) ── */}
+      <div
+        className={cn(
+          'z-20 flex w-full items-center gap-3 border-b border-white/[0.07] px-3 py-2.5 transition-[background-color,box-shadow] md:sticky md:left-[280px] md:w-[216px] md:shrink-0 md:border-b-0 md:border-r md:px-3.5',
+          destacado
+            ? 'bg-card shadow-[inset_4px_0_0_0_rgb(255_255_255/0.85)] md:shadow-[inset_4px_0_0_0_rgb(255_255_255/0.85),8px_0_16px_-12px_rgba(0,0,0,0.8)]'
+            : 'bg-background md:shadow-[8px_0_16px_-12px_rgba(0,0,0,0.8)]',
+        )}
+      >
+        <span
+          className={cn(
+            'relative flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted ring-2 ring-offset-2 ring-offset-background',
+            anillo,
+          )}
+        >
+          {barber.avatar_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={barber.avatar_url}
+              alt={barber.full_name}
+              className="h-full w-full object-cover"
+              style={{ objectPosition: 'center 15%' }}
+              draggable={false}
+            />
+          ) : (
+            <User className="size-5 text-muted-foreground" aria-hidden />
+          )}
+        </span>
+
+        <div className="min-w-0 flex-1">
+          <h3 className="line-clamp-2 text-sm font-semibold leading-tight text-foreground">{barber.full_name}</h3>
+          <p className={cn('mt-0.5 truncate text-xs font-medium', statusClass)}>{statusText}</p>
+          <p className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1" title={`${cortesHoy} ${cortesHoy === 1 ? 'corte' : 'cortes'} hoy`}>
+              <Scissors className="size-3" aria-hidden />
+              <span className="font-mono tabular-nums">{cortesHoy}</span> hoy
+            </span>
+            {enEspera > 0 && (
+              <span>
+                <span className="font-mono tabular-nums text-foreground/80">{enEspera}</span> en espera
+              </span>
             )}
-          </div>
+          </p>
+          {/* Próximo turno del día: hasta acá el dashboard no tenía forma de
+              saber que a este barbero le entra alguien con hora reservada. */}
+          {nextAppointment && (
+            <p
+              className="mt-1 flex items-center gap-1 text-[11px] font-medium text-violet-300"
+              title={`Próximo turno ${nextAppointment.timeLabel} · ${nextAppointment.appointment.client?.name ?? 'Cliente'}`}
+            >
+              <CalendarClock className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">
+                Turno {nextAppointment.timeLabel} · {nextAppointment.appointment.client?.name ?? 'Cliente'}
+              </span>
+              {nextAppointment.minutesUntil <= 60 && (
+                <span className="shrink-0 rounded bg-violet-500/15 px-1 py-px font-mono text-[10px] tabular-nums text-violet-200">
+                  {nextAppointment.minutesUntil <= 1 ? 'ahora' : `${nextAppointment.minutesUntil}m`}
+                </span>
+              )}
+            </p>
+          )}
         </div>
       </div>
 
-      {/* ── Fila de Clientes (Arrastrables con grid infinito css) ── */}
+      {/* ── Sus clientes, de izquierda a derecha (arrastrables) ── */}
       <div
         ref={setNodeRef}
-        className="flex-1 flex flex-col md:flex-row isolate bg-zinc-900/10 md:min-w-[260px] p-2 md:p-0 gap-1.5 md:gap-0"
-        style={{
-          backgroundSize: '260px 100%',
-          backgroundImage: 'linear-gradient(to right, transparent 259px, rgba(39, 39, 42, 0.4) 259px, rgba(39, 39, 42, 0.4) 260px)'
-        }}
+        className="isolate flex flex-1 flex-col gap-1.5 p-2 md:min-w-[280px] md:flex-row md:gap-0 md:p-0"
       >
         {inProgressEntry && (
-          <div className="w-full md:w-[260px] md:shrink-0 md:p-3">
+          <div className="w-full md:w-[272px] md:shrink-0 md:p-2">
             <InProgressCard
               entry={inProgressEntry}
               formatElapsed={formatElapsed}
@@ -1032,7 +1211,7 @@ function BarberRow({
 
         <SortableContext items={entryIds} strategy={horizontalListSortingStrategy}>
           {entries.map((entry) => (
-            <div key={entry.id} className="w-full md:w-[260px] md:shrink-0 md:p-3">
+            <div key={entry.id} className="w-full md:w-[272px] md:shrink-0 md:p-2">
               <QueueCard
                 entry={entry}
                 formatElapsed={formatElapsed}
@@ -1042,19 +1221,57 @@ function BarberRow({
                 selectedBranchId={selectedBranchId}
                 getBranchName={getBranchName}
                 timezone={timezone}
+                sigue={entry.id === sigueId}
               />
             </div>
           ))}
         </SortableContext>
-        
-        {/* Un único filler para ayudar al drop visual si está vacío */}
+
+        {/* Carril vacío: un solo lugar, que se ilumina si le están por soltar a alguien */}
         {entries.length === 0 && !inProgressEntry && (
-          <div className="w-full md:w-[260px] p-3 flex items-center justify-center text-zinc-600/50">
-            <p className="text-xs font-medium bg-zinc-900/40 px-3 py-1.5 rounded-md border border-zinc-800/40">Vacío</p>
+          <div className="w-full md:w-[272px] md:shrink-0 md:p-2">
+            <div
+              className={cn(
+                'flex h-full min-h-[3.25rem] items-center justify-center rounded-xl border border-dashed text-xs font-medium transition-colors',
+                destacado ? 'border-white/40 text-foreground' : 'border-white/[0.08] text-muted-foreground/70',
+              )}
+            >
+              {destacado ? 'Soltá acá' : 'Sin clientes'}
+            </div>
           </div>
         )}
 
-        <div className="hidden md:flex md:flex-1 md:min-w-[260px]" />
+        <div className="hidden md:flex md:min-w-[272px] md:flex-1" />
+      </div>
+    </div>
+  )
+}
+
+// ─── Resumen ────────────────────────────────────────────────────────────────
+
+/** Un número del resumen de arriba, con lo que lo explica al lado. */
+function ResumenFila({
+  icono,
+  fondoIcono,
+  titulo,
+  valor,
+  detalle,
+}: {
+  icono: React.ReactNode
+  fondoIcono: string
+  titulo: string
+  valor: number
+  detalle?: React.ReactNode
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-2.5 rounded-xl border border-white/[0.08] bg-white/[0.025] px-3 py-2.5">
+      <span className={cn('hidden size-9 shrink-0 items-center justify-center rounded-lg sm:flex', fondoIcono)}>{icono}</span>
+      <div className="min-w-0">
+        <p className="truncate text-[11px] leading-none text-muted-foreground">{titulo}</p>
+        <p className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-1.5 leading-none">
+          <span className="font-mono text-xl font-semibold tabular-nums text-foreground">{valor}</span>
+          {detalle && <span className="truncate text-[11px] text-muted-foreground">{detalle}</span>}
+        </p>
       </div>
     </div>
   )
@@ -1085,6 +1302,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
 
   const [draggedEntry, setDraggedEntry] = useState<QueueEntry | null>(null)
   const [draggedTemplate, setDraggedTemplate] = useState<BreakConfig | null>(null)
+  /** El carril (barbero o Dinámicos) sobre el que se está arrastrando: se ilumina. */
+  const [carrilDestino, setCarrilDestino] = useState<ColumnId | null>(null)
 
   // ── Registro manual & búsqueda de clientes ─────────────────────────────────
   const [manualDialogOpen, setManualDialogOpen] = useState(false)
@@ -1262,6 +1481,24 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     (entry: QueueEntry) => (entry.appointment_id ? horaPorTurno.get(entry.appointment_id) ?? null : null),
     [horaPorTurno],
   )
+
+  /** Instante (ms) de la hora reservada de cada turno del día. */
+  const inicioPorTurno = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const a of todayAppointments) map.set(a.id, appointmentInstantMs(a.appointment_date, a.start_time, timezone))
+    return map
+  }, [todayAppointments, timezone])
+
+  const inicioDeTurno = useCallback(
+    (entry: QueueEntry) => {
+      const deLaAgenda = entry.appointment_id ? inicioPorTurno.get(entry.appointment_id) : undefined
+      return deLaAgenda !== undefined && Number.isFinite(deLaAgenda) ? deLaAgenda : new Date(entry.priority_order).getTime()
+    },
+    [inicioPorTurno],
+  )
+
+  /** Lo que las tarjetas leen del tablero: la hora de los turnos y el reloj de 5 s. */
+  const tablero = useMemo(() => ({ horaDeTurno, inicioDeTurno, ahora: now }), [horaDeTurno, inicioDeTurno, now])
 
   // Un fetch al montar (y al cambiar de sucursal) + el refresco de 60s de más
   // abajo. Sin realtime ni polling corto: es dato de baja frecuencia y la DB ya
@@ -1694,7 +1931,10 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
 
   function handleDragOver(event: DragOverEvent) {
     const { active, over } = event
-    if (!over) return
+    if (!over) {
+      setCarrilDestino(null)
+      return
+    }
 
     const activeId = active.id
     const overId = over.id
@@ -1711,21 +1951,27 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       if (overEntry) targetColId = getEntryColumnId(overEntry)
     }
 
-    if (!targetColId) return
+    if (!targetColId) {
+      setCarrilDestino(null)
+      return
+    }
 
     if (isTemplate) {
       // It's a template, don't update `entries` optimistically during dragOver since it's not a real entry
-      // It just hovers perfectly fine thanks to DragOverlay.
+      // It just hovers perfectly fine thanks to DragOverlay. Un descanso sólo va a un barbero.
+      setCarrilDestino(targetColId === '__dynamic__' ? null : targetColId)
       return
     }
 
     // Encontrar entry original
     const activeEntry = entries.find(e => e.id === activeId)
     if (!activeEntry) return
+    const otraSucursal = esDeOtraSucursal(activeEntry, targetColId, entries.find(e => e.id === overId))
+    setCarrilDestino(otraSucursal ? null : targetColId)
     const activeColId = getEntryColumnId(activeEntry)
 
     if (activeColId === targetColId) return
-    if (esDeOtraSucursal(activeEntry, targetColId, entries.find(e => e.id === overId))) return
+    if (otraSucursal) return
 
     // Mover optimísticamente de columna usando setEntries
     setEntries(prev => {
@@ -1759,6 +2005,10 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
   async function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event
     setDraggedEntry(null)
+    // También el descanso en la mano: si quedaba puesto, el arrastre siguiente
+    // de un cliente dibujaba las dos fichas juntas debajo del puntero.
+    setDraggedTemplate(null)
+    setCarrilDestino(null)
     marcarArrastre(false)
 
     if (!over) {
@@ -2159,6 +2409,18 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
     }),
   }
 
+  // ── Resumen ─────────────────────────────────────────────────────────────
+
+  const descansosVisibles = breakConfigs.filter((c) => !selectedBranchId || c.branch_id === selectedBranchId)
+  const enAtencion = branchEntries.filter((e) => e.status === 'in_progress' && !e.is_break).length
+  const esperando = branchEntries.filter((e) => e.status === 'waiting' && !e.is_break)
+  const enCola = esperando.length
+  const esperaMasLarga = esperando.reduce((max, e) => Math.max(max, minutosDesde(e.checked_in_at, now)), 0)
+  const fichados = filteredBarbers.filter((b) => !notClockedInBarbers.has(b.id)).length
+  const serviciosDelDia = selectedBranchId
+    ? filteredBarbers.reduce((sum, b) => sum + (dailyServiceCounts[b.id] || 0), 0)
+    : Object.values(dailyServiceCounts).reduce((a, b) => a + b, 0)
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -2171,11 +2433,12 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       onDragCancel={() => {
         setDraggedEntry(null)
         setDraggedTemplate(null)
+        setCarrilDestino(null)
         marcarArrastre(false)
         fetchQueue() // reset visual state
       }}
     >
-      <HoraDeTurnoContext.Provider value={horaDeTurno}>
+      <TableroContext.Provider value={tablero}>
       {/* La PC del mostrador queda en esta pantalla todo el día: después de un
           deploy se recarga sola cuando está ociosa (sin diálogos abiertos, sin
           nada escrito a medias, un minuto sin tocarla). Ver src/lib/recarga-version.ts. */}
@@ -2185,10 +2448,11 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
         {/* Encabezado y Descansos (Top Bar) */}
         <div className="flex shrink-0 flex-col gap-2 lg:gap-3 px-2">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <div>
-              <h2 className="text-lg lg:text-xl font-bold tracking-tight">Fila en vivo</h2>
-              <p className="text-xs text-muted-foreground hidden sm:block">
-                Arrastrá clientes o descansos libremente para asignarlos o reordenarlos.
+            <div className="min-w-0">
+              <h2 className="text-xl font-semibold tracking-[-0.01em] lg:text-2xl">Fila en vivo</h2>
+              <p className="mt-0.5 hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
+                <GripVertical className="size-3.5 shrink-0" aria-hidden />
+                Arrastrá a un cliente al carril de un barbero para pasárselo, o entre clientes para cambiarle el lugar.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -2196,8 +2460,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="outline"
-                    size="sm"
-                    className="gap-1.5 shrink-0"
+                    className="h-9 shrink-0 gap-1.5"
                   >
                     <UserPlus className="size-4" />
                     <span className="hidden sm:inline">Registrar cliente</span>
@@ -2465,71 +2728,65 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
             </Dialog>
           </div>
           
-          <div className="flex items-center gap-2 lg:gap-3 overflow-x-auto pb-1 lg:pb-2 -mx-1 px-1">
+          <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <a
               href="/dashboard/equipo?tab=descansos"
-              className="flex items-center gap-1.5 lg:gap-2 px-2.5 lg:px-3 py-1.5 lg:py-2 rounded-lg bg-amber-500/10 text-amber-500 text-xs lg:text-sm font-bold border border-amber-500/20 shrink-0 transition-colors active:bg-amber-500/20"
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3 text-xs font-semibold text-muted-foreground transition-colors hover:border-white/25 hover:text-foreground"
+              title="Configurar los descansos de la sucursal"
             >
-              <Pause className="size-3.5 lg:size-4" />
-              {breakConfigs.filter((c) => !selectedBranchId || c.branch_id === selectedBranchId).length > 0
-                ? 'Descansos'
-                : 'Sin descansos'}
+              <Settings2 className="size-3.5" aria-hidden />
+              {descansosVisibles.length > 0 ? 'Descansos' : 'Sin descansos · configurar'}
             </a>
-            {breakConfigs
-              .filter((c) => !selectedBranchId || c.branch_id === selectedBranchId)
-              .map((config) => (
-                <div key={config.id} className="w-40 lg:w-48 shrink-0">
-                  <BreakTemplateCard config={config} />
-                </div>
-              ))}
+            {descansosVisibles.map((config) => (
+              <div key={config.id} className="shrink-0">
+                <BreakTemplateCard config={config} />
+              </div>
+            ))}
+            {descansosVisibles.length > 0 && (
+              <span className="hidden shrink-0 text-xs text-muted-foreground lg:inline">Arrastralos al carril de un barbero</span>
+            )}
           </div>
         </div>
 
-        {/* Cards resumen rápido */}
-        <div className="grid grid-cols-3 gap-2 lg:gap-3 shrink-0 px-2">
-          <div className="flex items-center gap-2.5 rounded-xl border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
-            <div className="flex size-8 items-center justify-center rounded-lg bg-blue-500/15">
-              <Scissors className="size-4 text-blue-400" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-[11px] text-muted-foreground leading-none">En atención</p>
-              <p className="text-lg font-bold leading-tight text-zinc-100">
-                {branchEntries.filter(e => e.status === 'in_progress' && !e.is_break).length}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2.5 rounded-xl border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
-            <div className="flex size-8 items-center justify-center rounded-lg bg-amber-500/15">
-              <Clock className="size-4 text-amber-400" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-[11px] text-muted-foreground leading-none">En cola</p>
-              <p className="text-lg font-bold leading-tight text-zinc-100">
-                {branchEntries.filter(e => e.status === 'waiting' && !e.is_break).length}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2.5 rounded-xl border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
-            <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-500/15">
-              <Check className="size-4 text-emerald-400" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-[11px] text-muted-foreground leading-none">Servicios del día</p>
-              <p className="text-lg font-bold leading-tight text-zinc-100">
-                {selectedBranchId
-                  ? filteredBarbers.reduce((sum, b) => sum + (dailyServiceCounts[b.id] || 0), 0)
-                  : Object.values(dailyServiceCounts).reduce((a, b) => a + b, 0)}
-              </p>
-            </div>
-          </div>
+        {/* Resumen rápido: tres números y lo que los explica */}
+        <div className="grid shrink-0 grid-cols-3 gap-2 px-2 lg:gap-3">
+          <ResumenFila
+            icono={<Scissors className="size-4 text-emerald-300" aria-hidden />}
+            fondoIcono="bg-emerald-500/12"
+            titulo="En atención"
+            valor={enAtencion}
+            detalle={fichados > 0 ? `de ${fichados} ${fichados === 1 ? 'fichado' : 'fichados'}` : undefined}
+          />
+          <ResumenFila
+            icono={<Clock className="size-4 text-amber-300" aria-hidden />}
+            fondoIcono="bg-amber-500/12"
+            titulo="En cola"
+            valor={enCola}
+            detalle={
+              enCola > 0 ? (
+                <>
+                  máx.{' '}
+                  <span className={cn('font-mono font-semibold tabular-nums', TEXTO_ESPERA[nivelEspera(esperaMasLarga)])}>
+                    {formatoEspera(esperaMasLarga)}
+                  </span>
+                </>
+              ) : undefined
+            }
+          />
+          <ResumenFila
+            icono={<Check className="size-4 text-sky-300" aria-hidden />}
+            fondoIcono="bg-sky-500/12"
+            titulo="Servicios hoy"
+            valor={serviciosDelDia}
+          />
         </div>
 
         {/* Tablero Kanban (Grid Layout) */}
-        <div className="relative mt-1 flex flex-none overflow-visible border-t border-zinc-800/80 bg-zinc-950/40 lg:mt-2 md:min-h-0 md:flex-1 md:overflow-auto">
+        <div className="relative mx-1 mt-1 flex flex-none overflow-visible rounded-2xl border border-white/[0.08] bg-background lg:mt-2 md:min-h-0 md:flex-1 md:overflow-auto">
           <div className="flex flex-col md:flex-row md:min-w-max w-full md:h-full">
 
             {/* Columna Dinámicos (Sticky a la izquierda) */}
-            <div className="md:sticky md:left-0 z-30 flex md:shrink-0 md:shadow-[4px_0_24px_-8px_rgba(0,0,0,0.8)] bg-zinc-950">
+            <div className="z-30 flex bg-background md:sticky md:left-0 md:shrink-0 md:shadow-[4px_0_24px_-8px_rgba(0,0,0,0.8)]">
               {/* `onStartService` también acá: el commit 2b42cc5 le agregó a las
                   tarjetas del pool el botón que abre "¿Quién lo atiende?", pero esta
                   columna —la única donde viven— nunca recibió el handler, así que el
@@ -2545,11 +2802,12 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
                 getBranchName={getBranchName}
                 getBarberName={getBarberName}
                 timezone={timezone}
+                destacado={carrilDestino === '__dynamic__'}
               />
             </div>
 
             {/* Filas de Barberos (Se expanden a la derecha) */}
-            <div className="flex-1 flex flex-col bg-zinc-950/20 md:min-w-max">
+            <div className="flex flex-1 flex-col md:min-w-max">
               {filteredBarbers.map((barber) => (
                 <BarberRow
                   key={barber.id}
@@ -2569,6 +2827,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
                   getBranchName={getBranchName}
                   timezone={timezone}
                   nextAppointment={nextAppointmentByBarber[barber.id]}
+                  cortesHoy={dailyServiceCounts[barber.id] || 0}
+                  destacado={carrilDestino === barber.id}
                 />
               ))}
             </div>
@@ -2579,7 +2839,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       <DragOverlay dropAnimation={dropAnimation}>
         {draggedEntry && <DragGhost entry={draggedEntry} />}
         {draggedTemplate && (
-          <div className="rotate-[2deg] scale-105 opacity-90 w-[270px] pointer-events-none">
+          <div className="pointer-events-none w-[220px] motion-safe:rotate-[2deg]">
             <BreakTemplateCard config={draggedTemplate} />
           </div>
         )}
@@ -2746,7 +3006,7 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      </HoraDeTurnoContext.Provider>
+      </TableroContext.Provider>
     </DndContext>
   )
 }

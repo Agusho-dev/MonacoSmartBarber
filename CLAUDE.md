@@ -218,6 +218,14 @@ El 19/oct/2026 se probó una "fila única" (una lista en orden de llegada más u
 - **`startService` deja el turno "en curso" también en la agenda** (antes seguía `checked_in` durante el corte arrancado desde el tablero).
 - La lectura de la agenda del día ya no deja una promesa rechazada sin atrapar cuando falla la red.
 
+**Rediseño visual con la misma estructura** (19/oct/2026, pedido del dueño: «mejorarlo pero manteniendo la misma estructura»): las mismas piezas (Dinámicos a la izquierda, un carril por barbero con su celda fija, barra de descansos, tres números arriba) con otra piel:
+- La tarjeta muestra el nombre entero, la espera con los colores del panel (ámbar a los 40 min, rojo a los 70) y una barra por el borde de abajo que se llena a las 2 h.
+- **"Sigue"** marca al próximo de cada carril con las reglas de `claim_next_for_barber` (`quienSigue`): un descanso pendiente adelante va primero, un turno cuya hora llegó antes que los walk-ins, y con un turno dentro de la ventana de protección el del turno (o nadie). La hora del turno sale de la agenda (`TableroContext.inicioDeTurno`).
+- El corte en curso mide los minutos como el panel (`computeMinutes`, sin las pausas) con el semáforo (ámbar desde 35, rojo desde 45).
+- El carril sobre el que se arrastra se ilumina (`carrilDestino`).
+- Las tarjetas son `shrink-0`: en Dinámicos, una columna de alto fijo, se aplastaban y cortaban su segundo renglón (pasaba también antes).
+- Al soltar se limpia también el descanso en la mano: si quedaba puesto, el arrastre siguiente de un cliente dibujaba las dos fichas juntas.
+
 ### Recarga por versión (después de cada deploy)
 
 `/api/version` devuelve el commit del deployment y `NEXT_PUBLIC_VERSION_APP` (next.config) lo hornea en el bundle. `RecargaPorVersion` (montado en el panel, el kiosko, la TV y `/dashboard/fila`) recarga con `src/lib/recarga-version.ts` SÓLO en reposo: visible, online, sin `[role=dialog]`/`[role=alertdialog]` abiertos (salvo `data-recarga-permitida`), sin foco en un campo, sin `html[data-subiendo-fotos]`, 60 s sin tocar; el kiosko además exige `html[data-kiosko-en-reposo]`. Una recarga por versión cada 10 min como máximo. En los `catch` de server actions: `esErrorDeVersion(e)` → `avisarYRecargarPorVersion()` (o `TEXTO_RECARGA_MANUAL` si la guarda no deja). No fijar `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` (ver Known Risk #38 del CLAUDE.md raíz).
