@@ -2445,17 +2445,30 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       <RecargaPorVersion superficie="panel" />
       <div className="flex flex-col gap-2 lg:gap-4 p-1 max-md:pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:h-[calc(100dvh-9rem)] lg:h-[calc(100dvh-9.5rem)] md:overflow-hidden">
 
-        {/* Encabezado y Descansos (Top Bar) */}
-        <div className="flex shrink-0 flex-col gap-2 lg:gap-3 px-2">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <div className="min-w-0">
-              <h2 className="text-xl font-semibold tracking-[-0.01em] lg:text-2xl">Fila en vivo</h2>
-              <p className="mt-0.5 hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
-                <GripVertical className="size-3.5 shrink-0" aria-hidden />
-                Arrastrá a un cliente al carril de un barbero para pasárselo, o entre clientes para cambiarle el lugar.
-              </p>
+        {/* Un solo renglón arriba (sin título: el tablero se lleva el lugar).
+            Descansos para arrastrar a la izquierda; registrar cliente y la
+            sucursal a la derecha (en el celular, arriba). */}
+        <div className="flex shrink-0 flex-col gap-2 px-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <div className="-mx-1 flex min-w-0 flex-1 items-center gap-2 overflow-x-auto px-1 py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <a
+                href="/dashboard/equipo?tab=descansos"
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3 text-xs font-semibold text-muted-foreground transition-colors hover:border-white/25 hover:text-foreground"
+                title="Configurar los descansos de la sucursal"
+              >
+                <Settings2 className="size-3.5" aria-hidden />
+                {descansosVisibles.length > 0 ? 'Descansos' : 'Sin descansos · configurar'}
+              </a>
+              {descansosVisibles.map((config) => (
+                <div key={config.id} className="shrink-0">
+                  <BreakTemplateCard config={config} />
+                </div>
+              ))}
+              {descansosVisibles.length > 0 && (
+                <span className="hidden shrink-0 text-xs text-muted-foreground xl:inline">Arrastralos al carril de un barbero</span>
+              )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="order-first flex shrink-0 items-center gap-2 sm:order-none">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -2726,25 +2739,6 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
                 </div>
               </DialogContent>
             </Dialog>
-          </div>
-          
-          <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <a
-              href="/dashboard/equipo?tab=descansos"
-              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3 text-xs font-semibold text-muted-foreground transition-colors hover:border-white/25 hover:text-foreground"
-              title="Configurar los descansos de la sucursal"
-            >
-              <Settings2 className="size-3.5" aria-hidden />
-              {descansosVisibles.length > 0 ? 'Descansos' : 'Sin descansos · configurar'}
-            </a>
-            {descansosVisibles.map((config) => (
-              <div key={config.id} className="shrink-0">
-                <BreakTemplateCard config={config} />
-              </div>
-            ))}
-            {descansosVisibles.length > 0 && (
-              <span className="hidden shrink-0 text-xs text-muted-foreground lg:inline">Arrastralos al carril de un barbero</span>
-            )}
           </div>
         </div>
 
