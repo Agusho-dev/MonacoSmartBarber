@@ -5,7 +5,6 @@ import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { getAppointmentsForDateMultiBranch, getAppointmentSettings } from '@/lib/actions/appointments'
 import { getActiveTimezone } from '@/lib/i18n'
 import { getLocalDateStr } from '@/lib/time-utils'
-import { protectionWindowMinutes } from '@/lib/queue-appointments'
 import { redirect } from 'next/navigation'
 import { FilaClient } from './fila-client'
 import { FilaTabsWrapper } from './fila-tabs-wrapper'
@@ -85,42 +84,15 @@ export default async function FilaAdminPage() {
 
   // Cargar turnos del día para todas las sucursales en una sola query
   // (en lugar de N queries con assertBranchAccess interno cada una).
-  const [allAppointments, { data: ajustesTurnos }, { data: personalTurnos }] = await Promise.all([
-    getAppointmentsForDateMultiBranch(
-      (branches ?? []).map(b => b.id),
-      today
-    ),
-    // Para que el tablero sugiera lo mismo que `claim_next_for_barber`: la
-    // ventana de protección de cada sucursal y quién atiende sólo turnos.
-    supabase
-      .from('appointment_settings')
-      .select('branch_id, buffer_minutes')
-      .eq('organization_id', orgId),
-    supabase
-      .from('appointment_staff')
-      .select('staff_id, walkin_mode')
-      .eq('organization_id', orgId)
-      .eq('walkin_mode', 'appointments_only'),
-  ])
-
-  // La misma resolución que el RPC: la fila de la sucursal si existe (aunque su
-  // buffer sea NULL), si no la de la organización, y 10 min por defecto.
-  const ajustes = (ajustesTurnos ?? []) as { branch_id: string | null; buffer_minutes: number | null }[]
-  const ajusteOrg = ajustes.find((a) => a.branch_id === null)
-  const ventanaPorSucursal: Record<string, number> = {}
-  for (const b of branches ?? []) {
-    const fila = ajustes.find((a) => a.branch_id === b.id) ?? ajusteOrg
-    ventanaPorSucursal[b.id] = protectionWindowMinutes(fila?.buffer_minutes)
-  }
-  const soloTurnos = ((personalTurnos ?? []) as { staff_id: string }[]).map((p) => p.staff_id)
+  const allAppointments = await getAppointmentsForDateMultiBranch(
+    (branches ?? []).map(b => b.id),
+    today
+  )
 
   return (
     <FilaTabsWrapper
       appointments={allAppointments}
       noShowToleranceMinutes={settings?.no_show_tolerance_minutes ?? 15}
-      branches={branches ?? []}
-      barbers={barbers ?? []}
-      orgId={orgId}
     >
       <FilaClient
         initialEntries={entries ?? []}
@@ -129,8 +101,6 @@ export default async function FilaAdminPage() {
         breakConfigs={breakConfigs ?? []}
         timezone={timezone}
         orgId={orgId}
-        ventanaPorSucursal={ventanaPorSucursal}
-        soloTurnos={soloTurnos}
       />
     </FilaTabsWrapper>
   )

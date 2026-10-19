@@ -1,57 +1,36 @@
 'use client'
 
-/*
- * Tablero de /dashboard/fila — "la fila única" (rediseño oct/2026).
- *
- * THESIS: la fila es UNA, en orden de llegada, y fluye hacia las sillas. A la
- *   izquierda quién espera, con su espera dibujada; a la derecha cada silla con
- *   quién está cortando y hace cuánto. Reemplaza el tablero de carriles por
- *   barbero, que llenaba la pantalla de celdas "Vacío" y escondía quién llevaba
- *   más tiempo esperando.
- * OWN-WORLD: el oscuro del dashboard (fondo, superficies `card`, hairlines), una
- *   sola familia (Geist) y mono sólo para medir (minutos, conteos, orden). El
- *   color sólo dice algo: verde cortando, blanco libre, ámbar descanso y demora,
- *   rojo crítico, celeste Menor espera, violeta turno, fucsia asesoría.
- * STORY: quien está en el mostrador ve de un vistazo quién espera hace más y qué
- *   silla está libre, y reparte arrastrando: agarra la tarjeta de un cliente y la
- *   suelta en la silla de un barbero (la gracia de la pantalla, dicho por el
- *   dueño). La silla se pone blanca ("Soltá acá"), la tarjeta en la mano dice a
- *   dónde va y qué lugar le toca, y el aviso trae "Deshacer". En la silla libre,
- *   "Atender a X" con lo que haría el motor. Anota a los que llegan desde arriba.
- * FIRST VIEWPORT: escritorio, dos paneles: la fila (tarjetas, con filtro por
- *   barbero) y la columna de sillas. Celular: las sillas en una tira deslizable y
- *   la fila debajo; al levantar una tarjeta (mantenerla apretada) los barberos
- *   suben en un dock abajo, al alcance del pulgar.
- * FINISH: unreviewed and undocumented is unfinished; this build ends with the
- *   finish review, the verdict, and DESIGN.md.
- */
-
-import Link from 'next/link'
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useVisibilityRefresh } from '@/hooks/use-visibility-refresh'
 import {
   DndContext,
   DragOverlay,
+  useDraggable,
   MouseSensor,
   TouchSensor,
   KeyboardSensor,
   useSensor,
   useSensors,
   pointerWithin,
-  closestCenter,
-  useDroppable,
-  type CollisionDetection,
+  rectIntersection,
   type DragEndEvent,
-  type DragOverEvent,
   type DragStartEvent,
-  type DropAnimation,
-  type Modifier,
+  type DragOverEvent,
+  type CollisionDetection,
   defaultDropAnimationSideEffects,
 } from '@dnd-kit/core'
-import { CSS, getEventCoordinates } from '@dnd-kit/utilities'
-import { SortableContext, verticalListSortingStrategy, arrayMove, sortableKeyboardCoordinates } from '@dnd-kit/sortable'
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  horizontalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { createClient } from '@/lib/supabase/client'
-import { cancelQueueEntry, updateQueueOrder, createBreakEntry, startService, cerrarSoloAsesoria } from '@/lib/actions/queue'
+import { cancelQueueEntry, updateQueueOrder, createBreakEntry, startService, checkinClient, cerrarSoloAsesoria } from '@/lib/actions/queue'
+import { asesoriaHabilitadaEnSucursal, type MotivoPedidoAsesoria } from '@/lib/actions/asesoria'
+import { searchClients } from '@/lib/actions/clients'
 import { CompleteServiceDialog, hayQueAnunciarCobro } from '@/components/barber/complete-service-dialog'
 import { AsesoriaBadge } from '@/components/barber/asesoria-badge'
 import { RecargaPorVersion } from '@/components/recarga-por-version'
@@ -67,50 +46,62 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Button } from '@/components/ui/button'
 import { useBranchStore } from '@/stores/branch-store'
-import type { Appointment, QueueEntry, StaffSchedule, Staff, BreakConfig, Service } from '@/lib/types/database'
+import { BranchSelector } from '@/components/dashboard/branch-selector'
+import { TurnoBadge } from '@/components/appointments/turno-badge'
+import type { Appointment, QueueEntry, StaffStatus, StaffSchedule, Staff, BreakConfig, Service } from '@/lib/types/database'
 import { esMovidaPorWhatsApp, isBarberBlockedByShiftEnd } from '@/lib/barber-utils'
 import {
   appointmentInstantMs,
+  appointmentTimeLabel,
   findNextAppointment,
   formatHourMinute,
-  protectionWindowMinutes,
   type NextAppointmentInfo,
 } from '@/lib/queue-appointments'
 import { getLocalDateStr } from '@/lib/time-utils'
-import { nivelEspera } from '@/components/barber/fila/espera'
-import { GripVertical, MessageCircleQuestionMark, Settings2, Users } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Clock, User, Scissors, X, Pause, GripVertical, Zap, UserPlus, Play, Check, ChevronDown, Search, FileEdit, ExternalLink, Sparkles, Info, CalendarClock, MessageCircle, MessageCircleQuestionMark } from 'lucide-react'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
-import {
-  POOL,
-  TEXTO_NIVEL,
-  esDelPool,
-  fechaLocal,
-  lugarAlPasar,
-  minutosDesde,
-  nombreDePila,
-  porOrdenDeLlegada,
-  type BarberRow,
-  type BranchRow,
-} from './_tablero/derivados'
-import { candidatoFifo, decidirSilla, type DecisionSilla } from './_tablero/motor'
-import { RenglonFila, RenglonFantasma, type DestinoEnLaMano, type DestinoFila } from './_tablero/renglon-fila'
-import {
-  FichaDescanso,
-  Silla,
-  SinFichar,
-  minutosEnLaSilla,
-  type AvisoSilla,
-  type EstadoSilla,
-  type SillaProps,
-  type SoltarEnSilla,
-} from './_tablero/silla'
-import { RielDeSillas } from './_tablero/riel-sillas'
-import { DockSoltar, type DestinoDock } from './_tablero/dock-soltar'
-import { FotoBarbero } from './_tablero/foto-barbero'
-import { TextoEspera } from './_tablero/texto-espera'
+
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+
+interface BarberRow {
+  id: string
+  full_name: string
+  branch_id: string | null
+  status: StaffStatus
+  is_active: boolean
+  hidden_from_checkin: boolean
+  avatar_url?: string | null
+}
+
+interface BranchRow {
+  id: string
+  name: string
+}
 
 interface FilaClientProps {
   initialEntries: QueueEntry[]
@@ -119,42 +110,16 @@ interface FilaClientProps {
   breakConfigs: BreakConfig[]
   timezone: string
   orgId: string
-  /**
-   * Ventana de protección de cada sucursal en minutos (45 + `buffer_minutes`,
-   * los mismos números que `claim_next_for_barber`): cuánto antes de un turno
-   * el motor deja de darle walk-ins al barbero.
-   */
-  ventanaPorSucursal: Record<string, number>
-  /** Barberos con `walkin_mode = 'appointments_only'`: sólo atienden turnos. */
-  soloTurnos: string[]
 }
 
-type Conexion = 'conectando' | 'en_vivo' | 'reconectando'
+type ColumnId = string // 'breaks', 'dynamic', or barber.id
 
-/** Las tres zonas del tablero donde importa dónde está el puntero al soltar. */
-interface ZonasDelTablero {
-  /** El contenedor que scrollea la lista de la fila. */
-  lista: HTMLElement | null
-  /** La columna de sillas del escritorio. */
-  sillas: HTMLElement | null
-  /** El dock de barberos del celular (sólo existe mientras se arrastra). */
-  dock: HTMLElement | null
-}
-
-type Punto = { x: number; y: number }
-type Caja = { top: number; bottom: number; left: number; right: number }
-
-/** La parte de un elemento que se ve en la pantalla (null si no se ve). */
-function cajaVisible(el: HTMLElement | null): Caja | null {
-  if (!el) return null
-  const r = el.getBoundingClientRect()
-  if (r.width === 0 || r.height === 0) return null
-  const top = Math.max(r.top, 0)
-  const bottom = Math.min(r.bottom, window.innerHeight)
-  return bottom > top ? { top, bottom, left: r.left, right: r.right } : null
-}
-
-const estaEn = (c: Caja | null, p: Punto) => !!c && p.x >= c.left && p.x <= c.right && p.y >= c.top && p.y <= c.bottom
+/**
+ * Valor del desplegable de servicio del registro manual que significa «pidió
+ * asesoría» (mig 217). Como en la tablet, la asesoría REEMPLAZA al servicio:
+ * se manda `asesoria=1` y ningún `service_id`.
+ */
+const OPCION_ASESORIA = '__asesoria__'
 
 /**
  * Una acción del tablero falló porque esta pestaña quedó con el bundle de un
@@ -175,195 +140,1001 @@ function avisarAccionFallida(e: unknown, texto: string) {
 }
 
 /**
- * Dónde cae lo que se arrastra. Soltar mal NUNCA puede cambiarle el lugar o el
- * barbero a nadie, así que todo lo que no sea un blanco claro devuelve vacío:
- *  1. adentro del dock del celular sólo cuentan sus barberos (el dock tapa la
- *     lista, y soltar en su fondo reordenaba la tarjeta de abajo);
- *  2. una silla o Menor espera, sólo con el puntero ADENTRO (y una silla, en la
- *     parte visible de la columna: las scrolleadas siguen teniendo rectángulo);
- *  3. entre tarjetas, sólo con el puntero sobre la parte VISIBLE de la lista y
- *     contra las tarjetas que se ven. Soltar en el título, en un costado o al
- *     lado de una silla no hace nada.
- * Con el teclado no hay puntero: la tarjeta más cercana (para pasarla a un
- * barbero está «Pasar a» en su menú).
+ * Detección de colisiones personalizada para el kanban horizontal.
+ * Prioriza pointerWithin (el puntero está DENTRO de un droppable) para que
+ * arrastrar a una fila vacía funcione correctamente. Si no hay coincidencia
+ * (ej. el puntero está entre filas), usa rectIntersection.
+ *
+ * Sin destino, no hay destino: hasta el 19/oct/2026 el último recurso era
+ * `closestCenter`, que SIEMPRE encuentra uno, así que soltar una tarjeta en el
+ * encabezado o en un costado vacío la pasaba al carril más cercano (le cambiaba
+ * el barbero o el lugar a alguien sin que nadie lo pidiera). Ahora vuelve a su
+ * lugar (`handleDragEnd` sin `over` relee la fila).
  */
-function detectarEnElTablero(args: Parameters<CollisionDetection>[0], zonas: ZonasDelTablero) {
-  const { droppableContainers, droppableRects, pointerCoordinates: p } = args
-  const datos = (id: string | number) => droppableContainers.find((c) => c.id === id)?.data.current
-  const esDestino = (id: string | number) => datos(id)?.type === 'Column'
-  const conArea = (id: string | number) => {
-    const r = droppableRects.get(id)
-    return !!r && r.width > 0 && r.height > 0
-  }
-  const tarjetas = droppableContainers.filter((c) => !esDestino(c.id) && conArea(c.id))
+const kanbanCollisionDetection: CollisionDetection = (args) => {
+  // 1. ¿El puntero está dentro de algún droppable?
+  const pointerCollisions = pointerWithin(args)
+  if (pointerCollisions.length > 0) return pointerCollisions
 
-  if (!p) return tarjetas.length > 0 ? closestCenter({ ...args, droppableContainers: tarjetas }) : []
+  // 2. ¿Hay intersección de rectangulos?
+  return rectIntersection(args)
+}
 
-  const dentro = pointerWithin(args).filter((c) => conArea(c.id))
+// ─── Asesoría en el registro manual ──────────────────────────────────────────
 
-  if (estaEn(cajaVisible(zonas.dock), p)) return dentro.filter((c) => datos(c.id)?.zona === 'dock')
-
-  const destinos = dentro.filter(
-    (c) => esDestino(c.id) && (datos(c.id)?.zona !== 'sillas' || estaEn(cajaVisible(zonas.sillas), p)),
+/** «Pidió asesoría» al pie del desplegable de servicio del registro (mig 217). */
+function OpcionAsesoriaDelRegistro() {
+  return (
+    <>
+      <SelectSeparator />
+      <SelectItem value={OPCION_ASESORIA}>
+        <MessageCircleQuestionMark className="text-fuchsia-300" aria-hidden />
+        Pidió asesoría · sin costo
+      </SelectItem>
+    </>
   )
-  if (destinos.length > 0) return destinos
-
-  const lista = cajaVisible(zonas.lista)
-  if (!lista || !estaEn(lista, p)) return []
-  const enVista = tarjetas.filter((c) => {
-    const r = droppableRects.get(c.id)
-    return !!r && r.bottom > lista.top && r.top < lista.bottom
-  })
-  if (enVista.length === 0) return []
-  const bajoElPuntero = dentro.filter((c) => enVista.some((t) => t.id === c.id))
-  if (bajoElPuntero.length > 0) return bajoElPuntero
-  // En el hueco entre dos tarjetas: la más cercana al PUNTERO (no a la tarjeta
-  // en la mano, que va corrida al costado del cursor).
-  let mejor: { id: string | number; distancia: number } | null = null
-  for (const c of enVista) {
-    const r = droppableRects.get(c.id)
-    if (!r) continue
-    const distancia = Math.abs(r.top + r.height / 2 - p.y)
-    if (!mejor || distancia < mejor.distancia) mejor = { id: c.id, distancia }
-  }
-  return mejor ? [{ id: mejor.id, data: { value: mejor.distancia } }] : []
 }
+
+/** Qué pasa con un cliente anotado pidiendo asesoría, dicho debajo del desplegable. */
+function AyudaAsesoriaDelRegistro() {
+  return (
+    <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+      <MessageCircleQuestionMark className="mt-px size-3.5 shrink-0 text-fuchsia-300" aria-hidden />
+      No sabe qué hacerse: le avisamos en el panel del barbero y él elige el servicio al cobrar.
+    </p>
+  )
+}
+
+// ─── Sortable QueueCard ────────────────────────────────────────────────────────
 
 /**
- * La tarjeta en la mano va al costado del puntero, no debajo: con el mouse,
- * abajo del cursor (como un archivo que se arrastra); con el dedo, arriba de la
- * yema. Así lo que está bajo el puntero —la silla que se pone blanca, "Soltá
- * acá"— siempre se ve. Nunca se sale de la pantalla: la columna de sillas está
- * contra el borde derecho.
+ * Hora RESERVADA de una entrada de turno, leída de la agenda del día (la
+ * provee el tablero). `null` si el turno no está en la agenda cargada.
  */
-const alLadoDelPuntero: Modifier = ({ activatorEvent, activeNodeRect, overlayNodeRect, transform, windowRect }) => {
-  if (!activatorEvent || !activeNodeRect) return transform
-  const p = getEventCoordinates(activatorEvent)
-  if (!p) return transform
-  const esToque = typeof TouchEvent !== 'undefined' && activatorEvent instanceof TouchEvent
-  const ancho = overlayNodeRect?.width ?? 304
-  const alto = overlayNodeRect?.height ?? 56
-  const anchoVentana = windowRect?.width ?? window.innerWidth
-  const altoVentana = windowRect?.height ?? window.innerHeight
-  // Dónde está el puntero ahora (donde se agarró + lo que se movió).
-  const x = p.x + transform.x
-  const y = p.y + transform.y
-  let izquierda = esToque ? x - ancho / 2 : x + 14
-  let arriba = esToque ? y - alto - 36 : y + 24
-  if (!esToque && arriba + alto > altoVentana - 8) arriba = y - alto - 16
-  if (esToque && arriba < 8) arriba = y + 48
-  izquierda = Math.min(Math.max(izquierda, 8), anchoVentana - ancho - 8)
-  return { ...transform, x: izquierda - activeNodeRect.left, y: arriba - activeNodeRect.top }
+const HoraDeTurnoContext = createContext<((entry: QueueEntry) => string | null) | null>(null)
+
+interface QueueCardProps {
+  entry: QueueEntry
+  formatElapsed: (ts: string) => string
+  onCancel: (id: string) => void
+  onStartService?: (entry: QueueEntry) => void
+  actionLoading: string | null
+  selectedBranchId: string | null
+  getBranchName: (id: string) => string
+  /** Nombre de un barbero por id (para "esperaba a X" de Menor espera por WhatsApp). */
+  getBarberName?: (id: string) => string | undefined
+  timezone: string
 }
 
-// Fijo (no depende de qué se arrastra): si cambiara al soltar, la tarjeta
-// saltaría justo cuando empieza la animación.
-const MODIFICADORES_DE_LA_MANO = [alLadoDelPuntero]
-
-/** Al reordenar, la tarjeta vuelve volando a su lugar nuevo en la lista. */
-const animacionAlSoltar: DropAnimation = {
-  duration: 220,
-  easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
-  sideEffects: defaultDropAnimationSideEffects({ styles: { active: { opacity: '0.5' } } }),
-}
-
-/**
- * Soltada en una silla, la tarjeta se "mete" ahí (se achica y se apaga donde
- * se soltó). Con la animación de siempre volvía volando a la lista —el cliente
- * sigue en la fila, sólo cambió de barbero— y parecía que no se había pasado.
- */
-const animacionAlSoltarEnSilla: DropAnimation = {
-  duration: 180,
-  easing: 'cubic-bezier(0.4, 0, 1, 1)',
-  keyframes: ({ transform }) => [
-    { opacity: 1, transform: CSS.Transform.toString(transform.initial) },
-    { opacity: 0, transform: CSS.Transform.toString({ ...transform.initial, scaleX: 0.7, scaleY: 0.7 }) },
-  ],
-}
-
-// ─── Componente principal ─────────────────────────────────────────────────────
-
-export function FilaClient({
-  initialEntries,
-  barbers,
-  branches,
-  breakConfigs,
+function QueueCard({
+  entry,
+  formatElapsed,
+  onCancel,
+  onStartService,
+  actionLoading,
+  selectedBranchId,
+  getBranchName,
+  getBarberName,
   timezone,
-  orgId,
-  ventanaPorSucursal,
-  soloTurnos,
-}: FilaClientProps) {
-  const selectedBranchId = useBranchStore((s) => s.selectedBranchId)
+}: QueueCardProps) {
+  // Los turnos no se arrastran. `handleDragEnd` renumera y reescribe
+  // `priority_order` (que en un turno es su hora reservada, la clave de toda la
+  // convivencia con la fila) y, al soltar en otra columna, le cambiaría el
+  // barbero sin tocar `appointments.barber_id`: fila y agenda quedarían
+  // diciendo cosas distintas. Se reprograman desde la agenda.
+  const isAppointment = entry.is_appointment
+
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: entry.id,
+    data: { entry },
+    // Sólo `draggable`: la tarjeta sigue siendo droppable para que un walk-in
+    // se pueda soltar antes o después del turno sin perder el punto de inserción.
+    disabled: { draggable: isAppointment },
+  })
+
+  // Evitar error visual de dnd-kit origin
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: transition ?? 'transform 200ms cubic-bezier(0.25, 1, 0.5, 1)',
+  }
+
+  const isBreak = entry.is_break
+  const displayName = isBreak ? 'Descanso' : (entry.client?.name ?? 'Cliente')
+  // Mig 218: aceptó por WhatsApp pasarse a Menor espera y sigue en el pool. La
+  // recepción tiene que saber a quién esperaba: conservó su lugar en la fila de
+  // ese barbero, que lo sigue viendo en su panel y lo puede tomar primero.
+  const viaWhatsApp = esMovidaPorWhatsApp(entry)
+  const esperabaA =
+    viaWhatsApp && entry.menor_espera_barbero_original_id
+      ? getBarberName?.(entry.menor_espera_barbero_original_id)
+      : undefined
+  // Mig 217: pidió asesoría sin costo en la tablet (no sabe qué hacerse).
+  const pidioAsesoria = !isBreak && entry.pidio_asesoria === true
+  const horaDeTurno = useContext(HoraDeTurnoContext)
+
+  function explainNoDrag() {
+    toast.info('Los turnos se mueven desde la agenda, no desde la fila', {
+      description: 'Ahí se reprograma la hora o el barbero y la fila se actualiza sola.',
+      action: {
+        label: 'Ir a la agenda',
+        onClick: () => { window.location.href = '/dashboard/turnos/agenda' },
+      },
+    })
+  }
+
+  /**
+   * Avisa sólo si REALMENTE intentó arrastrar: mismo umbral de 5px que usa el
+   * MouseSensor. Con un `onPointerDown` pelado, cualquier toque para scrollear
+   * el kanban en la tablet levantaba el cartel y se volvía ruido.
+   */
+  function handleAppointmentPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    const startX = e.clientX
+    const startY = e.clientY
+
+    function cleanup() {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', cleanup)
+      window.removeEventListener('pointercancel', cleanup)
+    }
+
+    function onMove(ev: PointerEvent) {
+      if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 5) return
+      cleanup()
+      explainNoDrag()
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', cleanup)
+    window.addEventListener('pointercancel', cleanup)
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...(isAppointment ? {} : attributes)}
+      {...(isAppointment ? {} : listeners)}
+      onPointerDown={isAppointment ? handleAppointmentPointerDown : undefined}
+      title={isAppointment ? 'Los turnos se mueven desde la agenda, no desde la fila' : undefined}
+      className={[
+        'w-full group relative rounded-xl border transition-colors duration-150 overflow-hidden',
+        isAppointment ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
+        isDragging ? 'opacity-40 scale-[0.98] z-50' : 'bg-zinc-900/80',
+        isBreak
+          ? 'border-amber-900/50 bg-amber-950/30'
+          : isAppointment
+            ? 'border-violet-500/40 bg-violet-950/25'
+            : 'border-zinc-800 hover:border-zinc-700',
+      ].join(' ')}
+    >
+      <div className="flex items-center gap-2.5 px-3 py-2.5">
+        {/* Handle visual (en un turno pasa a ser el ícono de reservado: no arrastra) */}
+        <div
+          className={
+            isAppointment
+              ? 'shrink-0 text-violet-400'
+              : 'shrink-0 text-zinc-700/50 group-hover:text-zinc-500 transition-colors'
+          }
+        >
+          {isAppointment ? <CalendarClock className="size-4" /> : <GripVertical className="size-4" />}
+        </div>
+
+        {/* Badge */}
+        <div
+          className={[
+            'flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold',
+            isBreak
+              ? 'bg-amber-500/20 text-amber-400'
+              : isAppointment
+                ? 'bg-violet-500/20 text-violet-300'
+                : 'bg-zinc-800 text-zinc-300',
+          ].join(' ')}
+        >
+          {isBreak ? <Pause className="size-3.5" /> : `#${entry.position}`}
+        </div>
+
+        {/* Datos */}
+        <div className="min-w-0 flex-1 flex flex-col justify-center">
+          <p
+            className={`truncate text-sm font-medium ${
+              isBreak ? 'text-amber-200' : 'text-zinc-200'
+            }`}
+          >
+            {displayName}
+          </p>
+          <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 mt-0.5 min-w-0 overflow-hidden">
+            {/* La hora RESERVADA sale de la agenda (`HoraDeTurnoContext`): en una
+                entrada adoptada de un walk-in, `priority_order` es la hora de
+                llegada (mig 170) y la tarjeta mostraba esa. Sin el turno en la
+                agenda cargada, `priority_order` es la mejor aproximación. */}
+            {isAppointment && (
+              <TurnoBadge
+                time={horaDeTurno?.(entry) ?? appointmentTimeLabel(entry, timezone)}
+                className="text-violet-300 dark:text-violet-300"
+              />
+            )}
+            {!isBreak && !isAppointment && entry.client?.phone && (
+              <span className="truncate shrink-0 max-w-[80px]">{entry.client.phone}</span>
+            )}
+            {!selectedBranchId && (
+              <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-px text-[10px] text-zinc-400 truncate max-w-[60px]">
+                {getBranchName(entry.branch_id)}
+              </span>
+            )}
+            {entry.is_dynamic && entry.barber?.full_name && (
+              <span className="shrink-0 inline-flex items-center gap-0.5 rounded bg-yellow-500/10 px-1.5 py-px text-[10px] text-yellow-400 truncate max-w-[90px]">
+                <Zap className="size-2.5 shrink-0" />
+                <span className="truncate">{entry.barber.full_name.split(' ')[0]}</span>
+              </span>
+            )}
+            <span className="flex shrink-0 items-center gap-1 ml-auto min-w-0">
+              <Clock className="size-3 shrink-0" />
+              <span className="truncate">{formatElapsed(entry.checked_in_at)}</span>
+            </span>
+          </div>
+          {/* Renglón propio y no un chip más en la línea de arriba: esa línea ya
+              va al límite de ancho (teléfono, sucursal, espera) y lo truncaría.
+              Asesoría y «Por WhatsApp» comparten el renglón y bajan solos si no
+              entran juntos. */}
+          {(pidioAsesoria || viaWhatsApp) && (
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
+              {pidioAsesoria && (
+                <span
+                  className="inline-flex"
+                  title="Pidió asesoría sin costo: no sabe qué hacerse. El barbero lo ve al empezar a atenderlo."
+                >
+                  <AsesoriaBadge tono="oscuro" />
+                </span>
+              )}
+              {viaWhatsApp && (
+                <span
+                  className="flex w-fit max-w-full items-start gap-1 rounded bg-sky-500/10 px-1.5 py-px text-[10px] font-medium leading-tight text-sky-300"
+                  title="Aceptó pasarse a Menor espera desde el aviso de WhatsApp. Conserva su lugar en la fila."
+                >
+                  <MessageCircle className="mt-px size-2.5 shrink-0" aria-hidden />
+                  <span>Por WhatsApp{esperabaA ? ` · esperaba a ${esperabaA}` : ''}</span>
+                </span>
+              )}
+            </div>
+          )}
+          {isAppointment && (
+            <a
+              href="/dashboard/turnos/agenda"
+              onPointerDown={(e) => e.stopPropagation()}
+              className="mt-1 inline-flex w-fit items-center gap-1 text-[10px] text-violet-400/80 transition-colors hover:text-violet-300"
+            >
+              <ExternalLink className="size-2.5 shrink-0" />
+              Se mueve desde la agenda
+            </a>
+          )}
+        </div>
+
+        {/* Acciones. Frenan `mousedown`/`touchstart`, que es lo que escuchan los
+            sensores de dnd-kit: el `onPointerDown` de cada botón no los frena, y
+            apretar ▶ o la X moviendo apenas el mouse (o un toque largo en la
+            tablet) arrastraba la tarjeta en vez de apretar el botón. */}
+        <div
+          className="flex items-center gap-1 shrink-0"
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+        >
+          {/* El botón verde también va en las tarjetas del pool ("Menor espera",
+              barber_id NULL). Sin esto, la ÚNICA acción posible sobre un cliente que
+              eligió "Menor espera" era la X roja que lo borra de la fila: para
+              atenderlo había que adivinar que se arrastra a la columna de un barbero.
+              Con barbero asignado inicia el corte; sin barbero abre el selector. */}
+          {!isBreak && onStartService && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={(e) => { e.stopPropagation(); onStartService(entry); }}
+              onPointerDown={(e) => e.stopPropagation()}
+              disabled={actionLoading === entry.id}
+              className="size-7 text-green-400"
+              title={entry.barber_id ? 'Iniciar corte' : 'Asignar barbero y atender'}
+            >
+              <Play className="size-3.5" />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={(e) => { e.stopPropagation(); onCancel(entry.id); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            disabled={actionLoading === entry.id}
+            className="size-7 text-red-400"
+            title="Cancelar"
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+// ─── En Servicio Card (No arrastrable) ───────────────────────────────────────
+
+function InProgressCard({
+  entry,
+  formatElapsed,
+  onCancel,
+  onComplete,
+  actionLoading,
+}: {
+  entry: QueueEntry
+  formatElapsed: (ts: string) => string
+  onCancel: (id: string) => void
+  onComplete?: (entry: QueueEntry) => void
+  actionLoading: string | null
+}) {
+  const isBreak = entry.is_break
+  const displayName = isBreak ? 'Descanso' : (entry.client?.name ?? 'Cliente')
+  // Mig 217: el sello sigue en curso para que la recepción sepa que el barbero
+  // tiene que elegir el servicio al cobrar (o cerrarla como solo asesoría).
+  const pidioAsesoria = !isBreak && entry.pidio_asesoria === true
+
+  return (
+    <div className="w-full group relative rounded-xl border border-green-500/30 bg-green-950/20 shadow-md overflow-hidden min-w-0">
+      <div className="flex items-center gap-2.5 px-3 py-2.5">
+        <div className="shrink-0 text-green-500/50 w-4 flex justify-center">
+          <Scissors className="size-4" />
+        </div>
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold bg-green-500/20 text-green-400">
+          {isBreak ? <Pause className="size-3.5" /> : `#${entry.position}`}
+        </div>
+        <div className="min-w-0 flex-1 flex flex-col justify-center">
+          <p className="truncate text-sm font-medium text-green-400">{displayName}</p>
+          <div className="flex items-center gap-1.5 text-[11px] text-green-500/70 mt-0.5 min-w-0 overflow-hidden">
+            <span className="flex shrink-0 items-center gap-1 min-w-0">
+              <Clock className="size-3 shrink-0" />
+              <span className="truncate">{entry.started_at ? formatElapsed(entry.started_at) : 'En curso'}</span>
+            </span>
+            {pidioAsesoria && (
+              <span
+                className="inline-flex shrink-0"
+                title={
+                  entry.asesoria_vista_at
+                    ? 'Pidió asesoría · su barbero ya vio el aviso'
+                    : 'Pidió asesoría · su barbero todavía no confirmó el aviso'
+                }
+              >
+                <AsesoriaBadge tono="oscuro" />
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {!isBreak && onComplete && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={(e) => { e.stopPropagation(); onComplete(entry); }}
+              onPointerDown={(e) => e.stopPropagation()}
+              disabled={actionLoading === entry.id}
+              className="size-7 text-emerald-400"
+              title="Finalizar corte"
+            >
+              <Check className="size-3.5" />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={(e) => { e.stopPropagation(); onCancel(entry.id); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            disabled={actionLoading === entry.id}
+            className="size-7 text-red-400"
+            title="Cancelar"
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Break Template Card (Draggable) ────────────────────────────────────────
+
+function BreakTemplateCard({ config }: { config: BreakConfig }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    isDragging,
+  } = useDraggable({
+    id: `template-break-${config.id}`,
+    data: { isTemplate: true, config },
+  })
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform) }}
+      {...attributes}
+      {...listeners}
+      className={[
+        'w-full cursor-grab active:cursor-grabbing group relative rounded-xl border border-amber-500/30 bg-amber-950/20 shadow-sm transition-all duration-150',
+        isDragging ? 'opacity-40 scale-[0.98] z-50' : 'hover:border-amber-500/50',
+      ].join(' ')}
+    >
+      <div className="flex items-center gap-2.5 px-3 py-2.5">
+        <div className="shrink-0 text-amber-700/50 group-hover:text-amber-600 transition-colors">
+          <GripVertical className="size-4" />
+        </div>
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold bg-amber-500/20 text-amber-500">
+          <Pause className="size-3.5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-amber-200">
+            {config.name}
+          </p>
+          <div className="flex items-center gap-2 text-[11px] text-amber-500/70 mt-0.5">
+            <span className="flex shrink-0 items-center gap-1">
+              <Clock className="size-3" />
+              {config.duration_minutes} min
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Kanban Column ──────────────────────────────────────────────────────────
+
+interface KanbanColumnProps {
+  id: ColumnId
+  title: string
+  icon?: React.ReactNode
+  entries: QueueEntry[]
+  inProgressEntry?: QueueEntry
+  barber?: BarberRow
+  notClockedInBarbers?: Set<string>
+  schedules?: StaffSchedule[]
+  now?: number
+  shiftEndMargin?: number
+  formatElapsed: (ts: string) => string
+  onCancel: (id: string) => void
+  onStartService?: (entry: QueueEntry) => void
+  onCompleteService?: (entry: QueueEntry) => void
+  actionLoading: string | null
+  selectedBranchId: string | null
+  getBranchName: (id: string) => string
+  timezone: string
+  children?: React.ReactNode
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function KanbanColumn({
+  id,
+  title,
+  icon,
+  entries,
+  inProgressEntry,
+  barber,
+  notClockedInBarbers,
+  schedules,
+  now,
+  shiftEndMargin,
+  formatElapsed,
+  onCancel,
+  onStartService,
+  onCompleteService,
+  actionLoading,
+  selectedBranchId,
+  getBranchName,
+  timezone,
+  children,
+}: KanbanColumnProps) {
+  const { setNodeRef } = useSortable({
+    id,
+    data: { type: 'Column', columnId: id },
+  })
+
+  // Estilos y estado del barbero (si es columna de barbero)
+  let isUnavailable = false
+  let HeaderContent = null
+
+  if (barber) {
+    const isNotClocked = notClockedInBarbers?.has(barber.id)
+    const isHidden = barber.hidden_from_checkin
+    const isShiftEnd =
+      !isNotClocked &&
+      schedules &&
+      now !== undefined &&
+      shiftEndMargin !== undefined &&
+      isBarberBlockedByShiftEnd(
+        barber as unknown as Staff,
+        inProgressEntry ? [inProgressEntry] : [],
+        schedules,
+        now,
+        shiftEndMargin
+      )
+    isUnavailable = isHidden || isNotClocked || !!isShiftEnd
+
+    let statusText: string
+    let statusClass: string
+    let dotClass: string
+
+    if (isHidden) {
+      statusText = 'Oculto en check-in'
+      statusClass = 'text-zinc-500'
+      dotClass = 'bg-zinc-600'
+    } else if (isNotClocked) {
+      statusText = 'Sin entrada'
+      statusClass = 'text-zinc-500'
+      dotClass = 'bg-zinc-600'
+    } else if (isShiftEnd) {
+      statusText = 'Fin de turno'
+      statusClass = 'text-amber-400'
+      dotClass = 'bg-amber-500'
+    } else if (inProgressEntry) {
+      statusText = inProgressEntry.is_break ? 'En descanso' : 'Atendiendo'
+      statusClass = inProgressEntry.is_break ? 'text-amber-400' : 'text-green-400'
+      dotClass = inProgressEntry.is_break ? 'bg-amber-500' : 'bg-green-500'
+    } else {
+      statusText = 'Disponible'
+      statusClass = 'text-zinc-400'
+      dotClass = 'bg-emerald-500'
+    }
+
+    HeaderContent = (
+      <div className={`flex items-center gap-3 w-full transition-opacity ${isUnavailable ? 'opacity-50' : ''}`}>
+        <div className="relative h-12 w-12 shrink-0">
+          <div className="h-full w-full rounded-full bg-zinc-800 overflow-hidden ring-2 ring-zinc-800">
+            {barber.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={barber.avatar_url}
+                alt={barber.full_name}
+                className="h-full w-full object-cover"
+                style={{ objectPosition: 'center 15%' }}
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <User className="size-5 text-zinc-500" />
+              </div>
+            )}
+          </div>
+          <div className={`absolute right-0 bottom-0 size-3.5 rounded-full ring-2 ring-zinc-900 z-10 ${dotClass}`} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate font-semibold text-zinc-100 text-sm">{barber.full_name}</h3>
+          <p className={`truncate text-xs mt-0.5 ${statusClass}`}>{statusText}</p>
+        </div>
+      </div>
+    )
+  } else {
+    // Columnas genéricas (Dinámicos / Descansos)
+    HeaderContent = (
+      <div className="flex items-center gap-2 h-12">
+        {icon}
+        <h3 className="font-semibold text-zinc-100">{title}</h3>
+      </div>
+    )
+  }
+
+  const entryIds = useMemo(() => entries.map((e) => e.id), [entries])
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`flex flex-col w-[300px] shrink-0 bg-zinc-900/40 border border-zinc-800/50 rounded-2xl overflow-hidden ${
+        isUnavailable ? 'opacity-70' : ''
+      }`}
+    >
+      {/* Columna Header */}
+      <div className="p-4 border-b border-zinc-800/60 bg-zinc-900/60">
+        {HeaderContent}
+      </div>
+
+      {/* Listado */}
+      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 min-h-[150px]">
+        {inProgressEntry && (
+          <InProgressCard
+            entry={inProgressEntry}
+            formatElapsed={formatElapsed}
+            onCancel={onCancel}
+            onComplete={onCompleteService}
+            actionLoading={actionLoading}
+          />
+        )}
+
+        <SortableContext items={entryIds} strategy={verticalListSortingStrategy}>
+          {entries.map((entry) => (
+            <QueueCard
+              key={entry.id}
+              entry={entry}
+              formatElapsed={formatElapsed}
+              onCancel={onCancel}
+              onStartService={onStartService}
+              actionLoading={actionLoading}
+              selectedBranchId={selectedBranchId}
+              getBranchName={getBranchName}
+              timezone={timezone}
+            />
+          ))}
+        </SortableContext>
+
+        {entries.length === 0 && !inProgressEntry && !children && (
+          <div className="flex flex-1 items-center justify-center h-24 border-2 border-dashed border-zinc-800/50 rounded-xl text-zinc-600">
+            <p className="text-xs font-medium">Arrastrar aquí</p>
+          </div>
+        )}
+
+        {children && (
+          <div className="mt-2 pt-2 border-t border-zinc-800/50 flex flex-col gap-2">
+            {children}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Ghost Drag Overlay ─────────────────────────────────────────────────────
+
+function DragGhost({ entry }: { entry: QueueEntry }) {
+  const isBreak = entry.is_break
+  const displayName = isBreak ? 'Descanso' : (entry.client?.name ?? 'Cliente')
+  return (
+    <div className="flex items-center gap-2.5 rounded-xl border border-primary/50 bg-zinc-800/95 px-3.5 py-2.5 shadow-2xl shadow-black/70 rotate-[2deg] scale-105 opacity-90 w-[270px]">
+      <div
+        className={`flex size-7 shrink-0 items-center justify-center rounded-md text-xs font-bold ${
+          isBreak ? 'bg-amber-500/25 text-amber-400' : 'bg-zinc-700 text-zinc-200'
+        }`}
+      >
+        {isBreak ? <Pause className="size-3" /> : `#${entry.position}`}
+      </div>
+      <span className="truncate text-sm font-semibold text-white">
+        {displayName}
+      </span>
+    </div>
+  )
+}
+
+// ─── Dynamic Column (Top-to-Bottom) ─────────────────────────────────────────
+
+function DynamicColumn({
+  id,
+  entries,
+  formatElapsed,
+  onCancel,
+  onStartService,
+  actionLoading,
+  selectedBranchId,
+  getBranchName,
+  getBarberName,
+  timezone,
+}: {
+  id: ColumnId
+  entries: QueueEntry[]
+  formatElapsed: (ts: string) => string
+  onCancel: (id: string) => void
+  onStartService?: (entry: QueueEntry) => void
+  actionLoading: string | null
+  selectedBranchId: string | null
+  getBranchName: (id: string) => string
+  getBarberName?: (id: string) => string | undefined
+  timezone: string
+}) {
+  const { setNodeRef } = useSortable({
+    id,
+    data: { type: 'Column', columnId: id },
+  })
+
+  const entryIds = useMemo(() => entries.map((e) => e.id), [entries])
+
+  return (
+    <div
+      ref={setNodeRef}
+      className="flex flex-col w-full md:w-[260px] md:shrink-0 bg-zinc-950 border-b md:border-b-0 md:border-r border-zinc-800/80"
+    >
+      <div className="p-3 md:p-4 border-b border-zinc-800/80 bg-zinc-950 sticky top-0 z-40 shadow-sm">
+        <div className="flex items-center gap-2 h-6">
+          <Zap className="size-4 text-yellow-400" />
+          <h3 className="font-semibold text-zinc-100 text-sm md:text-base">Dinámicos</h3>
+        </div>
+      </div>
+      <div className="flex-1 p-2 md:p-3 flex flex-col gap-2 md:gap-3 md:min-h-[500px]">
+        <SortableContext items={entryIds} strategy={verticalListSortingStrategy}>
+          {entries.map((entry) => (
+            <QueueCard
+              key={entry.id}
+              entry={entry}
+              formatElapsed={formatElapsed}
+              onCancel={onCancel}
+              onStartService={onStartService}
+              actionLoading={actionLoading}
+              selectedBranchId={selectedBranchId}
+              getBranchName={getBranchName}
+              getBarberName={getBarberName}
+              timezone={timezone}
+            />
+          ))}
+        </SortableContext>
+        {entries.length === 0 && (
+          <div className="flex flex-1 items-center justify-center border-2 border-dashed border-zinc-800/40 rounded-xl text-zinc-600 min-h-[100px]">
+            <p className="text-xs font-medium">Soltar aquí</p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Barber Row (Left-to-Right) ─────────────────────────────────────────────
+
+function BarberRow({
+  barber,
+  entries,
+  inProgressEntry,
+  notClockedInBarbers,
+  schedules,
+  now,
+  shiftEndMargin,
+  formatElapsed,
+  onCancel,
+  onStartService,
+  onCompleteService,
+  actionLoading,
+  selectedBranchId,
+  getBranchName,
+  timezone,
+  nextAppointment,
+}: {
+  barber: BarberRow
+  entries: QueueEntry[]
+  inProgressEntry?: QueueEntry
+  notClockedInBarbers?: Set<string>
+  schedules?: StaffSchedule[]
+  now?: number
+  shiftEndMargin?: number
+  formatElapsed: (ts: string) => string
+  onCancel: (id: string) => void
+  onStartService?: (entry: QueueEntry) => void
+  onCompleteService?: (entry: QueueEntry) => void
+  actionLoading: string | null
+  selectedBranchId: string | null
+  getBranchName: (id: string) => string
+  timezone: string
+  nextAppointment?: NextAppointmentInfo | null
+}) {
+  const { setNodeRef } = useSortable({
+    id: barber.id,
+    data: { type: 'Column', columnId: barber.id },
+  })
+
+  const isNotClocked = notClockedInBarbers?.has(barber.id)
+  const isHidden = barber.hidden_from_checkin
+  const isShiftEnd =
+    !isNotClocked &&
+    schedules &&
+    now !== undefined &&
+    shiftEndMargin !== undefined &&
+    isBarberBlockedByShiftEnd(
+      barber as unknown as Staff,
+      inProgressEntry ? [inProgressEntry] : [],
+      schedules,
+      now,
+      shiftEndMargin
+    )
+  const isUnavailable = isHidden || isNotClocked || !!isShiftEnd
+
+  let statusText: string
+  let statusClass: string
+  let dotClass: string
+
+  if (isHidden) {
+    statusText = 'Oculto en check-in'
+    statusClass = 'text-zinc-500'
+    dotClass = 'bg-zinc-600'
+  } else if (isNotClocked) {
+    statusText = 'Sin entrada'
+    statusClass = 'text-zinc-500'
+    dotClass = 'bg-zinc-600'
+  } else if (isShiftEnd) {
+    statusText = 'Fin de turno'
+    statusClass = 'text-amber-400'
+    dotClass = 'bg-amber-500'
+  } else if (inProgressEntry) {
+    statusText = inProgressEntry.is_break ? 'En descanso' : 'Atendiendo'
+    statusClass = inProgressEntry.is_break ? 'text-amber-400' : 'text-green-400'
+    dotClass = inProgressEntry.is_break ? 'bg-amber-500' : 'bg-green-500'
+  } else {
+    statusText = 'Disponible'
+    statusClass = 'text-zinc-400'
+    dotClass = 'bg-emerald-500'
+  }
+
+  const entryIds = useMemo(() => entries.map((e) => e.id), [entries])
+
+  return (
+    <div className={`flex flex-col md:flex-row md:min-h-[100px] md:items-stretch border-b border-zinc-800/80 ${isUnavailable ? 'opacity-60' : ''}`}>
+      {/* ── Info Barbero (Celda Fija y Sticky) ── */}
+      <div className="md:sticky md:left-[260px] z-20 w-full md:w-[200px] md:shrink-0 border-b md:border-b-0 md:border-r border-zinc-800/80 bg-zinc-950 px-3 py-2 md:p-3 flex items-center justify-start md:shadow-[8px_0_16px_-12px_rgba(0,0,0,0.8)]">
+        <div className="flex flex-row items-center gap-2.5 md:gap-3 text-left w-full">
+          <div className="relative h-10 w-10 md:h-12 md:w-12 shrink-0">
+            <div className="h-full w-full rounded-full bg-zinc-800 overflow-hidden ring-2 ring-zinc-800">
+              {barber.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={barber.avatar_url}
+                  alt={barber.full_name}
+                  className="h-full w-full object-cover"
+                  style={{ objectPosition: 'center 15%' }}
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center">
+                  <User className="size-6 text-zinc-500" />
+                </div>
+              )}
+            </div>
+            <div className={`absolute -right-0.5 -bottom-0.5 size-3.5 rounded-full ring-2 ring-zinc-900 z-10 ${dotClass}`} />
+          </div>
+          
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate font-bold text-zinc-100 text-sm">{barber.full_name}</h3>
+            <p className={`truncate text-xs mt-0.5 font-medium ${statusClass}`}>{statusText}</p>
+            {/* Próximo turno del día: hasta acá el dashboard no tenía forma de
+                saber que a este barbero le entra alguien con hora reservada. */}
+            {nextAppointment && (
+              <p
+                className="mt-1 flex items-center gap-1 text-[11px] font-medium text-violet-400"
+                title={`Próximo turno ${nextAppointment.timeLabel} · ${nextAppointment.appointment.client?.name ?? 'Cliente'}`}
+              >
+                <CalendarClock className="size-3 shrink-0" />
+                <span className="truncate">
+                  Turno {nextAppointment.timeLabel} · {nextAppointment.appointment.client?.name ?? 'Cliente'}
+                </span>
+                {nextAppointment.minutesUntil <= 60 && (
+                  <span className="shrink-0 rounded bg-violet-500/15 px-1 py-px text-[10px] tabular-nums text-violet-300">
+                    {nextAppointment.minutesUntil <= 1 ? 'ahora' : `${nextAppointment.minutesUntil}m`}
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Fila de Clientes (Arrastrables con grid infinito css) ── */}
+      <div
+        ref={setNodeRef}
+        className="flex-1 flex flex-col md:flex-row isolate bg-zinc-900/10 md:min-w-[260px] p-2 md:p-0 gap-1.5 md:gap-0"
+        style={{
+          backgroundSize: '260px 100%',
+          backgroundImage: 'linear-gradient(to right, transparent 259px, rgba(39, 39, 42, 0.4) 259px, rgba(39, 39, 42, 0.4) 260px)'
+        }}
+      >
+        {inProgressEntry && (
+          <div className="w-full md:w-[260px] md:shrink-0 md:p-3">
+            <InProgressCard
+              entry={inProgressEntry}
+              formatElapsed={formatElapsed}
+              onCancel={onCancel}
+              onComplete={onCompleteService}
+              actionLoading={actionLoading}
+            />
+          </div>
+        )}
+
+        <SortableContext items={entryIds} strategy={horizontalListSortingStrategy}>
+          {entries.map((entry) => (
+            <div key={entry.id} className="w-full md:w-[260px] md:shrink-0 md:p-3">
+              <QueueCard
+                entry={entry}
+                formatElapsed={formatElapsed}
+                onCancel={onCancel}
+                onStartService={onStartService}
+                actionLoading={actionLoading}
+                selectedBranchId={selectedBranchId}
+                getBranchName={getBranchName}
+                timezone={timezone}
+              />
+            </div>
+          ))}
+        </SortableContext>
+        
+        {/* Un único filler para ayudar al drop visual si está vacío */}
+        {entries.length === 0 && !inProgressEntry && (
+          <div className="w-full md:w-[260px] p-3 flex items-center justify-center text-zinc-600/50">
+            <p className="text-xs font-medium bg-zinc-900/40 px-3 py-1.5 rounded-md border border-zinc-800/40">Vacío</p>
+          </div>
+        )}
+
+        <div className="hidden md:flex md:flex-1 md:min-w-[260px]" />
+      </div>
+    </div>
+  )
+}
+
+// ─── Componente Principal ───────────────────────────────────────────────────
+
+export function FilaClient({ initialEntries, barbers, branches, breakConfigs, timezone, orgId }: FilaClientProps) {
+  const selectedBranchId = useBranchStore(s => s.selectedBranchId)
   const [entries, setEntries] = useState<QueueEntry[]>(initialEntries)
   const [liveBarbers, setLiveBarbers] = useState<BarberRow[]>(barbers)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
-  // Último estado confirmado de la base (para comparar en el drag).
+  // Ref que trackea el último estado confirmado de la DB (para comparar en drag & drop)
   const confirmedEntriesRef = useRef<QueueEntry[]>(initialEntries)
   const [schedules, setSchedules] = useState<StaffSchedule[]>([])
   const [now, setNow] = useState(() => Date.now())
   const [shiftEndMargin, setShiftEndMargin] = useState(35)
   const [dailyServiceCounts, setDailyServiceCounts] = useState<Record<string, number>>({})
   const [latestAttendance, setLatestAttendance] = useState<Record<string, string>>({})
-  // Turnos del día, sólo lectura: alimentan el "próximo turno" de cada silla.
+  // Turnos del día, sólo lectura: alimentan el "próximo turno" de cada barbero.
   const [todayAppointments, setTodayAppointments] = useState<Appointment[]>([])
-  // Servicios activos: sólo para nombrar lo que eligió cada uno en la fila.
-  const [services, setServices] = useState<Service[]>([])
-
+  
   const [completingEntry, setCompletingEntry] = useState<QueueEntry | null>(null)
-  // Confirmación para sacar a un cliente de la fila o cancelar un corte en curso.
+  // Confirmación para cancelar un corte ya iniciado (in_progress) desde el dashboard.
   const [cancelConfirmEntry, setCancelConfirmEntry] = useState<QueueEntry | null>(null)
   /** Cliente del pool al que hay que elegirle barbero antes de arrancar el corte. */
   const [asignarBarberoEntry, setAsignarBarberoEntry] = useState<QueueEntry | null>(null)
 
   const [draggedEntry, setDraggedEntry] = useState<QueueEntry | null>(null)
   const [draggedTemplate, setDraggedTemplate] = useState<BreakConfig | null>(null)
-  /** La silla (o Menor espera) bajo el puntero mientras se arrastra. */
-  const [sobre, setSobre] = useState<string | null>(null)
-  /** Cómo termina el arrastre: se mete en una silla o vuelve a la lista. */
-  const [soltadoEnSilla, setSoltadoEnSilla] = useState(false)
-  /** La silla que acaba de recibir a alguien (la acusa un momento). */
-  const [aterrizaje, setAterrizaje] = useState<string | null>(null)
-  const aterrizajeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  /** Qué parte de la fila se ve: toda, la de Menor espera o la de un barbero. */
-  const [filtro, setFiltro] = useState<string>('todos')
-  /**
-   * El orden de las sillas, congelado mientras se arrastra, mientras el mouse
-   * está sobre la columna o el dedo sobre el riel (ver `ordenSillas`): una silla
-   * que se libera corre a las demás, y el clic caía en la de al lado.
-   */
-  const [ordenCongelado, setOrdenCongelado] = useState<string[] | null>(null)
-  const motivosCongelado = useRef({ arrastre: false, puntero: false, toque: false })
-  const toqueTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [conexion, setConexion] = useState<Conexion>('conectando')
-
-  const zonas = useRef<ZonasDelTablero>({ lista: null, sillas: null, dock: null })
-  const deteccionDelTablero = useCallback<CollisionDetection>((args) => detectarEnElTablero(args, zonas.current), [])
-  /** Sólo la lista y la columna de sillas scrollean solas al arrastrar cerca del borde (nunca la página). */
-  const puedeScrollear = useCallback((el: Element) => el === zonas.current.lista || el === zonas.current.sillas, [])
+  // ── Registro manual & búsqueda de clientes ─────────────────────────────────
+  const [manualDialogOpen, setManualDialogOpen] = useState(false)
+  const [searchDialogOpen, setSearchDialogOpen] = useState(false)
+  const [services, setServices] = useState<Service[]>([])
+  const DYNAMIC_BARBER = '__dynamic__'
+  const [manualForm, setManualForm] = useState({ phone: '', name: '', serviceId: '', barberId: DYNAMIC_BARBER, isSpecial: false })
+  const [manualLoading, setManualLoading] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<{ id: string; name: string; phone: string }[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchExecuted, setSearchExecuted] = useState(false)
+  const [selectedSearchClient, setSelectedSearchClient] = useState<{ id: string; name: string; phone: string } | null>(null)
+  const [searchServiceId, setSearchServiceId] = useState('')
+  const [searchBarberId, setSearchBarberId] = useState(DYNAMIC_BARBER)
+  const [searchCheckinLoading, setSearchCheckinLoading] = useState(false)
+  // Asesoría (mig 217): el interruptor de la sucursal elegida, leído al abrir el
+  // registro. Guarda de qué sucursal es: cambiar de sucursal no hereda el valor.
+  const [asesoriaSucursal, setAsesoriaSucursal] = useState<{ branchId: string; habilitada: boolean } | null>(null)
 
   const supabase = useMemo(() => createClient(), [])
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 12 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor)
   )
 
-  // ── Lecturas ────────────────────────────────────────────────────────────────
+  // ── Fetches (Omitido para brevedad en review, la lógica es la misma) ───────
 
   const fetchQueue = useCallback(async () => {
-    // FIX #9: scopear por organization_id (sin esto el dashboard traía la cola
-    // de TODAS las orgs). Embeds por nombre de constraint (Known Risk #15): con
-    // dos FKs a `staff`, PostgREST rechaza la query entera con PGRST201. El `*`
-    // trae `pidio_asesoria` y `asesoria_vista_at` (mig 217).
+    // Query liviano: solo los campos que el kanban efectivamente renderiza.
+    // Evitamos clients(*) y staff(*) que traen columnas no usadas.
+    // FIX #9: scopear por organization_id. Sin esto (y con la policy pública
+    // queue_entries_public_read) el dashboard traía la cola de TODAS las orgs.
     const { data } = await supabase
       .from('queue_entries')
+      // Embeds por nombre de constraint (Known Risk #15): con dos FKs a `staff`,
+      // PostgREST rechaza la query entera con PGRST201 y esto devolvía null.
+      // El `*` trae `pidio_asesoria` y `asesoria_vista_at` (mig 217) sin
+      // consultas extra: el sello de asesoría sale de la misma fila.
       .select('*, client:clients!queue_entries_client_id_fkey(id, name, phone), barber:staff!queue_entries_barber_id_fkey(id, full_name, avatar_url)')
       .eq('organization_id', orgId)
       .in('status', ['waiting', 'in_progress'])
-      // `priority_order` es la llegada (el FIFO real) y `position` sólo desempata:
-      // se recicla y se repite entre entradas vivas.
+      // Orden por `priority_order` (la hora de llegada = el FIFO real), NO por
+      // `position`: esa columna se recicla (`next_queue_position` = MAX+1 sobre las
+      // ACTIVAS, así que al vaciarse la fila vuelve a 1) y se repite entre entradas
+      // vivas. Ordenando por ella, el kanban dibujaba la fila en un orden que no era
+      // el de llegada — y como el drag derivaba de ese dibujo, ESE orden equivocado
+      // era el que terminaba escrito en `priority_order`.
       .order('priority_order')
       .order('position')
     if (data) {
@@ -374,6 +1145,7 @@ export function FilaClient({
   }, [supabase, orgId])
 
   const fetchBarbers = useCallback(async () => {
+    // FIX #9: scopear por organization_id (paridad con el server-fetch de page.tsx).
     const { data } = await supabase
       .from('staff')
       .select('id, full_name, branch_id, status, is_active, hidden_from_checkin, avatar_url')
@@ -385,49 +1157,64 @@ export function FilaClient({
   }, [supabase, orgId])
 
   const fetchSchedules = useCallback(async () => {
-    // Bounds del día en la TZ de la org (no UTC): pasada la medianoche UTC los
-    // cortes del día quedaban en 0 y el día de la semana saltaba.
+    // Bounds del día en TZ de la org (no UTC). El bug previo usaba
+    // `new Date().setHours(0,0,0,0)` y `new Date().getDay()`: ambos basados
+    // en runtime TZ del server (UTC en Vercel). Pasada la medianoche UTC el
+    // dailyServiceCounts quedaba en 0 y el day_of_week saltaba un día.
     const { getLocalDayBounds } = await import('@/lib/time-utils')
     const { start: dayStartISO, end: dayEndISO } = getLocalDayBounds(timezone)
     const localDow = new Date(
       new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date()),
     ).getDay()
 
-    const [schedRes, settingsRes, todayVisitsRes, attendanceRes] = await Promise.all([
-      supabase.from('staff_schedules').select('*').eq('day_of_week', localDow).eq('is_active', true),
-      // Por organización: `app_settings` se lee entera con cualquier rol. Sin el
-      // filtro, `.maybeSingle()` recibía 14 filas, devolvía error y el tablero
-      // usaba el margen de fin de turno por defecto (35) en vez del de la org.
-      supabase
-        .from('app_settings')
-        .select('shift_end_margin_minutes')
-        .eq('organization_id', orgId)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      supabase
-        .from('visits')
-        .select('barber_id')
-        .gte('completed_at', dayStartISO)
-        .lte('completed_at', dayEndISO)
-        .not('barber_id', 'is', null),
-      supabase
-        .from('attendance_logs')
-        .select('staff_id, action_type')
-        .gte('recorded_at', dayStartISO)
-        .lte('recorded_at', dayEndISO)
-        .order('recorded_at', { ascending: false }),
-    ])
+    const [schedRes, settingsRes, todayVisitsRes, attendanceRes] =
+      await Promise.all([
+        supabase
+          .from('staff_schedules')
+          .select('*')
+          .eq('day_of_week', localDow)
+          .eq('is_active', true),
+        // Por organización: `app_settings` se lee entera con cualquier rol (policy
+        // `settings_anon_read`), una fila por org. Sin el filtro `.maybeSingle()`
+        // recibía 14 filas, devolvía error y el tablero usaba el margen de fin de
+        // turno por defecto (35) donde Monaco configuró 15: marcaba "Fin de turno"
+        // 20 minutos antes de tiempo.
+        supabase
+          .from('app_settings')
+          .select('shift_end_margin_minutes')
+          .eq('organization_id', orgId)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from('visits')
+          .select('barber_id')
+          .gte('completed_at', dayStartISO)
+          .lte('completed_at', dayEndISO)
+          .not('barber_id', 'is', null),
+        // (mig 131 / audit-2026-05-09): query `lastVisits` removida porque alimentaba
+        // un state `lastCompletedAt` que nadie leía (el fairness gate del cliente
+        // que lo usaba se eliminó). Se conserva el cálculo en queue-panel.tsx donde
+        // sí se usa.
+        supabase
+          .from('attendance_logs')
+          .select('staff_id, action_type')
+          .gte('recorded_at', dayStartISO)
+          .lte('recorded_at', dayEndISO)
+          .order('recorded_at', { ascending: false }),
+      ])
 
     if (schedRes.data) setSchedules(schedRes.data as StaffSchedule[])
     if (settingsRes.error) console.error('[fila] app_settings:', settingsRes.error.message)
     if (settingsRes.data) {
-      const margin = (settingsRes.data as { shift_end_margin_minutes?: number }).shift_end_margin_minutes
+      const margin = (settingsRes.data as { shift_end_margin_minutes?: number })
+        .shift_end_margin_minutes
       if (typeof margin === 'number' && margin >= 0) setShiftEndMargin(margin)
     }
     if (todayVisitsRes?.data) {
       const counts: Record<string, number> = {}
-      for (const v of todayVisitsRes.data as { barber_id: string }[]) counts[v.barber_id] = (counts[v.barber_id] || 0) + 1
+      for (const v of todayVisitsRes.data as { barber_id: string }[])
+        counts[v.barber_id] = (counts[v.barber_id] || 0) + 1
       setDailyServiceCounts(counts)
     }
     if (attendanceRes.data) {
@@ -439,7 +1226,10 @@ export function FilaClient({
     }
   }, [supabase, timezone, orgId])
 
-  /** Agenda del día: sólo para anunciar el próximo turno de cada silla. */
+  /**
+   * Agenda del día de las sucursales visibles. Se usa sólo para anunciar el
+   * próximo turno de cada barbero — la fila no cambia por esto.
+   */
   const fetchAppointments = useCallback(async () => {
     const branchIds = selectedBranchId ? [selectedBranchId] : branches.map((b) => b.id)
     if (branchIds.length === 0) {
@@ -458,8 +1248,24 @@ export function FilaClient({
     }
   }, [selectedBranchId, branches, timezone])
 
-  // Un fetch al montar (y al cambiar de sucursal) + el refresco de 60 s: dato de
-  // baja frecuencia, sin Realtime (la DB ya se ahogó una vez por escuchar de más).
+  /** Hora RESERVADA de cada turno del día (para la etiqueta de las tarjetas de turno). */
+  const horaPorTurno = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const a of todayAppointments) {
+      const label = formatHourMinute(appointmentInstantMs(a.appointment_date, a.start_time, timezone), timezone)
+      if (label) map.set(a.id, label)
+    }
+    return map
+  }, [todayAppointments, timezone])
+
+  const horaDeTurno = useCallback(
+    (entry: QueueEntry) => (entry.appointment_id ? horaPorTurno.get(entry.appointment_id) ?? null : null),
+    [horaPorTurno],
+  )
+
+  // Un fetch al montar (y al cambiar de sucursal) + el refresco de 60s de más
+  // abajo. Sin realtime ni polling corto: es dato de baja frecuencia y la DB ya
+  // se ahogó una vez por escuchar de más (mig 124).
   useEffect(() => {
     const apptId = setTimeout(() => { fetchAppointments() }, 0)
     return () => clearTimeout(apptId)
@@ -468,7 +1274,8 @@ export function FilaClient({
   useVisibilityRefresh(fetchAppointments, 60_000)
 
   useEffect(() => {
-    // Las primeras llamadas van diferidas: nada de setState en el cuerpo del effect.
+    // Diferimos las primeras llamadas para no disparar setState dentro del
+    // effect body (React Compiler detecta cascading renders).
     const initId = setTimeout(() => {
       fetchQueue()
       fetchBarbers()
@@ -477,95 +1284,356 @@ export function FilaClient({
 
     const channel = supabase
       .channel('admin-queue')
-      // FIX #9: filtrado por organization_id, sin el fan-out de otras orgs (mig 124).
+      // FIX #9: filtrar por organization_id para no recibir el fan-out de cambios
+      // de queue_entries/staff de OTRAS orgs (regresión del incidente mig 124).
       .on('postgres_changes', { event: '*', schema: 'public', table: 'queue_entries', filter: `organization_id=eq.${orgId}` }, () =>
-        fetchQueue(),
+        fetchQueue()
       )
+      // staff → refresca lista de barberos y sus estados
       .on('postgres_changes', { event: '*', schema: 'public', table: 'staff', filter: `organization_id=eq.${orgId}` }, () =>
-        fetchBarbers(),
+        fetchBarbers()
       )
-      // attendance_logs no está en la publicación de Realtime: horarios y
-      // fichajes se refrescan al reconectar y con el refresco de 30 s.
+      // NOTA: el listener de attendance_logs fue eliminado porque esa tabla fue
+      // removida de la supabase_realtime publication. Los horarios/asistencia se
+      // refrescan al reconectar el WebSocket (evento SUBSCRIBED) y vía polling de 30s.
       .subscribe((status) => {
-        queueMicrotask(() => {
-          if (status === 'SUBSCRIBED') {
-            setConexion('en_vivo')
+        // Re-fetch todo al reconectar. Defer a microtask para no
+        // disparar setState durante el callback de subscribe (cascading renders).
+        if (status === 'SUBSCRIBED') {
+          queueMicrotask(() => {
             fetchQueue()
             fetchBarbers()
             fetchSchedules()
-          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-            setConexion('reconectando')
-          }
-        })
+          })
+        }
       })
 
     return () => { clearTimeout(initId); supabase.removeChannel(channel) }
   }, [supabase, fetchQueue, fetchBarbers, fetchSchedules, orgId])
 
-  // Al volver a la pestaña, y cada 30 s como respaldo.
+  // Refresh data when returning to tab or as polling fallback
   useVisibilityRefresh(
     useCallback(() => {
       fetchQueue()
       fetchBarbers()
       fetchSchedules()
     }, [fetchQueue, fetchBarbers, fetchSchedules]),
-    30_000,
+    30_000
   )
 
   useEffect(() => {
-    // Cada 5 s: los minutos no necesitan más resolución.
+    // 5s en lugar de 1s: textos "elapsed" no necesitan resolución de segundo.
+    // El cambio reduce ~30-60% CPU en tablets durante el horario de operación.
     const interval = setInterval(() => setNow(Date.now()), 5000)
     return () => clearInterval(interval)
   }, [])
 
+  // ── Fetch servicios para registro manual ──────────────────────────────────
   useEffect(() => {
     supabase
       .from('services')
       .select('*')
       .eq('is_active', true)
+      .in('availability', ['checkin', 'both'])
       .order('name')
       .then(({ data }) => { if (data) setServices(data as Service[]) })
   }, [supabase])
 
-  // ── Lo que se ve ────────────────────────────────────────────────────────────
+  // ── Asesoría en el registro manual (mig 217) ──────────────────────────────
+  // «Pidió asesoría» se ofrece sólo si la sucursal la tiene prendida, igual que
+  // en la tablet. Se pregunta cada vez que se abre un registro (el dueño la
+  // prende y apaga desde Configuración). Falla CERRADA: sin el interruptor
+  // confirmado no se ofrece, y el servidor la vuelve a validar al anotar.
+  const dialogoDeAltaAbierto = manualDialogOpen || searchDialogOpen
+  useEffect(() => {
+    if (!dialogoDeAltaAbierto || !selectedBranchId) return
+    let vigente = true
+    asesoriaHabilitadaEnSucursal(selectedBranchId)
+      .then((habilitada) => {
+        if (vigente) setAsesoriaSucursal({ branchId: selectedBranchId, habilitada })
+      })
+      .catch((e: unknown) => {
+        console.error('[fila] interruptor de asesoría', e)
+        if (vigente) setAsesoriaSucursal({ branchId: selectedBranchId, habilitada: false })
+      })
+    return () => {
+      vigente = false
+    }
+  }, [dialogoDeAltaAbierto, selectedBranchId])
+  const asesoriaDisponible =
+    !!selectedBranchId && asesoriaSucursal?.branchId === selectedBranchId && asesoriaSucursal.habilitada
+  // Lo elegido en cada desplegable, sin una «asesoría» que la sucursal ya no ofrece.
+  const servicioManual =
+    manualForm.serviceId === OPCION_ASESORIA && !asesoriaDisponible ? '' : manualForm.serviceId
+  const servicioBuscado = searchServiceId === OPCION_ASESORIA && !asesoriaDisponible ? '' : searchServiceId
+
+  /** Pone el servicio o el pedido de asesoría en el FormData de `checkinClient`. */
+  function cargarServicioOAsesoria(fd: FormData, valor: string): boolean {
+    if (valor === OPCION_ASESORIA) {
+      fd.set('asesoria', '1')
+      return true
+    }
+    if (valor) fd.set('service_id', valor)
+    return false
+  }
+
+  /**
+   * El cliente ya tenía lugar: si pidió asesoría, qué pasó con el pedido.
+   * `asesoriaMotivo` dice por qué NO se sumó (null = se sumó o no la pidió).
+   */
+  function avisarYaEnFila(r: {
+    asesoriaPedida?: boolean
+    asesoriaSumada?: boolean
+    asesoriaMotivo?: MotivoPedidoAsesoria | null
+  }) {
+    const titulo = 'El cliente ya está en la fila'
+    if (r.asesoriaSumada) {
+      toast.info(titulo, { description: 'Sumamos su pedido de asesoría: le avisamos en el panel del barbero.' })
+      return
+    }
+    if (!r.asesoriaPedida) {
+      toast.info(titulo)
+      return
+    }
+    switch (r.asesoriaMotivo) {
+      case 'turno':
+        // Un turno no tiene la salida «solo asesoría»: la marca no se le suma.
+        toast.info(titulo, { description: 'Tiene turno: la asesoría se la pide a su barbero cuando lo atienda.' })
+        return
+      case 'limite':
+        toast.warning(titulo, {
+          description: 'No pudimos sumar su pedido de asesoría: esperá un momento y volvé a intentar.',
+        })
+        return
+      case 'en_curso':
+        toast.info(titulo, { description: 'Ya lo están atendiendo: avisale a su barbero que quiere asesoría.' })
+        return
+      case 'deshabilitada':
+        toast.info(titulo, { description: 'La sucursal tiene la asesoría apagada: avisale a su barbero.' })
+        return
+      default:
+        toast.info(titulo, { description: 'Avisale a su barbero que quiere asesoría.' })
+    }
+  }
+
+  /** Alta hecha. Si pidió asesoría y el servidor la descartó (la apagaron en el medio), se dice. */
+  function avisarAlta(titulo: string, pidioAsesoria: boolean, asesoriaQuedo: boolean) {
+    if (pidioAsesoria && !asesoriaQuedo) {
+      toast.warning(titulo, { description: 'Quedó sin el pedido de asesoría: la sucursal la tiene apagada.' })
+    } else if (pidioAsesoria) {
+      toast.success(titulo, { description: 'Pidió asesoría: le avisamos en el panel del barbero.' })
+    } else {
+      toast.success(titulo)
+    }
+  }
+
+  // ── Handlers registro manual ──────────────────────────────────────────────
+  const handleManualCheckin = async () => {
+    if (!selectedBranchId) {
+      toast.error('Seleccioná una sucursal primero')
+      return
+    }
+    // Cliente especial: sin teléfono y con nombre opcional (lo resuelve el server).
+    if (!manualForm.isSpecial && (!manualForm.phone || !manualForm.name)) {
+      toast.error('Nombre y teléfono son obligatorios')
+      return
+    }
+    setManualLoading(true)
+    const fd = new FormData()
+    fd.set('name', manualForm.name)
+    fd.set('branch_id', selectedBranchId)
+    if (manualForm.isSpecial) {
+      fd.set('special', '1')
+    } else {
+      fd.set('phone', manualForm.phone)
+    }
+    // Alta manual del dashboard: el origen que queda en `clients.signup_source`
+    // es 'staff', no la tablet (mig 210).
+    fd.set('origen', 'staff')
+    // La asesoría reemplaza al servicio, como en la tablet (mig 217).
+    const pideAsesoria = cargarServicioOAsesoria(fd, servicioManual)
+    if (manualForm.barberId && manualForm.barberId !== DYNAMIC_BARBER) {
+      fd.set('barber_id', manualForm.barberId)
+    }
+    let result: Awaited<ReturnType<typeof checkinClient>>
+    try {
+      result = await checkinClient(fd)
+    } catch (e) {
+      avisarAccionFallida(e, 'No pudimos registrar al cliente. Revisá la conexión y probá de nuevo.')
+      return
+    } finally {
+      setManualLoading(false)
+    }
+    if (result.error) {
+      toast.error(result.error)
+    } else if (result.alreadyInQueue) {
+      avisarYaEnFila(result)
+    } else {
+      avisarAlta(
+        manualForm.isSpecial ? 'Cliente especial agregado a la fila' : 'Cliente registrado en la fila',
+        pideAsesoria,
+        result.asesoria === true,
+      )
+      setManualForm({ phone: '', name: '', serviceId: '', barberId: DYNAMIC_BARBER, isSpecial: false })
+      setManualDialogOpen(false)
+    }
+  }
+
+  // ── Handlers búsqueda de clientes ─────────────────────────────────────────
+  const handleSearch = useCallback(async (query: string) => {
+    const trimmed = query.trim()
+    if (trimmed.length < 2) {
+      setSearchResults([])
+      setSearchExecuted(false)
+      return
+    }
+    setSearchLoading(true)
+    setSearchExecuted(true)
+    let result: Awaited<ReturnType<typeof searchClients>>
+    try {
+      result = await searchClients(trimmed)
+    } catch (e) {
+      avisarAccionFallida(e, 'No pudimos buscar clientes. Revisá la conexión y probá de nuevo.')
+      return
+    } finally {
+      setSearchLoading(false)
+    }
+    if (result.error) {
+      toast.error(result.error)
+    } else {
+      setSearchResults(result.data ?? [])
+    }
+  }, [])
+
+  // Búsqueda automática al escribir (debounce). Diferimos los resets vía
+  // setTimeout para que los setState se ejecuten fuera del effect body.
+  useEffect(() => {
+    let cancelled = false
+    if (searchQuery.trim().length < 2) {
+      const resetId = setTimeout(() => {
+        if (cancelled) return
+        setSearchResults([])
+        setSearchExecuted(false)
+      }, 0)
+      return () => { cancelled = true; clearTimeout(resetId) }
+    }
+    const timer = setTimeout(() => handleSearch(searchQuery), 300)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [searchQuery, handleSearch])
+
+  const handleSearchCheckin = async (client: { id: string; name: string; phone: string }) => {
+    if (!selectedBranchId) {
+      toast.error('Seleccioná una sucursal primero')
+      return
+    }
+    setSearchCheckinLoading(true)
+    const fd = new FormData()
+    fd.set('name', client.name)
+    fd.set('phone', client.phone)
+    fd.set('branch_id', selectedBranchId)
+    // El cliente ya existe (sale del buscador), así que acá no se crea ninguna
+    // ficha; el origen viaja igual por si el alta terminara ocurriendo.
+    fd.set('origen', 'staff')
+    const pideAsesoria = cargarServicioOAsesoria(fd, servicioBuscado)
+    if (searchBarberId && searchBarberId !== DYNAMIC_BARBER) {
+      fd.set('barber_id', searchBarberId)
+    }
+    let result: Awaited<ReturnType<typeof checkinClient>>
+    try {
+      result = await checkinClient(fd)
+    } catch (e) {
+      avisarAccionFallida(e, 'No pudimos registrar al cliente. Revisá la conexión y probá de nuevo.')
+      return
+    } finally {
+      setSearchCheckinLoading(false)
+    }
+    if (result.error) {
+      toast.error(result.error)
+    } else if (result.alreadyInQueue) {
+      avisarYaEnFila(result)
+    } else {
+      avisarAlta(`${client.name} registrado en la fila`, pideAsesoria, result.asesoria === true)
+      setSearchQuery('')
+      setSearchResults([])
+      setSelectedSearchClient(null)
+      setSearchServiceId('')
+      setSearchBarberId(DYNAMIC_BARBER)
+      setSearchDialogOpen(false)
+    }
+  }
+
+  // ── Filtros y Categorización ──────────────────────────────────────────────
 
   const notClockedInBarbers = useMemo(() => {
     const s = new Set<string>()
-    for (const b of liveBarbers) if (latestAttendance[b.id] !== 'clock_in') s.add(b.id)
+    for (const b of liveBarbers)
+      if (latestAttendance[b.id] !== 'clock_in') s.add(b.id)
     return s
   }, [liveBarbers, latestAttendance])
 
-  const filteredBarbers = useMemo(
-    () => (selectedBranchId ? liveBarbers.filter((b) => b.branch_id === selectedBranchId) : liveBarbers),
-    [selectedBranchId, liveBarbers],
-  )
+  const filteredBarbers = useMemo(() => {
+    return selectedBranchId
+      ? liveBarbers.filter((b) => b.branch_id === selectedBranchId)
+      : liveBarbers
+  }, [selectedBranchId, liveBarbers])
 
-  const branchEntries = useMemo(
-    () => (selectedBranchId ? entries.filter((e) => e.branch_id === selectedBranchId) : entries),
-    [entries, selectedBranchId],
-  )
+  const branchEntries = useMemo(() => {
+    return selectedBranchId
+      ? entries.filter(e => e.branch_id === selectedBranchId)
+      : entries
+  }, [entries, selectedBranchId])
 
-  /** Toda la fila de la sucursal, en orden de llegada (descansos pendientes incluidos). */
-  const fila = useMemo(
-    () => branchEntries.filter((e) => e.status === 'waiting').sort(porOrdenDeLlegada),
-    [branchEntries],
-  )
+  const getEntryColumnId = useCallback((entry: QueueEntry): ColumnId => {
+    if (entry.status === 'in_progress') return entry.barber_id ?? '__dynamic__'
+    // Modelo pool (mig 134): el dinámico vive con barber_id = NULL y va a la
+    // columna Dinámicos. Cualquier barbero libre lo reclama vía
+    // claim_next_for_barber (pool FIFO no bloqueante) — no hay binding.
+    if (entry.is_dynamic) return '__dynamic__'
+    if (entry.barber_id) return entry.barber_id
+    return '__dynamic__'
+  }, [])
 
-  const inProgressData = useMemo(() => {
-    const map: Record<string, QueueEntry> = {}
-    for (const e of branchEntries) if (e.status === 'in_progress' && e.barber_id) map[e.barber_id] = e
-    return map
-  }, [branchEntries])
+  const columnsData = useMemo(() => {
+    const cols: Record<ColumnId, QueueEntry[]> = {
+      __dynamic__: [],
+    }
+    for (const b of filteredBarbers) {
+      cols[b.id] = []
+    }
+
+    // Orden por `priority_order` (llegada real), con `position` sólo de desempate.
+    // Este sort es el que alimenta las columnas del tablero, así que pisaba el
+    // `.order('priority_order')` del fetch: el kanban dibujaba la fila en orden de
+    // `position` —una columna que se recicla y se duplica— mientras el panel del
+    // barbero y `claim_next_for_barber` ejecutaban en orden de llegada. Y como el
+    // drag deriva el nuevo orden de lo que está dibujado, ese orden equivocado era
+    // el que terminaba escrito.
+    const sortedEntries = [...branchEntries].sort((a, b) => {
+      const pa = new Date(a.priority_order).getTime()
+      const pb = new Date(b.priority_order).getTime()
+      if (pa !== pb) return pa - pb
+      return a.position - b.position
+    })
+
+    for (const entry of sortedEntries) {
+      if (entry.status !== 'waiting') continue
+      const colId = getEntryColumnId(entry)
+      if (cols[colId]) cols[colId].push(entry)
+    }
+
+    return cols
+  }, [branchEntries, filteredBarbers, getEntryColumnId])
 
   const nextAppointmentByBarber = useMemo(() => {
-    // Los turnos "con cualquiera" (barber_id NULL) no se anuncian en ninguna
-    // silla: recién se sabe quién los atiende al hacer el check-in.
+    // Los turnos "con cualquiera disponible" (barber_id NULL) no se anuncian en
+    // ninguna columna: recién se sabe quién los atiende al hacer el check-in.
     const byBarber: Record<string, Appointment[]> = {}
     for (const appointment of todayAppointments) {
       if (!appointment.barber_id) continue
       if (selectedBranchId && appointment.branch_id !== selectedBranchId) continue
       ;(byBarber[appointment.barber_id] ??= []).push(appointment)
     }
+
     const map: Record<string, NextAppointmentInfo> = {}
     for (const [barberId, list] of Object.entries(byBarber)) {
       const next = findNextAppointment(list, now, timezone)
@@ -574,269 +1642,377 @@ export function FilaClient({
     return map
   }, [todayAppointments, selectedBranchId, now, timezone])
 
-  const nombreServicio = useMemo(() => {
-    const map = new Map(services.map((s) => [s.id, s.name]))
-    return (id: string | null) => (id ? (map.get(id) ?? null) : null)
-  }, [services])
-
-  /**
-   * Hora RESERVADA de cada turno del día. `priority_order` no sirve para saber si
-   * a un turno le llegó la hora: en una entrada adoptada de un walk-in es la
-   * hora de llegada (mig 170). Lo mismo que hace el panel del barbero.
-   */
-  const inicioPorTurno = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const a of todayAppointments) map.set(a.id, appointmentInstantMs(a.appointment_date, a.start_time, timezone))
-    return map
-  }, [todayAppointments, timezone])
-
-  const inicioDeTurno = useCallback(
-    (e: QueueEntry) => {
-      const deLaAgenda = e.appointment_id ? inicioPorTurno.get(e.appointment_id) : undefined
-      // Si el turno todavía no está en la agenda cargada (lo registró el
-      // mostrador hace segundos), `priority_order` es la mejor aproximación.
-      return deLaAgenda !== undefined && Number.isFinite(deLaAgenda) ? deLaAgenda : new Date(e.priority_order).getTime()
-    },
-    [inicioPorTurno],
-  )
-  const horaDeTurno = (e: QueueEntry) => formatHourMinute(inicioDeTurno(e), timezone)
-
-  /**
-   * En qué orden los va a atender su barbero: un turno cuya hora llegó va antes
-   * que todos (camino [A] del motor) y el resto por llegada. Con el orden de
-   * llegada pelado, el walk-in que llegó antes decía "sigue" y el motor le daba
-   * la silla al del turno.
-   */
-  const ordenDeAtencion = useCallback(
-    (a: QueueEntry, b: QueueEntry) => {
-      const va = a.is_appointment && inicioDeTurno(a) <= now
-      const vb = b.is_appointment && inicioDeTurno(b) <= now
-      if (va !== vb) return va ? -1 : 1
-      if (va && vb) return inicioDeTurno(a) - inicioDeTurno(b)
-      return porOrdenDeLlegada(a, b)
-    },
-    [inicioDeTurno, now],
-  )
-
-  /** La fila de cada barbero (sin el pool), en orden de atención: de acá sale "sigue" / "2º". */
-  const filaPorBarbero = useMemo(() => {
-    const map: Record<string, QueueEntry[]> = {}
-    for (const e of fila) {
-      if (e.is_break || esDelPool(e) || !e.barber_id) continue
-      ;(map[e.barber_id] ??= []).push(e)
-    }
-    for (const lista of Object.values(map)) lista.sort(ordenDeAtencion)
-    return map
-  }, [fila, ordenDeAtencion])
-
-  const pool = useMemo(() => fila.filter((e) => !e.is_break && esDelPool(e)), [fila])
-
-  /** La fila que espera en cada sucursal (en orden de llegada): el motor decide por sucursal. */
-  const filaPorSucursal = useMemo(() => {
-    const map = new Map<string, QueueEntry[]>()
-    for (const e of fila) {
-      const lista = map.get(e.branch_id)
-      if (lista) lista.push(e)
-      else map.set(e.branch_id, [e])
+  const inProgressData = useMemo(() => {
+    const map: Record<string, QueueEntry> = {}
+    for (const e of branchEntries) {
+      if (e.status === 'in_progress' && e.barber_id) {
+        map[e.barber_id] = e
+      }
     }
     return map
-  }, [fila])
+  }, [branchEntries])
 
-  const soloTurnosSet = useMemo(() => new Set(soloTurnos), [soloTurnos])
+  // ── Dnd handlers ─────────────────────────────────────────────────────────
 
   /**
-   * El estado de cada silla y, en las libres, lo que haría el motor
-   * (`decidirSilla`, `_tablero/motor.ts`): sugerir lo que `claim_next_for_barber`
-   * no haría era adelantar un walk-in a un turno cuya hora ya llegó, o meterle un
-   * corte a un barbero con un turno en 20 minutos.
+   * El shell del dashboard cambia de sección deslizando el dedo de costado: con
+   * esta marca sabe que el gesto es un arrastre de tarjeta y no navega
+   * (dashboard-shell.tsx). Se saca un tick después, para que el `touchend` que
+   * soltó la tarjeta todavía la vea.
    */
-  const sillas = useMemo(() => {
-    const hoy = fechaLocal(now, timezone)
-    const esDeHoy = (iso: string) => !!iso && fechaLocal(iso, timezone) === hoy
+  function marcarArrastre(si: boolean) {
+    if (si) document.documentElement.setAttribute('data-arrastrando', '')
+    else setTimeout(() => document.documentElement.removeAttribute('data-arrastrando'), 0)
+  }
 
-    const base = filteredBarbers.map((barbero) => {
-      const enCurso = inProgressData[barbero.id]
-      const fichado = !notClockedInBarbers.has(barbero.id)
-      const finDeTurno =
-        fichado &&
-        isBarberBlockedByShiftEnd(barbero as unknown as Staff, enCurso ? [enCurso] : [], schedules, now, shiftEndMargin)
-      const estado: EstadoSilla = enCurso
-        ? enCurso.is_break
-          ? 'descanso'
-          : 'cortando'
-        : !fichado
-          ? 'sin_entrada'
-          : finDeTurno
-            ? 'fin_de_turno'
-            : 'libre'
-      const suFila = filaPorBarbero[barbero.id] ?? []
-      const descansoPendiente = fila.some((e) => e.is_break && e.barber_id === barbero.id)
-      const decision: DecisionSilla | null =
-        estado === 'libre'
-          ? decidirSilla({
-              barberoId: barbero.id,
-              fila: filaPorSucursal.get(barbero.branch_id ?? '') ?? [],
-              ahora: now,
-              ventanaMinutos: ventanaPorSucursal[barbero.branch_id ?? ''] ?? protectionWindowMinutes(),
-              soloTurnos: soloTurnosSet.has(barbero.id),
-              proximoTurno: nextAppointmentByBarber[barbero.id],
-              inicioDeTurno,
-            })
+  useEffect(() => () => document.documentElement.removeAttribute('data-arrastrando'), [])
+
+  /**
+   * Con "todas las sucursales" hay carriles de barberos de las cuatro: un
+   * cliente no se pasa al barbero (ni al lugar en la fila) de otra sucursal —su
+   * entrada seguiría en la suya con un barbero que no atiende ahí.
+   */
+  function esDeOtraSucursal(entry: QueueEntry, colId: ColumnId | null, overEntry?: QueueEntry) {
+    if (overEntry && overEntry.branch_id !== entry.branch_id) return true
+    if (!colId || colId === '__dynamic__') return false
+    const barbero = liveBarbers.find((b) => b.id === colId)
+    return !!barbero?.branch_id && barbero.branch_id !== entry.branch_id
+  }
+
+  function handleDragStart(event: DragStartEvent) {
+    const { active } = event
+    marcarArrastre(true)
+
+    if (active.data.current?.isTemplate) {
+      setDraggedTemplate(active.data.current.config)
+      return
+    }
+
+    const activeEntry = branchEntries.find((e) => e.id === active.id)
+    if (activeEntry) setDraggedEntry(activeEntry)
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    const { active, over } = event
+    if (!over) return
+
+    const activeId = active.id
+    const overId = over.id
+    const isTemplate = active.data.current?.isTemplate
+
+    // Encontrar columna destino (over puede ser una Row o una Columna)
+    const overData = over.data.current
+    let targetColId: ColumnId | null = null
+
+    if (overData?.type === 'Column') {
+      targetColId = overData.columnId
+    } else {
+      const overEntry = entries.find(e => e.id === overId)
+      if (overEntry) targetColId = getEntryColumnId(overEntry)
+    }
+
+    if (!targetColId) return
+
+    if (isTemplate) {
+      // It's a template, don't update `entries` optimistically during dragOver since it's not a real entry
+      // It just hovers perfectly fine thanks to DragOverlay.
+      return
+    }
+
+    // Encontrar entry original
+    const activeEntry = entries.find(e => e.id === activeId)
+    if (!activeEntry) return
+    const activeColId = getEntryColumnId(activeEntry)
+
+    if (activeColId === targetColId) return
+    if (esDeOtraSucursal(activeEntry, targetColId, entries.find(e => e.id === overId))) return
+
+    // Mover optimísticamente de columna usando setEntries
+    setEntries(prev => {
+      const activeItems = [...prev]
+      const activeIdx = activeItems.findIndex(e => e.id === activeId)
+      if (activeIdx === -1) return prev
+
+      // Modificamos el item para que pertenezca a la nueva columna
+      // (sin cambiar aún la DB)
+      const newItem = { ...activeItems[activeIdx] }
+      if (targetColId === '__dynamic__') {
+        newItem.barber_id = null
+        newItem.is_dynamic = true
+      } else {
+        newItem.barber_id = targetColId
+        newItem.is_dynamic = false
+      }
+
+      // Lo quitamos de su pos anterior
+      activeItems.splice(activeIdx, 1)
+
+      // Si over es un item de la columna destino, lo ponemos antes/después
+      const overIdx = activeItems.findIndex(e => e.id === overId)
+      const newIndex = overIdx >= 0 ? overIdx : activeItems.length
+
+      activeItems.splice(newIndex, 0, newItem)
+      return activeItems
+    })
+  }
+
+  async function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    setDraggedEntry(null)
+    marcarArrastre(false)
+
+    if (!over) {
+      fetchQueue()
+      return
+    }
+
+    const activeId = active.id
+    const overId = over.id
+    const isTemplate = active.data.current?.isTemplate
+
+    if (isTemplate) {
+      // Identify target column
+      const overData = over.data.current
+      let targetColId: ColumnId | null = null
+
+      if (overData?.type === 'Column') {
+        targetColId = overData.columnId
+      } else {
+        const overEntry = entries.find(e => e.id === overId)
+        if (overEntry) targetColId = getEntryColumnId(overEntry)
+      }
+
+      // Can only assign break to a barber column
+      if (targetColId && targetColId !== '__dynamic__') {
+        const config = active.data.current?.config as BreakConfig
+        if (!config || !selectedBranchId && !config.branch_id) return // We need branch_id
+
+        const branchId = selectedBranchId || config.branch_id
+        setActionLoading('creating-break')
+        try {
+          const result = await createBreakEntry(branchId, targetColId, config.name)
+          if ('error' in result) {
+            toast.error(result.error)
+          } else {
+            toast.success('Descanso asignado al barbero')
+          }
+        } catch (e) {
+          avisarAccionFallida(e, 'No pudimos asignar el descanso. Probá de nuevo.')
+        } finally {
+          await fetchQueue()
+          setActionLoading(null)
+        }
+      }
+      return
+    }
+
+    const activeIdx = entries.findIndex(e => e.id === activeId)
+    if (activeIdx === -1) return
+    const arrastrada = entries[activeIdx]
+
+    // Soltada sobre un barbero (o una tarjeta) de otra sucursal: no se mezcla.
+    const overEntryFinal = entries.find(e => e.id === overId)
+    const overColId: ColumnId | null =
+      over.data.current?.type === 'Column'
+        ? (over.data.current.columnId as ColumnId)
+        : overEntryFinal
+          ? getEntryColumnId(overEntryFinal)
           : null
-      return {
-        barbero,
-        estado,
-        enCurso,
-        fichado,
-        suFila,
-        decision,
-        siguiente: decision?.tipo === 'turno' ? decision.entry : (undefined as QueueEntry | undefined),
-        // Sin fichar y sin nadie: va a la línea "No ficharon hoy", no a una silla.
-        plegada: !fichado && !enCurso && suFila.length === 0 && !descansoPendiente,
+    if (esDeOtraSucursal(arrastrada, overColId, overEntryFinal)) {
+      toast.error('No se puede pasar a alguien a otra sucursal')
+      fetchQueue()
+      return
+    }
+
+    let finalEntries = [...entries]
+
+    // Si cambió el orden
+    if (activeId !== overId) {
+      const overIdx = finalEntries.findIndex(e => e.id === overId)
+      if (overIdx !== -1) {
+        finalEntries = arrayMove(finalEntries, activeIdx, overIdx)
+      }
+    }
+
+    // Reconstruimos posiciones desde 1 para la fila esperando DE ESTA SUCURSAL.
+    //
+    // El scope por sucursal es obligatorio, no una optimización: sin `selectedBranchId`
+    // el fetch trae la cola de TODA la organización (`.eq('organization_id', orgId)`),
+    // así que arrastrar una tarjeta en la vista "todas las sucursales" renumeraba —y
+    // antes rebaseaba— la fila de las cuatro sucursales a la vez, con un ancla de
+    // tiempo compartida entre locales que no tienen nada que ver entre sí.
+    const branchIdDelDrag = selectedBranchId || arrastrada.branch_id
+    const waitingItems = finalEntries.filter(
+      e => e.status === 'waiting' && e.branch_id === branchIdDelDrag
+    )
+
+    // Lista de updates para Supabase
+    const updates: { id: string; position: number; barber_id?: string | null; is_dynamic?: boolean; priority_order?: string }[] = []
+
+    // ── priority_order: SÓLO se le toca al que se arrastró ──────────────────────
+    //
+    // `priority_order` es la hora de llegada del cliente y la clave FIFO real de todo
+    // el sistema (`claim_next_for_barber` ordena por ella, el panel del barbero también).
+    // Hasta el 4/9/2026 este bloque la REESCRIBÍA para toda la fila: tomaba el mínimo
+    // como base y repartía base+1s, base+2s… en el orden de dibujo. Tres consecuencias,
+    // las tres verificadas contra producción:
+    //
+    //   1. El orden de llegada se perdía DENTRO de la cola de un mismo barbero (que
+    //      es donde importa: `claim_next_for_barber` filtra `barber_id = yo OR
+    //      barber_id IS NULL`, así que un barbero nunca compite con los clientes de
+    //      otro). El 4/9 en Rondeau hubo 13 inversiones mismo-barbero y el 3/9, 8 —
+    //      p. ej. Facundo Brusco (llegó 15:13) quedó con prio 14:38:24.974 y Joaquín
+    //      yotti (llegó 16:01) con 14:38:22.974, los dos de Nico Maidana: 48 minutos
+    //      de inversión. Y hacia afuera de la banda el daño es al revés: como el
+    //      ancla queda en el PASADO, los rebaseados se le adelantan a todo el que
+    //      hizo check-in después del último drag, sin que nadie lo haya pedido.
+    //   2. Se disparaba sin que nadie quisiera reordenar nada. `position` se recicla y
+    //      se repite (`next_queue_position` = MAX+1 sobre las activas), así que casi
+    //      nunca vale 1..N: `entry.position !== newPos` daba true para toda la fila y
+    //      un temblor de 5 px sobre una tarjeta (el `activationConstraint` del
+    //      MouseSensor) rebaseaba la cola entera. Medido: 17-33 entradas reescritas
+    //      por día sólo en Rondeau.
+    //   3. Empates exactos de `priority_order` (78 pares en prod). Ojo: NO llegan al
+    //      motor — nacen de dos pasadas distintas y para la segunda la primera fila
+    //      ya no está `waiting`, que es lo único que leen la RPC y el panel. Se
+    //      arregla de arrastre, pero no era el daño.
+    //
+    // Ahora se mueve UNA sola entrada, intercalando su timestamp entre sus vecinos
+    // nuevos (los demás no se tocan). `position` se sigue renumerando porque es orden
+    // de dibujo y conviene tenerlo prolijo, pero NO puede volver a decidir la hora de
+    // llegada de nadie.
+    const movedId = activeId !== overId ? String(activeId) : null
+    const movedEntry = movedId ? waitingItems.find(e => e.id === movedId) : undefined
+    // Cambiar a alguien de columna es cambiarle el BARBERO, no el lugar en la fila:
+    // mantiene su hora de llegada. Sólo un reordenamiento dentro de su misma columna
+    // significa "a éste atendelo antes/después", que es lo único que justifica
+    // tocarle `priority_order`.
+    const dbDelMovido = movedEntry
+      ? confirmedEntriesRef.current.find(e => e.id === movedEntry.id) ?? movedEntry
+      : undefined
+    const cambioDeColumna =
+      !!movedEntry && !!dbDelMovido && movedEntry.barber_id !== dbDelMovido.barber_id
+
+    if (movedEntry && !movedEntry.is_appointment && !cambioDeColumna) {
+      const prioridadDe = (e: QueueEntry) => new Date(e.priority_order).getTime()
+      // Vecinos walk-in en el orden nuevo. Los turnos se saltean: su `priority_order`
+      // es la hora RESERVADA, no una hora de llegada, y no sirve como cota.
+      const vecinos = waitingItems.filter(e => !e.is_appointment && !isNaN(prioridadDe(e)))
+      const idx = vecinos.findIndex(e => e.id === movedEntry.id)
+      const anterior = idx > 0 ? prioridadDe(vecinos[idx - 1]) : null
+      const siguiente = idx >= 0 && idx < vecinos.length - 1 ? prioridadDe(vecinos[idx + 1]) : null
+
+      let nuevaPrioridad: number
+      if (anterior !== null && siguiente !== null) {
+        nuevaPrioridad = Math.floor((anterior + siguiente) / 2)
+        // Vecinos pegados al milisegundo: no hay punto medio. Corremos al de adelante
+        // 1 ms —empujar a UNA entrada es infinitamente menos daño que rebasear la fila.
+        if (nuevaPrioridad <= anterior || nuevaPrioridad >= siguiente) {
+          nuevaPrioridad = anterior + 1
+          updates.push({
+            id: vecinos[idx + 1].id,
+            position: vecinos[idx + 1].position,
+            priority_order: new Date(anterior + 2).toISOString(),
+          })
+        }
+      } else if (siguiente !== null) {
+        nuevaPrioridad = siguiente - 1000 // lo pusieron primero
+      } else if (anterior !== null) {
+        nuevaPrioridad = anterior + 1000 // lo pusieron último
+      } else {
+        nuevaPrioridad = prioridadDe(movedEntry) // era el único: nada que reordenar
+      }
+
+      updates.push({
+        id: movedEntry.id,
+        position: movedEntry.position,
+        barber_id: movedEntry.barber_id,
+        is_dynamic: movedEntry.is_dynamic,
+        priority_order: new Date(nuevaPrioridad).toISOString(),
+      })
+    }
+
+    waitingItems.forEach((entry, index) => {
+      const newPos = index + 1
+      const dbEntry = confirmedEntriesRef.current.find(e => e.id === entry.id) || entry
+      const yaEnLista = updates.find(u => u.id === entry.id)
+
+      // Un turno sólo puede recibir `position` (que es orden de dibujo, y hay que
+      // renumerarlo o quedarían posiciones repetidas). Su `priority_order` es la
+      // hora reservada —la clave de toda la convivencia con la fila— y su barbero
+      // vive en `appointments`: tocarlos desde acá dejaría fila y agenda
+      // desincronizadas. Se reprograma desde /dashboard/turnos/agenda.
+      if (entry.is_appointment) {
+        if (entry.position !== newPos) {
+          updates.push({ id: entry.id, position: newPos })
+        }
+        return
+      }
+
+      if (yaEnLista) {
+        yaEnLista.position = newPos
+        return
+      }
+
+      // Cambió de columna (barbero / pool) sin ser el arrastrado, o se le corrió la
+      // posición de dibujo. En ninguno de los dos casos se toca `priority_order`.
+      const cambioBarbero =
+        entry.barber_id !== dbEntry.barber_id || entry.is_dynamic !== dbEntry.is_dynamic
+
+      if (cambioBarbero) {
+        updates.push({
+          id: entry.id,
+          position: newPos,
+          barber_id: entry.barber_id,
+          is_dynamic: entry.is_dynamic,
+        })
+      } else if (entry.position !== newPos) {
+        updates.push({ id: entry.id, position: newPos })
       }
     })
 
-    // Las que van por la fila (FIFO), en dos pasadas para que ninguna quede
-    // ociosa mientras alguien espera:
-    //  1. las que no tienen walk-ins propios toman a los de Menor espera, por llegada;
-    //  2. las que sí, al que llegó antes entre su primero y el próximo de Menor
-    //     espera que quede (el FIFO de `claim_next_for_barber`).
-    // Un cliente de Menor espera se le sugiere a una sola silla.
-    const tomados = new Set<string>()
-    const fifo = base.filter((s) => s.decision?.tipo === 'fifo')
-    const topeDe = (s: (typeof base)[number]) => (s.decision?.tipo === 'fifo' ? s.decision.tope : null)
-    const propiosDe = (s: (typeof base)[number]) =>
-      s.suFila.filter((e) => candidatoFifo(e, s.barbero.id, topeDe(s), esDeHoy))
-    const delPoolPara = (s: (typeof base)[number]) =>
-      (filaPorSucursal.get(s.barbero.branch_id ?? '') ?? []).find(
-        (e) => esDelPool(e) && !tomados.has(e.id) && candidatoFifo(e, s.barbero.id, topeDe(s), esDeHoy),
+    if (updates.length > 0) {
+      const originalEntries = [...entries]
+
+      const locallyUpdated = finalEntries.map(e => {
+        const update = updates.find(u => u.id === e.id)
+        return update ? { ...e, position: update.position, ...(update.priority_order && { priority_order: update.priority_order }) } : e
+      })
+      setEntries(locallyUpdated)
+      // Actualizar ref inmediatamente para que drags consecutivos funcionen sin esperar la DB
+      confirmedEntriesRef.current = locallyUpdated
+
+      // Fire-and-forget: la UI ya está actualizada, no bloquear el drag
+      updateQueueOrder(updates).then(
+        (result) => {
+          if ('error' in result) {
+            toast.error(result.error)
+            setEntries(originalEntries)
+            confirmedEntriesRef.current = originalEntries
+          }
+        },
+        (e: unknown) => {
+          // Sin respuesta: el orden de la pantalla no está confirmado. Se vuelve
+          // al anterior y se dice (antes quedaba el optimista sin avisar).
+          avisarAccionFallida(e, 'No pudimos guardar el nuevo orden de la fila. Probá de nuevo.')
+          setEntries(originalEntries)
+          confirmedEntriesRef.current = originalEntries
+        },
       )
-    for (const silla of fifo) {
-      if (propiosDe(silla).length > 0) continue
-      const delPool = delPoolPara(silla)
-      if (delPool) {
-        silla.siguiente = delPool
-        tomados.add(delPool.id)
-      }
+    } else {
+      setEntries(finalEntries)
     }
-    for (const silla of fifo) {
-      const propio = propiosDe(silla)[0]
-      if (!propio) continue
-      const delPool = delPoolPara(silla)
-      silla.siguiente = delPool && porOrdenDeLlegada(delPool, propio) < 0 ? delPool : propio
-      if (delPool && silla.siguiente === delPool) tomados.add(delPool.id)
-    }
-
-    return base.map((silla) => ({
-      ...silla,
-      siguienteDelPool: !!silla.siguiente && esDelPool(silla.siguiente),
-    }))
-  }, [
-    filteredBarbers,
-    inProgressData,
-    notClockedInBarbers,
-    schedules,
-    now,
-    shiftEndMargin,
-    filaPorBarbero,
-    fila,
-    filaPorSucursal,
-    ventanaPorSucursal,
-    soloTurnosSet,
-    nextAppointmentByBarber,
-    inicioDeTurno,
-    timezone,
-  ])
-
-  const estadoDe = useMemo(() => new Map(sillas.map((s) => [s.barbero.id, s])), [sillas])
-
-  /**
-   * El orden de la columna responde la pregunta del mostrador, "¿qué silla está
-   * libre?": primero las libres con alguien para atender, después las libres,
-   * las que cortan (las de más minutos arriba: son las próximas en liberarse),
-   * los descansos y al final las que terminan turno o no ficharon. Dentro de
-   * cada grupo, por nombre. Se congela mientras se arrastra algo, mientras el
-   * mouse está sobre la columna y mientras el dedo está sobre el riel: una silla
-   * que se corre bajo el puntero hace soltar (o tocar) en la equivocada.
-   */
-  const ordenSillas = useMemo(() => {
-    const grupo = (estado: EstadoSilla, conAlguien: boolean) =>
-      estado === 'libre' ? (conAlguien ? 0 : 1) : estado === 'cortando' ? 2 : estado === 'descanso' ? 3 : 4
-    return sillas
-      .map((s, i) => ({
-        id: s.barbero.id,
-        i,
-        g: grupo(s.estado, !!s.siguiente),
-        m: s.estado === 'cortando' ? minutosEnLaSilla(s.enCurso, now) : 0,
-      }))
-      .sort((a, b) => a.g - b.g || (a.g === 2 ? b.m - a.m : 0) || a.i - b.i)
-      .map((x) => x.id)
-  }, [sillas, now])
-
-  /** Congela (o suelta) el orden de las sillas por un motivo; se suelta cuando no queda ninguno. */
-  function congelarSillas(motivo: keyof typeof motivosCongelado.current, si: boolean) {
-    const m = motivosCongelado.current
-    const antes = m.arrastre || m.puntero || m.toque
-    m[motivo] = si
-    const despues = m.arrastre || m.puntero || m.toque
-    if (!antes && despues) setOrdenCongelado(ordenSillas)
-    else if (antes && !despues) setOrdenCongelado(null)
   }
 
-  /** El dedo sobre el riel congela; al levantarlo, un instante más (el toque termina en un clic). */
-  function tocandoElRiel(tocando: boolean) {
-    if (toqueTimer.current) clearTimeout(toqueTimer.current)
-    toqueTimer.current = null
-    if (tocando) congelarSillas('toque', true)
-    else toqueTimer.current = setTimeout(() => congelarSillas('toque', false), 700)
-  }
-
-  useEffect(
-    () => () => {
-      if (toqueTimer.current) clearTimeout(toqueTimer.current)
-      if (aterrizajeTimer.current) clearTimeout(aterrizajeTimer.current)
-      document.documentElement.removeAttribute('data-arrastrando')
-    },
-    [],
-  )
-
-  const clientesEsperando = fila.filter((e) => !e.is_break)
-  const masLarga = clientesEsperando.reduce((max, e) => Math.max(max, minutosDesde(e.checked_in_at, now)), 0)
-  const cortando = sillas.filter((s) => s.estado === 'cortando').length
-  const libres = sillas.filter((s) => s.estado === 'libre').length
-  const fichados = sillas.filter((s) => s.fichado).length
-  const cortesHoy = selectedBranchId
-    ? filteredBarbers.reduce((sum, b) => sum + (dailyServiceCounts[b.id] || 0), 0)
-    : Object.values(dailyServiceCounts).reduce((a, b) => a + b, 0)
-
-  // El filtro apunta a un barbero que ya no está (cambio de sucursal): se ve todo.
-  const filtroVigente = filtro === 'todos' || filtro === POOL || estadoDe.has(filtro) ? filtro : 'todos'
-  const visibles = useMemo(() => {
-    if (filtroVigente === 'todos') return fila
-    if (filtroVigente === POOL) return fila.filter((e) => !e.is_break && esDelPool(e))
-    return fila.filter((e) => !esDelPool(e) && e.barber_id === filtroVigente)
-  }, [fila, filtroVigente])
-
-  // Su número en la fila de la sucursal: la llegada, contando sólo clientes.
-  const numeroEnLaFila = useMemo(() => {
-    const map = new Map<string, number>()
-    let n = 0
-    for (const e of fila) if (!e.is_break) map.set(e.id, ++n)
-    return map
-  }, [fila])
-
-  const chips = useMemo(() => {
-    const deBarberos = sillas
-      .filter((s) => s.suFila.length > 0 || filtroVigente === s.barbero.id)
-      .map((s) => ({ id: s.barbero.id, barbero: s.barbero, cantidad: s.suFila.length }))
-    return deBarberos
-  }, [sillas, filtroVigente])
-
-  // ── Acciones ────────────────────────────────────────────────────────────────
-
-  // La X (ahora "Sacar de la fila") pide confirmación para cualquier CLIENTE y
-  // cancela directo sólo los descansos. Sacar a alguien de la fila es lo menos
-  // reversible de esta pantalla: el cliente no se entera y sigue esperando.
+  // Dispatcher de la X: pide confirmación para cualquier CLIENTE (esperando o en
+  // curso) y cancela directo sólo los descansos.
+  //
+  // Antes un cliente `waiting` se cancelaba con un solo tap, sin preguntar y sin
+  // deshacer. Sacar a alguien de la fila es la acción menos reversible de esta
+  // pantalla —no hay `cancelled_by` que mirar después (recién existe desde la mig
+  // 211) y el cliente no se entera: se queda sentado esperando un turno que ya no
+  // existe— y en producción hay 4 clientes por día que terminan así. El panel del
+  // barbero ya confirmaba; el dashboard, que es donde además está el drag, no.
   function handleCancel(entryId: string) {
     const entry = entries.find((e) => e.id === entryId)
     if (entry && !entry.is_break) {
@@ -846,22 +2022,16 @@ export function FilaClient({
     doCancel(entryId)
   }
 
-  // El dashboard es admin (Supabase Auth): `allowInProgress` habilita el override
-  // del servidor. El panel del barbero llama sin el flag y conserva la protección.
+  // El dashboard es admin (Supabase Auth) → allowInProgress: true habilita el
+  // override server-side. El panel del barbero (PIN) llama sin el flag y conserva
+  // la protección.
   async function doCancel(entryId: string) {
-    const entry = entries.find((e) => e.id === entryId)
+    const isBreak = entries.find((e) => e.id === entryId)?.is_break ?? false
     setActionLoading(entryId)
     try {
       const result = await cancelQueueEntry(entryId, { allowInProgress: true })
       if ('error' in result) toast.error(result.error)
-      else
-        toast.success(
-          entry?.is_break
-            ? 'Descanso cancelado'
-            : entry?.status === 'in_progress'
-              ? 'Corte cancelado'
-              : `${nombreDePila(entry?.client?.name)} salió de la fila`,
-        )
+      else toast.success(isBreak ? 'Descanso cancelado' : 'Turno cancelado')
     } catch (e) {
       avisarAccionFallida(e, 'No pudimos sacarlo de la fila. Revisá la conexión y probá de nuevo.')
     } finally {
@@ -871,20 +2041,30 @@ export function FilaClient({
   }
 
   /**
-   * «Solo asesoría» desde un corte en curso (mig 217): si se asesoró y no se
-   * hizo nada, la entrada se cierra SIN visita (`cancel_reason = 'solo_asesoria'`),
-   * no como un corte cancelado. La misma acción que el cobro le ofrece al barbero.
+   * «Solo asesoría» desde la X de un corte en curso (mig 217): si el cliente se
+   * asesoró y no se hizo nada, la entrada se cierra SIN visita y queda anotada
+   * como asesoría (`cancel_reason = 'solo_asesoria'`), no como un corte
+   * cancelado. Es la misma acción que el cobro ofrece al barbero.
    */
   async function doCerrarSoloAsesoria(entryId: string) {
     setActionLoading(entryId)
     try {
       const r = await cerrarSoloAsesoria(entryId)
       if ('error' in r) {
+        // Entre otros, «No tenés acceso a esta sucursal.» (fuera del alcance del rol).
         toast.error(r.error)
       } else {
-        // Las fotos de ese corte no van a ninguna ficha: el servidor ya intentó
-        // borrarlas y esto lo reintenta. El aviso del servidor se muestra recién
-        // al terminar el reintento, y sólo si el reintento no lo resolvió.
+        // Las fotos de ese corte no van a ninguna ficha. El servidor ya intentó
+        // borrarlas; esto lo reintenta (también lo que subió el celular), suelta
+        // lo que este dispositivo tuviera del cobro y avisa con Reintentar sólo
+        // si vuelve a fallar.
+        //
+        // El `aviso` del servidor (es sobre esas fotos) se muestra recién cuando
+        // el reintento termina, y sólo si el reintento no lo dijo ni lo resolvió:
+        // si borró algo, lo que había quedado ya está resuelto; si falló, ya hay
+        // un aviso persistente con Reintentar y serían dos por lo mismo. Queda el
+        // caso que el reintento no ve: el servidor borró las filas pero no los
+        // archivos, y sin filas no hay nada que reintentar desde acá.
         const avisoDelServidor = r.aviso
         if (avisoDelServidor) console.warn('[fila] cerrarSoloAsesoria con aviso (lo reintenta descartarFotosDelCobro):', avisoDelServidor)
         void descartarFotosDelCobro(entryId).then((descarte) => {
@@ -908,14 +2088,19 @@ export function FilaClient({
     }
   }
 
-  /** Arranca el corte de `entry` con `barberId` (la silla libre o el elegido). */
-  async function atenderCon(entry: QueueEntry, barberId: string) {
-    const barbero = liveBarbers.find((b) => b.id === barberId)
+  async function handleStartService(entry: QueueEntry) {
+    if (!entry.barber_id) {
+      // Cliente del pool ("Menor espera"). Antes esto era un `toast.error` sin salida
+      // y el botón ni siquiera se dibujaba, así que la única acción disponible sobre
+      // esta tarjeta era la X. Ahora se elige el barbero acá mismo.
+      setAsignarBarberoEntry(entry)
+      return
+    }
     setActionLoading(entry.id)
     try {
-      const result = await startService(entry.id, barberId)
+      const result = await startService(entry.id, entry.barber_id)
       if ('error' in result) toast.error(result.error)
-      else toast.success(barbero ? `Corte iniciado con ${nombreDePila(barbero.full_name)}` : 'Corte iniciado')
+      else toast.success('Corte iniciado')
     } catch (e) {
       avisarAccionFallida(e, 'No pudimos iniciar el corte. Revisá la conexión y probá de nuevo.')
     } finally {
@@ -924,754 +2109,478 @@ export function FilaClient({
     }
   }
 
-  /**
-   * Las sillas que pueden tomar a este walk-in YA por el camino del motor: libres,
-   * de su sucursal, sin turno ni descanso que les toque antes, y con el cliente
-   * anterior a su descanso pendiente.
-   */
-  const sillasParaWalkIn = (entry: QueueEntry) =>
-    sillas.filter(
-      (s) =>
-        s.estado === 'libre' &&
-        s.barbero.branch_id === entry.branch_id &&
-        s.decision?.tipo === 'fifo' &&
-        (s.decision.tope === null || new Date(entry.priority_order).getTime() < s.decision.tope),
-    )
-
-  function handleStartService(entry: QueueEntry) {
-    // Del pool ("Menor espera"): con una sola silla que lo pueda tomar se arranca
-    // con ese barbero (su cara está en el botón); si no, se elige en "¿Quién lo
-    // atiende?", que muestra también a los que el motor frena y por qué.
-    if (esDelPool(entry)) {
-      const libres = sillasParaWalkIn(entry)
-      if (libres.length === 1) void atenderCon(entry, libres[0].barbero.id)
-      else setAsignarBarberoEntry(entry)
-      return
-    }
-    if (entry.barber_id) void atenderCon(entry, entry.barber_id)
+  function handleCompleteService(entry: QueueEntry) {
+    setCompletingEntry(entry)
   }
 
-  /** La silla que acaba de recibir a alguien se ilumina un momento. */
-  function marcarAterrizaje(barberId: string) {
-    if (aterrizajeTimer.current) clearTimeout(aterrizajeTimer.current)
-    setAterrizaje(barberId)
-    aterrizajeTimer.current = setTimeout(() => setAterrizaje(null), 1400)
+  function formatElapsed(timestamp: string) {
+    const elapsed = now - new Date(timestamp).getTime()
+    if (isNaN(elapsed) || elapsed < 0) return '0m'
+    const totalSeconds = Math.floor(elapsed / 1000)
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`
   }
 
-  /** Escribe barbero / Menor espera de una entrada, con la pantalla adelantada y vuelta atrás si falla. */
-  async function escribirBarbero(entry: QueueEntry, barberId: string | null, dinamico: boolean): Promise<boolean> {
-    const barbero = barberId ? liveBarbers.find((b) => b.id === barberId) : undefined
-    const original = confirmedEntriesRef.current
-    const actualizado = original.map((e) =>
-      e.id === entry.id
-        ? ({
-            ...e,
-            barber_id: barberId,
-            is_dynamic: dinamico,
-            barber: barbero ? { id: barbero.id, full_name: barbero.full_name, avatar_url: barbero.avatar_url ?? null } : null,
-          } as QueueEntry)
-        : e,
-    )
-    setEntries(actualizado)
-    confirmedEntriesRef.current = actualizado
-    try {
-      const r = await updateQueueOrder([{ id: entry.id, position: entry.position, barber_id: barberId, is_dynamic: dinamico }])
-      if ('error' in r) {
-        toast.error(r.error)
-        setEntries(original)
-        confirmedEntriesRef.current = original
-        return false
-      }
-      return true
-    } catch (e) {
-      avisarAccionFallida(e, 'No pudimos pasarlo. Revisá la conexión y probá de nuevo.')
-      setEntries(original)
-      confirmedEntriesRef.current = original
-      return false
-    }
+  function getBranchName(branchId: string) {
+    return branches.find((b) => b.id === branchId)?.name ?? ''
   }
 
-  /**
-   * Pasa a alguien a esperar a otro barbero, o a Menor espera. Es un cambio de
-   * BARBERO, no de lugar: conserva su hora de llegada (`priority_order` no se
-   * toca), igual que soltarlo en la columna de otro barbero en el tablero viejo.
-   * Los turnos no se pasan desde acá (su barbero vive en `appointments`) y un
-   * descanso es de su barbero: no se le pasa a otro.
-   */
-  async function moverA(entry: QueueEntry, destino: string) {
-    if (entry.is_appointment || entry.is_break) return
-    const aPool = destino === POOL
-    const nuevoBarbero = aPool ? null : destino
-    if (aPool ? esDelPool(entry) : !esDelPool(entry) && entry.barber_id === nuevoBarbero) return
-
-    const barbero = nuevoBarbero ? liveBarbers.find((b) => b.id === nuevoBarbero) : undefined
-    if (barbero && barbero.branch_id !== entry.branch_id) {
-      toast.error(`${nombreDePila(barbero.full_name)} es de otra sucursal`)
-      return
-    }
-    // Para "Deshacer": cómo estaba (también la pista de un dinámico).
-    const antes = { barberId: entry.barber_id, dinamico: entry.is_dynamic }
-    const nombre = nombreDePila(entry.client?.name)
-    if (!(await escribirBarbero(entry, nuevoBarbero, aPool))) return
-
-    if (nuevoBarbero) marcarAterrizaje(nuevoBarbero)
-    const lugar = nuevoBarbero ? lugarAlPasar(entry, filaPorBarbero[nuevoBarbero] ?? [], ordenDeAtencion) : 0
-    toast.success(aPool ? `${nombre} pasó a Menor espera` : `${nombre} ahora espera a ${nombreDePila(barbero?.full_name)}`, {
-      id: `mover-${entry.id}`,
-      description: aPool ? 'Lo atiende el primero que se libere.' : lugar === 1 ? 'Es el que sigue.' : `Queda ${lugar}º en su fila.`,
-      action: {
-        label: 'Deshacer',
-        onClick: () => {
-          const ahora = confirmedEntriesRef.current.find((e) => e.id === entry.id)
-          if (!ahora || ahora.status !== 'waiting') {
-            toast.error(`${nombre} ya no está esperando: no se puede deshacer`)
-            return
-          }
-          void escribirBarbero(ahora, antes.barberId, antes.dinamico).then((ok) => {
-            if (ok) toast.success(`${nombre} volvió a donde estaba`, { id: `mover-${entry.id}` })
-          })
-        },
-      },
-    })
+  function getBarberName(barberId: string) {
+    return liveBarbers.find((b) => b.id === barberId)?.full_name
   }
 
-  async function asignarDescanso(barberId: string, config: BreakConfig) {
-    const barbero = liveBarbers.find((b) => b.id === barberId)
-    const branchId = barbero?.branch_id || selectedBranchId || config.branch_id
-    if (!branchId) return
-    setActionLoading('creating-break')
-    try {
-      const result = await createBreakEntry(branchId, barberId, config.name)
-      if ('error' in result) toast.error(result.error)
-      else toast.success(`${config.name} asignado a ${nombreDePila(barbero?.full_name)}`)
-    } catch (e) {
-      avisarAccionFallida(e, 'No pudimos asignar el descanso. Probá de nuevo.')
-    } finally {
-      await fetchQueue()
-      setActionLoading(null)
-    }
-  }
-
-  /**
-   * Reordenar la fila: SÓLO se le toca `priority_order` al arrastrado, metiéndolo
-   * entre sus vecinos nuevos. Hasta el 4/9/2026 se reescribía la fila entera
-   * (ver el historial de este archivo): se perdía el orden de llegada, se disparaba
-   * con un temblor de 5 px y adelantaba a los rebaseados por encima de todo el
-   * que hizo check-in después. `position` se renumera porque es orden de dibujo,
-   * pero no decide la llegada de nadie. Los turnos no se tocan: su
-   * `priority_order` es la hora RESERVADA.
-   */
-  function reordenar(activeId: string, overId: string) {
-    const activeIdx = entries.findIndex((e) => e.id === activeId)
-    if (activeIdx === -1) return
-    const arrastrada = entries[activeIdx]
-
-    let finalEntries = [...entries]
-    if (activeId !== overId) {
-      const overIdx = finalEntries.findIndex((e) => e.id === overId)
-      if (overIdx !== -1) finalEntries = arrayMove(finalEntries, activeIdx, overIdx)
-    }
-
-    // El scope por sucursal es obligatorio: sin él, reordenar en la vista de
-    // todas las sucursales renumeraba la fila de las cuatro a la vez.
-    const branchIdDelDrag = selectedBranchId || arrastrada.branch_id
-    const waitingItems = finalEntries.filter((e) => e.status === 'waiting' && e.branch_id === branchIdDelDrag)
-
-    const updates: { id: string; position: number; barber_id?: string | null; is_dynamic?: boolean; priority_order?: string }[] = []
-
-    const movedEntry = activeId !== overId ? waitingItems.find((e) => e.id === activeId) : undefined
-    if (movedEntry && !movedEntry.is_appointment) {
-      const prioridadDe = (e: QueueEntry) => new Date(e.priority_order).getTime()
-      // Vecinos walk-in en el orden nuevo (los turnos no sirven de cota: su
-      // `priority_order` es la hora reservada, no una llegada).
-      const vecinos = waitingItems.filter((e) => !e.is_appointment && !isNaN(prioridadDe(e)))
-      const idx = vecinos.findIndex((e) => e.id === movedEntry.id)
-      const anterior = idx > 0 ? prioridadDe(vecinos[idx - 1]) : null
-      const siguiente = idx >= 0 && idx < vecinos.length - 1 ? prioridadDe(vecinos[idx + 1]) : null
-
-      let nuevaPrioridad: number
-      if (anterior !== null && siguiente !== null) {
-        nuevaPrioridad = Math.floor((anterior + siguiente) / 2)
-        // Vecinos pegados al milisegundo: no hay punto medio. Se corre al de
-        // adelante 1 ms; empujar a UNA entrada es mucho menos daño que rebasear.
-        if (nuevaPrioridad <= anterior || nuevaPrioridad >= siguiente) {
-          nuevaPrioridad = anterior + 1
-          updates.push({
-            id: vecinos[idx + 1].id,
-            position: vecinos[idx + 1].position,
-            priority_order: new Date(anterior + 2).toISOString(),
-          })
-        }
-      } else if (siguiente !== null) {
-        nuevaPrioridad = siguiente - 1000 // lo pusieron primero
-      } else if (anterior !== null) {
-        nuevaPrioridad = anterior + 1000 // lo pusieron último
-      } else {
-        nuevaPrioridad = prioridadDe(movedEntry) // era el único
-      }
-
-      updates.push({
-        id: movedEntry.id,
-        position: movedEntry.position,
-        barber_id: movedEntry.barber_id,
-        is_dynamic: movedEntry.is_dynamic,
-        priority_order: new Date(nuevaPrioridad).toISOString(),
-      })
-    }
-
-    waitingItems.forEach((entry, index) => {
-      const newPos = index + 1
-      const yaEnLista = updates.find((u) => u.id === entry.id)
-      if (entry.is_appointment) {
-        if (entry.position !== newPos) updates.push({ id: entry.id, position: newPos })
-        return
-      }
-      if (yaEnLista) {
-        yaEnLista.position = newPos
-        return
-      }
-      if (entry.position !== newPos) updates.push({ id: entry.id, position: newPos })
-    })
-
-    if (updates.length === 0) {
-      setEntries(finalEntries)
-      return
-    }
-
-    const originalEntries = [...entries]
-    const locallyUpdated = finalEntries.map((e) => {
-      const update = updates.find((u) => u.id === e.id)
-      return update ? { ...e, position: update.position, ...(update.priority_order && { priority_order: update.priority_order }) } : e
-    })
-    setEntries(locallyUpdated)
-    // El ref se actualiza ya, para que dos arrastres seguidos no esperen a la base.
-    confirmedEntriesRef.current = locallyUpdated
-
-    // Sin bloquear: la pantalla ya cambió. Si la base no lo confirma, se vuelve atrás y se dice.
-    updateQueueOrder(updates).then(
-      (result) => {
-        if ('error' in result) {
-          toast.error(result.error)
-          setEntries(originalEntries)
-          confirmedEntriesRef.current = originalEntries
-        }
-      },
-      (e: unknown) => {
-        avisarAccionFallida(e, 'No pudimos guardar el nuevo orden de la fila. Probá de nuevo.')
-        setEntries(originalEntries)
-        confirmedEntriesRef.current = originalEntries
-      },
-    )
-  }
-
-  // ── Arrastrar y soltar ──────────────────────────────────────────────────────
-
-  function handleDragStart(event: DragStartEvent) {
-    const { active, activatorEvent } = event
-    // El shell del dashboard cambia de sección deslizando el dedo de costado:
-    // con esto sabe que el gesto es un arrastre (ver dashboard-shell.tsx).
-    document.documentElement.setAttribute('data-arrastrando', '')
-    congelarSillas('arrastre', true)
-    setSobre(null)
-    setSoltadoEnSilla(false)
-    // En el celular, un toque corto de vibración: "lo agarraste".
-    if (typeof TouchEvent !== 'undefined' && activatorEvent instanceof TouchEvent) navigator.vibrate?.(12)
-    if (active.data.current?.isTemplate) {
-      setDraggedTemplate(active.data.current.config as BreakConfig)
-      return
-    }
-    const activeEntry = branchEntries.find((e) => e.id === active.id)
-    if (activeEntry) setDraggedEntry(activeEntry)
-  }
-
-  function handleDragOver(event: DragOverEvent) {
-    const data = event.over?.data.current
-    setSobre(data?.type === 'Column' ? (data.columnId as string) : null)
-  }
-
-  function terminarArrastre() {
-    setDraggedEntry(null)
-    setDraggedTemplate(null)
-    setSobre(null)
-    congelarSillas('arrastre', false)
-    // Al próximo tick: el `touchend` que soltó la tarjeta todavía tiene que
-    // llegarle al shell con la marca puesta, para que no lo tome como un swipe.
-    setTimeout(() => document.documentElement.removeAttribute('data-arrastrando'), 0)
-  }
-
-  function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event
-    const overData = over?.data.current
-    const destino = overData?.type === 'Column' ? (overData.columnId as string) : null
-    // Se decide en este mismo render: la animación de soltar lee el prop ahora.
-    setSoltadoEnSilla(!!destino)
-    terminarArrastre()
-    if (!over) return
-
-    if (active.data.current?.isTemplate) {
-      // Un descanso sólo se le asigna a un barbero (no a Menor espera).
-      if (destino && destino !== POOL) void asignarDescanso(destino, active.data.current.config as BreakConfig)
-      return
-    }
-
-    const entry = entries.find((e) => e.id === active.id)
-    if (!entry) return
-    if (destino) {
-      void moverA(entry, destino)
-      return
-    }
-    reordenar(String(active.id), String(over.id))
-  }
-
-  // ── Datos de cada renglón ───────────────────────────────────────────────────
-
-  function destinosDe(entry: QueueEntry): DestinoFila[] {
-    const lista: DestinoFila[] = []
-    if (!esDelPool(entry)) lista.push({ id: POOL, nombre: 'Menor espera', nota: 'el primero libre' })
-    for (const s of sillas) {
-      if (s.barbero.branch_id !== entry.branch_id) continue
-      if (!esDelPool(entry) && s.barbero.id === entry.barber_id) continue
-      const nota =
-        s.estado === 'libre' ? 'libre' : s.estado === 'cortando' ? 'cortando' : s.estado === 'descanso' ? 'en descanso' : s.estado === 'fin_de_turno' ? 'termina turno' : 'sin fichar'
-      lista.push({ id: s.barbero.id, nombre: s.barbero.full_name, nota })
-    }
-    return lista
-  }
-
-  /**
-   * Si la tarjeta muestra «Atender». Un turno se puede arrancar a mano con su
-   * barbero libre (igual que «Iniciar turno» en el panel). Un walk-in, con las
-   * reglas del motor: si a su barbero le toca un turno o el descanso, o un turno
-   * próximo frena los walk-ins, el botón no está y el menú dice por qué. Con la
-   * fila mandando sobre el fichaje, el que no fichó igual se puede elegir.
-   */
-  function atenderDe(entry: QueueEntry): { habilitado: boolean; motivo?: string; con?: BarberRow } {
-    if (entry.is_break) return { habilitado: false }
-    if (esDelPool(entry) || !entry.barber_id) {
-      const libres = sillasParaWalkIn(entry)
-      if (libres.length === 1) return { habilitado: true, con: libres[0].barbero }
-      if (libres.length > 1) return { habilitado: true }
-      // Ninguna silla lo toma ya: queda elegir en "¿Quién lo atiende?" entre las
-      // que no están ocupadas (las que no ficharon o terminan turno, las que el
-      // motor frena). Las plegadas en "No ficharon hoy" no cuentan.
-      const elegibles = sillas.filter(
-        (s) => s.barbero.branch_id === entry.branch_id && !s.plegada && s.estado !== 'cortando' && s.estado !== 'descanso',
-      )
-      return elegibles.length > 0
-        ? { habilitado: true }
-        : { habilitado: false, motivo: 'Todas las sillas de la sucursal están ocupadas' }
-    }
-    const silla = estadoDe.get(entry.barber_id)
-    const nombre = nombreDePila(silla?.barbero.full_name ?? entry.barber?.full_name)
-    if (silla?.estado === 'cortando') {
-      return { habilitado: false, motivo: `${nombre} está atendiendo a ${nombreDePila(silla.enCurso?.client?.name)}` }
-    }
-    if (silla?.estado === 'descanso') return { habilitado: false, motivo: `${nombre} está en descanso` }
-    const d = silla?.decision
-    if (!entry.is_appointment && d) {
-      if (d.tipo === 'descanso') return { habilitado: false, motivo: `A ${nombre} le toca el descanso: lo arranca su tablet` }
-      if (d.tipo === 'turno') {
-        return {
-          habilitado: false,
-          motivo: `Primero va el turno de las ${horaDeTurno(d.entry)} (${nombreDePila(d.entry.client?.name)})`,
-        }
-      }
-      if (d.tipo === 'protegida') {
-        return {
-          habilitado: false,
-          motivo: d.turno
-            ? `${nombre} tiene turno a las ${d.turno.timeLabel}: no entra otro corte antes`
-            : `${nombre} sólo atiende turnos`,
-        }
-      }
-    }
-    return { habilitado: true }
-  }
-
-  /** Por qué el motor no le daría un walk-in a esta silla libre (para "¿Quién lo atiende?"). */
-  function notaDelMotor(s: (typeof sillas)[number]): string | null {
-    const d = s.decision
-    if (s.estado !== 'libre' || !d) return null
-    if (d.tipo === 'descanso') return 'le toca el descanso'
-    if (d.tipo === 'turno') return `turno ${horaDeTurno(d.entry)}`
-    if (d.tipo === 'protegida') return d.turno ? `turno ${d.turno.timeLabel}` : 'sólo turnos'
-    return null
-  }
-
-  /** Lo que muestra una silla libre sin nadie para atender cuando lo decide el motor. */
-  function avisoDe(s: (typeof sillas)[number]): AvisoSilla | undefined {
-    const d = s.decision
-    if (s.estado !== 'libre' || !d) return undefined
-    if (d.tipo === 'descanso') return { tono: 'descanso', texto: 'Le toca el descanso: lo arranca su tablet' }
-    if (d.tipo === 'protegida') {
-      return {
-        tono: 'turno',
-        texto: d.turno
-          ? `No entra otro corte antes del turno de las ${d.turno.timeLabel}${d.turno.minutesUntil > 1 ? ` (en ${d.turno.minutesUntil} min)` : ''}`
-          : 'Sólo atiende turnos',
-      }
-    }
-    return undefined
-  }
-
-  /** Qué es cada silla para lo que está en la mano (null sin arrastre). */
-  function soltarEn(s: (typeof sillas)[number]): SoltarEnSilla | null {
-    if (draggedTemplate) {
-      if (draggedTemplate.branch_id && s.barbero.branch_id !== draggedTemplate.branch_id) {
-        return { acepta: false, texto: 'Otra sucursal' }
-      }
-      return {
-        acepta: true,
-        texto: `${draggedTemplate.name} de ${draggedTemplate.duration_minutes} min para ${nombreDePila(s.barbero.full_name)}`,
-      }
-    }
-    if (!draggedEntry) return null
-    // Un descanso pendiente sólo se reordena en la lista: es de su barbero.
-    if (draggedEntry.is_break) return { acepta: false, texto: '' }
-    if (s.barbero.branch_id !== draggedEntry.branch_id) return { acepta: false, texto: 'Otra sucursal' }
-    if (!esDelPool(draggedEntry) && draggedEntry.barber_id === s.barbero.id) return { acepta: false, texto: 'Ya espera con él' }
-    const lugar = lugarAlPasar(draggedEntry, filaPorBarbero[s.barbero.id] ?? [], ordenDeAtencion)
-    return {
-      acepta: true,
-      texto: `${nombreDePila(draggedEntry.client?.name)} pasa a esperarlo · ${lugar === 1 ? 'es el que sigue' : `queda ${lugar}º`}`,
-    }
-  }
-
+  // Cliente del pool que se pasó desde el aviso de WhatsApp (mig 218): el
+  // selector "¿Quién lo atiende?" dice a quién esperaba y lo marca en la lista,
+  // porque conservó su lugar en la fila de ese barbero.
+  // Un corte en curso que pidió asesoría (y no es un turno): la X ofrece además
+  // cerrarlo como «solo asesoría», que es lo que pasó si no se hizo nada.
   const cancelarAsesoriaEnCurso =
     cancelConfirmEntry?.status === 'in_progress' &&
     cancelConfirmEntry.pidio_asesoria === true &&
     !cancelConfirmEntry.appointment_id &&
     !cancelConfirmEntry.is_break
 
-  // Cliente del pool que se pasó desde el aviso de WhatsApp (mig 218): el
-  // selector dice a quién esperaba, porque conservó su lugar en esa fila.
   const asignarViaWhatsApp = !!asignarBarberoEntry && esMovidaPorWhatsApp(asignarBarberoEntry)
   const asignarEsperabaA =
     asignarViaWhatsApp && asignarBarberoEntry?.menor_espera_barbero_original_id
-      ? liveBarbers.find((b) => b.id === asignarBarberoEntry.menor_espera_barbero_original_id)?.full_name
+      ? getBarberName(asignarBarberoEntry.menor_espera_barbero_original_id)
       : undefined
 
-  const descansosDe = (branchId: string | null) =>
-    breakConfigs.filter((c) => (branchId ? c.branch_id === branchId : !selectedBranchId || c.branch_id === selectedBranchId))
-  const descansosVisibles = breakConfigs.filter((c) => !selectedBranchId || c.branch_id === selectedBranchId)
-  // Congelado, el orden guardado manda; las sillas que aparecieron después
-  // (alguien fichó) van al final, y las que ya no están se caen.
-  const ordenVisible = ordenCongelado
-    ? [...ordenCongelado.filter((id) => estadoDe.has(id)), ...ordenSillas.filter((id) => !ordenCongelado.includes(id))]
-    : ordenSillas
-  const sillasOrdenadas = ordenVisible.map((id) => estadoDe.get(id)).filter((s): s is NonNullable<typeof s> => !!s)
-  const sillasVisibles = sillasOrdenadas.filter((s) => !s.plegada)
-  const plegadas = sillasOrdenadas.filter((s) => s.plegada)
-  const sinFichar = plegadas.map((s) => s.barbero)
-  // Arrastrando a un cliente (los turnos no se arrastran y un descanso sólo se
-  // reordena): en el celular sube el dock de barberos.
-  const arrastraAlguien = !!draggedEntry && !draggedEntry.is_break && !draggedEntry.is_appointment
-  // Y si no está en Menor espera, el chip de Menor espera de la lista se vuelve
-  // un lugar donde soltarlo.
-  const arrastraCliente = arrastraAlguien && !!draggedEntry && !esDelPool(draggedEntry)
-  const nivelMasLarga = nivelEspera(masLarga)
-  const nombreDelFiltro =
-    filtroVigente === POOL ? 'Menor espera' : filtroVigente !== 'todos' ? estadoDe.get(filtroVigente)?.barbero.full_name : undefined
-
-  /** Lo que dice la tarjeta en la mano al pasar por una silla o por Menor espera. */
-  const destinoEnLaMano: DestinoEnLaMano | null = (() => {
-    if (!draggedEntry || draggedEntry.is_break || !sobre) return null
-    if (sobre === POOL) return { texto: 'Menor espera · el primero que se libere' }
-    const s = estadoDe.get(sobre)
-    if (!s) return null
-    const lugar = lugarAlPasar(draggedEntry, filaPorBarbero[sobre] ?? [], ordenDeAtencion)
-    return {
-      barbero: s.barbero,
-      texto: `${nombreDePila(s.barbero.full_name)} · ${lugar === 1 ? 'es el que sigue' : `queda ${lugar}º`}`,
-    }
-  })()
-
-  /** Los blancos del dock del celular: Menor espera (si no está ahí) y los barberos de su sucursal. */
-  const destinosDelDock: DestinoDock[] = (() => {
-    if (!arrastraAlguien || !draggedEntry) return []
-    const delPool = esDelPool(draggedEntry)
-    const lista: DestinoDock[] = delPool
-      ? []
-      : [{ columnId: POOL, nombre: 'Menor espera', nota: 'el primero libre', acepta: true }]
-    for (const s of sillasVisibles) {
-      if (s.barbero.branch_id !== draggedEntry.branch_id) continue
-      // Un dinámico puede traer la pista de un barbero: no "está" con él.
-      const yaEsta = !delPool && draggedEntry.barber_id === s.barbero.id
-      const nota = yaEsta
-        ? 'ya está acá'
-        : s.estado === 'libre'
-          ? 'libre'
-          : s.estado === 'cortando'
-            ? `cortando ${Math.round(minutosEnLaSilla(s.enCurso, now))}′`
-            : s.estado === 'descanso'
-              ? 'en descanso'
-              : s.estado === 'fin_de_turno'
-                ? 'termina turno'
-                : 'sin fichar'
-      lista.push({
-        columnId: s.barbero.id,
-        nombre: nombreDePila(s.barbero.full_name),
-        barbero: s.barbero,
-        estado: s.estado,
-        nota,
-        acepta: !yaEsta,
-      })
-    }
-    return lista
-  })()
-
-  /** Lo que necesita una silla (la de la columna o la del riel del celular). */
-  function propsDeSilla(s: (typeof sillas)[number]): SillaProps {
-    const turno = s.siguiente?.is_appointment ? s.siguiente : undefined
-    return {
-      barbero: s.barbero,
-      estado: s.estado,
-      enCurso: s.enCurso,
-      ahora: now,
-      cortesHoy: dailyServiceCounts[s.barbero.id] || 0,
-      enSuFila: s.suFila.length,
-      siguiente: s.siguiente,
-      siguienteDelPool: s.siguienteDelPool,
-      siguienteTurno: turno ? { hora: horaDeTurno(turno), aTiempo: inicioDeTurno(turno) <= now } : undefined,
-      aviso: avisoDe(s),
-      proximoTurno: nextAppointmentByBarber[s.barbero.id],
-      oculto: s.barbero.hidden_from_checkin,
-      sinFichar: !s.fichado,
-      descansos: descansosDe(s.barbero.branch_id),
-      soltar: soltarEn(s),
-      aterrizaje: aterrizaje === s.barbero.id,
-      ocupadoId: actionLoading,
-      onCobrar: setCompletingEntry,
-      onAtender: (entry) => void atenderCon(entry, s.barbero.id),
-      onCancelar: (entry) => handleCancel(entry.id),
-      onDescanso: (config) => void asignarDescanso(s.barbero.id, config),
-      onVerSuFila: () => setFiltro(filtroVigente === s.barbero.id ? 'todos' : s.barbero.id),
-      filtrada: filtroVigente === s.barbero.id,
-      hayFila: clientesEsperando.length > 0,
-    }
+  const dropAnimation = {
+    duration: 250,
+    easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
+    sideEffects: defaultDropAnimationSideEffects({
+      styles: {
+        active: {
+          opacity: '0.5',
+        },
+      },
+    }),
   }
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={deteccionDelTablero}
-      autoScroll={{ threshold: { x: 0, y: 0.12 }, canScroll: puedeScrollear }}
+      collisionDetection={kanbanCollisionDetection}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
       onDragCancel={() => {
-        setSoltadoEnSilla(false)
-        terminarArrastre()
-        fetchQueue()
+        setDraggedEntry(null)
+        setDraggedTemplate(null)
+        marcarArrastre(false)
+        fetchQueue() // reset visual state
       }}
     >
+      <HoraDeTurnoContext.Provider value={horaDeTurno}>
       {/* La PC del mostrador queda en esta pantalla todo el día: después de un
-          deploy se recarga sola cuando está ociosa. Ver src/lib/recarga-version.ts. */}
+          deploy se recarga sola cuando está ociosa (sin diálogos abiertos, sin
+          nada escrito a medias, un minuto sin tocarla). Ver src/lib/recarga-version.ts. */}
       <RecargaPorVersion superficie="panel" />
+      <div className="flex flex-col gap-2 lg:gap-4 p-1 max-md:pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:h-[calc(100dvh-9rem)] lg:h-[calc(100dvh-9.5rem)] md:overflow-hidden">
 
-      <div className="flex flex-col gap-4 md:h-full md:min-h-0 md:flex-row">
-        {/* ── La fila ─────────────────────────────────────────────────────── */}
-        <section
-          aria-labelledby="fila-titulo"
-          className="flex min-h-[18rem] flex-col overflow-hidden rounded-2xl border border-border bg-card md:min-h-0 md:flex-1"
-        >
-          <header className="flex shrink-0 flex-col gap-3 border-b border-border px-4 pb-3 pt-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h2 id="fila-titulo" className="flex items-baseline gap-2.5 text-lg font-semibold tracking-[-0.01em]">
-                  Esperando
-                  <span className="font-mono text-[1.625rem] leading-none tabular-nums">{clientesEsperando.length}</span>
-                </h2>
-                <p className="mt-1 text-[0.8125rem] text-muted-foreground">
-                  {clientesEsperando.length === 0 ? (
-                    'Nadie esperando ahora'
-                  ) : (
-                    <>
-                      En orden de llegada · la espera más larga{' '}
-                      <TextoEspera minutos={masLarga} className={cn('font-semibold', TEXTO_NIVEL[nivelMasLarga])} />
-                    </>
-                  )}
-                </p>
-                {/* Pasar clientes a los barberos arrastrando es la gracia de esta
-                    pantalla: se dice cómo, distinto con mouse y con el dedo. */}
-                {clientesEsperando.length > 0 && filteredBarbers.length > 0 && (
-                  <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground/80">
-                    <GripVertical className="size-3.5 shrink-0" aria-hidden />
-                    <span className="pointer-coarse:hidden">Arrastrá un cliente a la silla de un barbero para pasárselo</span>
-                    <span className="hidden pointer-coarse:inline">Mantené apretado un cliente y soltalo en un barbero</span>
-                  </p>
-                )}
-              </div>
-              <EnVivo conexion={conexion} />
+        {/* Encabezado y Descansos (Top Bar) */}
+        <div className="flex shrink-0 flex-col gap-2 lg:gap-3 px-2">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+              <h2 className="text-lg lg:text-xl font-bold tracking-tight">Fila en vivo</h2>
+              <p className="text-xs text-muted-foreground hidden sm:block">
+                Arrastrá clientes o descansos libremente para asignarlos o reordenarlos.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 shrink-0"
+                  >
+                    <UserPlus className="size-4" />
+                    <span className="hidden sm:inline">Registrar cliente</span>
+                    <ChevronDown className="size-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem asChild>
+                    <a
+                      href={`/checkin${selectedBranchId ? `?branch=${selectedBranchId}` : ''}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="gap-2"
+                    >
+                      <ExternalLink className="size-4" />
+                      Check-in normal
+                    </a>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setManualDialogOpen(true)} className="gap-2">
+                    <FileEdit className="size-4" />
+                    Registro manual
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setSearchDialogOpen(true)} className="gap-2">
+                    <Search className="size-4" />
+                    Buscar cliente existente
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <BranchSelector branches={branches} />
             </div>
 
-            {/* Filtro: toda la fila, Menor espera o la de un barbero */}
-            {(chips.length > 0 || pool.length > 0 || arrastraCliente) && (
-              <div
-                role="group"
-                aria-label="Filtrar la fila"
-                // El borde derecho se desvanece: avisa que hay más chips para deslizar.
-                className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-0.5 [mask-image:linear-gradient(to_right,#000_calc(100%-2.5rem),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              >
-                <ChipFiltro activo={filtroVigente === 'todos'} onClick={() => setFiltro('todos')} cantidad={clientesEsperando.length}>
-                  Todos
-                </ChipFiltro>
-                {(pool.length > 0 || filtroVigente === POOL || arrastraCliente) && (
-                  <ChipMenorEspera
-                    activo={filtroVigente === POOL}
-                    onClick={() => setFiltro(POOL)}
-                    cantidad={pool.length}
-                    destino={arrastraCliente}
-                  />
-                )}
-                {chips.map((c) => (
-                  <ChipFiltro key={c.id} activo={filtroVigente === c.id} onClick={() => setFiltro(c.id)} cantidad={c.cantidad}>
-                    <FotoBarbero barbero={c.barbero} tamano="xs" className="size-5" />
-                    {nombreDePila(c.barbero.full_name)}
-                  </ChipFiltro>
-                ))}
-              </div>
-            )}
-          </header>
+            {/* Dialog: Registro manual */}
+            <Dialog open={manualDialogOpen} onOpenChange={(open) => {
+              setManualDialogOpen(open)
+              if (!open) {
+                setManualForm({ phone: '', name: '', serviceId: '', barberId: DYNAMIC_BARBER, isSpecial: false })
+              }
+            }}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Registro manual</DialogTitle>
+                </DialogHeader>
+                <div className="flex flex-col gap-4 py-2">
+                  {/* Toggle "cliente especial": walk-in sin teléfono (niño, invitado, etc.).
+                      Label + Switch como hermanos (no anidados) para no meter un button
+                      dentro de otro y evitar el doble-toggle. */}
+                  <div className={`flex items-center gap-3 rounded-lg border p-3 transition-colors ${
+                    manualForm.isSpecial ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30'
+                  }`}>
+                    <label htmlFor="manual-special-switch" className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
+                      <span className={`flex size-9 shrink-0 items-center justify-center rounded-md transition-colors ${
+                        manualForm.isSpecial ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'
+                      }`}>
+                        <Sparkles className="size-5" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium leading-tight">Cliente especial</span>
+                        <span className="block text-xs text-muted-foreground leading-tight mt-0.5">
+                          Sin teléfono — niños, invitados o quien no deja su número
+                        </span>
+                      </span>
+                    </label>
+                    <Switch
+                      id="manual-special-switch"
+                      checked={manualForm.isSpecial}
+                      onCheckedChange={(v) => setManualForm((f) => ({ ...f, isSpecial: v }))}
+                    />
+                  </div>
 
-          <div
-            ref={(el) => { zonas.current.lista = el }}
-            className="@container min-h-0 flex-1 overflow-y-auto overscroll-contain"
-          >
-            {visibles.length === 0 ? (
-              <FilaVacia
-                filtrada={filtroVigente !== 'todos'}
-                nombreDelFiltro={nombreDelFiltro}
-                onVerTodo={() => setFiltro('todos')}
-              />
-            ) : (
-              <SortableContext items={visibles.map((e) => e.id)} strategy={verticalListSortingStrategy}>
-                <ol aria-label="Clientes esperando, en orden de llegada" className="flex flex-col gap-1.5 p-2 @lg:gap-2 @lg:p-3">
-                  {visibles.map((entry, i) => {
-                    const barbero = entry.barber_id ? estadoDe.get(entry.barber_id)?.barbero ?? liveBarbers.find((b) => b.id === entry.barber_id) : undefined
-                    const suFila = !esDelPool(entry) && entry.barber_id ? filaPorBarbero[entry.barber_id] : undefined
-                    const lugar = suFila ? suFila.indexOf(entry) + 1 || undefined : undefined
-                    return (
-                      <RenglonFila
-                        key={entry.id}
-                        entry={entry}
-                        orden={numeroEnLaFila.get(entry.id) ?? 0}
-                        ahora={now}
-                        horaTurno={entry.is_appointment ? horaDeTurno(entry) : undefined}
-                        servicio={nombreServicio(entry.service_id)}
-                        barbero={barbero}
-                        lugar={lugar}
-                        sucursal={!selectedBranchId ? branches.find((b) => b.id === entry.branch_id)?.name : undefined}
-                        esperabaA={
-                          entry.menor_espera_barbero_original_id
-                            ? liveBarbers.find((b) => b.id === entry.menor_espera_barbero_original_id)?.full_name
-                            : undefined
-                        }
-                        atender={atenderDe(entry)}
-                        onAtender={() => handleStartService(entry)}
-                        destinos={destinosDe(entry)}
-                        onMover={(d) => void moverA(entry, d)}
-                        onSubir={i > 0 ? () => reordenar(entry.id, visibles[i - 1].id) : undefined}
-                        onBajar={i < visibles.length - 1 ? () => reordenar(entry.id, visibles[i + 1].id) : undefined}
-                        onSacar={() => handleCancel(entry.id)}
-                        ocupado={actionLoading === entry.id}
+                  {manualForm.isSpecial ? (
+                    <div className="flex items-start gap-2 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                      <Info className="size-4 shrink-0 mt-0.5" />
+                      <span>Se agrega sin teléfono. Cada cliente especial queda como un registro aparte en la fila.</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="manual-phone">Teléfono</Label>
+                      <Input
+                        id="manual-phone"
+                        placeholder="Ej: 1122334455"
+                        value={manualForm.phone}
+                        onChange={(e) => setManualForm((f) => ({ ...f, phone: e.target.value }))}
                       />
-                    )
-                  })}
-                </ol>
-              </SortableContext>
-            )}
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="manual-name">{manualForm.isSpecial ? 'Nombre (opcional)' : 'Nombre'}</Label>
+                    <Input
+                      id="manual-name"
+                      placeholder={manualForm.isSpecial ? 'Ej: Niño, Invitado…' : 'Nombre del cliente'}
+                      value={manualForm.name}
+                      onChange={(e) => setManualForm((f) => ({ ...f, name: e.target.value }))}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Servicio</Label>
+                    <Select
+                      value={servicioManual}
+                      onValueChange={(v) => setManualForm((f) => ({ ...f, serviceId: v }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Seleccionar servicio (opcional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {services
+                          .filter((s) => !selectedBranchId || s.branch_id === selectedBranchId || !s.branch_id)
+                          .map((s) => (
+                            <SelectItem key={s.id} value={s.id}>
+                              {s.name}
+                            </SelectItem>
+                          ))}
+                        {asesoriaDisponible && <OpcionAsesoriaDelRegistro />}
+                      </SelectContent>
+                    </Select>
+                    {servicioManual === OPCION_ASESORIA && <AyudaAsesoriaDelRegistro />}
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Barbero</Label>
+                    <Select
+                      value={manualForm.barberId}
+                      onValueChange={(v) => setManualForm((f) => ({ ...f, barberId: v }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Elegir barbero" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={DYNAMIC_BARBER}>Menor espera</SelectItem>
+                        {liveBarbers
+                          .filter((b) =>
+                            b.is_active &&
+                            !b.hidden_from_checkin &&
+                            (!selectedBranchId || b.branch_id === selectedBranchId)
+                          )
+                          .map((b) => (
+                            <SelectItem key={b.id} value={b.id}>
+                              {b.full_name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button onClick={handleManualCheckin} disabled={manualLoading} className="w-full">
+                    {manualLoading ? 'Registrando…' : (manualForm.isSpecial ? 'Agregar cliente especial' : 'Agregar a la fila')}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* Dialog: Buscar cliente existente */}
+            <Dialog open={searchDialogOpen} onOpenChange={(open) => {
+              setSearchDialogOpen(open)
+              if (!open) {
+                setSearchQuery('')
+                setSearchResults([])
+                setSearchExecuted(false)
+                setSelectedSearchClient(null)
+                setSearchServiceId('')
+                setSearchBarberId(DYNAMIC_BARBER)
+              }
+            }}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Buscar cliente</DialogTitle>
+                </DialogHeader>
+                <div className="flex flex-col gap-4 py-2">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Nombre o teléfono…"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-9"
+                      autoFocus
+                    />
+                  </div>
+
+                  {searchLoading && (
+                    <p className="text-sm text-muted-foreground text-center py-4">Buscando…</p>
+                  )}
+
+                  {searchResults.length > 0 && (
+                    <div className="flex flex-col gap-1 max-h-60 overflow-y-auto">
+                      {searchResults.map((client) => (
+                        <button
+                          key={client.id}
+                          type="button"
+                          onClick={() => setSelectedSearchClient(client)}
+                          className={`flex items-center gap-3 px-3 py-2 rounded-md text-left text-sm transition-colors ${
+                            selectedSearchClient?.id === client.id
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-zinc-900/50 active:bg-zinc-800'
+                          }`}
+                        >
+                          <User className="size-4 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="font-medium truncate">{client.name}</p>
+                            <p className="text-xs opacity-70">{client.phone}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {searchResults.length === 0 && searchExecuted && !searchLoading && (
+                    <p className="text-sm text-muted-foreground text-center py-4">No se encontraron clientes</p>
+                  )}
+
+                  {selectedSearchClient && (
+                    <div className="flex flex-col gap-3 border-t pt-3">
+                      <p className="text-sm font-medium">
+                        Registrar a <span className="text-primary">{selectedSearchClient.name}</span>
+                      </p>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Servicio</Label>
+                        <Select value={servicioBuscado} onValueChange={setSearchServiceId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Seleccionar servicio (opcional)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {services
+                              .filter((s) => !selectedBranchId || s.branch_id === selectedBranchId || !s.branch_id)
+                              .map((s) => (
+                                <SelectItem key={s.id} value={s.id}>
+                                  {s.name}
+                                </SelectItem>
+                              ))}
+                            {asesoriaDisponible && <OpcionAsesoriaDelRegistro />}
+                          </SelectContent>
+                        </Select>
+                        {servicioBuscado === OPCION_ASESORIA && <AyudaAsesoriaDelRegistro />}
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Barbero</Label>
+                        <Select value={searchBarberId} onValueChange={setSearchBarberId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Elegir barbero" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={DYNAMIC_BARBER}>Menor espera</SelectItem>
+                            {liveBarbers
+                              .filter((b) =>
+                                b.is_active &&
+                                !b.hidden_from_checkin &&
+                                (!selectedBranchId || b.branch_id === selectedBranchId)
+                              )
+                              .map((b) => (
+                                <SelectItem key={b.id} value={b.id}>
+                                  {b.full_name}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                        onClick={() => handleSearchCheckin(selectedSearchClient)}
+                        disabled={searchCheckinLoading}
+                        className="w-full"
+                      >
+                        {searchCheckinLoading ? 'Registrando…' : 'Agregar a la fila'}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
-        </section>
-
-        {/* ── Las sillas ──────────────────────────────────────────────────── */}
-        <section
-          ref={(el) => { zonas.current.sillas = el }}
-          aria-labelledby="sillas-titulo"
-          // Con el mouse encima, el orden de las sillas se queda quieto.
-          onPointerEnter={(e) => { if (e.pointerType === 'mouse') congelarSillas('puntero', true) }}
-          onPointerLeave={(e) => { if (e.pointerType === 'mouse') congelarSillas('puntero', false) }}
-          className="flex min-w-0 flex-col gap-3 max-md:-order-1 md:min-h-0 md:w-[20rem] md:shrink-0 md:overflow-y-auto md:overscroll-contain md:pb-2 xl:w-[22rem]"
-        >
-          <header className="flex items-baseline justify-between gap-3 px-1">
-            <h2 id="sillas-titulo" className="text-lg font-semibold tracking-[-0.01em]">
-              Sillas
-            </h2>
-            <p className="text-[0.8125rem] text-muted-foreground">
-              <span className="font-mono tabular-nums text-foreground/90">{cortando}</span> de{' '}
-              <span className="font-mono tabular-nums">{fichados}</span> cortando
-              {libres > 0 && (
-                <>
-                  {' '}· <span className="font-mono tabular-nums text-foreground/90">{libres}</span>{' '}
-                  {libres === 1 ? 'libre' : 'libres'}
-                </>
-              )}
-              {' '}· <span className="font-mono tabular-nums">{cortesHoy}</span> {cortesHoy === 1 ? 'corte' : 'cortes'} hoy
-            </p>
-          </header>
-
-          {filteredBarbers.length === 0 ? (
-            <p className="rounded-2xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-              Esta sucursal no tiene barberos activos.
-            </p>
-          ) : (
-            <>
-              {/* Celular: un riel que se ve entero (los que no ficharon, al final) */}
-              <RielDeSillas
-                sillas={[...sillasVisibles, ...plegadas].map(propsDeSilla)}
-                onTocando={tocandoElRiel}
-                className="md:hidden"
-              />
-
-              {/* Escritorio: la columna, con cada silla como lugar donde soltar */}
-              <div className="hidden flex-col gap-3 md:flex">
-                {sillasVisibles.map((s) => (
-                  <Silla key={s.barbero.id} {...propsDeSilla(s)} />
-                ))}
-              </div>
-            </>
-          )}
-
-          <SinFichar barberos={sinFichar} className="hidden md:flex" />
-
-          {/* Descansos para arrastrar a una silla (en el celular, desde el menú de cada una) */}
-          <div className="hidden flex-wrap items-center gap-2 px-1 md:flex">
-            {descansosVisibles.map((config) => (
-              <FichaDescanso key={config.id} config={config} />
-            ))}
-            {descansosVisibles.length > 0 && <span className="text-xs text-muted-foreground">Arrastralo a una silla ·</span>}
-            <Link
+          
+          <div className="flex items-center gap-2 lg:gap-3 overflow-x-auto pb-1 lg:pb-2 -mx-1 px-1">
+            <a
               href="/dashboard/equipo?tab=descansos"
-              className="inline-flex items-center gap-1 rounded text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex items-center gap-1.5 lg:gap-2 px-2.5 lg:px-3 py-1.5 lg:py-2 rounded-lg bg-amber-500/10 text-amber-500 text-xs lg:text-sm font-bold border border-amber-500/20 shrink-0 transition-colors active:bg-amber-500/20"
             >
-              <Settings2 className="size-3.5" aria-hidden />
-              {descansosVisibles.length > 0 ? 'Configurar' : 'Sin descansos configurados · Configurar'}
-            </Link>
+              <Pause className="size-3.5 lg:size-4" />
+              {breakConfigs.filter((c) => !selectedBranchId || c.branch_id === selectedBranchId).length > 0
+                ? 'Descansos'
+                : 'Sin descansos'}
+            </a>
+            {breakConfigs
+              .filter((c) => !selectedBranchId || c.branch_id === selectedBranchId)
+              .map((config) => (
+                <div key={config.id} className="w-40 lg:w-48 shrink-0">
+                  <BreakTemplateCard config={config} />
+                </div>
+              ))}
           </div>
-        </section>
+        </div>
+
+        {/* Cards resumen rápido */}
+        <div className="grid grid-cols-3 gap-2 lg:gap-3 shrink-0 px-2">
+          <div className="flex items-center gap-2.5 rounded-xl border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-blue-500/15">
+              <Scissors className="size-4 text-blue-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] text-muted-foreground leading-none">En atención</p>
+              <p className="text-lg font-bold leading-tight text-zinc-100">
+                {branchEntries.filter(e => e.status === 'in_progress' && !e.is_break).length}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5 rounded-xl border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-amber-500/15">
+              <Clock className="size-4 text-amber-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] text-muted-foreground leading-none">En cola</p>
+              <p className="text-lg font-bold leading-tight text-zinc-100">
+                {branchEntries.filter(e => e.status === 'waiting' && !e.is_break).length}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5 rounded-xl border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-500/15">
+              <Check className="size-4 text-emerald-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] text-muted-foreground leading-none">Servicios del día</p>
+              <p className="text-lg font-bold leading-tight text-zinc-100">
+                {selectedBranchId
+                  ? filteredBarbers.reduce((sum, b) => sum + (dailyServiceCounts[b.id] || 0), 0)
+                  : Object.values(dailyServiceCounts).reduce((a, b) => a + b, 0)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Tablero Kanban (Grid Layout) */}
+        <div className="relative mt-1 flex flex-none overflow-visible border-t border-zinc-800/80 bg-zinc-950/40 lg:mt-2 md:min-h-0 md:flex-1 md:overflow-auto">
+          <div className="flex flex-col md:flex-row md:min-w-max w-full md:h-full">
+
+            {/* Columna Dinámicos (Sticky a la izquierda) */}
+            <div className="md:sticky md:left-0 z-30 flex md:shrink-0 md:shadow-[4px_0_24px_-8px_rgba(0,0,0,0.8)] bg-zinc-950">
+              {/* `onStartService` también acá: el commit 2b42cc5 le agregó a las
+                  tarjetas del pool el botón que abre "¿Quién lo atiende?", pero esta
+                  columna —la única donde viven— nunca recibió el handler, así que el
+                  botón no se dibujaba y lo único posible seguía siendo la X. */}
+              <DynamicColumn
+                id="__dynamic__"
+                entries={columnsData['__dynamic__']}
+                formatElapsed={formatElapsed}
+                onCancel={handleCancel}
+                onStartService={handleStartService}
+                actionLoading={actionLoading}
+                selectedBranchId={selectedBranchId}
+                getBranchName={getBranchName}
+                getBarberName={getBarberName}
+                timezone={timezone}
+              />
+            </div>
+
+            {/* Filas de Barberos (Se expanden a la derecha) */}
+            <div className="flex-1 flex flex-col bg-zinc-950/20 md:min-w-max">
+              {filteredBarbers.map((barber) => (
+                <BarberRow
+                  key={barber.id}
+                  barber={barber}
+                  entries={columnsData[barber.id] || []}
+                  inProgressEntry={inProgressData[barber.id]}
+                  notClockedInBarbers={notClockedInBarbers}
+                  schedules={schedules}
+                  now={now}
+                  shiftEndMargin={shiftEndMargin}
+                  formatElapsed={formatElapsed}
+                  onCancel={handleCancel}
+                  onStartService={handleStartService}
+                  onCompleteService={handleCompleteService}
+                  actionLoading={actionLoading}
+                  selectedBranchId={selectedBranchId}
+                  getBranchName={getBranchName}
+                  timezone={timezone}
+                  nextAppointment={nextAppointmentByBarber[barber.id]}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Celular: mientras se arrastra a un cliente, los barberos suben en un
-          dock abajo (el riel de arriba queda fuera de la pantalla con la fila
-          scrolleada). */}
-      {arrastraAlguien && draggedEntry && (
-        <DockSoltar
-          nombreCliente={nombreDePila(draggedEntry.client?.name)}
-          destinos={destinosDelDock}
-          refZona={(el) => { zonas.current.dock = el }}
-        />
-      )}
-
-      <DragOverlay
-        dropAnimation={soltadoEnSilla ? animacionAlSoltarEnSilla : animacionAlSoltar}
-        modifiers={MODIFICADORES_DE_LA_MANO}
-      >
-        {draggedEntry && <RenglonFantasma entry={draggedEntry} ahora={now} destino={destinoEnLaMano} />}
+      <DragOverlay dropAnimation={dropAnimation}>
+        {draggedEntry && <DragGhost entry={draggedEntry} />}
         {draggedTemplate && (
-          <div className="pointer-events-none rotate-[2deg]">
-            <FichaDescanso config={draggedTemplate} />
+          <div className="rotate-[2deg] scale-105 opacity-90 w-[270px] pointer-events-none">
+            <BreakTemplateCard config={draggedTemplate} />
           </div>
         )}
       </DragOverlay>
@@ -1684,24 +2593,30 @@ export function FilaClient({
           onCompleted={async (resultado) => {
             setCompletingEntry(null)
             // La asesoría cerrada sin cobro, el cobro que ya estaba registrado y
-            // el que no pudo guardar el importe los avisa el diálogo.
+            // el que no pudo guardar el importe los avisa el diálogo: «Corte
+            // finalizado» sólo para un cobro de ahora que quedó bien.
             if (hayQueAnunciarCobro(resultado)) toast.success('Corte finalizado')
             await fetchQueue()
           }}
         />
       )}
 
-      {/* ¿Quién lo atiende? (cliente de Menor espera). Los que atienden ahora
-          quedan deshabilitados —un segundo corte choca contra
-          `idx_queue_one_in_progress_per_barber`— y los que no ficharon se
-          marcan, pero se pueden elegir: la fila real manda sobre el fichaje. */}
-      <AlertDialog open={!!asignarBarberoEntry} onOpenChange={(open) => { if (!open) setAsignarBarberoEntry(null) }}>
+      {/* Selector de barbero para un cliente del pool ("Menor espera").
+          Los barberos que atienden ahora quedan deshabilitados —arrancarles un
+          segundo corte choca contra `idx_queue_one_in_progress_per_barber`— y los
+          que no fichadaron se marcan, pero se pueden elegir igual: la fila real
+          manda sobre el fichaje. */}
+      <AlertDialog
+        open={!!asignarBarberoEntry}
+        onOpenChange={(open) => { if (!open) setAsignarBarberoEntry(null) }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>¿Quién lo atiende?</AlertDialogTitle>
             <AlertDialogDescription>
-              <strong>{asignarBarberoEntry?.client?.name ?? 'El cliente'}</strong> eligió &ldquo;Menor espera&rdquo;, así
-              que no tiene barbero asignado. Elegí uno para arrancar el corte.
+              <strong>{asignarBarberoEntry?.client?.name ?? 'El cliente'}</strong> eligió
+              &ldquo;Menor espera&rdquo;, así que no tiene barbero asignado. Elegí uno para
+              arrancar el corte.
               {asignarViaWhatsApp && (
                 <>
                   {' '}Se pasó desde el aviso de WhatsApp
@@ -1709,7 +2624,8 @@ export function FilaClient({
                 </>
               )}
             </AlertDialogDescription>
-            {/* Mig 217: el panel del barbero elegido le muestra el pedido al empezar. */}
+            {/* Mig 217: el panel del barbero elegido le muestra el pedido al
+                empezar (sale del estado de la entrada, no del botón que la inició). */}
             {asignarBarberoEntry?.pidio_asesoria && (
               <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                 <AsesoriaBadge tono="oscuro" />
@@ -1718,55 +2634,50 @@ export function FilaClient({
             )}
           </AlertDialogHeader>
           <div className="grid max-h-[45vh] gap-2 overflow-y-auto py-1">
-            {sillas
-              .filter((s) => !asignarBarberoEntry || s.barbero.branch_id === asignarBarberoEntry.branch_id)
-              // Primero los que pueden atender ya, después los libres que el motor
-              // frena (turno inminente, descanso) y los que no ficharon o terminan
-              // turno —se pueden elegir igual, con el motivo a la vista— y al
-              // final los ocupados.
-              .map((s, i) => ({
-                s,
-                i,
-                g:
-                  s.estado === 'libre' && !notaDelMotor(s)
-                    ? 0
-                    : s.estado === 'cortando' || s.estado === 'descanso'
-                      ? 2
-                      : 1,
-              }))
-              .sort((a, b) => a.g - b.g || a.i - b.i)
-              .map(({ s }) => {
-                const ocupado = s.estado === 'cortando' || s.estado === 'descanso'
-                const nota = notaDelMotor(s)
-                const loEsperaba = asignarViaWhatsApp && asignarBarberoEntry?.menor_espera_barbero_original_id === s.barbero.id
+            {filteredBarbers
+              .filter(b => !asignarBarberoEntry || b.branch_id === asignarBarberoEntry.branch_id)
+              .map((barbero) => {
+                const ocupado = entries.some(
+                  e => e.barber_id === barbero.id && e.status === 'in_progress'
+                )
+                const loEsperaba =
+                  asignarViaWhatsApp &&
+                  asignarBarberoEntry?.menor_espera_barbero_original_id === barbero.id
                 return (
                   <Button
-                    key={s.barbero.id}
+                    key={barbero.id}
                     variant="outline"
                     disabled={ocupado || actionLoading === asignarBarberoEntry?.id}
-                    className="h-auto justify-start gap-3 py-2.5 text-left"
-                    onClick={() => {
+                    className="h-auto justify-start py-2.5 text-left"
+                    onClick={async () => {
                       const entry = asignarBarberoEntry
                       if (!entry) return
                       setAsignarBarberoEntry(null)
-                      void atenderCon(entry, s.barbero.id)
+                      setActionLoading(entry.id)
+                      try {
+                        const result = await startService(entry.id, barbero.id)
+                        if ('error' in result) toast.error(result.error)
+                        else toast.success(`Corte iniciado con ${barbero.full_name}`)
+                      } catch (e) {
+                        avisarAccionFallida(e, 'No pudimos iniciar el corte. Revisá la conexión y probá de nuevo.')
+                      } finally {
+                        await fetchQueue()
+                        setActionLoading(null)
+                      }
                     }}
                   >
-                    <FotoBarbero barbero={s.barbero} tamano="md" />
                     <span className="flex-1 truncate font-medium">
-                      {s.barbero.full_name}
-                      {loEsperaba && <span className="ml-1.5 text-xs font-normal text-sky-400">· lo esperaba</span>}
+                      {barbero.full_name}
+                      {loEsperaba && (
+                        <span className="ml-1.5 text-xs font-normal text-sky-400">· lo esperaba</span>
+                      )}
                     </span>
-                    {s.estado === 'cortando' ? (
+                    {ocupado ? (
                       <span className="text-xs text-muted-foreground">atendiendo</span>
-                    ) : s.estado === 'descanso' ? (
-                      <span className="text-xs text-amber-300">en descanso</span>
-                    ) : !s.fichado ? (
+                    ) : notClockedInBarbers.has(barbero.id) ? (
                       <span className="text-xs text-amber-500">sin fichar</span>
-                    ) : nota ? (
-                      <span className={cn('text-xs', s.decision?.tipo === 'descanso' ? 'text-amber-300' : 'text-violet-300')}>{nota}</span>
                     ) : (
-                      <span className="text-xs font-semibold text-foreground">libre</span>
+                      <span className="text-xs text-green-500">libre</span>
                     )}
                   </Button>
                 )
@@ -1778,17 +2689,21 @@ export function FilaClient({
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={!!cancelConfirmEntry} onOpenChange={(open) => { if (!open) setCancelConfirmEntry(null) }}>
+      <AlertDialog
+        open={!!cancelConfirmEntry}
+        onOpenChange={(open) => { if (!open) setCancelConfirmEntry(null) }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {cancelConfirmEntry?.status === 'in_progress' ? '¿Cancelar un corte en curso?' : '¿Sacar al cliente de la fila?'}
+              {cancelConfirmEntry?.status === 'in_progress'
+                ? '¿Cancelar un corte en curso?'
+                : '¿Sacar al cliente de la fila?'}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {cancelConfirmEntry?.status === 'in_progress' ? (
                 <>
-                  <strong>{cancelConfirmEntry?.client?.name ?? 'El cliente'}</strong> ya está siendo atendido. Si lo cancelás,
-                  ese corte <strong>no se va a cobrar ni registrar</strong> y saldrá de la fila.
+                  <strong>{cancelConfirmEntry?.client?.name ?? 'El cliente'}</strong> ya está siendo atendido. Si lo cancelás, ese corte <strong>no se va a cobrar ni registrar</strong> y saldrá de la fila.
                   {cancelarAsesoriaEnCurso && (
                     <>
                       {' '}Pidió asesoría: si se asesoró y no se hizo nada, cerralo como <strong>solo asesoría</strong> y
@@ -1798,9 +2713,7 @@ export function FilaClient({
                 </>
               ) : (
                 <>
-                  <strong>{cancelConfirmEntry?.client?.name ?? 'El cliente'}</strong> queda marcado como ausente y sale de la
-                  fila. Si todavía está en el local <strong>no se va a enterar</strong>: va a seguir esperando un turno que ya
-                  no existe y va a tener que anotarse de nuevo.
+                  <strong>{cancelConfirmEntry?.client?.name ?? 'El cliente'}</strong> queda marcado como ausente y sale de la fila. Si todavía está en el local <strong>no se va a enterar</strong>: va a seguir esperando un turno que ya no existe y va a tener que anotarse de nuevo.
                 </>
               )}
             </AlertDialogDescription>
@@ -1833,141 +2746,7 @@ export function FilaClient({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      </HoraDeTurnoContext.Provider>
     </DndContext>
-  )
-}
-
-// ─── Piezas chicas ────────────────────────────────────────────────────────────
-
-/** Si el tablero está recibiendo los cambios en vivo (Realtime) o no. */
-function EnVivo({ conexion }: { conexion: Conexion }) {
-  const texto = conexion === 'en_vivo' ? 'En vivo' : conexion === 'reconectando' ? 'Reconectando…' : 'Conectando…'
-  return (
-    <span
-      role="status"
-      className={cn(
-        'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
-        conexion === 'en_vivo'
-          ? 'border-emerald-500/30 text-emerald-300'
-          : conexion === 'reconectando'
-            ? 'border-amber-500/40 text-amber-300'
-            : 'border-border text-muted-foreground',
-      )}
-    >
-      <span className="relative flex size-2" aria-hidden>
-        <span
-          className={cn(
-            'relative inline-flex size-2 rounded-full',
-            conexion === 'en_vivo' ? 'bg-emerald-400' : conexion === 'reconectando' ? 'bg-amber-400' : 'bg-muted-foreground',
-          )}
-        />
-      </span>
-      {texto}
-    </span>
-  )
-}
-
-function ChipFiltro({
-  activo,
-  onClick,
-  cantidad,
-  children,
-}: {
-  activo: boolean
-  onClick: () => void
-  cantidad: number
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={activo}
-      className={cn(
-        'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[0.8125rem] font-medium outline-none transition-colors',
-        'focus-visible:ring-2 focus-visible:ring-ring',
-        activo
-          ? 'border-foreground bg-foreground text-background'
-          : 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground',
-      )}
-    >
-      {children}
-      <span className={cn('font-mono tabular-nums', activo ? 'text-background/70' : 'text-muted-foreground')}>{cantidad}</span>
-    </button>
-  )
-}
-
-/**
- * El chip de Menor espera: filtra la fila y, mientras se arrastra a un cliente,
- * es el lugar donde soltarlo para que lo atienda el primero que se libere. Está
- * siempre a la vista (en el encabezado de la lista) y no corre nada al aparecer.
- */
-function ChipMenorEspera({
-  activo,
-  onClick,
-  cantidad,
-  destino,
-}: {
-  activo: boolean
-  onClick: () => void
-  cantidad: number
-  destino: boolean
-}) {
-  const { setNodeRef, isOver } = useDroppable({ id: POOL, data: { type: 'Column', columnId: POOL, zona: 'lista' }, disabled: !destino })
-  if (destino) {
-    return (
-      <span
-        ref={setNodeRef}
-        className={cn(
-          'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border-2 border-dashed px-3 text-[0.8125rem] font-semibold transition-colors',
-          isOver ? 'border-sky-300 bg-sky-500/25 text-sky-100' : 'border-sky-400/60 text-sky-300',
-        )}
-      >
-        <span className="size-2 rounded-full bg-sky-400" aria-hidden />
-        {isOver ? 'Soltá: Menor espera' : 'Soltalo acá: Menor espera'}
-      </span>
-    )
-  }
-  return (
-    <span ref={setNodeRef} className="inline-flex shrink-0">
-      <ChipFiltro activo={activo} onClick={onClick} cantidad={cantidad}>
-        <span className="size-2 rounded-full bg-sky-400" aria-hidden />
-        Menor espera
-      </ChipFiltro>
-    </span>
-  )
-}
-
-function FilaVacia({
-  filtrada,
-  nombreDelFiltro,
-  onVerTodo,
-}: {
-  filtrada: boolean
-  nombreDelFiltro?: string
-  onVerTodo: () => void
-}) {
-  return (
-    <div className="flex h-full min-h-[14rem] flex-col items-center justify-center gap-3 px-6 py-10 text-center">
-      <span className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        <Users className="size-5" aria-hidden />
-      </span>
-      {filtrada ? (
-        <>
-          <p className="text-[0.9375rem] font-medium">Nadie espera {nombreDelFiltro === 'Menor espera' ? 'en Menor espera' : `con ${nombreDelFiltro ?? 'este barbero'}`}</p>
-          <Button variant="outline" size="sm" onClick={onVerTodo}>
-            Ver toda la fila
-          </Button>
-        </>
-      ) : (
-        <>
-          <p className="text-[0.9375rem] font-medium">No hay nadie esperando</p>
-          <p className="max-w-xs text-[0.8125rem] text-muted-foreground">
-            Los que se anotan en la tablet aparecen acá al instante, en orden de llegada. Para anotar a alguien desde acá,
-            usá «Anotar cliente».
-          </p>
-        </>
-      )}
-    </div>
   )
 }
