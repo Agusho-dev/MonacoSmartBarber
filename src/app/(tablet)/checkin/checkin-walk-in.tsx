@@ -102,6 +102,7 @@ import {
   IDLE_MS_PERSONAL,
 } from '@/components/checkin/use-idle-reset'
 import { useKioskoEnReposo } from '@/components/checkin/use-kiosko-en-reposo'
+import { usePrecalentarReconocimiento } from '@/components/checkin/use-precalentar-reconocimiento'
 import type { FaceMatchResult } from '@/lib/face-recognition'
 import { saveFacePhoto, enrollFaceDescriptor, registrarRostroDelStaff } from '@/lib/face-recognition'
 import type { WalkInHandoff } from '@/components/checkin/turnos-flow'
@@ -1008,6 +1009,9 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
       !confirmingArrival &&
       !pidiendoAsesoria
   )
+  // La cámara tiene que reaccionar al primer toque de "Sí": los modelos se
+  // cargan y se calientan mientras el inicio espera.
+  usePrecalentarReconocimiento(step === 'home')
 
   // ── Turno de hoy (sólo `conTurnos`) ──
 
@@ -2660,11 +2664,10 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
       {step === 'face_scan' && (
         <div
           key={`face-scan-${animKey}`}
-          className="relative z-[1] w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-6 pt-6 md:pt-8 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
           <FaceCamera
-            variant="terminal"
             isLightBg={isLightBg}
             branchName={selectedBranch?.name}
             orgId={selectedBranch?.organization_id}
@@ -3004,7 +3007,7 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
       {step === 'face_enroll' && (
         <div
           key={`face-enroll-${animKey}`}
-          className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-4 md:px-6 pt-6 md:pt-8 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
 
@@ -3013,6 +3016,7 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
             clientName={name || 'Cliente'}
             source="checkin"
             branchId={selectedBranch?.id}
+            isLightBg={isLightBg}
             captureOnly={wantsEnrollment}
             onCapture={(descriptors, photo) => {
               setCapturedFaceDescriptors(descriptors)
@@ -3391,18 +3395,14 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
       {step === 'staff_face_scan' && (
         <div
           key={`staff-face-${animKey}`}
-          className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-6 pt-6 md:pt-8 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
-          <div className="relative text-center mt-2">
-            <h2 className={cn(terminalH2, isLightBg && 'text-zinc-900')}>Identificación barbero</h2>
-            <p className={cn('mt-1 md:mt-2 text-base md:text-lg', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
-              Mirá la cámara para identificarte
-            </p>
-          </div>
+          {/* Un solo título: antes iban "Identificación barbero" y, debajo, el
+              "Check-in" de la cámara de clientes, con su botón "Soy Nuevo". */}
           <FaceCamera
-            variant="terminal"
             isLightBg={isLightBg}
+            titulo="Fichaje"
             branchName={selectedBranch?.name ?? 'Sucursal'}
             targetRole="staff"
             orgId={selectedBranch?.organization_id}
@@ -3711,13 +3711,15 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
       {step === 'staff_face_enroll' && staffEnrollId && (
         <div
           key={`staff-enroll-${animKey}`}
-          className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 md:gap-4 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className="relative z-[1] w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-4 md:px-6 pt-6 md:pt-8 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
         >
           <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
 
           <FaceEnrollment
             clientName={staffEnrollName}
             source="checkin"
+            isLightBg={isLightBg}
+            subtitulo="la próxima vez fichás con sólo mirar la cámara"
             captureOnly
             onCapture={async (descriptors) => {
               const guardado = staffEnrollPermiso

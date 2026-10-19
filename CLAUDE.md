@@ -214,6 +214,19 @@ Sistema visual en `DESIGN.md` (raíz del repo); contexto de producto en `PRODUCT
 
 Una lista que se vuelve a leer en cada evento de Realtime NO se reemplaza por un spinner mientras recarga. Con `loading ? spinner : lista`, la lista —y cualquier diálogo que viva adentro— se desmonta bajo el dedo en cada cambio de la fila. El spinner va sólo en la primera carga (`loading && items.length === 0`). Pasaba en el paso de barbero del kiosko y en sus dos «Cambiar barbero» (arreglado el 4/oct/2026); la banda de asesoría del kiosko sigue la misma regla.
 
+### Escáner facial del kiosko (rediseño 19/oct/2026)
+
+`src/lib/escaneo-facial/` (motor, geometría, dibujo, filtro, textos) + `src/components/checkin/escaner-facial.tsx`. `FaceCamera` (identificar cliente o staff) y `FaceEnrollment` (registrar) son capas finas encima: el escáner lee la cara y les pasa la lectura; ellas deciden (buscar en la base, guardar). Lo que hay que saber antes de tocarlo:
+
+- **Dos caminos de face-api, a propósito.** El rastreo (`rastrearCara`, 10–20 Hz) sube el cuadro UNA vez a la GPU y trabaja con tensores: detector sobre el 720p reducido 2×2 y los 68 puntos sobre un recorte de tamaño FIJO (`cropAndResize` a 224 → promedio 2×2 → 112). Los descriptores que se COMPARAN contra la base salen SÓLO de `detectFace`, el camino por canvas con el que se calcularon los ~31.000 guardados. No mezclar: el rastreo da puntos casi iguales, que para dibujar alcanzan.
+- **No prender `WEBGL_USE_SHAPES_UNIFORMS`.** Con tfjs 4.22 el detector deja de encontrar caras con entradas distintas de 320 y no tira error (medido). Las recompilaciones se evitan con los recortes de tamaño fijo: con un `slice` del tamaño de la cara, cada tamaño nuevo compilaba shaders y trababa la pantalla.
+- **Una lectura = el promedio de 2 muestras coherentes** (a menos de 0,4 entre sí), en UN viaje a la base; 2 intentos y después `onNoMatch` (el teléfono le guarda esa cara al cliente). Antes: muestras sueltas, dos coincidencias seguidas y 2 s de cartel por intento (un cliente nuevo esperaba ~8 s). El contrato con la base no cambió (`match_face_descriptor`, umbral 0,48, 1 resultado). El registro toma 3 muestras con límites más exigentes (`LIMITES_REGISTRAR`).
+- **Cada límite que frena la lectura tiene su guía en pantalla** (`evaluarCara` → acercate/alejate/de frente/…): no hay zonas muertas donde la persona espera sin saber qué hacer. Sin nadie a la vista, el detector mira el cuadro entero con entrada 416 (ve caras a más de un metro); una cara lejana se sigue en una ventana a resolución completa.
+- **Cámara a 1280×720** (antes 480×640). La lente encuadra a la cara con un transform sobre el video (la sigue, como el Center Stage) y la malla usa el mismo encuadre, así quedan pegadas. React se entera sólo de los cambios de momento: el canvas se dibuja a la tasa de la pantalla, con los puntos suavizados (One Euro + predicción) y sin `shadowBlur` (era lo que trababa la malla vieja). Si la tablet no llega a ~40 fps, `aliviar()` baja la densidad y saca los halos.
+- **Precalentado**: `usePrecalentarReconocimiento(step === 'home')` baja los modelos y compila los shaders mientras el inicio espera. Sin eso, la carga la pagaba el primero que tocaba "Sí".
+- El botón manual dice lo que hace: "Ingresar con mi teléfono" (clientes) / "Ingresar con mi PIN" (staff, pantalla "Fichaje"); antes era "Soy Nuevo" en las dos, y la del staff tenía dos títulos.
+- Para probarlo sin tablet: Chrome headless con `--use-file-for-fake-video-capture=<video.mjpeg>` contra una página que monte `FaceCamera`, interceptando `rest/v1/rpc/match_face_descriptor`. Medido así (19/oct/2026): 60 fps estables también con la CPU frenada ×6, cero tareas largas durante el escaneo, sin fugas de tensores, ~0,7 s de la cara lista a "¡Hola, Nacho!".
+
 ### Edge Functions
 
 `supabase/functions/` contains three Deno functions:

@@ -1,49 +1,39 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
-import {
-  initFaceModels,
-  detectFace,
-  matchFaceInDB,
-  captureFrameAsBlob,
-  areModelsLoaded,
-  type FaceDetectionResult,
-  type FaceMatchResult,
-  type FaceLandmarkPoint,
-} from '@/lib/face-recognition'
-import { drawFaceOverlayWithMesh } from '@/lib/face-mesh'
-import { Loader2, Camera, KeyboardIcon, UserCheck, XCircle } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { KeyRound, MapPin, Smartphone } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+import { matchFaceInDB, type FaceMatchResult } from '@/lib/face-recognition'
+import { primerNombre } from '@/lib/escaneo-facial/textos'
+import type { FaseEscaner, LecturaFacial, ResultadoEscaner, Veredicto } from '@/lib/escaneo-facial/tipos'
+import { EscanerFacial } from '@/components/checkin/escaner-facial'
 
 interface FaceCameraProps {
   onMatch: (match: FaceMatchResult, descriptor: Float32Array, photoBlob: Blob | null) => void
+  /** No coincidió: viaja la lectura para guardarle la cara a quien entre por el teléfono. */
   onNoMatch: (descriptor: Float32Array, photoBlob: Blob | null) => void
   onManualEntry: () => void
   branchName?: string
   targetRole?: 'client' | 'staff'
   orgId?: string | null
-  /** Estilo kiosk neón (terminal de check-in). */
-  variant?: 'default' | 'terminal'
-  /** Fondo claro activo — adapta textos y bordes al tema claro. */
+  /** Fondo claro activo: adapta textos y bordes. */
   isLightBg?: boolean
+  /** Título sobre la lente (default "Check-in"). */
+  titulo?: string
 }
 
-type CameraState =
-  | 'loading_models'
-  | 'requesting_camera'
-  | 'scanning'
-  | 'detected'
-  | 'matching'
-  | 'matched'
-  | 'no_match'
-  | 'error'
+/** Sin reconocer a nadie durante esto, el botón del ingreso manual se ofrece con más fuerza. */
+const DESTACAR_MANUAL_MS = 12_000
 
-const SCAN_INTERVAL_MS = 200
-const MATCH_HOLD_MS = 1000
-const CONSECUTIVE_MATCHES_REQUIRED = 2 // confirmaciones consecutivas antes de aceptar un match
-const MIN_FACE_WIDTH_RATIO = 0.08 // cara debe ocupar al menos 8% del ancho del video
-const MAX_NO_MATCH_ATTEMPTS = 3 // tras N no-matches consecutivos pedimos teléfono y actualizamos descriptores
-
+/**
+ * Identificación por la cara en el kiosko: clientes (check-in) y staff (fichaje).
+ *
+ * Cada intento junta dos muestras coherentes de la cara y compara su promedio
+ * en UN viaje a la base. Si no coincide, prueba una vez más; si tampoco,
+ * `onNoMatch` con la lectura, para que el flujo del teléfono le guarde esa cara
+ * al cliente que se identifique (así la próxima lo reconoce).
+ */
 export function FaceCamera({
   onMatch,
   onNoMatch,
@@ -51,437 +41,135 @@ export function FaceCamera({
   branchName,
   targetRole = 'client',
   orgId,
-  variant = 'default',
   isLightBg = false,
+  titulo,
 }: FaceCameraProps) {
-  const isTerminal = variant === 'terminal'
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const mountedRef = useRef(true)
+  const esStaff = targetRole === 'staff'
+  const coincidenciaRef = useRef<FaceMatchResult | null>(null)
+  /** La última lectura que no coincidió (ver `ingresoManual`). */
+  const sinCoincidenciaRef = useRef<LecturaFacial | null>(null)
+  const salioRef = useRef(false)
+  const [fase, setFase] = useState<FaseEscaner>('preparando')
+  const [destacarManual, setDestacarManual] = useState(false)
 
-  const [state, setState] = useState<CameraState>('loading_models')
-  const [matchResult, setMatchResult] = useState<FaceMatchResult | null>(null)
-  const [lastDescriptor, setLastDescriptor] = useState<Float32Array | null>(null)
-  const lastPhotoBlobRef = useRef<Blob | null>(null)
-  const [faceBox, setFaceBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
-  const consecutiveMatchRef = useRef<{ clientId: string; count: number } | null>(null)
-  const noMatchCountRef = useRef(0)
-  const landmarksRef = useRef<FaceLandmarkPoint[] | null>(null)
-  const faceBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
-  const faceValidRef = useRef(false)
-  const meshAnimRef = useRef<number | null>(null)
-  const showMeshRef = useRef(false)
-
-  const stopCamera = useCallback(() => {
-    if (scanTimerRef.current) {
-      clearTimeout(scanTimerRef.current)
-      scanTimerRef.current = null
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop())
-      streamRef.current = null
-    }
-  }, [])
-
-  const startCamera = useCallback(async () => {
-    setState('requesting_camera')
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 640 } },
-        audio: false,
-      })
-      if (!mountedRef.current) {
-        stream.getTracks().forEach((t) => t.stop())
-        return
+  const alLeer = useCallback(
+    async (lectura: LecturaFacial): Promise<Veredicto> => {
+      const match = await matchFaceInDB(lectura.descriptor, targetRole, orgId)
+      if (match) {
+        coincidenciaRef.current = match
+        // La foto se codifica mientras corre la animación: al terminar ya está.
+        void lectura.foto()
+        return { tipo: 'exito', nombre: primerNombre(match.clientName) }
       }
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        await videoRef.current.play()
-        setState('scanning')
-      }
-    } catch {
-      setState('error')
-    }
-  }, [])
-
-  useEffect(() => {
-    mountedRef.current = true
-    let cancelled = false
-
-    // Timeout de seguridad: si los modelos tardan > 20s, asumir falla
-    // (red caída, CSP bloqueando, WebGL/WASM no disponible en este browser).
-    const safetyTimer = setTimeout(() => {
-      if (!cancelled && !areModelsLoaded()) {
-        console.error('[face-camera] timeout cargando modelos de reconocimiento')
-        setState('error')
-      }
-    }, 20_000)
-
-    const boot = async () => {
-      try {
-        await initFaceModels()
-        if (cancelled) return
-        await startCamera()
-      } catch (err) {
-        if (cancelled) return
-        console.error('[face-camera] error inicializando reconocimiento facial', err)
-        setState('error')
-      }
-    }
-
-    boot()
-
-    return () => {
-      cancelled = true
-      mountedRef.current = false
-      clearTimeout(safetyTimer)
-      stopCamera()
-    }
-  }, [startCamera, stopCamera])
-
-  const drawFaceOverlay = useCallback(
-    (detection: FaceDetectionResult | null, isValid: boolean = false) => {
-      if (detection) {
-        const { x, y, width, height } = detection.box
-        faceBoxRef.current = { x, y, width, height }
-        landmarksRef.current = detection.landmarks
-        faceValidRef.current = isValid
-        setFaceBox({ x, y, w: width, h: height })
-      } else {
-        faceBoxRef.current = null
-        landmarksRef.current = null
-        faceValidRef.current = false
-        setFaceBox(null)
-      }
+      sinCoincidenciaRef.current = lectura
+      return { tipo: 'reintento' }
     },
-    []
+    [targetRole, orgId],
   )
 
-  // Loop de animación — solo dibuja la malla cuando la cara está quieta y validada
+  // Si la pantalla se fue (Atrás, reinicio por inactividad) mientras se
+  // codificaba la foto, no se navega desde una cámara que ya no está.
+  const montadoRef = useRef(true)
   useEffect(() => {
-    const animate = () => {
-      const canvas = canvasRef.current
-      const video = videoRef.current
-      if (canvas && video && video.videoWidth > 0) {
-        canvas.width = video.videoWidth
-        canvas.height = video.videoHeight
-        const ctx = canvas.getContext('2d')!
-
-        if (showMeshRef.current && landmarksRef.current) {
-          drawFaceOverlayWithMesh(
-            ctx,
-            canvas.width,
-            canvas.height,
-            landmarksRef.current,
-            faceBoxRef.current,
-            faceValidRef.current,
-            { time: Date.now() }
-          )
-        } else {
-          ctx.clearRect(0, 0, canvas.width, canvas.height)
-        }
-      }
-      meshAnimRef.current = requestAnimationFrame(animate)
-    }
-    meshAnimRef.current = requestAnimationFrame(animate)
+    montadoRef.current = true
     return () => {
-      if (meshAnimRef.current) cancelAnimationFrame(meshAnimRef.current)
+      montadoRef.current = false
     }
   }, [])
 
-  const runScanLoop = useCallback(async () => {
-    if (!mountedRef.current || !videoRef.current || !areModelsLoaded()) return
-    if (state !== 'scanning') return
-
-    const detection = await detectFace(videoRef.current)
-    if (!mountedRef.current || state !== 'scanning') return
-
-    let isFaceValid = false
-    if (detection) {
-      const { x, y, width, height } = detection.box
-      const videoW = videoRef.current.videoWidth
-      const videoH = videoRef.current.videoHeight
-
-      const faceCenterX = x + width / 2
-      const faceCenterY = y + height / 2
-
-      // Cara centrada, tamaño mínimo
-      isFaceValid = (
-        faceCenterX > videoW * 0.20 &&
-        faceCenterX < videoW * 0.80 &&
-        faceCenterY > videoH * 0.15 &&
-        faceCenterY < videoH * 0.85 &&
-        width >= videoW * MIN_FACE_WIDTH_RATIO
-      )
-    }
-
-    drawFaceOverlay(detection, isFaceValid)
-
-    if (detection && isFaceValid) {
-      // Activar malla de puntos cuando la cara está validada y quieta
-      showMeshRef.current = true
-      setState('matching')
-      setLastDescriptor(detection.descriptor)
-      // Capturar foto del frame actual — queda cacheada por si hay que enviarla en el onNoMatch
-      const currentPhoto = videoRef.current ? await captureFrameAsBlob(videoRef.current) : null
-      lastPhotoBlobRef.current = currentPhoto
-
-      const match = await matchFaceInDB(detection.descriptor, targetRole, orgId)
-      if (!mountedRef.current) return
-
-      if (match) {
-        // Requiere confirmaciones consecutivas del mismo cliente para evitar falsos positivos
-        const prev = consecutiveMatchRef.current
-        if (prev && prev.clientId === match.clientId) {
-          prev.count += 1
-        } else {
-          consecutiveMatchRef.current = { clientId: match.clientId, count: 1 }
-        }
-
-        if (consecutiveMatchRef.current && consecutiveMatchRef.current.count >= CONSECUTIVE_MATCHES_REQUIRED) {
-          consecutiveMatchRef.current = null
-          noMatchCountRef.current = 0
-          setState('matched')
-          setMatchResult(match)
-          setTimeout(() => {
-            if (mountedRef.current) onMatch(match, detection.descriptor, currentPhoto)
-          }, MATCH_HOLD_MS)
-        } else {
-          // Aún no suficientes confirmaciones, seguir escaneando
-          setState('scanning')
-        }
+  const alTerminar = useCallback(
+    async ({ tipo, lectura }: ResultadoEscaner) => {
+      if (salioRef.current) return
+      salioRef.current = true
+      const foto = lectura ? await lectura.foto() : null
+      if (!montadoRef.current) return
+      if (tipo === 'exito' && coincidenciaRef.current && lectura) {
+        onMatch(coincidenciaRef.current, lectura.descriptor, foto)
+      } else if (lectura) {
+        onNoMatch(lectura.descriptor, foto)
       } else {
-        consecutiveMatchRef.current = null
-        showMeshRef.current = false
-        noMatchCountRef.current += 1
-
-        if (noMatchCountRef.current >= MAX_NO_MATCH_ATTEMPTS) {
-          // Tras N intentos, pasamos al flujo manual por teléfono llevando el último
-          // descriptor y la foto capturada para re-enrolar al cliente real.
-          const descriptorToSend = detection.descriptor
-          const photoToSend = currentPhoto
-          noMatchCountRef.current = 0
-          setState('no_match')
-          setTimeout(() => {
-            if (mountedRef.current) onNoMatch(descriptorToSend, photoToSend)
-          }, MATCH_HOLD_MS)
-          return
-        }
-
-        setState('no_match')
-        setTimeout(() => {
-          if (mountedRef.current) {
-            setState('scanning')
-          }
-        }, 2000)
+        onManualEntry()
       }
-    } else {
-      consecutiveMatchRef.current = null
-      showMeshRef.current = false
-      // Auto-recursión via setTimeout: la referencia a runScanLoop se resuelve
-      // en runtime cuando el callback se ejecuta (no en declaración).
-      // eslint-disable-next-line react-hooks/immutability
-      scanTimerRef.current = setTimeout(runScanLoop, SCAN_INTERVAL_MS)
-    }
-  }, [state, drawFaceOverlay, onMatch, onNoMatch, targetRole, orgId])
+    },
+    [onMatch, onNoMatch, onManualEntry],
+  )
 
+  // Si pasa un rato sin reconocer a nadie, el botón se ofrece con más fuerza:
+  // el que no tiene la cara registrada no tiene por qué seguir esperando.
+  const esperando = fase === 'buscando' || fase === 'ajustando'
   useEffect(() => {
-    if (state === 'scanning') {
-      scanTimerRef.current = setTimeout(runScanLoop, SCAN_INTERVAL_MS)
-    }
-    return () => {
-      if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
-    }
-  }, [state, runScanLoop])
+    if (!esperando) return
+    const id = setTimeout(() => setDestacarManual(true), DESTACAR_MANUAL_MS)
+    return () => clearTimeout(id)
+  }, [esperando])
 
-  const handleManualNoMatch = () => {
-    if (lastDescriptor) {
-      onNoMatch(lastDescriptor, lastPhotoBlobRef.current)
-    } else {
-      onManualEntry()
-    }
-  }
+  const terminando = fase === 'exito' || fase === 'fallo'
+  const destacado = (destacarManual && esperando) || fase === 'error'
 
-  const statusLabel = () => {
-    switch (state) {
-      case 'loading_models':
-        return 'Cargando sistema de reconocimiento...'
-      case 'requesting_camera':
-        return 'Accediendo a la cámara...'
-      case 'scanning':
-        return faceBox ? 'Cara detectada, analizando...' : 'Acercá tu cara a la cámara'
-      case 'matching':
-        return 'Buscando en el sistema...'
-      case 'matched':
-        return '¡Te encontramos!'
-      case 'no_match':
-        return 'No te reconocemos aún'
-      case 'error':
-        return 'No se pudo acceder a la cámara'
-      default:
-        return ''
-    }
-  }
-
-  const statusColor = () => {
-    switch (state) {
-      case 'matched':
-        return 'text-emerald-400'
-      case 'no_match':
-      case 'error':
-        return 'text-orange-400'
-      default:
-        return 'text-muted-foreground'
-    }
+  const ingresoManual = () => {
+    if (salioRef.current || terminando) return
+    salioRef.current = true
+    const lectura = sinCoincidenciaRef.current
+    if (lectura) {
+      void lectura.foto().then((foto) => {
+        if (montadoRef.current) onNoMatch(lectura.descriptor, foto)
+      })
+    } else onManualEntry()
   }
 
   return (
-    <div className="relative z-[1] w-full max-w-sm md:max-w-md flex flex-col items-center gap-2 md:gap-3 flex-1 min-h-0">
-      <div className="text-center">
+    <div className="relative z-[1] flex w-full max-w-2xl flex-col items-center gap-2 md:gap-3">
+      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5">
         <h2
-          className={
-            isTerminal
-              ? isLightBg
-                ? 'text-2xl md:text-3xl font-bold tracking-tight text-zinc-900'
-                : 'text-2xl md:text-3xl font-bold tracking-tight bg-gradient-to-r from-cyan-200 via-white to-violet-200 bg-clip-text text-transparent'
-              : 'text-2xl md:text-3xl font-bold'
-          }
+          className={cn(
+            'text-2xl font-bold tracking-tight md:text-3xl',
+            isLightBg
+              ? 'text-zinc-900'
+              : 'bg-gradient-to-r from-cyan-200 via-white to-violet-200 bg-clip-text text-transparent',
+          )}
         >
-          Check-in
+          {titulo ?? 'Check-in'}
         </h2>
         {branchName && (
-          <p
-            className={
-              isTerminal
-                ? isLightBg
-                  ? 'mt-1 md:mt-2 text-base md:text-lg text-zinc-600'
-                  : 'mt-1 md:mt-2 text-base md:text-lg text-cyan-100/55'
-                : 'text-muted-foreground mt-1 md:mt-2 text-base md:text-lg'
-            }
+          <span
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium tracking-wide backdrop-blur-sm md:text-sm',
+              isLightBg ? 'border border-zinc-300 bg-white/70 text-zinc-700' : 'border border-white/10 bg-zinc-950/50 text-white/70',
+            )}
           >
+            <MapPin className={cn('size-3 md:size-3.5', isLightBg ? 'text-cyan-700' : 'text-cyan-300/70')} />
             {branchName}
-          </p>
+          </span>
         )}
       </div>
 
-      {/* Camera viewport */}
-      <div
-        className={
-          isTerminal
-            ? isLightBg
-              ? 'relative w-full aspect-[3/4] max-h-[55dvh] rounded-2xl overflow-hidden bg-zinc-950/80 border border-zinc-300 shadow-lg shrink'
-              : 'relative w-full aspect-[3/4] max-h-[55dvh] rounded-2xl overflow-hidden bg-zinc-950/80 border border-cyan-400/25 shadow-[0_0_40px_rgba(34,211,238,0.15)] shrink'
-            : 'relative w-full aspect-[3/4] max-h-[55dvh] rounded-2xl overflow-hidden bg-black/50 border border-white/10 shrink'
-        }
+      <EscanerFacial
+        modo="identificar"
+        quien={esStaff ? 'staff' : 'cliente'}
+        esClaro={isLightBg}
+        alLeer={alLeer}
+        alTerminar={alTerminar}
+        alCambiar={(e) => setFase(e.fase)}
       >
-        <video
-          ref={videoRef}
-          className="absolute inset-0 w-full h-full object-cover mirror"
-          playsInline
-          muted
-          style={{ transform: 'scaleX(-1)' }}
-        />
-        <canvas
-          ref={canvasRef}
-          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-          style={{ transform: 'scaleX(-1)' }}
-        />
-
-        {/* Oval guide overlay */}
-        {(state === 'scanning' || state === 'matching') && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div
-              className={`w-56 h-72 md:w-64 md:h-80 rounded-full border-2 border-dashed transition-colors duration-300 ${
-                faceBox
-                  ? 'border-emerald-400 shadow-[0_0_30px_rgba(34,197,94,0.3)]'
-                  : isTerminal
-                    ? 'border-cyan-400/40 shadow-[0_0_24px_rgba(34,211,238,0.2)]'
-                    : 'border-white/20'
-              }`}
-            />
-          </div>
-        )}
-
-        {/* Loading overlay */}
-        {(state === 'loading_models' || state === 'requesting_camera') && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
-            <Loader2 className="size-12 animate-spin text-white/60 mb-4" />
-            <p className="text-white/70 text-lg">{statusLabel()}</p>
-          </div>
-        )}
-
-        {/* Match overlay */}
-        {state === 'matched' && matchResult && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
-            <div className="size-20 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center mb-4">
-              <UserCheck className="size-10 text-emerald-400" />
-            </div>
-            <p className="text-3xl font-bold text-white">{matchResult.clientName}</p>
-            <p className="text-emerald-400 mt-2 text-lg">¡Bienvenido de vuelta!</p>
-          </div>
-        )}
-
-        {/* No match overlay */}
-        {state === 'no_match' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
-            <div className="size-20 rounded-full bg-orange-500/20 border-2 border-orange-400 flex items-center justify-center mb-4">
-              <XCircle className="size-10 text-orange-400" />
-            </div>
-            <p className="text-xl font-bold text-white">No te reconocemos</p>
-            <p className="text-orange-400/80 mt-2">
-              {noMatchCountRef.current === 0
-                ? 'Pedíte el ingreso manual'
-                : `Reintentando... (${noMatchCountRef.current}/${MAX_NO_MATCH_ATTEMPTS})`}
-            </p>
-          </div>
-        )}
-
-        {/* Error overlay */}
-        {state === 'error' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70">
-            <Camera className="size-12 text-white/40 mb-4" />
-            <p className="text-white/70 text-lg text-center px-6">
-              No se pudo acceder a la cámara.
-              <br />
-              Usá el ingreso manual.
-            </p>
-          </div>
-        )}
-
-        {/* Scanning pulse */}
-        {state === 'matching' && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
-            <div className="flex items-center gap-2 bg-black/60 backdrop-blur-sm rounded-full px-4 py-2">
-              <Loader2 className="size-4 animate-spin text-white/60" />
-              <span className="text-sm text-white/70">Buscando...</span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Status text */}
-      <p className={`text-base md:text-lg font-medium text-center transition-colors shrink-0 ${statusColor()}`}>
-        {statusLabel()}
-      </p>
-
-      {/* Manual entry button */}
-      <Button
-        onClick={state === 'no_match' ? handleManualNoMatch : onManualEntry}
-        variant="outline"
-        className={
-          isTerminal
-            ? isLightBg
-              ? 'w-full h-11 md:h-12 text-sm md:text-base rounded-xl gap-2 md:gap-3 shrink-0 border-zinc-300 bg-white text-zinc-700 shadow-sm hover:bg-zinc-50 hover:text-zinc-900 hover:border-zinc-400'
-              : 'w-full h-11 md:h-12 text-sm md:text-base rounded-xl gap-2 md:gap-3 shrink-0 border-cyan-500/25 bg-zinc-950/50 text-cyan-100 hover:bg-cyan-950/40 hover:text-white hover:border-cyan-400/40'
-            : 'w-full h-11 md:h-12 text-sm md:text-base rounded-xl gap-2 md:gap-3 shrink-0'
-        }
-      >
-        <KeyboardIcon className="size-5" />
-        Soy Nuevo
-      </Button>
+        <Button
+          onClick={ingresoManual}
+          variant="outline"
+          disabled={terminando}
+          className={cn(
+            'mt-1 h-12 w-full max-w-sm gap-2.5 rounded-2xl text-base font-semibold transition-all duration-500 md:h-14 md:text-lg',
+            isLightBg
+              ? 'border-zinc-300 bg-white text-zinc-800 shadow-sm hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-900'
+              : 'checkin-glass-surface border-white/15 text-white hover:border-white/30 hover:bg-white/10 hover:text-white',
+            destacado &&
+              (isLightBg
+                ? 'border-cyan-600/50 ring-4 ring-cyan-600/15'
+                : 'border-cyan-300/50 ring-4 ring-cyan-300/15 shadow-[0_0_32px_rgba(34,211,238,0.25)]'),
+          )}
+        >
+          {esStaff ? <KeyRound className="size-5" /> : <Smartphone className="size-5" />}
+          {esStaff ? 'Ingresar con mi PIN' : 'Ingresar con mi teléfono'}
+        </Button>
+      </EscanerFacial>
     </div>
   )
 }

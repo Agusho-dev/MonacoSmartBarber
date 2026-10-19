@@ -59,6 +59,7 @@ import {
   IDLE_MS_PERSONAL,
 } from '@/components/checkin/use-idle-reset'
 import { useKioskoEnReposo } from '@/components/checkin/use-kiosko-en-reposo'
+import { usePrecalentarReconocimiento } from '@/components/checkin/use-precalentar-reconocimiento'
 import { enrollFaceDescriptor, saveFacePhoto } from '@/lib/face-recognition'
 import type { FaceMatchResult } from '@/lib/face-recognition'
 import type { AppointmentInfo } from '@/lib/actions/kiosk-turnos'
@@ -257,6 +258,7 @@ export function TurnosCheckinFlow({
   // Recarga por versión: después de un deploy, el kiosko se recarga solo
   // únicamente en su pantalla inicial y sin nada en vuelo (ver el hook).
   useKioskoEnReposo(step === 'home' && !isConfirming && !isLooking)
+  usePrecalentarReconocimiento(step === 'home')
 
   // ── Reconocimiento facial ──
 
@@ -674,7 +676,7 @@ export function TurnosCheckinFlow({
 
   if (step === 'face_scan') {
     return (
-      <div className="relative z-[1] w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-300">
+      <div className="relative z-[1] w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-6 pt-6 md:pt-8 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-300">
         <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
         {isLooking ? (
           <div className="flex flex-col items-center gap-4 my-auto">
@@ -685,7 +687,6 @@ export function TurnosCheckinFlow({
           </div>
         ) : (
           <FaceCamera
-            variant="terminal"
             isLightBg={isLightBg}
             branchName={branchName}
             orgId={organizationId}
@@ -916,13 +917,14 @@ export function TurnosCheckinFlow({
 
   if (step === 'face_enroll') {
     return (
-      <div className="relative z-[1] w-full max-w-sm md:max-w-lg flex flex-col items-center gap-3 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-300">
+      <div className="relative z-[1] w-full max-w-lg md:max-w-3xl flex flex-col items-center gap-3 px-4 md:px-6 pt-6 md:pt-8 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-300">
         <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
         <FaceEnrollment
           clientId={clientId ?? undefined}
           clientName={clientName || 'Cliente'}
           source="checkin"
           branchId={branchId}
+          isLightBg={isLightBg}
           onComplete={() => handleEnrolamientoTerminado(true)}
           onSkip={() => handleEnrolamientoTerminado(false)}
         />
