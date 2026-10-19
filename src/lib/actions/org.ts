@@ -102,9 +102,11 @@ export async function getPublicBranches(orgId?: string) {
   if (!activeOrgId) return []
 
   const supabase = createAdminClient()
+  // `logo_kiosko`: el logo grande del inicio del kiosko (organizations.settings), si la org lo tiene.
+  // Se pide la clave suelta y no `settings` entero: este resultado viaja a una tablet pública.
   const { data } = await supabase
     .from('branches')
-    .select('*, organizations(name, logo_url)')
+    .select('*, organizations(name, logo_url, logo_kiosko:settings->>logo_kiosko_url)')
     .eq('is_active', true)
     .eq('organization_id', activeOrgId)
     .order('name')

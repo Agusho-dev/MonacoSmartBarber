@@ -2481,25 +2481,52 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
           key={`home-${animKey}`}
           className="relative z-[1] w-full max-w-sm md:max-w-2xl flex flex-col items-center justify-center gap-5 md:gap-8 px-4 md:px-8 py-4 md:py-8 my-auto animate-in fade-in zoom-in-95 duration-500"
         >
-          <div className="relative flex flex-col items-center gap-3 md:gap-4">
-            <div className="relative size-16 md:size-24 rounded-full flex items-center justify-center">
-              <div
-                className="pointer-events-none absolute -inset-6 rounded-full bg-[radial-gradient(circle_at_center,rgba(34,211,238,0.22),rgba(167,139,250,0.12)_45%,transparent_70%)] blur-xl opacity-80 motion-reduce:opacity-60"
-                aria-hidden
-              />
-              <div className="relative size-full rounded-full overflow-hidden flex items-center justify-center ring-1 ring-white/10 bg-zinc-950/80 backdrop-blur-sm shadow-[0_8px_32px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.08)]">
-                <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/10 via-transparent to-violet-500/10" />
+          <div className={cn('relative flex flex-col items-center', selectedBranch.organizations?.logo_kiosko ? 'gap-5 md:gap-7' : 'gap-3 md:gap-4')}>
+            {selectedBranch.organizations?.logo_kiosko ? (
+              // Logo grande del kiosko (`organizations.settings.logo_kiosko_url`): el
+              // isotipo suelto, sin el círculo. Se diseña para el fondo oscuro de la
+              // terminal (Monaco: la M blanca); sobre un fondo claro se pinta negro,
+              // que si no un logo blanco desaparece.
+              <div className="relative h-32 w-48 md:h-48 md:w-72">
+                {!isLightBg && (
+                  <div
+                    className="pointer-events-none absolute -inset-10 rounded-full bg-[radial-gradient(circle_at_center,rgba(34,211,238,0.16),rgba(167,139,250,0.08)_45%,transparent_70%)] blur-2xl motion-reduce:opacity-70"
+                    aria-hidden
+                  />
+                )}
                 <Image
-                  src={selectedBranch.organizations?.logo_url || '/logo-barberos.png'}
+                  src={selectedBranch.organizations.logo_kiosko}
                   alt={selectedBranch.organizations?.name?.trim() || 'BarberOS'}
                   fill
-                  sizes="(max-width: 768px) 64px, 96px"
-                  className="absolute inset-0 z-[1] size-full object-cover"
+                  sizes="(max-width: 768px) 192px, 288px"
+                  className={cn(
+                    'object-contain',
+                    isLightBg ? 'brightness-0' : 'drop-shadow-[0_0_28px_rgba(255,255,255,0.14)]'
+                  )}
                   priority
                   unoptimized
                 />
               </div>
-            </div>
+            ) : (
+              <div className="relative size-16 md:size-24 rounded-full flex items-center justify-center">
+                <div
+                  className="pointer-events-none absolute -inset-6 rounded-full bg-[radial-gradient(circle_at_center,rgba(34,211,238,0.22),rgba(167,139,250,0.12)_45%,transparent_70%)] blur-xl opacity-80 motion-reduce:opacity-60"
+                  aria-hidden
+                />
+                <div className="relative size-full rounded-full overflow-hidden flex items-center justify-center ring-1 ring-white/10 bg-zinc-950/80 backdrop-blur-sm shadow-[0_8px_32px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.08)]">
+                  <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/10 via-transparent to-violet-500/10" />
+                  <Image
+                    src={selectedBranch.organizations?.logo_url || '/logo-barberos.png'}
+                    alt={selectedBranch.organizations?.name?.trim() || 'BarberOS'}
+                    fill
+                    sizes="(max-width: 768px) 64px, 96px"
+                    className="absolute inset-0 z-[1] size-full object-cover"
+                    priority
+                    unoptimized
+                  />
+                </div>
+              </div>
+            )}
             <div className="text-center space-y-1.5 md:space-y-2.5">
               <h1
                 className={cn(

@@ -135,8 +135,11 @@ export interface Branch {
   metas_en_panel?: boolean
   created_at: string
   updated_at: string
-  /** Presente cuando el query incluye el embed `organizations(name, logo_url)` (p. ej. getPublicBranches). */
-  organizations?: Pick<Organization, 'name' | 'logo_url'> | null
+  /**
+   * Presente cuando el query incluye el embed `organizations(name, logo_url)` (p. ej. getPublicBranches).
+   * `logo_kiosko` sale de `organizations.settings.logo_kiosko_url`: el logo grande del inicio del kiosko.
+   */
+  organizations?: (Pick<Organization, 'name' | 'logo_url'> & { logo_kiosko?: string | null }) | null
 }
 
 export interface ReviewRequest {
