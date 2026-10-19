@@ -550,6 +550,10 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     }
 
     const onMove = (e: TouchEvent) => {
+      // Arrastrando una tarjeta (la fila: un cliente hacia un barbero) el dedo
+      // va para cualquier lado: no es un gesto de cambiar de sección.
+      if (document.documentElement.hasAttribute('data-arrastrando')) return
+
       const dx = e.touches[0].clientX - touchStartX.current
       const dy = e.touches[0].clientY - touchStartY.current
 
@@ -613,7 +617,10 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     const isLeft = dx < 0
     const THRESHOLD = W * 0.28                          // 28% del ancho de pantalla
     const isFlick = Math.abs(dx) > 40 && Math.abs(dx) / dt > 0.45  // gesto rápido
+    // Si el gesto terminó siendo un arrastre (empezó a deslizar unos píxeles
+    // antes de que la tarjeta se levantara), vuelve a su lugar sin navegar.
     const isValidSwipe =
+      !document.documentElement.hasAttribute('data-arrastrando') &&
       (Math.abs(dx) > THRESHOLD || isFlick) &&
       Math.abs(dx) > Math.abs(dy) * 1.5
 

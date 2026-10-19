@@ -798,7 +798,7 @@ export async function startService(queueEntryId: string, barberId: string) {
   // Obtener la entrada para validar que la sucursal pertenece a la org activa
   const { data: entry } = await supabase
     .from('queue_entries')
-    .select('branch_id')
+    .select('branch_id, appointment_id')
     .eq('id', queueEntryId)
     .maybeSingle()
 
@@ -830,6 +830,21 @@ export async function startService(queueEntryId: string, barberId: string) {
 
   if (!iniciadas || iniciadas.length === 0) {
     return { error: 'El cliente ya no está esperando: otro barbero lo tomó o salió de la fila.' }
+  }
+
+  // Un turno arrancado desde el tablero queda "en curso" también en la agenda,
+  // como cuando lo toma `claim_next_for_barber` o el «Iniciar turno» del panel.
+  // Sin esto seguía `checked_in` durante el corte: la agenda lo mostraba
+  // esperando y el tablero lo seguía anunciando como próximo turno de la silla.
+  // No corta el inicio si falla: el corte ya empezó.
+  if (entry.appointment_id) {
+    const { error: turnoError } = await supabase
+      .from('appointments')
+      .update({ status: 'in_progress' })
+      .eq('id', entry.appointment_id)
+      .in('status', ['scheduled', 'confirmed', 'checked_in'])
+    if (turnoError) console.error('[startService] turno en curso', { queueEntryId, error: turnoError.message })
+    revalidatePath('/dashboard/turnos/agenda')
   }
 
   revalidatePath('/barbero/fila')

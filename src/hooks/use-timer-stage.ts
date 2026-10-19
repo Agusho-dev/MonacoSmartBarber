@@ -15,7 +15,7 @@ export type TimerStage = 'ok' | 'heads-up' | 'focus' | 'warn' | 'danger'
 const STAGE_ORDER: TimerStage[] = ['ok', 'heads-up', 'focus', 'warn', 'danger']
 const NEXT_BOUNDARIES_MIN = [25, 30, 35, 45, Infinity]
 
-function resolveStage(minutes: number): TimerStage {
+export function resolveStage(minutes: number): TimerStage {
   if (minutes >= 45) return 'danger'
   if (minutes >= 35) return 'warn'
   if (minutes >= 30) return 'focus'
