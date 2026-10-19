@@ -16,14 +16,12 @@ export default async function RendimientoPage() {
 
     const dayStats = await fetchBarberPerformance(session.staff_id, session.branch_id, 'day')
     const weekStats = await fetchBarberPerformance(session.staff_id, session.branch_id, 'week')
-    const monthStats = await fetchBarberPerformance(session.staff_id, session.branch_id, 'month')
 
     return (
         <RendimientoClient
             session={session}
             dayStats={dayStats}
             weekStats={weekStats}
-            monthStats={monthStats}
         />
     )
 }

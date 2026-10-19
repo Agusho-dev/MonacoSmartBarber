@@ -77,9 +77,15 @@ export async function fetchBarberPerformance(
     }
 }
 
+/**
+ * Las metas del barbero y su avance. El total de cortes del mes NO sale de acá
+ * (decisión del dueño, 19/oct/2026: el barbero no tiene que poder ver cuántos
+ * cortes lleva en el mes): cada meta recibe su avance ya acotado a su umbral,
+ * que es lo único que la tarjeta necesita para decir cuánto falta.
+ */
 export async function fetchBarberGoals(staffId: string, branchId: string) {
     const isValid = await validateBarberBranchOwnership(staffId, branchId)
-    if (!isValid) return { rules: [], achievements: [], currentCuts: 0, currentPeriod: '' }
+    if (!isValid) return { rules: [], achievements: [], currentPeriod: '' }
 
     const supabase = createAdminClient()
     const now = new Date()
@@ -99,19 +105,26 @@ export async function fetchBarberGoals(staffId: string, branchId: string) {
         .eq('staff_id', staffId)
         .eq('period_label', currentPeriod)
 
-    // Calculate progress for haircut_count rules
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-    const { count: monthCuts } = await supabase
-        .from('visits')
-        .select('id', { count: 'exact', head: true })
-        .eq('barber_id', staffId)
-        .eq('branch_id', branchId)
-        .gte('completed_at', startOfMonth.toISOString())
+    // Avance de las metas por cantidad de cortes, acotado al umbral de cada una.
+    const cuentaCortes = (r: { metric: string; threshold: number }) => r.metric === 'haircut_count' && r.threshold > 0
+    let monthCuts = 0
+    if ((rules ?? []).some(cuentaCortes)) {
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+        const { count } = await supabase
+            .from('visits')
+            .select('id', { count: 'exact', head: true })
+            .eq('barber_id', staffId)
+            .eq('branch_id', branchId)
+            .gte('completed_at', startOfMonth.toISOString())
+        monthCuts = count ?? 0
+    }
 
     return {
-        rules: rules ?? [],
+        rules: (rules ?? []).map((r) => ({
+            ...r,
+            progreso: cuentaCortes(r) ? Math.min(monthCuts, r.threshold) : 0,
+        })),
         achievements: achievements ?? [],
-        currentCuts: monthCuts ?? 0,
         currentPeriod,
     }
 }

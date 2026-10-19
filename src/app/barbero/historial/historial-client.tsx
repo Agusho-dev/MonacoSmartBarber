@@ -83,12 +83,9 @@ export function HistorialClient({ session, history, timeZone }: HistorialClientP
                     ) : (
                         [...grouped.entries()].map(([dateLabel, visits]) => (
                             <section key={dateLabel} aria-label={dateLabel} className="space-y-2.5">
-                                <div className="flex items-baseline justify-between gap-3">
-                                    <h2 className="text-[1.0625rem] font-semibold first-letter:uppercase">{dateLabel}</h2>
-                                    <span className="font-mono text-[0.9375rem] font-semibold tabular-nums text-muted-foreground">
-                                        {visits.length} {visits.length === 1 ? 'corte' : 'cortes'}
-                                    </span>
-                                </div>
+                                {/* Sin un conteo por día: sumados, daban el total del mes, y el
+                                    dueño no quiere que el barbero lo vea (ver fetchBarberGoals). */}
+                                <h2 className="text-[1.0625rem] font-semibold first-letter:uppercase">{dateLabel}</h2>
                                 <ol className="overflow-hidden rounded-[1.25rem] border border-border/80 bg-card">
                                     {visits.map((v) => {
                                         const Icon = PAYMENT_ICONS[v.payment_method] ?? Banknote

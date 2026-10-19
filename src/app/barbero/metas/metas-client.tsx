@@ -15,13 +15,14 @@ interface GoalsData {
         reward_amount: number
         period: string
         is_active: boolean
+        /** Cortes que cuentan para esta meta, ya acotados a su umbral (ver fetchBarberGoals). */
+        progreso: number
     }[]
     achievements: {
         id: string
         rule_id: string
         amount_earned: number
     }[]
-    currentCuts: number
     currentPeriod: string
 }
 
@@ -54,15 +55,9 @@ export function MetasClient({ session, goals }: MetasClientProps) {
             />
 
             <div className="px-4 py-5 sm:px-6 sm:py-6">
+                {/* Sin el total de cortes del mes: el dueño no quiere que el barbero
+                    lo vea. Cada meta dice cuánto le falta para ella y nada más. */}
                 <div className="mx-auto max-w-3xl space-y-5">
-                    <p className="text-lg text-muted-foreground">
-                        Este mes llevás{' '}
-                        <span className="font-mono text-[1.75rem] font-semibold tabular-nums text-foreground">
-                            {goals.currentCuts}
-                        </span>{' '}
-                        {goals.currentCuts === 1 ? 'corte' : 'cortes'}
-                    </p>
-
                     {goals.rules.length === 0 ? (
                         <div className="rounded-[1.25rem] border-2 border-dashed border-foreground/15 px-6 py-12 text-center">
                             <Target className="mx-auto size-9 text-muted-foreground/60" aria-hidden />
@@ -75,7 +70,7 @@ export function MetasClient({ session, goals }: MetasClientProps) {
                         goals.rules.map((rule) => {
                             const isAchieved = achievedRuleIds.has(rule.id)
                             const cuentaCortes = rule.metric === 'haircut_count' && rule.threshold > 0
-                            const progress = cuentaCortes ? Math.min(goals.currentCuts, rule.threshold) : 0
+                            const progress = cuentaCortes ? Math.min(rule.progreso, rule.threshold) : 0
                             const faltan = Math.max(0, rule.threshold - progress)
                             // Lograda (el local registró el logro): la tarjeta va completa
                             // aunque el conteo del mes diga otra cosa (cortes anulados).

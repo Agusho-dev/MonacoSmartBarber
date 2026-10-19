@@ -4,10 +4,11 @@ import { useState } from 'react'
 import { EncabezadoPantalla } from '@/components/barber/encabezado-pantalla'
 import { cn } from '@/lib/utils'
 
+// Sin "Mes": el barbero no tiene que poder ver cuántos cortes lleva en el mes
+// (decisión del dueño, 19/oct/2026; ver fetchBarberGoals).
 const PERIODS = [
     { id: 'day', label: 'Hoy' },
     { id: 'week', label: 'Semana' },
-    { id: 'month', label: 'Mes' },
 ] as const
 
 type PeriodId = (typeof PERIODS)[number]['id']
@@ -20,13 +21,12 @@ interface RendimientoClientProps {
     session: { staff_id: string; full_name: string; branch_id: string; role: string }
     dayStats: Stats
     weekStats: Stats
-    monthStats: Stats
 }
 
-export function RendimientoClient({ session, dayStats, weekStats, monthStats }: RendimientoClientProps) {
+export function RendimientoClient({ session, dayStats, weekStats }: RendimientoClientProps) {
     const [period, setPeriod] = useState<PeriodId>('day')
 
-    const stats = period === 'day' ? dayStats : period === 'week' ? weekStats : monthStats
+    const stats = period === 'day' ? dayStats : weekStats
 
     return (
         <div>
@@ -56,7 +56,7 @@ export function RendimientoClient({ session, dayStats, weekStats, monthStats }: 
                         <p className="font-mono text-[4rem] font-semibold leading-none tabular-nums">{stats.cuts}</p>
                         <p className="mt-3 text-lg text-muted-foreground">
                             {stats.cuts === 1 ? 'corte' : 'cortes'}{' '}
-                            {period === 'day' ? 'hoy' : period === 'week' ? 'esta semana' : 'este mes'}
+                            {period === 'day' ? 'hoy' : 'esta semana'}
                         </p>
                     </div>
                 </div>
