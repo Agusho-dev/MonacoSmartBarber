@@ -8,13 +8,32 @@ interface Organization {
   name: string
   slug: string
   logo_url: string | null
+  /** Logo grande de la org (`settings.logo_kiosko_url`): el mismo del inicio del kiosko. */
+  logo_kiosko?: string | null
 }
 
 export function OrgHomePage({ organization }: { organization: Organization }) {
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-12 p-8">
       <div className="flex flex-col items-center gap-4 text-center">
-        {organization.logo_url ? (
+        {organization.logo_kiosko ? (
+          // Suelto y grande, sin el círculo (Monaco: la M blanca).
+          <div className="relative mb-2 h-32 w-48 md:h-40 md:w-60">
+            <div
+              className="pointer-events-none absolute -inset-10 rounded-full bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.08),transparent_65%)] blur-2xl"
+              aria-hidden
+            />
+            <Image
+              src={organization.logo_kiosko}
+              alt={organization.name}
+              fill
+              sizes="(max-width: 768px) 192px, 240px"
+              className="object-contain drop-shadow-[0_0_28px_rgba(255,255,255,0.12)]"
+              priority
+              unoptimized
+            />
+          </div>
+        ) : organization.logo_url ? (
           <Image
             src={organization.logo_url}
             alt={organization.name}

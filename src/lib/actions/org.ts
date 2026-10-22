@@ -228,7 +228,8 @@ export async function getActiveOrganization() {
   const supabase = createAdminClient()
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, name, slug, logo_url, is_active, timezone, currency, locale, primary_color')
+    // `logo_kiosko`: el logo grande (organizations.settings) que muestran la portada y el kiosko.
+    .select('id, name, slug, logo_url, logo_kiosko:settings->>logo_kiosko_url, is_active, timezone, currency, locale, primary_color')
     .eq('id', orgId)
     .eq('is_active', true)
     .maybeSingle()
