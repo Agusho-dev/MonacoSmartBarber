@@ -633,6 +633,16 @@ export function textoNoPudeLeer(error: string): string {
   return `No pude leer: ${e}`
 }
 
+/**
+ * "5★" → "5 estrellas", "1★" → "1 estrella". La fuente del PDF (Helvetica,
+ * WinAnsi) no tiene la ★ y `textoPdf` la borraba: el KPI "5★" de las reseñas
+ * salía "5" a secas en el archivo que se manda. Lo usan `generar_informe` (así
+ * la pantalla y el PDF dicen lo mismo) y `textoPdf` (informes ya guardados).
+ */
+export function estrellasEnTexto(texto: string): string {
+  return texto.replace(/(\d+(?:[.,]\d+)?)\s*★/g, (_m, n: string) => `${n} ${n === '1' ? 'estrella' : 'estrellas'}`)
+}
+
 /** Hacia dónde apunta un delta ("+12 %" sube, "-3 %" baja), mirando el signo escrito. */
 export function direccionDeDelta(delta: string | undefined | null): 'sube' | 'baja' | 'igual' | null {
   if (!delta) return null

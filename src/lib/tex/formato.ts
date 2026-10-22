@@ -44,6 +44,13 @@ export function decimal(n: number): string {
   return HASTA_UN_DECIMAL.format(Number.isFinite(n) ? n : 0)
 }
 
+const DOS_DECIMALES = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+/** "4,92": un promedio de calificaciones (siempre con dos decimales). */
+export function decimalDos(n: number): string {
+  return DOS_DECIMALES.format(Number.isFinite(n) ? n : 0)
+}
+
 /** "32 %" / "36,4 %": con espacio, como escribe el resto del dashboard. */
 export function porcentaje(n: number): string {
   return `${HASTA_UN_DECIMAL.format(Number.isFinite(n) ? n : 0)} %`
@@ -232,6 +239,11 @@ export function horaEnZona(instante: Date | string, zona = ZONA_ARGENTINA): stri
   return new Intl.DateTimeFormat('es-AR', { timeZone: zona, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(
     typeof instante === 'string' ? new Date(instante) : instante,
   )
+}
+
+/** "22/10/2026 17:32": un instante en la hora de pared de la zona (para tablas). */
+export function fechaHoraEnZona(instante: Date | string, zona = ZONA_ARGENTINA): string {
+  return `${fechaConAnio(fechaEnZona(instante, zona))} ${horaEnZona(instante, zona)}`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -42,6 +42,29 @@ export async function leerTodas<T>(
   throw new Error(`[tex] ${opciones.contexto ?? 'lectura'}: más de ${maxFilas} filas`)
 }
 
+/**
+ * Corre `f` sobre cada item con como mucho `limite` en vuelo, y devuelve los
+ * resultados en el MISMO orden que los items. Si alguno tira, tira (después de
+ * que terminen los que ya estaban corriendo).
+ */
+export async function conConcurrencia<T, R>(items: T[], limite: number, f: (item: T) => Promise<R>): Promise<R[]> {
+  const resultados = new Array<R>(items.length)
+  const estado: { siguiente: number; falla: { error: unknown } | null } = { siguiente: 0, falla: null }
+  const trabajador = async () => {
+    while (estado.falla === null && estado.siguiente < items.length) {
+      const i = estado.siguiente++
+      try {
+        resultados[i] = await f(items[i])
+      } catch (error) {
+        estado.falla ??= { error }
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limite, items.length)) }, trabajador))
+  if (estado.falla) throw estado.falla.error
+  return resultados
+}
+
 /** Inicio y fin de un día de pared en Argentina, con offset: "2026-10-21T00:00:00-03:00". */
 export function limitesDelDia(fecha: string): { desde: string; hasta: string } {
   const { start, end } = getDayBounds(fecha)

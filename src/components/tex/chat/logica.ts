@@ -1,12 +1,15 @@
 // =============================================================================
-// Lógica pura del chat de Tex: qué está haciendo Tex, cómo se cuenta un paso,
-// cómo se copia una respuesta para WhatsApp y cómo se agrupa el historial.
+// Lógica pura del chat de Tex: qué está haciendo Tex, qué parte de un mensaje
+// es la respuesta y cuál es el trabajo, cómo se cuenta un paso, cómo se copia
+// una respuesta para WhatsApp y cómo se agrupa el historial.
 //
 // Sin React ni DOM: lo usan la página, el panel y las pruebas del scratchpad
 // (que corren este archivo con Node, así que los tipos van con `import type`).
 // =============================================================================
 
-import { metaHerramienta } from '@/lib/tex/contrato'
+import { formatosDeTabla, textoDeCelda } from '@/lib/tex/bloques-formato'
+import { esHerramientaVisible, metaHerramienta } from '@/lib/tex/contrato'
+import { TEXTO_CANCELADO } from '@/lib/tex/historial-puro'
 import type {
   TexCodigoAviso,
   TexCodigoError,
@@ -40,6 +43,15 @@ export function nombreDeHerramienta(p: ParteHerramienta): string {
 }
 
 /**
+ * ¿La parte es de una herramienta que dibuja en la RESPUESTA (`mostrar`,
+ * `graficar`, `generar_informe`)? Las demás son de datos: lo que traen es el
+ * trabajo de Tex y queda en la tarjeta de trabajo (contrato: esHerramientaVisible).
+ */
+export function esParteVisible(p: ParteHerramienta): boolean {
+  return esHerramientaVisible(nombreDeHerramienta(p))
+}
+
+/**
  * Sin emojis, como el resto de la interfaz (y como el PDF, que no los puede
  * dibujar): el prompt se lo pide a Tex, pero si igual escribe uno no se
  * muestra. Misma regla que la síntesis del informe (bloques/tex-markdown.tsx).
@@ -65,7 +77,13 @@ export function salidaUI(valor: unknown): TexSalidaUI | null {
   return Array.isArray(o.bloques) ? (o as TexSalidaUI) : null
 }
 
-export type EstadoPaso = 'corriendo' | 'ok' | 'error'
+/**
+ * 'cortado' = la persona apretó Detener con la herramienta en vuelo: no es una
+ * consulta que falló (no se cuenta como tal ni se pinta como error). En vivo el
+ * paso queda sin terminar; guardado, vuelve como `output-error` con
+ * TEXTO_CANCELADO (src/lib/tex/historial-puro.ts) y se reconoce acá.
+ */
+export type EstadoPaso = 'corriendo' | 'ok' | 'error' | 'cortado'
 
 export interface PasoTex {
   id: string
@@ -79,48 +97,156 @@ export interface PasoTex {
   errorText: string | null
 }
 
+function pasoDeParte(p: ParteHerramienta): PasoTex {
+  const nombre = nombreDeHerramienta(p)
+  if (p.state === 'output-available') {
+    const salida = salidaUI(p.output)
+    return {
+      id: p.toolCallId,
+      nombre,
+      // "No pude leer" dentro de la salida también es un paso fallido (Known Risk #15).
+      estado: salida?.error ? 'error' : 'ok',
+      input: p.input,
+      inputCompleto: true,
+      salida,
+      errorText: salida?.error ?? null,
+    }
+  }
+  if (p.state === 'output-error') {
+    const cortado = p.errorText === TEXTO_CANCELADO
+    return {
+      id: p.toolCallId,
+      nombre,
+      estado: cortado ? 'cortado' : 'error',
+      input: p.input,
+      inputCompleto: true,
+      salida: null,
+      errorText: cortado ? null : p.errorText,
+    }
+  }
+  return {
+    id: p.toolCallId,
+    nombre,
+    estado: 'corriendo',
+    input: p.input,
+    inputCompleto: p.state === 'input-available',
+    salida: null,
+    errorText: null,
+  }
+}
+
 /** Las herramientas del mensaje, en el orden en que se llamaron. */
 export function pasosDeMensaje(m: Pick<TexUIMessage, 'parts'>): PasoTex[] {
   const pasos: PasoTex[] = []
-  for (const p of m.parts) {
-    if (!esParteHerramienta(p)) continue
-    const nombre = nombreDeHerramienta(p)
-    if (p.state === 'output-available') {
-      const salida = salidaUI(p.output)
-      pasos.push({
-        id: p.toolCallId,
-        nombre,
-        // "No pude leer" dentro de la salida también es un paso fallido (Known Risk #15).
-        estado: salida?.error ? 'error' : 'ok',
-        input: p.input,
-        inputCompleto: true,
-        salida,
-        errorText: salida?.error ?? null,
-      })
-    } else if (p.state === 'output-error') {
-      pasos.push({ id: p.toolCallId, nombre, estado: 'error', input: p.input, inputCompleto: true, salida: null, errorText: p.errorText })
-    } else {
-      pasos.push({
-        id: p.toolCallId,
-        nombre,
-        estado: 'corriendo',
-        input: p.input,
-        inputCompleto: p.state === 'input-available',
-        salida: null,
-        errorText: null,
-      })
-    }
-  }
+  for (const p of m.parts) if (esParteHerramienta(p)) pasos.push(pasoDeParte(p))
   return pasos
 }
 
-/** ¿Llegó texto DESPUÉS de la última herramienta? (es lo que pliega la tarjeta de trabajo). */
-export function hayTextoDespuesDeHerramientas(m: Pick<TexUIMessage, 'parts'>): boolean {
-  let ultimaHerramienta = -1
-  m.parts.forEach((p, i) => {
-    if (esParteHerramienta(p)) ultimaHerramienta = i
+// ─────────────────────────────────────────────────────────────────────────────
+// Respuesta y trabajo (oct/2026: "muestra todo el razonamiento, debe mostrar la
+// respuesta final")
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Una línea de la tarjeta de trabajo: un paso, o lo que Tex dijo entre una consulta y otra. */
+export type ItemTrabajo = { tipo: 'paso'; paso: PasoTex } | { tipo: 'nota'; id: string; texto: string }
+
+/** Un lugar de la respuesta que ocupa una herramienta visible: su salida, o `null` mientras se prepara. */
+export interface PiezaRespuesta {
+  id: string
+  nombre: string
+  salida: TexSalidaUI | null
+}
+
+export interface AnatomiaRespuesta {
+  /** Todas las herramientas del mensaje, en orden. */
+  pasos: PasoTex[]
+  /** Los pasos y las notas de Tex entre consultas, en el orden en que pasaron: la tarjeta de trabajo. */
+  trabajo: ItemTrabajo[]
+  /** La respuesta: los textos que llegaron DESPUÉS de la última herramienta de datos. */
+  texto: string
+  /**
+   * Las herramientas visibles con algo para dibujar (o todavía corriendo), en
+   * el orden de sus partes. Una que falló sin bloques no está: su error queda
+   * en la tarjeta (el texto de Tex ya cuenta qué pasó).
+   */
+  piezas: PiezaRespuesta[]
+}
+
+/**
+ * Qué parte de un mensaje de Tex es la RESPUESTA y cuál es el TRABAJO.
+ *
+ * - Los bloques de las herramientas de datos (finanzas_pyl, reviews_crm,
+ *   consulta_sql…) son el trabajo: van plegados en la tarjeta, con su "Ver
+ *   datos". En la respuesta sólo se dibujan las visibles (`mostrar`,
+ *   `graficar`, `generar_informe`). También al reabrir una conversación vieja.
+ * - El texto que Tex escribió ANTES de su última consulta ("Busco a Chipi como
+ *   cliente…", "No aparece, pruebo con la consulta avanzada") es narración del
+ *   trabajo, no la respuesta: va a la tarjeta, entre los pasos. La respuesta es
+ *   el texto que llegó después de la última herramienta de datos; `mostrar` y
+ *   `graficar` no cortan ese texto porque ya son parte de la respuesta.
+ */
+export function anatomiaDeRespuesta(m: Pick<TexUIMessage, 'parts'>): AnatomiaRespuesta {
+  const partes = m.parts
+  let ultimoDato = -1
+  partes.forEach((p, i) => {
+    if (esParteHerramienta(p) && !esParteVisible(p)) ultimoDato = i
   })
-  return m.parts.some((p, i) => i > ultimaHerramienta && p.type === 'text' && p.text.trim() !== '')
+
+  const pasos: PasoTex[] = []
+  const trabajo: ItemTrabajo[] = []
+  const textos: string[] = []
+  const piezas: PiezaRespuesta[] = []
+  partes.forEach((p, i) => {
+    if (p.type === 'text') {
+      const t = p.text.trim()
+      if (!t) return
+      if (i > ultimoDato) textos.push(t)
+      else {
+        const nota = textoPlano(t)
+        if (nota) trabajo.push({ tipo: 'nota', id: `nota-${i}`, texto: nota })
+      }
+      return
+    }
+    if (!esParteHerramienta(p)) return
+    const paso = pasoDeParte(p)
+    // Un `mostrar` que terminó sin nada para dibujar es un id mal pedido (o un input
+    // inválido) que el modelo corrige solo: plomería, no un paso para la persona. Sin
+    // esto la tarjeta decía "Respuesta ✓" (dos, si reintentaba) o "1 consulta falló".
+    if (paso.nombre === 'mostrar' && (paso.estado === 'ok' || paso.estado === 'error') && !paso.salida?.bloques.length) return
+    pasos.push(paso)
+    trabajo.push({ tipo: 'paso', paso })
+    if (!esParteVisible(p)) return
+    if (paso.estado === 'corriendo') piezas.push({ id: paso.id, nombre: paso.nombre, salida: null })
+    else if (paso.salida && paso.salida.bloques.length > 0) piezas.push({ id: paso.id, nombre: paso.nombre, salida: paso.salida })
+  })
+  return { pasos, trabajo, texto: textos.join('\n\n'), piezas }
+}
+
+/**
+ * ¿El paso tiene datos que mostrar en "Ver datos"? Las visibles no: lo suyo ya
+ * está en la respuesta. Un paso sin bloques tampoco (su error, si falló, va en
+ * su propia línea).
+ */
+export function tieneDatosParaVer(paso: Pick<PasoTex, 'nombre' | 'salida'>): boolean {
+  if (esHerramientaVisible(paso.nombre)) return false
+  return (paso.salida?.bloques.length ?? 0) > 0
+}
+
+/**
+ * Markdown → una línea de texto (las notas de la tarjeta de trabajo): sin
+ * marcas, títulos, viñetas, código ni enlaces (queda su texto).
+ */
+export function textoPlano(md: string): string {
+  return sinEmojis(md)
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, '')
+    .replace(/\*\*|__|~~|`/g, '')
+    .replace(/(^|[^\w*])\*(?=\S)([^*\n]*?\S)\*(?![\w*])/g, '$1$2')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 /** ¿El mensaje ya muestra algo? Sin nada visible, Tex sigue "pensando". */
@@ -270,6 +396,15 @@ const MESES = [
 ]
 const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 
+/** `periodo` de reviews_crm y de la conciliación ('hoy' | 'ayer' | 'semana' | 'mes' | 'mes_pasado'). */
+const PERIODOS_CON_NOMBRE: ReadonlyMap<string, string> = new Map([
+  ['hoy', 'hoy'],
+  ['ayer', 'ayer'],
+  ['semana', 'últimos 7 días'],
+  ['mes', 'este mes'],
+  ['mes_pasado', 'el mes pasado'],
+])
+
 function campo(input: unknown, clave: string): unknown {
   if (!input || typeof input !== 'object') return undefined
   return (input as Record<string, unknown>)[clave]
@@ -324,6 +459,12 @@ export function periodoLegible(input: unknown): string | null {
   const dia = leerFecha(campo(input, 'fecha')) ?? leerFecha(campo(input, 'dia'))
   if (dia) return diaCorto(dia)
 
+  // El período con nombre de reseñas y conciliación (src/lib/tex/periodo.ts). Las
+  // fechas de arriba mandan sobre él, igual que en el servidor.
+  const nombrado = campo(input, 'periodo')
+  const conNombre = typeof nombrado === 'string' ? PERIODOS_CON_NOMBRE.get(nombrado) : undefined
+  if (conNombre) return conNombre
+
   const mesFinal = campo(input, 'mesFinal') ?? campo(input, 'mes')
   const mf = typeof mesFinal === 'string' ? /^(\d{4})-(\d{2})/.exec(mesFinal) : null
   const nombreMes = mf && Number(mf[2]) >= 1 && Number(mf[2]) <= 12 ? MESES[Number(mf[2]) - 1] : null
@@ -337,11 +478,27 @@ export function periodoLegible(input: unknown): string | null {
   return nombreMes
 }
 
+/** "Chipi" · "Chipi y Lucas" · "Chipi y 2 más": uno o varios nombres de un input. */
+function nombresCortos(v: unknown): string | null {
+  if (typeof v === 'string') return textoCorto(v, 24)
+  if (!Array.isArray(v)) return null
+  const nombres = v.map((x) => textoCorto(x, 24)).filter((x): x is string => x !== null)
+  if (nombres.length === 0) return null
+  if (nombres.length <= 2) return enumerar(nombres)
+  return `${nombres[0]} y ${nombres.length - 1} más`
+}
+
 /** Los argumentos que vale la pena mostrar en el paso, en orden. */
 export function argumentosLegibles(input: unknown): string[] {
   const out: string[] = []
   const sucursal = textoCorto(campo(input, 'sucursal'), 28)
   if (sucursal) out.push(sucursal)
+  // La cuenta de Mercado Pago de "Diferencias" (conciliacion_casos): "monacoparana4".
+  const cuenta = textoCorto(campo(input, 'cuenta'), 28)
+  if (cuenta) out.push(cuenta)
+  // "Reseñas · Chipi · octubre": de quién son los datos, antes del período.
+  const barbero = nombresCortos(campo(input, 'barbero') ?? campo(input, 'barberos'))
+  if (barbero) out.push(barbero)
   const periodo = periodoLegible(input)
   if (periodo) out.push(periodo)
   const busqueda = textoCorto(
@@ -349,6 +506,8 @@ export function argumentosLegibles(input: unknown): string[] {
     28,
   )
   if (busqueda) out.push(`“${busqueda}”`)
+  // reviews_crm con solo_bajas: la lista trae sólo las notas de 1 a 3 ("¿quién se quejó?").
+  if (campo(input, 'solo_bajas') === true) out.push('sólo notas bajas')
   if (out.length === 0) {
     const titulo = textoCorto(campo(input, 'titulo'), 48)
     if (titulo) out.push(titulo)
@@ -356,21 +515,36 @@ export function argumentosLegibles(input: unknown): string[] {
   return out
 }
 
-/** "Leyendo las finanzas · Paraná · octubre" (el paso de la tarjeta de trabajo). */
-export function textoDePaso(
+/**
+ * El error de un paso tal como se le puede mostrar a la persona, o null. El
+ * servidor manda frases para la persona ("No pude leer las reseñas"); un
+ * mensaje técnico (JSON, un volcado largo) no se muestra tal cual.
+ */
+function errorLegible(errorText: string | null | undefined): string | null {
+  const t = errorText?.replace(/\s+/g, ' ').trim()
+  return t && t.length <= 120 && !/[{}[\]]/.test(t) ? t : null
+}
+
+export interface FilaDePaso {
+  /** "Leyendo las reseñas" mientras corre; "Reseñas" cuando terminó. */
+  titulo: string
+  /** Los argumentos legibles ("Chipi", "octubre"); vacío mientras el input llega a pedazos. */
+  detalle: string[]
+  /** Si falló: su error en una línea, para la persona. */
+  error: string | null
+}
+
+/** Un paso de la tarjeta de trabajo desplegada: etiqueta, argumentos y error. */
+export function filaDePaso(
   paso: Pick<PasoTex, 'nombre' | 'input' | 'estado' | 'errorText'> & { inputCompleto?: boolean },
-  conArgumentos: boolean,
-): string {
+  enCurso: boolean,
+): FilaDePaso {
   const meta = metaHerramienta(paso.nombre)
-  if (paso.estado === 'error') {
-    const t = paso.errorText?.trim()
-    // El servidor manda frases para la persona ("No pude leer las reseñas"); un
-    // mensaje técnico (JSON, inglés) no se muestra tal cual.
-    if (t && t.length <= 120 && !/[{}[\]]/.test(t)) return t
-    return `No pude completar: ${meta.etiqueta}`
+  return {
+    titulo: paso.estado === 'corriendo' && enCurso ? meta.haciendo : meta.etiqueta,
+    detalle: paso.inputCompleto === false ? [] : argumentosLegibles(paso.input),
+    error: paso.estado === 'error' ? (errorLegible(paso.errorText) ?? 'No pude completar esta consulta.') : null,
   }
-  const args = conArgumentos && paso.inputCompleto !== false ? argumentosLegibles(paso.input) : []
-  return [meta.haciendo, ...args].join(' · ')
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -400,15 +574,34 @@ const ACCIONES: Record<string, string> = {
   sincronizar_mp: 'Traje los movimientos de Mercado Pago',
 }
 
-export function resumenPlegado(pasos: Pick<PasoTex, 'nombre' | 'estado'>[], duracionMs?: number | null): string {
+export interface ResumenTrabajo {
+  /** "Consulté Reseñas y Equipo · Armé un gráfico" */
+  principal: string
+  /** "1 consulta falló" · "3 consultas fallaron" · null */
+  fallos: string | null
+  /** "3,2 s" · null si no se midió (una conversación reabierta) */
+  duracion: string | null
+}
+
+/**
+ * La tarjeta plegada en partes: el componente trunca sólo `principal` y deja
+ * siempre a la vista las fallas y la duración (en 390 px no entra todo).
+ * `mostrar` no se nombra: armar la respuesta no es una consulta.
+ */
+export function partesDelResumen(pasos: Pick<PasoTex, 'nombre' | 'estado'>[], duracionMs?: number | null): ResumenTrabajo {
   const consultas: string[] = []
   const acciones: string[] = []
   let graficos = 0
+  let respuestas = 0
   let fallidos = 0
   for (const p of pasos) {
     if (p.estado === 'error') fallidos++
     if (p.nombre === 'graficar') {
       graficos++
+      continue
+    }
+    if (p.nombre === 'mostrar') {
+      respuestas++
       continue
     }
     const accion = ACCIONES[p.nombre]
@@ -424,9 +617,43 @@ export function resumenPlegado(pasos: Pick<PasoTex, 'nombre' | 'estado'>[], dura
   if (graficos === 1) frases.push('Armé un gráfico')
   else if (graficos > 1) frases.push(`Armé ${graficos} gráficos`)
   frases.push(...acciones)
-  if (fallidos > 0) frases.push(fallidos === 1 ? '1 sin leer' : `${fallidos} sin leer`)
-  if (duracionMs != null && duracionMs > 0) frases.push(formatearDuracion(duracionMs))
-  return frases.join(' · ')
+  if (frases.length === 0 && respuestas > 0) frases.push('Preparé la respuesta')
+  return {
+    principal: frases.join(' · '),
+    // "N sin leer" no se entendía: eran consultas que fallaron, y así se dice.
+    fallos: fallidos === 0 ? null : fallidos === 1 ? '1 consulta falló' : `${fallidos} consultas fallaron`,
+    duracion: duracionMs != null && duracionMs > 0 ? formatearDuracion(duracionMs) : null,
+  }
+}
+
+/**
+ * Lo que tardó el trabajo de la tarjeta, medido en el navegador: del primer
+ * paso al último. `mostrar` no cuenta (no se nombra en el resumen y corre
+ * DESPUÉS de que Tex escribió la respuesta): contarlo sumaba el tiempo de
+ * escritura y la cifra saltaba ("13 s" → nada → "18 s"). Sin todos los pasos
+ * medidos (una conversación reabierta, un paso todavía corriendo) no hay cifra.
+ */
+export function duracionDelTrabajo(
+  pasos: Pick<PasoTex, 'id' | 'nombre'>[],
+  tiempos: Readonly<Record<string, { inicio: number; fin?: number }>>,
+): number | null {
+  const contados = pasos.some((p) => p.nombre !== 'mostrar') ? pasos.filter((p) => p.nombre !== 'mostrar') : pasos
+  if (contados.length === 0) return null
+  let inicio = Infinity
+  let fin = -Infinity
+  for (const p of contados) {
+    const t = tiempos[p.id]
+    if (t?.fin === undefined) return null
+    inicio = Math.min(inicio, t.inicio)
+    fin = Math.max(fin, t.fin)
+  }
+  return fin - inicio
+}
+
+/** "Consulté Reseñas y Equipo · 1 consulta falló · 3,2 s" */
+export function resumenPlegado(pasos: Pick<PasoTex, 'nombre' | 'estado'>[], duracionMs?: number | null): string {
+  const r = partesDelResumen(pasos, duracionMs)
+  return [r.principal, r.fallos, r.duracion].filter(Boolean).join(' · ')
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -533,13 +760,21 @@ export function aWhatsApp(md: string): string {
     .trim()
 }
 
-/** Lo que copia "Copiar para WhatsApp": el texto; si la respuesta es sólo bloques, sus cifras. */
+/** Una tabla larga no se pega entera en un WhatsApp. */
+const MAX_FILAS_COMPARTIDAS = 30
+
+/**
+ * Lo que copia "Copiar para WhatsApp": lo que se ve como respuesta. El texto
+ * de la respuesta (sin la narración del trabajo); si la respuesta es sólo
+ * bloques, sus cifras. Los datos de las consultas no: no son la respuesta.
+ */
 export function textoParaCompartir(m: Pick<TexUIMessage, 'parts'>): string {
-  const texto = textoDeMensaje(m)
+  const { texto, piezas } = anatomiaDeRespuesta(m)
   if (texto) return aWhatsApp(texto)
   const renglones: string[] = []
-  for (const paso of pasosDeMensaje(m)) {
-    for (const b of paso.salida?.bloques ?? []) {
+  for (const pieza of piezas) {
+    const antes = renglones.length
+    for (const b of pieza.salida?.bloques ?? []) {
       if (b.tipo === 'kpis') {
         if (b.titulo) renglones.push(`*${b.titulo}*`)
         for (const k of b.items) renglones.push(`${k.etiqueta}: ${k.valor}`)
@@ -549,9 +784,22 @@ export function textoParaCompartir(m: Pick<TexUIMessage, 'parts'>): string {
         for (const k of b.informe.kpis) renglones.push(`${k.etiqueta}: ${k.valor}`)
       } else if (b.tipo === 'conciliacion') {
         renglones.push(`*${b.veredicto.titular}*`, b.veredicto.detalle)
+      } else if (b.tipo === 'tabla') {
+        // Una tabla que mostró `mostrar` (las calificaciones bajas, por ejemplo), en renglones.
+        // Cada celda con el mismo formato que en pantalla ("4,92", "2026", "$12.000").
+        const columnas = b.tabla.columnas.map((c) => String(c ?? ''))
+        const formatos = formatosDeTabla(b.tabla)
+        if (b.tabla.titulo) renglones.push(`*${b.tabla.titulo}*`)
+        for (const fila of b.tabla.filas.slice(0, MAX_FILAS_COMPARTIDAS)) {
+          const r = filaATexto(columnas, fila.map((c, j) => (c == null ? '' : textoDeCelda(c, formatos[j]))))
+          if (r) renglones.push(r)
+        }
+        const resto = b.tabla.filas.length - MAX_FILAS_COMPARTIDAS
+        if (resto > 0) renglones.push(`… y ${resto} ${resto === 1 ? 'fila' : 'filas'} más`)
       }
     }
-    if (paso.salida?.fuente && renglones.length) renglones.push(`_Fuente: ${paso.salida.fuente}_`)
+    // La fuente va con lo que ESTA pieza aportó, no con lo de la anterior.
+    if (pieza.salida?.fuente && renglones.length > antes) renglones.push(`_Fuente: ${pieza.salida.fuente}_`)
   }
   return renglones.join('\n').trim()
 }
@@ -720,6 +968,35 @@ export function tituloProvisorio(texto: string): string {
   const corte = t.slice(0, 60)
   const espacio = corte.lastIndexOf(' ')
   return `${(espacio > 30 ? corte.slice(0, espacio) : corte).trimEnd()}…`
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scroll del hilo
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Lo que queda arriba de una respuesta anclada: "Tex · 14:32" no va pegado al borde. */
+export const MARGEN_ANCLA_PX = 12
+
+/**
+ * Dónde dejar el hilo "pegado" al final cuando el contenido creció. Sigue al
+ * final, salvo que eso suba el comienzo de la respuesta que está llegando por
+ * arriba de la pantalla: ahí se queda con ese comienzo a la vista ("Tex ·
+ * 14:32", la línea de la tarjeta y el texto) y deja de seguir.
+ *
+ * Por qué: el servidor pide `mostrar` ANTES del texto, así que las tarjetas y
+ * tablas aparecen primero y el texto se escribe arriba de ellas. Siguiendo el
+ * final, en el celular el texto —la respuesta que el dueño quiere leer— se
+ * escribía fuera de la pantalla y el turno terminaba mostrando la última tabla.
+ *
+ * `inicioRespuesta`: dónde empieza esa respuesta, en px desde el comienzo del
+ * contenido; null si no hay respuesta que anclar (Tex todavía trabaja, ya se
+ * ancló una vez o es una conversación reabierta, que arranca abajo).
+ */
+export function destinoDelScroll(a: { fondo: number; inicioRespuesta: number | null }): { top: number; anclada: boolean } {
+  const fondo = Math.max(0, a.fondo)
+  if (a.inicioRespuesta == null || !Number.isFinite(a.inicioRespuesta)) return { top: fondo, anclada: false }
+  const ancla = Math.max(0, Math.round(a.inicioRespuesta - MARGEN_ANCLA_PX))
+  return ancla < fondo ? { top: ancla, anclada: true } : { top: fondo, anclada: false }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

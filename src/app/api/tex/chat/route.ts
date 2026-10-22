@@ -37,6 +37,7 @@ import {
   type TexErrorRespuesta,
   type TexUIMessage,
 } from '@/lib/tex/contrato'
+import { leerEquipoTex } from '@/lib/tex/equipo'
 import { cantidad } from '@/lib/tex/formato'
 import { asegurarConversacion, prepararHistorialTex, type HistorialPreparado } from '@/lib/tex/historial'
 import { resumirError } from '@/lib/tex/motor'
@@ -140,6 +141,9 @@ export async function POST(req: Request): Promise<Response> {
   // ── 6. La conversación (de esta org y de esta persona) ────────────────────
   // Hasta acá todo fue lectura. Desde acá se escribe: si la persona ya tocó Detener, no.
   if (req.signal.aborted) return clienteSeFue()
+  // El equipo para el system ("Chipi" es un barbero, no un cliente), en paralelo con la
+  // conversación y el historial. Nunca tira: si falla, el system sale sin esa sección.
+  const promesaEquipo = leerEquipoTex(ctx)
   const conversacion = await asegurarConversacion(ctx, pedido.conversacionId, texto)
   if (!conversacion.ok) {
     return conversacion.motivo === 'no_encontrada'
@@ -172,6 +176,7 @@ export async function POST(req: Request): Promise<Response> {
   // La pregunta ya quedó guardada: si la persona se fue mientras tanto, no se corre el
   // modelo. "Reintentar" reenvía el MISMO mensaje y el servidor corta desde esa fila.
   if (req.signal.aborted) return clienteSeFue()
+  const equipo = await promesaEquipo
   const claveTex = clave.clave
   const preparado = historial
   const idAsistente = crypto.randomUUID()
@@ -204,6 +209,7 @@ export async function POST(req: Request): Promise<Response> {
           signal: req.signal,
           // La respuesta se guarda sólo si esta pregunta sigue siendo la misma al terminar.
           pregunta: preparado.pregunta,
+          equipo,
         })
       } finally {
         liberar()

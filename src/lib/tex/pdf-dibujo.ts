@@ -31,6 +31,7 @@ import {
   direccionDeDelta,
   escalaDeGrafico,
   esNumero,
+  estrellasEnTexto,
   etiquetaDeBarra,
   filasDeKpis,
   formateadorDeBarras,
@@ -108,7 +109,9 @@ const CP1252_EXTRA = new Set(Array.from('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘�
 export function textoPdf(valor: unknown): string {
   const s = typeof valor === 'string' ? valor : valor == null ? '' : String(valor)
   let quitado = false
-  const limpio = s
+  // "5★" → "5 estrellas" (un informe guardado antes de que generar_informe lo hiciera); una suelta, "*".
+  const limpio = estrellasEnTexto(s)
+    .replace(/[★☆]/g, '*')
     .replace(/[\u2212\u2010\u2011]/g, '-')
     .replace(/[\u2000-\u200a\u202f\u205f\u3000]/g, ' ')
     // Invisibles que en el PDF se verían (el guion opcional sale como "-").

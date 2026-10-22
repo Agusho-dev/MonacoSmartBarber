@@ -16,7 +16,26 @@ import 'server-only'
 //   refusal      → no se ejecuta nada, aviso `rechazo` (Haiku 5.5 no tiene
 //                  fallback del lado del servidor: no se manda `fallbacks`).
 //   pause_turn   → se continúa (sólo pasa con herramientas de servidor).
-// Máximo 10 pasos por turno.
+// Máximo 10 pasos con herramientas por turno.
+//
+// SIEMPRE HAY RESPUESTA. Si el décimo paso todavía pidió herramientas, después
+// de correrlas se hace UNA llamada más con `tool_choice: {type: 'none'}` y un
+// mensaje de sistema a mitad de conversación ("llegaste al máximo de consultas:
+// respondé con lo que tenés"). Esa llamada stremea texto como cualquier otra.
+// El aviso `pasos` queda sólo si también falla. `none` es válido con el
+// pensamiento adaptativo de Haiku 5.5 y no lo saltea (con `any`/`tool` la
+// respuesta arranca sin pensar), y
+// `tool_choice` está fuera del prefijo que compara el pensamiento preservado:
+// cambiarlo en esa llamada no invalida los bloques `thinking` del turno. Las
+// `tools` viajan IGUALES (sacarlas sí los invalidaría).
+//
+// LO QUE SE VE Y LO QUE NO. Sólo `mostrar`, `graficar` y `generar_informe`
+// dibujan en la respuesta (`TEX_HERRAMIENTAS_VISIBLES`); lo que traen las
+// herramientas de datos queda plegado en la tarjeta de trabajo. Para que el
+// modelo pueda mostrarlo, el motor numera los resultados de datos con algo para
+// ver ("r1", "r2"…, siguiendo la cuenta del historial para no repetir ids de
+// turnos anteriores), les agrega `mostrar_con` en lo que lee el modelo y le pasa
+// a `mostrar` el mapa de este turno.
 //
 // PARÁMETROS QUE NO PUEDEN VIAJAR: `temperature`, `top_p` y `top_k` son un 400
 // con `anthropic-version: 2026-10-21` (lo manda el SDK 1.1.0). `stream()` es
@@ -54,18 +73,30 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { FinishReason } from 'ai'
 import {
   TEX_MODELO,
+  esHerramientaVisible,
   metaHerramienta,
   type TexCodigoAviso,
   type TexErrorRespuesta,
   type TexEsfuerzo,
+  type TexSalidaUI,
   type TexUso,
 } from './contrato'
 import { sumarPedido, usoVacio } from './costo'
 import { TEXTO_CANCELADO, type MotivoCierre } from './historial-puro'
 import type { TexChunk } from './partes'
-import type { TexContexto, TexHerramienta, TexResultado } from './herramientas/tipos'
+import type { TexContexto, TexHerramienta, TexResultado, TexResultadoDelTurno } from './herramientas/tipos'
 
 export const MAX_PASOS = 10
+
+/**
+ * El mensaje de sistema de la llamada final (sin herramientas). Va a mitad de
+ * conversación, después de los tool_result del último paso, y NO se guarda.
+ */
+export const MENSAJE_ULTIMO_PASO =
+  'Llegaste al máximo de consultas de esta respuesta: ya no podés usar herramientas. Respondé ahora con lo que ya tenés, en pocas líneas y con las cifras que trajeron las herramientas. Si falta algo, decí qué y cómo seguir (por ejemplo, una pregunta más concreta).'
+
+/** El campo que el motor agrega a un resultado de datos que se puede mostrar. */
+export const CAMPO_REFERENCIA = 'mostrar_con'
 /** El pensamiento cuenta dentro; con streaming no hay timeout que temer. */
 const MAX_TOKENS = 32_000
 /** Un JSON de herramienta imposible de parsear (eager streaming) se reintenta hasta 2 veces. */
@@ -233,6 +264,13 @@ export async function correrMotor(e: EntradaMotor): Promise<ResultadoMotor> {
   // Tokens y costo, pedido a pedido (cada pedido con su tarifa: src/lib/tex/costo.ts).
   const uso: TexUso = usoVacio()
   const porNombre = new Map(e.herramientas.map((h) => [h.nombre, h]))
+  // Los resultados de datos que el modelo puede mostrar con `mostrar` ("r1", "r2"…). Sin
+  // `mostrar` declarada no se numera nada: el id no le serviría al modelo.
+  const registro: RegistroDeResultados = {
+    numerar: porNombre.has('mostrar'),
+    siguiente: siguienteNumeroDeResultado(e.mensajes),
+    mapa: new Map(),
+  }
 
   const terminar = (
     motivo: MotivoCierre,
@@ -247,6 +285,63 @@ export async function correrMotor(e: EntradaMotor): Promise<ResultadoMotor> {
   const guardarParcial = (textos: string[]) => {
     const bloques = textos.filter((t) => t.trim() !== '').map((t) => ({ type: 'text' as const, text: t }))
     if (bloques.length > 0) turno.push({ role: 'assistant', content: bloques })
+  }
+
+  /**
+   * Se agotaron los pasos con herramientas: UNA llamada más, sin herramientas
+   * (`tool_choice: none`), para que el modelo responda con lo que ya trajo. El
+   * aviso `pasos` queda sólo si esa llamada también falla o no escribe nada.
+   */
+  const cerrarConRespuesta = async (pasoFinal: number): Promise<ResultadoMotor> => {
+    const avisoPasos = { aviso: { codigo: 'pasos' as const, texto: AVISOS.pasos } }
+    // El mensaje de sistema sólo puede ir después de un user (los tool_result del último paso).
+    if (mensajes[mensajes.length - 1]?.role !== 'user') return terminar('pasos', 'tool-calls', avisoPasos)
+    console.warn(`[tex] el turno llegó a ${maxPasos} pasos: respuesta final sin herramientas`)
+    // El aviso NO entra al turno guardado: es una instrucción de esta llamada, no de la conversación.
+    const conAviso: Anthropic.MessageParam[] = [...mensajes, { role: 'system', content: MENSAJE_ULTIMO_PASO }]
+    let intento = 0
+    let r: ResultadoPaso = await correrPaso(e, conAviso, pasoFinal, intento, uso, { sinHerramientas: true })
+    while (r.tipo === 'reintentar') {
+      intento++
+      r = await correrPaso(e, conAviso, pasoFinal, intento, uso, { sinHerramientas: true })
+    }
+    if (r.tipo === 'abortado') {
+      guardarParcial(r.textoParcial)
+      return terminar('interrumpido', 'other', { aviso: { codigo: 'interrumpido', texto: AVISOS.interrumpido } })
+    }
+    if (r.tipo === 'fatal') {
+      // Lo consultado ya está a la vista en la tarjeta de trabajo; queda el aviso de siempre.
+      console.error('[tex] la respuesta final (sin herramientas) falló:', r.error.mensaje)
+      guardarParcial(r.textoParcial)
+      return terminar('pasos', 'tool-calls', avisoPasos)
+    }
+    const { final, herramientasEmpezadas } = r
+    const asistente: Anthropic.MessageParam = { role: 'assistant', content: final.content }
+    mensajes.push(asistente)
+    turno.push(asistente)
+    const cancelar = (texto: string) => {
+      for (const id of herramientasEmpezadas) e.escribir({ type: 'tool-output-error', toolCallId: id, errorText: texto })
+    }
+    if (final.stop_reason === 'refusal') {
+      cancelar('No se ejecutó: el pedido fue rechazado.')
+      e.escribir({ type: 'finish-step' })
+      return terminar('rechazo', 'content-filter', { aviso: { codigo: 'rechazo', texto: AVISOS.rechazo } })
+    }
+    if (final.stop_reason === 'max_tokens' || final.stop_reason === 'model_context_window_exceeded') {
+      cancelar('No se ejecutó: la respuesta se cortó por larga.')
+      e.escribir({ type: 'finish-step' })
+      return terminar('limite_respuesta', 'length', { aviso: { codigo: 'limite_respuesta', texto: AVISOS.limite_respuesta } })
+    }
+    const conTexto = final.content.some((b) => b.type === 'text' && b.text.trim() !== '')
+    const pidioHerramientas = final.content.some((b) => b.type === 'tool_use')
+    if (pidioHerramientas || !conTexto) {
+      // Con `none` no debería pasar. Si pasa, nada se ejecuta (el cierre del turno los cancela).
+      cancelar('No se ejecutó: se alcanzó el límite de pasos del turno.')
+      e.escribir({ type: 'finish-step' })
+      return terminar('pasos', 'tool-calls', avisoPasos)
+    }
+    e.escribir({ type: 'finish-step' })
+    return terminar('completo', finishReasonDe(final.stop_reason))
   }
 
   e.escribir({ type: 'data-estado', data: { fase: 'pensando' }, transient: true })
@@ -301,7 +396,7 @@ export async function correrMotor(e: EntradaMotor): Promise<ResultadoMotor> {
 
       let resultados: Anthropic.ToolResultBlockParam[]
       try {
-        resultados = await ejecutarHerramientas(e, usos, porNombre)
+        resultados = await ejecutarHerramientas(e, usos, porNombre, registro)
       } catch (err) {
         // Red de seguridad: cada herramienta ya atrapa lo suyo (`ejecutarUna`). Si igual algo
         // se escapa, los tool_use de este paso se cierran con su error y el turno termina
@@ -326,12 +421,12 @@ export async function correrMotor(e: EntradaMotor): Promise<ResultadoMotor> {
       e.escribir({ type: 'data-estado', data: { fase: 'redactando' }, transient: true })
       e.escribir({ type: 'finish-step' })
       if (paso === maxPasos) {
-        // Las herramientas de este último paso SÍ corrieron (la persona ve sus tablas y
-        // gráficos), pero no hay otra llamada para que el modelo las cuente.
-        return terminar('pasos', 'tool-calls', { aviso: { codigo: 'pasos', texto: AVISOS.pasos } })
+        // Las herramientas de este último paso SÍ corrieron: el modelo las cuenta en una
+        // llamada final sin herramientas, en vez de cortar el turno sin respuesta.
+        return await cerrarConRespuesta(paso + 1)
       }
     }
-    return terminar('pasos', 'tool-calls', { aviso: { codigo: 'pasos', texto: AVISOS.pasos } })
+    return await cerrarConRespuesta(maxPasos + 1)
   } catch (err) {
     // Lo inesperado: el turno termina como error con lo que ya tenía (`mensajesParaPersistir`
     // cierra los tool_use que hayan quedado abiertos), y el orquestador lo guarda con el uso.
@@ -340,13 +435,19 @@ export async function correrMotor(e: EntradaMotor): Promise<ResultadoMotor> {
   }
 }
 
-/** Una llamada a la API, traducida a chunks a medida que llega. */
+/**
+ * Una llamada a la API, traducida a chunks a medida que llega. Con
+ * `sinHerramientas` (la respuesta final de un turno que agotó los pasos) viaja
+ * `tool_choice: {type: 'none'}`: las `tools` van iguales, para no tocar el
+ * prefijo que valida el pensamiento preservado.
+ */
 async function correrPaso(
   e: EntradaMotor,
   mensajes: Anthropic.MessageParam[],
   paso: number,
   intento: number,
   uso: TexUso,
+  opciones: { sinHerramientas?: boolean } = {},
 ): Promise<ResultadoPaso> {
   e.escribir({ type: 'start-step' })
   const sufijo = intento === 0 ? `${paso}` : `${paso}r${intento}`
@@ -368,7 +469,10 @@ async function correrPaso(
 
   // `satisfies` (y no una anotación): sin él, un `temperature` de más pasaría el
   // type-check —`stream<Params extends MessageStreamParams>` acepta campos extra—
-  // y sería un 400 en runtime. Sin `tool_choice`: auto, y el modelo piensa antes de llamar.
+  // y sería un 400 en runtime. Sin `tool_choice` (auto) en los pasos normales: el modelo
+  // piensa antes de llamar. Sólo la respuesta final de un turno sin pasos manda `none`
+  // (con `any`/`tool` el pensamiento se saltea; `none` no lo toca).
+  const sinHerramientas = opciones.sinHerramientas === true && e.definiciones.length > 0
   const params = {
     model: TEX_MODELO,
     max_tokens: MAX_TOKENS,
@@ -376,6 +480,7 @@ async function correrPaso(
     output_config: { effort: e.esfuerzo },
     system: e.system,
     ...(e.definiciones.length > 0 ? { tools: e.definiciones } : {}),
+    ...(sinHerramientas ? { tool_choice: { type: 'none' as const } } : {}),
     // Breakpoint 3 de 3: caché automática de los mensajes (los otros dos son la
     // última herramienta y el system). Máximo 4.
     cache_control: { type: 'ephemeral' },
@@ -489,18 +594,73 @@ async function correrPaso(
 // Herramientas
 // ─────────────────────────────────────────────────────────────────────────────
 
-function serializarParaModelo(valor: unknown): string {
+function esObjetoPlano(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/**
+ * Lo que lee el modelo. Con `referencia`, el id para `mostrar` va PRIMERO (así
+ * un recorte por tamaño no lo pierde).
+ */
+function serializarParaModelo(valor: unknown, referencia?: string): string {
+  const conReferencia =
+    referencia == null ? valor : esObjetoPlano(valor) ? { [CAMPO_REFERENCIA]: referencia, ...valor } : { [CAMPO_REFERENCIA]: referencia, resultado: valor }
   let texto: string
   try {
-    texto = JSON.stringify(valor ?? null)
+    texto = JSON.stringify(conReferencia ?? null)
   } catch {
     return JSON.stringify({ error: 'no_se_pudo_leer', mensaje: 'El resultado no se pudo serializar.' })
   }
   if (texto.length <= MAX_RESULTADO_CARACTERES) return texto
   return JSON.stringify({
+    ...(referencia != null ? { [CAMPO_REFERENCIA]: referencia } : {}),
     aviso: 'El resultado era demasiado grande y se recortó: pedí menos datos (un período o una sucursal) si necesitás el resto.',
     recorte: texto.slice(0, MAX_RESULTADO_CARACTERES),
   })
+}
+
+const REFERENCIA_EN_RESULTADO = new RegExp(`"${CAMPO_REFERENCIA}":"r(\\d{1,6})"`, 'g')
+
+/**
+ * El próximo número de resultado: uno más que el mayor "rN" que ya vio el modelo
+ * en esta conversación. Así un id de un turno anterior nunca apunta a un
+ * resultado nuevo distinto (el de antes ya no se puede mostrar: vuelve como
+ * desconocido y el modelo vuelve a consultar).
+ */
+export function siguienteNumeroDeResultado(mensajes: Anthropic.MessageParam[]): number {
+  let mayor = 0
+  for (const m of mensajes) {
+    if (m.role !== 'user' || typeof m.content === 'string') continue
+    for (const b of m.content) {
+      if (b.type !== 'tool_result') continue
+      const texto =
+        typeof b.content === 'string'
+          ? b.content
+          : Array.isArray(b.content)
+            ? b.content.map((c) => (c.type === 'text' ? c.text : '')).join('\n')
+            : ''
+      for (const encontrado of texto.matchAll(REFERENCIA_EN_RESULTADO)) mayor = Math.max(mayor, Number(encontrado[1]))
+    }
+  }
+  return mayor + 1
+}
+
+/** Los resultados de datos del turno que se pueden mostrar, y la cuenta de ids. */
+interface RegistroDeResultados {
+  numerar: boolean
+  siguiente: number
+  mapa: Map<string, TexResultadoDelTurno>
+}
+
+/**
+ * ¿Hay algo que valga la pena mostrar? Una herramienta de datos que terminó sin
+ * error y con al menos un bloque que no sea un aviso ("no hubo filas", "base
+ * vacía", "sin acceso" no se muestran: se cuentan en el texto).
+ */
+function esMostrable(t: { herramienta: string; paraModelo: unknown; salida: TexSalidaUI }): boolean {
+  if (esHerramientaVisible(t.herramienta)) return false
+  if (errorDelModelo(t.paraModelo) !== null || t.salida.error) return false
+  return Array.isArray(t.salida.bloques) && t.salida.bloques.some((b) => b != null && b.tipo !== 'aviso')
 }
 
 function errorDelModelo(paraModelo: unknown): string | null {
@@ -520,12 +680,32 @@ function resumirInput(input: unknown): unknown {
   }
 }
 
+/** Una herramienta ejecutada: su tool_result y, si terminó, lo que hace falta para numerarla. */
+interface Ejecutada {
+  bloque: Anthropic.ToolResultBlockParam
+  terminada?: { herramienta: string; paraModelo: unknown; salida: TexSalidaUI }
+}
+
+/**
+ * Las herramientas de un paso, en paralelo. Los ids de los resultados mostrables
+ * se asignan DESPUÉS, en el orden de los tool_use (no en el que terminan): así la
+ * numeración es determinística. `mostrar` ve los resultados de los pasos
+ * anteriores (una copia del mapa), nunca los de su propio paso.
+ */
 async function ejecutarHerramientas(
   e: EntradaMotor,
   usos: Anthropic.ToolUseBlock[],
   porNombre: Map<string, TexHerramienta>,
+  registro: RegistroDeResultados,
 ): Promise<Anthropic.ToolResultBlockParam[]> {
-  return Promise.all(usos.map((tu) => ejecutarUna(e, tu, porNombre.get(tu.name))))
+  const anteriores: ReadonlyMap<string, TexResultadoDelTurno> = new Map(registro.mapa)
+  const ejecutadas = await Promise.all(usos.map((tu) => ejecutarUna(e, tu, porNombre.get(tu.name), anteriores)))
+  return ejecutadas.map(({ bloque, terminada }) => {
+    if (!registro.numerar || !terminada || !esMostrable(terminada)) return bloque
+    const id = `r${registro.siguiente++}`
+    registro.mapa.set(id, { id, herramienta: terminada.herramienta, salida: terminada.salida })
+    return { ...bloque, content: serializarParaModelo(terminada.paraModelo, id) }
+  })
 }
 
 /**
@@ -534,13 +714,18 @@ async function ejecutarHerramientas(
  * herramienta que explotaba (p. ej. un esquema de zod que tiraba al validar)
  * rechazaba el `Promise.all` y se perdía el turno entero, sin guardarse.
  */
-async function ejecutarUna(e: EntradaMotor, tu: Anthropic.ToolUseBlock, h: TexHerramienta | undefined): Promise<Anthropic.ToolResultBlockParam> {
+async function ejecutarUna(
+  e: EntradaMotor,
+  tu: Anthropic.ToolUseBlock,
+  h: TexHerramienta | undefined,
+  anteriores: ReadonlyMap<string, TexResultadoDelTurno>,
+): Promise<Ejecutada> {
   try {
-    return await ejecutarUnaSinRed(e, tu, h)
+    return await ejecutarUnaSinRed(e, tu, h, anteriores)
   } catch (err) {
     console.error(`[tex] la herramienta ${tu.name} falló fuera de su ejecución:`, resumirError(err))
     e.escribir({ type: 'tool-output-error', toolCallId: tu.id, errorText: `No pude completar «${metaHerramienta(tu.name).etiqueta}».` })
-    return { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: RESULTADO_FALLIDO }
+    return { bloque: { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: RESULTADO_FALLIDO } }
   }
 }
 
@@ -550,14 +735,17 @@ async function ejecutarUnaSinRed(
   e: EntradaMotor,
   tu: Anthropic.ToolUseBlock,
   h: TexHerramienta | undefined,
-): Promise<Anthropic.ToolResultBlockParam> {
+  anteriores: ReadonlyMap<string, TexResultadoDelTurno>,
+): Promise<Ejecutada> {
   if (!h) {
     e.escribir({ type: 'tool-input-error', toolCallId: tu.id, toolName: tu.name, input: tu.input, errorText: 'Herramienta desconocida.' })
     return {
-      type: 'tool_result',
-      tool_use_id: tu.id,
-      is_error: true,
-      content: `La herramienta "${tu.name}" no existe. Usá sólo las herramientas declaradas.`,
+      bloque: {
+        type: 'tool_result',
+        tool_use_id: tu.id,
+        is_error: true,
+        content: `La herramienta "${tu.name}" no existe. Usá sólo las herramientas declaradas.`,
+      },
     }
   }
 
@@ -590,14 +778,14 @@ async function ejecutarUnaSinRed(
     } catch {
       crudo = ''
     }
-    return { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ INVALID_JSON: crudo, errores }) }
+    return { bloque: { type: 'tool_result', tool_use_id: tu.id, is_error: true, content: JSON.stringify({ INVALID_JSON: crudo, errores }) } }
   }
 
   e.escribir({ type: 'tool-input-available', toolCallId: tu.id, toolName: tu.name, input: validado.data })
   const inicio = Date.now()
   let resultado: TexResultado
   try {
-    resultado = await h.ejecutar(validado.data, { ctx: e.ctx, signal: e.signal })
+    resultado = await h.ejecutar(validado.data, { ctx: e.ctx, signal: e.signal, resultadosDelTurno: anteriores })
   } catch (err) {
     const cancelada = e.signal.aborted
     if (!cancelada) console.error(`[tex] la herramienta ${tu.name} falló:`, resumirError(err))
@@ -614,10 +802,12 @@ async function ejecutarUnaSinRed(
       detail: { estado: cancelada ? 'cancelada' : 'excepcion', ms: Date.now() - inicio, input: resumirInput(validado.data) },
     })
     return {
-      type: 'tool_result',
-      tool_use_id: tu.id,
-      is_error: true,
-      content: cancelada ? TEXTO_CANCELADO : RESULTADO_FALLIDO,
+      bloque: {
+        type: 'tool_result',
+        tool_use_id: tu.id,
+        is_error: true,
+        content: cancelada ? TEXTO_CANCELADO : RESULTADO_FALLIDO,
+      },
     }
   }
 
@@ -643,9 +833,12 @@ async function ejecutarUnaSinRed(
     },
   })
   return {
-    type: 'tool_result',
-    tool_use_id: tu.id,
-    content: serializarParaModelo(resultado.paraModelo),
-    ...(error === 'no_se_pudo_leer' ? { is_error: true } : {}),
+    bloque: {
+      type: 'tool_result',
+      tool_use_id: tu.id,
+      content: serializarParaModelo(resultado.paraModelo),
+      ...(error === 'no_se_pudo_leer' ? { is_error: true } : {}),
+    },
+    terminada: { herramienta: tu.name, paraModelo: resultado.paraModelo, salida },
   }
 }

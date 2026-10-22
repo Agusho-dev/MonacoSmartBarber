@@ -2,17 +2,25 @@
 
 // Un mensaje del hilo. La respuesta de Tex se arma siempre en el mismo orden
 // (especificación B, "Anatomía de una respuesta"): "Tex · 14:32" → tarjeta de
-// trabajo → texto → bloques de las herramientas → avisos → acciones. Sin avatar
-// por mensaje: la única cara viva es la del composer.
+// trabajo → texto → bloques de las herramientas VISIBLES → avisos → acciones.
+// Sin avatar por mensaje: la única cara viva es la del composer.
+//
+// Respuesta y trabajo (oct/2026): el dueño veía cada consulta dibujando su
+// tabla —SQL crudo, fechas ISO, "La base de conocimiento está vacía"— y no
+// encontraba la respuesta. Ahora sólo `mostrar`, `graficar` y
+// `generar_informe` dibujan en la respuesta; lo que traen las herramientas de
+// datos (y lo que Tex dijo entre consulta y consulta) queda plegado en la
+// tarjeta de trabajo, con "Ver datos" por paso (logica.ts: anatomiaDeRespuesta).
+// Vale también para las conversaciones viejas al reabrirlas.
 //
 // Los mensajes terminados van con `memo`: durante el stream sólo cambia el
 // último (useChat reemplaza ese objeto y deja los demás con la misma identidad),
 // así que el resto no vuelve a parsear su markdown en cada chunk.
 
 import { memo, useState, type ReactNode } from 'react'
-import { Check, CircleStop, Copy, History, RotateCcw, Share2, SquarePen } from 'lucide-react'
+import { Check, CircleStop, Copy, History, Loader2, RotateCcw, Share2, SquarePen } from 'lucide-react'
 import { toast } from 'sonner'
-import type { TexCodigoAviso, TexUIMessage } from '@/lib/tex/contrato'
+import { metaHerramienta, type TexCodigoAviso, type TexUIMessage } from '@/lib/tex/contrato'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { TexPensando } from '@/components/tex/tex-pensando'
@@ -20,15 +28,7 @@ import { TexPose } from '@/components/tex/tex-pose'
 import { TexBloques, type ContenidoLienzo } from '@/components/tex/bloques'
 import { TexMarkdown } from './tex-markdown'
 import { TexTarjetaTrabajo } from './tex-tarjeta-trabajo'
-import {
-  hayTextoDespuesDeHerramientas,
-  horaCorta,
-  pasosDeMensaje,
-  textoDeAviso,
-  textoDeMensaje,
-  textoParaCompartir,
-  tienePartesVisibles,
-} from './logica'
+import { anatomiaDeRespuesta, horaCorta, textoDeAviso, textoDeMensaje, textoParaCompartir, tienePartesVisibles } from './logica'
 
 const ENTRADA =
   'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-[180ms] motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]'
@@ -92,8 +92,7 @@ export const TexMensajeTex = memo(function TexMensajeTex({
   onAbrirLienzo,
   onEnviar,
 }: TexMensajeTexProps) {
-  const pasos = pasosDeMensaje(mensaje)
-  const texto = textoDeMensaje(mensaje)
+  const { pasos, trabajo, texto, piezas } = anatomiaDeRespuesta(mensaje)
   const avisos = mensaje.parts.filter((p) => p.type === 'data-aviso')
   const visible = tienePartesVisibles(mensaje)
   const creadoEn = mensaje.metadata?.creadoEn
@@ -103,8 +102,22 @@ export const TexMensajeTex = memo(function TexMensajeTex({
   // con su id, y el servidor reemplaza el turno cortado).
   const volverAPreguntar = !enCurso && !texto && pasos.length === 0 && puedeRegenerar ? onRegenerar : undefined
 
+  const textoEmpezo = texto !== ''
+  // Una consulta que falló no alarma si Tex igual respondió (se recuperó con
+  // otra). Sí cuando la respuesta no llegó: sin texto ni bloques, o el turno
+  // se cortó por los pasos o por un error. Detener lo decidió la persona.
+  const respuestaLlego = textoEmpezo || piezas.some((p) => p.salida !== null)
+  const turnoCortado = avisos.some((a) => a.data.codigo === 'pasos' || a.data.codigo === 'error')
+  const alarma = !enCurso && !interrumpido && !avisoInterrumpidoServidor && (!respuestaLlego || turnoCortado)
+  // Una herramienta visible que corre con la respuesta ya empezada (la tarjeta
+  // está plegada) avisa en su lugar: "Preparando la respuesta…".
+  const lugares = piezas.filter((p) => p.salida !== null || (enCurso && textoEmpezo))
+  // La respuesta ya está a la vista (texto o bloques): desde acá el hilo puede
+  // quedarse con su comienzo en pantalla en vez de seguir al final (tex-chat.tsx).
+  const respuestaALaVista = textoEmpezo || lugares.some((p) => p.salida !== null)
+
   return (
-    <article className="group/msg min-w-0" aria-label="Respuesta de Tex">
+    <article className="group/msg min-w-0" aria-label="Respuesta de Tex" data-tex-respuesta={respuestaALaVista ? '' : undefined}>
       <p className="mb-2 text-xs text-muted-foreground">
         Tex{typeof creadoEn === 'number' && Number.isFinite(creadoEn) ? ` · ${horaCorta(creadoEn)}` : ''}
       </p>
@@ -118,22 +131,27 @@ export const TexMensajeTex = memo(function TexMensajeTex({
 
       {pasos.length > 0 && (
         <TexTarjetaTrabajo
-          pasos={pasos}
+          trabajo={trabajo}
           enCurso={enCurso}
-          textoEmpezo={hayTextoDespuesDeHerramientas(mensaje)}
+          textoEmpezo={textoEmpezo}
+          alarma={alarma}
           compacto={compacto}
           aviso={enCurso && !texto ? aviso : null}
+          orgNombre={orgNombre}
+          onAbrirLienzo={onAbrirLienzo}
         />
       )}
 
       {texto && <TexMarkdown texto={texto} className={pasos.length > 0 ? 'mt-3' : undefined} />}
 
-      {pasos.some((p) => p.salida) && (
-        <div className="mt-4 space-y-4">
-          {pasos.map((p) =>
+      {lugares.length > 0 && (
+        <div className={cn('space-y-4', (texto || pasos.length > 0) && 'mt-4')}>
+          {lugares.map((p) =>
             p.salida ? (
               <TexBloques key={p.id} salida={p.salida} orgNombre={orgNombre} onAbrirLienzo={onAbrirLienzo} compacto={compacto} />
-            ) : null,
+            ) : (
+              <PiezaPreparandose key={p.id} nombre={p.nombre} />
+            ),
           )}
         </div>
       )}
@@ -157,6 +175,20 @@ export const TexMensajeTex = memo(function TexMensajeTex({
     </article>
   )
 })
+
+/**
+ * El lugar de un bloque que se está armando ("Preparando la respuesta…",
+ * "Armando el informe…"). Sin `role="status"`: la línea del encabezado ya lo
+ * anuncia (aria-live) y se escucharía dos veces.
+ */
+function PiezaPreparandose({ nombre }: { nombre: string }) {
+  return (
+    <p className="flex min-h-8 items-center gap-2 text-[13px] text-muted-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200">
+      <Loader2 className="size-3.5 shrink-0 animate-spin text-[color:var(--tex-texto)] motion-reduce:animate-none" aria-hidden />
+      {metaHerramienta(nombre).haciendo}…
+    </p>
+  )
+}
 
 /** La respuesta que todavía no llegó (enviado, sin el primer chunk). */
 export function TexMensajePendiente({ aviso }: { aviso?: ReactNode }) {
@@ -279,9 +311,13 @@ async function copiar(texto: string): Promise<boolean> {
 
 function AccionesMensaje({ mensaje, onRegenerar }: { mensaje: TexUIMessage; onRegenerar?: () => void }) {
   const [copiado, setCopiado] = useState(false)
+  // Lo que se copia es lo que se ve como respuesta. Un turno que no llegó a
+  // responder (se cortó por los pasos) no tiene nada que copiar: queda
+  // "Volver a generar" solo, en vez de dos botones que no hacen nada.
+  const aCompartir = textoParaCompartir(mensaje)
 
   async function alCopiar() {
-    const texto = textoParaCompartir(mensaje)
+    const texto = aCompartir
     if (!texto) return
     if (await copiar(texto)) {
       setCopiado(true)
@@ -293,7 +329,7 @@ function AccionesMensaje({ mensaje, onRegenerar }: { mensaje: TexUIMessage; onRe
   }
 
   async function alCompartir() {
-    const texto = textoParaCompartir(mensaje)
+    const texto = aCompartir
     if (!texto) return
     if (typeof navigator.share === 'function') {
       try {
@@ -308,6 +344,9 @@ function AccionesMensaje({ mensaje, onRegenerar }: { mensaje: TexUIMessage; onRe
     else toast.error('No pude compartir. Probá de nuevo.')
   }
 
+  // Un turno viejo sin nada que copiar (y que ya no es el último): sin barra vacía.
+  if (!aCompartir && !onRegenerar) return null
+
   return (
     <div
       className={cn(
@@ -317,17 +356,21 @@ function AccionesMensaje({ mensaje, onRegenerar }: { mensaje: TexUIMessage; onRe
         '[@media(hover:none)]:opacity-60',
       )}
     >
-      <BotonAccion etiqueta={copiado ? 'Copiado' : 'Copiar para WhatsApp'} onClick={alCopiar}>
-        {copiado ? <Check className="size-4 text-emerald-400" /> : <Copy className="size-4" />}
-      </BotonAccion>
+      {aCompartir && (
+        <BotonAccion etiqueta={copiado ? 'Copiado' : 'Copiar para WhatsApp'} onClick={alCopiar}>
+          {copiado ? <Check className="size-4 text-emerald-400" /> : <Copy className="size-4" />}
+        </BotonAccion>
+      )}
       {onRegenerar && (
         <BotonAccion etiqueta="Volver a generar" onClick={onRegenerar}>
           <RotateCcw className="size-4" />
         </BotonAccion>
       )}
-      <BotonAccion etiqueta="Compartir" onClick={alCompartir}>
-        <Share2 className="size-4" />
-      </BotonAccion>
+      {aCompartir && (
+        <BotonAccion etiqueta="Compartir" onClick={alCompartir}>
+          <Share2 className="size-4" />
+        </BotonAccion>
+      )}
     </div>
   )
 }

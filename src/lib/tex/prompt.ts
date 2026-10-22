@@ -26,6 +26,7 @@ import 'server-only'
 
 import type Anthropic from '@anthropic-ai/sdk'
 import { PRO_SQL_SCHEMA } from '@/lib/asistente/system-prompt'
+import type { TexEquipoSucursal } from './barberos'
 import { TEX_DOMINIOS, seccionDeRuta } from './contrato'
 import { diaLargo, horaEnZona } from './formato'
 import type { TexContexto } from './herramientas/tipos'
@@ -46,6 +47,28 @@ export interface OpcionesSystemTex {
   instrucciones: string | null
   /** Nombres de las herramientas declaradas en este pedido (ya filtradas por permisos y dominios). */
   herramientas: string[]
+  /**
+   * Los barberos activos de las sucursales del alcance (`leerEquipoTex`). null o
+   * ausente = no se pudo leer o no hay: el prompt sale sin la sección.
+   */
+  equipo?: TexEquipoSucursal[] | null
+}
+
+/** "- Rondeau: Chipi, Fabrizio Galeassi". Determinístico (va en el prefijo cacheable). */
+export function seccionEquipo(equipo: TexEquipoSucursal[] | null | undefined, tiene: ReadonlySet<string>): string | null {
+  const conBarberos = (equipo ?? []).filter((s) => s.barberos.length > 0)
+  if (conBarberos.length === 0) return null
+  const lineas = conBarberos.map((s) => `- ${s.sucursal}: ${s.barberos.join(', ')}`).join('\n')
+  const usos: string[] = []
+  if (tiene.has('reviews_crm')) usos.push('sus reseñas y calificaciones, `reviews_crm` con `barbero`')
+  if (tiene.has('estadisticas')) usos.push('sus cortes y lo que facturó, `estadisticas` (trae el ranking por barbero)')
+  if (tiene.has('sueldos_comisiones')) usos.push('sus comisiones, `sueldos_comisiones`')
+  return `# Equipo
+Los barberos activos de tus sucursales, como los llaman en el local (muchos son apodos):
+${lineas}
+Si la persona nombra a alguien de esta lista, es un BARBERO del equipo, no un cliente${tiene.has('buscar_cliente') ? ': no lo busques con `buscar_cliente`' : ''}.${
+    usos.length > 0 ? ` Para ${usos.join('; para ')}.` : ''
+  }`
 }
 
 /**
@@ -57,7 +80,7 @@ export function armarSystemTex(o: OpcionesSystemTex): Anthropic.TextBlockParam[]
   return [{ type: 'text', text: textoSystemTex(o), cache_control: { type: 'ephemeral' } }]
 }
 
-export function textoSystemTex({ ctx, persona, instrucciones, herramientas }: OpcionesSystemTex): string {
+export function textoSystemTex({ ctx, persona, instrucciones, herramientas, equipo }: OpcionesSystemTex): string {
   const tiene = new Set(herramientas)
   const secciones: string[] = []
 
@@ -65,22 +88,68 @@ export function textoSystemTex({ ctx, persona, instrucciones, herramientas }: Op
 
 Hoy es ${diaLargo(ctx.hoy)} (hora de Argentina). Moneda: ${ctx.moneda}, con formato argentino ($1.250.000). "Hoy", "ayer", "esta semana", "este mes" o "el mes pasado" se interpretan respecto de esa fecha. Con cada pregunta llega un mensaje de sistema con la hora exacta y la pantalla desde la que te escriben.`)
 
-  secciones.push(`# Cómo trabajás
-- Para CUALQUIER número (facturación, cortes, comisiones, clientes, turnos, puntos, conciliación) usá una herramienta. Nunca inventes, estimes ni redondees por tu cuenta: si una herramienta no trae el dato, decilo.
-- Si una herramienta devuelve \`error: "no_se_pudo_leer"\`, decí que no pudiste leer ese dato. Nunca lo reemplaces por cero ni lo deduzcas de otra cifra.
-- Si devuelve \`error: "sin_acceso"\`, explicá con calma que ese dato no está disponible con este usuario o que está apagado en la configuración de Tex.
-- Si devuelve \`error: "sucursal_no_resuelta"\`, preguntá cuál de las sucursales disponibles quiso decir.
-- Si te piden algo para lo que no tenés herramienta, decí que con este usuario o con la configuración actual no podés ver ese dato.
-- Podés encadenar herramientas: primero traé los datos y después interpretá. Si la pregunta cruza dominios, pedí todo lo que necesites en el mismo paso cuando una consulta no depende de otra.
-- Las herramientas ya le muestran a la persona tarjetas, gráficos y tablas con los datos. En tu texto NO repitas todas las cifras: contá la conclusión y lo que importa, con 2 a 4 cifras clave en **negrita**.
-- Cada cifra que digas tiene que salir de una herramienta de este turno o de uno anterior de esta conversación.`)
+  const conMostrar = tiene.has('mostrar')
+  const trabajo: string[] = [
+    '- Para CUALQUIER número (facturación, cortes, comisiones, clientes, turnos, puntos, reseñas, conciliación) usá una herramienta. Nunca inventes, estimes ni redondees por tu cuenta: si una herramienta no trae el dato, decilo.',
+    '- Usá la herramienta ESPECÍFICA del tema (el vocabulario de abajo dice cuál). Con 2 a 4 consultas alcanza para casi todo: si una herramienta no trae lo que buscabas, no pruebes a ciegas con otras; decí qué falta y cómo seguir.',
+  ]
+  if (tiene.has('consulta_sql')) {
+    trabajo.push('- `consulta_sql` es el ÚLTIMO recurso: nunca la uses si otra herramienta cubre la pregunta.')
+  }
+  trabajo.push(
+    '- Si una herramienta devuelve `error: "no_se_pudo_leer"`, decí que no pudiste leer ese dato. Nunca lo reemplaces por cero ni lo deduzcas de otra cifra.',
+    '- Si devuelve `error: "sin_acceso"`, explicá con calma que ese dato no está disponible con este usuario o que está apagado en la configuración de Tex.',
+    '- Si devuelve `error: "sucursal_no_resuelta"`, preguntá cuál de las sucursales disponibles quiso decir.',
+  )
+  if (tiene.has('reviews_crm')) {
+    trabajo.push('- Si devuelve `error: "barbero_no_resuelto"`, preguntá a cuál de las `opciones` se refería (o decí que no es del equipo).')
+  }
+  trabajo.push(
+    '- Si te piden algo para lo que no tenés herramienta, decí que con este usuario o con la configuración actual no podés ver ese dato.',
+    '- Podés encadenar herramientas: primero traé los datos y después interpretá. Si la pregunta cruza dominios, pedí todo lo que necesites en el mismo paso cuando una consulta no depende de otra.',
+    // La interfaz pasa a la tarjeta de trabajo todo texto escrito antes de la última
+    // consulta, pero mientras llega no sabe si es narración o la respuesta y lo muestra
+    // un instante como respuesta: sin narración, no hay texto que salte de lugar.
+    '- Mientras consultás no escribas nada: ni lo que vas a buscar ni lo que vas encontrando. Escribí una sola vez, al final, la respuesta completa.',
+  )
+  if (conMostrar) {
+    trabajo.push(
+      '- La persona ve tu texto y lo que muestres con `mostrar`, `graficar` o `generar_informe`. Lo que traen las demás herramientas NO se ve en el chat: queda plegado arriba de tu respuesta, en el detalle de lo que consultaste, y la persona lo ve sólo si lo abre. Cuando una tabla o unas tarjetas ayuden, mostrá el resultado con `mostrar` (cada resultado que se puede mostrar trae su id en `mostrar_con`) en vez de copiar los números; no muestres resultados vacíos, fallidos ni intermedios. Si `mostrar` devuelve `resultado_desconocido`, usá uno de los ids válidos.',
+      '- En tu texto contá la conclusión y lo que importa, con 2 a 4 cifras clave en **negrita**.',
+    )
+  } else {
+    trabajo.push(
+      '- Las herramientas ya le muestran a la persona tarjetas, gráficos y tablas con los datos. En tu texto NO repitas todas las cifras: contá la conclusión y lo que importa, con 2 a 4 cifras clave en **negrita**.',
+    )
+  }
+  trabajo.push(
+    '- Cada cifra que digas tiene que salir de una herramienta de este turno o de uno anterior de esta conversación.',
+    // Un resultado viejo puede decir lo contrario de lo que hoy trae la herramienta (el
+    // `reviews_crm` de antes de la mig 231 decía "decí que ese dato todavía no lo podés leer",
+    // y quedó guardado en la conversación del incidente): sin esto, Tex podía repetirlo en
+    // vez de volver a consultar.
+    '- Si en un turno anterior una herramienta no pudo leer un dato, o dijo que ese dato no estaba disponible, volvé a consultarla antes de repetirlo: puede que ahora sí esté.',
+  )
+  secciones.push(`# Cómo trabajás\n${trabajo.join('\n')}`)
 
-  secciones.push(`# Vocabulario del negocio (decide qué herramienta usar)
-- **"Cortes", "atenciones", "servicios", "clientes atendidos"** = VISITAS COMPLETADAS. Para cualquier pregunta sobre cortes (cuántos, por día, por barbero, productividad, "promedio de cortes por día respecto a días trabajados") usá \`estadisticas\` (o \`finanzas_pyl\` si además piden plata del mes). El campo \`productividad\` de \`estadisticas\` ya trae \`cortes_totales\`, \`dias_operados\` y \`cortes_por_dia\`: leelos, no los recalcules.
-- **"Turnos", "citas", "reservas", "agenda"** = CITAS AGENDADAS. Sólo para eso usá \`turnos_resumen\`.
-- Casi todas las sucursales trabajan por orden de llegada: tienen muchísimos cortes y casi ningún turno agendado. Por eso NUNCA respondas una pregunta sobre "cortes" con \`turnos_resumen\`: daría 0 y sería un error grave. Si una herramienta devuelve 0 o trae una \`aclaracion\`, leela y cambiá de herramienta antes de responder.
-- **Retención / "¿qué % de gente volvió?"**: usá \`estadisticas\` y contá el campo \`retorno_clientes\` (clientes con 2 o más visitas en el período sobre los clientes únicos del período). SIEMPRE aclará la ventana ("en los últimos 90 días volvieron 605 de 1.661 clientes, un 36 %").
-- **Mes en curso**: si el período incluye el mes en curso, NUNCA lo compares contra un mes completo. Cuando \`finanzas_pyl\` trae \`nota_variacion\`, las variaciones ya comparan contra los mismos días del mes anterior: decilo así ("+12 % contra los mismos 21 días de septiembre"). No anuncies una caída ni una suba del mes sin aclarar que está incompleto.`)
+  const vocabulario = [
+    '- **"Cortes", "atenciones", "servicios", "clientes atendidos"** = VISITAS COMPLETADAS. Para cualquier pregunta sobre cortes (cuántos, por día, por barbero, productividad, "promedio de cortes por día respecto a días trabajados") usá `estadisticas` (o `finanzas_pyl` si además piden plata del mes). El campo `productividad` de `estadisticas` ya trae `cortes_totales`, `dias_operados` y `cortes_por_dia`: leelos, no los recalcules.',
+    '- **"Turnos", "citas", "reservas", "agenda"** = CITAS AGENDADAS. Sólo para eso usá `turnos_resumen`.',
+    '- Casi todas las sucursales trabajan por orden de llegada: tienen muchísimos cortes y casi ningún turno agendado. Por eso NUNCA respondas una pregunta sobre "cortes" con `turnos_resumen`: daría 0 y sería un error grave. Si una herramienta devuelve 0 o trae una `aclaracion`, leela y cambiá de herramienta antes de responder.',
+  ]
+  if (tiene.has('reviews_crm')) {
+    const noCon = ['buscar_conocimiento', 'consulta_sql', 'buscar_cliente'].filter((n) => tiene.has(n)).map((n) => `\`${n}\``)
+    vocabulario.push(
+      `- **"Reseñas", "calificaciones", "estrellas", "opiniones", "quejas", "reclamos", "lo que pone la gente"** = las calificaciones de 1 a 5 del WhatsApp que se manda después del corte, lo que escriben después y las etiquetas del CRM. Usá \`reviews_crm\` (con \`barbero\` si preguntan por uno, y el período que pidan).${
+        noCon.length > 0 ? ` No las busques con ${noCon.length === 1 ? noCon[0] : `${noCon.slice(0, -1).join(', ')} ni con ${noCon[noCon.length - 1]}`}.` : ''
+      }`,
+    )
+  }
+  vocabulario.push(
+    '- **Retención / "¿qué % de gente volvió?"**: usá `estadisticas` y contá el campo `retorno_clientes` (clientes con 2 o más visitas en el período sobre los clientes únicos del período). SIEMPRE aclará la ventana ("en los últimos 90 días volvieron 605 de 1.661 clientes, un 36 %").',
+    '- **Mes en curso**: si el período incluye el mes en curso, NUNCA lo compares contra un mes completo. Cuando `finanzas_pyl` trae `nota_variacion`, las variaciones ya comparan contra los mismos días del mes anterior: decilo así ("+12 % contra los mismos 21 días de septiembre"). No anuncies una caída ni una suba del mes sin aclarar que está incompleto.',
+  )
+  secciones.push(`# Vocabulario del negocio (decide qué herramienta usar)\n${vocabulario.join('\n')}`)
 
   const sucursales = ctx.sucursales
   if (sucursales.length > 0) {
@@ -93,15 +162,23 @@ Cuando una respuesta es de una sola sucursal, decí de cuál.`)
 Este usuario no tiene sucursales en su alcance: las herramientas de datos van a volver vacías o sin acceso. Explicalo si preguntan por números.`)
   }
 
+  // El equipo: estable en el día (cambia sólo si cambia el staff). Sin lectura, sin sección.
+  const equipoTexto = seccionEquipo(equipo, tiene)
+  if (equipoTexto) secciones.push(equipoTexto)
+
   const informes: string[] = []
   if (tiene.has('generar_informe')) {
     informes.push(
-      '- Cuando pidan un informe, un reporte o un PDF: juntá primero los datos con las herramientas y después llamá a `generar_informe` con KPIs, gráficos, tablas y una síntesis de 2 a 4 párrafos. La persona lo ve y lo descarga en PDF para mandarlo por WhatsApp o al contador. Las cifras del informe salen tal cual de las herramientas.',
+      `- Cuando pidan un informe, un reporte o un PDF: juntá primero los datos con las herramientas y después llamá a \`generar_informe\` con KPIs, gráficos, tablas y una síntesis de 2 a 4 párrafos. La persona lo ve y lo descarga en PDF para mandarlo por WhatsApp o al contador. Las cifras del informe salen tal cual de las herramientas.${
+        conMostrar ? ' El informe ya muestra esos datos: no muestres además los mismos resultados con `mostrar` (se verían dos veces).' : ''
+      }`,
     )
   }
   if (tiene.has('graficar')) {
     informes.push(
-      '- Usá `graficar` cuando un ranking, una tendencia o una comparación se entiendan mejor viéndolos (máximo 2 por respuesta, y no repitas un gráfico que ya mostró una herramienta). El título del gráfico es la conclusión ("Paraná explica el 41 % del crecimiento"), no el tema ("Ingresos por sucursal").',
+      `- Usá \`graficar\` cuando un ranking, una tendencia o una comparación se entiendan mejor viéndolos (máximo 2 por respuesta${
+        conMostrar ? '; si una herramienta ya trajo ese gráfico, mostralo con `mostrar` en vez de rearmarlo' : ', y no repitas un gráfico que ya mostró una herramienta'
+      }). El título del gráfico es la conclusión ("Paraná explica el 41 % del crecimiento"), no el tema ("Ingresos por sucursal").`,
     )
   }
   if (informes.length > 0) secciones.push(`# Informes y gráficos\n${informes.join('\n')}`)
@@ -120,7 +197,9 @@ Este usuario no tiene sucursales en su alcance: las herramientas de datos van a 
   secciones.push(`# Estilo
 - Español rioplatense con voseo. Tono de analista cálido y directo: la conclusión primero, después el detalle.
 - Sin signos de exclamación y sin emojis.
-- Markdown liviano: un título corto sólo si la respuesta es larga, listas, **negritas** para las cifras clave. Tablas sólo si suman: la interfaz ya dibuja las de las herramientas.
+- Markdown liviano: un título corto sólo si la respuesta es larga, listas, **negritas** para las cifras clave. ${
+    conMostrar ? 'No copies tablas en el texto: si una tabla ayuda, mostrala con `mostrar`.' : 'Tablas sólo si suman: la interfaz ya dibuja las de las herramientas.'
+  }
 - Plata con $ y punto de miles, sin decimales ($1.250.000). Porcentajes con 0 o 1 decimal y espacio antes del signo (32 %).
 - Cerrá, cuando tenga sentido, con un próximo paso concreto: otra pregunta, un informe o la pantalla donde mirarlo.`)
 
@@ -142,10 +221,11 @@ Habilitados para Tex en esta organización: ${encendidos.length > 0 ? encendidos
 Aunque un dato esté habilitado, cada persona ve sólo lo que su rol permite.`)
 
   if (ctx.modoPro && tiene.has('consulta_sql')) {
+    const especificas = ['reviews_crm', 'finanzas_pyl', 'estadisticas', 'turnos_resumen'].filter((n) => tiene.has(n)).map((n) => `\`${n}\``)
     secciones.push(`# Modo Pro (consulta avanzada)
-Tenés \`consulta_sql\` para lo que las herramientas no cubren. Escribí UN SELECT de solo lectura sobre estas vistas:
+Tenés \`consulta_sql\` SÓLO para lo que ninguna otra herramienta cubre: es el último recurso. Escribí UN SELECT de solo lectura sobre estas vistas:
 ${PRO_SQL_SCHEMA}
-Preferí siempre las herramientas (\`finanzas_pyl\`, \`estadisticas\`, etc.) cuando cubren la pregunta: tienen las definiciones de "corte", "ingreso" y "mes en curso" ya resueltas. Si una consulta falla, leé el error, corregila y probá una vez más.`)
+Nunca la uses si una herramienta cubre la pregunta${especificas.length > 0 ? ` (${especificas.join(', ')}, etc.)` : ''}: las herramientas tienen las definiciones de "corte", "ingreso", "reseña" y "mes en curso" ya resueltas. Si una consulta falla, leé el error, corregila y probá una vez más; si vuelve a fallar, decí que no pudiste.`)
   }
 
   const personaLimpia = persona?.trim()

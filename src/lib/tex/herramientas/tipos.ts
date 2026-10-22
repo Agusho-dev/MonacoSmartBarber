@@ -60,10 +60,30 @@ export interface TexContexto {
   hoy: string
 }
 
+/**
+ * Un resultado de una herramienta de datos de ESTE turno que se puede mostrar
+ * en la respuesta. El motor los numera ("r1", "r2"…) en el orden en que
+ * terminan los pasos y le pasa el id al modelo en el resultado (`mostrar_con`).
+ */
+export interface TexResultadoDelTurno {
+  /** "r1", "r2"… Únicos en toda la conversación (el motor sigue la cuenta del historial). */
+  id: string
+  /** La herramienta que lo trajo ("reviews_crm"). */
+  herramienta: string
+  /** Lo que trajo para la pantalla, tal cual. `mostrar` lo copia, nunca lo modifica. */
+  salida: TexSalidaUI
+}
+
 export interface TexEjecucion {
   ctx: TexContexto
   /** El Detener del browser llega acá: las herramientas largas lo tienen que respetar. */
   signal: AbortSignal
+  /**
+   * Los resultados de las herramientas de datos de los pasos ANTERIORES de este
+   * turno, por id. Sólo lo lee `mostrar`. Es una copia: lo que haga una
+   * herramienta con él no cambia el registro del motor.
+   */
+  resultadosDelTurno?: ReadonlyMap<string, TexResultadoDelTurno>
 }
 
 export interface TexResultado {

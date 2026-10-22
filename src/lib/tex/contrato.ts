@@ -312,6 +312,21 @@ export const TEX_HERRAMIENTAS: Record<string, TexHerramientaMeta> = {
   conciliacion_casos: { etiqueta: 'Diferencias', haciendo: 'Buscando las diferencias', icono: 'conciliacion' },
   cuentas_mp: { etiqueta: 'Cuentas de Mercado Pago', haciendo: 'Revisando las cuentas conectadas', icono: 'cuentas' },
   sincronizar_mp: { etiqueta: 'Sincronización', haciendo: 'Trayendo los movimientos de Mercado Pago', icono: 'sincronizar' },
+  mostrar: { etiqueta: 'Respuesta', haciendo: 'Preparando la respuesta', icono: 'resumen' },
+}
+
+/**
+ * Las ÚNICAS herramientas cuyos bloques se dibujan en la respuesta. Lo que
+ * traen las demás (las de datos) es el trabajo de Tex, no la respuesta: queda
+ * plegado en la tarjeta de trabajo (la línea "Consulté … ›", con "Ver datos"
+ * en cada paso). Para mostrarle a
+ * la persona una tabla o unas tarjetas que trajo una herramienta de datos,
+ * Tex llama a `mostrar` con la referencia de ese resultado.
+ */
+export const TEX_HERRAMIENTAS_VISIBLES: readonly string[] = ['mostrar', 'graficar', 'generar_informe']
+
+export function esHerramientaVisible(nombre: string): boolean {
+  return TEX_HERRAMIENTAS_VISIBLES.includes(nombre)
 }
 
 export function metaHerramienta(nombre: string): TexHerramientaMeta {

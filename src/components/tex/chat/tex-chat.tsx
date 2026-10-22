@@ -26,6 +26,7 @@ import { crearRelojPasos, RelojPasosContext, useTecladoVirtual } from './hooks'
 import {
   avisarLento,
   derivarEstadoTex,
+  destinoDelScroll,
   lineaDeEstado,
   pasoActivo,
   pasosDeMensaje,
@@ -102,6 +103,9 @@ export interface TexChatProps {
 /** Sin texto a los 8 s: "Está tardando más de lo normal." */
 const LENTO_MS = 8000
 
+/** A menos de esto del final el hilo está "al final": lo sigue y no muestra "Nuevo ↓". */
+const CERCA_DEL_FINAL_PX = 80
+
 function caraDe(estado: EstadoTex): TexCaraEstado {
   if (estado === 'hablando') return 'hablando'
   if (estado === 'reposo') return 'reposo'
@@ -130,6 +134,23 @@ function crearAvisador() {
       }
     },
   }
+}
+
+/**
+ * La respuesta del hilo que se puede anclar (logica.ts: destinoDelScroll), con
+ * dónde empieza en px desde el comienzo del contenido. Tiene que ser lo ÚLTIMO
+ * del hilo (con un error o un aviso debajo, se sigue al final para que se
+ * vean), llegada en esta sesión (una conversación reabierta arranca abajo,
+ * como siempre), con la respuesta ya a la vista (mientras Tex trabaja, el hilo
+ * sigue los pasos) y no anclada antes (después de "Nuevo ↓" sigue al final).
+ */
+function respuestaParaAnclar(sc: HTMLElement, yaAnclada: string | null): { id: string; inicio: number } | null {
+  const ultimo = sc.querySelector<HTMLElement>('[data-tex-hilo]')?.lastElementChild
+  if (!(ultimo instanceof HTMLElement) || ultimo.dataset.texMensaje !== 'nueva') return null
+  const id = ultimo.dataset.texId
+  const respuesta = ultimo.querySelector<HTMLElement>('[data-tex-respuesta]')
+  if (!id || id === yaAnclada || !respuesta) return null
+  return { id, inicio: respuesta.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop }
 }
 
 /** El vacío se dibuja como componente: así sus acciones no se "llaman" durante el render del chat. */
@@ -240,13 +261,16 @@ export function TexChat({
   }, [ocupado, hayTextoEnCurso, pedidoN])
   const lento = avisarLento({ ocupado, hayTexto: hayTextoEnCurso, pedidoEnCurso: pedidoN, pedidoLento: lentoEn })
 
-  // ── Scroll: baja solo si estás a menos de 80 px del final ────────────────
+  // ── Scroll: baja solo si estás a menos de 80 px del final, y nunca saca de
+  // la pantalla el comienzo de la respuesta que está llegando ──────────────
   const scrollRef = useRef<HTMLDivElement>(null)
   const contenidoRef = useRef<HTMLDivElement>(null)
   // Una conversación reabierta arranca abajo; el estado vacío, arriba (en el
   // celular el parte del día puede no entrar y el saludo quedaría tapado).
   const pegadoRef = useRef(mensajesIniciales.length > 0)
   const scrollProgramadoHastaRef = useRef(0)
+  // La respuesta que ya se ancló con su comienzo a la vista: no se vuelve a anclar.
+  const anclaRef = useRef<string | null>(null)
 
   useEffect(() => {
     const sc = scrollRef.current
@@ -261,18 +285,48 @@ export function TexChat({
       const nuevoAlto = ct.offsetHeight
       const crecio = nuevoAlto > alto + 1
       alto = nuevoAlto
-      if (pegadoRef.current) sc.scrollTop = sc.scrollHeight
-      else if (crecio) setHayNuevo(true)
+      const debajo = () => sc.scrollHeight - sc.scrollTop - sc.clientHeight
+      if (!pegadoRef.current) {
+        // "Nuevo ↓" sólo si lo nuevo quedó fuera de la vista (no por el margen de abajo).
+        if (crecio && debajo() >= CERCA_DEL_FINAL_PX) setHayNuevo(true)
+        return
+      }
+      // Pegado: sigue al final, salvo que eso saque de la pantalla el comienzo
+      // de la respuesta que está llegando (logica.ts: destinoDelScroll). Se mira
+      // sólo cuando crece el contenido: el teclado que achica la pantalla no ancla.
+      const respuesta = crecio ? respuestaParaAnclar(sc, anclaRef.current) : null
+      const destino = destinoDelScroll({ fondo: sc.scrollHeight - sc.clientHeight, inicioRespuesta: respuesta?.inicio ?? null })
+      if (destino.anclada && respuesta) {
+        anclaRef.current = respuesta.id
+        pegadoRef.current = false
+        // El scroll que dispara esta línea no vuelve a "pegar" el hilo: con menos de
+        // 80 px abajo, alScrollear lo daba por "cerca del final" y el texto que seguía
+        // llegando empujaba otra vez el comienzo de la respuesta fuera de la pantalla.
+        scrollProgramadoHastaRef.current = performance.now() + 150
+      }
+      sc.scrollTop = destino.top
+      if (destino.anclada && debajo() >= CERCA_DEL_FINAL_PX) setHayNuevo(true)
     })
     ro.observe(ct)
     ro.observe(sc)
     return () => ro.disconnect()
   }, [])
 
+  /**
+   * La persona movió el hilo a mano (o pidió "Nuevo ↓"): la respuesta que está
+   * llegando ya no se ancla sola. Si no, al volver al final el hilo la subía de
+   * golpe hasta el comienzo de la respuesta.
+   */
+  function noAnclarLaUltima() {
+    const u = messages[messages.length - 1]
+    if (u?.role === 'assistant') anclaRef.current = u.id
+  }
+
   function alScrollear() {
     const sc = scrollRef.current
     if (!sc || performance.now() < scrollProgramadoHastaRef.current) return
-    const cerca = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80
+    const cerca = sc.scrollHeight - sc.scrollTop - sc.clientHeight < CERCA_DEL_FINAL_PX
+    if (!cerca && pegadoRef.current) noAnclarLaUltima()
     pegadoRef.current = cerca
     if (cerca && hayNuevo) setHayNuevo(false)
   }
@@ -280,6 +334,7 @@ export function TexChat({
   function irAlFinal() {
     const sc = scrollRef.current
     if (!sc) return
+    noAnclarLaUltima()
     pegadoRef.current = true
     setHayNuevo(false)
     const suave = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -395,12 +450,12 @@ export function TexChat({
     )
   } else {
     contenido = (
-      <ol aria-label="Conversación con Tex" className={cn('flex flex-col', compacto ? 'gap-6' : 'gap-7')}>
+      <ol aria-label="Conversación con Tex" data-tex-hilo="" className={cn('flex flex-col', compacto ? 'gap-6' : 'gap-7')}>
         {messages.map((m, i) => {
           const esUltimo = i === messages.length - 1
           if (m.role === 'user') {
             return (
-              <li key={m.id}>
+              <li key={m.id} data-tex-mensaje="usuario">
                 <TexMensajeUsuario mensaje={m} animar={!idsIniciales.has(m.id)} />
               </li>
             )
@@ -408,7 +463,7 @@ export function TexChat({
           if (m.role !== 'assistant') return null
           const enCurso = esUltimo && ocupado
           return (
-            <li key={m.id}>
+            <li key={m.id} data-tex-mensaje={idsIniciales.has(m.id) ? 'guardada' : 'nueva'} data-tex-id={m.id}>
               <TexMensajeTex
                 mensaje={m}
                 compacto={compacto}

@@ -36,6 +36,7 @@ import type Anthropic from '@anthropic-ai/sdk'
 import type { UIMessageStreamWriter } from 'ai'
 import { incrementUsage } from '@/lib/actions/entitlements'
 import { auditAssistant } from '@/lib/asistente/context'
+import type { TexEquipoSucursal } from './barberos'
 import { crearClienteTex } from './cliente'
 import { puedeConfigurarTex, type TexConfigOrg } from './contexto'
 import type { TexErrorRespuesta, TexUIMessage, TexUso } from './contrato'
@@ -68,6 +69,11 @@ export interface EntradaTurnoTex {
    * siendo ésa (un reintento o un "Volver a generar" la corta y la vuelve a guardar).
    */
   pregunta?: PreguntaDelTurno
+  /**
+   * Los barberos activos del alcance, por sucursal (`leerEquipoTex`, lo lee la ruta en
+   * paralelo con el historial). null/ausente = no se pudo leer: el system sale sin esa sección.
+   */
+  equipo?: TexEquipoSucursal[] | null
 }
 
 const ERROR_GENERICO: TexErrorRespuesta = { codigo: 'error', mensaje: 'Tex no pudo terminar la respuesta. Probá de nuevo.' }
@@ -108,6 +114,7 @@ export async function correrTurnoTex(e: EntradaTurnoTex): Promise<void> {
       persona: e.config.persona,
       instrucciones: e.config.instrucciones,
       herramientas: herramientas.map((h) => h.nombre),
+      equipo: e.equipo ?? null,
     })
     // El título corre en paralelo: depende sólo del primer mensaje.
     const promesaTitulo = e.debeTitular ? generarTituloTex(cliente, e.textoUsuario, e.signal) : null
