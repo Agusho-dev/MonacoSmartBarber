@@ -719,14 +719,24 @@ export function textoRechazo(r: Pick<RechazoVista, 'lado' | 'monto' | 'fecha' | 
 
 /**
  * " (salvo el crédito que se descartó a mano)": para el "busqué y no encontré"
- * del detalle. Lo descartado con "No es este" que cae en la ventana de la búsqueda
- * (±`ventanaMs` de `iso`) estaba ahí: sin la aclaración, "nada" sería mentira.
- * '' si no hay nada descartado en esa ventana.
+ * del detalle. Lo descartado con "No es este" que entraba en esa búsqueda —el
+ * mismo `monto` (±$1) y a ±`ventanaMs` de `iso`— estaba ahí: sin la aclaración,
+ * "nada" sería mentira. Lo descartado con OTRO monto no entraba (el crédito de
+ * $36.000 de un cobro conjunto sin marcar, visto desde uno de sus cobros de
+ * $18.000): nombrarlo diría que había uno de ese monto. '' si no hay ninguno.
  */
-export function salvoDescartados(c: Pick<CasoConciliacion, 'rechazados'>, lado: 'credito' | 'cobro', iso: string, ventanaMs: number): string {
+export function salvoDescartados(
+  c: Pick<CasoConciliacion, 'rechazados'>,
+  lado: 'credito' | 'cobro',
+  iso: string,
+  ventanaMs: number,
+  monto: number,
+): string {
   const t = Date.parse(iso)
   if (!Number.isFinite(t)) return ''
-  const n = (c.rechazados ?? []).filter((r) => r.lado === lado && Math.abs(Date.parse(r.fecha) - t) <= ventanaMs).length
+  const n = (c.rechazados ?? []).filter(
+    (r) => r.lado === lado && Math.abs(r.monto - monto) <= 1 && Math.abs(Date.parse(r.fecha) - t) <= ventanaMs,
+  ).length
   if (!n) return ''
   const que =
     lado === 'credito'

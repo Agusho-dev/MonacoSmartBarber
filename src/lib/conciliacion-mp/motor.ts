@@ -1962,8 +1962,8 @@ export function resumir(e: EntradaResumen): Resumen {
         titular = `Falta confirmar ${n} ${plural(n, 'emparejamiento', 'emparejamientos')}.`
         detalle =
           n === 1
-            ? `Se encontró con poca certeza (${plata(totales.montoParaConfirmar ?? 0)}): hay que confirmarlo o revisarlo.`
-            : `Se encontraron con poca certeza (${plata(totales.montoParaConfirmar ?? 0)}): hay que confirmarlos o revisarlos.`
+            ? `Se encontró con poca certeza (${plata(totales.montoParaConfirmar ?? 0)}): hay que confirmarlo o descartarlo.`
+            : `Se encontraron con poca certeza (${plata(totales.montoParaConfirmar ?? 0)}): hay que confirmarlos o descartarlos.`
         const k = conPlataSegura.length
         if (k === 1) detalle += ` La otra transferencia ${periodo.de} está en Mercado Pago.`
         else if (k > 1) detalle += ` Las otras ${k} transferencias ${periodo.de} están en Mercado Pago.`

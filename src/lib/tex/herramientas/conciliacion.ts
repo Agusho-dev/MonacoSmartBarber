@@ -168,9 +168,12 @@ function compacto(c: CasoConciliacion, conDia: boolean) {
     // Lo que una persona descartó con "No es este": esos dos no se vuelven a juntar solos.
     ...(c.rechazados?.length
       ? {
-          descartadosAMano: c.rechazados.map(
-            (r) => `${r.lado === 'credito' ? 'crédito' : 'cobro'} de ${plata(r.monto)} de las ${hhmmAR(r.fecha)}${r.alias ? ` en ${r.alias}` : ''}`,
-          ),
+          // Con la fecha si es de otro día que el caso (en un período de varios días, la hora sola confunde).
+          descartadosAMano: c.rechazados.map((r) => {
+            const dia = diaAR(r.fecha)
+            const cuando = dia && dia !== c.dia ? `del ${diaMes(dia)} a las ${hhmmAR(r.fecha)}` : `de las ${hhmmAR(r.fecha)}`
+            return `${r.lado === 'credito' ? 'crédito' : 'cobro'} de ${plata(r.monto)} ${cuando}${r.alias ? ` en ${r.alias}` : ''}`
+          }),
         }
       : {}),
   }

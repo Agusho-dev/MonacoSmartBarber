@@ -538,7 +538,8 @@ export function ConciliacionClient({ inicial, sucursales, puedeGestionar, texDis
     programarTira()
   }
 
-  function alDeshacerDesdeDetalle() {
+  function alDeshacerDesdeDetalle(opciones?: { cerrar?: boolean }) {
+    if (opciones?.cerrar) cerrarCasoUrl()
     toast.success('Listo: volvió a como estaba.')
     void cargar(periodo, sucursalId)
     programarTira()

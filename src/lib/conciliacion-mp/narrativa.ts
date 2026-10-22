@@ -170,19 +170,19 @@ export function narrar(e: EntradaNarrativa): string[] {
     const c = dudosos[0]
     if (c.senales.includes('grupo')) {
       frases.push(
-        `Una transferencia de ${plata(c.montoMp)} cubre ${c.esperados.length} cobros que no se marcaron como cobro conjunto: hay que confirmarlo.`,
+        `Una transferencia de ${plata(c.montoMp)} cubre ${c.esperados.length} cobros que no se marcaron como cobro conjunto: hay que confirmarlo o descartarlo.`,
       )
     } else {
       const r = c.retrasoSeg ?? 0
       const min = Math.max(1, Math.round(Math.abs(r) / 60))
       // retraso = sistema − MP: negativo es "MP después del cobro".
       frases.push(
-        `Un cobro de ${plata(c.montoSistema)} se emparejó con una transferencia del mismo monto que entró ${min} min ${r >= 0 ? 'antes' : 'después'}: hay que confirmarlo.`,
+        `Un cobro de ${plata(c.montoSistema)} se emparejó con una transferencia del mismo monto que entró ${min} min ${r >= 0 ? 'antes' : 'después'}: hay que confirmarlo o descartarlo.`,
       )
     }
   } else if (dudosos.length > 1) {
     frases.push(
-      `${dudosos.length} emparejamientos se encontraron con poca certeza (${plata(sumar(dudosos, (c) => c.montoSistema))}): hay que confirmarlos.`,
+      `${dudosos.length} emparejamientos se encontraron con poca certeza (${plata(sumar(dudosos, (c) => c.montoSistema))}): hay que confirmarlos o descartarlos.`,
     )
   }
 

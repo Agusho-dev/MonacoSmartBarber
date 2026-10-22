@@ -494,13 +494,6 @@ export async function leerRechazos(
   }))
 }
 
-/** Une listas de rechazos sin repetir (el mismo par llega por su cobro y por su crédito). */
-function unirRechazos(...listas: RechazoMotor[][]): RechazoMotor[] {
-  const vistos = new Map<string, RechazoMotor>()
-  for (const l of listas) for (const r of l) if (!vistos.has(r.id)) vistos.set(r.id, r)
-  return [...vistos.values()]
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Links y plata de los últimos 30 días (para las tarjetas)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -623,14 +616,11 @@ export async function cargarPeriodo(orgId: string, desde: Date, hasta: Date): Pr
   ])
 
   // Un vínculo manual puede apuntar a un crédito fuera de la ventana: se trae aparte.
-  // Y los descartes de los créditos leídos (los de un cobro de un período vecino).
+  // Los descartes alcanza con leerlos por los cobros del período: uno cuyo cobro
+  // es de un período vecino no traba nada acá (ese cobro no entra al motor).
   const cargados = new Set(movimientos.map((m) => m.id))
   const faltantes = resoluciones.filter((r) => r.movimientoId && !cargados.has(r.movimientoId)).map((r) => r.movimientoId!)
-  const [vinculadosAfuera, rechazosDeCreditos] = await Promise.all([
-    leerMovimientosPorId(orgId, faltantes),
-    leerRechazos(orgId, 'movimiento_id', [...cargados]),
-  ])
-  movimientos.push(...vinculadosAfuera)
+  movimientos.push(...(await leerMovimientosPorId(orgId, faltantes)))
 
   return {
     sucursales,
@@ -639,6 +629,6 @@ export async function cargarPeriodo(orgId: string, desde: Date, hasta: Date): Pr
     esperados,
     movimientos,
     resoluciones,
-    rechazos: unirRechazos(rechazosDeCobros, rechazosDeCreditos),
+    rechazos: rechazosDeCobros,
   }
 }

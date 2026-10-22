@@ -103,7 +103,8 @@ interface Props {
   onCerrar: () => void
   onNavegar: (dir: -1 | 1) => void
   onResuelto: (r: Resuelto) => void
-  onDeshecho: () => void
+  /** `cerrar`: volver a la lista (el caso abierto deja de existir al recalcular). */
+  onDeshecho: (opciones?: { cerrar?: boolean }) => void
   onConectarCuenta: (c: CuentaConciliacion) => void
   onPreguntarTex: (c: CasoConciliacion) => void
 }
@@ -139,6 +140,13 @@ const PROBABILIDAD: Record<CandidatoCruce['probabilidad'], string> = {
 
 export function DetalleCaso(props: Props) {
   const contenidoRef = useRef<HTMLDivElement>(null)
+  // Mientras la hoja se va (la animación de salida, 300 ms) sigue el último caso que mostró. Al
+  // cerrar, `caso` llega null (ya no hay `?caso=`) y la hoja dibujaba "Este caso ya no está" durante
+  // la salida: un parpadeo en CADA cierre (la X, "Confirmar", "No es este"). Con la hoja abierta, un
+  // caso que de verdad desapareció al recalcular sí muestra ese aviso.
+  const [ultimo, setUltimo] = useState<CasoConciliacion | null>(props.caso)
+  if (props.abierto && props.caso !== ultimo) setUltimo(props.caso)
+  const caso = props.abierto ? props.caso : ultimo
   return (
     <Sheet open={props.abierto} onOpenChange={(v) => !v && props.onCerrar()}>
       <SheetContent
@@ -158,10 +166,11 @@ export function DetalleCaso(props: Props) {
           }
         }}
       >
-        <div ref={contenidoRef} className="flex h-full min-h-0 flex-col">
-          {props.caso ? (
+        {/* Saliendo, lo que queda a la vista no se puede tocar: un segundo toque en "No es este" o "Confirmar" mientras se va. */}
+        <div ref={contenidoRef} className={cn('flex h-full min-h-0 flex-col', !props.abierto && 'pointer-events-none')}>
+          {caso ? (
             // La clave lleva el modo: R o V con el detalle ya abierto lo vuelven a armar con el foco donde va.
-            <Contenido key={`${props.caso.id}:${props.modo}`} {...props} caso={props.caso} />
+            <Contenido key={`${caso.id}:${props.modo}`} {...props} caso={caso} />
           ) : (
             <NoEncontrado onCerrar={props.onCerrar} />
           )}
@@ -176,7 +185,9 @@ function NoEncontrado({ onCerrar }: { onCerrar: () => void }) {
     <div className="flex flex-1 flex-col items-start gap-3 p-6">
       <SheetTitle>Este caso ya no está</SheetTitle>
       <SheetDescription>
-        Se volvió a calcular la conciliación con lo nuevo de Mercado Pago y el caso cambió, o es de otro período.
+        {/* No sólo por Mercado Pago: deshacer un vínculo o un descarte vuelve a juntar el cobro con su crédito en otro caso. */}
+        Se volvió a calcular la conciliación y el caso cambió (se juntó con otro, se resolvió o llegó algo nuevo de Mercado Pago), o es
+        de otro período.
       </SheetDescription>
       <Button variant="outline" onClick={onCerrar}>
         Volver a la lista
@@ -284,7 +295,11 @@ function Contenido(props: Props & { caso: CasoConciliacion }) {
       setError(res.error ?? 'No se pudo deshacer.')
       return
     }
-    props.onDeshecho()
+    // Visto desde el crédito ('mov:…', sin cobros), deshacer el descarte lo devuelve a su par:
+    // al recalcular, este caso deja de existir y la hoja quedaba en "Este caso ya no está…
+    // con lo nuevo de Mercado Pago", que no es lo que pasó. Se vuelve a la lista, como
+    // después de "No es este". Visto desde el cobro, el par se rearma con el mismo id y se ve.
+    props.onDeshecho({ cerrar: c.esperados.length === 0 })
   }
 
   async function vincular(clave: string, transferLogIds: string[], movimientoId: string, montoEsperado: number, montoMov: number, afectados: string[]) {
@@ -960,7 +975,7 @@ function textoSinSistema(c: CasoConciliacion, hayCandidatos: boolean): string {
   if (hayCandidatos) return 'No hay un cobro registrado a esa hora. Hay cobros parecidos cerca: mirá abajo.'
   const iso = c.movimiento?.fecha ?? c.fecha
   const v = ventana(iso)
-  return `Busqué un cobro de ${plata(c.montoMp)} en el sistema entre las ${v.desde} y las ${v.hasta}: no hay ninguno sin pareja${salvoDescartados(c, 'cobro', iso, VENTANA_BUSQUEDA_MS)}.`
+  return `Busqué un cobro de ${plata(c.montoMp)} en el sistema entre las ${v.desde} y las ${v.hasta}: no hay ninguno sin pareja${salvoDescartados(c, 'cobro', iso, VENTANA_BUSQUEDA_MS, c.montoMp)}.`
 }
 
 function textoSinComprobante(c: CasoConciliacion): string {
@@ -996,7 +1011,7 @@ function textoSinMovimiento(
   if (hayCandidatos) return 'No entró en el momento del cobro. Hay movimientos parecidos cerca: mirá abajo.'
   const v = ventana(t)
   const n = cuentas.filter(estaConectada).length
-  return `Busqué ${plata(c.montoSistema)} en ${n === 1 ? 'la cuenta conectada' : `las ${n} cuentas conectadas`} entre las ${v.desde} y las ${v.hasta}: nada${salvoDescartados(c, 'credito', t, VENTANA_BUSQUEDA_MS)}.`
+  return `Busqué ${plata(c.montoSistema)} en ${n === 1 ? 'la cuenta conectada' : `las ${n} cuentas conectadas`} entre las ${v.desde} y las ${v.hasta}: nada${salvoDescartados(c, 'credito', t, VENTANA_BUSQUEDA_MS, c.montoSistema)}.`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

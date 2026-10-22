@@ -90,11 +90,39 @@ function recortarAlAlcance(casos: CasoConciliacion[], alcance: Set<string> | nul
     s.add(p.sucursalId)
     sucursalesDeMp.set(p.cuentaMpId, s)
   }
-  return casos.filter((c) =>
-    c.esperados.length > 0
-      ? c.esperados.some((x) => !!x.sucursalId && alcance.has(x.sucursalId))
-      : !!c.movimiento && [...(sucursalesDeMp.get(c.movimiento.cuentaMpId) ?? [])].some((s) => alcance.has(s)),
-  )
+  // La sucursal de cada cobro, de TODOS los casos (antes de recortar): la de un
+  // cobro descartado puede ser otra que la del caso que lo muestra.
+  const sucursalDeCobro = new Map<string, string | null>()
+  for (const c of casos) for (const e of c.esperados) if (e.transferLogId) sucursalDeCobro.set(e.transferLogId, e.sucursalId)
+  const cobroEnAlcance = (tl: string) => {
+    const s = sucursalDeCobro.get(tl)
+    return !!s && alcance.has(s)
+  }
+  return casos
+    .filter((c) =>
+      c.esperados.length > 0
+        ? c.esperados.some((x) => !!x.sucursalId && alcance.has(x.sucursalId))
+        : !!c.movimiento && [...(sucursalesDeMp.get(c.movimiento.cuentaMpId) ?? [])].some((s) => alcance.has(s)),
+    )
+    .map((c) => descartesDelAlcance(c, cobroEnAlcance))
+}
+
+/**
+ * Lo descartado a mano ("No es este") que ve alguien con ese alcance: sólo lo
+ * de cobros de sus sucursales. En una cuenta compartida (barberia.monaco cobra
+ * para Caseros y para Paraná), un descarte sobre un cobro de Paraná aparecía en
+ * el crédito que ve el encargado de Caseros con un "Deshacer" que nunca puede
+ * andar (`deshacerRechazo` verifica el alcance de los cobros) y con el monto y
+ * la hora de un cobro que no es suyo. El motor igual lo respeta: esto es sólo
+ * lo que se muestra.
+ */
+function descartesDelAlcance(c: CasoConciliacion, cobroEnAlcance: (tl: string) => boolean): CasoConciliacion {
+  if (!c.rechazados?.length) return c
+  const visibles = c.rechazados.filter((r) => r.transferLogIds.every(cobroEnAlcance))
+  if (visibles.length === c.rechazados.length) return c
+  const copia: CasoConciliacion = { ...c, rechazados: visibles }
+  if (!visibles.length) delete copia.rechazados
+  return copia
 }
 
 /**
