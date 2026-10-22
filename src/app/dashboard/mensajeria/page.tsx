@@ -3,6 +3,8 @@ import { getCurrentOrgId } from '@/lib/actions/org'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { countConversations } from '@/lib/actions/conversations'
 import { INBOX_PAGE_SIZE } from '@/lib/inbox'
+import { COLUMNAS_AI_CONFIG_MENSAJERIA } from '@/lib/ai-config-columnas'
+import type { OrgAiConfig } from '@/lib/actions/ai-config'
 import { MensajeriaClient } from './mensajeria-client'
 
 export const dynamic = 'force-dynamic'
@@ -104,13 +106,16 @@ export default async function MensajeriaPage() {
           .maybeSingle()
           .then((r) => ({ data: r.data }))
       : Promise.resolve({ data: null }),
+    // Columnas EXPLÍCITAS: la fila tiene la clave cifrada de Tex y su configuración, y todo
+    // lo que se lee acá viaja al navegador (src/lib/ai-config-columnas.ts). Sin las columnas
+    // `assistant_*` de `OrgAiConfig`: Mensajería no las lee.
     orgId
       ? supabase
           .from('organization_ai_config')
-          .select('*')
+          .select(COLUMNAS_AI_CONFIG_MENSAJERIA)
           .eq('organization_id', orgId)
           .maybeSingle()
-          .then((r) => ({ data: r.data }))
+          .then((r) => ({ data: r.data as unknown as OrgAiConfig | null }))
       : Promise.resolve({ data: null }),
     orgId
       ? supabase

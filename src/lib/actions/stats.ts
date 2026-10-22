@@ -2,13 +2,10 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { fetchAll } from '@/lib/supabase/fetch-all'
+import { calcularEstadisticas, estadisticasVacias } from '@/lib/estadisticas-nucleo'
 import { getCurrentOrgId } from './org'
 import { getScopedBranchIds } from './branch-access'
 import { getActiveTimezone } from '@/lib/i18n'
-
-function toLocalDate(isoString: string, tz: string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(isoString))
-}
 
 function toDayHour(isoString: string, tz: string): { day: number; hour: number } {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -100,245 +97,37 @@ export interface StatsData {
   }
 }
 
-/**
- * Un "corte" es una visita atada a un servicio o a una entrada de la fila. Una visita sin
- * ninguno de los dos es una venta de producto suelta (`directProductSale`): plata real, pero
- * no un corte. Misma definición que usa Finanzas — es a propósito que sea una sola.
- */
-function esCorte(v: { service_id?: string | null; queue_entry_id?: string | null }): boolean {
-  return Boolean(v.service_id || v.queue_entry_id)
-}
-
 export async function fetchStats(
   fromISO: string,
   toISO: string,
   branchId?: string | null
 ): Promise<StatsData> {
-  const supabase = createAdminClient()
+  // El cálculo vive en `src/lib/estadisticas-nucleo.ts`, compartido con Tex (`estadisticas`).
+  // Esta action resuelve el alcance desde la sesión y lo llama en modo NO estricto: ante una
+  // lectura que falla, la pantalla sigue con lo que pudo leer y el error queda en el log.
   const tz = await getActiveTimezone()
-
   const orgId = await getCurrentOrgId()
 
-  // Obtener sucursales de la org
+  // Sucursales que la persona puede ver
   const orgBranchIds = await getScopedBranchIds()
 
-  // Validar que el branchId solicitado pertenece a la org
-  if (branchId && !orgBranchIds.includes(branchId)) {
-    return {
-      heatmap: [],
-      ranking: [],
-      trends: [],
-      revenueByMethod: [],
-      segmentation: { new_count: 0, recurring: 0, at_risk: 0, lost: 0, total: 0 },
-      retention: { returning_in_period: 0, unique_in_period: 0, rate: 0 },
-      totals: { revenue: 0, cuts: 0, avgTicket: 0, clients: 0, productRevenue: 0, productCount: 0 },
-    }
-  }
+  // Validar que el branchId solicitado pertenece a la org (y al alcance del rol)
+  if (branchId && !orgBranchIds.includes(branchId)) return estadisticasVacias()
 
-  // Visitas del periodo (paginadas)
   const filterBranchIds = branchId ? [branchId] : orgBranchIds
-  if (filterBranchIds.length === 0) {
-    return {
-      heatmap: [],
-      ranking: [],
-      trends: [],
-      revenueByMethod: [],
-      segmentation: { new_count: 0, recurring: 0, at_risk: 0, lost: 0, total: 0 },
-      retention: { returning_in_period: 0, unique_in_period: 0, rate: 0 },
-      totals: { revenue: 0, cuts: 0, avgTicket: 0, clients: 0, productRevenue: 0, productCount: 0 },
-    }
-  }
+  if (filterBranchIds.length === 0) return estadisticasVacias()
 
-  const visits = await fetchAll((from, to) => {
-    return supabase
-      .from('visits')
-      .select(
-        'id, branch_id, client_id, barber_id, amount, payment_method, completed_at, commission_amount, service_id, queue_entry_id, barber:staff(full_name)'
-      )
-      .in('branch_id', filterBranchIds)
-      .gte('completed_at', fromISO)
-      .lte('completed_at', toISO)
-      .order('completed_at')
-      .range(from, to)
+  const { datos } = await calcularEstadisticas({
+    desdeISO: fromISO,
+    hastaISO: toISO,
+    sucursalesIds: filterBranchIds,
+    orgId,
+    // Clientes nuevos y total: de la sucursal elegida o de toda la org, como siempre en la pantalla.
+    clientesDe: branchId ? { tipo: 'sucursal', id: branchId } : { tipo: 'org' },
+    tz,
+    estricto: false,
   })
-
-  // Settings de la org
-  let settingsQuery = supabase.from('app_settings').select('lost_client_days, at_risk_client_days')
-  if (orgId) settingsQuery = settingsQuery.eq('organization_id', orgId)
-  const { data: settings } = await settingsQuery.maybeSingle()
-  const lostDays = settings?.lost_client_days ?? 40
-  const riskDays = settings?.at_risk_client_days ?? 25
-
-  // Clientes nuevos: clientes cuya primera visita (en la sucursal si se filtra, o en toda la org) cae en el periodo
-  let newCount = 0
-  if (orgId) {
-    const { data: newCountData } = await supabase.rpc('count_new_clients_scoped', {
-      p_org_id: orgId,
-      p_from: fromISO,
-      p_to: toISO,
-      p_branch_id: branchId ?? null,
-    })
-    newCount = (newCountData as number | null) ?? 0
-  }
-
-  // Visitas para segmentación (periodo extendido, paginadas)
-  const segFrom = new Date()
-  segFrom.setDate(segFrom.getDate() - lostDays * 2)
-  const segVisits = await fetchAll((from, to) => {
-    return supabase
-      .from('visits')
-      .select('client_id, completed_at')
-      .in('branch_id', filterBranchIds)
-      .gte('completed_at', segFrom.toISOString())
-      .range(from, to)
-  })
-
-  // Total de clientes: en la org, o con al menos una visita en la sucursal filtrada
-  let totalClients = 0
-  if (orgId) {
-    const { data: totalData } = await supabase.rpc('count_clients_scoped', {
-      p_org_id: orgId,
-      p_branch_id: branchId ?? null,
-    })
-    totalClients = (totalData as number | null) ?? 0
-  }
-
-  const safe = visits
-
-  // Heatmap
-  const heatMap = new Map<string, number>()
-  for (const v of safe) {
-    const { day, hour } = toDayHour(v.completed_at, tz)
-    const key = `${day}-${hour}`
-    heatMap.set(key, (heatMap.get(key) || 0) + 1)
-  }
-  const heatmap: HeatmapCell[] = [...heatMap.entries()].map(([k, count]) => {
-    const [day, hour] = k.split('-').map(Number)
-    return { day, hour, count }
-  })
-
-  // Barber ranking
-  const barberAgg = new Map<
-    string,
-    { name: string; cuts: number; revenue: number; clients: Set<string>; commission: number }
-  >()
-  for (const v of safe) {
-    const existing = barberAgg.get(v.barber_id) || {
-      name: (v.barber as unknown as { full_name: string } | null)?.full_name ?? '?',
-      cuts: 0,
-      revenue: 0,
-      clients: new Set<string>(),
-      commission: 0,
-    }
-    if (esCorte(v)) existing.cuts++
-    existing.revenue += v.amount
-    existing.commission += v.commission_amount
-    existing.clients.add(v.client_id)
-    barberAgg.set(v.barber_id, existing)
-  }
-  const ranking: BarberRank[] = [...barberAgg.entries()]
-    .map(([id, d]) => ({
-      id,
-      name: d.name,
-      cuts: d.cuts,
-      revenue: d.revenue,
-      clients: d.clients.size,
-      commission: d.commission,
-    }))
-    .sort((a, b) => b.revenue - a.revenue)
-
-  // Daily trends
-  const dailyAgg = new Map<string, { revenue: number; cuts: number }>()
-  for (const v of safe) {
-    const day = toLocalDate(v.completed_at, tz)
-    const d = dailyAgg.get(day) || { revenue: 0, cuts: 0 }
-    d.revenue += v.amount
-    if (esCorte(v)) d.cuts++
-    dailyAgg.set(day, d)
-  }
-  const trends: TrendPoint[] = [...dailyAgg.entries()]
-    .map(([date, d]) => ({ date, ...d }))
-    .sort((a, b) => a.date.localeCompare(b.date))
-
-  // Revenue by payment method
-  const methodAgg = new Map<string, { amount: number; cuts: number }>()
-  for (const v of safe) {
-    const d = methodAgg.get(v.payment_method) || { amount: 0, cuts: 0 }
-    d.amount += v.amount
-    if (esCorte(v)) d.cuts++
-    methodAgg.set(v.payment_method, d)
-  }
-  const revenueByMethod: MethodRevenue[] = [...methodAgg.entries()].map(
-    ([method, d]) => ({ method, amount: d.amount, cuts: d.cuts })
-  )
-
-  // Segmentation
-  const now = Date.now()
-  const lastVisitMap = new Map<string, number>()
-  const visitCountMap = new Map<string, number>()
-  for (const v of segVisits) {
-    const ts = new Date(v.completed_at).getTime()
-    const prev = lastVisitMap.get(v.client_id) || 0
-    if (ts > prev) lastVisitMap.set(v.client_id, ts)
-    visitCountMap.set(v.client_id, (visitCountMap.get(v.client_id) || 0) + 1)
-  }
-  let recurring = 0
-  let atRisk = 0
-  let lost = 0
-  for (const [, count] of visitCountMap) {
-    if (count >= 2) recurring++
-  }
-  for (const [, lastTs] of lastVisitMap) {
-    const daysSince = Math.floor((now - lastTs) / 86400000)
-    if (daysSince >= riskDays && daysSince < lostDays) atRisk++
-    else if (daysSince >= lostDays) lost++
-  }
-
-  const totalRevenue = safe.reduce((s, v) => s + v.amount, 0)
-  const totalCuts = safe.reduce((s, v) => s + (esCorte(v) ? 1 : 0), 0)
-  // Ventas de producto sueltas: se muestran aparte en vez de quedar diluidas dentro de
-  // "Cortes" e inflando el ticket promedio.
-  const productos = safe.filter((v) => !esCorte(v))
-  const productRevenue = productos.reduce((s, v) => s + v.amount, 0)
-  const serviceRevenue = totalRevenue - productRevenue
-  const uniqueClients = new Set(safe.map((v) => v.client_id)).size
-
-  // Tasa de retorno DENTRO del período [fromISO, toISO]: clientes con 2+ visitas
-  // en el período / clientes únicos del período. A diferencia de `segmentation.recurring`
-  // (ventana móvil ~lostDays*2), acá numerador y denominador comparten la misma ventana,
-  // así "¿qué % de gente volvió?" es inequívoco y reproducible.
-  const periodVisitCount = new Map<string, number>()
-  for (const v of safe) periodVisitCount.set(v.client_id, (periodVisitCount.get(v.client_id) || 0) + 1)
-  let returningInPeriod = 0
-  for (const count of periodVisitCount.values()) if (count >= 2) returningInPeriod++
-  const retentionRate = uniqueClients > 0 ? returningInPeriod / uniqueClients : 0
-
-  return {
-    heatmap,
-    ranking,
-    trends,
-    revenueByMethod,
-    segmentation: {
-      new_count: newCount ?? 0,
-      recurring,
-      at_risk: atRisk,
-      lost,
-      total: totalClients,
-    },
-    retention: {
-      returning_in_period: returningInPeriod,
-      unique_in_period: uniqueClients,
-      rate: retentionRate,
-    },
-    totals: {
-      revenue: totalRevenue,
-      cuts: totalCuts,
-      avgTicket: totalCuts > 0 ? Math.round(serviceRevenue / totalCuts) : 0,
-      clients: uniqueClients,
-      productRevenue,
-      productCount: productos.length,
-    },
-  }
+  return datos
 }
 
 export async function fetchWeekHeatmap(
@@ -357,15 +146,19 @@ export async function fetchWeekHeatmap(
   const filterBranchIds = branchId ? [branchId] : orgBranchIds
   if (filterBranchIds.length === 0) return []
 
-  const data = await fetchAll((from, to) => {
+  // Con orden estable (y `id` de desempate): sin `.order()`, Postgres no garantiza que las
+  // páginas de 1000 no se pisen o se salteen visitas.
+  const data = await fetchAll<{ completed_at: string }>((from, to) => {
     return supabase
       .from('visits')
       .select('completed_at')
       .in('branch_id', filterBranchIds)
       .gte('completed_at', weekStartISO)
       .lte('completed_at', weekEndISO)
+      .order('completed_at')
+      .order('id')
       .range(from, to)
-  })
+  }, { contexto: 'mapa de calor de la semana' })
 
   const heatMap = new Map<string, number>()
   for (const v of data) {

@@ -136,7 +136,7 @@ Supabase Realtime WebSocket subscriptions on `queue_entries` and `staff` power t
 
 ### Turnos ↔ fila
 
-El sistema de turnos y su convivencia con la fila están documentados en detalle en el `CLAUDE.md` de la raíz del monorepo (`../CLAUDE.md`), sección "Sistema de turnos (migración 119+, refundado en la 168)". Lo mínimo que hay que saber antes de tocar cualquiera de los dos:
+El sistema de turnos y su convivencia con la fila están documentados en detalle en `../.claude/rules/turnos.md` (el motor y la convivencia) y `../.claude/rules/turnos-superficies.md` (turnero, agenda, kiosko y fila). Lo mínimo que hay que saber antes de tocar cualquiera de los dos:
 
 - Al hacer check-in, el turno entra a la fila con **`priority_order` = la hora del turno**, no la de llegada. Es la clave de toda la precedencia.
 - `claim_next_for_barber` tiene dos caminos propios para turnos; el FIFO walk-in quedó intacto (sigue filtrando `is_appointment = false`).
@@ -145,7 +145,7 @@ El sistema de turnos y su convivencia con la fila están documentados en detalle
 
 ### Programa de fidelización (migraciones 196–206)
 
-La lógica (categorías por frecuencia, lotes de puntos FEFO, canje, referidos, cron) vive en la base y está documentada en el `CLAUDE.md` de la raíz, sección "Programa de fidelización". Lo que hay que saber de este repo:
+La lógica (categorías por frecuencia, lotes de puntos FEFO, canje, referidos, cron) vive en la base y está documentada en `../.claude/rules/fidelizacion.md`. Lo que hay que saber de este repo:
 
 - **`/dashboard/fidelizacion`** (`src/app/dashboard/fidelizacion/`, gate `rewards.view` / mutaciones `rewards.manage`; ítem "Fidelización" del sidebar). Sub-navegación por `?tab=`: Resumen (interruptor del programa + tarjetas de categoría + KPIs + eventos) · Categorías (slider de 3 manijas para los umbrales + **simulador en vivo** con `loyalty_preview_distribution`) · Puntos (parámetros + calculadora de ejemplo + qué servicios cuentan como visita) · Premios (grilla + vista escalera + editor completo con subida de imagen) · Referidos · Notificaciones (12 reglas con vista previa tipo teléfono) · Clientes (ficha con lotes, beneficios, referidos, historial; ajustar puntos, cancelar beneficio, revertir visita, canjear en nombre del cliente). Server actions en `src/lib/actions/loyalty.ts` (22), tipos en `src/lib/types/loyalty.ts`. Las tablas `loyalty_*` **no tienen policies de staff**: todo va por `createAdminClient()` + `getCurrentOrgId()` + `currentUserCan(...)`, y cada id que llega del cliente se verifica contra la org antes de la RPC.
 - La pestaña **Premios de `/dashboard/app-movil` se reemplazó** por un enlace a Fidelización → Premios (el `CatalogoTab` que escribía `reward_catalog` desde el browser se borró). `reward_catalog` se escribe con `organization_id` explícito: el trigger `set_org_from_session` falla con service role si va NULL.
@@ -169,7 +169,7 @@ Los cobros por transferencia entran a cuentas bancarias personales de los barber
 
 ### Oct/2026: asesoría, menor espera, fotos del corte, productos, sucursales (migraciones 216–225)
 
-El detalle (modelo, decisiones y qué NO hacer) está en el `CLAUDE.md` raíz. Mapa del código:
+El detalle (modelo, decisiones y qué NO hacer) está en `../.claude/rules/operacion-local.md`. Mapa del código:
 
 - **Asesoría sin costo**: `src/lib/actions/asesoria.ts` (interruptor por sucursal, «Mi turno», `marcarAsesoriaVista`, métricas), `cerrarSoloAsesoria` y los guards de `completeService` en `queue.ts`, `src/components/checkin/asesoria-kiosk-band.tsx`, `src/components/barber/asesoria-{badge,aviso,inicio-dialog}.tsx`, `src/components/dashboard/asesoria-card.tsx`. Helpers puros del aviso en `barber-utils.ts` (`marcasDeAsesoria`, `asesoriasNuevas`). Trigger de red en la base: `trg_queue_asesoria_exige_servicio` (221).
 - **Menor espera por WhatsApp**: `src/lib/menor-espera/*` (el corte del webhook vive en `webhook.ts` y `salvavidas.ts`, y se llama desde `src/app/api/webhooks/whatsapp/route.ts` ANTES del motor), `src/lib/actions/menor-espera.ts`, `src/components/dashboard/menor-espera-card.tsx`. «Mi fila» con los movidos: `armarMiFila` en `barber-utils.ts`.
@@ -247,6 +247,14 @@ Una lista que se vuelve a leer en cada evento de Realtime NO se reemplaza por un
 - El botón manual dice lo que hace: "Ingresar con mi teléfono" (clientes) / "Ingresar con mi PIN" (staff, pantalla "Fichaje"); antes era "Soy Nuevo" en las dos, y la del staff tenía dos títulos.
 - Para probarlo sin tablet: Chrome headless con `--use-file-for-fake-video-capture=<video.mjpeg>` contra una página que monte `FaceCamera`, interceptando `rest/v1/rpc/match_face_descriptor`. Medido así (19/oct/2026): 60 fps estables también con la CPU frenada ×6, cero tareas largas durante el escaneo, sin fugas de tensores, ~0,7 s de la cara lista a "¡Hola, Nacho!".
 
+### Tex y la conciliación con Mercado Pago (oct/2026, migraciones 227–230)
+
+El detalle está en `../.claude/rules/tex.md` y `../.claude/rules/conciliacion-mp.md`. Mapa del código:
+
+- **Tex** (la IA del dashboard, Claude Haiku 5.5): ruta `/api/tex/chat`, servidor en `src/lib/tex/*` (motor, turno, historial, prompt, herramientas), actions en `src/lib/actions/tex.ts`, UI en `src/components/tex/*` (cara animada, chat, panel ⌘K, bloques, lienzo) y `src/app/dashboard/asistente/**`, PDF en `src/lib/tex/pdf.ts` + `pdf-dibujo.ts`, imágenes en `public/tex/`. El asistente viejo (`/api/asistente/chat`, `src/lib/asistente/*`) queda en el repo para bundles viejos (Known Risk #38 del CLAUDE.md raíz).
+- **Conciliación**: motor y sincronización en `src/lib/conciliacion-mp/*` (el motor y la narrativa son puros), actions en `src/lib/actions/conciliacion-mp.ts`, pantalla `src/app/dashboard/conciliacion/**`, página pública del titular `src/app/conectar-mp/**`, callback de OAuth `src/app/api/mercadopago/conciliacion/callback`, cron `src/app/api/cron/mp-movimientos` (su `pg_cron` es la `migrations_pendientes/228b`, que va DESPUÉS del deploy).
+- Permisos nuevos: `conciliacion.view` / `conciliacion.manage`.
+
 ### Edge Functions
 
 `supabase/functions/` contains three Deno functions:
@@ -272,7 +280,7 @@ Los crons se disparan desde **pg_cron en Supabase** (ver migración 087) haciend
 
 ## SQL Migrations
 
-Located in `supabase/migrations/`, numbered sequentially (through `225` at oct/2026). Las escritas pero NO aplicadas (con gate) viven en `supabase/migrations_pendientes/` con un README del orden: no moverlas a `migrations/` hasta aplicarlas. Always use `IF NOT EXISTS`/`IF EXISTS` for idempotency. Comments in Spanish. Migrations 030–036 added mobile app support; 047–051 added multi-tenant org support. Changes to those tables affect the Flutter mobile app (`../Monaco-mobile`).
+Located in `supabase/migrations/`, numbered sequentially (through `230` at oct/2026). Las escritas pero NO aplicadas (con gate) viven en `supabase/migrations_pendientes/` con un README del orden: no moverlas a `migrations/` hasta aplicarlas. Always use `IF NOT EXISTS`/`IF EXISTS` for idempotency. Comments in Spanish. Migrations 030–036 added mobile app support; 047–051 added multi-tenant org support. Changes to those tables affect the Flutter mobile app (`../Monaco-mobile`).
 
 ## Environment Variables
 
@@ -280,3 +288,5 @@ Required in `.env`:
 - `NEXT_PUBLIC_SUPABASE_URL` — Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — public anon key
 - `SUPABASE_SERVICE_ROLE_KEY` — server-side only, bypasses RLS
+
+Opcionales de Tex y la conciliación: `ANTHROPIC_API_KEY` (clave de plataforma si la org no cargó la suya), `MP_CONCILIACION_CLIENT_ID`, `MP_CONCILIACION_CLIENT_SECRET` y `MP_CONCILIACION_REDIRECT_URI` (la app de OAuth de Mercado Pago de la conciliación, separada de la de señas).

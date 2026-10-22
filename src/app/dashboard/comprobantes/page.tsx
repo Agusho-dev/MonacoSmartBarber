@@ -5,6 +5,7 @@ import { getCurrentOrgId } from '@/lib/actions/org'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { getEffectivePermissions } from '@/lib/permissions'
 import { getReconciliation, getReceiptSettingsForOrg } from '@/lib/actions/receipts'
+import { currentUserCan } from '@/lib/actions/permissions-gate'
 import { ComprobantesClient } from './comprobantes-client'
 
 export const dynamic = 'force-dynamic'
@@ -39,7 +40,7 @@ export default async function ComprobantesPage() {
   const to = now.toISOString()
   const from = new Date(now.getTime() - 7 * 86400000).toISOString()
 
-  const [settings, recon, branchesRes, accountsRes] = await Promise.all([
+  const [settings, recon, branchesRes, accountsRes, puedeVerConciliacion] = await Promise.all([
     getReceiptSettingsForOrg(),
     getReconciliation({ from, to }),
     branchIds.length
@@ -48,6 +49,8 @@ export default async function ComprobantesPage() {
     branchIds.length
       ? supabase.from('payment_accounts').select('id, name, branch_id').in('branch_id', branchIds).eq('is_active', true).order('sort_order')
       : Promise.resolve({ data: [] }),
+    // El enlace a la conciliación con Mercado Pago, sólo si la puede ver.
+    currentUserCan('conciliacion.view'),
   ])
 
   return (
@@ -58,6 +61,7 @@ export default async function ComprobantesPage() {
       branches={(branchesRes.data as { id: string; name: string }[]) ?? []}
       accounts={(accountsRes.data as { id: string; name: string; branch_id: string }[]) ?? []}
       canManage={perms['comprobantes.manage'] === true}
+      puedeVerConciliacion={puedeVerConciliacion}
     />
   )
 }

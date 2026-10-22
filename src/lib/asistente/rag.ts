@@ -308,8 +308,18 @@ export interface RagStats {
   embedded: number
   pending: number
   lastIndexedAt: string | null
+  /**
+   * Presente si no se pudo LEER el estado de la base: entonces los conteos vienen en 0 y no
+   * hay que mostrarlos como "la base está vacía" (Known Risk #15), sino este texto.
+   */
+  error?: string
 }
 
+/**
+ * El estado de la base de conocimiento de la org. TIRA si cualquiera de las lecturas falla:
+ * un `count ?? 0` ante un error hacía que Configurar Tex dijera "Está vacía: reindexala" sobre
+ * una base con miles de fragmentos.
+ */
 export async function getRagStats(orgId: string): Promise<RagStats> {
   const supabase = createAdminClient()
   const [docs, chunksTotal, embeddedRes, pendingRes, last] = await Promise.all([
@@ -319,11 +329,17 @@ export async function getRagStats(orgId: string): Promise<RagStats> {
     supabase.from('assistant_chunks').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).is('embedding', null),
     supabase.from('assistant_documents').select('updated_at').eq('organization_id', orgId).order('updated_at', { ascending: false }).limit(1).maybeSingle(),
   ])
+  const conteo = (contexto: string, r: { count: number | null; error: { message: string } | null }): number => {
+    if (r.error) throw new Error(`[rag] ${contexto}: ${r.error.message}`)
+    if (r.count == null) throw new Error(`[rag] ${contexto}: sin conteo`)
+    return r.count
+  }
+  if (last.error) throw new Error(`[rag] última indexación: ${last.error.message}`)
   return {
-    documents: docs.count ?? 0,
-    chunks: chunksTotal.count ?? 0,
-    embedded: embeddedRes.count ?? 0,
-    pending: pendingRes.count ?? 0,
+    documents: conteo('documentos', docs),
+    chunks: conteo('fragmentos', chunksTotal),
+    embedded: conteo('fragmentos embebidos', embeddedRes),
+    pending: conteo('fragmentos pendientes', pendingRes),
     lastIndexedAt: (last.data?.updated_at as string) ?? null,
   }
 }

@@ -175,10 +175,27 @@ export async function saveAssistantConfig(input: SaveAssistantConfigInput) {
 }
 
 // ── Base de conocimiento / indexación ───────────────────────────────
+/**
+ * El estado de la base de conocimiento (Configurar Tex). Misma forma de siempre (es una
+ * action viva, Known Risk #38): null = sin contexto. Si no se pudo LEER, vuelve con
+ * `error` y los conteos en 0, y la pantalla tiene que mostrar el error, no "está vacía".
+ */
 export async function getKnowledgeStats(): Promise<RagStats | null> {
   const ctx = await getAssistantContext()
   if (!ctx) return null
-  return getRagStats(ctx.orgId)
+  try {
+    return await getRagStats(ctx.orgId)
+  } catch (err) {
+    console.error('[asistente] estado de la base de conocimiento:', err instanceof Error ? err.message : String(err))
+    return {
+      documents: 0,
+      chunks: 0,
+      embedded: 0,
+      pending: 0,
+      lastIndexedAt: null,
+      error: 'No pudimos leer el estado de la base de conocimiento.',
+    }
+  }
 }
 
 export async function reindexKnowledge(): Promise<{ documents: number; embedded?: number; error?: string }> {

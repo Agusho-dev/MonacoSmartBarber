@@ -79,6 +79,13 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionCategory> = {
             'comprobantes.manage': 'Conciliar a mano y configurar el escaneo de comprobantes',
         },
     },
+    conciliacion: {
+        label: 'Conciliación Mercado Pago',
+        permissions: {
+            'conciliacion.view': 'Ver si las transferencias reales de Mercado Pago cuadran con lo cobrado',
+            'conciliacion.manage': 'Conectar cuentas de Mercado Pago, sincronizar y resolver diferencias',
+        },
+    },
     arca: {
         label: 'Facturación ARCA',
         permissions: {
@@ -244,6 +251,8 @@ export const PERMISSION_DESCRIPTIONS: Record<string, string> = {
 
     'comprobantes.view': 'Permite ver el tablero de conciliación: cruza cada cobro por transferencia contra su comprobante escaneado.',
     'comprobantes.manage': 'Permite conciliar comprobantes a mano, marcar problemas y elegir el motor de lectura (IA/OCR).',
+    'conciliacion.view': 'Permite ver la conciliación con Mercado Pago: lo que entró de verdad en cada cuenta contra lo cobrado por transferencia, con el nombre de quien pagó. Incluye las diferencias y su evidencia.',
+    'conciliacion.manage': 'Permite conectar las cuentas de Mercado Pago (link para el titular o access token), sincronizarlas, vincular movimientos a mano y marcar diferencias como revisadas.',
     'arca.view': 'Permite ver el facturador: el cupo del período, las ventas facturables y los comprobantes ya emitidos con su CAE.',
     'arca.emit': 'Permite emitir facturas electrónicas y notas de crédito ante ARCA. Son comprobantes fiscales reales: una vez emitidos sólo se anulan con nota de crédito.',
     'arca.manage': 'Permite configurar el facturador (CUIT, certificado, punto de venta) y definir el cupo: cuánto de lo que se vende se factura.',

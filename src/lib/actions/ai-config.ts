@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { getCurrentOrgId } from './org'
 import { revalidatePath } from 'next/cache'
+import { COLUMNAS_AI_CONFIG_MENSAJERIA } from '@/lib/ai-config-columnas'
 
 export interface OrgAiConfig {
   id: string
@@ -127,29 +128,17 @@ export async function saveOrgAiConfig(config: {
       },
       { onConflict: 'organization_id' }
     )
-    .select()
+    // Columnas EXPLÍCITAS: lo que devuelve esta action llega al navegador (Mensajería hace
+    // `setAiConfig(result.data)`), y un `.select()` pelado es `*`: devolvía la clave cifrada
+    // de Tex y su configuración (src/lib/ai-config-columnas.ts).
+    .select(COLUMNAS_AI_CONFIG_MENSAJERIA)
     .single()
 
   if (error) return { data: null, error: error.message }
 
   revalidatePath('/dashboard/mensajeria')
-  return { data: data as OrgAiConfig, error: null }
-}
-
-/**
- * Obtiene la config de IA para una org específica (usado por el workflow engine).
- * No requiere sesión — se llama desde webhooks con service role.
- */
-export async function getAiConfigForOrg(orgId: string): Promise<OrgAiConfig | null> {
-  const supabase = createAdminClient()
-  const { data } = await supabase
-    .from('organization_ai_config')
-    .select('*')
-    .eq('organization_id', orgId)
-    .eq('is_active', true)
-    .maybeSingle()
-
-  return data as OrgAiConfig | null
+  // Sin las columnas `assistant_*` ni la clave cifrada: Mensajería no las lee.
+  return { data: data as unknown as OrgAiConfig, error: null }
 }
 
 export interface AiExecutionLog {

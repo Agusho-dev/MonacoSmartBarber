@@ -342,11 +342,25 @@ export async function incrementUsage(
   const resolvedOrgId = orgId ?? (await getCurrentOrgId())
   if (!resolvedOrgId) return
   const supabase = createAdminClient()
-  await supabase.rpc('increment_org_usage', {
+  // Known Risk #13: un error que no se mira deja el tope del mes sin contar en silencio
+  // (como el contador de las cuentas de cobro, que quedó en $0 desde el día uno). No se
+  // propaga para no romper a quien llama (Tex, difusiones, el asistente viejo): el mensaje
+  // ya se respondió o se mandó. Queda en el log con la org y la métrica para rastrearlo.
+  // Desde la mig 229 la RPC es sólo de service_role: este cliente lo es.
+  const { error } = await supabase.rpc('increment_org_usage', {
     p_org_id: resolvedOrgId,
     p_metric: metric,
     p_amount: amount,
   })
+  if (error) {
+    console.error('[entitlements] increment_org_usage falló: el uso del mes quedó sin sumar', {
+      orgId: resolvedOrgId,
+      metric,
+      amount,
+      code: error.code,
+      message: error.message,
+    })
+  }
 }
 
 export async function logDenial(

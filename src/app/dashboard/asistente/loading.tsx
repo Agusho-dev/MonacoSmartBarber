@@ -1,33 +1,21 @@
+import { EsqueletoHilo, EsqueletoHistorial } from './components/esqueleto'
+
+// Mismo alto que la pantalla (ver asistente-client.tsx): el shell no le suma el
+// padding inferior en esta ruta y el header mide 48 px en el celular y 56 en la compu.
 export default function Loading() {
   return (
-    <div className="-m-3 flex h-[calc(100dvh-3.5rem)] lg:-m-6">
-      <aside className="hidden w-64 shrink-0 border-r border-border p-2 lg:block">
-        <div className="asst-shimmer h-9 w-full rounded-xl" />
-        <div className="mt-3 space-y-1.5">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="asst-shimmer h-8 w-full rounded-lg" />
-          ))}
-        </div>
+    <div className="-m-3 flex h-[calc(100dvh-3rem)] min-h-0 overflow-hidden lg:-m-6 lg:h-[calc(100dvh-3.5rem)]">
+      <aside className="hidden w-[264px] shrink-0 border-r bg-sidebar/60 lg:block">
+        <EsqueletoHistorial />
       </aside>
-      <div className="flex flex-1 flex-col">
-        <div className="flex h-12 items-center gap-2 border-b border-border px-3">
-          <div className="asst-shimmer size-7 rounded-lg" />
-          <div className="asst-shimmer h-4 w-28 rounded" />
+      <section className="flex min-w-0 flex-1 flex-col">
+        <div className="hidden h-14 shrink-0 items-center gap-3 border-b px-6 lg:flex">
+          <div className="asst-shimmer size-8 rounded-full" />
+          <div className="asst-shimmer h-4 w-14 rounded" />
         </div>
-        <div className="mx-auto w-full max-w-3xl flex-1 space-y-6 px-4 py-6">
-          <div className="flex justify-end">
-            <div className="asst-shimmer h-10 w-1/2 rounded-2xl" />
-          </div>
-          <div className="space-y-2">
-            <div className="asst-shimmer h-4 w-3/4 rounded" />
-            <div className="asst-shimmer h-4 w-2/3 rounded" />
-            <div className="asst-shimmer h-4 w-1/2 rounded" />
-          </div>
-        </div>
-        <div className="border-t border-border p-3">
-          <div className="asst-shimmer mx-auto h-12 max-w-3xl rounded-2xl" />
-        </div>
-      </div>
+        <div className="h-11 shrink-0 border-b lg:hidden" />
+        <EsqueletoHilo />
+      </section>
     </div>
   )
 }

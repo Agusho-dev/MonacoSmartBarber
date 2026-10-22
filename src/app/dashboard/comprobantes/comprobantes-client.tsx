@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition, type ComponentType } from 'react'
+import Link from 'next/link'
 import {
   ScanLine, Settings, CheckCircle2, AlertTriangle, Copy, Clock, FileQuestion,
   ReceiptText, Download, Sparkles, Cpu, ShieldCheck, ExternalLink, X, ChevronRight,
-  Loader2, Building2, Wallet, CalendarX2, CalendarClock, Users, RefreshCw,
+  Loader2, Building2, Wallet, CalendarX2, CalendarClock, Users, RefreshCw, ArrowUpRight,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -27,11 +28,14 @@ import type { TransferReceiptSettingsView } from '@/lib/actions/receipts'
 import type { ReceiptEngine } from '@/lib/types/database'
 
 // ── Metadata visual por estado ──────────────────────────────
+// "Con comprobante" y no "Conciliado": acá se mira si cada cobro tiene su
+// comprobante escaneado. Si la plata entró de verdad lo dice /dashboard/conciliacion
+// (Mercado Pago), y "conciliado/cuadra" queda reservado para eso.
 const STATE_META: Record<ReconState, {
   label: string; short: string; icon: ComponentType<{ className?: string }>
   text: string; bg: string; ring: string
 }> = {
-  conciliado:      { label: 'Conciliado',        short: 'Conciliados',     icon: CheckCircle2,  text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10', ring: 'border-emerald-500/30' },
+  conciliado:      { label: 'Con comprobante',   short: 'Con comprobante', icon: CheckCircle2,  text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10', ring: 'border-emerald-500/30' },
   sin_comprobante: { label: 'Sin comprobante',   short: 'Sin comprobante', icon: ReceiptText,   text: 'text-amber-600 dark:text-amber-400',     bg: 'bg-amber-500/10',   ring: 'border-amber-500/30' },
   monto:           { label: 'Monto no coincide', short: 'Monto ≠',         icon: AlertTriangle, text: 'text-orange-600 dark:text-orange-400',   bg: 'bg-orange-500/10',  ring: 'border-orange-500/30' },
   fecha:           { label: 'Fecha vieja',        short: 'Fecha vieja',    icon: CalendarX2,    text: 'text-rose-600 dark:text-rose-400',       bg: 'bg-rose-500/10',    ring: 'border-rose-500/30' },
@@ -89,7 +93,7 @@ function ConciliationRing({ pct, empty }: { pct: number; empty?: boolean }) {
           {empty ? '—' : `${shown}%`}
         </span>
         <span className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {empty ? 'sin datos' : 'conciliado'}
+          {empty ? 'sin datos' : 'con comprobante'}
         </span>
       </div>
     </div>
@@ -120,7 +124,7 @@ function StatusBadge({ state }: { state: ReconState }) {
   )
 }
 
-/** Aviso suave: cobro conciliado por monto, pero la fecha leída parece de otro día. */
+/** Aviso suave: el monto del comprobante coincide con el cobro, pero la fecha leída parece de otro día. */
 function DateReviewPill() {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-600 dark:text-amber-400">
@@ -145,6 +149,8 @@ interface Props {
   branches: { id: string; name: string }[]
   accounts: { id: string; name: string; branch_id: string }[]
   canManage: boolean
+  /** Muestra el enlace a la conciliación con Mercado Pago (permiso conciliacion.view). */
+  puedeVerConciliacion?: boolean
 }
 
 type Preset = 'hoy' | '7d' | '30d'
@@ -158,7 +164,7 @@ function rangeFor(p: Preset): { from: string; to: string } {
   return { from: from.toISOString(), to: now.toISOString() }
 }
 
-export function ComprobantesClient({ initialRecon, settings: initialSettings, branches, accounts, canManage }: Props) {
+export function ComprobantesClient({ initialRecon, settings: initialSettings, branches, accounts, canManage, puedeVerConciliacion = false }: Props) {
   const [recon, setRecon] = useState(initialRecon)
   const [preset, setPreset] = useState<Preset>('7d')
   const [branchId, setBranchId] = useState<string>('all')
@@ -219,7 +225,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
     setDetailSaving(false)
     if ('error' in res) { toast.error(res.error); return }
     toast.success(successMsg ?? (
-      action === 'manual_ok' ? 'Marcado como conciliado'
+      action === 'manual_ok' ? 'Dado por válido'
       : action === 'date_reviewed' ? 'Fecha marcada como revisada'
       : action === 'joint_reviewed' ? 'Cobro conjunto revisado'
       : 'Nota guardada'
@@ -268,9 +274,18 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
             Conciliá cada cobro por transferencia con su comprobante escaneado.
           </p>
         </div>
-        <Button variant="outline" onClick={openSettings} className="gap-2">
-          <Settings className="size-4" /> Configuración
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {puedeVerConciliacion && (
+            <Button variant="ghost" asChild className="gap-1.5 text-muted-foreground hover:text-foreground">
+              <Link href="/dashboard/conciliacion">
+                Ver la conciliación con Mercado Pago <ArrowUpRight className="size-4" />
+              </Link>
+            </Button>
+          )}
+          <Button variant="outline" onClick={openSettings} className="gap-2">
+            <Settings className="size-4" /> Configuración
+          </Button>
+        </div>
       </div>
 
       {/* Banner: la lectura falló. Va PRIMERO porque invalida todo lo de abajo. */}
@@ -396,8 +411,10 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
         </div>
       </div>
 
-      {/* Aviso interno de fecha: cobros conciliados por monto, con fecha a revisar.
-          NO frena al barbero — el aviso vive acá, en el dashboard. */}
+      {/* Aviso interno de fecha: el monto del comprobante coincide con el cobro, pero la fecha
+          leída es de otro día. NO frena al barbero — el aviso vive acá, en el dashboard.
+          Que el comprobante coincida NO prueba que la plata entró: eso lo dice la conciliación
+          con Mercado Pago (/dashboard/conciliacion). */}
       {settings.isEnabled && summary.dateReview > 0 && (
         <button
           onClick={() => { setStateFilter(null); setJointFilter(false); setDateFilter((v) => !v) }}
@@ -412,7 +429,7 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
               {summary.dateReview} {summary.dateReview === 1 ? 'comprobante con fecha a revisar' : 'comprobantes con fecha a revisar'}
             </p>
             <p className="text-xs text-muted-foreground">
-              El monto coincide y el cobro está conciliado. Confirmá que la fecha del comprobante sea correcta.
+              El monto del comprobante coincide con el cobro. Confirmá que la fecha sea correcta.
             </p>
           </div>
           <span className="shrink-0 text-xs font-medium text-amber-600/80 dark:text-amber-400/80">
@@ -449,10 +466,12 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
       )}
 
       {/* Aviso salud / filtro activo. Sólo cuando NO hay filtro activo: si no, se
-          mostraría "Todo cuadra" encima de una tabla filtrada (posiblemente vacía). */}
+          mostraría encima de una tabla filtrada (posiblemente vacía). No dice "cuadra":
+          que cada cobro tenga su comprobante no prueba que la plata entró (eso lo dice
+          /dashboard/conciliacion, que puede decir "Faltan $X" para el mismo período). */}
       {settings.isEnabled && anomalies === 0 && summary.scopeCount > 0 && !stateFilter && !dateFilter && !jointFilter && (
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm font-medium text-emerald-700 dark:text-emerald-300">
-          <CheckCircle2 className="size-4" /> Todo cuadra: cada transferencia del período tiene su comprobante.
+        <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm font-medium text-emerald-300">
+          <CheckCircle2 className="size-4" /> Cada transferencia del período tiene su comprobante.
         </div>
       )}
       {stateFilter && (
@@ -637,10 +656,19 @@ export function ComprobantesClient({ initialRecon, settings: initialSettings, br
                       <CalendarClock className="size-4" /> La fecha leída parece de otro día
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      El cobro ya está conciliado por monto — la plata entró.{canManage
+                      El monto del comprobante coincide con el cobro.{canManage
                         ? ' Mirá la imagen: si la fecha es correcta (o no importa), marcala como revisada y este aviso desaparece.'
                         : ' Revisá la imagen para confirmar que la fecha del comprobante sea correcta.'}
                     </p>
+                    {/* Si la plata entró de verdad no lo dice un comprobante: lo dice Mercado Pago. */}
+                    {puedeVerConciliacion && (
+                      <Link
+                        href="/dashboard/conciliacion"
+                        className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-amber-300 underline-offset-4 hover:underline"
+                      >
+                        Ver si la plata entró en Mercado Pago <ArrowUpRight className="size-3.5" />
+                      </Link>
+                    )}
                     {canManage && detail.receipt && (
                       <Button
                         variant="outline"

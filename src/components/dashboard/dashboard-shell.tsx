@@ -3,6 +3,7 @@
 import { useState, useTransition, useEffect, useMemo, useCallback, useRef } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import {
   Building2,
@@ -24,10 +25,10 @@ import {
   ScanLine,
   Handshake,
   CalendarClock,
-  Bot,
   FileCheck2,
   Gift,
   IdCard,
+  Scale,
 } from 'lucide-react'
 import {
   DndContext,
@@ -79,6 +80,12 @@ import { Badge } from '@/components/ui/badge'
 import { Lock, Clock as ClockIcon, CreditCard } from 'lucide-react'
 import { NAV_FEATURE_MAP } from '@/lib/billing/nav-feature-map'
 import { AiFeatureAnnouncement } from './ai-feature-announcement'
+import { TexIcono } from '@/components/tex/tex-icono'
+import { TexLanzador } from '@/components/tex/tex-lanzador'
+
+// El panel de Tex (atajos ⌘K, abrirTex()) va diferido: no suma peso a la
+// carga de cada pantalla. El chat en sí se baja recién al abrirlo.
+const TexPanel = dynamic(() => import('@/components/tex/tex-panel').then((m) => m.TexPanel), { ssr: false })
 
 const navItems = [
   { href: '/dashboard/fila', label: 'Fila', icon: ListOrdered, requiredPermissions: ['queue.view'] },
@@ -89,12 +96,13 @@ const navItems = [
   { href: '/dashboard/servicios', label: 'Servicios y Productos', icon: Sparkles, requiredPermissions: ['services.view'] },
   { href: '/dashboard/clientes', label: 'Clientes', icon: Users, requiredPermissions: ['clients.view'] },
   { href: '/dashboard/mensajeria', label: 'Mensajería', icon: MessageSquare, requiredPermissions: ['clients.view'] },
-  { href: '/dashboard/asistente', label: 'Asistente IA', icon: Bot, requiredPermissions: ['stats.view', 'settings.view'] },
+  { href: '/dashboard/asistente', label: 'Tex', icon: TexIcono, requiredPermissions: ['stats.view', 'settings.view'] },
   { href: '/dashboard/app-movil', label: 'APP Móvil', icon: Smartphone, requiredPermissions: ['rewards.view'] },
   { href: '/dashboard/fidelizacion', label: 'Fidelización', icon: Gift, requiredPermissions: ['rewards.view'] },
   { href: '/dashboard/convenios', label: 'Convenios', icon: Handshake, requiredPermissions: ['agreements.view'] },
   { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3, requiredPermissions: ['stats.view'] },
   { href: '/dashboard/caja', label: 'Caja', icon: Receipt, requiredPermissions: ['caja.view'] },
+  { href: '/dashboard/conciliacion', label: 'Conciliación', icon: Scale, requiredPermissions: ['conciliacion.view'] },
   { href: '/dashboard/comprobantes', label: 'Comprobantes', icon: ScanLine, requiredPermissions: ['comprobantes.view'] },
   // "Facturación ARCA" y no "Facturación" a secas: el dropdown del avatar ya
   // usa esa palabra para /dashboard/billing, que es la suscripción del SaaS.
@@ -225,31 +233,35 @@ function SortableNavItem({
   }
 
   // Modo normal — comportamiento de link igual al original.
-  // El Asistente IA lleva un borde con brillo animado (nav-ai-glow).
-  const isAi = item.href === '/dashboard/asistente'
+  // Tex va sin el borde arcoíris (nav-ai-glow, que distraía en un menú de
+  // trabajo): su cara como ícono y, en la pantalla activa, un anillo quieto
+  // del azul de Tex.
+  const isTex = item.href === '/dashboard/asistente'
   return (
     <div ref={setNodeRef} style={style}>
-      <div className={isAi ? 'nav-ai-glow rounded-lg' : undefined}>
-        <Link
-          href={item.href}
-          onClick={onNavigate}
+      <Link
+        href={item.href}
+        onClick={onNavigate}
+        className={cn(
+          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+          isActive
+            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+            : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+        )}
+      >
+        <item.icon
           className={cn(
-            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-            isActive
-              ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-              : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+            'size-4 shrink-0',
+            isTex && isActive && 'rounded-full ring-1 ring-[color:var(--tex)]/70 ring-offset-1 ring-offset-sidebar-accent'
           )}
-        >
-          <item.icon className={cn('size-4 shrink-0', isAi && 'text-[oklch(0.82_0.12_285)]')} />
-          {isAi ? <span className="font-semibold">{item.label}</span> : item.label}
-          {isAi && <Sparkles className="ml-auto size-3.5 text-[oklch(0.80_0.13_85)]" />}
-          {item.href === '/dashboard/equipo' && pendingBreakCount > 0 && (
-            <span className="ml-auto flex size-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
-              {pendingBreakCount}
-            </span>
-          )}
-        </Link>
-      </div>
+        />
+        {item.label}
+        {item.href === '/dashboard/equipo' && pendingBreakCount > 0 && (
+          <span className="ml-auto flex size-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
+            {pendingBreakCount}
+          </span>
+        )}
+      </Link>
     </div>
   )
 }
@@ -378,6 +390,20 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   const searchParams = useSearchParams()
   const isFocusMode =
     pathname.startsWith('/dashboard/mensajeria') && searchParams.get('foco') === '1'
+  // Tex: quien tiene el módulo de IA y ve estadísticas o configuración (owner y
+  // admin tienen todos los permisos). En su propia pantalla no van ni el
+  // lanzador ni el panel: la pantalla ES Tex.
+  const puedeUsarTex =
+    !!entitlements?.features?.['ai.enabled'] && (!!permissions['stats.view'] || !!permissions['settings.view'])
+  const isTexScreen = pathname === '/dashboard/asistente'
+  const mostrarPanelTex = puedeUsarTex && !pathname.startsWith('/dashboard/asistente')
+  const [texPanelAbierto, setTexPanelAbierto] = useState(false)
+  // Pantallas de alto completo (modo foco de Mensajería y Tex): sin barra
+  // inferior, sin el padding que la compensa y sin swipe entre secciones (en
+  // Tex se pisaría con el composer, las tablas y los gráficos). Con la hoja de
+  // Tex abierta en el celular tampoco.
+  const isFullHeight = isFocusMode || isTexScreen
+  const hideBottomNav = isFullHeight || (mostrarPanelTex && texPanelAbierto)
   const touchStartX = useRef(0)
   const touchStartY = useRef(0)
   const touchStartTime = useRef(0)
@@ -533,7 +559,9 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   // y evitar el scroll vertical mientras se desliza horizontalmente
   useEffect(() => {
     const el = mainRef.current
-    if (!el) return
+    // Sin el listener: sin un touchstart propio, un touchmove se mediría contra
+    // el inicio de un gesto viejo.
+    if (!el || hideBottomNav) return
 
     // Detecta si el elemento tocado (o algún ancestro hasta main) tiene scroll horizontal propio.
     // Esto permite que tab bars y tablas con overflow-x-auto funcionen sin conflicto con el swipe.
@@ -550,6 +578,10 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     }
 
     const onMove = (e: TouchEvent) => {
+      // Gráficos, tablas, carruseles y el composer de Tex se excluyen con
+      // `data-sin-swipe`: deslizar sobre ellos no cambia de sección.
+      if ((e.target as Element | null)?.closest?.('[data-sin-swipe]')) return
+
       // Arrastrando una tarjeta (la fila: un cliente hacia un barbero) el dedo
       // va para cualquier lado: no es un gesto de cambiar de sección.
       if (document.documentElement.hasAttribute('data-arrastrando')) return
@@ -603,7 +635,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
 
     el.addEventListener('touchmove', onMove, { passive: false })
     return () => el.removeEventListener('touchmove', onMove)
-  }, [currentNavIndex, orderedItems])
+  }, [currentNavIndex, orderedItems, hideBottomNav])
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     // Si no hubo un swipe horizontal activo, no hacer nada
@@ -782,9 +814,19 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
       />
     <div className="flex h-screen overflow-hidden">
       <AiFeatureAnnouncement
-        canUse={!!entitlements?.features?.['ai.enabled'] && (!!permissions['stats.view'] || !!permissions['settings.view'])}
+        canUse={puedeUsarTex}
         userKey={user.email}
       />
+      {mostrarPanelTex && (
+        <TexPanel
+          orgNombre={availableOrganizations.find(o => o.id === organizationId)?.name || 'tu barbería'}
+          puedeConfigurar={!!permissions['settings.manage']}
+          puedeConciliacion={!!permissions['conciliacion.view']}
+          etiquetaSeccion={currentNavIndex >= 0 ? orderedItems[currentNavIndex]?.label ?? null : null}
+          sinEncabezado={isFocusMode}
+          onAbiertoChange={setTexPanelAbierto}
+        />
+      )}
       <aside
         className={cn(
           'hidden lg:flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shrink-0 overflow-hidden transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]',
@@ -854,7 +896,13 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
             </span>
           </div>
 
-          <div className="flex-1 hidden lg:block" />
+          {/* Tex: en la compu, campo-botón en el centro del header (el padding
+              izquierdo iguala el avatar + el gap, así queda centrado de verdad);
+              en el celular, la cara entre el título y el avatar. */}
+          <div className="flex-1 hidden lg:flex items-center justify-center lg:pl-[52px]">
+            {mostrarPanelTex && !isFocusMode && <TexLanzador variante="escritorio" />}
+          </div>
+          {mostrarPanelTex && !isFocusMode && <TexLanzador variante="movil" />}
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -900,14 +948,19 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
           <main
             ref={mainRef}
             className={cn(
-              'h-full overflow-y-auto overflow-x-hidden transition-[padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]',
+              'h-full overflow-y-auto overflow-x-hidden',
+              // En Tex el padding cambia de golpe: animado, mientras baja, la
+              // pantalla de alto completo desbordaría el <main> y aparecería un scroll.
+              !isTexScreen && 'transition-[padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]',
               !isFocusMode && 'p-3 lg:p-6 lg:pb-6'
             )}
             style={{
-              paddingBottom: isFocusMode ? 0 : 'calc(4.5rem + env(safe-area-inset-bottom, 0px))',
+              // Tex no tiene barra inferior que compensar: queda el padding de
+              // las clases, que su pantalla cancela con márgenes negativos.
+              paddingBottom: isFocusMode ? 0 : isTexScreen ? undefined : 'calc(4.5rem + env(safe-area-inset-bottom, 0px))',
             }}
-            onTouchStart={isFocusMode ? undefined : handleTouchStart}
-            onTouchEnd={isFocusMode ? undefined : handleTouchEnd}
+            onTouchStart={hideBottomNav ? undefined : handleTouchStart}
+            onTouchEnd={hideBottomNav ? undefined : handleTouchEnd}
           >
             <BranchScopeProvider allowedBranchIds={allowedBranchIds} organizationId={organizationId}>
               {children}
@@ -936,7 +989,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
         <MobileBottomNav
           orderedItems={orderedItems}
           currentIndex={currentNavIndex < 0 ? 0 : currentNavIndex}
-          hidden={isFocusMode}
+          hidden={hideBottomNav}
         />
       </div>
     </div>

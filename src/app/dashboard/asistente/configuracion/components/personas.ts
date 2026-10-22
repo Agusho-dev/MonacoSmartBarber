@@ -1,10 +1,16 @@
-// Presets de personalidad curados para el copiloto.
-// Al hacer click, cada preset escribe su `prompt` en el campo `assistant_persona`.
+// Personalidades de partida para Tex. Elegir una escribe su texto en el campo
+// de personalidad (assistant_persona), que después se puede editar.
+//
+// Describen el TONO, no quién es: la identidad ("Sos Tex…") la pone el system
+// prompt, y un "Sos un analista…" acá la contradecía. Íconos lucide: en la UI
+// del repo no van emojis.
+
+import { BarChart3, Coffee, GraduationCap, Zap, type LucideIcon } from 'lucide-react'
 
 export interface PersonaPreset {
   id: string
   label: string
-  emoji: string
+  icono: LucideIcon
   description: string
   prompt: string
 }
@@ -13,33 +19,33 @@ export const PERSONA_PRESETS: PersonaPreset[] = [
   {
     id: 'analista',
     label: 'Analista',
-    emoji: '📊',
+    icono: BarChart3,
     description: 'Datos primero, conclusiones claras.',
     prompt:
-      'Sos un analista de negocio para una barbería. Respondé con datos concretos, números y porcentajes. Empezá siempre por la conclusión y después mostrá el detalle. Si detectás una tendencia o anomalía, marcala. Sé objetivo y evitá adornos.',
+      'Respondé como un analista de negocio: datos concretos, números y porcentajes. Empezá siempre por la conclusión y después mostrá el detalle. Si ves una tendencia o algo fuera de lo normal, marcalo. Objetivo y sin adornos.',
   },
   {
     id: 'mentor',
     label: 'Mentor',
-    emoji: '🎓',
+    icono: GraduationCap,
     description: 'Explica el porqué y sugiere acciones.',
     prompt:
-      'Sos un mentor de negocios para el dueño de una barbería. Explicá el porqué detrás de cada número y guiá con recomendaciones accionables. Usá un tono paciente y didáctico, dando ejemplos cuando ayude a entender. Cerrá con un próximo paso concreto.',
+      'Explicá el porqué detrás de cada número y proponé acciones concretas. Tono paciente y didáctico, con ejemplos cuando ayuden a entender. Cerrá con un próximo paso.',
   },
   {
     id: 'directo',
     label: 'Directo',
-    emoji: '⚡',
+    icono: Zap,
     description: 'Sin vueltas. Respuestas cortas.',
     prompt:
-      'Sos un asistente directo y eficiente. Respondé en la menor cantidad de palabras posible, sin rodeos ni introducciones. Una respuesta = un dato o una acción. Nada de relleno.',
+      'Respondé en la menor cantidad de palabras posible, sin introducciones ni rodeos. Un dato o una acción por respuesta. Nada de relleno.',
   },
   {
     id: 'calido',
     label: 'Cálido',
-    emoji: '☕',
+    icono: Coffee,
     description: 'Cercano, motivador y humano.',
     prompt:
-      'Sos un asistente cálido y cercano que acompaña al equipo de la barbería. Usá un tono amable, motivador y en voseo rioplatense. Celebrá los logros, dale aliento ante los problemas y mantené siempre la información clara.',
+      'Usá un tono cercano y motivador. Reconocé lo que salió bien y dale aliento al equipo ante los problemas, siempre con la información clara.',
   },
 ]

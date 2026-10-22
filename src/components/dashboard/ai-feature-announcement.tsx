@@ -1,30 +1,46 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { Bot, Sparkles, BarChart3, FileText, Search, ArrowRight } from 'lucide-react'
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { usePathname, useRouter } from 'next/navigation'
+import { ArrowRight } from 'lucide-react'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { TexPose } from '@/components/tex/tex-pose'
+import { useAtajoTex, useMediaQuery } from '@/components/tex/chat/hooks'
 
-const STORAGE_KEY = 'msb_ai_announce_v1'
+// Clave nueva (antes `msb_ai_announce_v1`): quien ya vio el popup del
+// "Asistente IA" tiene que conocer a Tex igual.
+const STORAGE_KEY = 'msb_tex_announce_v1'
 
 /**
- * Popup de presentación del Asistente IA. Se muestra UNA vez (por navegador/usuario)
- * a quien tenga acceso a la feature (dueños/admins con el módulo activo).
+ * "Conocé a Tex": la presentación de la IA del dashboard. Se muestra UNA vez
+ * (por navegador y usuario) a quien puede usarla (módulo de IA + estadísticas o
+ * configuración).
  */
 export function AiFeatureAnnouncement({ canUse, userKey }: { canUse: boolean; userKey?: string | null }) {
   const [open, setOpen] = useState(false)
   const router = useRouter()
+  // En la pantalla de Tex la presentación sobra (y su botón llevaría a la misma
+  // pantalla): quien llegó ahí ya lo conoce.
+  const enTex = usePathname()?.startsWith('/dashboard/asistente') ?? false
+  // El atajo sólo se menciona con teclado y mouse (en el celular no existe).
+  const conMouse = useMediaQuery('(pointer: fine)')
+  const atajoTex = useAtajoTex()
+  const atajo = conMouse ? atajoTex : null
   const key = userKey ? `${STORAGE_KEY}::${userKey}` : STORAGE_KEY
 
   useEffect(() => {
     if (!canUse) return
+    if (enTex) {
+      try { localStorage.setItem(key, '1') } catch { /* ignore */ }
+      return
+    }
     let seen = false
     try { seen = localStorage.getItem(key) === '1' } catch { /* ignore */ }
     if (seen) return
     const t = setTimeout(() => setOpen(true), 700)
     return () => clearTimeout(t)
-  }, [canUse, key])
+  }, [canUse, key, enTex])
 
   function markSeen() {
     try { localStorage.setItem(key, '1') } catch { /* ignore */ }
@@ -43,59 +59,30 @@ export function AiFeatureAnnouncement({ canUse, userKey }: { canUse: boolean; us
 
   if (!canUse) return null
 
-  const features = [
-    { icon: BarChart3, title: 'Preguntá en lenguaje natural', desc: 'Facturación, ranking de barberos, clientes en riesgo… con números reales.' },
-    { icon: FileText, title: 'Informes en PDF', desc: 'Pedile un reporte y descargalo con tu marca, listo para compartir.' },
-    { icon: Search, title: 'Búsqueda inteligente', desc: 'Encontrá qué dicen tus clientes y activá el Modo Pro para consultas avanzadas.' },
-  ]
-
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) dismiss() }}>
-      <DialogContent className="max-w-md overflow-hidden p-0 gap-0">
-        {/* Hero */}
-        <div className="relative overflow-hidden px-6 pt-8 pb-6 text-center">
-          <div className="pointer-events-none absolute inset-0 opacity-60"
-            style={{ background: 'radial-gradient(120% 80% at 50% 0%, oklch(0.72 0.16 285 / 0.22), transparent 70%)' }} />
-          <div className="relative mx-auto flex size-16 items-center justify-center rounded-2xl assistant-pro-ring border border-[oklch(0.78_0.12_85/0.4)] animate-scale-in">
-            <Bot className="size-8 text-[oklch(0.82_0.12_285)]" />
-            <Sparkles className="absolute -right-1 -top-1 size-4 text-[oklch(0.80_0.13_85)]" style={{ animation: 'pulse-dot 2s ease-in-out infinite' }} />
-          </div>
-          <div className="relative mt-4">
-            <span className="inline-flex items-center gap-1 rounded-full border border-[oklch(0.78_0.12_85/0.4)] bg-[oklch(0.78_0.12_85/0.1)] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[oklch(0.80_0.13_85)]">
-              <Sparkles className="size-3" /> Nuevo
-            </span>
-            <DialogTitle className="mt-2 text-xl font-bold tracking-tight">
-              Conocé tu nuevo Asistente IA
-            </DialogTitle>
-            <p className="mt-1.5 text-sm text-muted-foreground">
-              Un copiloto que entiende tu negocio y responde con tus datos reales, al instante.
+      <DialogContent className="max-w-md gap-0 overflow-hidden p-0">
+        <div className="flex flex-col items-center px-6 pb-6 pt-8 text-center">
+          <TexPose pose="saludo" alto={128} halo prioridad />
+          <DialogTitle className="mt-5 text-xl font-semibold tracking-tight">Conocé a Tex</DialogTitle>
+          <DialogDescription className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Te contesta con los números reales de tu negocio, te arma informes y cada mañana te dice si cuadró la plata.
+          </DialogDescription>
+          {atajo && (
+            <p className="mt-4 text-xs text-muted-foreground">
+              Lo abrís desde cualquier pantalla con{' '}
+              <kbd className="rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 font-sans text-[11px] font-medium text-foreground/80">
+                {atajo}
+              </kbd>
+              .
             </p>
-          </div>
+          )}
         </div>
-
-        {/* Features */}
-        <div className="space-y-2 px-6">
-          {features.map((f, i) => {
-            const Icon = f.icon
-            return (
-              <div key={i} className="flex items-start gap-3 rounded-xl border border-border bg-card/50 p-3 animate-fade-up" style={{ animationDelay: `${i * 70}ms` }}>
-                <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent">
-                  <Icon className="size-4 text-foreground/80" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold">{f.title}</p>
-                  <p className="text-xs text-muted-foreground">{f.desc}</p>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-
-        {/* CTAs */}
-        <div className="flex items-center gap-2 p-6 pt-5">
-          <Button variant="ghost" className="flex-1" onClick={dismiss}>Ahora no</Button>
-          <Button className="btn-gold flex-1" onClick={tryIt}>
-            Probarlo <ArrowRight className="ml-1 size-4" />
+        <div className="flex items-center gap-2 border-t px-6 py-4">
+          <Button variant="ghost" className="h-10 flex-1" onClick={dismiss}>Ahora no</Button>
+          <Button className="h-10 flex-1 gap-1.5" onClick={tryIt}>
+            Hablar con Tex
+            <ArrowRight className="size-4" aria-hidden />
           </Button>
         </div>
       </DialogContent>
