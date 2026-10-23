@@ -61,6 +61,7 @@ import {
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { exportPaymentReceiptPDF, type ReceiptReport } from '@/lib/export'
+import { salioElArchivo } from '@/lib/guardar-archivo'
 import { useBranchStore } from '@/stores/branch-store'
 
 // ─── Tipos y constantes ───────────────────────────────────────────────────────
@@ -485,14 +486,15 @@ export function SueldosClient({ branches, staffMembers, paymentAccounts }: Props
         setPayAccountId('')
         // Generar recibo PDF
         try {
-          await exportPaymentReceiptPDF({
+          const resultado = await exportPaymentReceiptPDF({
             barberName,
             batchDate: new Date().toISOString(),
             totalAmount: r.data!.totalAmount,
             notes: currentNotes,
             reports: selectedReports,
           })
-          toast.success('Recibo PDF descargado')
+          // Con la hoja cerrada o el "Guardar" pendiente (app instalada del iPhone), no se dice "descargado".
+          if (salioElArchivo(resultado)) toast.success('Recibo PDF descargado')
         } catch (err) {
           console.error('Error al generar recibo PDF:', err)
           toast.error('El pago se registró pero hubo un error al generar el recibo')

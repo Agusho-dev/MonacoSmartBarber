@@ -76,6 +76,7 @@ import { getPaymentBatchesGrouped, type GroupedBatchMonth, type SalaryReport, ty
 import { prepareStaffContact } from '@/lib/actions/staff-contact'
 import { getStaffServiceHistory } from '@/lib/actions/visit-history'
 import { exportPaymentReceiptPDF } from '@/lib/export'
+import { guardarArchivo } from '@/lib/guardar-archivo'
 import type {
   Staff,
   Role,
@@ -1013,7 +1014,8 @@ function BarberDetailPanel({
         )
       }
 
-      doc.save(
+      await guardarArchivo(
+        doc.output('blob'),
         `boletin-${barber.full_name.replace(/\s+/g, '-').toLowerCase()}-${boletinFrom}-${boletinTo}.pdf`
       )
     } catch (err) {

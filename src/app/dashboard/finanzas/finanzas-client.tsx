@@ -30,6 +30,7 @@ import {
   type AccountPeriodTotals,
 } from '@/lib/actions/paymentAccounts'
 import { formatCurrency } from '@/lib/format'
+import { guardarArchivo } from '@/lib/guardar-archivo'
 import type { Branch, PaymentAccount } from '@/lib/types/database'
 import {
   Card,
@@ -461,12 +462,7 @@ export function FinanzasClient({
 
     const csvContent = '\ufeff' + lines.join(eol)
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `finanzas_${orgSlug}_${period}meses.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    void guardarArchivo(blob, `finanzas_${orgSlug}_${period}meses.csv`)
   }
 
   // PDF multi-sección usando jsPDF + autotable
@@ -635,7 +631,7 @@ export function FinanzasClient({
       })
     }
 
-    doc.save(`finanzas_${orgSlug}_${period}meses.pdf`)
+    await guardarArchivo(doc.output('blob'), `finanzas_${orgSlug}_${period}meses.pdf`)
   }
 
   return (

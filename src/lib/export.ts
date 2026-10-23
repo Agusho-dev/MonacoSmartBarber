@@ -1,5 +1,11 @@
 'use client'
 
+import { guardarArchivo, type OpcionesGuardar, type ResultadoGuardar } from '@/lib/guardar-archivo'
+
+// Los tres exportadores bajan el archivo con guardarArchivo: en la app
+// instalada del iPhone, por la hoja de compartir. Devuelven su resultado para
+// que el que llama no diga "Descargado" si la persona cerró la hoja.
+
 export interface OpcionesCSV {
   /**
    * Separador de columnas. Por defecto ',' (lo de siempre en las otras
@@ -20,17 +26,18 @@ export function contenidoCSV(headers: string[], rows: (string | number)[][], opc
   return [headers.map(encabezado).join(sep), ...rows.map((row) => row.map(celda).join(sep))].join('\n')
 }
 
-export function exportCSV(
+/** null = no había filas: no se armó ningún archivo. */
+export async function exportCSV(
   headers: string[],
   rows: (string | number)[][],
   filename: string,
-  opciones?: OpcionesCSV
-) {
-  if (rows.length === 0) return
+  opciones?: OpcionesCSV & Pick<OpcionesGuardar, 'detalle'>
+): Promise<ResultadoGuardar | null> {
+  if (rows.length === 0) return null
   const blob = new Blob(['\ufeff' + contenidoCSV(headers, rows, opciones)], {
     type: 'text/csv;charset=utf-8;',
   })
-  triggerDownload(blob, `${filename}.csv`)
+  return guardarArchivo(blob, `${filename}.csv`, { detalle: opciones?.detalle })
 }
 
 export async function exportPDF(
@@ -38,7 +45,7 @@ export async function exportPDF(
   headers: string[],
   rows: (string | number)[][],
   filename: string
-) {
+): Promise<ResultadoGuardar> {
   const { default: jsPDF } = await import('jspdf')
   const { default: autoTable } = await import('jspdf-autotable')
 
@@ -57,16 +64,7 @@ export async function exportPDF(
     headStyles: { fillColor: [40, 40, 40] },
   })
 
-  doc.save(`${filename}.pdf`)
-}
-
-function triggerDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  return guardarArchivo(doc.output('blob'), `${filename}.pdf`)
 }
 
 // ─── Recibo de pago salarial ─────────────────────────────────────────────────
@@ -98,7 +96,7 @@ export interface ReceiptData {
   orgName?: string
 }
 
-export async function exportPaymentReceiptPDF(data: ReceiptData) {
+export async function exportPaymentReceiptPDF(data: ReceiptData): Promise<ResultadoGuardar> {
   const { default: jsPDF } = await import('jspdf')
   const { default: autoTable } = await import('jspdf-autotable')
 
@@ -231,5 +229,5 @@ export async function exportPaymentReceiptPDF(data: ReceiptData) {
   }
 
   const safeName = data.barberName.replace(/\s+/g, '-').toLowerCase()
-  doc.save(`recibo-${safeName}-${periodFrom}-${periodTo}.pdf`)
+  return guardarArchivo(doc.output('blob'), `recibo-${safeName}-${periodFrom}-${periodTo}.pdf`)
 }

@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { formatCurrency, formatDateTime } from '@/lib/format'
+import { guardarArchivo } from '@/lib/guardar-archivo'
 import { toast } from 'sonner'
 import {
   getReconciliation, getReceiptSignedUrl, reviewReceipt, updateReceiptSettings,
@@ -821,9 +822,5 @@ function exportCsv(rows: ReconRow[]) {
   ].map(cell).join(','))
   const csv = '﻿' + [header.join(','), ...lines].join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = `comprobantes-${new Date().toISOString().slice(0, 10)}.csv`
-  a.click()
-  URL.revokeObjectURL(a.href)
+  void guardarArchivo(blob, `comprobantes-${new Date().toISOString().slice(0, 10)}.csv`)
 }

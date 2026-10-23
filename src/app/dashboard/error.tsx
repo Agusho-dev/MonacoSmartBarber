@@ -1,6 +1,8 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { AlertTriangle } from 'lucide-react'
 
@@ -11,6 +13,26 @@ interface DashboardErrorProps {
 
 // Boundary global de errores del dashboard
 export default function DashboardError({ error, reset }: DashboardErrorProps) {
+  const router = useRouter()
+  const [reintentando, startTransition] = useTransition()
+
+  // reset() solo no vuelve a pedirle nada al servidor: ante un error de una
+  // consulta (la base lenta) mostraba lo mismo. refresh() trae la página de
+  // nuevo. En la app instalada no hay botón de recargar.
+  function reintentar() {
+    // Sin red, refresh() termina en una navegación completa y queda la página
+    // de error del navegador, que en la app instalada no tiene salida.
+    if (navigator.onLine === false) {
+      reset()
+      toast.error('Sin conexión. Probá de nuevo cuando vuelva la red.')
+      return
+    }
+    startTransition(() => {
+      router.refresh()
+      reset()
+    })
+  }
+
   useEffect(() => {
     // Patrón listo para Sentry: Sentry.captureException(error)
     console.error('[dashboard:error]', {
@@ -38,7 +60,9 @@ export default function DashboardError({ error, reset }: DashboardErrorProps) {
         )}
       </div>
 
-      <Button onClick={reset}>Reintentar</Button>
+      <Button onClick={reintentar} disabled={reintentando}>
+        Reintentar
+      </Button>
     </div>
   )
 }

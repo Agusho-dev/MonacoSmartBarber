@@ -8,6 +8,7 @@ import { DbDownError } from '@/components/dashboard/db-down-error'
 import { LoyaltyResultHost } from '@/components/barber/loyalty-result-host'
 import { getCurrentOrgId } from '@/lib/actions/org'
 import { getEntitlements } from '@/lib/actions/entitlements'
+import { METADATA_APP_INSTALABLE } from '@/lib/app-instalable'
 import type { EntitlementsSnapshot } from '@/components/billing/entitlements-provider'
 
 export const dynamic = 'force-dynamic'
@@ -31,9 +32,14 @@ export const dynamic = 'force-dynamic'
  * dashboard que no exportan metadata (inicio, clientes, estadísticas,
  * mensajería, servicios, sucursales, fidelización…) heredan "BarberOS" en vez
  * de la marca de Monaco, y las que sí la exportan quedan intactas.
+ *
+ * El manifest y los meta de app instalada (src/lib/app-instalable.ts) también
+ * los heredan todas las páginas: un `metadata` propio que sólo pone el título
+ * no los pisa.
  */
 export const metadata: Metadata = {
   title: 'BarberOS',
+  ...METADATA_APP_INSTALABLE,
 }
 
 /**

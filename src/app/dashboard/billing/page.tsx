@@ -221,7 +221,14 @@ export default async function BillingPage() {
       <div>
         <div className="mb-3 flex items-baseline justify-between">
           <h2 className="text-lg font-semibold">Cambiar de plan</h2>
-          <Link href="/pricing" className="text-sm text-muted-foreground hover:underline">
+          {/* En otra ventana: /pricing no tiene forma de volver al panel, y en
+              la app instalada no hay botón de atrás (src/lib/app-instalable.ts). */}
+          <Link
+            href="/pricing"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-muted-foreground hover:underline"
+          >
             Ver comparativa completa →
           </Link>
         </div>

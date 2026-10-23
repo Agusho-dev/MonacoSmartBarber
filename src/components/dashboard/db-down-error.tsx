@@ -97,7 +97,7 @@ export function DbDownError({ context }: DbDownErrorProps) {
   const progresoPct = (segundosRestantes / intervaloActual) * 100
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <div className="min-h-dvh flex items-center justify-center bg-background p-4">
       <Card className="max-w-md w-full">
         <CardHeader>
           <div className="flex items-center gap-3">

@@ -1,6 +1,7 @@
 /**
  * Recarga por versión: que las pantallas que quedan prendidas todo el día (panel
- * del barbero, kiosko, TV) no sigan corriendo el bundle de un deploy anterior.
+ * del barbero, kiosko, TV, la Fila del dashboard y el dashboard instalado como
+ * app) no sigan corriendo el bundle de un deploy anterior.
  *
  * El problema. Producción tiene Skew Protection: una pantalla abierta antes del
  * deploy sigue pegándole al deployment VIEJO (sus server actions mandan
@@ -26,6 +27,13 @@
  *    server action ya falló por versión, la pantalla no puede seguir: avisa y
  *    recarga (esperando a que terminen de subirse las fotos, si hay).
  *
+ * 3. La superficie 'aviso' (el dashboard instalado como app, fuera de la Fila)
+ *    NO recarga sola: avisa "Hay una versión nueva del sistema" con
+ *    "Actualizar". Ahí hay cambios sin guardar que no viven en un diálogo (la
+ *    agenda de Turnos, las categorías de Fidelización, el editor de
+ *    automatizaciones), "ocioso" no los ve, y Safari de iOS no tiene
+ *    beforeunload que frene la recarga.
+ *
  * Guardas: nunca más de una recarga por la misma versión objetivo cada 10
  * minutos (sessionStorage; sin sessionStorage, la recarga automática no corre),
  * y apagado si el bundle no tiene versión (desarrollo).
@@ -34,12 +42,13 @@ import { toast } from 'sonner'
 import { unstable_isUnrecognizedActionError } from 'next/navigation'
 import { VERSION_APP } from '@/lib/version-app'
 
-export type SuperficieRecarga = 'panel' | 'kiosko' | 'tv'
+export type SuperficieRecarga = 'panel' | 'kiosko' | 'tv' | 'aviso'
 
 /** Para el call-site cuando la guarda no deja recargar sola (ya se recargó hace menos de 10 min). */
 export const TEXTO_RECARGA_MANUAL = 'Hay una versión nueva del sistema. Recargá la página para seguir.'
 
 const TEXTO_RECARGANDO = 'Hay una versión nueva del sistema: recargando…'
+const TEXTO_VERSION_NUEVA = 'Hay una versión nueva del sistema'
 const ID_AVISO = 'recarga-por-version'
 
 const CLAVE_GUARDA = 'msb.recarga-version.v1'
@@ -275,6 +284,25 @@ export function avisarYRecargarPorVersion(): boolean {
   return true
 }
 
+/**
+ * Superficie 'aviso': la versión nueva se ofrece y no se impone. El toque en
+ * "Actualizar" recarga sin pasar por la guarda: no puede entrar en bucle solo.
+ */
+function avisarVersionNueva(): void {
+  toast(TEXTO_VERSION_NUEVA, {
+    id: ID_AVISO,
+    description: 'Actualizá cuando termines lo que estás haciendo.',
+    duration: Infinity,
+    action: {
+      label: 'Actualizar',
+      onClick: () => {
+        console.info('[version] recargando', { desde: VERSION_APP || '(sin versión)', motivo: 'actualizar' })
+        window.location.reload()
+      },
+    },
+  })
+}
+
 // ─── Motor de la recarga en reposo ──────────────────────────────────────────
 
 /**
@@ -348,6 +376,8 @@ export function iniciarRecargaPorVersion(superficie: SuperficieRecarga): () => v
   motorActivo = true
 
   let pendiente: string | null = null
+  /** Superficie 'aviso': la versión que ya se avisó (una vez por versión). */
+  let avisada: string | null = null
   let ultimaConsulta = 0
   let consultando = false
   let intentando = false
@@ -366,7 +396,7 @@ export function iniciarRecargaPorVersion(superficie: SuperficieRecarga): () => v
   }
 
   const intentarRecargar = async () => {
-    if (!pendiente || intentando || detenido) return
+    if (superficie === 'aviso' || !pendiente || intentando || detenido) return
     // Guarda antes que nada: si ya se recargó hacia esta versión hace menos de
     // 10 min (o no hay sessionStorage), ni siquiera se pregunta al servidor.
     const guarda = leerGuarda()
@@ -415,16 +445,28 @@ export function iniciarRecargaPorVersion(superficie: SuperficieRecarga): () => v
         // Por ejemplo, un rollback a la versión que ya corre esta pantalla.
         pendiente = null
         dejarDeRevisar()
+        if (avisada) {
+          avisada = null
+          toast.dismiss(ID_AVISO)
+        }
         return
       }
       if (pendiente !== version) {
-        console.info('[version] hay una versión nueva; se recarga cuando la pantalla esté ociosa', {
-          actual: VERSION_APP,
-          nueva: version,
-          superficie,
-        })
+        console.info(
+          superficie === 'aviso'
+            ? '[version] hay una versión nueva; se avisa con "Actualizar"'
+            : '[version] hay una versión nueva; se recarga cuando la pantalla esté ociosa',
+          { actual: VERSION_APP, nueva: version, superficie },
+        )
       }
       pendiente = version
+      if (superficie === 'aviso') {
+        if (avisada !== version) {
+          avisada = version
+          avisarVersionNueva()
+        }
+        return
+      }
       revisarSiPendiente()
       void intentarRecargar()
     } finally {

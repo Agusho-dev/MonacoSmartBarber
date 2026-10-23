@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { Plus, Trash2, Wallet, Pencil, Download } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
+import { guardarArchivo } from '@/lib/guardar-archivo'
 import { toDateStr, todayDateStr } from '@/lib/time-utils'
 import { createExpenseTicket, deleteExpenseTicket, updateExpenseTicket } from '@/lib/actions/expense-tickets'
 import { useBranchStore } from '@/stores/branch-store'
@@ -264,12 +265,7 @@ export function EgresosClient({ expenseTickets, branches, accounts }: Props) {
         ])
         const csvContent = [headers, ...rows].map(row => row.map(csvField).join(',')).join('\n')
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `egresos.csv`
-        a.click()
-        URL.revokeObjectURL(url)
+        void guardarArchivo(blob, `egresos.csv`)
     }
 
     return (

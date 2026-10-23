@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
 import { Copy, Check, Link2, QrCode, Download, ExternalLink, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { Button } from '@/components/ui/button'
@@ -9,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { guardarArchivo } from '@/lib/guardar-archivo'
 
 interface Branch {
   id: string
@@ -34,12 +36,7 @@ function downloadSvg(id: string, filename: string) {
   const serializer = new XMLSerializer()
   const source = '<?xml version="1.0" standalone="no"?>\r\n' + serializer.serializeToString(svg)
   const blob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  void guardarArchivo(blob, filename)
 }
 
 function useCopy(text: string) {
@@ -202,18 +199,18 @@ export function LinkPublicoClient({ isEnabled, baseUrl, orgSlug, orgName, branch
             {!isEnabled ? (
               <>
                 El turnero está deshabilitado. Los clientes no podrán reservar hasta que lo actives desde{' '}
-                <a href="/dashboard/turnos/configuracion" className="font-medium text-foreground underline underline-offset-2 hover:no-underline">
+                <Link href="/dashboard/turnos/configuracion" className="font-medium text-foreground underline underline-offset-2 hover:no-underline">
                   Configuración
-                </a>
+                </Link>
                 .
               </>
             ) : (
               <>
                 Ninguna sucursal acepta turnos todavía: quien abra este link va a ver
                 &ldquo;trabajamos sin turno previo&rdquo;. Elegí el modo de operación en{' '}
-                <a href="/dashboard/turnos/configuracion" className="font-medium text-foreground underline underline-offset-2 hover:no-underline">
+                <Link href="/dashboard/turnos/configuracion" className="font-medium text-foreground underline underline-offset-2 hover:no-underline">
                   Configuración
-                </a>
+                </Link>
                 .
               </>
             )}

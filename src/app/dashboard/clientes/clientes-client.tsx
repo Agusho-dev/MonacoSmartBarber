@@ -40,6 +40,8 @@ import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
 import { exportCSV } from '@/lib/export'
+import { salioElArchivo } from '@/lib/guardar-archivo'
+import { esAppInstalada } from '@/lib/app-instalable'
 import { createClient } from '@/lib/supabase/client'
 import { updateClientNotes } from '@/lib/actions/clients'
 import { checkinClient } from '@/lib/actions/queue'
@@ -548,7 +550,10 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
         toast.error('No hay clientes para exportar con estos filtros')
         return
       }
-      exportCSV(
+      const recorte = res.truncated
+        ? `Exportamos las primeras ${res.rows.length} filas. Afiná los filtros para el resto.`
+        : undefined
+      const resultado = await exportCSV(
         [
           'Nombre',
           'Teléfono',
@@ -581,12 +586,14 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
           metaOrigen(c.signupSource).label,
           c.notes ?? '',
         ]),
-        `clientes-${new Date().toISOString().slice(0, 10)}`
+        `clientes-${new Date().toISOString().slice(0, 10)}`,
+        // Si el archivo queda esperando su "Guardar" (app instalada del iPhone),
+        // el recorte va en ese mismo aviso: uno nuevo encima lo taparía.
+        { detalle: recorte }
       )
-      if (res.truncated) {
-        toast.warning(
-          `Exportamos las primeras ${res.rows.length} filas. Afiná los filtros para el resto.`
-        )
+      if (!salioElArchivo(resultado)) return
+      if (recorte) {
+        toast.warning(recorte)
       } else {
         toast.success(`${res.rows.length} clientes exportados`)
       }
@@ -738,7 +745,7 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
   )
 
   return (
-    <div className="flex h-[calc(100dvh-7.5rem-env(safe-area-inset-bottom))] flex-col overflow-hidden lg:h-[calc(100dvh-5rem)]">
+    <div className="flex h-[calc(100dvh-8.25rem-env(safe-area-inset-bottom))] flex-col overflow-hidden lg:h-[calc(100dvh-5rem)]">
       {/* ---------- Header sticky ---------- */}
       <div className="shrink-0 border-b border-white/[0.06] bg-zinc-950/80 backdrop-blur-xl">
         <div className="mx-auto max-w-[100rem] space-y-2.5 px-4 pt-3 pb-2.5">
@@ -1606,10 +1613,33 @@ export function ClientesClient({ initial, branches, orgName = 'BarberOS', canEdi
                                             }
                                             const url = `${window.location.origin}/review/${res.token}`
                                             const msg = `¡Hola ${nombreVisible(c.name)}! Gracias por visitarnos en ${orgName}. Podés contarnos qué te pareció el servicio acá: ${url}`
-                                            window.open(
-                                              `https://wa.me/${c.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`,
-                                              '_blank'
-                                            )
+                                            const linkWhatsApp = `https://wa.me/${c.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`
+                                            // Después de esperar al servidor, Safari en el iPhone bloquea la
+                                            // ventana nueva y el botón parecía no hacer nada. En la app
+                                            // instalada, además, window.open no dice si abrió (puede abrir y
+                                            // devolver null): ahí va directo el aviso, con un enlace de verdad,
+                                            // para no abrir WhatsApp dos veces.
+                                            if (esAppInstalada() || !window.open(linkWhatsApp, '_blank')) {
+                                              const idAviso = `pedir-resena:${visit.id}`
+                                              toast('El pedido de reseña está listo', {
+                                                id: idAviso,
+                                                description: `Para ${nombreVisible(c.name)}`,
+                                                duration: 20_000,
+                                                // data-button: el estilo del botón de los avisos.
+                                                action: (
+                                                  <a
+                                                    href={linkWhatsApp}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    data-button
+                                                    data-action
+                                                    onClick={() => toast.dismiss(idAviso)}
+                                                  >
+                                                    Abrir WhatsApp
+                                                  </a>
+                                                ),
+                                              })
+                                            }
                                           } finally {
                                             setRequestingReview(null)
                                           }

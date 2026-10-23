@@ -251,6 +251,18 @@ Una lista que se vuelve a leer en cada evento de Realtime NO se reemplaza por un
 
 El detalle está en `../.claude/rules/navegacion-dashboard.md`. Lo mínimo: los grupos y sus pestañas salen de `src/lib/navegacion/grupos.ts` (módulo puro; las URLs no cambiaron y la coincidencia es por segmento), una página nueva en `/dashboard` va como pestaña o como alias ahí, las pestañas internas de una pantalla usan el contenedor gris (el subrayado es del nivel 1, en el header) y la clave vieja `nav-order-<nombre>` se lee para migrar pero no se escribe. Tex salió del menú: botón flotante (`src/components/tex/tex-boton-flotante.tsx`).
 
+### El dashboard como app instalada (23/oct/2026)
+
+El detalle está en `../.claude/rules/navegacion-dashboard.md`. Lo mínimo:
+- El manifest es `public/dashboard.webmanifest`, con alcance `/` para que el login quede adentro. Lo enlazan sólo `src/app/dashboard/layout.tsx` y `src/app/(auth)/layout.tsx`, vía `METADATA_APP_INSTALABLE` (`src/lib/app-instalable.ts`). Sin manifest, iOS 26 abría todo lo que estaba fuera del alcance en la hoja de Safari, con la X y las barras.
+- La barra de estado va `black`, nunca `black-translucent`.
+- iOS lee el manifest al agregar el ícono: un cambio exige borrar el ícono y volver a agregarlo.
+- Toda descarga pasa por `guardarArchivo` (`src/lib/guardar-archivo.ts`), porque la app instalada de iOS no tiene gestor de descargas.
+- Recarga después de un deploy: la Fila se recarga sola cuando está ociosa. En la app instalada, las demás pantallas muestran «Actualizar» y nunca recargan solas, porque hay cambios sin guardar fuera de los diálogos y Safari de iOS no tiene `beforeunload`.
+- El shell usa `h-dvh` sólo en la app instalada.
+- Las barras fijas de abajo llevan el área segura.
+- Una dirección inexistente bajo `/dashboard` cae en `[...resto]` y muestra el 404 adentro del menú.
+
 ### Tex y la conciliación con Mercado Pago (oct/2026, migraciones 227–230)
 
 El detalle está en `../.claude/rules/tex.md` y `../.claude/rules/conciliacion-mp.md`. Mapa del código:

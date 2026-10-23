@@ -8,6 +8,7 @@
 // =============================================================================
 
 import { TEX_CARA_PNG } from '@/components/tex/assets'
+import { guardarArchivo, type ResultadoGuardar } from '@/lib/guardar-archivo'
 import type { TexInforme } from './contrato'
 
 export interface OpcionesPdfTex {
@@ -97,24 +98,18 @@ export function nombreArchivoInformeTex(informe: TexInforme): string {
   return slug === 'informe' || slug.startsWith('informe-') ? `${slug}.pdf` : `informe-${slug}.pdf`
 }
 
-/** Baja un PDF ya armado. */
-export function guardarPdf(blob: Blob, nombre: string): void {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = nombre
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  // Safari en iOS abre la vista previa y lee el blob después del click: con
-  // 1 s a veces llegaba revocado. Un minuto no cuesta nada.
-  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+/**
+ * Baja un PDF ya armado. En la app instalada del iPhone no hay descargas: ahí
+ * abre la hoja de compartir con el PDF (`guardarArchivo`). Nunca rechaza.
+ */
+export function guardarPdf(blob: Blob, nombre: string): Promise<ResultadoGuardar> {
+  return guardarArchivo(blob, nombre)
 }
 
 /** Arma el PDF y lo descarga. */
-export async function descargarInformeTex(informe: TexInforme, opts: OpcionesPdfTex = {}): Promise<void> {
+export async function descargarInformeTex(informe: TexInforme, opts: OpcionesPdfTex = {}): Promise<ResultadoGuardar> {
   const blob = await generarPdfInformeTex(informe, opts)
-  guardarPdf(blob, nombreArchivoInformeTex(informe))
+  return guardarPdf(blob, nombreArchivoInformeTex(informe))
 }
 
 export type ResultadoCompartir =

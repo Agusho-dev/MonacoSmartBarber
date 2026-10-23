@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import Image from "next/image"
+import { METADATA_APP_INSTALABLE } from "@/lib/app-instalable"
 
 /**
  * Login y registro del STAFF. Es la puerta de entrada al dashboard de BarberOS
@@ -13,9 +14,14 @@ import Image from "next/image"
  * dos resuelven al `default` y no hay ningún sufijo escrito a mano con el que
  * duplicarse. Queda listo para que cualquiera de las dos ponga "Iniciar sesión"
  * o "Crear cuenta" sin volver a tocar este archivo.
+ *
+ * Lleva el mismo manifest que el dashboard (src/lib/app-instalable.ts): el login
+ * es parte de esa app, y quien la agrega a la pantalla de inicio sin sesión
+ * iniciada la agrega desde acá.
  */
 export const metadata: Metadata = {
   title: { default: "BarberOS", template: "%s · BarberOS" },
+  ...METADATA_APP_INSTALABLE,
 }
 
 const FEATURES = [

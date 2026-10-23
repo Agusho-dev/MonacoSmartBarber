@@ -33,7 +33,7 @@ import { asesoriaHabilitadaEnSucursal, type MotivoPedidoAsesoria } from '@/lib/a
 import { searchClients } from '@/lib/actions/clients'
 import { CompleteServiceDialog, hayQueAnunciarCobro } from '@/components/barber/complete-service-dialog'
 import { AsesoriaBadge } from '@/components/barber/asesoria-badge'
-import { RecargaPorVersion } from '@/components/recarga-por-version'
+import Link from 'next/link'
 import { avisarYRecargarPorVersion, esErrorDeVersion, TEXTO_RECARGA_MANUAL } from '@/lib/recarga-version'
 import { descartarFotosDelCobro } from '@/stores/fotos-corte-store'
 import {
@@ -474,14 +474,14 @@ function QueueCard({
                 </span>
               )}
               {isAppointment && (
-                <a
+                <Link
                   href="/dashboard/turnos/agenda"
                   onPointerDown={(e) => e.stopPropagation()}
                   className="inline-flex w-fit items-center gap-1 text-[10px] text-violet-300/80 transition-colors hover:text-violet-200"
                 >
                   <ExternalLink className="size-2.5 shrink-0" aria-hidden />
                   Se mueve desde la agenda
-                </a>
+                </Link>
               )}
             </div>
           )}
@@ -2439,10 +2439,8 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
       }}
     >
       <TableroContext.Provider value={tablero}>
-      {/* La PC del mostrador queda en esta pantalla todo el día: después de un
-          deploy se recarga sola cuando está ociosa (sin diálogos abiertos, sin
-          nada escrito a medias, un minuto sin tocarla). Ver src/lib/recarga-version.ts. */}
-      <RecargaPorVersion superficie="panel" />
+      {/* La recarga después de un deploy (la PC del mostrador queda en esta
+          pantalla todo el día) la monta el shell: dashboard-shell.tsx. */}
       <div className="flex flex-col gap-2 lg:gap-4 p-1 max-md:pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:h-[calc(100dvh-9rem)] lg:h-[calc(100dvh-9.5rem)] md:overflow-hidden">
 
         {/* Un solo renglón arriba (sin título: el tablero se lleva el lugar).
@@ -2451,14 +2449,14 @@ export function FilaClient({ initialEntries, barbers, branches, breakConfigs, ti
         <div className="flex shrink-0 flex-col gap-2 px-2">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             <div className="-mx-1 flex min-w-0 flex-1 items-center gap-2 overflow-x-auto px-1 py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              <a
+              <Link
                 href="/dashboard/equipo?tab=descansos"
                 className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3 text-xs font-semibold text-muted-foreground transition-colors hover:border-white/25 hover:text-foreground"
                 title="Configurar los descansos de la sucursal"
               >
                 <Settings2 className="size-3.5" aria-hidden />
                 {descansosVisibles.length > 0 ? 'Descansos' : 'Sin descansos · configurar'}
-              </a>
+              </Link>
               {descansosVisibles.map((config) => (
                 <div key={config.id} className="shrink-0">
                   <BreakTemplateCard config={config} />

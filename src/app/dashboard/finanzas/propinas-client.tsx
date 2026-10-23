@@ -59,6 +59,7 @@ import {
   type BarberTipBucket,
 } from '@/lib/actions/tips'
 import { exportPaymentReceiptPDF } from '@/lib/export'
+import { salioElArchivo } from '@/lib/guardar-archivo'
 import { getBarberTipsDetail } from '@/lib/actions/tips'
 import type { Branch } from '@/lib/types/database'
 
@@ -294,7 +295,7 @@ export function PropinasClient({
         return
       }
       try {
-        await exportPaymentReceiptPDF({
+        const resultado = await exportPaymentReceiptPDF({
           barberName: selectedBranchId
             ? `Histórico de propinas — ${branches.find(b => b.id === selectedBranchId)?.name ?? ''}`
             : 'Histórico de propinas — Toda la organización',
@@ -304,7 +305,8 @@ export function PropinasClient({
           orgName,
           reports: allReports,
         })
-        toast.success('Histórico exportado')
+        // Con la hoja cerrada o el "Guardar" pendiente (app instalada del iPhone), no se dice "exportado".
+        if (salioElArchivo(resultado)) toast.success('Histórico exportado')
       } catch (err) {
         console.error(err)
         toast.error('Error al generar el PDF')

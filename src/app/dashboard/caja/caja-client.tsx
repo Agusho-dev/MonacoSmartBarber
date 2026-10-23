@@ -59,6 +59,7 @@ import { toast } from 'sonner'
 import { useBranchStore } from '@/stores/branch-store'
 import { BranchSelector } from '@/components/dashboard/branch-selector'
 import { formatCurrency } from '@/lib/format'
+import { guardarArchivo, salioElArchivo, type ResultadoGuardar } from '@/lib/guardar-archivo'
 import { getLocalDateStr } from '@/lib/time-utils'
 import {
   fetchCajaTickets,
@@ -374,7 +375,7 @@ export function CajaClient({
   const isToday = date === getLocalDateStr()
 
   return (
-    <div className="flex h-[calc(100dvh-7.5rem-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-5rem)] flex-col overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(120,113,108,0.08),transparent_60%)]">
+    <div className="flex h-[calc(100dvh-8.25rem-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-5rem)] flex-col overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(120,113,108,0.08),transparent_60%)]">
 
       {/* ── Header sticky ── */}
       <CajaHeader
@@ -1428,6 +1429,10 @@ function ExportDialog({
       const rangeLabel = startDate === endDate ? startDate : `${startDate}-a-${endDate}`
       const paymentSuffix = filterPayment === 'all' ? 'todos' : safeFilePart(paymentLabel)
 
+      // En la app instalada del iPhone, guardarArchivo abre la hoja de compartir.
+      // El "listo" va sólo si el archivo salió: con "pendiente" ya hay un aviso
+      // con "Guardar" y otro encima lo taparía.
+      let resultado: ResultadoGuardar
       if (splitPerBarber && filterBarber === 'all') {
         const byBarber = new Map<string, { name: string; rows: CajaCSVRow[] }>()
         for (const r of data) {
@@ -1443,16 +1448,17 @@ function ExportDialog({
           zip.file(`caja-${safeFilePart(name)}-${rangeLabel}-${paymentSuffix}.csv`, '﻿' + csv)
         }
         const blob = await zip.generateAsync({ type: 'blob' })
-        triggerDownload(blob, `caja-por-barbero-${rangeLabel}-${paymentSuffix}.zip`)
-        toast.success(`ZIP generado: ${byBarber.size} barbero(s)`)
+        resultado = await guardarArchivo(blob, `caja-por-barbero-${rangeLabel}-${paymentSuffix}.zip`)
+        if (salioElArchivo(resultado)) toast.success(`ZIP generado: ${byBarber.size} barbero(s)`)
       } else {
         const csv = csvFromRows(headers, data.map(toRow))
         const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
         const barberSuffix = filterBarber === 'all' ? 'todos' : safeFilePart(barberLabel)
-        triggerDownload(blob, `caja-${barberSuffix}-${rangeLabel}-${paymentSuffix}.csv`)
-        toast.success('CSV exportado correctamente')
+        resultado = await guardarArchivo(blob, `caja-${barberSuffix}-${rangeLabel}-${paymentSuffix}.csv`)
+        if (salioElArchivo(resultado)) toast.success('CSV exportado correctamente')
       }
-      onOpenChange(false)
+      // Si cerró la hoja sin guardar, el diálogo queda abierto para intentar de nuevo.
+      if (resultado !== 'cancelado') onOpenChange(false)
     } catch (err) {
       console.error(err)
       toast.error('Error al exportar')
@@ -1527,15 +1533,6 @@ function ExportDialog({
       </DialogContent>
     </Dialog>
   )
-}
-
-function triggerDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
 }
 
 // ─── Cierres de barberos ──────────────────────────────────────────────────────

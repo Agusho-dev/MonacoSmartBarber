@@ -58,6 +58,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
+import { guardarArchivo } from '@/lib/guardar-archivo'
 import { cn } from '@/lib/utils'
 
 import {
@@ -836,16 +837,10 @@ function PasoCertificado({
     function descargarCsr() {
         if (!pedido) return
         // La descarga se arma acá con un Blob: el CSR ya lo tenemos en memoria y
-        // no hay ningún endpoint que sirva archivos.
+        // no hay ningún endpoint que sirva archivos. En la app instalada del
+        // iPhone, guardarArchivo lo ofrece por la hoja de compartir.
         const blob = new Blob([pedido.csrPem], { type: 'application/pkcs10' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = pedido.nombreArchivo
-        document.body.appendChild(a)
-        a.click()
-        a.remove()
-        setTimeout(() => URL.revokeObjectURL(url), 2_000)
+        void guardarArchivo(blob, pedido.nombreArchivo)
     }
 
     async function generar() {

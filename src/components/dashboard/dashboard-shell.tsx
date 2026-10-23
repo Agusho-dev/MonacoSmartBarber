@@ -53,6 +53,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { BranchScopeProvider } from '@/components/dashboard/branch-scope-provider'
+import { RecargaPorVersion } from '@/components/recarga-por-version'
+import { useEsAppInstalada } from '@/hooks/use-app-instalada'
 import { MobileBottomNav } from '@/components/dashboard/mobile-bottom-nav'
 import { PestanasEncabezado, esClicQueNavegaAca } from '@/components/dashboard/pestanas-encabezado'
 import { ICONOS_NAV } from '@/components/dashboard/iconos-nav'
@@ -384,6 +386,13 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     coincideRuta('/dashboard/mensajeria', pathname) ||
     isFocusMode ||
     (mostrarPanelTex && texPanelAbierto)
+  // Después de un deploy (src/lib/recarga-version.ts): la Fila, que la PC del
+  // mostrador deja abierta todo el día, se recarga sola cuando está ociosa. En
+  // la app instalada, que no tiene botón de recargar (src/lib/app-instalable.ts),
+  // las demás pantallas avisan con "Actualizar": recargar solas podía borrar
+  // cambios sin guardar que no están en un diálogo.
+  const esAppInstalada = useEsAppInstalada()
+  const superficieRecarga = coincideRuta('/dashboard/fila', pathname) ? 'panel' : esAppInstalada ? 'aviso' : null
   const touchStartX = useRef(0)
   const touchStartY = useRef(0)
   const touchStartTime = useRef(0)
@@ -763,10 +772,14 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     {/* --alto-barra-inferior: lo que ocupa la barra inferior del celular (52 px,
         su borde de 1 px y el área segura, como mínimo 4 px; ver
         mobile-bottom-nav.tsx). 0 en la compu y cuando la barra no está. El
-        botón flotante de Tex lo usa para quedar arriba de ella. */}
+        botón flotante de Tex lo usa para quedar arriba de ella.
+        En la app instalada, h-dvh (el alto visible): ahí 100vh incluye la barra
+        de estado de iOS y la página scrolleaba esa diferencia. En el navegador
+        sigue h-screen, como siempre: el sobrante deja que Safari y Chrome
+        escondan sus barras al scrollear. */}
     <div
       className={cn(
-        'flex h-screen overflow-hidden',
+        'flex h-screen [@media(display-mode:standalone)]:h-dvh overflow-hidden',
         barraOculta
           ? '[--alto-barra-inferior:0px]'
           : '[--alto-barra-inferior:calc(3.25rem_+_1px_+_max(0.25rem,env(safe-area-inset-bottom,0px)))] lg:[--alto-barra-inferior:0px]',
@@ -961,6 +974,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
         />
       </div>
       {puedeUsarTex && <TexBotonFlotante oculto={ocultarBotonTex} />}
+      {superficieRecarga && <RecargaPorVersion superficie={superficieRecarga} />}
     </div>
     </EntitlementsProvider>
   )

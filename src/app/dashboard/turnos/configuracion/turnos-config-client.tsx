@@ -780,9 +780,13 @@ export function TurnosConfigClient(props: Props) {
         </>
       )}
 
-      {/* Barra de guardado */}
+      {/* Barra de guardado. Abajo, el área segura: en la app instalada del
+          iPhone la barra llega al borde y la rayita de inicio tapaba los botones. */}
       {hayCambios && (
-        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-card/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+        <div
+          className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-card/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80"
+          style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+        >
           <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
             <p className="flex items-center gap-2 text-sm">
               <span className="size-2 shrink-0 rounded-full bg-amber-500" />
