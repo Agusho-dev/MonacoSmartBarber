@@ -27,7 +27,7 @@ export interface TexPanelContenidoProps {
   conversacionId: string
   pedido: PedidoPanel | null
   pathname: string
-  /** El nombre del ítem del menú en el que está la persona (para secciones sin entrada propia). */
+  /** La pestaña del menú en la que está la persona, con los alias resueltos (para secciones sin entrada propia). */
   etiquetaSeccion: string | null
   orgNombre: string
   puedeConfigurar: boolean
@@ -61,7 +61,7 @@ export default function TexPanelContenido({
 
   const seccion = seccionDeRuta(pathname)
   // TEX_SECCIONES termina en '/dashboard' (Inicio): para una pantalla sin entrada
-  // propia (Equipo, Servicios…) el nombre sale del menú, no "Inicio".
+  // propia (Equipo, Servicios…) el nombre es el de su pestaña, no "Inicio".
   const generica = !seccion || (seccion.prefijo === '/dashboard' && pathname !== '/dashboard')
   const nombreSeccion = generica ? etiquetaSeccion : seccion.nombre
   const sugerencias = generica ? SUGERENCIAS_GENERALES : seccion.sugerencias

@@ -611,7 +611,8 @@ export function PanelBarberos({
                     </span>
                 </div>
 
-                <div className="flex items-center gap-2">
+                {/* flex-wrap: en 360 px el orden y el alta no entran en un renglón. */}
+                <div className="flex flex-wrap items-center gap-2">
                     <Select value={orden} onValueChange={(v) => setOrden(v as Orden)}>
                         <SelectTrigger size="sm" className="w-[190px]">
                             <SelectValue />

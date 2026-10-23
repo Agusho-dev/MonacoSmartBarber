@@ -6,29 +6,15 @@ import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import {
-  Building2,
   Scissors,
-  Sparkles,
-  Users,
-  BarChart3,
-  DollarSign,
-  Settings,
   Menu,
   LogOut,
-  ListOrdered,
-  MessageSquare,
-  Smartphone,
   GripVertical,
   Check,
   ChevronDown,
-  Receipt,
-  ScanLine,
-  Handshake,
-  CalendarClock,
-  FileCheck2,
-  Gift,
-  IdCard,
-  Scale,
+  Lock,
+  Clock as ClockIcon,
+  CreditCard,
 } from 'lucide-react'
 import {
   DndContext,
@@ -45,7 +31,6 @@ import {
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
-  arrayMove,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { logout } from '@/lib/actions/auth'
@@ -69,6 +54,9 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { BranchScopeProvider } from '@/components/dashboard/branch-scope-provider'
 import { MobileBottomNav } from '@/components/dashboard/mobile-bottom-nav'
+import { PestanasEncabezado, esClicQueNavegaAca } from '@/components/dashboard/pestanas-encabezado'
+import { ICONOS_NAV } from '@/components/dashboard/iconos-nav'
+import { guardarMemoriaNav, leerMemoriaNav, useMemoriaNav } from '@/components/dashboard/memoria-nav'
 import { useBranchStore } from '@/stores/branch-store'
 import { createClient } from '@/lib/supabase/client'
 import { switchOrganization } from '@/lib/actions/org'
@@ -77,79 +65,73 @@ import { UpgradePromptDialog } from '@/components/billing/upgrade-prompt-dialog'
 import { ComingSoonDialog } from '@/components/billing/coming-soon-dialog'
 import { TrialBanner } from '@/components/billing/trial-banner'
 import { Badge } from '@/components/ui/badge'
-import { Lock, Clock as ClockIcon, CreditCard } from 'lucide-react'
-import { NAV_FEATURE_MAP } from '@/lib/billing/nav-feature-map'
+import {
+  claveOrdenGrupos,
+  claveOrdenVieja,
+  claveUltimasPestanas,
+  coincideRuta,
+  destinoDeGrupo,
+  estaDesbloqueada,
+  gruposVisibles,
+  moverGrupo,
+  ordenarGrupos,
+  parsearUltimas,
+  recordarUltima,
+  resolverOrdenGuardado,
+  secuenciaDeslizar,
+  tituloFueraDeGrupo,
+  ubicacionDeRuta,
+  type ContextoPlan,
+  type GrupoId,
+  type GrupoVisible,
+  type PasoDeslizar,
+  type PestanaVisible,
+} from '@/lib/navegacion/grupos'
 import { AiFeatureAnnouncement } from './ai-feature-announcement'
-import { TexIcono } from '@/components/tex/tex-icono'
-import { TexLanzador } from '@/components/tex/tex-lanzador'
+import { TexBotonFlotante } from '@/components/tex/tex-boton-flotante'
 
 // El panel de Tex (atajos ⌘K, abrirTex()) va diferido: no suma peso a la
 // carga de cada pantalla. El chat en sí se baja recién al abrirlo.
 const TexPanel = dynamic(() => import('@/components/tex/tex-panel').then((m) => m.TexPanel), { ssr: false })
 
-const navItems = [
-  { href: '/dashboard/fila', label: 'Fila', icon: ListOrdered, requiredPermissions: ['queue.view'] },
-  { href: '/dashboard/turnos', label: 'Turnos', icon: CalendarClock, requiredPermissions: ['appointments.view'] },
-  { href: '/dashboard/sucursales', label: 'Sucursales', icon: Building2, requiredPermissions: ['branches.view'] },
-  { href: '/dashboard/equipo', label: 'Equipo', icon: Scissors, requiredPermissions: ['staff.view', 'roles.manage', 'breaks.view', 'incentives.view', 'discipline.view'] },
-  { href: '/dashboard/rrhh', label: 'Recursos humanos', icon: IdCard, requiredPermissions: ['rrhh.view'] },
-  { href: '/dashboard/servicios', label: 'Servicios y Productos', icon: Sparkles, requiredPermissions: ['services.view'] },
-  { href: '/dashboard/clientes', label: 'Clientes', icon: Users, requiredPermissions: ['clients.view'] },
-  { href: '/dashboard/mensajeria', label: 'Mensajería', icon: MessageSquare, requiredPermissions: ['clients.view'] },
-  { href: '/dashboard/asistente', label: 'Tex', icon: TexIcono, requiredPermissions: ['stats.view', 'settings.view'] },
-  { href: '/dashboard/app-movil', label: 'APP Móvil', icon: Smartphone, requiredPermissions: ['rewards.view'] },
-  { href: '/dashboard/fidelizacion', label: 'Fidelización', icon: Gift, requiredPermissions: ['rewards.view'] },
-  { href: '/dashboard/convenios', label: 'Convenios', icon: Handshake, requiredPermissions: ['agreements.view'] },
-  { href: '/dashboard/estadisticas', label: 'Estadísticas', icon: BarChart3, requiredPermissions: ['stats.view'] },
-  { href: '/dashboard/caja', label: 'Caja', icon: Receipt, requiredPermissions: ['caja.view'] },
-  { href: '/dashboard/conciliacion', label: 'Conciliación', icon: Scale, requiredPermissions: ['conciliacion.view'] },
-  { href: '/dashboard/comprobantes', label: 'Comprobantes', icon: ScanLine, requiredPermissions: ['comprobantes.view'] },
-  // "Facturación ARCA" y no "Facturación" a secas: el dropdown del avatar ya
-  // usa esa palabra para /dashboard/billing, que es la suscripción del SaaS.
-  { href: '/dashboard/facturacion', label: 'Facturación ARCA', icon: FileCheck2, requiredPermissions: ['arca.view'] },
-  { href: '/dashboard/finanzas', label: 'Finanzas', icon: DollarSign, requiredPermissions: ['finances.view', 'salary.view'] },
-  { href: '/dashboard/configuracion', label: 'Configuración', icon: Settings, requiredPermissions: ['settings.view'] },
-]
+// El menú es de GRUPOS (src/lib/navegacion/grupos.ts): cinco en el menú lateral
+// y en la barra inferior del celular; las secciones de antes son las pestañas de
+// cada grupo, en el encabezado (pestanas-encabezado.tsx).
 
-// Tipo para cada ítem de navegación
-interface NavItem {
-  href: string
-  label: string
-  icon: React.ComponentType<{ className?: string }>
-  requiredPermissions: string[]
+// El número va oculto para el lector de pantalla: quien lo usa lo dice entero
+// ("3 descansos pendientes", también con más de 99) en un sr-only.
+function BadgeDescansos({ cantidad }: { cantidad: number }) {
+  return (
+    <span aria-hidden className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold tabular-nums text-amber-950">
+      {cantidad > 99 ? '99+' : cantidad}
+    </span>
+  )
 }
 
-type NavLockState = 'unlocked' | 'upgrade' | 'coming_soon'
-type NavItemLockMeta = {
-  state: NavLockState
-  minPlan?: 'start' | 'pro' | 'enterprise'
-  moduleId?: string | null
-  moduleName?: string
-  moduleTeaser?: string | null
-  estimatedRelease?: string | null
-}
-
-// Props para el componente de ítem sorteable — debe estar fuera de DashboardShell
+// Ítem sorteable del menú lateral — debe estar fuera de DashboardShell
 // para evitar violaciones de las reglas de hooks (hooks dentro de funciones anidadas)
-interface SortableNavItemProps {
-  item: NavItem
+interface SortableGrupoProps {
+  grupo: GrupoVisible
+  /** Adónde lleva tocarlo (la última pestaña usada del grupo o la primera). */
+  destino: PestanaVisible | null
   isActive: boolean
   isEditMode: boolean
   pendingBreakCount: number
   onNavigate: () => void
-  lockMeta?: NavItemLockMeta
-  onLockedClick?: (item: NavItem, meta: NavItemLockMeta) => void
+  onTocado: (grupo: GrupoId) => void
+  onLockedClick: (pestana: PestanaVisible) => void
 }
 
-function SortableNavItem({
-  item,
+function SortableGrupo({
+  grupo,
+  destino,
   isActive,
   isEditMode,
   pendingBreakCount,
   onNavigate,
-  lockMeta,
+  onTocado,
   onLockedClick,
-}: SortableNavItemProps) {
+}: SortableGrupoProps) {
   const {
     attributes,
     listeners,
@@ -157,12 +139,14 @@ function SortableNavItem({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: item.href })
+  } = useSortable({ id: grupo.id })
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
   }
+  const Icono = ICONOS_NAV[grupo.icono]
+  const pendientes = grupo.id === 'equipo' ? pendingBreakCount : 0
 
   if (isEditMode) {
     return (
@@ -180,86 +164,74 @@ function SortableNavItem({
           {...attributes}
           {...listeners}
           className="touch-none flex items-center justify-center min-w-[44px] min-h-[44px] -ml-2 -my-2 text-muted-foreground hover:text-sidebar-foreground cursor-grab active:cursor-grabbing"
-          aria-label={`Arrastrar para reordenar ${item.label}`}
+          aria-label={`Arrastrar para reordenar ${grupo.etiqueta}`}
         >
           <GripVertical className="size-4 shrink-0" />
         </button>
-        <item.icon className="size-4 shrink-0 text-muted-foreground" />
-        <span>{item.label}</span>
-        {item.href === '/dashboard/equipo' && pendingBreakCount > 0 && (
-          <span className="ml-auto flex size-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
-            {pendingBreakCount}
-          </span>
-        )}
+        <Icono className="size-4 shrink-0 text-muted-foreground" />
+        <span>{grupo.etiqueta}</span>
+        {pendientes > 0 && <BadgeDescansos cantidad={pendientes} />}
       </div>
     )
   }
 
-  // Estado bloqueado (upgrade o coming_soon): reemplaza Link por botón que abre modal.
-  const isLocked = lockMeta && lockMeta.state !== 'unlocked'
+  if (!destino) return null
 
-  if (isLocked && onLockedClick) {
-    const isComing = lockMeta!.state === 'coming_soon'
+  // Todas las pestañas visibles del grupo están "Pronto": el grupo abre el
+  // aviso del módulo, como antes lo hacía el ítem del menú.
+  if (!estaDesbloqueada(destino)) {
     return (
       <div ref={setNodeRef} style={style}>
         <button
           type="button"
-          onClick={() => onLockedClick(item, lockMeta!)}
+          onClick={() => onLockedClick(destino)}
           className={cn(
-            'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+            'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors max-lg:min-h-11',
             'text-sidebar-foreground/40 hover:bg-sidebar-accent/30 hover:text-sidebar-foreground/60',
             'cursor-pointer text-left',
           )}
-          aria-label={`${item.label} — ${isComing ? 'Próximamente' : 'Requiere upgrade'}`}
+          aria-label={`${grupo.etiqueta} — Próximamente`}
         >
-          <item.icon className="size-4 shrink-0 opacity-70" />
-          <span className="flex-1 truncate">{item.label}</span>
+          <Icono className="size-4 shrink-0 opacity-70" />
+          <span className="flex-1 truncate">{grupo.etiqueta}</span>
           <Badge
-            variant={isComing ? 'outline' : 'secondary'}
-            className={cn(
-              'ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-wide',
-              isComing && 'border-amber-500/50 text-amber-500',
-            )}
+            variant="outline"
+            className="ml-auto shrink-0 border-amber-500/50 text-[10px] font-semibold uppercase tracking-wide text-amber-500"
           >
-            {isComing ? (
-              <><ClockIcon className="mr-1 size-3" /> Pronto</>
-            ) : (
-              <><Lock className="mr-1 size-3" /> {lockMeta!.minPlan === 'enterprise' ? 'Enterprise' : lockMeta!.minPlan === 'start' ? 'Start' : 'Pro'}</>
-            )}
+            <ClockIcon className="mr-1 size-3" /> Pronto
           </Badge>
         </button>
       </div>
     )
   }
 
-  // Modo normal — comportamiento de link igual al original.
-  // Tex va sin el borde arcoíris (nav-ai-glow, que distraía en un menú de
-  // trabajo): su cara como ícono y, en la pantalla activa, un anillo quieto
-  // del azul de Tex.
-  const isTex = item.href === '/dashboard/asistente'
   return (
     <div ref={setNodeRef} style={style}>
       <Link
-        href={item.href}
-        onClick={onNavigate}
+        href={destino.href}
+        onClick={(e) => {
+          onNavigate()
+          if (esClicQueNavegaAca(e)) onTocado(grupo.id)
+        }}
+        aria-current={isActive ? 'true' : undefined}
         className={cn(
-          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+          // En el menú del celular (la hoja, debajo de lg), 44 px de alto: un
+          // objetivo cómodo para el dedo. En la compu queda compacto.
+          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors max-lg:min-h-11',
           isActive
             ? 'bg-sidebar-accent text-sidebar-accent-foreground'
             : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
         )}
       >
-        <item.icon
-          className={cn(
-            'size-4 shrink-0',
-            isTex && isActive && 'rounded-full ring-1 ring-[color:var(--tex)]/70 ring-offset-1 ring-offset-sidebar-accent'
-          )}
-        />
-        {item.label}
-        {item.href === '/dashboard/equipo' && pendingBreakCount > 0 && (
-          <span className="ml-auto flex size-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
-            {pendingBreakCount}
-          </span>
+        <Icono className="size-4 shrink-0" />
+        <span className="flex-1 truncate">{grupo.etiqueta}</span>
+        {pendientes > 0 && (
+          <>
+            <BadgeDescansos cantidad={pendientes} />
+            <span className="sr-only">
+              , {pendientes} {pendientes === 1 ? 'descanso pendiente' : 'descansos pendientes'}
+            </span>
+          </>
         )}
       </Link>
     </div>
@@ -388,15 +360,16 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
+  // Las rutas se comparan por segmento (coincideRuta): /dashboard/mensajeriax no es Mensajería.
   const isFocusMode =
-    pathname.startsWith('/dashboard/mensajeria') && searchParams.get('foco') === '1'
+    coincideRuta('/dashboard/mensajeria', pathname) && searchParams.get('foco') === '1'
   // Tex: quien tiene el módulo de IA y ve estadísticas o configuración (owner y
-  // admin tienen todos los permisos). En su propia pantalla no van ni el
-  // lanzador ni el panel: la pantalla ES Tex.
+  // admin tienen todos los permisos). En su propia pantalla no van ni el botón
+  // flotante ni el panel: la pantalla ES Tex.
   const puedeUsarTex =
     !!entitlements?.features?.['ai.enabled'] && (!!permissions['stats.view'] || !!permissions['settings.view'])
   const isTexScreen = pathname === '/dashboard/asistente'
-  const mostrarPanelTex = puedeUsarTex && !pathname.startsWith('/dashboard/asistente')
+  const mostrarPanelTex = puedeUsarTex && !coincideRuta('/dashboard/asistente', pathname)
   const [texPanelAbierto, setTexPanelAbierto] = useState(false)
   // Pantallas de alto completo (modo foco de Mensajería y Tex): sin barra
   // inferior, sin el padding que la compensa y sin swipe entre secciones (en
@@ -404,6 +377,13 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   // Tex abierta en el celular tampoco.
   const isFullHeight = isFocusMode || isTexScreen
   const hideBottomNav = isFullHeight || (mostrarPanelTex && texPanelAbierto)
+  // El botón flotante de Tex no va en Tex, ni en Mensajería (abajo están su
+  // composer y su barra), ni en el modo foco, ni con el panel ya abierto.
+  const ocultarBotonTex =
+    coincideRuta('/dashboard/asistente', pathname) ||
+    coincideRuta('/dashboard/mensajeria', pathname) ||
+    isFocusMode ||
+    (mostrarPanelTex && texPanelAbierto)
   const touchStartX = useRef(0)
   const touchStartY = useRef(0)
   const touchStartTime = useRef(0)
@@ -411,33 +391,70 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   const panelRef = useRef<HTMLDivElement>(null)
   const swipeDirectionRef = useRef<'left' | 'right' | null>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [swipeTargetItem, setSwipeTargetItem] = useState<NavItem | null>(null)
+  const [swipeDestino, setSwipeDestino] = useState<PasoDeslizar | null>(null)
   const [, startTransition] = useTransition()
   const [pendingBreakCount, setPendingBreakCount] = useState(0)
   const selectedBranchId = useBranchStore(s => s.selectedBranchId)
   const supabase = useMemo(() => createClient(), [])
 
-  // --- Estado de ordenamiento personalizado por usuario ---
-  const storageKey = `nav-order-${user.full_name}`
+  // --- Grupos que ve esta persona (permisos + plan), igual que el menú de antes ---
+  const plan = useMemo<ContextoPlan>(
+    () => ({ features: entitlements?.features ?? null, modulos: visibleModulesMeta ?? [] }),
+    [entitlements, visibleModulesMeta],
+  )
+  const visibles = useMemo(() => gruposVisibles(permissions, plan), [permissions, plan])
 
-  // FIX 3 — Inicializar siempre con el orden por defecto para evitar mismatch de hidratación SSR/cliente.
-  // El orden guardado se lee en useEffect, únicamente en el cliente.
-  const [navOrder, setNavOrder] = useState<string[]>(() => navItems.map(i => i.href))
+  // --- Orden personalizado y última pestaña de cada grupo, por usuario ---
+  // Se leen con useSyncExternalStore (memoria-nav.ts): el servidor y la
+  // hidratación usan el orden por defecto y lo guardado llega enseguida.
+  const claveOrden = claveOrdenGrupos(user.full_name)
+  const claveUltimas = claveUltimasPestanas(user.full_name)
+  const crudoOrden = useMemoriaNav(claveOrden)
+  // El orden del menú de antes (16 secciones): si nunca se ordenaron los grupos,
+  // sale de ahí, para que quien había reordenado no pierda su preferencia.
+  const crudoOrdenViejo = useMemoriaNav(claveOrdenVieja(user.full_name))
+  const crudoUltimas = useMemoriaNav(claveUltimas)
+  const ordenGuardado = useMemo(() => resolverOrdenGuardado(crudoOrden, crudoOrdenViejo), [crudoOrden, crudoOrdenViejo])
+  const grupos = useMemo(() => ordenarGrupos(visibles, ordenGuardado), [visibles, ordenGuardado])
+  const ultimas = useMemo(() => parsearUltimas(crudoUltimas), [crudoUltimas])
+  const destinos = useMemo(
+    () => new Map<GrupoId, PestanaVisible | null>(grupos.map((g) => [g.id, destinoDeGrupo(g, ultimas[g.id])])),
+    [grupos, ultimas],
+  )
 
+  // --- Dónde estamos: grupo y pestaña de la ruta (con los alias) ---
+  const ubicacion = useMemo(() => ubicacionDeRuta(pathname), [pathname])
+  const grupoActivo = ubicacion ? grupos.find((g) => g.id === ubicacion.grupo.id) ?? null : null
+  const pestanaActiva = ubicacion && grupoActivo ? grupoActivo.pestanas.find((p) => p.href === ubicacion.pestana.href) ?? null : null
+  const orgNombre = availableOrganizations.find(o => o.id === organizationId)?.name
+  const etiquetaActiva = ubicacion?.pestana.etiqueta ?? null
+  const tituloMovil = etiquetaActiva ?? tituloFueraDeGrupo(pathname) ?? (orgNombre || 'BarberOS')
+
+  // El grupo tocado (menú lateral o barra inferior) se marca enseguida, sin
+  // esperar a que cargue la pantalla; al cambiar la ruta manda otra vez la ruta.
+  const [grupoTocado, setGrupoTocado] = useState<GrupoId | null>(null)
+  const [rutaDelToque, setRutaDelToque] = useState(pathname)
+  if (rutaDelToque !== pathname) {
+    setRutaDelToque(pathname)
+    setGrupoTocado(null)
+  }
+  const grupoMarcado = grupoTocado ?? grupoActivo?.id ?? null
+  // La barra de grupos tampoco va:
+  // - en Mensajería: en el celular la página tiene su propia barra abajo (Inbox,
+  //   Difusiones…), que tapaba a la barra vieja y taparía a medias a esta, que es
+  //   más alta. Ahí se cambia de grupo con el menú o con las pestañas de arriba;
+  // - sin ningún grupo visible (un rol sin secciones): no tendría nada que mostrar.
+  const barraOculta = hideBottomNav || coincideRuta('/dashboard/mensajeria', pathname) || grupos.length === 0
+
+  // Recordar la pestaña de cada grupo: tocar el grupo después vuelve a ella.
+  // Se lee lo guardado en el momento (no lo del render: al hidratar es null).
+  const hrefParaRecordar = pestanaActiva && estaDesbloqueada(pestanaActiva) ? pestanaActiva.href : null
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(storageKey)
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (Array.isArray(parsed) && parsed.every((v): v is string => typeof v === 'string')) {
-          // eslint-disable-next-line react-hooks/set-state-in-effect
-          setNavOrder(parsed)
-        }
-      }
-    } catch {
-      // localStorage no disponible (modo privado, cuota excedida)
-    }
-  }, [storageKey])
+    if (!hrefParaRecordar) return
+    const actuales = parsearUltimas(leerMemoriaNav(claveUltimas))
+    const nuevas = recordarUltima(actuales, hrefParaRecordar)
+    if (nuevas !== actuales) guardarMemoriaNav(claveUltimas, JSON.stringify(nuevas))
+  }, [hrefParaRecordar, claveUltimas])
 
   const [isEditMode, setIsEditMode] = useState(false)
 
@@ -457,68 +474,6 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     })
   )
 
-  // Mapa de metadatos de módulo por moduleId para el estado coming_soon
-  const moduleMetaById = useMemo(() => {
-    const map = new Map<string, { name: string; teaser: string | null; estimatedRelease: string | null; status: 'active'|'beta'|'coming_soon' }>()
-    for (const m of visibleModulesMeta ?? []) {
-      map.set(m.moduleId, { name: m.name, teaser: m.teaser, estimatedRelease: m.estimatedRelease, status: m.status })
-    }
-    return map
-  }, [visibleModulesMeta])
-
-  // Estado de bloqueo por href (basado en entitlements + plan gating)
-  const lockStateByHref = useMemo(() => {
-    const map = new Map<string, NavItemLockMeta>()
-    if (!entitlements) {
-      // Sin entitlements: asumimos todo desbloqueado (fallback seguro).
-      for (const item of navItems) map.set(item.href, { state: 'unlocked' })
-      return map
-    }
-    for (const item of navItems) {
-      const meta = NAV_FEATURE_MAP[item.href]
-      if (!meta || !meta.featureKey) {
-        map.set(item.href, { state: 'unlocked' })
-        continue
-      }
-      const moduleMeta = meta.moduleId ? moduleMetaById.get(meta.moduleId) : undefined
-      if (moduleMeta?.status === 'coming_soon') {
-        map.set(item.href, {
-          state: 'coming_soon',
-          moduleId: meta.moduleId ?? null,
-          moduleName: moduleMeta.name,
-          moduleTeaser: moduleMeta.teaser,
-          estimatedRelease: moduleMeta.estimatedRelease,
-        })
-        continue
-      }
-      if (entitlements.features[meta.featureKey] === true) {
-        map.set(item.href, { state: 'unlocked' })
-      } else {
-        map.set(item.href, { state: 'upgrade', minPlan: meta.minPlan ?? 'pro', moduleId: meta.moduleId ?? null })
-      }
-    }
-    return map
-  }, [entitlements, moduleMetaById])
-
-  // Ítems filtrados por permisos y ordenados según preferencia del usuario.
-  // Ocultamos los módulos NO concedidos (estado 'upgrade'): si un módulo no está
-  // habilitado para la organización, no aparece en el sidebar. Los 'coming_soon'
-  // sí se muestran como teaser. El upsell vive en la página de planes/módulos.
-  const orderedItems = useMemo(() => {
-    const filtered = navItems.filter(item =>
-      item.requiredPermissions.some(p => permissions[p]) &&
-      lockStateByHref.get(item.href)?.state !== 'upgrade'
-    )
-    return [...filtered].sort((a, b) => {
-      const ai = navOrder.indexOf(a.href)
-      const bi = navOrder.indexOf(b.href)
-      if (ai === -1 && bi === -1) return 0
-      if (ai === -1) return 1
-      if (bi === -1) return -1
-      return ai - bi
-    })
-  }, [navOrder, permissions, lockStateByHref])
-
   // Estado de los modales de upgrade / coming_soon
   const [upgradeModal, setUpgradeModal] = useState<{ open: boolean; featureName: string; minPlan: 'start'|'pro'|'enterprise' }>(
     { open: false, featureName: '', minPlan: 'pro' },
@@ -527,12 +482,14 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     { open: false, moduleId: '', name: '', teaser: null, estimatedRelease: null },
   )
 
-  const handleLockedClick = useCallback((item: NavItem, meta: NavItemLockMeta) => {
-    if (meta.state === 'coming_soon' && meta.moduleId) {
+  // Una pestaña (o un grupo entero) en "Pronto" abre el aviso del módulo.
+  const handleLockedClick = useCallback((pestana: PestanaVisible) => {
+    const meta = pestana.bloqueo
+    if (meta.estado === 'coming_soon' && meta.moduleId) {
       setComingSoonModal({
         open: true,
         moduleId: meta.moduleId,
-        name: meta.moduleName ?? item.label,
+        name: meta.moduleName ?? pestana.etiqueta,
         teaser: meta.moduleTeaser ?? null,
         estimatedRelease: meta.estimatedRelease ?? null,
       })
@@ -540,14 +497,14 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     }
     setUpgradeModal({
       open: true,
-      featureName: item.label,
+      featureName: pestana.etiqueta,
       minPlan: meta.minPlan ?? 'pro',
     })
   }, [])
 
-  const currentNavIndex = useMemo(() => {
-    return orderedItems.findIndex(item => pathname.startsWith(item.href))
-  }, [orderedItems, pathname])
+  // --- Deslizar en el celular: recorre las pestañas, grupo por grupo ---
+  const secuencia = useMemo(() => secuenciaDeslizar(grupos), [grupos])
+  const indiceActual = pestanaActiva ? secuencia.findIndex((s) => s.pestana.href === pestanaActiva.href) : -1
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX
@@ -596,10 +553,12 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
       // (tab bars, tablas, etc.) — dejar que el browser lo maneje
       if (isHorizontallyScrollable(e.target)) return
 
+      // Fuera de las pestañas (Mi cuenta, la suscripción) no hay vecina a la cual ir.
       const isLeft = dx < 0
       const canGo =
-        (isLeft && currentNavIndex < orderedItems.length - 1) ||
-        (!isLeft && currentNavIndex > 0)
+        indiceActual >= 0 &&
+        ((isLeft && indiceActual < secuencia.length - 1) ||
+          (!isLeft && indiceActual > 0))
 
       if (!canGo) return
 
@@ -623,19 +582,16 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
           : '16px 0 48px rgba(0,0,0,0.13)'
       }
 
-      // Establecer ítem destino una sola vez por gesto (evita re-renders continuos)
+      // Establecer la pestaña destino una sola vez por gesto (evita re-renders continuos)
       if (swipeDirectionRef.current === null) {
         swipeDirectionRef.current = isLeft ? 'left' : 'right'
-        const target = isLeft
-          ? orderedItems[currentNavIndex + 1]
-          : orderedItems[currentNavIndex - 1]
-        setSwipeTargetItem(target ?? null)
+        setSwipeDestino(secuencia[indiceActual + (isLeft ? 1 : -1)] ?? null)
       }
     }
 
     el.addEventListener('touchmove', onMove, { passive: false })
     return () => el.removeEventListener('touchmove', onMove)
-  }, [currentNavIndex, orderedItems, hideBottomNav])
+  }, [indiceActual, secuencia, hideBottomNav])
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     // Si no hubo un swipe horizontal activo, no hacer nada
@@ -659,9 +615,9 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     const EASE = 'transform 240ms cubic-bezier(0.4, 0, 0.2, 1)'
 
     if (isValidSwipe) {
-      const targetHref = isLeft
-        ? orderedItems[currentNavIndex + 1]?.href
-        : orderedItems[currentNavIndex - 1]?.href
+      const targetHref = indiceActual >= 0
+        ? secuencia[indiceActual + (isLeft ? 1 : -1)]?.pestana.href
+        : undefined
 
       // Animar panel para cubrir pantalla
       if (mainRef.current) {
@@ -688,7 +644,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
           panelRef.current.style.boxShadow = ''
         }
         swipeDirectionRef.current = null
-        setSwipeTargetItem(null)
+        setSwipeDestino(null)
       }, 240)
     } else {
       // Spring-back: volver a la posición original con animación suave
@@ -709,24 +665,17 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
           panelRef.current.style.boxShadow = ''
         }
         swipeDirectionRef.current = null
-        setSwipeTargetItem(null)
+        setSwipeDestino(null)
       }, 240)
     }
-  }, [currentNavIndex, orderedItems, router])
+  }, [indiceActual, secuencia, router])
 
+  // "Personalizar orden": se ordenan los GRUPOS, con su propia clave.
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event
-    if (over && active.id !== over.id) {
-      const oldIndex = orderedItems.findIndex(i => i.href === active.id)
-      const newIndex = orderedItems.findIndex(i => i.href === over.id)
-      const newOrder = arrayMove(orderedItems, oldIndex, newIndex).map(i => i.href)
-      setNavOrder(newOrder)
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(newOrder))
-      } catch {
-        // Ignorar errores de localStorage (modo privado, cuota excedida, etc.)
-      }
-    }
+    if (!over || active.id === over.id) return
+    const nuevo = moverGrupo(grupos.map((g) => g.id), ordenGuardado, active.id as GrupoId, over.id as GrupoId)
+    guardarMemoriaNav(claveOrden, JSON.stringify(nuevo))
   }
 
   // FIX 5 — Callback estable para evitar nuevas closures en cada render
@@ -769,30 +718,29 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   // evitando que DndContext pierda estado durante el arrastre.
   function renderNavLinks() {
     return (
-      <nav className="flex flex-col gap-1 px-3">
+      <nav aria-label="Menú principal" className="flex flex-col gap-1 px-3">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={orderedItems.map(i => i.href)} strategy={verticalListSortingStrategy}>
-            {orderedItems.map((item) => {
-              const isActive = pathname.startsWith(item.href)
-              const lockMeta = lockStateByHref.get(item.href)
-              return (
-                <SortableNavItem
-                  key={item.href}
-                  item={item}
-                  isActive={isActive}
-                  isEditMode={isEditMode}
-                  pendingBreakCount={pendingBreakCount}
-                  onNavigate={handleMobileClose}
-                  lockMeta={lockMeta}
-                  onLockedClick={handleLockedClick}
-                />
-              )
-            })}
+          <SortableContext items={grupos.map((g) => g.id)} strategy={verticalListSortingStrategy}>
+            {grupos.map((grupo) => (
+              <SortableGrupo
+                key={grupo.id}
+                grupo={grupo}
+                destino={destinos.get(grupo.id) ?? null}
+                isActive={grupoMarcado === grupo.id}
+                isEditMode={isEditMode}
+                pendingBreakCount={pendingBreakCount}
+                onNavigate={handleMobileClose}
+                onTocado={setGrupoTocado}
+                onLockedClick={handleLockedClick}
+              />
+            ))}
           </SortableContext>
         </DndContext>
       </nav>
     )
   }
+
+  const IconoDestino = swipeDestino ? ICONOS_NAV[swipeDestino.pestana.icono] : null
 
   return (
     <EntitlementsProvider value={entitlements}>
@@ -812,17 +760,28 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
         teaserCopy={comingSoonModal.teaser}
         estimatedRelease={comingSoonModal.estimatedRelease}
       />
-    <div className="flex h-screen overflow-hidden">
+    {/* --alto-barra-inferior: lo que ocupa la barra inferior del celular (52 px,
+        su borde de 1 px y el área segura, como mínimo 4 px; ver
+        mobile-bottom-nav.tsx). 0 en la compu y cuando la barra no está. El
+        botón flotante de Tex lo usa para quedar arriba de ella. */}
+    <div
+      className={cn(
+        'flex h-screen overflow-hidden',
+        barraOculta
+          ? '[--alto-barra-inferior:0px]'
+          : '[--alto-barra-inferior:calc(3.25rem_+_1px_+_max(0.25rem,env(safe-area-inset-bottom,0px)))] lg:[--alto-barra-inferior:0px]',
+      )}
+    >
       <AiFeatureAnnouncement
         canUse={puedeUsarTex}
         userKey={user.email}
       />
       {mostrarPanelTex && (
         <TexPanel
-          orgNombre={availableOrganizations.find(o => o.id === organizationId)?.name || 'tu barbería'}
+          orgNombre={orgNombre || 'tu barbería'}
           puedeConfigurar={!!permissions['settings.manage']}
           puedeConciliacion={!!permissions['conciliacion.view']}
-          etiquetaSeccion={currentNavIndex >= 0 ? orderedItems[currentNavIndex]?.label ?? null : null}
+          etiquetaSeccion={etiquetaActiva}
           sinEncabezado={isFocusMode}
           onAbiertoChange={setTexPanelAbierto}
         />
@@ -854,6 +813,8 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
             side="left"
             className="w-64 p-0 bg-sidebar text-sidebar-foreground"
             showCloseButton={false}
+            // Sin descripción: el título alcanza. Sin esto Radix avisa en la consola cada vez que se abre.
+            aria-describedby={undefined}
           >
             <SheetTitle className="sr-only">Menú de navegación</SheetTitle>
             <SidebarContent
@@ -872,41 +833,39 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
       )}
 
       <div className="flex flex-1 flex-col overflow-hidden">
+        {/* La línea de abajo es una sombra interior y no un borde: así el
+            subrayado de la pestaña activa queda justo encima de ella. */}
         <header
           className={cn(
-            'flex shrink-0 items-center gap-2 lg:gap-4 border-b overflow-hidden transition-[height,opacity,padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]',
+            'flex shrink-0 items-center gap-2 lg:gap-4 overflow-hidden transition-[height,opacity,padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]',
             isFocusMode
-              ? 'h-0 opacity-0 px-0 border-b-0 pointer-events-none'
-              : 'h-12 lg:h-14 opacity-100 px-3 lg:px-6'
+              ? 'h-0 opacity-0 px-0 pointer-events-none'
+              : 'h-12 lg:h-14 opacity-100 px-3 lg:px-6 shadow-[inset_0_-1px_0_var(--color-border)]'
           )}
           aria-hidden={isFocusMode}
+          // Plegado en el modo foco: que el teclado tampoco caiga en sus pestañas.
+          inert={isFocusMode}
         >
           <Button
             variant="ghost"
             size="icon"
-            className="lg:hidden size-9"
+            className="lg:hidden size-9 shrink-0"
             onClick={() => setMobileOpen(true)}
+            aria-label="Abrir el menú"
           >
             <Menu className="size-5" />
           </Button>
 
-          <div className="flex items-center gap-2 lg:hidden min-w-0 flex-1">
-            <span className="font-semibold text-sm truncate">
-              {currentNavIndex >= 0 ? orderedItems[currentNavIndex]?.label : (availableOrganizations.find(o => o.id === organizationId)?.name || 'BarberOS')}
-            </span>
-          </div>
-
-          {/* Tex: en la compu, campo-botón en el centro del header (el padding
-              izquierdo iguala el avatar + el gap, así queda centrado de verdad);
-              en el celular, la cara entre el título y el avatar. */}
-          <div className="flex-1 hidden lg:flex items-center justify-center lg:pl-[52px]">
-            {mostrarPanelTex && !isFocusMode && <TexLanzador variante="escritorio" />}
-          </div>
-          {mostrarPanelTex && !isFocusMode && <TexLanzador variante="movil" />}
+          <PestanasEncabezado
+            grupo={grupoActivo}
+            activa={pestanaActiva?.href ?? null}
+            tituloMovil={tituloMovil}
+            onBloqueada={handleLockedClick}
+          />
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="rounded-full">
+              <Button variant="ghost" size="icon" className="shrink-0 rounded-full" aria-label="Tu cuenta">
                 <Avatar>
                   <AvatarFallback>{initials}</AvatarFallback>
                 </Avatar>
@@ -967,31 +926,41 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
             </BranchScopeProvider>
           </main>
 
-          {/* Panel de sección entrante — solo visible durante el swipe en mobile */}
+          {/* Pestaña entrante — solo visible durante el swipe en mobile */}
           <div
             ref={panelRef}
             className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-5 bg-background lg:hidden"
             style={{ visibility: 'hidden', transform: 'translateX(100%)' }}
             aria-hidden="true"
           >
-            {swipeTargetItem && (
+            {swipeDestino && IconoDestino && (
               <>
                 <div className="rounded-2xl bg-muted p-5 ring-1 ring-border/60">
-                  <swipeTargetItem.icon className="size-12 text-foreground/70" />
+                  <IconoDestino className="size-12 text-foreground/70" />
                 </div>
-                <p className="text-2xl font-semibold tracking-tight text-foreground">
-                  {swipeTargetItem.label}
-                </p>
+                <div className="flex flex-col items-center gap-1.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    {swipeDestino.grupo.etiqueta}
+                  </p>
+                  <p className="text-2xl font-semibold tracking-tight text-foreground">
+                    {swipeDestino.pestana.etiqueta}
+                  </p>
+                </div>
               </>
             )}
           </div>
         </div>
         <MobileBottomNav
-          orderedItems={orderedItems}
-          currentIndex={currentNavIndex < 0 ? 0 : currentNavIndex}
-          hidden={hideBottomNav}
+          grupos={grupos}
+          grupoMarcado={grupoMarcado}
+          destinos={destinos}
+          descansosPendientes={pendingBreakCount}
+          hidden={barraOculta}
+          onTocado={setGrupoTocado}
+          onBloqueada={handleLockedClick}
         />
       </div>
+      {puedeUsarTex && <TexBotonFlotante oculto={ocultarBotonTex} />}
     </div>
     </EntitlementsProvider>
   )

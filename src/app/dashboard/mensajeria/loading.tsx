@@ -4,7 +4,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 // Mobile: fullscreen chat con bottom nav
 export default function MensajeriaLoading() {
   return (
-    <div className="flex h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-5rem)] overflow-hidden">
+    <div className="flex h-[calc(100dvh-7.5rem-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-5rem)] overflow-hidden">
       {/* Nav lateral — solo desktop */}
       <div className="hidden w-14 shrink-0 flex-col items-center gap-2 border-r border-white/[0.06] bg-zinc-950/60 py-3 lg:flex">
         {Array.from({ length: 6 }).map((_, i) => (

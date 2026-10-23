@@ -5,7 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 // minimalista coherente con el shell del dashboard.
 export default function DashboardRootLoading() {
   return (
-    <div className="flex h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-5rem)] flex-col">
+    <div className="flex h-[calc(100dvh-7.5rem-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-5rem)] flex-col">
       <div className="shrink-0 border-b border-white/[0.06] bg-zinc-950/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Skeleton className="h-6 w-40 rounded-md" />

@@ -145,8 +145,10 @@ export function NotificacionesClient({
         </div>
       </header>
 
-      {/* Pestañas tipo pill con borde inferior: el patrón del resto del dashboard. */}
-      <nav className="flex flex-wrap gap-1 border-b border-border" aria-label="Secciones de notificaciones">
+      {/* Pestañas de SEGUNDO nivel (contenedor gris, la activa en relieve, como
+          Turnos o Equipo): el subrayado es de las pestañas del grupo, en el
+          encabezado del shell. */}
+      <nav className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg border bg-muted/30 p-1" aria-label="Secciones de notificaciones">
         {PESTANIAS.map(p => {
           const activa = pestania === p.id
           return (
@@ -155,8 +157,8 @@ export function NotificacionesClient({
               type="button"
               onClick={() => setPestania(p.id)}
               aria-current={activa ? 'page' : undefined}
-              className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
-                activa ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+              className={`flex items-center whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-all sm:px-3 sm:py-2 sm:text-sm ${
+                activa ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               {p.etiqueta}

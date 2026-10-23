@@ -1,7 +1,7 @@
 // Baja el contenido del panel de Tex (el chat, el AI SDK, el markdown) antes de
-// que haga falta: el lanzador lo pide al pasar el mouse o al enfocarlo, así el
-// primer ⌘K no espera la descarga. Webpack lo separa en su propio chunk y el
-// import se resuelve una sola vez.
+// que haga falta: el botón flotante lo pide al pasar el mouse, al enfocarlo o
+// al apoyar el dedo, así abrirlo no espera la descarga. Webpack lo separa en su
+// propio chunk y el import se resuelve una sola vez.
 
 let pedido: Promise<unknown> | null = null
 

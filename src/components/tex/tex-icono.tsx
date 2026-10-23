@@ -1,7 +1,6 @@
-// La cara de Tex quieta, como ícono: el ítem del menú, botones, chips. Acepta
-// `className` igual que un ícono de lucide (el menú del shell lo pinta con
-// `<item.icon className="size-4 …" />`), y el dibujo se encaja con
-// object-contain dentro de esa caja cuadrada.
+// La cara de Tex quieta, como ícono: el botón flotante, botones, chips. Acepta
+// `className` igual que un ícono de lucide (`className="size-8 …"`), y el
+// dibujo se encaja con object-contain dentro de esa caja cuadrada.
 
 import { cn } from '@/lib/utils'
 import { srcCara } from './assets'

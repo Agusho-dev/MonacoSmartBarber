@@ -971,3 +971,94 @@ html[data-giro='css'] .giro-solo-normal { display: none; }
   .tex-pixeles > i:nth-child(2) { animation-delay: 200ms; }
   .tex-pixeles > i:nth-child(3) { animation-delay: 400ms; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Botón flotante de Tex (tex-boton-flotante.tsx) y los avisos del dashboard.
+   - El disco: oscuro, con el anillo del azul de Tex y sombra; la cara lleva el
+     halo porque sobre fondo oscuro su contorno azul marino se pierde.
+   - La invitación de la primera vez: tres pulsos del anillo. Queda en pausa
+     mientras el botón está escondido o hay un diálogo abierto (Radix marca
+     <body data-scroll-locked>), así se ve cuando el botón está a la vista.
+   - `--avisos-abajo`: la altura que toaster-raiz.tsx le pasa a sonner en el
+     dashboard, para que los avisos no queden ni encima ni debajo del botón ni
+     de la barra inferior del celular (52 px + safe-area, mobile-bottom-nav.tsx;
+     el Toaster vive fuera del shell y no hereda su --alto-barra-inferior). Sin
+     el botón (quien no usa Tex), sólo despejan la barra.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@layer components {
+  .tex-flotante {
+    -webkit-tap-highlight-color: transparent;
+    background: linear-gradient(to bottom, oklch(0.205 0.026 258), oklch(0.155 0.022 262));
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--tex) 34%, transparent),
+      inset 0 1px 0 oklch(1 0 0 / 0.07),
+      0 12px 32px -10px oklch(0 0 0 / 0.8),
+      0 4px 12px -4px oklch(0 0 0 / 0.55);
+  }
+  @media (hover: hover) {
+    .tex-flotante:hover {
+      box-shadow:
+        0 0 0 1px color-mix(in oklab, var(--tex) 60%, transparent),
+        inset 0 1px 0 oklch(1 0 0 / 0.09),
+        0 14px 36px -10px oklch(0 0 0 / 0.85),
+        0 0 28px -6px color-mix(in oklab, var(--tex) 42%, transparent);
+    }
+  }
+  .tex-flotante-cara {
+    background: radial-gradient(closest-side, var(--tex-halo), transparent 78%);
+  }
+  /* Una barra fija de la página a todo el ancho abajo (la de guardar de
+     /dashboard/turnos/configuracion, z-50) tapaba la mitad de abajo del botón
+     y asomaba medio disco: mientras la barra está, el botón se corre. Con
+     visibility tampoco se enfoca ni lo lee un lector de pantalla. (También
+     calza con una hoja inferior abierta, que de todos modos lo tapa.) */
+  html:has(.fixed.inset-x-0.bottom-0.z-50) .tex-flotante {
+    visibility: hidden;
+    opacity: 0;
+  }
+  /* Lo mismo con una barra de guardar pegada abajo (sticky) en una pestaña a la
+     vista: en la compu, el disco quedaba encima de «Guardar categorías» de
+     Fidelización > Categorías. Las pestañas de Fidelización siguen montadas y
+     se ocultan con [hidden] (fidelizacion-client.tsx): ésas no cuentan. Va en
+     una regla aparte para que, si un navegador no entendiera este selector, la
+     de arriba siga andando (el minificador las junta en un :is(), que tolera
+     los selectores que no entiende). */
+  html:has(.sticky.bottom-0:not([hidden] *)) .tex-flotante {
+    visibility: hidden;
+    opacity: 0;
+  }
+}
+
+/* La barra inferior ocupa 52 px + 1 px de borde + el área segura (como mínimo
+   4 px): el mismo cálculo que el --alto-barra-inferior del shell. Contando sólo
+   52 px + área segura, el aviso quedaba a 7 px del botón y no a 12. */
+:root {
+  --avisos-abajo: calc(3.25rem + 1px + max(0.25rem, env(safe-area-inset-bottom, 0px)) + 12px);
+}
+:root:has([data-tex-flotante]) {
+  /* El botón: 52 px, 12 px arriba de la barra; y 12 px de aire. */
+  --avisos-abajo: calc(3.25rem + 1px + max(0.25rem, env(safe-area-inset-bottom, 0px)) + 76px);
+}
+@media (min-width: 1024px) {
+  :root {
+    --avisos-abajo: 24px;
+  }
+  :root:has([data-tex-flotante]) {
+    /* El botón: 56 px a 24 px del borde; y 16 px de aire. */
+    --avisos-abajo: 96px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes tex-flotante-pulso {
+    0%        { box-shadow: 0 0 0 0 color-mix(in oklab, var(--tex) 60%, transparent); }
+    70%, 100% { box-shadow: 0 0 0 14px color-mix(in oklab, var(--tex) 0%, transparent); }
+  }
+  .tex-flotante-pulso {
+    animation: tex-flotante-pulso 1.6s cubic-bezier(0.22, 1, 0.36, 1) 1.4s 3;
+  }
+  .tex-flotante[aria-hidden='true'] .tex-flotante-pulso,
+  body[data-scroll-locked] .tex-flotante-pulso {
+    animation-play-state: paused;
+  }
+}

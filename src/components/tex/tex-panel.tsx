@@ -2,16 +2,16 @@
 
 // El panel lateral de Tex, desde cualquier pantalla del dashboard.
 //
-// Se abre con ⌘K / Ctrl+K, con el lanzador del header o con `abrirTex()` (el
-// "Preguntale a Tex" de Conciliación, Finanzas…). En la compu es un aside fijo
-// a la derecha de 420 px, NO modal: la página se sigue usando y no hay
-// `pointer-events: none` en el body (Known Risk #39). En el celular es una hoja
-// inferior de 88 dvh (ahí sí modal).
+// Se abre con ⌘K / Ctrl+K, con el botón flotante (tex-boton-flotante.tsx) o
+// con `abrirTex()` (el "Preguntale a Tex" de Conciliación, Finanzas…). En la
+// compu es un aside fijo a la derecha de 420 px, NO modal: la página se sigue
+// usando y no hay `pointer-events: none` en el body (Known Risk #39). En el
+// celular es una hoja inferior de 88 dvh (ahí sí modal).
 //
 // Este archivo es liviano a propósito (vive en el shell, en todas las
 // pantallas): escucha los atajos y guarda el estado. El chat —AI SDK, markdown,
 // bloques— se baja recién la primera vez que se abre (o antes, si el mouse pasó
-// por el lanzador).
+// por el botón flotante, si se enfocó o si se apoyó el dedo).
 
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import dynamic from 'next/dynamic'
@@ -42,7 +42,7 @@ export interface TexPanelProps {
   orgNombre: string
   puedeConfigurar: boolean
   puedeConciliacion: boolean
-  /** El nombre del ítem del menú activo (para pantallas sin sección propia de Tex). */
+  /** La pestaña de la pantalla actual, con los alias resueltos (para pantallas sin sección propia de Tex). */
   etiquetaSeccion?: string | null
   /** Modo foco de Mensajería: el header del shell no está y el panel va desde arriba. */
   sinEncabezado?: boolean
@@ -72,8 +72,9 @@ export function TexPanel({
   const nonceRef = useRef(0)
   const asideRef = useRef<HTMLElement>(null)
 
-  // En /dashboard/asistente la página es Tex: el panel no se mete.
-  const enPantallaTex = pathname.startsWith('/dashboard/asistente')
+  // En /dashboard/asistente (y Configurar Tex) la página es Tex: el panel no se
+  // mete. Por segmento, como el shell, que con la misma regla ni lo monta.
+  const enPantallaTex = pathname === '/dashboard/asistente' || pathname.startsWith('/dashboard/asistente/')
 
   // En el celular la hoja es modal y tapa el 88 % de la pantalla: un enlace del
   // panel ("Ver la conciliación", "Abrir Finanzas", un enlace del texto) cambiaba
@@ -136,7 +137,7 @@ export function TexPanel({
   // pantalla de Tex), que no le quede la barra inferior escondida.
   useEffect(() => () => onAbiertoChange?.(false), [onAbiertoChange])
 
-  // Un `abrirTex()` de antes de que este chunk cargara (el lanzador, el
+  // Un `abrirTex()` de antes de que este chunk cargara (el botón flotante, el
   // "Preguntale a Tex" de Conciliación con mala señal): se atiende ahora.
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -220,11 +221,19 @@ export function TexPanel({
         }}
         className={cn(
           'fixed bottom-0 right-0 z-[45] flex w-[420px] max-w-[calc(100vw-1rem)] flex-col border-l bg-background',
-          'transition-[transform,visibility,box-shadow] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none',
+          'ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none',
           sinEncabezado ? 'top-0' : 'top-14',
+          // Al abrir, `visibility` cambia en el acto (no está en la transición):
+          // con la transición, en el primer cuadro el aside seguía `hidden` y el
+          // composer no tomaba el foco al reabrir (con la conversación ya
+          // montada, el foco llega un tick después) y Esc no lo cerraba. Al
+          // cerrar sí transiciona: sigue visible mientras se desliza afuera.
+          // Se transiciona `translate` y no `transform`: en Tailwind v4,
+          // translate-x-* escribe la propiedad `translate`, y con `transform`
+          // el panel aparecía y desaparecía de golpe, sin deslizarse.
           abierto
-            ? 'visible translate-x-0 shadow-[-24px_0_48px_-12px_rgba(0,0,0,0.55)] duration-[260ms]'
-            : 'invisible translate-x-full shadow-none duration-200',
+            ? 'visible translate-x-0 shadow-[-24px_0_48px_-12px_rgba(0,0,0,0.55)] transition-[translate,box-shadow] duration-[260ms]'
+            : 'invisible translate-x-full shadow-none transition-[translate,visibility,box-shadow] duration-200',
         )}
       >
         {contenido}

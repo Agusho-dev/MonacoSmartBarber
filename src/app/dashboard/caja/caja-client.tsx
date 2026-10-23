@@ -374,7 +374,7 @@ export function CajaClient({
   const isToday = date === getLocalDateStr()
 
   return (
-    <div className="flex h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-5rem)] flex-col overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(120,113,108,0.08),transparent_60%)]">
+    <div className="flex h-[calc(100dvh-7.5rem-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-5rem)] flex-col overflow-hidden bg-[radial-gradient(ellipse_at_top,rgba(120,113,108,0.08),transparent_60%)]">
 
       {/* ── Header sticky ── */}
       <CajaHeader

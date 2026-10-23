@@ -4,8 +4,9 @@
 // /dashboard/asistente — la pantalla de Tex.
 //
 // 1440: riel de conversaciones (264) | hilo centrado (máx. 720) | Lienzo (520,
-// al abrir un informe, tabla o gráfico en grande). 390: el shell no muestra la
-// barra inferior ni hace swipe en esta ruta; debajo de su header va la subbarra
+// al abrir un informe, tabla o gráfico en grande). En esta ruta el shell no
+// muestra el botón flotante de Tex (en ninguna medida) y, en 390, tampoco la
+// barra inferior ni el swipe; debajo de su header va la subbarra
 // [Historial] · estado · [Nueva] y el historial se abre en una hoja.
 //
 // Alto: el shell NO le suma su padding inferior a esta ruta (ver

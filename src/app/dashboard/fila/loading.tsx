@@ -4,7 +4,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 // kanban horizontal con columnas por barbero + columna "Descansos"
 export default function FilaLoading() {
   return (
-    <div className="flex h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-5rem)] flex-col overflow-hidden">
+    <div className="flex h-[calc(100dvh-7.5rem-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-5rem)] flex-col overflow-hidden">
       {/* Header sticky */}
       <div className="shrink-0 border-b border-white/[0.06] bg-zinc-950/80 backdrop-blur-xl">
         <div className="mx-auto max-w-7xl space-y-2.5 px-4 pt-3 pb-2">

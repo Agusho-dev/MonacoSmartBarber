@@ -92,6 +92,18 @@ export function useTecladoVirtual(): number {
   return useSyncExternalStore(suscribirTeclado, leerTeclado, () => 0)
 }
 
+const hayTeclado = () => leerTeclado() > 0
+
+/**
+ * ¿Hay un teclado virtual abierto? Para quien sólo necesita saber si está: con
+ * el teclado abierto el viewport visual se mueve en cada scroll y la cantidad
+ * de px cambia en cada evento; el sí/no, no (el botón flotante de Tex no se
+ * vuelve a dibujar en cada uno).
+ */
+export function useHayTecladoVirtual(): boolean {
+  return useSyncExternalStore(suscribirTeclado, hayTeclado, () => false)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Atajo ⌘K / Ctrl K
 // ─────────────────────────────────────────────────────────────────────────────

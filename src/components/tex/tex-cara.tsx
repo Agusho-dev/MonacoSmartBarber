@@ -1,7 +1,8 @@
 'use client'
 
-// La cara de Tex: la voz. Va chica y animada donde se conversa (el composer,
-// el encabezado, el lanzador). Tres cuadros apilados y precargados; el visible
+// La cara de Tex: la voz. Va chica y animada donde se conversa (el composer).
+// Donde sólo se la nombra (el botón flotante, el encabezado, botones y chips) va
+// quieta: `TexIcono`. Tres cuadros apilados y precargados; el visible
 // lo elige el atributo `data-cuadro`, que escriben un timer (parpadeo) y un
 // requestAnimationFrame (habla) directo en el DOM: el stream trae ~20 cambios
 // por segundo y no tiene sentido re-renderizar React por cada cuadro.

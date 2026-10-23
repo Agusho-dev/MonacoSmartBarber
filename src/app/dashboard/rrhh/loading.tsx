@@ -3,7 +3,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 /** Espeja el layout real (header sticky + tiles + grilla), no un rectángulo genérico. */
 export default function RrhhLoading() {
   return (
-    <div className="flex h-[calc(100dvh-7.5rem)] flex-col overflow-hidden lg:h-[calc(100dvh-5rem)]">
+    <div className="flex h-[calc(100dvh-7.5rem-env(safe-area-inset-bottom))] flex-col overflow-hidden lg:h-[calc(100dvh-5rem)]">
       <div className="shrink-0 border-b border-white/[0.06] bg-zinc-950/80 backdrop-blur-xl">
         <div className="mx-auto max-w-[100rem] space-y-3 px-4 pt-3 pb-3">
           <div className="flex items-center gap-3">

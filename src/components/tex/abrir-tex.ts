@@ -5,7 +5,7 @@
 // orden de carga de los chunks.
 //
 // El panel se baja diferido (next/dynamic): con mala señal, un `abrirTex()`
-// apenas carga la pantalla ("Preguntale a Tex" de Conciliación, el lanzador)
+// apenas carga la pantalla ("Preguntale a Tex" de Conciliación, el botón flotante)
 // llegaba antes de que hubiera quién lo escuchara y el botón parecía muerto.
 // Por eso cada pedido además queda guardado unos segundos: quien lo atiende
 // (el panel, al recibir el evento o al montarse; la pantalla de Tex, que

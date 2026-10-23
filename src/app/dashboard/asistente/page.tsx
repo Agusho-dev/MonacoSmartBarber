@@ -12,8 +12,9 @@ import { esConversacionNoEncontrada, saludoPorHora, TEX_TZ } from '@/components/
 import { AsistenteClient } from './asistente-client'
 import { TexBloqueado } from './components/tex-bloqueado'
 
-// La ruta no cambia con el nombre: el orden guardado del menú, NAV_FEATURE_MAP,
-// el anuncio y los revalidatePath dependen de /dashboard/asistente.
+// La ruta no cambia con el nombre: NAV_FEATURE_MAP, el shell (que acá no pone
+// la barra inferior, el deslizar ni el botón flotante), los avisos, el anuncio y
+// los revalidatePath dependen de /dashboard/asistente. Tex ya no está en el menú.
 export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = { title: 'Tex | BarberOS' }

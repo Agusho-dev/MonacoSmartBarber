@@ -151,9 +151,11 @@ export function FacturacionClient({
             )}
 
             {/* --------------------------------------------------------- pestañas */}
-            {/* Botones pill y no el primitivo tabs: es el patrón que ya usa el resto
-                del dashboard, y así la pestaña activa sobrevive a un refresh de datos. */}
-            <nav className="flex flex-wrap gap-1 border-b border-border">
+            {/* Botones y no el primitivo tabs: así la pestaña activa sobrevive a un
+                refresh de datos. Van con el estilo de SEGUNDO nivel (contenedor gris,
+                la activa en relieve, como Turnos o Equipo): el subrayado es de las
+                pestañas del grupo, en el encabezado del shell. */}
+            <nav aria-label="Secciones de facturación" className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg border bg-muted/30 p-1">
                 {PESTANIAS.map((p) => {
                     const activa = pestania === p.id
                     const bloqueada = false
@@ -163,10 +165,11 @@ export function FacturacionClient({
                             type="button"
                             disabled={bloqueada}
                             onClick={() => setPestania(p.id)}
-                            className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+                            aria-pressed={activa}
+                            className={`flex items-center whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-all sm:px-3 sm:py-2 sm:text-sm ${
                                 activa
-                                    ? 'border-primary text-foreground'
-                                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                                    ? 'bg-background text-foreground shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground'
                             } disabled:cursor-not-allowed disabled:opacity-40`}
                         >
                             {p.etiqueta}
