@@ -87,7 +87,11 @@ export function ConversationList({
           menu={menu}
         />
       </section>
-      {programados && <VistaProgramados onVolver={() => setInboxTab('inbox')} onProgramar={onProgramar} />}
+      {/* Con una sección abierta no va: en la compu quedaba en la columna de la
+          lista y la sección se apretaba en el lugar del chat. */}
+      {programados && !seccionAbierta && (
+        <VistaProgramados onVolver={() => setInboxTab('inbox')} onProgramar={onProgramar} />
+      )}
     </>
   )
 }

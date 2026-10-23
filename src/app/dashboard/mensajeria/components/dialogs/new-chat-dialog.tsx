@@ -28,7 +28,8 @@ export function NewChatDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       onOpenChange={onOpenChange}
       titulo="Nuevo chat"
       descripcion="Buscá un cliente por nombre o teléfono para abrir su chat."
-      // El foco va al buscador (no a "Cancelar"): es lo único que hay para hacer.
+      // En la compu el foco va al buscador (no a "Cancelar"): es lo único que
+      // hay para hacer. Con pantalla táctil va a la hoja (HojaWhatsApp).
       onOpenAutoFocus={(e) => {
         e.preventDefault()
         inputRef.current?.focus()

@@ -271,7 +271,9 @@ export function BroadcastSection() {
         // En modo CSV el servidor resuelve la audiencia a client_ids.
         audienceFilters: isCsv ? {} : buildFilters(),
         csvContacts: isCsv ? csvContacts.map(c => ({ name: c.name, phone: c.phone })) : undefined,
-        scheduledFor: scheduledFor || undefined,
+        // El campo da la hora local sin zona ("2026-10-30T17:00"); la base es UTC
+        // y la guardaba como las 17 UTC: la difusión salía 3 horas antes.
+        scheduledFor: scheduledFor ? new Date(scheduledFor).toISOString() : undefined,
       })
       if (result.error) { toast.error(result.error); return }
       toast.success(

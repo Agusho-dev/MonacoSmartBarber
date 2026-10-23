@@ -25,7 +25,11 @@ type BannerState =
  * conserva el cierre con la X y el estado ya calculado. Desmontado, al volver
  * aparecía de nuevo y empujaba el encabezado hacia abajo.
  */
-export function TrialBanner({ oculto = false }: { oculto?: boolean }) {
+export function TrialBanner({ oculto = false, tapado = false }: {
+  oculto?: boolean
+  /** Lo tapa una capa de la pantalla inmersiva: queda dibujado, pero ni el foco ni el lector de pantalla llegan. */
+  tapado?: boolean
+}) {
   const ent = useEntitlements()
   const [dismissed, setDismissed] = useState(false)
   const [state, setState] = useState<BannerState>(null)
@@ -72,6 +76,8 @@ export function TrialBanner({ oculto = false }: { oculto?: boolean }) {
   return (
     <div
       hidden={oculto}
+      inert={tapado}
+      aria-hidden={tapado || undefined}
       className={cn(
         'sticky top-0 z-40 flex items-center justify-center gap-3 px-4 py-2 text-sm',
         toneClasses,

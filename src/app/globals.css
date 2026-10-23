@@ -1446,9 +1446,15 @@ html[data-giro='css'] .giro-solo-normal { display: none; }
        chat-view.tsx con el alto real del composer (área segura incluida), que
        crece con el texto y con las respuestas rápidas.
      - Sin composer (una sección, Programados) no está publicado: 12 px arriba
-       del área segura. */
+       del área segura.
+     El documento no scrollea mientras haya una capa: con un banner arriba (el
+     del plan de prueba, el del modo plataforma) el documento mide la pantalla
+     más el banner, y arrastrar en vertical sobre una parte de la capa que no
+     scrollea movía la página por debajo; al volver, el banner tapaba el
+     encabezado. */
   :root[data-pantalla-inmersiva] {
     --avisos-abajo-mensajeria: calc(var(--alto-composer-chat, env(safe-area-inset-bottom, 0px)) + 12px);
+    overflow: hidden;
   }
 }
 @media (min-width: 1024px) {

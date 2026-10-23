@@ -835,8 +835,9 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
       {/* El banner va arriba y fuera del alto de la pantalla. En el modo foco
           se esconde SIN desmontarse: desmontado perdía el cierre (la X) y al
           volver empujaba el encabezado. Con una capa de la pantalla inmersiva
-          no hace falta esconderlo: la capa (fixed, z-41) lo tapa. */}
-      <TrialBanner oculto={isFocusMode} />
+          no hace falta esconderlo: la capa (fixed, z-41) lo tapa, y queda
+          inerte como el encabezado y la barra. */}
+      <TrialBanner oculto={isFocusMode} tapado={inmersiva} />
       <UpgradePromptDialog
         open={upgradeModal.open}
         onOpenChange={(open) => setUpgradeModal(p => ({ ...p, open }))}

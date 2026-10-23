@@ -6,6 +6,8 @@ import { requireOrgAccessToEntity } from './guard'
 import { revalidatePath } from 'next/cache'
 import type { AudienceFilters } from './client-segments'
 import { normalizeCsvPhone, CSV_MAX_CONTACTS } from '@/lib/csv/contacts'
+import { getActiveTimezone } from '@/lib/i18n'
+import { getTzOffsetISO } from '@/lib/time-utils'
 
 // Estructura de variables por componente de template (Meta Cloud API format)
 export interface TemplateVariable {
@@ -27,6 +29,25 @@ async function requireOrgId(): Promise<{ orgId: string } | { error: string }> {
     return { error: 'Sesión expirada. Recargá la página e intentá de nuevo.' }
   }
   return { orgId }
+}
+
+/**
+ * La fecha de envío con zona horaria. `scheduled_for` es timestamptz y la base
+ * corre en UTC: una fecha sin zona ("2026-10-30T17:00", lo que da un campo de
+ * fecha y hora del navegador) quedaba como las 17 UTC y la difusión salía 3
+ * horas antes. El dashboard ya manda ISO con zona; lo que llegue sin zona (un
+ * bundle viejo) se toma como hora de la org. null si no es una fecha.
+ */
+async function fechaDeEnvioConZona(fecha: string): Promise<string | null> {
+  const texto = fecha.trim()
+  if (/(?:z|[+-]\d{2}:?\d{2})$/i.test(texto)) return Number.isNaN(Date.parse(texto)) ? null : texto
+  const partes = texto.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?$/)
+  if (!partes) return null
+  const zona = await getActiveTimezone()
+  // El desfase de ese día (por si la zona de la org tuviera horario de verano).
+  const desfase = getTzOffsetISO(new Date(`${partes[1]}T${partes[2]}:00Z`), zona)
+  const conZona = `${partes[1]}T${partes[2]}:00${desfase}`
+  return Number.isNaN(Date.parse(conZona)) ? null : conZona
 }
 
 export async function getBroadcasts() {
@@ -198,6 +219,8 @@ export async function createBroadcast(input: {
   const orgId = result.orgId
   if (!input.name.trim()) return { error: 'Nombre requerido' }
   if (!input.templateName) return { error: 'Template requerido' }
+  const scheduledFor = input.scheduledFor ? await fechaDeEnvioConZona(input.scheduledFor) : null
+  if (input.scheduledFor && !scheduledFor) return { error: 'La fecha de envío no es válida' }
 
   // Gate de plan: broadcasts requiere feature + cap mensual (Pro = 500/mes).
   const { requireFeature, requireMonthlyCap } = await import('@/lib/actions/entitlements')
@@ -244,7 +267,7 @@ export async function createBroadcast(input: {
       template_components: input.templateComponents ?? null,
       audience_filters: audienceFilters,
       audience_count: audienceFilters.manualClientIds?.length ?? 0,
-      scheduled_for: input.scheduledFor || null,
+      scheduled_for: scheduledFor,
     })
     .select('*')
     .single()

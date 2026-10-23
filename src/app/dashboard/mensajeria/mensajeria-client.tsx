@@ -100,9 +100,9 @@ function MarcoMensajeria() {
   // En el celular, un chat abierto, una sección y Programados son capas que
   // tapan la pantalla entera. El shell deja quietos e inertes su encabezado y
   // su barra (debajo de la capa) y apaga el deslizar entre pestañas.
-  usePantallaInmersiva(
-    esCelular && ((showMobileChat && !!activeConv) || section !== 'inbox' || inboxTab === 'scheduled'),
-  )
+  const capaAbierta =
+    esCelular && ((showMobileChat && !!activeConv) || section !== 'inbox' || inboxTab === 'scheduled')
+  usePantallaInmersiva(capaAbierta)
 
   const toggleFocusMode = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString())
@@ -161,6 +161,9 @@ function MarcoMensajeria() {
       return
     }
     setSection(destino)
+    // De Programados a una sección: Programados se cierra. Si no, en la compu
+    // quedaban las dos a la vista y la sección se apretaba en el lugar del chat.
+    setInboxTab('inbox')
   }
 
   const activo = destinoActivo(section, inboxTab)
@@ -184,7 +187,11 @@ function MarcoMensajeria() {
     // desde la derecha: la conversación quedaba 138 px a la izquierda con una
     // franja negra (23/oct/2026). Con clip no hay nada que correr.
     <div className="wa-scope flex h-full min-h-0 flex-col overflow-clip bg-[var(--wa-bg)] text-[var(--wa-text)]">
-      <TokenHealthBanner onOpenSettings={abrirConfiguracion} />
+      {/* Debajo de una capa queda inerte, como la lista: tapado, «Reconectar» se
+          podía enfocar y el lector de pantalla lo leía. */}
+      <div inert={capaAbierta} aria-hidden={capaAbierta || undefined} className="contents">
+        <TokenHealthBanner onOpenSettings={abrirConfiguracion} />
+      </div>
 
       {/* Las columnas: el contenedor que miden las container queries (sólo en
           la compu: en el celular no hay columnas que medir). */}

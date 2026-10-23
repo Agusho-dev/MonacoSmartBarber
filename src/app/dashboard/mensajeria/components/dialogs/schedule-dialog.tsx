@@ -17,6 +17,7 @@ import { toast } from 'sonner'
 import { scheduleMessageAuto } from '@/lib/actions/conversations'
 import { obtenerProgramados } from '@/lib/actions/programados'
 import { searchClients } from '@/lib/actions/clients'
+import { avisarYRecargarPorVersion, esErrorDeVersion, TEXTO_RECARGA_MANUAL } from '@/lib/recarga-version'
 import { cn } from '@/lib/utils'
 import { Avatar } from '../shared/avatar'
 import { formatearTelefonoAr } from '../shared/helpers'
@@ -94,21 +95,36 @@ export function ScheduleDialog({
       toast.error('Completá todos los campos')
       return
     }
+    // Ningún rechazo puede salir de la transición: en React 19 sube al error
+    // boundary y se llevaba toda Mensajería («Algo salió mal»), aunque el
+    // mensaje ya hubiera quedado programado.
     startProgramando(async () => {
-      const r = await scheduleMessageAuto({
-        clientId: cliente.id,
-        content: mensaje.trim(),
-        scheduledFor: new Date(cuando).toISOString(),
-      })
+      let r: Awaited<ReturnType<typeof scheduleMessageAuto>>
+      try {
+        r = await scheduleMessageAuto({
+          clientId: cliente.id,
+          content: mensaje.trim(),
+          scheduledFor: new Date(cuando).toISOString(),
+        })
+      } catch (e) {
+        if (esErrorDeVersion(e) && avisarYRecargarPorVersion()) return
+        toast.error(esErrorDeVersion(e) ? TEXTO_RECARGA_MANUAL : 'No se pudo programar el mensaje. Revisá la conexión y probá de nuevo.')
+        return
+      }
       if (r.error) {
         toast.error(r.error)
         return
       }
       toast.success('Mensaje programado')
       onOpenChange(false)
-      // La lista de Programados (y el contador de pendientes) con el nuevo.
-      const lista = await obtenerProgramados()
-      if (!lista.error) setScheduled(lista.data)
+      // La lista de Programados (y el contador de pendientes) con el nuevo. Si
+      // la relectura falla no se avisa: Programados vuelve a leer al abrirse.
+      try {
+        const lista = await obtenerProgramados()
+        if (!lista.error) setScheduled(lista.data)
+      } catch {
+        // nada
+      }
     })
   }
 
@@ -122,8 +138,9 @@ export function ScheduleDialog({
       onOpenChange={onOpenChange}
       titulo="Programar mensaje"
       descripcion="Elegí el cliente, escribí el mensaje y el día y la hora en que sale por WhatsApp."
-      // El foco, a lo que falta: el mensaje si el cliente ya vino elegido (desde
-      // la info. del contacto); si no, el buscador de clientes.
+      // En la compu, el foco a lo que falta: el mensaje si el cliente ya vino
+      // elegido (desde la info. del contacto); si no, el buscador de clientes.
+      // Con pantalla táctil va a la hoja (HojaWhatsApp).
       onOpenAutoFocus={(e) => {
         e.preventDefault()
         document.getElementById(clienteInicial ? 'programar-mensaje' : 'programar-buscar')?.focus()

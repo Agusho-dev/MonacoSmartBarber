@@ -49,7 +49,21 @@ export function HojaWhatsApp({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        onOpenAutoFocus={onOpenAutoFocus}
+        onOpenAutoFocus={(e) => {
+          // Con pantalla táctil, el foco no va a un campo al abrir: va a la hoja.
+          // La hoja entra deslizando desde abajo, y si un campo toma el foco a
+          // mitad de camino, iOS abre el teclado y corre la pantalla para
+          // mostrarlo donde está en ese momento. Al terminar de entrar, la hoja
+          // quedaba arriba, fuera de la vista, y sobre el teclado sólo se veía
+          // negro (probado en la app instalada, iOS 26.3). WhatsApp tampoco abre
+          // el teclado solo: se toca el campo.
+          if (window.matchMedia('(pointer: coarse)').matches) {
+            e.preventDefault()
+            if (e.target instanceof HTMLElement) e.target.focus({ preventScroll: true })
+            return
+          }
+          onOpenAutoFocus?.(e)
+        }}
         className={cn(
           'wa-scope flex flex-col gap-0 overflow-hidden border-0 p-0 text-[var(--wa-text)] outline-none',
           // max-h-[none] y no max-h-none: tailwind-merge no reconoce el segundo

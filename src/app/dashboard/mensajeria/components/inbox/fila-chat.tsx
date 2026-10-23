@@ -82,6 +82,9 @@ export const FilaChat = memo(function FilaChat({
       aria-current={elegida ? 'true' : undefined}
       className={cn(
         'flex w-full items-stretch gap-3 pl-4 text-left outline-none [-webkit-tap-highlight-color:transparent]',
+        // Mantener el dedo sobre una fila no selecciona texto ni abre el menú
+        // "Copiar | Consultar" de iOS (en WhatsApp una fila nunca se selecciona).
+        'select-none [-webkit-touch-callout:none]',
         // Con el teclado, el anillo verde por dentro: el fondo gris solo no se veía (1,1:1).
         'transition-colors duration-100 active:bg-[var(--wa-hover)] focus-visible:bg-[var(--wa-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--wa-accent)]',
         'lg:mx-2 lg:w-[calc(100%-1rem)] lg:rounded-xl lg:pl-3 lg:hover:bg-[var(--wa-hover)]',
@@ -173,7 +176,9 @@ function LineaEtiquetas({ etiquetas, ancho }: { etiquetas: Etiqueta[]; ancho: nu
           key={e.id}
           aria-hidden
           className={cn(
-            'inline-flex h-5 items-center rounded-md px-1.5 text-[11px] font-medium leading-none',
+            // leading-[14px] y no leading-none: el "…" del truncate recorta a la
+            // caja de la línea, y con 11 px se comía las descendentes ("aqendado").
+            'inline-flex h-5 items-center rounded-md px-1.5 text-[11px] font-medium leading-[14px]',
             // Ni la primera entra entera: se corta con "…" en vez de desbordar.
             enteras === 0 ? 'min-w-0' : 'shrink-0',
           )}
@@ -189,7 +194,7 @@ function LineaEtiquetas({ etiquetas, ancho }: { etiquetas: Etiqueta[]; ancho: nu
       {sobran > 0 && (
         <span
           aria-hidden
-          className="inline-flex h-5 shrink-0 items-center rounded-md bg-white/[0.08] px-1.5 text-[11px] font-medium leading-none tabular-nums text-[var(--wa-text-2)]"
+          className="inline-flex h-5 shrink-0 items-center rounded-md bg-white/[0.08] px-1.5 text-[11px] font-medium leading-[14px] tabular-nums text-[var(--wa-text-2)]"
         >
           +{sobran}
         </span>
