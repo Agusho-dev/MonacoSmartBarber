@@ -10,6 +10,7 @@ import type { CrmAlert, CrmAlertType } from '@/lib/types/database'
 import { formatDistanceToNow } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { displayName } from '../shared/helpers'
+import { AccionDeBarraIos, BotonTextoIos } from '../navegacion/barra-ios'
 
 type AlertWithConversation = CrmAlert & {
   conversation?: {
@@ -143,22 +144,31 @@ export function CrmAlertsPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =
     )
   }
 
+  const resumen = unreadCount > 0 ? `${unreadCount} sin leer` : 'Todo al día'
+
   return (
-    <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border shrink-0 bg-card/50">
-        <div className="flex items-center gap-3">
-          <div className="size-9 rounded-xl bg-red-500/15 flex items-center justify-center">
-            <Bell className="size-5 text-red-400" />
+    // A sangre adentro del marco de Mensajería (MarcoSeccion). En el celular el
+    // título va en la barra de iOS ("‹ Chats · Alertas") y "Leer todas" a su
+    // derecha; abajo, el resumen como el pie de un título. En la compu, el
+    // encabezado de 56 px.
+    <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+      {unreadCount > 0 && (
+        <AccionDeBarraIos>
+          <BotonTextoIos onClick={handleMarkAllRead} disabled={isMarking}>Leer todas</BotonTextoIos>
+        </AccionDeBarraIos>
+      )}
+      {/* Header (compu) */}
+      <div className="hidden h-14 shrink-0 items-center justify-between gap-3 border-b bg-card/50 px-5 lg:flex">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="size-8 shrink-0 rounded-lg bg-red-500/15 flex items-center justify-center">
+            <Bell aria-hidden className="size-4 text-red-400" />
           </div>
-          <div>
-            <h2 className="text-base font-bold tracking-tight">Alertas CRM</h2>
-            <p className="text-[11px] text-muted-foreground">
-              {unreadCount > 0 ? `${unreadCount} sin leer` : 'Todo al día'}
-            </p>
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold leading-tight">Alertas CRM</h2>
+            <p className="truncate text-[11px] leading-tight text-muted-foreground">{resumen}</p>
           </div>
           {unreadCount > 0 && (
-            <span className="min-w-6 h-6 flex items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white px-2 animate-pulse">
+            <span aria-hidden className="min-w-6 h-6 flex items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white px-2 animate-pulse">
               {unreadCount}
             </span>
           )}
@@ -176,9 +186,11 @@ export function CrmAlertsPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =
           </Button>
         )}
       </div>
+      {/* Celular: el resumen, sin franja. */}
+      <p className="shrink-0 px-4 pb-1 pt-3 text-[13px] text-muted-foreground lg:hidden">{resumen}</p>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      <div className="flex-1 overflow-y-auto p-3 space-y-2 max-lg:touch-pan-y max-lg:touch-pinch-zoom">
         {alerts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
             <div className="size-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
@@ -294,7 +306,7 @@ export function CrmAlertsPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =
                                 h-8 px-4 rounded-full flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider transition-all shadow-sm
                                 ${alert.is_read 
                                   ? 'bg-muted text-muted-foreground hover:bg-muted/80' 
-                                  : 'bg-green-500 hover:bg-green-600 text-white hover:shadow-md hover:-translate-y-0.5 active:translate-y-0'}
+                                  : 'bg-[var(--wa-accent)] hover:bg-[var(--wa-accent-hover)] text-[var(--wa-on-accent)] hover:shadow-md hover:-translate-y-0.5 active:translate-y-0'}
                               `}
                               title={`Responder a ${clientName}`}
                             >

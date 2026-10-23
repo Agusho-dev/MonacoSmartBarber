@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
-import { AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Bot, User } from 'lucide-react'
+import { AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Bot, User, Sparkles } from 'lucide-react'
 import { getAiExecutionLogs, type AiExecutionLog } from '@/lib/actions/ai-config'
 import { formatRelativeDate } from '../shared/helpers'
 
@@ -56,7 +56,14 @@ export function AiLogsPanel() {
       {visible.length === 0 && (
         <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
           <Bot className="mb-2 size-8 opacity-30" />
-          <p className="text-xs">{filter === 'error' ? 'Sin errores recientes ✨' : 'Todavía no hay ejecuciones de IA'}</p>
+          {filter === 'error' ? (
+            <p className="flex items-center gap-1.5 text-xs">
+              Sin errores recientes
+              <Sparkles aria-hidden className="size-3.5 text-emerald-400" />
+            </p>
+          ) : (
+            <p className="text-xs">Todavía no hay ejecuciones de IA</p>
+          )}
         </div>
       )}
 

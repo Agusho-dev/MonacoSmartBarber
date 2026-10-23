@@ -17,7 +17,9 @@ import {
 import type { TemplateVariable } from '@/lib/actions/broadcasts'
 import { previewAudience } from '@/lib/actions/client-segments'
 import { useMensajeria } from '../shared/mensajeria-context'
-import { extractTemplateVariables } from '../shared/helpers'
+import { extractTemplateVariables, formatFechaHora } from '../shared/helpers'
+import { AccionDeBarraIos, BotonMasIos, BotonPrincipal, EncabezadoSeccion } from '../navegacion/barra-ios'
+import { CampoFechaHora } from '../dialogs/campo-fecha-hora'
 import type { AudienceFilters } from '@/lib/actions/client-segments'
 import { parseContactsCsv, CSV_MAX_CONTACTS } from '@/lib/csv/contacts'
 import type { CsvParseResult } from '@/lib/csv/contacts'
@@ -357,26 +359,31 @@ export function BroadcastSection() {
   }
 
   return (
-    <div className="flex flex-1 min-w-0">
+    // A sangre adentro del marco de Mensajería (MarcoSeccion): sin la caja de
+    // borde alrededor de la lista. En el celular el título va en la barra de iOS
+    // ("‹ Chats · Difusiones") y "Nueva" es el "+" verde de esa barra (antes era
+    // una franja de más con un solo botón); en la compu, el encabezado de 56 px.
+    <div className="flex flex-1 min-w-0 min-h-0">
+      {!showWizard && (
+        <AccionDeBarraIos>
+          <BotonMasIos etiqueta="Nueva difusión" onClick={() => setShowWizard(true)} />
+        </AccionDeBarraIos>
+      )}
       {/* Lista */}
-      <div className={`flex flex-col border-r border bg-background w-full ${showWizard ? 'hidden lg:flex lg:w-[340px]' : ''} lg:max-w-sm shrink-0`}>
-        <div className="flex items-center justify-between px-4 py-3 bg-card border-b border">
-          <div className="flex items-center gap-2">
-            <Megaphone className="size-4 text-green-400" />
-            <span className="font-semibold text-white text-sm">Difusiones</span>
-          </div>
-          <Button size="sm" onClick={() => setShowWizard(true)} className="h-7 text-xs bg-green-600 hover:bg-green-500 text-white">
-            <Plus className="size-3 mr-1" /> Nueva
-          </Button>
-        </div>
+      <div className={`flex flex-col lg:border-r bg-background w-full ${showWizard ? 'hidden lg:flex lg:w-[340px]' : ''} lg:max-w-sm shrink-0`}>
+        <EncabezadoSeccion icono={<Megaphone aria-hidden className="size-4 text-[var(--wa-accent)]" />} titulo="Difusiones">
+          <BotonPrincipal onClick={() => setShowWizard(true)}>
+            <Plus aria-hidden className="size-3.5" strokeWidth={2.5} /> Nueva
+          </BotonPrincipal>
+        </EncabezadoSeccion>
 
-        <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="flex-1 overflow-y-auto min-h-0 max-lg:touch-pan-y max-lg:touch-pinch-zoom">
           {loading ? (
             <div className="flex justify-center py-12">
-              <div className="size-6 animate-spin rounded-full border-2 border border-t-green-400" />
+              <div className="size-6 animate-spin rounded-full border-2 border border-t-[var(--wa-accent)]" />
             </div>
           ) : broadcasts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+            <div className="flex flex-col items-center justify-center px-8 py-16 text-center text-muted-foreground">
               <Megaphone className="mb-3 size-10 opacity-20" />
               <p className="text-sm">Sin difusiones</p>
               <p className="text-xs mt-1 opacity-60">Creá tu primera campaña masiva</p>
@@ -386,7 +393,7 @@ export function BroadcastSection() {
               {broadcasts.map(b => {
                 const { text, cls } = statusLabel(b.status)
                 return (
-                  <div key={b.id} className="px-4 py-3 border-b border space-y-2 hover:bg-muted/50 transition-colors">
+                  <div key={b.id} className="px-4 py-3 border-b space-y-2 hover:bg-muted/50 transition-colors">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium text-white truncate">{b.name}</span>
                       <Badge variant="outline" className={`shrink-0 text-[10px] border-0 ${cls}`}>{text}</Badge>
@@ -403,13 +410,21 @@ export function BroadcastSection() {
                       </div>
                     )}
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-muted-foreground">
-                        {new Date(b.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                      </span>
+                      {/* Una programada dice para cuándo; las demás, cuándo se crearon. En 24 h. */}
+                      {b.status === 'scheduled' && b.scheduled_for ? (
+                        <span className="flex items-center gap-1 text-[11px] tabular-nums text-blue-300">
+                          <Calendar aria-hidden className="size-3" />
+                          Sale el {formatFechaHora(b.scheduled_for)}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] tabular-nums text-muted-foreground">
+                          {formatFechaHora(b.created_at)}
+                        </span>
+                      )}
                       <div className="flex gap-1.5">
                         {b.status === 'draft' && (
                           <button onClick={() => handleSend(b.id)} disabled={isSending}
-                            className="text-[10px] text-green-400 hover:text-green-300 flex items-center gap-0.5">
+                            className="text-[10px] text-[var(--wa-accent)] hover:text-[var(--wa-accent-hover)] flex items-center gap-0.5">
                             <Send className="size-2.5" /> Enviar
                           </button>
                         )}
@@ -434,14 +449,17 @@ export function BroadcastSection() {
         {!showWizard ? (
           <div className="flex h-full flex-col items-center justify-center gap-4">
             <div className="flex size-20 items-center justify-center rounded-full bg-white/5 border border">
-              <Megaphone className="size-10 text-green-500/50" />
+              <Megaphone className="size-10 text-[var(--wa-accent)]/50" />
             </div>
             <p className="text-sm text-muted-foreground">Seleccioná una difusión o creá una nueva</p>
           </div>
         ) : (
-          <div className="flex flex-col h-full">
+          // data-sin-volver: en el celular el asistente vive adentro de la capa
+          // de Difusiones, y deslizar desde el borde la cerraba entera con lo
+          // cargado a medias. Se sale con la X (o con «‹ Chats», a propósito).
+          <div data-sin-volver="" className="flex flex-col h-full">
             {/* Wizard header */}
-            <div className="flex items-center justify-between px-6 py-3 bg-card border-b border">
+            <div className="flex h-12 shrink-0 items-center justify-between px-4 bg-card border-b border lg:h-14 lg:px-6">
               <div className="flex items-center gap-3">
                 <button onClick={resetWizard} className="text-muted-foreground hover:text-white">
                   <X className="size-4" />
@@ -450,7 +468,7 @@ export function BroadcastSection() {
               </div>
               <div className="flex items-center gap-1.5">
                 {Array.from({ length: totalSteps }, (_, i) => i + 1).map(s => (
-                  <div key={s} className={`size-2 rounded-full transition-colors ${wizardStep >= s ? 'bg-green-400' : 'bg-white/10'}`} />
+                  <div key={s} className={`size-2 rounded-full transition-colors ${wizardStep >= s ? 'bg-[var(--wa-accent)]' : 'bg-white/10'}`} />
                 ))}
               </div>
             </div>
@@ -477,7 +495,7 @@ export function BroadcastSection() {
                       <button key={key} onClick={() => switchAudienceMode(key)}
                         className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition-colors ${
                           audienceMode === key
-                            ? 'bg-green-600 text-white'
+                            ? 'bg-[var(--wa-accent)] text-[var(--wa-on-accent)]'
                             : 'text-muted-foreground hover:text-white hover:bg-white/5'
                         }`}>
                         <Icon className="size-3.5" />
@@ -654,7 +672,7 @@ export function BroadcastSection() {
                         <button key={key} onClick={() => toggleSegment(key)}
                           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border ${
                             selectedSegments.includes(key)
-                              ? 'text-white border-transparent bg-green-600'
+                              ? 'border-transparent bg-[var(--wa-chip-on-bg)] text-[var(--wa-chip-on-text)]'
                               : 'text-muted-foreground border hover:border-foreground/20'
                           }`}>
                           <span className={`size-2 rounded-full ${color}`} />
@@ -701,7 +719,7 @@ export function BroadcastSection() {
                         <button key={i} onClick={() => setContactRange(i)}
                           className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all border ${
                             contactRange === i
-                              ? 'text-white border-transparent bg-green-600'
+                              ? 'border-transparent bg-[var(--wa-chip-on-bg)] text-[var(--wa-chip-on-text)]'
                               : 'text-muted-foreground border hover:border-foreground/20'
                           }`}>
                           {range.label}
@@ -995,11 +1013,11 @@ export function BroadcastSection() {
 
                   <div className="space-y-2">
                     <Label className="text-xs text-muted-foreground uppercase tracking-wider">Programar (opcional)</Label>
-                    <Input
-                      type="datetime-local"
-                      className="bg-card border text-white"
-                      value={scheduledFor}
-                      onChange={e => setScheduledFor(e.target.value)}
+                    {/* De 24 h: el datetime-local del navegador salía "05:00 p. m." (campo-fecha-hora.tsx). */}
+                    <CampoFechaHora
+                      valor={scheduledFor}
+                      onCambio={setScheduledFor}
+                      claseCampo="h-9 rounded-md border bg-card px-3 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     />
                     <p className="text-[10px] text-muted-foreground">Dejá vacío para enviar ahora</p>
                   </div>
@@ -1032,12 +1050,12 @@ export function BroadcastSection() {
                     (getStepContent(wizardStep) === 'template' && !canAdvanceFromStep2) ||
                     (getStepContent(wizardStep) === 'variables' && !canAdvanceFromStep3)
                   }
-                  className="bg-green-600 hover:bg-green-500 text-white">
+                  className="bg-[var(--wa-accent)] font-semibold text-[var(--wa-on-accent)] hover:bg-[var(--wa-accent-hover)]">
                   Siguiente <ChevronRight className="size-4 ml-1" />
                 </Button>
               ) : (
                 <Button onClick={handleCreate} disabled={isCreating || audienceCount === 0}
-                  className="bg-green-600 hover:bg-green-500 text-white">
+                  className="bg-[var(--wa-accent)] font-semibold text-[var(--wa-on-accent)] hover:bg-[var(--wa-accent-hover)]">
                   {isCreating ? 'Creando...' : scheduledFor ? 'Programar' : 'Crear y enviar'}
                   <Send className="size-3.5 ml-1.5" />
                 </Button>

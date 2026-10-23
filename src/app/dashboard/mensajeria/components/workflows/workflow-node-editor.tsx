@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Plus, Trash2, MessageSquare, Tag, Bell, Image, LayoutGrid, GitBranch, Clock, Send, List as ListIcon, User, MessageCircleReply, Hash, Bot, UserCheck, Globe, Inbox, CalendarDays, RefreshCw, ChevronDown, Sliders, Brain, AlertTriangle, Sparkles } from 'lucide-react'
+import { X, Plus, Trash2, MessageSquare, Tag, Bell, Image, LayoutGrid, GitBranch, Clock, Send, List as ListIcon, User, MessageCircleReply, Hash, Bot, UserCheck, Globe, Inbox, CalendarDays, RefreshCw, ChevronDown, Sliders, Brain, AlertTriangle, Sparkles, Timer, Lightbulb } from 'lucide-react'
 import { ModelPicker } from '../shared/model-picker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -599,9 +599,9 @@ function DelayConfig({ config, onChange }: { config: Record<string, unknown>; on
         />
         <div className={`rounded-md border px-2.5 py-2 text-[10px] leading-relaxed ${isInline ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200' : 'border-amber-500/30 bg-amber-500/5 text-amber-200'}`}>
           {isInline ? (
-            <>⚡ <strong>Inline:</strong> hasta 10s se ejecuta dentro del mismo request — funciona siempre.</>
+            <><Zap aria-hidden className="mr-1 inline-block size-3 align-[-2px]" /><strong>Inline:</strong> hasta 10s se ejecuta dentro del mismo request — funciona siempre.</>
           ) : (
-            <>⏱ <strong>Diferido:</strong> se reanuda cuando llega el próximo mensaje del cliente o cuando corre el cron <code className="text-foreground">/api/cron/process-workflow-delays</code>. Sin cron configurado, usá valores ≤ 10s.</>
+            <><Timer aria-hidden className="mr-1 inline-block size-3 align-[-2px]" /><strong>Diferido:</strong> se reanuda cuando llega el próximo mensaje del cliente o cuando corre el cron <code className="text-foreground">/api/cron/process-workflow-delays</code>. Sin cron configurado, usá valores ≤ 10s.</>
           )}
         </div>
       </div>
@@ -1245,7 +1245,7 @@ function AiAutoTagConfig() {
       </p>
       <div className="rounded-md border border-dashed border-muted-foreground/20 p-2.5">
         <p className="text-[10px] text-muted-foreground">
-          💡 <strong>Ejemplo:</strong> Si tenés una etiqueta <em>&quot;Consulta precio&quot;</em> con descripción <em>&quot;Cliente pregunta por precios o promociones&quot;</em>, la IA la asignará cuando detecte mensajes sobre costos.
+          <Lightbulb aria-hidden className="mr-1 inline-block size-3 align-[-2px] text-amber-300" /><strong>Ejemplo:</strong> Si tenés una etiqueta <em>&quot;Consulta precio&quot;</em> con descripción <em>&quot;Cliente pregunta por precios o promociones&quot;</em>, la IA la asignará cuando detecte mensajes sobre costos.
         </p>
       </div>
     </div>

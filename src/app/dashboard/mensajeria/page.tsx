@@ -1,9 +1,8 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { getCurrentOrgId } from '@/lib/actions/org'
-import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { countConversations } from '@/lib/actions/conversations'
 import { INBOX_PAGE_SIZE } from '@/lib/inbox'
 import { COLUMNAS_AI_CONFIG_MENSAJERIA } from '@/lib/ai-config-columnas'
+import { alcanceDeMensajeria, leerProgramados } from '@/lib/mensajeria/programados'
 import type { OrgAiConfig } from '@/lib/actions/ai-config'
 import { MensajeriaClient } from './mensajeria-client'
 
@@ -11,27 +10,11 @@ export const dynamic = 'force-dynamic'
 
 export default async function MensajeriaPage() {
   const supabase = createAdminClient()
-  const orgId = await getCurrentOrgId()
 
-  // Obtener branches permitidas al usuario para filtrar el inbox
-  const scopedIds = await getScopedBranchIds()
-  const { data: orgBranches } = orgId && scopedIds.length > 0
-    ? await supabase.from('branches').select('id, name').eq('organization_id', orgId).in('id', scopedIds).order('name')
-    : { data: [] }
-  const branchIds = orgBranches?.map((b) => b.id) ?? []
-
-  // Obtener canales de la org: pueden estar scopeados por `organization_id`
-  // (modelo org-wide, nuevo) o por `branch_id` (legacy). Sin este OR, los
-  // canales de WhatsApp/Instagram globales quedan invisibles y el inbox
-  // aparece vacío aunque existan cientos de conversaciones activas.
-  const channelFilters: string[] = []
-  if (orgId) channelFilters.push(`organization_id.eq.${orgId}`)
-  if (branchIds.length > 0) channelFilters.push(`branch_id.in.(${branchIds.join(',')})`)
-
-  const { data: orgChannels } = channelFilters.length > 0
-    ? await supabase.from('social_channels').select('id').or(channelFilters.join(','))
-    : { data: [] }
-  const channelIds = orgChannels?.map((c) => c.id) ?? []
+  // La org de la sesión, las sucursales permitidas al usuario (filtran el
+  // inbox) y los canales: org-wide o legacy por sucursal. Es el mismo alcance
+  // que usa la action que relee Programados (src/lib/mensajeria/programados.ts).
+  const { orgId, branches: orgBranches, channelFilters, channelIds } = await alcanceDeMensajeria(supabase)
 
   const [
     { data: conversations },
@@ -72,22 +55,9 @@ export default async function MensajeriaPage() {
           .eq('is_active', true)
           .order('platform')
       : Promise.resolve({ data: [] }),
-    // scheduled_messages: solo status relevantes, sin fetchAll
-    channelIds.length > 0
-      ? supabase
-          .from('scheduled_messages')
-          .select(`
-            *,
-            channel:social_channels(platform, display_name),
-            client:clients(name, phone),
-            template:message_templates(name),
-            created_by_staff:staff(full_name)
-          `)
-          .in('channel_id', channelIds)
-          .in('status', ['pending', 'sent', 'failed'])
-          .order('scheduled_for', { ascending: true })
-          .limit(100)
-      : Promise.resolve({ data: [] }),
+    // Programados: todos los pendientes y los últimos enviados o fallidos (no
+    // los 100 más viejos, como antes: ver leerProgramados).
+    leerProgramados(supabase, channelIds),
     // clients removido del initial load: NewChatDialog y ScheduleDialog
     // usan searchClients() on-demand para evitar traer 10k+ clientes en cada carga.
     orgId

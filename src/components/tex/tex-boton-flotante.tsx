@@ -7,7 +7,12 @@
 // Abajo a la derecha ya había tres cosas, y por eso hasta entonces no existía:
 //  - Los avisos (sonner): en el dashboard se corren hacia arriba y no quedan ni
 //    encima ni debajo del botón (`--avisos-abajo` en globals.css, toaster-raiz.tsx).
-//  - El composer y la barra propia de Mensajería: ahí el shell lo oculta (`oculto`).
+//  - Mensajería, que va a sangre como WhatsApp (la lista de chats pasa por
+//    debajo de la barra y un chat abierto tiene el composer abajo): ahí el shell
+//    lo oculta (`oculto`).
+// En /dashboard/asistente/* (Tex y Configurar Tex) el shell ni lo monta, igual
+// que el panel que abre: montado y escondido, `:root:has([data-tex-flotante])`
+// lo contaba y los avisos quedaban 64 px arriba de un hueco.
 //  - Los destinos de arrastre de la Fila: mientras se arrastra una tarjeta
 //    (`html[data-arrastrando]`, lo pone fila-client.tsx) el botón se va.
 // También se va con el teclado virtual abierto y, en el celular, al scrollear
@@ -36,8 +41,9 @@ import { precargarPanelTex } from './chat/precarga'
 
 export interface TexBotonFlotanteProps {
   /**
-   * Lo decide el shell: la pantalla de Tex, Mensajería (su composer y su barra
-   * están abajo), el modo foco y el panel de Tex abierto.
+   * Lo decide el shell: Mensajería (abajo están su lista de chats y su
+   * composer), el modo foco y el panel de Tex abierto. En la pantalla de Tex y
+   * en Configurar Tex el botón no se monta.
    */
   oculto: boolean
 }
@@ -102,8 +108,9 @@ export function TexBotonFlotante({ oculto }: TexBotonFlotanteProps) {
       className={cn(
         'tex-flotante group/tex fixed z-40 flex touch-manipulation select-none items-center rounded-full',
         // Celular: 12 px arriba de la barra inferior. El shell publica lo que la
-        // barra ocupa CON el área segura (52 px + safe-area; 0 si no está): el
-        // max() evita contar el área segura dos veces y la respeta sin barra.
+        // barra ocupa desde el borde de abajo CON el área segura (60 px más su
+        // separación del borde, max(10 px, área segura − 12 px); 0 si no está):
+        // el max() evita contar el área segura dos veces y la respeta sin barra.
         // Compu: en la esquina.
         'bottom-[calc(max(var(--alto-barra-inferior,0px),env(safe-area-inset-bottom,0px))+12px)] right-4 lg:bottom-6 lg:right-6',
         'transition-[opacity,translate,scale,bottom,box-shadow] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',

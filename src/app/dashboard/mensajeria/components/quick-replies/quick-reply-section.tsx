@@ -12,6 +12,9 @@ import {
   getQuickReplies, createQuickReply, updateQuickReply,
   deleteQuickReply, reorderQuickReplies,
 } from '@/lib/actions/quick-replies'
+import {
+  AccionDeBarraIos, BotonMasIos, BotonPrincipal, EncabezadoSeccion, TEMA_DIALOGO_SECCION,
+} from '../navegacion/barra-ios'
 
 interface QuickReply {
   id: string
@@ -109,26 +112,29 @@ export function QuickReplySection() {
   }
 
   return (
-    <div className="flex flex-1 min-w-0">
+    // A sangre adentro del marco de Mensajería (MarcoSeccion): sin la caja de
+    // borde alrededor de la lista. En el celular el título va en la barra de iOS
+    // y "Nueva" es el "+" verde de esa barra (antes era una franja de más con un
+    // solo botón); en la compu, el encabezado de 56 px.
+    <div className="flex flex-1 min-w-0 min-h-0">
+      <AccionDeBarraIos>
+        <BotonMasIos etiqueta="Nueva respuesta rápida" onClick={() => openEditor()} />
+      </AccionDeBarraIos>
       {/* Lista */}
-      <div className="flex flex-col bg-background w-full lg:max-w-md shrink-0 border-r border">
-        <div className="flex items-center justify-between px-4 py-3 bg-card border-b border">
-          <div className="flex items-center gap-2">
-            <MessageCircle className="size-4 text-blue-400" />
-            <span className="font-semibold text-foreground text-sm">Mensajes rápidos</span>
-          </div>
-          <Button size="sm" onClick={() => openEditor()} className="h-7 text-xs bg-green-600 hover:bg-green-500 text-white">
-            <Plus className="size-3 mr-1" /> Nuevo
-          </Button>
-        </div>
+      <div className="flex flex-col bg-background w-full lg:max-w-md shrink-0 lg:border-r">
+        <EncabezadoSeccion icono={<MessageCircle aria-hidden className="size-4 text-blue-400" />} titulo="Respuestas rápidas">
+          <BotonPrincipal onClick={() => openEditor()}>
+            <Plus aria-hidden className="size-3.5" strokeWidth={2.5} /> Nueva
+          </BotonPrincipal>
+        </EncabezadoSeccion>
 
-        <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="flex-1 overflow-y-auto min-h-0 max-lg:touch-pan-y max-lg:touch-pinch-zoom">
           {loading ? (
             <div className="flex justify-center py-12">
-              <div className="size-6 animate-spin rounded-full border-2 border-muted border-t-green-400" />
+              <div className="size-6 animate-spin rounded-full border-2 border-muted border-t-[var(--wa-accent)]" />
             </div>
           ) : replies.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+            <div className="flex flex-col items-center justify-center px-8 py-16 text-center text-muted-foreground">
               <MessageCircle className="mb-3 size-10 opacity-20" />
               <p className="text-sm">Sin mensajes rápidos</p>
               <p className="text-xs mt-1 opacity-60">Creá mensajes predefinidos para responder más rápido</p>
@@ -136,7 +142,7 @@ export function QuickReplySection() {
           ) : (
             <div>
               {replies.map((reply, index) => (
-                <div key={reply.id} className="px-4 py-3 border-b border hover:bg-muted transition-colors">
+                <div key={reply.id} className="px-4 py-3 border-b hover:bg-muted transition-colors">
                   <div className="flex items-start gap-2">
                     {/* Reorder */}
                     <div className="flex flex-col gap-0.5 pt-0.5 shrink-0">
@@ -195,7 +201,7 @@ export function QuickReplySection() {
 
       {/* Editor dialog */}
       <Dialog open={showEditor} onOpenChange={setShowEditor}>
-        <DialogContent className="max-w-md">
+        <DialogContent className={`max-w-md ${TEMA_DIALOGO_SECCION.className}`} style={TEMA_DIALOGO_SECCION.style}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <MessageCircle className="size-4 text-blue-400" />
@@ -226,7 +232,7 @@ export function QuickReplySection() {
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => { setShowEditor(false); resetForm() }} className="text-muted-foreground hover:text-foreground">Cancelar</Button>
-            <Button className="bg-green-600 hover:bg-green-500 text-white" onClick={handleSave} disabled={isSaving}>
+            <Button className="bg-[var(--wa-accent)] font-semibold text-[var(--wa-on-accent)] hover:bg-[var(--wa-accent-hover)]" onClick={handleSave} disabled={isSaving}>
               {isSaving ? 'Guardando...' : editingReply ? 'Actualizar' : 'Crear'}
             </Button>
           </DialogFooter>

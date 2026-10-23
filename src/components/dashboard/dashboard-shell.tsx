@@ -7,11 +7,12 @@ import dynamic from 'next/dynamic'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import {
   Scissors,
-  Menu,
   LogOut,
   GripVertical,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ArrowUpDown,
   Lock,
   Clock as ClockIcon,
   CreditCard,
@@ -40,6 +41,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Separator } from '@/components/ui/separator'
@@ -47,6 +49,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -56,6 +59,7 @@ import { BranchScopeProvider } from '@/components/dashboard/branch-scope-provide
 import { RecargaPorVersion } from '@/components/recarga-por-version'
 import { useEsAppInstalada } from '@/hooks/use-app-instalada'
 import { MobileBottomNav } from '@/components/dashboard/mobile-bottom-nav'
+import { useHayPantallaInmersiva } from '@/components/dashboard/pantalla-inmersiva'
 import { PestanasEncabezado, esClicQueNavegaAca } from '@/components/dashboard/pestanas-encabezado'
 import { ICONOS_NAV } from '@/components/dashboard/iconos-nav'
 import { guardarMemoriaNav, leerMemoriaNav, useMemoriaNav } from '@/components/dashboard/memoria-nav'
@@ -97,8 +101,13 @@ import { TexBotonFlotante } from '@/components/tex/tex-boton-flotante'
 const TexPanel = dynamic(() => import('@/components/tex/tex-panel').then((m) => m.TexPanel), { ssr: false })
 
 // El menú es de GRUPOS (src/lib/navegacion/grupos.ts): cinco en el menú lateral
-// y en la barra inferior del celular; las secciones de antes son las pestañas de
-// cada grupo, en el encabezado (pestanas-encabezado.tsx).
+// de la compu y en la barra inferior del celular; las secciones de antes son las
+// pestañas de cada grupo, en el encabezado (pestanas-encabezado.tsx).
+//
+// El celular no tiene menú lateral: las ☰ se sacaron el 23/oct/2026 ("si ya está
+// el nav bar abajo"). Lo que sólo vivía en esa hoja pasó al menú del avatar: el
+// nombre de la organización, cambiar de organización y ordenar los grupos (que
+// ahora es el orden de la barra).
 
 // El número va oculto para el lector de pantalla: quien lo usa lo dice entero
 // ("3 descansos pendientes", también con más de 99) en un sr-only.
@@ -110,8 +119,9 @@ function BadgeDescansos({ cantidad }: { cantidad: number }) {
   )
 }
 
-// Ítem sorteable del menú lateral — debe estar fuera de DashboardShell
-// para evitar violaciones de las reglas de hooks (hooks dentro de funciones anidadas)
+// Ítem sorteable del menú lateral (y, en modo edición, de «Ordenar la barra» en
+// el celular) — debe estar fuera de DashboardShell para evitar violaciones de
+// las reglas de hooks (hooks dentro de funciones anidadas)
 interface SortableGrupoProps {
   grupo: GrupoVisible
   /** Adónde lleva tocarlo (la última pestaña usada del grupo o la primera). */
@@ -119,7 +129,13 @@ interface SortableGrupoProps {
   isActive: boolean
   isEditMode: boolean
   pendingBreakCount: number
-  onNavigate: () => void
+  /**
+   * En la hoja «Ordenar la barra» del celular: con la etiqueta de la barra
+   * («Ajustes») y el texto a contraste pleno. El modo edición de la compu lo
+   * atenúa al 60 % (ahí el menú sigue a la vista), y en la hoja los renglones
+   * parecían deshabilitados.
+   */
+  enHoja?: boolean
   onTocado: (grupo: GrupoId) => void
   onLockedClick: (pestana: PestanaVisible) => void
 }
@@ -130,7 +146,7 @@ function SortableGrupo({
   isActive,
   isEditMode,
   pendingBreakCount,
-  onNavigate,
+  enHoja = false,
   onTocado,
   onLockedClick,
 }: SortableGrupoProps) {
@@ -151,27 +167,30 @@ function SortableGrupo({
   const pendientes = grupo.id === 'equipo' ? pendingBreakCount : 0
 
   if (isEditMode) {
+    const nombre = enHoja ? grupo.etiquetaCorta : grupo.etiqueta
     return (
       <div
         ref={setNodeRef}
         style={style}
         className={cn(
           'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium',
-          'bg-sidebar-accent/30 text-sidebar-foreground/60 select-none',
+          'bg-sidebar-accent/30 select-none',
+          enHoja ? 'text-sidebar-foreground' : 'text-sidebar-foreground/60',
           isDragging && 'opacity-50 shadow-lg z-50 relative'
         )}
       >
-        {/* Manejador de arrastre — objetivo táctil mínimo 44x44px */}
+        {/* Manejador de arrastre — objetivo táctil mínimo 44x44px. En la hoja
+            queda más tenue que el nombre: es la herramienta, no el contenido. */}
         <button
           {...attributes}
           {...listeners}
           className="touch-none flex items-center justify-center min-w-[44px] min-h-[44px] -ml-2 -my-2 text-muted-foreground hover:text-sidebar-foreground cursor-grab active:cursor-grabbing"
-          aria-label={`Arrastrar para reordenar ${grupo.etiqueta}`}
+          aria-label={`Arrastrar para reordenar ${nombre}`}
         >
           <GripVertical className="size-4 shrink-0" />
         </button>
-        <Icono className="size-4 shrink-0 text-muted-foreground" />
-        <span>{grupo.etiqueta}</span>
+        <Icono className={cn('size-4 shrink-0', enHoja ? 'text-sidebar-foreground/85' : 'text-muted-foreground')} />
+        <span>{nombre}</span>
         {pendientes > 0 && <BadgeDescansos cantidad={pendientes} />}
       </div>
     )
@@ -188,7 +207,7 @@ function SortableGrupo({
           type="button"
           onClick={() => onLockedClick(destino)}
           className={cn(
-            'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors max-lg:min-h-11',
+            'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
             'text-sidebar-foreground/40 hover:bg-sidebar-accent/30 hover:text-sidebar-foreground/60',
             'cursor-pointer text-left',
           )}
@@ -212,14 +231,11 @@ function SortableGrupo({
       <Link
         href={destino.href}
         onClick={(e) => {
-          onNavigate()
           if (esClicQueNavegaAca(e)) onTocado(grupo.id)
         }}
         aria-current={isActive ? 'true' : undefined}
         className={cn(
-          // En el menú del celular (la hoja, debajo de lg), 44 px de alto: un
-          // objetivo cómodo para el dedo. En la compu queda compacto.
-          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors max-lg:min-h-11',
+          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
           isActive
             ? 'bg-sidebar-accent text-sidebar-accent-foreground'
             : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
@@ -252,7 +268,8 @@ interface SidebarContentProps {
   children: React.ReactNode
 }
 
-function OrgLogo({ url }: { url: string | null }) {
+/** `className` achica el logo (el menú del avatar lo usa más chico que el menú lateral). */
+function OrgLogo({ url, className }: { url: string | null; className?: string }) {
   if (url) {
     return (
       <Image
@@ -260,26 +277,29 @@ function OrgLogo({ url }: { url: string | null }) {
         alt=""
         width={32}
         height={32}
-        className="size-8 shrink-0 rounded-full object-cover"
+        className={cn('size-8 shrink-0 rounded-full object-cover', className)}
         unoptimized
       />
     )
   }
-  return <Scissors className="size-5 shrink-0" />
+  return <Scissors className={cn('size-5 shrink-0', className)} />
+}
+
+// Lo usan el menú lateral (compu) y el menú del avatar (celular).
+async function cambiarDeOrganizacion(orgId: string, actual: string | null) {
+  if (orgId === actual) return
+  const res = await switchOrganization(orgId)
+  if (res.success) {
+    window.location.reload()
+  } else {
+    console.error(res.error)
+  }
 }
 
 function SidebarContent({ isEditMode, onToggleEditMode, userRole, userFullName, organizationId, availableOrganizations, orgLogoUrl, children }: SidebarContentProps) {
   const currentOrg = availableOrganizations.find(o => o.id === organizationId)
-  
-  const handleSwitchOrg = async (orgId: string) => {
-    if (orgId === organizationId) return
-    const res = await switchOrganization(orgId)
-    if (res.success) {
-      window.location.reload()
-    } else {
-      console.error(res.error)
-    }
-  }
+
+  const handleSwitchOrg = (orgId: string) => cambiarDeOrganizacion(orgId, organizationId)
 
   return (
     <div className="flex h-full flex-col">
@@ -363,11 +383,22 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   const router = useRouter()
   const searchParams = useSearchParams()
   // Las rutas se comparan por segmento (coincideRuta): /dashboard/mensajeriax no es Mensajería.
-  const isFocusMode =
-    coincideRuta('/dashboard/mensajeria', pathname) && searchParams.get('foco') === '1'
+  const esMensajeria = coincideRuta('/dashboard/mensajeria', pathname)
+  const isFocusMode = esMensajeria && searchParams.get('foco') === '1'
+  // Una página pidió la pantalla entera en el celular (pantalla-inmersiva.ts):
+  // Mensajería con un chat, una sección o Programados abiertos, como WhatsApp.
+  // Esas pantallas son CAPAS fijas que tapan el shell entero; debajo queda todo
+  // montado y quieto: el encabezado con sus pestañas y la barra se siguen
+  // dibujando (al volver deslizando se ve la pantalla de verdad), pero inertes,
+  // y no se desliza entre pestañas. La pide sólo debajo de lg; en el servidor y
+  // al hidratar es false.
+  const inmersiva = useHayPantallaInmersiva()
   // Tex: quien tiene el módulo de IA y ve estadísticas o configuración (owner y
-  // admin tienen todos los permisos). En su propia pantalla no van ni el botón
-  // flotante ni el panel: la pantalla ES Tex.
+  // admin tienen todos los permisos). En /dashboard/asistente/* (Tex y
+  // Configurar Tex) no van ni el panel ni el botón flotante, que lo abre: en
+  // Tex la pantalla ES Tex, y en Configurar Tex el botón montado y escondido
+  // igual contaba para los avisos (:has([data-tex-flotante]) los subía 64 px
+  // sobre un hueco).
   const puedeUsarTex =
     !!entitlements?.features?.['ai.enabled'] && (!!permissions['stats.view'] || !!permissions['settings.view'])
   const isTexScreen = pathname === '/dashboard/asistente'
@@ -379,13 +410,13 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   // Tex abierta en el celular tampoco.
   const isFullHeight = isFocusMode || isTexScreen
   const hideBottomNav = isFullHeight || (mostrarPanelTex && texPanelAbierto)
-  // El botón flotante de Tex no va en Tex, ni en Mensajería (abajo están su
-  // composer y su barra), ni en el modo foco, ni con el panel ya abierto.
-  const ocultarBotonTex =
-    coincideRuta('/dashboard/asistente', pathname) ||
-    coincideRuta('/dashboard/mensajeria', pathname) ||
-    isFocusMode ||
-    (mostrarPanelTex && texPanelAbierto)
+  // Tampoco se desliza entre pestañas en la pantalla inmersiva: en una capa el
+  // dedo es de la capa (y el shell de abajo está quieto).
+  const sinDeslizar = hideBottomNav || inmersiva
+  // El botón flotante de Tex se monta donde va el panel (arriba) y se esconde
+  // en Mensajería (abajo están la lista de chats, que pasa por debajo de la
+  // barra, y el composer), en el modo foco y con el panel ya abierto.
+  const ocultarBotonTex = esMensajeria || isFocusMode || texPanelAbierto
   // Después de un deploy (src/lib/recarga-version.ts): la Fila, que la PC del
   // mostrador deja abierta todo el día, se recarga sola cuando está ociosa. En
   // la app instalada, que no tiene botón de recargar (src/lib/app-instalable.ts),
@@ -399,7 +430,8 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   const mainRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const swipeDirectionRef = useRef<'left' | 'right' | null>(null)
-  const [mobileOpen, setMobileOpen] = useState(false)
+  // «Ordenar la barra» (celular): la hoja de abajo con los grupos para arrastrar.
+  const [ordenandoBarra, setOrdenandoBarra] = useState(false)
   const [swipeDestino, setSwipeDestino] = useState<PasoDeslizar | null>(null)
   const [, startTransition] = useTransition()
   const [pendingBreakCount, setPendingBreakCount] = useState(0)
@@ -448,12 +480,35 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     setGrupoTocado(null)
   }
   const grupoMarcado = grupoTocado ?? grupoActivo?.id ?? null
-  // La barra de grupos tampoco va:
-  // - en Mensajería: en el celular la página tiene su propia barra abajo (Inbox,
-  //   Difusiones…), que tapaba a la barra vieja y taparía a medias a esta, que es
-  //   más alta. Ahí se cambia de grupo con el menú o con las pestañas de arriba;
+  // La barra de grupos no va:
+  // - en las pantallas de alto completo ni con la hoja de Tex abierta (arriba);
   // - sin ningún grupo visible (un rol sin secciones): no tendría nada que mostrar.
-  const barraOculta = hideBottomNav || coincideRuta('/dashboard/mensajeria', pathname) || grupos.length === 0
+  // Con la pantalla inmersiva SÍ va: queda dibujada debajo de la capa, quieta e
+  // inerte (`tapada`), y --alto-barra-inferior sigue valiendo su huella (la usa
+  // la lista de chats de abajo).
+  const barraOculta = hideBottomNav || grupos.length === 0
+
+  // --- «Volver» del celular ---
+  // Una pantalla fuera de los grupos y sin barra (Tex) no tiene otra salida en
+  // la app instalada: no hay menú lateral ni botón de atrás del navegador. Si se
+  // llegó navegando adentro del dashboard, vuelve a la pantalla de antes; si se
+  // abrió directo ahí (o se recargó), no hay "antes" propio y va al primer grupo.
+  // Se decide al tocar, con lo que registró el shell: nada cambia al hidratar.
+  // (Una capa de la pantalla inmersiva tapa el encabezado y trae su propio «‹».)
+  const conVolver = !ubicacion && isFullHeight
+  const rutaDeEntradaRef = useRef(pathname)
+  const navegoAdentroRef = useRef(false)
+  useEffect(() => {
+    // El shell vive en el layout y no se vuelve a montar entre pantallas del
+    // dashboard: otra ruta que la primera es una navegación del lado del cliente.
+    if (pathname !== rutaDeEntradaRef.current) navegoAdentroRef.current = true
+  }, [pathname])
+  const inicioHref =
+    grupos.map((g) => destinos.get(g.id)).find((d) => d && estaDesbloqueada(d))?.href ?? '/dashboard'
+  const volver = () => {
+    if (navegoAdentroRef.current) router.back()
+    else router.push(inicioHref)
+  }
 
   // Recordar la pestaña de cada grupo: tocar el grupo después vuelve a ella.
   // Se lee lo guardado en el momento (no lo del render: al hidratar es null).
@@ -527,7 +582,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     const el = mainRef.current
     // Sin el listener: sin un touchstart propio, un touchmove se mediría contra
     // el inicio de un gesto viejo.
-    if (!el || hideBottomNav) return
+    if (!el || sinDeslizar) return
 
     // Detecta si el elemento tocado (o algún ancestro hasta main) tiene scroll horizontal propio.
     // Esto permite que tab bars y tablas con overflow-x-auto funcionen sin conflicto con el swipe.
@@ -600,7 +655,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
 
     el.addEventListener('touchmove', onMove, { passive: false })
     return () => el.removeEventListener('touchmove', onMove)
-  }, [indiceActual, secuencia, hideBottomNav])
+  }, [indiceActual, secuencia, sinDeslizar])
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     // Si no hubo un swipe horizontal activo, no hacer nada
@@ -679,16 +734,14 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     }
   }, [indiceActual, secuencia, router])
 
-  // "Personalizar orden": se ordenan los GRUPOS, con su propia clave.
+  // "Personalizar orden" (compu) y «Ordenar la barra» (celular): se ordenan los
+  // GRUPOS, con su propia clave. Es también el orden de la barra inferior.
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event
     if (!over || active.id === over.id) return
     const nuevo = moverGrupo(grupos.map((g) => g.id), ordenGuardado, active.id as GrupoId, over.id as GrupoId)
     guardarMemoriaNav(claveOrden, JSON.stringify(nuevo))
   }
-
-  // FIX 5 — Callback estable para evitar nuevas closures en cada render
-  const handleMobileClose = useCallback(() => setMobileOpen(false), [])
 
   const handleLogout = () => startTransition(() => logout())
 
@@ -738,7 +791,6 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
                 isActive={grupoMarcado === grupo.id}
                 isEditMode={isEditMode}
                 pendingBreakCount={pendingBreakCount}
-                onNavigate={handleMobileClose}
                 onTocado={setGrupoTocado}
                 onLockedClick={handleLockedClick}
               />
@@ -749,11 +801,42 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     )
   }
 
+  // «Ordenar la barra» (celular): la misma lista sorteable, siempre en modo
+  // edición, con los mismos sensores y el mismo guardado. La barra de atrás se
+  // reordena en vivo.
+  function renderOrdenBarra() {
+    return (
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={grupos.map((g) => g.id)} strategy={verticalListSortingStrategy}>
+          <div className="flex flex-col gap-1.5">
+            {grupos.map((grupo) => (
+              <SortableGrupo
+                key={grupo.id}
+                grupo={grupo}
+                destino={destinos.get(grupo.id) ?? null}
+                isActive={grupoMarcado === grupo.id}
+                isEditMode
+                enHoja
+                pendingBreakCount={pendingBreakCount}
+                onTocado={setGrupoTocado}
+                onLockedClick={handleLockedClick}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+    )
+  }
+
   const IconoDestino = swipeDestino ? ICONOS_NAV[swipeDestino.pestana.icono] : null
 
   return (
     <EntitlementsProvider value={entitlements}>
-      {!isFocusMode && <TrialBanner />}
+      {/* El banner va arriba y fuera del alto de la pantalla. En el modo foco
+          se esconde SIN desmontarse: desmontado perdía el cierre (la X) y al
+          volver empujaba el encabezado. Con una capa de la pantalla inmersiva
+          no hace falta esconderlo: la capa (fixed, z-41) lo tapa. */}
+      <TrialBanner oculto={isFocusMode} />
       <UpgradePromptDialog
         open={upgradeModal.open}
         onOpenChange={(open) => setUpgradeModal(p => ({ ...p, open }))}
@@ -769,10 +852,13 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
         teaserCopy={comingSoonModal.teaser}
         estimatedRelease={comingSoonModal.estimatedRelease}
       />
-    {/* --alto-barra-inferior: lo que ocupa la barra inferior del celular (52 px,
-        su borde de 1 px y el área segura, como mínimo 4 px; ver
-        mobile-bottom-nav.tsx). 0 en la compu y cuando la barra no está. El
-        botón flotante de Tex lo usa para quedar arriba de ella.
+    {/* --alto-barra-inferior: lo que ocupa la barra inferior del celular desde
+        el borde de abajo: 60 px más su separación del borde, que ya cuenta el
+        área segura (82 px en un iPhone con rayita, 70 sin área segura). Es el
+        token --barra-inferior-huella de globals.css, el mismo que usan la barra
+        y los avisos. 0 en la compu y cuando la barra no está. Lo usan el botón
+        flotante de Tex, para quedar arriba de ella, y Mensajería, que va a
+        sangre y deja pasar su lista por debajo del vidrio.
         En la app instalada, h-dvh (el alto visible): ahí 100vh incluye la barra
         de estado de iOS y la página scrolleaba esa diferencia. En el navegador
         sigue h-screen, como siempre: el sobrante deja que Safari y Chrome
@@ -782,7 +868,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
         'flex h-screen [@media(display-mode:standalone)]:h-dvh overflow-hidden',
         barraOculta
           ? '[--alto-barra-inferior:0px]'
-          : '[--alto-barra-inferior:calc(3.25rem_+_1px_+_max(0.25rem,env(safe-area-inset-bottom,0px)))] lg:[--alto-barra-inferior:0px]',
+          : '[--alto-barra-inferior:var(--barra-inferior-huella)] lg:[--alto-barra-inferior:0px]',
       )}
     >
       <AiFeatureAnnouncement
@@ -820,54 +906,42 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
         </div>
       </aside>
 
-      {!isFocusMode && (
-        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <SheetContent
-            side="left"
-            className="w-64 p-0 bg-sidebar text-sidebar-foreground"
-            showCloseButton={false}
-            // Sin descripción: el título alcanza. Sin esto Radix avisa en la consola cada vez que se abre.
-            aria-describedby={undefined}
-          >
-            <SheetTitle className="sr-only">Menú de navegación</SheetTitle>
-            <SidebarContent
-              isEditMode={isEditMode}
-              onToggleEditMode={() => setIsEditMode(p => !p)}
-              userRole={user.role}
-              userFullName={user.full_name}
-              organizationId={organizationId}
-              availableOrganizations={availableOrganizations}
-              orgLogoUrl={orgLogoUrl}
-            >
-              {renderNavLinks()}
-            </SidebarContent>
-          </SheetContent>
-        </Sheet>
-      )}
-
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* La línea de abajo es una sombra interior y no un borde: así el
-            subrayado de la pestaña activa queda justo encima de ella. */}
+            subrayado de la pestaña activa queda justo encima de ella.
+            Se pliega en el modo foco. Con la pantalla inmersiva (una capa de
+            Mensajería encima, en el celular) NO se pliega: se queda dibujado y
+            quieto debajo de la capa, para que al volver deslizando se vea la
+            pantalla de verdad (antes quedaba una franja vacía de 48 px). */}
         <header
           className={cn(
-            'flex shrink-0 items-center gap-2 lg:gap-4 overflow-hidden transition-[height,opacity,padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]',
+            'flex shrink-0 items-center gap-2 lg:gap-4 overflow-hidden lg:transition-[height,opacity,padding] lg:duration-300 lg:ease-[cubic-bezier(0.4,0,0.2,1)]',
             isFocusMode
               ? 'h-0 opacity-0 px-0 pointer-events-none'
-              : 'h-12 lg:h-14 opacity-100 px-3 lg:px-6 shadow-[inset_0_-1px_0_var(--color-border)]'
+              : cn(
+                  'h-12 lg:h-14 opacity-100 px-3 lg:px-6 shadow-[inset_0_-1px_0_var(--color-border)]',
+                  // Mensajería en el celular: negro y sin línea, de una pieza con
+                  // la lista de chats de abajo (como WhatsApp).
+                  esMensajeria && 'max-lg:bg-black max-lg:shadow-none',
+                ),
           )}
-          aria-hidden={isFocusMode}
-          // Plegado en el modo foco: que el teclado tampoco caiga en sus pestañas.
-          inert={isFocusMode}
+          // Plegado (foco) o tapado por una capa (inmersiva): ni toques, ni el
+          // teclado en sus pestañas, ni el lector de pantalla.
+          aria-hidden={isFocusMode || inmersiva || undefined}
+          inert={isFocusMode || inmersiva}
         >
-          <Button
-            variant="ghost"
-            size="icon"
-            className="lg:hidden size-9 shrink-0"
-            onClick={() => setMobileOpen(true)}
-            aria-label="Abrir el menú"
-          >
-            <Menu className="size-5" />
-          </Button>
+          {/* Sin barra y fuera de los grupos (Tex), la única salida del celular. */}
+          {conVolver && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="-ml-1.5 size-9 shrink-0 lg:hidden"
+              onClick={volver}
+              aria-label="Volver"
+            >
+              <ChevronLeft className="size-6" />
+            </Button>
+          )}
 
           <PestanasEncabezado
             grupo={grupoActivo}
@@ -884,8 +958,13 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuContent align="end" className="w-60">
               <DropdownMenuLabel>
+                {/* En el celular no hay menú lateral: la organización va acá. */}
+                <span className="mb-2 flex min-w-0 items-center gap-2 lg:hidden">
+                  <OrgLogo url={orgLogoUrl} className="size-5" />
+                  <span className="truncate text-xs font-semibold text-muted-foreground">{orgNombre || 'BarberOS'}</span>
+                </span>
                 <p className="text-sm font-medium">{user.full_name}</p>
                 {user.email && (
                   <p className="text-xs font-normal text-muted-foreground">
@@ -894,6 +973,35 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
                 )}
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
+              {/* Lo que en la compu está en el menú lateral: cambiar de
+                  organización y ordenar los grupos (en el celular, la barra). */}
+              {availableOrganizations.length > 1 && (
+                <DropdownMenuGroup className="lg:hidden">
+                  <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                    Cambiar de organización
+                  </DropdownMenuLabel>
+                  {availableOrganizations.map((org) => (
+                    <DropdownMenuItem
+                      key={org.id}
+                      onSelect={() => cambiarDeOrganizacion(org.id, organizationId)}
+                      className="justify-between"
+                    >
+                      <span className="truncate">{org.name}</span>
+                      {org.id === organizationId && <Check className="size-4 shrink-0" />}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                </DropdownMenuGroup>
+              )}
+              {grupos.length > 1 && (
+                <DropdownMenuGroup className="lg:hidden">
+                  <DropdownMenuItem onSelect={() => setOrdenandoBarra(true)}>
+                    <ArrowUpDown className="size-4" />
+                    Ordenar la barra
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </DropdownMenuGroup>
+              )}
               <DropdownMenuItem asChild>
                 <Link href="/dashboard/account">
                   <Lock className="size-4" />
@@ -915,24 +1023,38 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
           </DropdownMenu>
         </header>
 
-        {/* Contenedor de swipe — overflow-hidden recorta el panel entrante */}
+        {/* Contenedor de swipe — overflow-hidden recorta el panel entrante.
+            Las capas de la pantalla inmersiva (fixed inset-0 z-[41], adentro del
+            <main>) tienen que pintarse encima del encabezado y de la barra
+            (fixed z-40): ni este contenedor, ni el <main>, ni ningún ancestro
+            puede crear EN REPOSO un bloque contenedor o un contexto de
+            apilamiento (transform, filter, backdrop-filter, contain,
+            will-change, isolation, z-index con position). El overflow no las
+            recorta: un fixed se escapa. El transform del deslizar entre
+            pestañas existe sólo durante ese gesto, que con la inmersiva está
+            apagado. */}
         <div className="relative flex-1 overflow-hidden">
+          {/* El padding cambia sólo con la ruta (Tex, Mensajería) y de golpe:
+              animado, una pantalla de alto completo desbordaría el <main> mientras
+              tanto y aparecería un scroll. */}
           <main
             ref={mainRef}
             className={cn(
               'h-full overflow-y-auto overflow-x-hidden',
-              // En Tex el padding cambia de golpe: animado, mientras baja, la
-              // pantalla de alto completo desbordaría el <main> y aparecería un scroll.
-              !isTexScreen && 'transition-[padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]',
-              !isFocusMode && 'p-3 lg:p-6 lg:pb-6'
+              // Mensajería va a sangre, como WhatsApp (también en el modo foco):
+              // ocupa el <main> entero y se encarga sola de su espacio de abajo
+              // con var(--alto-barra-inferior), así su lista pasa por debajo del
+              // vidrio de la barra.
+              !esMensajeria && 'p-3 lg:p-6 lg:pb-6',
             )}
             style={{
-              // Tex no tiene barra inferior que compensar: queda el padding de
-              // las clases, que su pantalla cancela con márgenes negativos.
-              paddingBottom: isFocusMode ? 0 : isTexScreen ? undefined : 'calc(4.5rem + env(safe-area-inset-bottom, 0px))',
+              // Lo que tapa la barra inferior, con el área segura. Tex no tiene
+              // barra que compensar: queda el padding de las clases, que su
+              // pantalla cancela con márgenes negativos.
+              paddingBottom: esMensajeria || isTexScreen ? undefined : 'calc(4.5rem + env(safe-area-inset-bottom, 0px))',
             }}
-            onTouchStart={hideBottomNav ? undefined : handleTouchStart}
-            onTouchEnd={hideBottomNav ? undefined : handleTouchEnd}
+            onTouchStart={sinDeslizar ? undefined : handleTouchStart}
+            onTouchEnd={sinDeslizar ? undefined : handleTouchEnd}
           >
             <BranchScopeProvider allowedBranchIds={allowedBranchIds} organizationId={organizationId}>
               {children}
@@ -969,11 +1091,37 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
           destinos={destinos}
           descansosPendientes={pendingBreakCount}
           hidden={barraOculta}
+          tapada={inmersiva}
           onTocado={setGrupoTocado}
           onBloqueada={handleLockedClick}
         />
+
+        {/* «Ordenar la barra» (menú del avatar, celular): lo que en la compu es
+            "Personalizar orden" del menú lateral. */}
+        <Sheet open={ordenandoBarra} onOpenChange={setOrdenandoBarra}>
+          <SheetContent
+            side="bottom"
+            showCloseButton={false}
+            className="gap-0 rounded-t-2xl bg-sidebar p-0 text-sidebar-foreground"
+            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))' }}
+          >
+            <div aria-hidden className="mx-auto mt-2.5 h-1 w-9 rounded-full bg-foreground/20" />
+            <div className="px-5 pb-3 pt-3">
+              <SheetTitle className="text-base">Ordenar la barra</SheetTitle>
+              <SheetDescription className="mt-1 text-[13px]">
+                Mantené apretada la manija de un grupo y arrastralo a su lugar: es el orden de la barra de abajo.
+              </SheetDescription>
+            </div>
+            <div className="px-3">{renderOrdenBarra()}</div>
+            <div className="px-5 pt-4">
+              <Button className="h-11 w-full" onClick={() => setOrdenandoBarra(false)}>
+                Listo
+              </Button>
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
-      {puedeUsarTex && <TexBotonFlotante oculto={ocultarBotonTex} />}
+      {mostrarPanelTex && <TexBotonFlotante oculto={ocultarBotonTex} />}
       {superficieRecarga && <RecargaPorVersion superficie={superficieRecarga} />}
     </div>
     </EntitlementsProvider>

@@ -7,6 +7,7 @@ import { getCrmCases, updateCrmCase, type CrmCaseRow, type CrmCaseStatus } from 
 import { useMensajeria } from '../shared/mensajeria-context'
 import { createClient } from '@/lib/supabase/client'
 import { displayName } from '../shared/helpers'
+import { AccionDeBarraIos, BotonTextoIos } from '../navegacion/barra-ios'
 import { toast } from 'sonner'
 import { formatDistanceToNow } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -51,7 +52,7 @@ export function CrmCasesPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =>
     return () => { cancelled = true }
   }, [])
 
-  // Realtime: refrescar cuando entra un caso nuevo (review ≤2★) o cambia uno.
+  // Realtime: refrescar cuando entra un caso nuevo (reseña de 2 estrellas o menos) o cambia uno.
   useEffect(() => {
     const supabase = createClient()
     const channel = supabase
@@ -102,22 +103,32 @@ export function CrmCasesPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =>
     )
   }
 
+  // Las estrellas, con palabras: un glifo de estrella como adorno va contra la regla de íconos (sin emojis ni glifos).
+  const resumen = pendingCount > 0
+    ? `${pendingCount} pendiente${pendingCount === 1 ? '' : 's'} · reseñas de 2 estrellas o menos`
+    : 'Sin casos pendientes'
+
   return (
-    <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border shrink-0 bg-card/50">
-        <div className="flex items-center gap-3">
-          <div className="size-9 rounded-xl bg-orange-500/15 flex items-center justify-center">
-            <Frown className="size-5 text-orange-400" />
+    // A sangre adentro del marco de Mensajería (MarcoSeccion). En el celular el
+    // título va en la barra de iOS ("‹ Chats · Casos") y "Ver todos" a su
+    // derecha; abajo, el resumen como el pie de un título. En la compu, el
+    // encabezado de 56 px.
+    <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+      <AccionDeBarraIos>
+        <BotonTextoIos onClick={() => setShowResolved(v => !v)}>{showResolved ? 'Pendientes' : 'Ver todos'}</BotonTextoIos>
+      </AccionDeBarraIos>
+      {/* Header (compu) */}
+      <div className="hidden h-14 shrink-0 items-center justify-between gap-3 border-b bg-card/50 px-5 lg:flex">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="size-8 shrink-0 rounded-lg bg-orange-500/15 flex items-center justify-center">
+            <Frown aria-hidden className="size-4 text-orange-400" />
           </div>
-          <div>
-            <h2 className="text-base font-bold tracking-tight">Casos de atención</h2>
-            <p className="text-[11px] text-muted-foreground">
-              {pendingCount > 0 ? `${pendingCount} pendiente${pendingCount === 1 ? '' : 's'} · reseñas de ≤2★` : 'Sin casos pendientes'}
-            </p>
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold leading-tight">Casos de atención</h2>
+            <p className="truncate text-[11px] leading-tight text-muted-foreground">{resumen}</p>
           </div>
           {pendingCount > 0 && (
-            <span className="min-w-6 h-6 flex items-center justify-center rounded-full bg-orange-500 text-xs font-bold text-white px-2">
+            <span aria-hidden className="min-w-6 h-6 flex items-center justify-center rounded-full bg-orange-500 text-xs font-bold text-white px-2">
               {pendingCount}
             </span>
           )}
@@ -131,9 +142,11 @@ export function CrmCasesPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =>
           {showResolved ? 'Ocultar cerrados' : 'Ver todos'}
         </Button>
       </div>
+      {/* Celular: el resumen, sin franja. */}
+      <p className="shrink-0 px-4 pb-1 pt-3 text-[13px] text-muted-foreground lg:hidden">{resumen}</p>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      <div className="flex-1 overflow-y-auto p-3 space-y-2 max-lg:touch-pan-y max-lg:touch-pinch-zoom">
         {visible.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
             <div className="size-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
@@ -141,7 +154,7 @@ export function CrmCasesPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =>
             </div>
             <p className="text-sm font-medium">Sin casos {showResolved ? '' : 'pendientes'}</p>
             <p className="text-xs mt-1 text-center max-w-[240px]">
-              Cuando un cliente deja una reseña de 2★ o menos, aparece acá para que puedas hacer seguimiento.
+              Cuando un cliente deja una reseña de 2 estrellas o menos, aparece acá para que puedas hacer seguimiento.
             </p>
           </div>
         ) : (
@@ -228,7 +241,7 @@ export function CrmCasesPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =>
                         )}
                       </div>
                       <button onClick={() => handleResponder(c.client?.id)}
-                        className="h-8 px-4 rounded-full inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider bg-green-500 hover:bg-green-600 text-white transition-all shadow-sm hover:shadow-md">
+                        className="h-8 px-4 rounded-full inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider bg-[var(--wa-accent)] hover:bg-[var(--wa-accent-hover)] text-[var(--wa-on-accent)] transition-all shadow-sm hover:shadow-md">
                         <MessageSquare className="size-3.5" /> Contactar
                       </button>
                     </div>

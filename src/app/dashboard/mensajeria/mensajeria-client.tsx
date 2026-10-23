@@ -1,15 +1,32 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+// Mensajería como WhatsApp (23/oct/2026, pedido del dueño: "quiero que esto
+// sea igual a whatsapp en mobile, en desktop también debe verse bien").
+// - Celular: la lista de chats de iOS a sangre, con la barra de vidrio del
+//   dashboard flotando abajo. Lo que en iOS se "empuja" desde la lista (el
+//   chat, la info. del contacto, las secciones del "…" y Programados) es una
+//   CAPA fija sobre el shell entero (barra-ios.tsx). Debajo queda todo montado
+//   y quieto: el encabezado del dashboard con sus pestañas, la lista y la
+//   barra; al volver deslizando se ve la pantalla de verdad. Se fueron la barra
+//   propia de 8 botones de abajo (el "quilombo de opciones") y la fila de
+//   etiquetas de arriba (las etiquetas son chips de la lista).
+// - Compu: tres columnas como WhatsApp para Mac: secciones, lista y
+//   conversación, con anchos que salen del lugar que tienen las columnas.
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { MessageSquare, Megaphone, Zap, MessageCircle, Settings, Bell, Maximize2, Minimize2, Frown } from 'lucide-react'
+import { usePantallaInmersiva } from '@/components/dashboard/pantalla-inmersiva'
+import { useEsCelular } from '@/hooks/use-es-celular'
+import { getOpenCrmCaseCount } from '@/lib/actions/crm-cases'
+import { getUnreadAlertCount } from '@/lib/actions/workflows'
+import { createClient } from '@/lib/supabase/client'
 import { MensajeriaProvider, useMensajeria } from './components/shared/mensajeria-context'
 import { ConversationList } from './components/inbox/conversation-list'
 import { ChatView } from './components/inbox/chat-view'
 import { ClientProfile } from './components/inbox/client-profile'
 import { SettingsSheet } from './components/settings/settings-sheet'
 import { NewChatDialog } from './components/dialogs/new-chat-dialog'
-import { ScheduleDialog } from './components/dialogs/schedule-dialog'
+import { ScheduleDialog, type ClienteInicial } from './components/dialogs/schedule-dialog'
 import { TemplatePicker } from './components/dialogs/template-picker'
 import { BroadcastSection } from './components/broadcasts/broadcast-section'
 import { WorkflowList } from './components/workflows/workflow-list'
@@ -17,83 +34,31 @@ import { QuickReplySection } from './components/quick-replies/quick-reply-sectio
 import { CrmAlertsPanel } from './components/alerts/crm-alerts-panel'
 import { CrmCasesPanel } from './components/casos/crm-cases-panel'
 import { TokenHealthBanner } from './components/shared/token-health-banner'
-import { getUnreadAlertCount } from '@/lib/actions/workflows'
-import { getOpenCrmCaseCount } from '@/lib/actions/crm-cases'
-import { createClient } from '@/lib/supabase/client'
+import { BarraSecciones } from './components/navegacion/barra-secciones'
+import { MenuSecciones } from './components/navegacion/menu-secciones'
+import { MarcoSeccion } from './components/navegacion/barra-ios'
+import { destinoActivo, itemDe, type DestinoMensajeria } from './components/navegacion/secciones'
 import type { MensajeriaProps, CrmSection } from './components/shared/types'
 
-const NAV_ITEMS: { key: CrmSection; icon: React.ElementType; label: string }[] = [
-  { key: 'inbox', icon: MessageSquare, label: 'Inbox' },
-  { key: 'broadcasts', icon: Megaphone, label: 'Difusiones' },
-  { key: 'automations', icon: Zap, label: 'Workflows' },
-  { key: 'alerts', icon: Bell, label: 'Alertas' },
-  { key: 'casos', icon: Frown, label: 'Casos' },
-  { key: 'quick-replies', icon: MessageCircle, label: 'Rápidos' },
-  { key: 'settings', icon: Settings, label: 'Config' },
-]
+// Los anchos de las columnas de la compu. Se miden por el contenedor de las
+// columnas (@container/columnas) y no por la pantalla: el menú del dashboard
+// ocupa 256 px y el modo foco los devuelve. Medidos por la pantalla, a 1280 px
+// la columna de secciones con etiquetas (220) y la lista ancha (380) dejaban
+// la conversación en 424 px (a 1279, en 611).
+// - --ancho-secciones: el riel de íconos (72) o, desde 1180 px de columnas, la
+//   lista con etiquetas (220). 0 donde la columna no se dibuja (el celular).
+// - --ancho-lista: 340, o 380 desde 1000 px de columnas. Lo usan la lista y
+//   Programados.
+// La info. del contacto (client-profile.tsx) es hija de este mismo envoltorio:
+// superpuesta, ocupa exactamente la conversación con
+// left: calc(var(--ancho-secciones) + var(--ancho-lista)), y desde 1500 px de
+// columnas va al lado. En el celular las columnas miden lo que la pantalla: por
+// eso todo va con lg: además del container query.
+const ANCHOS_DE_COLUMNAS =
+  '[--ancho-secciones:0px] lg:[--ancho-secciones:72px] lg:@min-[1180px]/columnas:[--ancho-secciones:220px] ' +
+  'lg:[--ancho-lista:340px] lg:@min-[1000px]/columnas:[--ancho-lista:380px]'
 
 export function MensajeriaClient(props: MensajeriaProps) {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const isFocusMode = searchParams.get('foco') === '1'
-
-  const [section, setSection] = useState<CrmSection>('inbox')
-  const [showSettings, setShowSettings] = useState(() => searchParams.get('settings') === '1')
-  const [showNewChat, setShowNewChat] = useState(false)
-  const [showScheduleDialog, setShowScheduleDialog] = useState(false)
-  const [alertCount, setAlertCount] = useState(0)
-  const [casosCount, setCasosCount] = useState(0)
-
-  const toggleFocusMode = useCallback(() => {
-    const params = new URLSearchParams(searchParams.toString())
-    if (isFocusMode) params.delete('foco')
-    else params.set('foco', '1')
-    const qs = params.toString()
-    router.replace(`/dashboard/mensajeria${qs ? `?${qs}` : ''}`, { scroll: false })
-  }, [isFocusMode, router, searchParams])
-
-  // Cargar count de alertas no leídas + casos pendientes
-  useEffect(() => {
-    getUnreadAlertCount().then(r => setAlertCount(r.count))
-    getOpenCrmCaseCount().then(r => setCasosCount(r.count))
-  }, [])
-
-  // Realtime para actualizar los badges cuando llega una alerta o un caso nuevo
-  useEffect(() => {
-    const supabase = createClient()
-    const channel = supabase
-      .channel('crm-alerts-badge')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_alerts' }, () => {
-        setAlertCount(prev => prev + 1)
-      })
-      // NOTA: crm_cases NO está en la publication supabase_realtime, así que un
-      // listener postgres_changes sobre esa tabla nunca dispara (era código muerto).
-      // El badge de casos se refresca por refetch manual al montar y al navegar
-      // (handleNavClick). Si se quiere en vivo, agregar crm_cases a la publication
-      // (bajo riesgo: tasa de cambios baja y el callback solo refetchea un count).
-      .subscribe((status, err) => {
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          console.error('[crm-alerts-badge realtime] canal en estado', status, err)
-        }
-      })
-    return () => { supabase.removeChannel(channel) }
-  }, [])
-
-  const handleNavClick = (key: CrmSection) => {
-    if (key === 'settings') {
-      setShowSettings(true)
-    } else {
-      if (key === 'alerts') {
-        // Al entrar a alertas, refrescar count
-        getUnreadAlertCount().then(r => setAlertCount(r.count))
-      }
-      if (key === 'casos') {
-        getOpenCrmCaseCount().then(r => setCasosCount(r.count))
-      }
-      setSection(key)
-    }
-  }
-
   return (
     <MensajeriaProvider
       initialConversations={props.initialConversations}
@@ -106,169 +71,188 @@ export function MensajeriaClient(props: MensajeriaProps) {
       branches={props.branches}
       totalConversations={props.totalConversations}
     >
-      <div
-        className={`wa-scope flex flex-col h-full min-h-0 overflow-hidden bg-[#0b141a] transition-[padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${
-          isFocusMode ? 'max-lg:pb-[calc(2.75rem+env(safe-area-inset-bottom,0px))]' : ''
-        }`}
-      >
-
-        <TokenHealthBanner onOpenSettings={() => setShowSettings(true)} />
-
-        <TopTagsBar />
-
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-
-        {/* ═══ NAV BAR — Iconos de sección (estilo WhatsApp Web) ═══ */}
-        <div className="hidden lg:flex flex-col items-center w-16 shrink-0 bg-[#202c33] border-r border-[#0b141a] py-3 gap-1">
-          {NAV_ITEMS.map(({ key, icon: Icon, label }) => {
-            const isActive = key === section || (key === 'settings' && showSettings)
-            return (
-              <button
-                key={key}
-                onClick={() => handleNavClick(key)}
-                className={`relative flex flex-col items-center justify-center w-12 h-12 rounded-xl transition-colors group ${
-                  isActive
-                    ? 'bg-[#00a884]/15 text-[#00a884]'
-                    : 'text-[#aebac1] hover:bg-[#2a3942] hover:text-[#e9edef]'
-                }`}
-                title={label}
-              >
-                <Icon className="size-4.5" />
-                <span className="text-[9px] mt-0.5 font-medium leading-none">{label}</span>
-                {key === 'alerts' && alertCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 flex items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white px-1">
-                    {alertCount > 9 ? '9+' : alertCount}
-                  </span>
-                )}
-                {key === 'casos' && casosCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 flex items-center justify-center rounded-full bg-orange-500 text-[9px] font-bold text-white px-1">
-                    {casosCount > 9 ? '9+' : casosCount}
-                  </span>
-                )}
-              </button>
-            )
-          })}
-          {/* Separador + toggle modo foco */}
-          <div className="mt-auto flex flex-col items-center gap-1 pt-2">
-            <div className="h-px w-8 bg-[#2a3942]" />
-            <button
-              onClick={toggleFocusMode}
-              className={`relative flex flex-col items-center justify-center w-12 h-12 rounded-xl transition-colors ${
-                isFocusMode
-                  ? 'bg-[#00a884]/15 text-[#00a884]'
-                  : 'text-[#aebac1] hover:bg-[#2a3942] hover:text-[#e9edef]'
-              }`}
-              title={isFocusMode ? 'Salir de modo foco' : 'Modo foco'}
-              aria-pressed={isFocusMode}
-            >
-              {isFocusMode ? <Minimize2 className="size-4.5" /> : <Maximize2 className="size-4.5" />}
-              <span className="text-[9px] mt-0.5 font-medium leading-none">Foco</span>
-            </button>
-          </div>
-        </div>
-
-        {/* ═══ MOBILE NAV — Bottom bar (solo mobile) ═══ */}
-        <div
-          className="lg:hidden fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around bg-[#202c33] border-t border-[#0b141a] py-1 px-2"
-          style={{ paddingBottom: 'max(0.25rem, env(safe-area-inset-bottom))' }}
-        >
-          {NAV_ITEMS.map(({ key, icon: Icon, label }) => {
-            const isActive = key === section
-            return (
-              <button
-                key={key}
-                onClick={() => handleNavClick(key)}
-                className={`relative flex flex-col items-center justify-center py-1.5 px-2 rounded-lg transition-colors ${
-                  isActive ? 'text-[#00a884]' : 'text-[#aebac1]'
-                }`}
-              >
-                <Icon className="size-4.5" />
-                <span className="text-[9px] mt-0.5 font-medium">{label}</span>
-                {key === 'alerts' && alertCount > 0 && (
-                  <span className="absolute top-0.5 right-0 min-w-3.5 h-3.5 flex items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white px-0.5">
-                    {alertCount > 9 ? '9+' : alertCount}
-                  </span>
-                )}
-                {key === 'casos' && casosCount > 0 && (
-                  <span className="absolute top-0.5 right-0 min-w-3.5 h-3.5 flex items-center justify-center rounded-full bg-orange-500 text-[8px] font-bold text-white px-0.5">
-                    {casosCount > 9 ? '9+' : casosCount}
-                  </span>
-                )}
-              </button>
-            )
-          })}
-          <button
-            onClick={toggleFocusMode}
-            className={`relative flex flex-col items-center justify-center py-1.5 px-2 rounded-lg transition-colors ${
-              isFocusMode ? 'text-[#00a884]' : 'text-[#aebac1]'
-            }`}
-            aria-pressed={isFocusMode}
-            aria-label={isFocusMode ? 'Salir de modo foco' : 'Modo foco'}
-          >
-            {isFocusMode ? <Minimize2 className="size-4.5" /> : <Maximize2 className="size-4.5" />}
-            <span className="text-[9px] mt-0.5 font-medium">Foco</span>
-          </button>
-        </div>
-
-        <DeepLinkHandler onSection={setSection} />
-
-        {/* ═══ CONTENT ═══ */}
-        {section === 'inbox' && (
-          <>
-            <ConversationList
-              onNewChat={() => setShowNewChat(true)}
-              onOpenSettings={() => setShowSettings(true)}
-            />
-            <ChatView
-              onOpenSettings={() => setShowSettings(true)}
-              onNewChat={() => setShowNewChat(true)}
-            />
-            <ClientProfile />
-          </>
-        )}
-
-        {section === 'broadcasts' && <BroadcastSection />}
-        {section === 'automations' && <WorkflowList />}
-        {section === 'alerts' && <CrmAlertsPanel onNavigateToInbox={() => setSection('inbox')} />}
-        {section === 'casos' && <CrmCasesPanel onNavigateToInbox={() => setSection('inbox')} />}
-        {section === 'quick-replies' && <QuickReplySection />}
-
-        </div>
-
-        {/* ═══ Dialogs & Sheets ═══ */}
-        <SettingsSheet open={showSettings} onOpenChange={setShowSettings} />
-        <NewChatDialog open={showNewChat} onOpenChange={setShowNewChat} />
-        <ScheduleDialog open={showScheduleDialog} onOpenChange={setShowScheduleDialog} />
-        <TemplatePicker />
-      </div>
+      <MarcoMensajeria />
     </MensajeriaProvider>
   )
 }
 
-function TopTagsBar() {
-  const { tags, tagFilter, setTagFilter } = useMensajeria()
-  if (tags.length === 0) return null
+// Adentro del provider: la navegación necesita la vista del inbox (chats o
+// programados) y la pantalla inmersiva necesita saber si hay un chat abierto.
+function MarcoMensajeria() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const isFocusMode = searchParams.get('foco') === '1'
+  const { inboxTab, setInboxTab, conversations, scheduled, showMobileChat, activeConv } = useMensajeria()
+  const esCelular = useEsCelular()
+
+  const [section, setSection] = useState<CrmSection>('inbox')
+  const [showSettings, setShowSettings] = useState(() => searchParams.get('settings') === '1')
+  const [showNewChat, setShowNewChat] = useState(false)
+  // Programar un mensaje: desde Programados, sin cliente; desde la info. del
+  // contacto, con el cliente de esa conversación ya elegido.
+  const [programar, setProgramar] = useState<{ abierto: boolean; cliente: ClienteInicial | null }>({
+    abierto: false,
+    cliente: null,
+  })
+  const [alertCount, setAlertCount] = useState(0)
+  const [casosCount, setCasosCount] = useState(0)
+
+  // En el celular, un chat abierto, una sección y Programados son capas que
+  // tapan la pantalla entera. El shell deja quietos e inertes su encabezado y
+  // su barra (debajo de la capa) y apaga el deslizar entre pestañas.
+  usePantallaInmersiva(
+    esCelular && ((showMobileChat && !!activeConv) || section !== 'inbox' || inboxTab === 'scheduled'),
+  )
+
+  const toggleFocusMode = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (isFocusMode) params.delete('foco')
+    else params.set('foco', '1')
+    const qs = params.toString()
+    router.replace(`/dashboard/mensajeria${qs ? `?${qs}` : ''}`, { scroll: false })
+  }, [isFocusMode, router, searchParams])
+
+  // Alertas no leídas y casos pendientes. Sólo pinta la última consulta: si
+  // una vieja llega tarde no pisa el número nuevo.
+  const consultaContadores = useRef(0)
+  const refrescarContadores = useCallback(() => {
+    const n = ++consultaContadores.current
+    getUnreadAlertCount()
+      .then((r) => { if (n === consultaContadores.current) setAlertCount(r.count) })
+      .catch(() => {})
+    getOpenCrmCaseCount()
+      .then((r) => { if (n === consultaContadores.current) setCasosCount(r.count) })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refrescarContadores()
+  }, [refrescarContadores])
+
+  // Realtime para actualizar los badges cuando llega una alerta o un caso nuevo
+  useEffect(() => {
+    const supabase = createClient()
+    const channel = supabase
+      .channel('crm-alerts-badge')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_alerts' }, () => {
+        setAlertCount(prev => prev + 1)
+      })
+      // NOTA: crm_cases NO está en la publication supabase_realtime, así que un
+      // listener postgres_changes sobre esa tabla nunca dispara (era código muerto).
+      // El badge de casos se refresca por refetch manual al montar, al cambiar
+      // de sección y al abrir el menú "…". Si se quiere en vivo, agregar
+      // crm_cases a la publication (bajo riesgo: tasa de cambios baja y el
+      // callback solo refetchea un count).
+      .subscribe((status, err) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.error('[crm-alerts-badge realtime] canal en estado', status, err)
+        }
+      })
+    return () => { supabase.removeChannel(channel) }
+  }, [])
+
+  const irA = (destino: DestinoMensajeria) => {
+    // Cada cambio de sección vuelve a contar: al salir de Alertas o de Casos el
+    // número tiene que reflejar lo que se leyó o se resolvió ahí.
+    refrescarContadores()
+    if (destino === 'chats' || destino === 'programados') {
+      setSection('inbox')
+      setInboxTab(destino === 'programados' ? 'scheduled' : 'inbox')
+      return
+    }
+    setSection(destino)
+  }
+
+  const activo = destinoActivo(section, inboxTab)
+  const seccionAbierta = section !== 'inbox'
+  const chatsNoLeidos = useMemo(() => conversations.filter((c) => c.unread_count > 0).length, [conversations])
+  const programadosPendientes = useMemo(() => scheduled.filter((s) => s.status === 'pending').length, [scheduled])
+  const abrirConfiguracion = () => setShowSettings(true)
+  const abrirChatNuevo = () => setShowNewChat(true)
+  // Lo que no traiga id y nombre (por ejemplo, el evento del clic si quien
+  // llama pasa el handler tal cual) abre el diálogo sin cliente.
+  const abrirProgramar = (cliente?: ClienteInicial) =>
+    setProgramar({
+      abierto: true,
+      cliente: typeof cliente?.id === 'string' && typeof cliente.nombre === 'string' ? { id: cliente.id, nombre: cliente.nombre } : null,
+    })
+
   return (
-    <div className="border-b border-[#0b141a] bg-[#111b21] px-3 py-2 overflow-x-auto wa-scroll">
-      <div className="flex items-center gap-1 whitespace-nowrap w-max">
-        <button
-          onClick={() => setTagFilter(null)}
-          className={`px-2.5 py-1 rounded-full text-[11px] font-medium shrink-0 transition-colors ${tagFilter === null ? 'bg-[#2a3942] text-[#e9edef]' : 'text-[#8696a0] hover:text-[#e9edef]'}`}
-        >
-          Todas
-        </button>
-        {tags.map(tag => (
-          <button
-            key={tag.id}
-            onClick={() => setTagFilter(tagFilter === tag.id ? null : tag.id)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all border shrink-0 ${tagFilter === tag.id ? 'text-white border-transparent' : 'text-[#8696a0] border-[#2a3942] hover:border-[#3b4a54]'}`}
-            style={tagFilter === tag.id ? { backgroundColor: tag.color, borderColor: tag.color } : {}}
-          >
-            <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
-            {tag.name}
-          </button>
-        ))}
+    // overflow-clip y no hidden, acá y en las columnas: un overflow hidden es un
+    // contenedor de scroll, y el scrollIntoView del final del hilo (el contexto,
+    // 50 ms después de cargar) lo corría de costado mientras el chat entraba
+    // desde la derecha: la conversación quedaba 138 px a la izquierda con una
+    // franja negra (23/oct/2026). Con clip no hay nada que correr.
+    <div className="wa-scope flex h-full min-h-0 flex-col overflow-clip bg-[var(--wa-bg)] text-[var(--wa-text)]">
+      <TokenHealthBanner onOpenSettings={abrirConfiguracion} />
+
+      {/* Las columnas: el contenedor que miden las container queries (sólo en
+          la compu: en el celular no hay columnas que medir). */}
+      <div className="relative flex min-h-0 flex-1 overflow-clip lg:@container/columnas">
+        <div className={`relative flex min-h-0 min-w-0 flex-1 ${ANCHOS_DE_COLUMNAS}`}>
+          <BarraSecciones
+            activo={activo}
+            contadores={{
+              chats: chatsNoLeidos,
+              alertas: alertCount,
+              casos: casosCount,
+              programados: programadosPendientes,
+            }}
+            configAbierta={showSettings}
+            isFocusMode={isFocusMode}
+            onIr={irA}
+            onConfig={abrirConfiguracion}
+            onToggleFoco={toggleFocusMode}
+          />
+
+          {/* La lista está siempre: en el celular, debajo de las capas; en la
+              compu, escondida mientras una sección o Programados ocupan su lugar. */}
+          <ConversationList
+            onNewChat={abrirChatNuevo}
+            onOpenSettings={abrirConfiguracion}
+            onProgramar={() => abrirProgramar()}
+            seccionAbierta={seccionAbierta}
+            menu={
+              <MenuSecciones
+                alertCount={alertCount}
+                casosCount={casosCount}
+                isFocusMode={isFocusMode}
+                onIr={irA}
+                onConfig={abrirConfiguracion}
+                onToggleFoco={toggleFocusMode}
+                onAbrir={refrescarContadores}
+              />
+            }
+          />
+
+          {seccionAbierta ? (
+            <MarcoSeccion titulo={itemDe(activo).titulo} onVolver={() => irA('chats')}>
+              {section === 'broadcasts' && <BroadcastSection />}
+              {section === 'automations' && <WorkflowList />}
+              {section === 'alerts' && <CrmAlertsPanel onNavigateToInbox={() => irA('chats')} />}
+              {section === 'casos' && <CrmCasesPanel onNavigateToInbox={() => irA('chats')} />}
+              {section === 'quick-replies' && <QuickReplySection />}
+            </MarcoSeccion>
+          ) : (
+            <>
+              <ChatView onOpenSettings={abrirConfiguracion} onNewChat={abrirChatNuevo} />
+              <ClientProfile onProgramar={abrirProgramar} />
+            </>
+          )}
+        </div>
       </div>
+
+      <DeepLinkHandler onSection={setSection} />
+
+      {/* ═══ Dialogs & Sheets ═══ */}
+      <SettingsSheet open={showSettings} onOpenChange={setShowSettings} />
+      <NewChatDialog open={showNewChat} onOpenChange={setShowNewChat} />
+      <ScheduleDialog
+        open={programar.abierto}
+        onOpenChange={(abierto) => setProgramar((p) => ({ ...p, abierto }))}
+        clienteInicial={programar.cliente}
+      />
+      <TemplatePicker />
     </div>
   )
 }
@@ -286,7 +270,12 @@ function DeepLinkHandler({ onSection }: { onSection: (s: CrmSection) => void }) 
     onSection('inbox')
     handleStartConversation(clientId)
     if (tag) setPendingTag({ clientId, tagId: tag })
-    router.replace('/dashboard/mensajeria')
+    // Se consumen clientId y tag; lo demás (?foco=1, ?settings=1) queda.
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('clientId')
+    params.delete('tag')
+    const qs = params.toString()
+    router.replace(`/dashboard/mensajeria${qs ? `?${qs}` : ''}`, { scroll: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 

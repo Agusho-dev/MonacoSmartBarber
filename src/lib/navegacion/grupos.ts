@@ -49,7 +49,8 @@ export interface GrupoNav {
   readonly etiqueta: string
   /**
    * La de la barra inferior del celular: cinco etiquetas de 10,5 px tienen que
-   * entrar enteras en 360 px (≈70 px cada una). "Configuración" mide 72 px.
+   * entrar enteras en 360 px (≈66 px por ranura: la cápsula flotante deja 12 px
+   * a cada lado y 4 adentro). "Configuración" mide 72 px.
    */
   readonly etiquetaCorta: string
   readonly icono: ClaveIcono

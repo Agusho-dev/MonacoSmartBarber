@@ -26,8 +26,8 @@ export function AiFeatureAnnouncement({ canUse, userKey }: { canUse: boolean; us
   const pathname = usePathname()
   // En la pantalla de Tex la presentación sobra: quien llegó ahí ya lo conoce.
   const enTex = pathname === '/dashboard/asistente' || (pathname?.startsWith('/dashboard/asistente/') ?? false)
-  // En Mensajería no está el botón (abajo van su composer y su barra): la
-  // presentación, que lo señala, espera a la próxima pantalla.
+  // En Mensajería no está el botón (abajo van su lista de chats y su composer):
+  // la presentación, que lo señala, espera a la próxima pantalla.
   const sinBoton = pathname === '/dashboard/mensajeria' || (pathname?.startsWith('/dashboard/mensajeria/') ?? false)
   // El atajo sólo se menciona con teclado y mouse (en el celular no existe).
   const conMouse = useMediaQuery('(pointer: fine)')

@@ -19,6 +19,9 @@ import {
 import type { AutomationWorkflow } from '@/lib/types/database'
 import { useMensajeria } from '../shared/mensajeria-context'
 import { WorkflowBuilder } from './workflow-builder'
+import {
+  AccionDeBarraIos, BotonMasIos, BotonPrincipal, EncabezadoSeccion, TEMA_DIALOGO_SECCION,
+} from '../navegacion/barra-ios'
 import { messageReceivedTriggerSummary } from './message-received-trigger-config'
 
 const TRIGGER_TYPES = [
@@ -193,11 +196,16 @@ export function WorkflowList() {
     ? workflows.filter(wf => !wf.branch_id || wf.branch_id === branchFilter)
     : workflows
 
-  // Editor a pantalla completa: el lienzo toma prioridad (encima de la barra de tags,
-  // rail CRM y lista lateral de mensajería).
+  // Editor a pantalla completa: el lienzo toma prioridad (encima de la columna
+  // de secciones y de la barra de iOS de Mensajería). Abajo deja el área
+  // segura, para que la rayita de inicio del iPhone no tape sus botones; antes
+  // dejaba 3.5rem para la barra propia de Mensajería, que ya no existe.
+  // data-sin-volver: en el celular el editor vive adentro de la capa de la
+  // sección, y deslizar desde el borde la cerraba entera (con los cambios sin
+  // guardar). Del editor se sale con su botón de volver.
   if (editingWorkflowId) {
     return (
-      <div className="fixed inset-0 z-[100] flex flex-col bg-background max-lg:pb-14">
+      <div data-sin-volver="" className="fixed inset-0 z-[100] flex flex-col bg-background pb-[env(safe-area-inset-bottom,0px)]">
         <WorkflowBuilder
           workflowId={editingWorkflowId}
           onBack={() => {
@@ -209,57 +217,67 @@ export function WorkflowList() {
     )
   }
 
+  const insigniaAlertas = alertCount > 0 && (
+    <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400" title="Alertas sin leer">
+      <Bell aria-hidden className="size-2.5" /> {alertCount}
+      <span className="sr-only"> alertas sin leer</span>
+    </span>
+  )
+
   return (
-    <div className="flex flex-1 min-w-0">
+    // A sangre adentro del marco de Mensajería (MarcoSeccion): sin la caja de
+    // borde alrededor de la lista. En el celular el título va en la barra de iOS
+    // y "Nuevo workflow" es el "+" verde de esa barra; abajo quedan las alertas
+    // y el filtro por sucursal. En la compu, el encabezado de 56 px.
+    <div className="flex flex-1 min-w-0 min-h-0">
+      <AccionDeBarraIos>
+        <BotonMasIos etiqueta="Nuevo workflow" onClick={() => setShowNewDialog(true)} />
+      </AccionDeBarraIos>
       {/* Lista */}
-      <div className="flex flex-col bg-background w-full lg:max-w-md shrink-0 border-r border">
-        <div className="px-4 py-3 bg-card border-b border space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Zap className="size-4 text-amber-400" />
-              <span className="font-semibold text-foreground text-sm">Automatizaciones</span>
-              {alertCount > 0 && (
-                <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400">
-                  <Bell className="size-2.5" /> {alertCount}
-                </span>
-              )}
-            </div>
-            <Button size="sm" onClick={() => setShowNewDialog(true)} className="h-7 text-xs bg-green-600 hover:bg-green-500 text-white">
-              <Plus className="size-3 mr-1" /> Nuevo workflow
-            </Button>
-          </div>
-          {branches.length > 1 && (
-            <div className="flex gap-1 flex-wrap">
-              <button
-                onClick={() => setBranchFilter(null)}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border ${
-                  !branchFilter ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : 'text-muted-foreground border-transparent hover:border-border'
-                }`}
-              >
-                <Globe className="size-2.5" />
-                Todas
-              </button>
-              {branches.map(b => (
+      <div className="flex flex-col bg-background w-full lg:max-w-md shrink-0 lg:border-r">
+        <EncabezadoSeccion icono={<Zap aria-hidden className="size-4 text-amber-400" />} titulo="Automatizaciones">
+          {insigniaAlertas}
+          <BotonPrincipal onClick={() => setShowNewDialog(true)}>
+            <Plus aria-hidden className="size-3.5" strokeWidth={2.5} /> Nuevo workflow
+          </BotonPrincipal>
+        </EncabezadoSeccion>
+        {(branches.length > 1 || alertCount > 0) && (
+          <div className={`flex items-center gap-2 px-4 py-2.5 bg-card border-b ${branches.length > 1 ? '' : 'lg:hidden'}`}>
+            {/* En la compu las alertas van en el encabezado. */}
+            {alertCount > 0 && <span className="lg:hidden">{insigniaAlertas}</span>}
+            {branches.length > 1 && (
+              <div className="flex gap-1 flex-wrap">
                 <button
-                  key={b.id}
-                  onClick={() => setBranchFilter(branchFilter === b.id ? null : b.id)}
+                  onClick={() => setBranchFilter(null)}
                   className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border ${
-                    branchFilter === b.id ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'text-muted-foreground border-transparent hover:border-border'
+                    !branchFilter ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : 'text-muted-foreground border-transparent hover:border-border'
                   }`}
                 >
-                  <MapPin className="size-2.5" />
-                  {b.name}
+                  <Globe className="size-2.5" />
+                  Todas
                 </button>
-              ))}
-            </div>
-          )}
-        </div>
+                {branches.map(b => (
+                  <button
+                    key={b.id}
+                    onClick={() => setBranchFilter(branchFilter === b.id ? null : b.id)}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border ${
+                      branchFilter === b.id ? 'bg-[var(--wa-chip-on-bg)] text-[var(--wa-chip-on-text)] border-transparent' : 'text-muted-foreground border-transparent hover:border-border'
+                    }`}
+                  >
+                    <MapPin className="size-2.5" />
+                    {b.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
-        <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="flex-1 overflow-y-auto min-h-0 max-lg:touch-pan-y max-lg:touch-pinch-zoom">
           {loading ? (
             <div className="space-y-0">
               {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="px-4 py-3 border-b border space-y-2.5 animate-pulse" style={{ animationDelay: `${i * 80}ms` }}>
+                <div key={i} className="px-4 py-3 border-b space-y-2.5 animate-pulse" style={{ animationDelay: `${i * 80}ms` }}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <div className="size-3.5 rounded bg-muted" />
@@ -281,7 +299,7 @@ export function WorkflowList() {
               ))}
             </div>
           ) : filteredWorkflows.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+            <div className="flex flex-col items-center justify-center px-8 py-16 text-center text-muted-foreground">
               <Zap className="mb-3 size-10 opacity-20" />
               <p className="text-sm">Sin automatizaciones</p>
               <p className="text-xs mt-1 opacity-60">Creá workflows para automatizar respuestas, reseñas y seguimientos</p>
@@ -291,7 +309,7 @@ export function WorkflowList() {
               {filteredWorkflows.map(wf => (
                 <div
                   key={wf.id}
-                  className="px-4 py-3 border-b border space-y-2 hover:bg-muted/50 transition-all duration-200 cursor-pointer hover:pl-5"
+                  className="px-4 py-3 border-b space-y-2 hover:bg-muted/50 transition-all duration-200 cursor-pointer hover:pl-5"
                   onClick={() => setEditingWorkflowId(wf.id)}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -306,7 +324,9 @@ export function WorkflowList() {
                       <button
                         onClick={() => handleToggle(wf.id, !wf.is_active)}
                         disabled={isToggling}
-                        className={`relative w-9 h-5 rounded-full transition-all duration-200 ${wf.is_active ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.3)]' : 'bg-muted'}`}
+                        aria-pressed={wf.is_active}
+                        aria-label={wf.is_active ? `Desactivar ${wf.name}` : `Activar ${wf.name}`}
+                        className={`relative w-9 h-5 rounded-full transition-all duration-200 ${wf.is_active ? 'bg-[var(--wa-accent)]' : 'bg-muted'}`}
                       >
                         <span className={`absolute top-0.5 left-0.5 size-4 rounded-full bg-white transition-all duration-200 ${wf.is_active ? 'translate-x-4' : ''}`} />
                       </button>
@@ -390,7 +410,7 @@ export function WorkflowList() {
 
       {/* New Workflow Dialog */}
       <Dialog open={showNewDialog} onOpenChange={setShowNewDialog}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className={`max-w-lg max-h-[85vh] overflow-y-auto ${TEMA_DIALOGO_SECCION.className}`} style={TEMA_DIALOGO_SECCION.style}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Zap className="size-4 text-amber-400" />
@@ -572,7 +592,7 @@ export function WorkflowList() {
           <DialogFooter>
             <Button variant="ghost" onClick={() => { setShowNewDialog(false); resetForm() }}
               className="text-muted-foreground hover:text-foreground">Cancelar</Button>
-            <Button className="bg-green-600 hover:bg-green-500 text-white" onClick={handleCreate} disabled={isCreating}>
+            <Button className="bg-[var(--wa-accent)] font-semibold text-[var(--wa-on-accent)] hover:bg-[var(--wa-accent-hover)]" onClick={handleCreate} disabled={isCreating}>
               {isCreating ? 'Creando...' : 'Crear y configurar'}
             </Button>
           </DialogFooter>

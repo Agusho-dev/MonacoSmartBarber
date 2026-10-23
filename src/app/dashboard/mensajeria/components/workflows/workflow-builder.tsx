@@ -24,6 +24,7 @@ import {
   type MessageReceivedTriggerState,
 } from './message-received-trigger-config'
 import { useMensajeria } from '../shared/mensajeria-context'
+import { TEMA_DIALOGO_SECCION } from '../navegacion/barra-ios'
 
 // ─── Constantes ──────────────────────────────────────────────────
 
@@ -634,7 +635,7 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
                 <Maximize2 className="size-3.5" />
               </button>
             </div>
-            <Button size="sm" onClick={handleSave} disabled={isSaving} className="h-7 text-xs bg-green-600 hover:bg-green-500 text-white">
+            <Button size="sm" onClick={handleSave} disabled={isSaving} className="h-7 text-xs font-semibold bg-[var(--wa-accent)] text-[var(--wa-on-accent)] hover:bg-[var(--wa-accent-hover)]">
               <Save className="size-3 mr-1" />
               {isSaving ? 'Guardando...' : 'Guardar'}
             </Button>
@@ -884,7 +885,7 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
             <div className="relative">
               <Button
                 onClick={() => setShowToolbar(!showToolbar)}
-                className="h-10 px-4 rounded-full bg-green-600 hover:bg-green-500 text-white shadow-lg shadow-green-600/30"
+                className="h-10 px-4 rounded-full font-semibold bg-[var(--wa-accent)] text-[var(--wa-on-accent)] hover:bg-[var(--wa-accent-hover)] shadow-lg shadow-black/40"
               >
                 <Plus className="size-4 mr-1.5" />
                 Agregar paso
@@ -1124,7 +1125,7 @@ function WorkflowSettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className={`max-w-2xl max-h-[90vh] overflow-y-auto ${TEMA_DIALOGO_SECCION.className}`} style={TEMA_DIALOGO_SECCION.style}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings2 className="size-4 text-amber-400" />
@@ -1367,7 +1368,7 @@ function WorkflowSettingsDialog({
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}
             className="text-muted-foreground hover:text-foreground">Cancelar</Button>
-          <Button className="bg-green-600 hover:bg-green-500 text-white" onClick={handleSave} disabled={isSaving}>
+          <Button className="bg-[var(--wa-accent)] font-semibold text-[var(--wa-on-accent)] hover:bg-[var(--wa-accent-hover)]" onClick={handleSave} disabled={isSaving}>
             {isSaving ? 'Guardando...' : 'Guardar cambios'}
           </Button>
         </DialogFooter>

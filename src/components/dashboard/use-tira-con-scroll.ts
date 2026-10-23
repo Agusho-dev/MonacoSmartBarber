@@ -36,14 +36,14 @@ function movimientoReducido(): boolean {
 /**
  * Centra `marcada` en la tira (sin pasarse de los extremos). Con `siempre` en
  * false sólo se mueve si la marcada no se ve entera (fuera de los bordes
- * desvanecidos).
+ * desvanecidos, de `borde` px).
  */
-function llevarALaVista(tira: HTMLElement, marcada: HTMLElement, suave: boolean, siempre: boolean): void {
+function llevarALaVista(tira: HTMLElement, marcada: HTMLElement, suave: boolean, siempre: boolean, borde: number): void {
   const max = tira.scrollWidth - tira.clientWidth
   if (max <= 1) return
   const desde = marcada.offsetLeft
   const hasta = desde + marcada.offsetWidth
-  if (!siempre && desde >= tira.scrollLeft + BORDE_PX && hasta <= tira.scrollLeft + tira.clientWidth - BORDE_PX) return
+  if (!siempre && desde >= tira.scrollLeft + borde && hasta <= tira.scrollLeft + tira.clientWidth - borde) return
   const destino = Math.max(0, Math.min(max, Math.round(desde + marcada.offsetWidth / 2 - tira.clientWidth / 2)))
   if (Math.abs(destino - tira.scrollLeft) < 1) return
   tira.scrollTo({ left: destino, behavior: suave ? 'smooth' : 'auto' })
@@ -53,11 +53,18 @@ function llevarALaVista(tira: HTMLElement, marcada: HTMLElement, suave: boolean,
  * `marcada`: la pestaña marcada (el hijo con `data-marcada` en el DOM).
  * `conjunto`: identifica las pestañas de la tira; si cambia (otro grupo), la
  * marcada se trae de un salto en vez de deslizarse.
+ * `borde`: el ancho del desvanecido (px). Tiene que alcanzar a tapar algo de
+ * texto: si la tira se corta justo entre dos pestañas, uno de 24 px cae sobre
+ * el relleno y no avisa que hay más.
  *
  * La tira tiene que ser `position: relative` (el offsetLeft de las pestañas se
  * mide contra ella).
  */
-export function useTiraConScroll<T extends HTMLElement = HTMLDivElement>(marcada: string | null, conjunto: string) {
+export function useTiraConScroll<T extends HTMLElement = HTMLDivElement>(
+  marcada: string | null,
+  conjunto: string,
+  borde: number = BORDE_PX,
+) {
   const ref = useRef<T>(null)
   const conjuntoVistoRef = useRef<string | null>(null)
 
@@ -67,9 +74,9 @@ export function useTiraConScroll<T extends HTMLElement = HTMLDivElement>(marcada
     const mismoConjunto = conjuntoVistoRef.current === conjunto
     conjuntoVistoRef.current = conjunto
     const el = marcada ? tira.querySelector<HTMLElement>('[data-marcada]') : null
-    if (el) llevarALaVista(tira, el, mismoConjunto && !movimientoReducido(), true)
-    aplicarBordes(tira)
-  }, [marcada, conjunto])
+    if (el) llevarALaVista(tira, el, mismoConjunto && !movimientoReducido(), true, borde)
+    aplicarBordes(tira, borde)
+  }, [marcada, conjunto, borde])
 
   // Cambios de tamaño (girar el teléfono, la fuente que termina de cargar):
   // los bordes se recalculan y la marcada vuelve a la vista si quedó afuera.
@@ -78,15 +85,15 @@ export function useTiraConScroll<T extends HTMLElement = HTMLDivElement>(marcada
     if (!tira || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(() => {
       const el = tira.querySelector<HTMLElement>('[data-marcada]')
-      if (el) llevarALaVista(tira, el, false, false)
-      aplicarBordes(tira)
+      if (el) llevarALaVista(tira, el, false, false, borde)
+      aplicarBordes(tira, borde)
     })
     ro.observe(tira)
     for (const hijo of Array.from(tira.children)) ro.observe(hijo)
     return () => ro.disconnect()
-  }, [conjunto])
+  }, [conjunto, borde])
 
-  const onScroll = (e: UIEvent<T>) => aplicarBordes(e.currentTarget)
+  const onScroll = (e: UIEvent<T>) => aplicarBordes(e.currentTarget, borde)
 
   // Con el teclado (Tab), la pestaña enfocada también se trae a la vista:
   // Chrome no corre la tira para mostrar un elemento que ya se ve en parte, y
@@ -96,7 +103,7 @@ export function useTiraConScroll<T extends HTMLElement = HTMLDivElement>(marcada
     const enfocado = e.target
     if (!(enfocado instanceof HTMLElement) || !enfocado.matches(':focus-visible')) return
     const pestana = enfocado.closest<HTMLElement>('a,button')
-    if (pestana && tira.contains(pestana)) llevarALaVista(tira, pestana, !movimientoReducido(), false)
+    if (pestana && tira.contains(pestana)) llevarALaVista(tira, pestana, !movimientoReducido(), false, borde)
   }
 
   return { ref, onScroll, onFocus }

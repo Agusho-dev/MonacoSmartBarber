@@ -254,124 +254,272 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   WhatsApp Web — clon visual del inbox de Mensajería.
-   Paleta oficial WhatsApp dark. El inbox es una superficie inmersiva: mantiene
-   el look dark siempre (el dashboard ya es dark). Utilidades para wallpaper,
-   burbujas con tails SVG y el "float" del timestamp (reserva inline de espacio).
+   WhatsApp — clon visual de Mensajería (23/oct/2026, pedido del dueño con
+   capturas de su iPhone y de su Mac: "quiero que esto sea igual a WhatsApp en
+   mobile, en desktop también debe verse bien").
+   - Celular: WhatsApp de iOS en modo oscuro (fondo negro, título grande).
+   - Compu (lg+): WhatsApp de la Mac en modo oscuro (grises neutros).
+   Los colores van como tokens --wa-*: los componentes no repiten hex sueltos.
+   El inbox mantiene el look oscuro siempre (el dashboard ya es oscuro).
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .wa-scope {
   color-scheme: dark;
-  --wa-panel: #111b21;
-  --wa-header: #202c33;
-  --wa-in: #202c33;
-  --wa-out: #005c4b;
-  --wa-text: #e9edef;
-  --wa-muted: #8696a0;
-  --wa-accent: #00a884;
-  --wa-unread: #25d366;
-  --wa-hover: #202c33;
-  --wa-active: #2a3942;
-  --wa-tick: #53bdeb;
-  --wa-input: #2a3942;
-  --wa-divider: rgba(134, 150, 160, 0.14);
+  /* La letra del sistema: en el iPhone y en la Mac es la San Francisco, la de WhatsApp. */
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+
+  /* Celular: WhatsApp de iOS, modo oscuro */
+  --wa-bg: #000000;                    /* fondo de la lista y de cada pantalla */
+  --wa-bar: rgba(14, 14, 14, 0.86);    /* barras translúcidas (encabezado del chat, composer), con blur */
+  --wa-sidebar: #000000;               /* la columna de secciones (sólo existe en la compu) */
+  --wa-field: #1c1c1e;                 /* buscador y campo de texto */
+  --wa-raised: #1c1c1e;                /* tarjetas y menús */
+  --wa-raised-2: #2c2c2e;              /* lo que va encima de una tarjeta, o apretado */
+  --wa-hover: rgba(255, 255, 255, 0.05);
+  --wa-selected: rgba(255, 255, 255, 0.09);
+  --wa-text: #f5f5f5;
+  --wa-text-2: #9a9a9f;                /* secundario: vista previa, horas */
+  --wa-text-3: #6b6b70;                /* terciario: ayudas */
+  --wa-divider: rgba(84, 84, 88, 0.48);
+  --wa-accent: #21c063;                /* el verde de WhatsApp */
+  --wa-accent-hover: #1cad58;
+  --wa-on-accent: #0b0b0b;             /* texto e íconos sobre el verde */
+  --wa-chip-on-bg: #103529;            /* chip de filtro marcado */
+  --wa-chip-on-text: #25d366;
+  --wa-out: #144d37;                   /* burbuja saliente */
+  --wa-in: #242626;                    /* burbuja entrante */
+  --wa-bubble-text: #e9edef;
+  /* La hora y el «No enviado» de la saliente: 0,7 da 5:1 sobre --wa-out (con 0,62, 4,3). */
+  --wa-meta-out: rgba(233, 237, 239, 0.7);
+  --wa-meta-in: #9a9a9f;
+  --wa-tick: #53bdeb;                  /* tilde azul de leído */
+  --wa-danger: #f15c6d;
+  --wa-date-chip: rgba(28, 28, 30, 0.92);
+  --wa-wallpaper-base: #0b0b0b;
+
+  /* Los nombres de antes, para lo que todavía los use */
+  --wa-panel: var(--wa-bg);
+  --wa-header: var(--wa-raised);
+  --wa-muted: var(--wa-text-2);
+  --wa-unread: var(--wa-accent);
+  --wa-active: var(--wa-selected);
+  --wa-input: var(--wa-field);
+}
+@media (min-width: 1024px) {
+  /* Compu: WhatsApp de la Mac, modo oscuro */
+  .wa-scope {
+    --wa-bg: #161717;
+    --wa-bar: #161717;
+    --wa-sidebar: #1d1f1f;
+    --wa-field: #2e2f2f;
+    --wa-raised: #242626;
+    --wa-raised-2: #2e2f2f;
+    --wa-hover: #202222;
+    --wa-selected: #2e2f2f;
+    --wa-divider: rgba(255, 255, 255, 0.08);
+    --wa-date-chip: rgba(36, 38, 38, 0.95);
+    --wa-wallpaper-base: #161717;
+  }
 }
 
-/* Wallpaper del panel de chat: base sólida + patrón doodle (imagen provista,
-   optimizada a WebP ~74KB). Va en una capa absoluta detrás de los mensajes para
-   quedar fija mientras el hilo scrollea (igual que WhatsApp). */
-.wa-wallpaper {
-  background-color: #0b141a;
-  background-image: url('/fondo_whatsapp_dark.webp');
-  background-repeat: repeat;
-  background-size: 412px auto;
-  background-position: center top;
+/* ── El chat abierto (chat-view.tsx): fondo, burbujas, hora y tildes ─────────
+   En @layer components para que las utilidades de Tailwind de cada burbuja
+   (anchos, rellenos) le ganen sin `!`: suelto, este CSS les ganaba a todas. */
+@layer components {
+  /* Fondo del chat: el patrón de WhatsApp en una capa fija detrás del hilo, que
+     scrollea encima. La imagen es opaca y neutra (~74 KB); la base es lo que se
+     ve mientras carga. En la compu va más tenue, como en WhatsApp para Mac. */
+  .wa-wallpaper {
+    background-color: var(--wa-wallpaper-base);
+  }
+  .wa-wallpaper::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url('/fondo_whatsapp_dark.webp');
+    background-repeat: repeat;
+    background-size: 412px auto;
+    background-position: center top;
+  }
+
+  /* Burbuja. Celular: la de WhatsApp de iOS (letra de 16 px, radio 16). Compu:
+     la de la Mac (14,5 px, radio 12), en el @media de abajo. */
+  .wa-bubble {
+    position: relative;
+    /* La colita va con z-index -1: así queda arriba del fondo de la burbuja y
+       debajo del texto, y no se escapa detrás del fondo del chat. */
+    isolation: isolate;
+    max-width: min(80%, 34rem);
+    border-radius: 16px;
+    padding: 6px 10px 7px;
+    font-size: 16px;
+    line-height: 21px;
+    color: var(--wa-bubble-text);
+    overflow-wrap: anywhere;
+    box-shadow: 0 1px 0.5px rgba(0, 0, 0, 0.18);
+  }
+  /* -out/-in: la última de su tanda, con colita. -fill-: las demás, sin colita. */
+  .wa-bubble-out, .wa-fill-out { background-color: var(--wa-out); }
+  .wa-bubble-in,  .wa-fill-in  { background-color: var(--wa-in); }
+
+  /* La colita va ABAJO de la última burbuja de cada tanda, como en iOS y en la
+     Mac (WhatsApp Web la pone arriba en la primera). Es una máscara pintada con
+     el color de la burbuja, así sigue al token; la esquina de ese lado va recta
+     (más abajo) y la colita sale de ella. */
+  .wa-bubble-out::after,
+  .wa-bubble-in::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    z-index: -1;
+    width: 9px;
+    height: 17px;
+    background-color: inherit;
+    -webkit-mask-repeat: no-repeat;
+            mask-repeat: no-repeat;
+    -webkit-mask-size: 100% 100%;
+            mask-size: 100% 100%;
+  }
+  .wa-bubble-out::after {
+    right: -8px;
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 17' preserveAspectRatio='none'%3E%3Cpath d='M0 0H1C1 7 2.6 12.8 8.3 16.4C8.7 16.65 8.55 17 8.1 17H0Z'/%3E%3C/svg%3E");
+            mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 17' preserveAspectRatio='none'%3E%3Cpath d='M0 0H1C1 7 2.6 12.8 8.3 16.4C8.7 16.65 8.55 17 8.1 17H0Z'/%3E%3C/svg%3E");
+  }
+  .wa-bubble-in::after {
+    left: -8px;
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 17' preserveAspectRatio='none'%3E%3Cpath d='M9 0H8C8 7 6.4 12.8 0.7 16.4C0.3 16.65 0.45 17 0.9 17H9Z'/%3E%3C/svg%3E");
+            mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 17' preserveAspectRatio='none'%3E%3Cpath d='M9 0H8C8 7 6.4 12.8 0.7 16.4C0.3 16.65 0.45 17 0.9 17H9Z'/%3E%3C/svg%3E");
+  }
+
+  /* Hora y tildes, flotando abajo a la derecha del TEXTO (su contenedor es
+     relative; si fuera la burbuja entera, se montaban sobre el «No enviado ·
+     Reintentar»). El .wa-spacer reserva ese lugar al final de la última línea,
+     así el texto nunca queda debajo: la técnica de WhatsApp. En vez de un ancho
+     fijo, el espaciador escribe la misma hora, invisible y con la misma letra
+     (attr(data-hora)): según el navegador la hora sale «11:05» o «11:05 a. m.»,
+     y con un ancho fijo se montaba sobre el texto. Al ser un ::after, no se
+     selecciona ni se copia con el mensaje. */
+  .wa-meta {
+    position: absolute;
+    right: -3px;
+    bottom: -2px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    line-height: 15px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .wa-meta-out { color: var(--wa-meta-out); }
+  .wa-meta-in  { color: var(--wa-meta-in); }
+  .wa-spacer {
+    display: inline-block;
+    padding-left: 5px; /* el aire entre el texto y la hora */
+    font-size: 11px;
+    line-height: 0;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    visibility: hidden;
+    user-select: none;
+  }
+  .wa-spacer::after { content: attr(data-hora); }
+  .wa-spacer-out { padding-right: 18px; } /* las tildes (15 px) y su separación */
+
+  /* La hora sobre una foto sin texto: un velo abajo y letra clara con sombra. */
+  .wa-img-scrim {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 40px;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.45), transparent);
+    pointer-events: none;
+  }
+  .wa-img-meta {
+    position: absolute;
+    right: 8px;
+    bottom: 5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    line-height: 15px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.92);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+  }
+
+  /* Barra de scroll fina, que aparece sólo con el puntero encima. */
+  .wa-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+  .wa-scroll:hover { scrollbar-color: rgba(255, 255, 255, 0.2) transparent; }
+  .wa-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+  .wa-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+  .wa-scroll:hover::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); }
+
+  @media (min-width: 1024px) {
+    .wa-wallpaper::before { opacity: 0.45; }
+    .wa-bubble {
+      max-width: min(65%, 36rem);
+      border-radius: 12px;
+      padding: 6px 9px 7px;
+      font-size: 14.5px;
+      line-height: 20px;
+    }
+  }
+
+  /* Después del @media: el radio de la compu no puede devolverle la curva a la
+     esquina de donde sale la colita. */
+  .wa-bubble.wa-bubble-out { border-bottom-right-radius: 0; }
+  .wa-bubble.wa-bubble-in  { border-bottom-left-radius: 0; }
+
+  /* ── Las capas del celular ──────────────────────────────────────────────
+     Lo que iOS "empuja" desde la lista de chats (el chat, la info. del
+     contacto, las secciones de Mensajería, Programados) es una capa fija que
+     tapa al shell entero, entra desde la derecha y se vuelve deslizando desde
+     el borde izquierdo (deslizar-para-volver.ts). Lo que queda descubierto se
+     ve oscurecido y el canto de la capa hace sombra, como en iOS: es el
+     ::before, pegado a la izquierda de la capa y del ancho de la pantalla, que
+     viaja con ella. Mientras entra, el oscurecido aparece de a poco; durante el
+     gesto, se aclara con --volver (0 con la capa en su lugar, 1 afuera), que
+     pone el hook. La clase va en el elemento que se mueve: el que recibe el ref
+     de useDeslizarParaVolver. En la compu no hace nada. */
+  @media (max-width: 1023.98px) {
+    /* Sin posición propia, la capa es la referencia del ::before; las
+       utilidades (fixed, absolute) le ganan: esto va en components. */
+    .wa-capa { position: relative; }
+    .wa-capa::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      right: 100%;
+      width: 100vw;
+      pointer-events: none;
+      background:
+        linear-gradient(to left, rgb(0 0 0 / calc(0.4 * (1 - var(--volver)))), transparent 16px),
+        rgb(0 0 0 / calc(0.24 * (1 - var(--volver))));
+    }
+  }
+  @media (max-width: 1023.98px) and (prefers-reduced-motion: no-preference) {
+    .wa-capa::before { animation: wa-capa-oscurece 300ms ease-out both; }
+  }
 }
 
-/* Burbuja base */
-.wa-bubble {
-  position: relative;
-  max-width: min(65%, 30rem);
-  border-radius: 7.5px;
-  padding: 6px 9px 8px 9px;
-  font-size: 14.2px;
-  line-height: 19px;
-  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
-  overflow-wrap: break-word;
-  word-break: break-word;
+/* El progreso del gesto de volver (.wa-capa, arriba). Registrada como número
+   para que la transición del final del gesto lo lleve de a poco junto con el
+   transform; hereda para que el ::before de la capa lo lea. */
+@property --volver {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
 }
-.wa-bubble-out { background: var(--wa-out); color: var(--wa-text); border-top-right-radius: 0; }
-.wa-bubble-in  { background: var(--wa-in);  color: var(--wa-text); border-top-left-radius: 0; }
-/* Relleno para mensajes consecutivos del mismo emisor (sin tail, esquinas redondeadas) */
-.wa-fill-out { background: var(--wa-out); color: var(--wa-text); }
-.wa-fill-in  { background: var(--wa-in);  color: var(--wa-text); }
-
-/* Tails: SVG oficial de WhatsApp como pseudo-elemento en la esquina superior */
-.wa-bubble-out::before,
-.wa-bubble-in::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  width: 8px;
-  height: 13px;
-  background-repeat: no-repeat;
+@keyframes wa-capa-oscurece {
+  from { opacity: 0; }
 }
-.wa-bubble-out::before {
-  right: -8px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='13'%3E%3Cpath fill='%23005c4b' d='M5.188 0H0v11.193l6.467-8.625C7.526 1.156 6.958 0 5.188 0z'/%3E%3C/svg%3E");
-}
-.wa-bubble-in::before {
-  left: -8px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='13'%3E%3Cpath fill='%23202c33' d='M2.812 0H8v11.193L1.533 2.568C.474 1.156 1.042 0 2.812 0z'/%3E%3C/svg%3E");
-}
-
-/* Meta (hora + ticks) flotando abajo-derecha; el .wa-spacer reserva el ancho
-   en la última línea del texto para que no se solape (técnica de WhatsApp). */
-.wa-meta {
-  position: absolute;
-  right: 8px;
-  bottom: 5px;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
-  line-height: 15px;
-  white-space: nowrap;
-  pointer-events: none;
-}
-.wa-meta-out { color: rgba(233, 237, 239, 0.6); }
-.wa-meta-in  { color: var(--wa-muted); }
-.wa-spacer { display: inline-block; height: 1px; }
-.wa-spacer-out { width: 68px; }
-.wa-spacer-in  { width: 46px; }
-
-/* Meta sobre imágenes/videos: scrim + texto claro con sombra */
-.wa-img-scrim {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  height: 34px;
-  background: linear-gradient(to top, rgba(11, 20, 26, 0.5), transparent);
-  pointer-events: none;
-}
-.wa-img-meta {
-  position: absolute;
-  right: 9px;
-  bottom: 5px;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
-  color: #e9edef;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-  pointer-events: none;
-}
-
-/* Barra de scroll fina estilo WhatsApp (sólo visible al hover del panel) */
-.wa-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; }
-.wa-scroll:hover { scrollbar-color: rgba(134, 150, 160, 0.3) transparent; }
-.wa-scroll::-webkit-scrollbar { width: 6px; }
-.wa-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
-.wa-scroll:hover::-webkit-scrollbar-thumb { background: rgba(134, 150, 160, 0.3); }
 
 /* ── Auth/Onboarding premium animations ────────────────────────────────────── */
 
@@ -973,6 +1121,252 @@ html[data-giro='css'] .giro-solo-normal { display: none; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   Barra inferior del celular (mobile-bottom-nav.tsx): la cápsula de vidrio de
+   iOS 26 que flota sobre la página (pedido del dueño, 23/oct/2026, con una
+   captura de WhatsApp: "que pueda deslizar con el dedo al estilo apple").
+   - Las medidas son tokens: las usan la barra, el shell (--alto-barra-inferior,
+     dashboard-shell.tsx) y los avisos (--avisos-abajo, en el bloque de abajo).
+     Viven acá una sola vez; antes el alto estaba copiado en tres lados.
+   - El vidrio, la píldora y las pestañas son HERMANOS dentro del <nav>: un
+     backdrop-filter ve lo que hay detrás sólo hasta el ancestro más cercano con
+     filtro, opacidad menor que 1 o backdrop-filter (el "backdrop root"). Con la
+     píldora adentro del vidrio, la lente vería el vidrio y no la página. Por lo
+     mismo, la barra escondida se desvanece en cada hijo y no en el <nav>.
+   - La píldora en reposo se ubica con --barra-i y --barra-n (porcentajes): el
+     HTML del servidor ya la dibuja en su lugar. Al arrastrar, la barra la mueve
+     con `translate` en línea y la levanta como lente con [data-lente]: el
+     cuerpo (la píldora de reposo) se apaga y aparece la lente, una pieza aparte
+     más grande que la barra. Con el dedo lejos de la cápsula ([data-lente-fuera]:
+     soltar ahí no elige) la lente se desinfla y vuelve la píldora.
+   - Con una capa de Mensajería encima (la pantalla inmersiva) la barra se
+     sigue dibujando debajo, inerte: [data-oculta] es sólo cuando se va.
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* 60 px de alto, separada del borde de abajo max(10 px, área segura − 12 px):
+     ~22 px en un iPhone con rayita (34 px de área segura), 10 px sin área segura. */
+  --barra-inferior-alto: 60px;
+  --barra-inferior-separacion: max(10px, env(safe-area-inset-bottom, 0px) - 12px);
+  /* Lo que ocupa desde el borde de abajo: 82 px en el iPhone, 70 sin área
+     segura. Entra en el padding de abajo del <main> del shell (4.5rem + área
+     segura: 106 y 72 px), que no se toca: de él dependen las pantallas de alto
+     fijo. */
+  --barra-inferior-huella: calc(var(--barra-inferior-alto) + var(--barra-inferior-separacion));
+}
+
+@layer components {
+  .barra-vidrio {
+    bottom: var(--barra-inferior-separacion);
+    height: var(--barra-inferior-alto);
+    /* El dedo es de la barra: sin scroll ni zoom, sin la lupa, el menú del
+       enlace o el resaltado gris de iOS al mantenerlo apretado. */
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: translate 260ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .barra-vidrio > * {
+    transition: opacity 200ms ease-out;
+  }
+  .barra-vidrio[data-oculta] {
+    translate: 0 16px;
+    pointer-events: none;
+  }
+  .barra-vidrio[data-oculta] > * {
+    opacity: 0;
+  }
+
+  /* El vidrio: oscuro y translúcido, una luz muy suave arriba, el borde de 1 px
+     y el brillo interior del canto de arriba. */
+  .barra-vidrio-fondo {
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background:
+      linear-gradient(to bottom, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0) 55%),
+      rgb(30 30 32 / 0.55);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(24px) saturate(180%);
+    box-shadow:
+      inset 0 0 0 1px rgb(255 255 255 / 0.12),
+      inset 0 1px 0 rgb(255 255 255 / 0.14),
+      0 10px 30px -8px rgb(0 0 0 / 0.6),
+      0 2px 8px -2px rgb(0 0 0 / 0.35);
+  }
+  /* Sin backdrop-filter, más opaco: si no, lo de abajo se lee a través. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .barra-vidrio-fondo {
+      background: rgb(28 28 30 / 0.94);
+    }
+  }
+
+  /* La pista, 4 px adentro de la cápsula, partida en n ranuras: las de la
+     píldora y las de las pestañas coinciden. */
+  .barra-vidrio-pista,
+  .barra-vidrio-items {
+    position: absolute;
+    inset: 4px;
+  }
+  .barra-vidrio-items {
+    display: flex;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .barra-pildora {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: calc(100% / var(--barra-n, 5));
+    translate: calc(var(--barra-i, 0) * 100%) 0;
+    transition: opacity 200ms ease-out;
+  }
+  .barra-pildora:not([data-visible]) {
+    opacity: 0;
+  }
+  /* La píldora en reposo. Al viajar de ranura en ranura se estira (una
+     animación de la barra sobre su `scale`). */
+  .barra-pildora-cuerpo {
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background-color: rgb(255 255 255 / 0.11);
+    transition: opacity 160ms ease-out;
+  }
+
+  /* La lente: la píldora levantada, como la de iOS 26. Más grande que la barra
+     (80 px de alto: sale 10 px arriba y 10 abajo de la cápsula, y 12 px más
+     ancha de cada lado) y de vidrio CLARO: un velo blanco con más luz arriba,
+     un filtro que aclara y satura lo de abajo, el canto de arriba brillante y
+     el borde iridiscente (magenta de un lado, cian del otro). Lo que agranda
+     son las pestañas mismas, que van encima (--barra-brillo y `scale`).
+     Lo claro lo da el velo, no el filtro: Safari no le muestra a la lente el
+     vidrio de la cápsula (ve la página directo) y con un filtro fuerte los
+     colores de abajo quedaban de neón; Chrome sí se lo muestra.
+     En reposo está desinflada al tamaño de la píldora y escondida: con
+     `visibility` no se pinta ni se calcula su filtro (sólo `scale` y
+     `opacity` se animan: nada de layout por cuadro). */
+  .barra-pildora-lente {
+    position: absolute;
+    inset: -14px -12px;
+    border-radius: 9999px;
+    pointer-events: none;
+    visibility: hidden;
+    opacity: 0;
+    scale: 0.75 0.65;
+    background:
+      linear-gradient(to bottom, rgb(255 255 255 / 0.24), rgb(255 255 255 / 0.06) 46%, rgb(255 255 255 / 0.12)),
+      rgb(255 255 255 / 0.05);
+    -webkit-backdrop-filter: blur(1px) saturate(140%) brightness(1.12);
+    backdrop-filter: blur(1px) saturate(140%) brightness(1.12);
+    box-shadow:
+      inset 0 0 0 1px rgb(255 255 255 / 0.5),
+      inset 0 1.5px 1px -0.5px rgb(255 255 255 / 0.85),
+      inset 0 -1.5px 2px -1px rgb(255 255 255 / 0.35),
+      inset 5px 0 6px -4px rgb(255 92 214 / 0.65),
+      inset -5px 0 6px -4px rgb(72 220 255 / 0.65),
+      0 14px 30px -12px rgb(0 0 0 / 0.7),
+      0 2px 6px -1px rgb(0 0 0 / 0.3);
+    transition:
+      opacity 160ms ease-out,
+      scale 300ms cubic-bezier(0.2, 0, 0, 1),
+      visibility 0s linear 300ms;
+  }
+  .barra-vidrio[data-lente] .barra-pildora {
+    opacity: 1;
+  }
+  .barra-vidrio[data-lente] .barra-pildora-cuerpo {
+    opacity: 0;
+  }
+  .barra-vidrio[data-lente] .barra-pildora-lente {
+    visibility: visible;
+    opacity: 1;
+    scale: 1;
+    transition:
+      opacity 120ms ease-out,
+      scale 360ms cubic-bezier(0.34, 1.56, 0.64, 1),
+      visibility 0s;
+  }
+  /* El dedo se alejó de la cápsula (soltar ahí no elige): la lente se desinfla,
+     vuelve la píldora (que la barra lleva a su grupo) y, sin grupo marcado, no
+     queda nada. */
+  .barra-vidrio[data-lente-fuera] .barra-pildora-cuerpo {
+    opacity: 1;
+  }
+  .barra-vidrio[data-lente-fuera] .barra-pildora:not([data-visible]) {
+    opacity: 0;
+  }
+  .barra-vidrio[data-lente-fuera] .barra-pildora-lente {
+    visibility: hidden;
+    opacity: 0;
+    scale: 0.75 0.65;
+    transition:
+      opacity 160ms ease-out,
+      scale 300ms cubic-bezier(0.2, 0, 0, 1),
+      visibility 0s linear 300ms;
+  }
+  /* Sin backdrop-filter, la lente más blanca y casi opaca: sin el filtro que
+     aclara lo de abajo quedaría gris oscura. (Después de su regla: le gana.) */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .barra-pildora-lente {
+      background:
+        linear-gradient(to bottom, rgb(255 255 255 / 0.26), rgb(255 255 255 / 0.1) 50%, rgb(255 255 255 / 0.16)),
+        rgb(58 58 62 / 0.85);
+    }
+  }
+
+  /* Las pestañas: blanco al 65 % y la marcada entera. Mientras se arrastra, la
+     barra pisa --barra-brillo y `scale` en línea: las cercanas a la lente se
+     aclaran y se agrandan, cuadro a cuadro (por eso ahí sin transición; con el
+     dedo lejos vuelven a su lugar con la transición). */
+  .barra-item {
+    --barra-brillo: 0.65;
+  }
+  .barra-item[aria-current] {
+    --barra-brillo: 1;
+  }
+  .barra-item-contenido {
+    color: rgb(255 255 255 / var(--barra-brillo));
+    transition:
+      color 200ms ease-out,
+      scale 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .barra-item:active .barra-item-contenido {
+    scale: 0.92;
+  }
+  .barra-vidrio[data-lente]:not([data-lente-fuera]) .barra-item-contenido {
+    transition: none;
+  }
+}
+
+/* Sin resortes ni agrandado: la píldora salta y el arrastre sigue andando. La
+   lente es del tamaño de la píldora y aparece y se va sin escala. */
+@media (prefers-reduced-motion: reduce) {
+  .barra-vidrio,
+  .barra-vidrio > *,
+  .barra-pildora,
+  .barra-pildora-cuerpo,
+  .barra-pildora-lente,
+  .barra-vidrio[data-lente] .barra-pildora-lente,
+  .barra-vidrio[data-lente-fuera] .barra-pildora-lente,
+  .barra-item-contenido {
+    transition: none;
+  }
+  .barra-pildora-lente,
+  .barra-vidrio[data-lente] .barra-pildora-lente,
+  .barra-vidrio[data-lente-fuera] .barra-pildora-lente {
+    inset: 0;
+    scale: none;
+  }
+  .barra-item:active .barra-item-contenido {
+    scale: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    Botón flotante de Tex (tex-boton-flotante.tsx) y los avisos del dashboard.
    - El disco: oscuro, con el anillo del azul de Tex y sombra; la cara lleva el
      halo porque sobre fondo oscuro su contorno azul marino se pierde.
@@ -981,9 +1375,10 @@ html[data-giro='css'] .giro-solo-normal { display: none; }
      <body data-scroll-locked>), así se ve cuando el botón está a la vista.
    - `--avisos-abajo`: la altura que toaster-raiz.tsx le pasa a sonner en el
      dashboard, para que los avisos no queden ni encima ni debajo del botón ni
-     de la barra inferior del celular (52 px + safe-area, mobile-bottom-nav.tsx;
-     el Toaster vive fuera del shell y no hereda su --alto-barra-inferior). Sin
-     el botón (quien no usa Tex), sólo despejan la barra.
+     de la barra inferior del celular (--barra-inferior-huella, del bloque de
+     arriba: el Toaster vive fuera del shell y no hereda su
+     --alto-barra-inferior). Sin el botón (quien no usa Tex), sólo despejan la
+     barra. Mensajería tiene la suya, `--avisos-abajo-mensajeria`.
    ═══════════════════════════════════════════════════════════════════════════ */
 @layer components {
   .tex-flotante {
@@ -1029,19 +1424,40 @@ html[data-giro='css'] .giro-solo-normal { display: none; }
   }
 }
 
-/* La barra inferior ocupa 52 px + 1 px de borde + el área segura (como mínimo
-   4 px): el mismo cálculo que el --alto-barra-inferior del shell. Contando sólo
-   52 px + área segura, el aviso quedaba a 7 px del botón y no a 12. */
+/* Los avisos van 12 px arriba de lo que ocupa la barra desde el borde de abajo
+   (--barra-inferior-huella: el mismo token que el --alto-barra-inferior del
+   shell, así que nunca quedan debajo del vidrio). */
 :root {
-  --avisos-abajo: calc(3.25rem + 1px + max(0.25rem, env(safe-area-inset-bottom, 0px)) + 12px);
+  --avisos-abajo: calc(var(--barra-inferior-huella) + 12px);
+  /* Mensajería no tiene botón de Tex: el shell lo esconde, pero sigue montado y
+     el :has() de abajo lo contaría. En la lista de chats, 12 px arriba de la barra. */
+  --avisos-abajo-mensajeria: calc(var(--barra-inferior-huella) + 12px);
 }
 :root:has([data-tex-flotante]) {
   /* El botón: 52 px, 12 px arriba de la barra; y 12 px de aire. */
-  --avisos-abajo: calc(3.25rem + 1px + max(0.25rem, env(safe-area-inset-bottom, 0px)) + 76px);
+  --avisos-abajo: calc(var(--barra-inferior-huella) + 76px);
+}
+@media (max-width: 1023.98px) {
+  /* Una capa de Mensajería abierta en el celular (pantalla-inmersiva.ts): tapa
+     la barra, así que los avisos no van arriba de ella.
+     - Con un chat, 12 px arriba del composer y no arriba de todo: con el
+       teclado abierto iOS corre la página para mostrar el campo, y un aviso
+       arriba puede quedar fuera de la pantalla. --alto-composer-chat lo publica
+       chat-view.tsx con el alto real del composer (área segura incluida), que
+       crece con el texto y con las respuestas rápidas.
+     - Sin composer (una sección, Programados) no está publicado: 12 px arriba
+       del área segura. */
+  :root[data-pantalla-inmersiva] {
+    --avisos-abajo-mensajeria: calc(var(--alto-composer-chat, env(safe-area-inset-bottom, 0px)) + 12px);
+  }
 }
 @media (min-width: 1024px) {
   :root {
     --avisos-abajo: 24px;
+    /* Mensajería en la compu: el composer del chat ocupa el borde de abajo de
+       la columna del medio; 16 px arriba de él (sin chat abierto, la estimación
+       de un renglón). */
+    --avisos-abajo-mensajeria: calc(var(--alto-composer-chat, 64px) + 16px);
   }
   :root:has([data-tex-flotante]) {
     /* El botón: 56 px a 24 px del borde; y 16 px de aire. */

@@ -77,11 +77,13 @@ export function AudioPlayer({ src, isOut }: AudioPlayerProps) {
   const progress = duration > 0 ? currentTime / duration : 0
   const playedBars = Math.round(progress * BAR_COUNT)
 
-  // Colores WhatsApp: barras reproducidas en celeste (out) / verde (in),
-  // pendientes en un tono apagado.
-  const playedColor = isOut ? '#8ad4ff' : '#00a884'
-  const restColor = isOut ? 'rgba(233,237,239,0.35)' : 'rgba(134,150,160,0.45)'
-  const timeColor = isOut ? 'rgba(233,237,239,0.6)' : '#8696a0'
+  // Colores de WhatsApp, con los tokens de .wa-scope: lo reproducido en azul
+  // (saliente) o verde (entrante), lo que falta en un tono apagado del texto.
+  const playedColor = isOut ? 'var(--wa-tick)' : 'var(--wa-accent)'
+  const restColor = isOut
+    ? 'color-mix(in oklab, var(--wa-bubble-text) 35%, transparent)'
+    : 'color-mix(in oklab, var(--wa-text-2) 45%, transparent)'
+  const timeColor = isOut ? 'var(--wa-meta-out)' : 'var(--wa-meta-in)'
 
   return (
     <div className="flex items-center gap-2.5 w-full max-w-[248px] pl-1 pr-2 py-1.5">
@@ -101,17 +103,19 @@ export function AudioPlayer({ src, isOut }: AudioPlayerProps) {
       <button
         onClick={togglePlay}
         aria-label={isPlaying ? 'Pausar' : 'Reproducir'}
-        className={`shrink-0 flex items-center justify-center size-9 rounded-full transition-colors ${
-          isOut ? 'bg-white/15 hover:bg-white/25 text-white' : 'bg-white/10 hover:bg-white/15 text-[#e9edef]'
+        className={`shrink-0 flex items-center justify-center size-9 rounded-full transition-colors text-[var(--wa-bubble-text)] ${
+          isOut ? 'bg-white/15 hover:bg-white/25' : 'bg-white/10 hover:bg-white/15'
         }`}
       >
         {isPlaying ? <Pause className="size-4" /> : <Play className="size-4 ml-0.5" />}
       </button>
 
-      <div className="flex-1 flex flex-col justify-center gap-1 min-w-[130px]">
+      {/* min-w-0: en una burbuja angosta (el chat de 356 px de la compu a 1024)
+          la onda se achica con ella en vez de empujar la burbuja hacia afuera. */}
+      <div className="flex-1 flex flex-col justify-center gap-1 min-w-0">
         {/* Waveform */}
         <div className="relative h-6 flex items-center">
-          <div className="flex items-center gap-[2px] w-full h-full" aria-hidden="true">
+          <div className="flex items-center gap-[2px] w-full h-full overflow-hidden" aria-hidden="true">
             {bars.map((h, i) => (
               <span
                 key={i}

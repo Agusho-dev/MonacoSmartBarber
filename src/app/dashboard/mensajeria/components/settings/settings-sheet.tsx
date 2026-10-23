@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import {
-  Copy, Eye, EyeOff, Wifi, WifiOff, ExternalLink, Instagram, Facebook, Bot, ScrollText,
+  Copy, Eye, EyeOff, Wifi, WifiOff, ExternalLink, Instagram, Facebook, Bot, ScrollText, Tag,
 } from 'lucide-react'
 import { ModelPicker } from '../shared/model-picker'
 import { AiLogsPanel } from './ai-logs-panel'
@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import { Sheet, SheetContent } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { toast } from 'sonner'
 import { saveOrgWhatsAppConfig } from '@/lib/actions/whatsapp-meta'
 import { saveOrgInstagramConfig } from '@/lib/actions/instagram-meta'
@@ -20,6 +20,7 @@ import { saveOrgAiConfig } from '@/lib/actions/ai-config'
 import { WhatsAppIcon } from '../shared/icons'
 import { TAG_COLORS } from '../shared/helpers'
 import { useMensajeria } from '../shared/mensajeria-context'
+import { TEMA_DIALOGO_SECCION } from '../navegacion/barra-ios'
 
 type SettingsTab = 'whatsapp' | 'instagram' | 'facebook' | 'ai' | 'logs' | 'tags'
 
@@ -126,9 +127,16 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full max-w-md flex flex-col p-0">
+      {/* aria-describedby={undefined}: la hoja no tiene descripción (Radix avisa si no se dice). */}
+      <SheetContent
+        side="right"
+        aria-describedby={undefined}
+        className={`w-full max-w-md flex flex-col p-0 ${TEMA_DIALOGO_SECCION.className}`}
+        style={TEMA_DIALOGO_SECCION.style}
+      >
         <div className="px-6 py-4 border-b border shrink-0">
-          <p className="font-semibold text-foreground mb-3">Configuración</p>
+          {/* El título de la hoja (Radix lo exige: sin él avisaba «DialogContent requires a DialogTitle»). */}
+          <SheetTitle className="mb-3 text-base font-semibold text-foreground">Configuración</SheetTitle>
           <div className="grid grid-cols-6 gap-1 bg-card p-1 rounded-lg">
             {(['whatsapp', 'instagram', 'facebook', 'ai', 'logs', 'tags'] as SettingsTab[]).map(tab => (
               <button key={tab} onClick={() => setSettingsTab(tab)}
@@ -138,7 +146,7 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
                 {tab === 'facebook' && <Facebook className="size-3.5 text-blue-400" />}
                 {tab === 'ai' && <Bot className="size-3.5 text-purple-400" />}
                 {tab === 'logs' && <ScrollText className="size-3.5 text-amber-400" />}
-                {tab === 'tags' && <span className="text-base leading-none">🏷️</span>}
+                {tab === 'tags' && <Tag aria-hidden className="size-3.5 text-teal-400" />}
                 <span>{tab === 'whatsapp' ? 'WA' : tab === 'instagram' ? 'IG' : tab === 'facebook' ? 'FB' : tab === 'ai' ? 'IA' : tab === 'logs' ? 'Logs' : 'Tags'}</span>
               </button>
             ))}
@@ -238,7 +246,7 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
                       onChange={(e) => setConfigForm(prev => ({ ...prev, app_secret: e.target.value }))} />
                     <p className="text-[10px] text-muted-foreground">Meta App → Configuración → Básica → Clave secreta de la app</p>
                   </div>
-                  <Button className="w-full bg-green-600 hover:bg-green-500 text-white" onClick={handleSaveConfig} disabled={savingConfig}>
+                  <Button className="w-full bg-[var(--wa-accent)] font-semibold text-[var(--wa-on-accent)] hover:bg-[var(--wa-accent-hover)]" onClick={handleSaveConfig} disabled={savingConfig}>
                     {savingConfig ? 'Guardando...' : 'Guardar credenciales'}
                   </Button>
                 </div>

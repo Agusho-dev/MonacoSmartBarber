@@ -1,6 +1,7 @@
 'use client'
 
 import { Check, CheckCheck, AlertCircle, Clock } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 export function WhatsAppIcon({ className = 'size-4' }: { className?: string }) {
   return (
@@ -10,23 +11,25 @@ export function WhatsAppIcon({ className = 'size-4' }: { className?: string }) {
   )
 }
 
-export function MessageStatusIcon({ status }: { status: string }) {
+// Las tildes van dentro de la hora (.wa-meta en el chat, la vista previa en la
+// lista): enviado y entregado heredan su color, como en WhatsApp; leído va en
+// azul (--wa-tick). Los tokens --wa-* existen sólo dentro de .wa-scope.
+export function MessageStatusIcon({ status, className }: { status: string; className?: string }) {
   switch (status) {
-    // sent/delivered heredan el color del contenedor (.wa-meta) como en WhatsApp;
-    // read usa el celeste oficial #53bdeb.
-    case 'sent': return <Check className="size-[15px]" />
-    case 'delivered': return <CheckCheck className="size-[15px]" />
-    case 'read': return <CheckCheck className="size-[15px] text-[#53bdeb]" />
-    case 'failed': return <AlertCircle className="size-3 text-red-400" />
-    default: return <Clock className="size-3 opacity-70" />
+    case 'sent': return <Check role="img" aria-label="Enviado" className={cn('size-[15px] shrink-0', className)} />
+    case 'delivered': return <CheckCheck role="img" aria-label="Entregado" className={cn('size-[15px] shrink-0', className)} />
+    case 'read': return <CheckCheck role="img" aria-label="Leído" className={cn('size-[15px] shrink-0 text-[var(--wa-tick)]', className)} />
+    case 'failed': return <AlertCircle role="img" aria-label="No enviado" className={cn('size-3 shrink-0 text-[var(--wa-danger)]', className)} />
+    default: return <Clock role="img" aria-label="Enviando" className={cn('size-3 shrink-0 opacity-70', className)} />
   }
 }
 
 export function StatusBadge({ status }: { status: string }) {
   switch (status) {
     case 'open': return null
-    case 'closed': return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400">Cerrado</span>
-    case 'archived': return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 text-white/30">Archivado</span>
+    case 'closed': return <span className="rounded-full bg-[var(--wa-raised-2)] px-2 py-0.5 text-[11px] font-medium text-[var(--wa-text-2)]">Cerrado</span>
+    // --wa-text-2 y no -3: es texto que se lee (con -3 daba 2,6:1).
+    case 'archived': return <span className="rounded-full bg-[var(--wa-raised-2)] px-2 py-0.5 text-[11px] font-medium text-[var(--wa-text-2)]">Archivado</span>
     default: return null
   }
 }

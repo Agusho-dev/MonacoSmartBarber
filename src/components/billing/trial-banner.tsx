@@ -20,8 +20,12 @@ type BannerState =
  * Banner superior visible cuando la org está en trial o en past_due.
  * Calculamos el estado en un efecto (con tick por minuto) para no llamar
  * Date.now() durante render y respetar las reglas de pureza de React 19.
+ *
+ * `oculto` (el modo foco de Mensajería) lo esconde sin desmontarlo: así
+ * conserva el cierre con la X y el estado ya calculado. Desmontado, al volver
+ * aparecía de nuevo y empujaba el encabezado hacia abajo.
  */
-export function TrialBanner() {
+export function TrialBanner({ oculto = false }: { oculto?: boolean }) {
   const ent = useEntitlements()
   const [dismissed, setDismissed] = useState(false)
   const [state, setState] = useState<BannerState>(null)
@@ -67,6 +71,7 @@ export function TrialBanner() {
 
   return (
     <div
+      hidden={oculto}
       className={cn(
         'sticky top-0 z-40 flex items-center justify-center gap-3 px-4 py-2 text-sm',
         toneClasses,

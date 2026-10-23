@@ -6,8 +6,13 @@
 //
 // - Compu: a la izquierda, sólo texto, subrayadas sobre el borde inferior del
 //   encabezado (como las pestañas de un proyecto en Vercel).
-// - Celular: una tira con scroll horizontal entre el menú y el avatar, sin barra
-//   y desvanecida en los bordes; la marcada siempre a la vista.
+// - Celular: una tira con scroll horizontal a la izquierda del avatar (no hay ☰:
+//   los grupos están en la barra de abajo), sin barra y desvanecida en el borde
+//   que tiene más pestañas (los dos, en el medio del scroll); la marcada siempre
+//   a la vista, centrada con el scrollLeft de la tira (use-tira-con-scroll.ts).
+//   El desvanecido es de 40 px: con el de 24, si la tira se cortaba justo entre
+//   dos pestañas (Finanzas en 402 px: «Facturación ARCA» afuera) caía sobre el
+//   relleno y no avisaba nada.
 // - Con una sola pestaña visible, o en una pantalla que no es de ningún grupo,
 //   el celular muestra el título (como antes) y la compu nada.
 //
@@ -20,6 +25,9 @@ import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { estaDesbloqueada, type GrupoVisible, type PestanaVisible } from '@/lib/navegacion/grupos'
 import { useTiraConScroll } from './use-tira-con-scroll'
+
+/** El desvanecido de la tira (px): alcanza para tapar parte del texto de la última pestaña que entra. */
+const DESVANECIDO_PX = 40
 
 /**
  * ¿El clic navega en esta pestaña del navegador? (con ⌘, Ctrl, Shift, Alt o
@@ -55,7 +63,7 @@ export function PestanasEncabezado({ grupo, activa, tituloMovil, onBloqueada }: 
 
   const pestanas = grupo?.pestanas ?? []
   const conjunto = pestanas.map((p) => p.href).join('|')
-  const { ref, onScroll, onFocus } = useTiraConScroll(pestanas.length >= 2 ? marcada : null, conjunto)
+  const { ref, onScroll, onFocus } = useTiraConScroll(pestanas.length >= 2 ? marcada : null, conjunto, DESVANECIDO_PX)
 
   if (!grupo || pestanas.length < 2) {
     return (
