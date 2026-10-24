@@ -263,6 +263,15 @@ El detalle está en `../.claude/rules/navegacion-dashboard.md`. Lo mínimo:
 - Las barras fijas de abajo llevan el área segura.
 - Una dirección inexistente bajo `/dashboard` cae en `[...resto]` y muestra el 404 adentro del menú.
 
+### Mensajería como WhatsApp (23/oct/2026)
+
+El detalle está en `../.claude/rules/mensajeria.md` (y el contrato con el shell en `../.claude/rules/navegacion-dashboard.md`). Lo mínimo:
+- Celular = WhatsApp para iOS y compu = WhatsApp para Mac, todo con los tokens `--wa-*` de `.wa-scope` (`globals.css`). Un portal (hoja, menú) necesita `wa-scope` de nuevo.
+- En el celular el chat, la info. del contacto, las secciones y Programados son capas `fixed inset-0` que tapan al shell (pantalla inmersiva). Ningún ancestro de una capa puede tener transform, filter, contain, container-type ni nada que atrape a un fixed, y lo que se pueda correr de costado va con `overflow-clip`, nunca `overflow-hidden`: un `scrollIntoView` lo corría 138 px.
+- Cada capa, hoja, foto ampliada y paso de la nueva difusión es una entrada del historial (`inbox/historial-capas.ts`, `inbox/entrada-de-hoja.ts`). El marcador va en el hash, porque el HistoryUpdater de Next 16 borra lo propio de `history.state` en cada server action. Para cambiar la dirección sin navegar se usa el `replaceState` de la ventana, que Next parchea: un `router.replace` en vuelo lo descarta la primera entrada que se empuja.
+- El teclado del iPhone no achica la pantalla: el chat y las hojas siguen al viewport visual (`src/hooks/use-viewport-visual.ts`).
+- `components/shared/mensajeria-context.tsx` (el realtime) no se toca.
+
 ### Tex y la conciliación con Mercado Pago (oct/2026, migraciones 227–230)
 
 El detalle está en `../.claude/rules/tex.md` y `../.claude/rules/conciliacion-mp.md`. Mapa del código:

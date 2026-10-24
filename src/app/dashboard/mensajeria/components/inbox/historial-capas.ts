@@ -44,8 +44,9 @@
 // Dos esperas antes de empujar (de hasta unos 3 s cada una):
 // - Hasta que Next parchee el historial (lo hace en un efecto al hidratar):
 //   antes, un replaceState no le avisa al router.
-// - Mientras la dirección tenga ?clientId= (el deep link: el contexto y
-//   DeepLinkHandler abren el chat y lo sacan con router.replace). Un pushState
+// - Mientras la dirección tenga ?clientId= (el deep link: DeepLinkHandler lo
+//   saca con el replaceState de la ventana, pero el efecto de deep link del
+//   contexto todavía hace su router.replace). Un pushState
 //   con dirección es una navegación para Next y DESCARTA la que está en curso:
 //   la entrada de abajo se quedaba con ?clientId y, al volver, el deep link
 //   volvía a abrir el chat.
