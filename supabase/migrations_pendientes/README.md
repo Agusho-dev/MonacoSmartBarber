@@ -12,7 +12,7 @@ Cuando se aplica una, se mueve a `supabase/migrations/` con el encabezado
 
 ## Orden
 
-Ya aplicadas (4/10/2026, después del deploy `d31840e`): `219h` y `224b` — están en `supabase/migrations/`.
+Ya aplicadas (4/10/2026, después del deploy `d31840e`): `219h` y `224b` — están en `supabase/migrations/`. `228b` (el cron de la conciliación con Mercado Pago) se aplicó el 24/10/2026 y también se mudó.
 
 | Archivo | Cuándo | Qué cierra |
 |---|---|---|
@@ -21,7 +21,6 @@ Ya aplicadas (4/10/2026, después del deploy `d31840e`): `219h` y `224b` — est
 | `223_rostros_staff_sin_anon.sql` | **Gate**: el commit deployado ya no usa `enrollStaffFaceDescriptor` ni `verifyBarberPin`, tablets recargadas y prueba positiva de alta de cara en Test | Biometría del staff: tabla y RPC sólo para `service_role` |
 | `224_staff_columnas_sensibles_sin_anon.sql` | **Gate**: inventario sin consultas del browser que nombren `staff.phone`/`commission_pct`, tablets recargadas y 0 GET anónimos que las pidan | Teléfono y comisión del staff legibles por anon (14 orgs) |
 | `recuperar_fotos_27ago.sql` | Sólo con el OK del dueño | No es una migración: recupera 2 fotos del 27/8 |
-| `228b_cron_mp_movimientos.sql` | **Gate**: después del deploy que trae `/api/cron/mp-movimientos`; verificar con `curl` que la ruta responde 200 (o 429 por su rate limit) en producción antes de aplicarla | Programa la lectura cada 15 min de las cuentas de Mercado Pago de la conciliación (`trigger_mp_movimientos`, URL desde Vault, sin CRON_SECRET). Después: mirar `net._http_response`, no `cron.job_run_details` |
 
 Cada archivo trae en su encabezado el gate exacto (consultas a `query_logs` /
 `edge_logs`), la verificación posterior con `curl` y el rollback. Las que tocan

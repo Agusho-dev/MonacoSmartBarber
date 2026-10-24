@@ -1,5 +1,7 @@
 -- =============================================================================
--- 228b_cron_mp_movimientos.sql — PENDIENTE (NO APLICADA)
+-- 228b_cron_mp_movimientos.sql — APLICADA en prod el 24/oct/2026, después del
+-- deploy 2521889 y con las variables MP_CONCILIACION_* ya cargadas en Vercel
+-- (curl a la ruta: 200 con 0 cuentas; net._http_response: 192 de 192 en 200).
 --
 -- Programa la lectura automática de las cuentas de Mercado Pago de la
 -- conciliación: cada 15 minutos pg_cron le pega a /api/cron/mp-movimientos,
