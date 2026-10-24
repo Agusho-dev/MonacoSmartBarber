@@ -8,10 +8,11 @@
 // En el celular el chat es una CAPA fija que tapa al shell entero (el modelo de
 // capas de Mensajería): debajo quedan montados y quietos el encabezado del
 // shell, la lista de chats y la barra de vidrio, así al volver deslizando se ve
-// la pantalla de verdad.
+// la pantalla de verdad. Con el teclado abierto, el encabezado, el hilo y el
+// composer van en lo que se ve arriba del teclado (use-viewport-visual.ts).
 
-import { Fragment, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { createPortal, flushSync } from 'react-dom'
+import { Fragment, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import {
   AlertCircle, Archive, CalendarPlus, CalendarSearch, CheckCircle2, ChevronLeft, Clock,
   Download, Ellipsis, ExternalLink, FileIcon, FileText, Instagram, Loader2, MessagesSquare,
@@ -22,6 +23,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { useEsCelular } from '@/hooks/use-es-celular'
+import { useViewportConTeclado } from '@/hooks/use-viewport-visual'
 import { Avatar } from '../shared/avatar'
 import { MessageStatusIcon } from '../shared/icons'
 import { displayName, formatTime, nombreLegibleDePlantilla, plantillaDelMarcador } from '../shared/helpers'
@@ -37,8 +39,10 @@ import {
   type BookingServiceOption,
 } from '@/components/appointments/appointment-booking-dialog'
 import { useDeslizarParaVolver } from './deslizar-para-volver'
+import { useEntradaDeHoja } from './entrada-de-hoja'
 import { subtituloDeContacto } from './contacto'
 import { campoTrasDevolucion } from './borrador'
+import { scrollTrasCambio, type MedidaDelHilo } from './scroll-del-hilo'
 import {
   crearPastilla, diaDeLaPastilla, diaDelMensaje, etiquetaDeDia, PASTILLA_ESCONDIDA,
   type SeparadorMedido, type VistaPastilla,
@@ -46,6 +50,8 @@ import {
 import { trozosDePlantilla } from './plantilla'
 
 const MAX_MESSAGE_INPUT_PX = 280
+// Con el teclado abierto, el campo crece hasta esta parte de lo que se ve.
+const TOPE_DEL_CAMPO_CON_TECLADO = 0.4
 
 // Los menús salen por un portal a <body>, fuera de .wa-scope: llevan la clase
 // para tener los tokens. En el celular, renglones de toque cómodo, como iOS.
@@ -165,19 +171,52 @@ export function ChatView({
   const hiloRef = useRef<HTMLDivElement>(null)
   const contenidoRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLElement>(null)
+  const testigoRef = useRef<HTMLSpanElement>(null)
 
   const hayChat = !!activeConv
   const puedeEscribir = !!activeConv && activeConv.status === 'open' && canReply
-  // En el celular, con la info. del contacto encima (otra capa), el chat queda
-  // debajo: ni se toca, ni se enfoca, ni lo lee el lector de pantalla.
-  const tapado = esCelular && showProfile && hayChat
+
+  // En la compu la info. del contacto va al lado del chat con columnas de 1500
+  // px o más, y por debajo, encima (el container query de client-profile.tsx).
+  // Un testigo repite ese corte: mide 1 px sólo cuando va al lado, y este
+  // ResizeObserver se entera cuando cambia.
+  const [perfilAlLado, setPerfilAlLado] = useState(false)
+  useEffect(() => {
+    const testigo = testigoRef.current
+    if (!testigo) return
+    const ro = new ResizeObserver(() => setPerfilAlLado(testigo.offsetWidth > 0))
+    ro.observe(testigo)
+    return () => ro.disconnect()
+  }, [])
+  // Con la info. del contacto encima, el chat queda debajo: ni se toca, ni se
+  // enfoca, ni lo lee el lector de pantalla. En el celular siempre (es otra
+  // capa); en la compu mientras lo tapa, porque con Shift+Tab desde la info. se
+  // llegaba a escribir en el campo tapado. Al lado se usan los dos.
+  const tapado = showProfile && hayChat && (esCelular || !perfilAlLado)
+
+  // ── El teclado ──
+  // Con el teclado abierto iOS no achica la pantalla: corre lo que se ve hacia
+  // abajo para mostrar el campo (use-viewport-visual.ts), y esta capa, fija
+  // sobre la pantalla entera, quedaba con el encabezado 403 px arriba, fuera de
+  // la vista: no se veía con quién se hablaba, ni el «‹», ni la ventana de 24 h.
+  // Mientras hay teclado, el encabezado, el hilo y el composer van en lo que se
+  // ve arriba de él, como en WhatsApp: el encabezado queda arriba, el composer
+  // pegado al teclado y el hilo se achica (el ResizeObserver del hilo, más
+  // abajo, lo deja al final si estaba al final). Se mueven ellos y no la capa,
+  // que sigue tapando la pantalla entera: si los avisos del viewport llegan
+  // tarde (iOS los manda al terminar de animar el teclado), lo que asoma un
+  // instante es el fondo del chat y no la lista de abajo. Van por dos
+  // variables en la raíz (--visible-arriba y --visible-alto).
+  const teclado = useViewportConTeclado(esCelular && showMobileChat && hayChat)
+  const visible = teclado
+    ? ({ '--visible-arriba': `${teclado.arriba}px`, '--visible-alto': `${teclado.alto}px` } as CSSProperties)
+    : undefined
 
   // ── El campo ──
   // Lo que se escribe mientras sale un mensaje no se pierde (borrador.ts): si
   // el envío falla, el contexto vuelve a poner lo que no salió y pisaría lo
-  // escrito mientras tanto; acá se ve ese cambio y se unen los dos. Hasta que
-  // el contexto reciba la unión (al escribir o al mandar), el campo la muestra
-  // desde `unido`. Se sigue con el patrón de "estado anterior" (no un efecto).
+  // escrito mientras tanto; acá se ve ese cambio (con el patrón de "estado
+  // anterior", no un efecto) y se unen los dos en `unido`.
   const [enVuelo, setEnVuelo] = useState<string | null>(null)
   const [unido, setUnido] = useState<string | null>(null)
   const [propio, setPropio] = useState<string | null>(null)
@@ -193,8 +232,22 @@ export function ChatView({
     // Terminó el envío (salió o volvió): ya no hay nada en vuelo.
     if (enviandoAntes && !isSending) setEnVuelo(null)
   }
+  // El contexto ya la tiene (el efecto de abajo): `unido` deja de hacer falta.
+  if (unido !== null && unido === messageInput) setUnido(null)
+  // Hasta entonces (un dibujo que no llega a pintarse) el campo la muestra de acá.
   const valorCampo = unido ?? messageInput
   const hasText = valorCampo.trim().length > 0
+
+  // La unión pasa al contexto apenas aparece. Antes vivía sólo en este estado
+  // hasta que se volviera a escribir o a mandar: si en el medio el chat se
+  // desmontaba (abrir una sección lo desmonta), el contexto se quedaba con lo
+  // que había fallado y lo escrito mientras salía se perdía. Es un efecto
+  // porque el campo es estado del provider, que no se cambia mientras se dibuja
+  // el chat; y de layout, para que el contexto la tenga antes de que se pinte
+  // nada y de que se pueda tocar algo (Enter manda el campo del contexto).
+  useLayoutEffect(() => {
+    if (unido !== null) setMessageInput(unido)
+  }, [unido, setMessageInput])
 
   // Todo lo que el chat pone en el campo pasa por acá: se anota como propio
   // (no es una devolución del contexto) y reemplaza a una unión pendiente.
@@ -203,13 +256,6 @@ export function ChatView({
     setUnido(null)
     setMessageInput(valor)
   }
-
-  // handleSend lee el campo del render del contexto: para mandar una unión
-  // recién puesta hace falta el handleSend del render siguiente.
-  const enviarDelContexto = useRef(handleSend)
-  useLayoutEffect(() => {
-    enviarDelContexto.current = handleSend
-  })
 
   // El campo crece con el texto hasta un tope. Corre también al aparecer el
   // campo y al cruzar el corte del celular, donde cambian la letra y el relleno.
@@ -248,12 +294,14 @@ export function ChatView({
 
   // En el celular el composer flota sobre el hilo, así que el hilo reserva abajo
   // lo que mide el composer (--alto-composer), que crece con el texto y con las
-  // respuestas rápidas. Y si estabas al final del chat, te deja al final cuando
-  // algo cambia de alto: el composer, el hilo (el teclado, girar el teléfono) o
-  // el contenido (una foto que termina de cargar). «Estabas al final» se mide
-  // con el alto de ANTES del cambio: con un listener de scroll, el evento de
-  // nuestro propio salto llegaba después de que la foto agrandara el hilo y
-  // decía que no.
+  // respuestas rápidas. Y cuando algo cambia de alto (el composer, el hilo con
+  // el teclado o al girar el teléfono, el contenido con una foto que termina de
+  // cargar), el scroll queda donde dice scroll-del-hilo.ts: al final si estabas
+  // al final y, más arriba, con lo de abajo quieto si cambió el alto del hilo.
+  // Se decide con lo de ANTES del cambio. Antes un listener de scroll decidía
+  // si estabas al final, y el evento de nuestro propio salto llegaba después de
+  // que la foto agrandara el hilo y decía que no; el de ahora sólo anota dónde
+  // quedó el scroll mientras el hilo mide lo que medía.
   // El mismo alto va también a <html> (--alto-composer-chat): los avisos viven
   // fuera de Mensajería y lo usan para quedar arriba del composer (globals.css).
   // Con el chat escondido (la lista, en el celular) mide 0 y se saca.
@@ -265,33 +313,71 @@ export function ChatView({
     if (!hayChat || !raiz || !hilo || !contenido || !composer) return
     const html = document.documentElement
     // En cero, la primera medición cuenta como «al final»: el chat abre abajo.
-    let altoAntes = 0
-    let vistaAntes = 0
+    let antes: MedidaDelHilo = { alto: 0, vista: 0, scroll: 0 }
+    // Si el hilo ya cambió de alto y el ResizeObserver todavía no avisó (algo
+    // forzó el layout antes, como al agrandar la ventana), este scroll es el
+    // recorte del navegador al nuevo máximo: no se anota.
+    const anotarScroll = () => {
+      if (hilo.clientHeight === antes.vista) antes = { ...antes, scroll: hilo.scrollTop }
+    }
     const ro = new ResizeObserver(() => {
       const alto = composer.offsetHeight
       raiz.style.setProperty('--alto-composer', `${alto}px`)
       if (alto > 0) html.style.setProperty('--alto-composer-chat', `${alto}px`)
       else html.style.removeProperty('--alto-composer-chat')
-      if (altoAntes - hilo.scrollTop - vistaAntes < 72) hilo.scrollTop = hilo.scrollHeight
-      altoAntes = hilo.scrollHeight
-      vistaAntes = hilo.clientHeight
+      const scroll = scrollTrasCambio(antes, { alto: hilo.scrollHeight, vista: hilo.clientHeight })
+      if (scroll !== null) hilo.scrollTop = scroll
+      antes = { alto: hilo.scrollHeight, vista: hilo.clientHeight, scroll: hilo.scrollTop }
     })
+    hilo.addEventListener('scroll', anotarScroll, { passive: true })
     ro.observe(composer)
     ro.observe(hilo)
     ro.observe(contenido)
     return () => {
       ro.disconnect()
+      hilo.removeEventListener('scroll', anotarScroll)
       html.style.removeProperty('--alto-composer-chat')
     }
   }, [hayChat])
 
+  // Con el teclado abierto el composer va pegado al teclado, y los avisos se
+  // tienen que correr lo mismo: --teclado-tapa en <html> es lo que el teclado
+  // tapa del fondo de la pantalla, y globals.css lo suma. Sin eso un aviso (el
+  // de un envío que falló, por ejemplo) quedaba detrás del teclado.
+  useEffect(() => {
+    if (!teclado) return
+    const html = document.documentElement
+    html.style.setProperty('--teclado-tapa', `${Math.max(0, Math.round(window.innerHeight - teclado.arriba - teclado.alto))}px`)
+    return () => {
+      html.style.removeProperty('--teclado-tapa')
+    }
+  }, [teclado])
+
   // Volver a la lista deslizando desde el borde izquierdo, como en iOS, o con
-  // el «‹» (la misma salida, animada).
+  // el «‹» (la misma salida, animada). Con la info. del contacto encima, el
+  // chat sigue siendo una capa abierta debajo: su entrada del historial queda
+  // (#/chat y encima #/chat/perfil: el «atrás» del sistema vuelve al chat y
+  // después a la lista) y el gesto lo toma sólo la de arriba
+  // (historial-capas.ts).
   const volverAnimado = useDeslizarParaVolver(
     capaRef,
-    esCelular && showMobileChat && hayChat && !showProfile,
+    esCelular && showMobileChat && hayChat,
     () => setShowMobileChat(false),
   )
+  // «Ver disponibilidad» y «Agendar turno», en el celular, son entradas del
+  // historial encima de la del chat (#/chat/disponibilidad, #/chat/turno): el
+  // «atrás» del sistema los cierra a ellos. Sin entrada cerraba el chat y, como
+  // el chat queda montado (escondido), el diálogo seguía abierto sobre la
+  // lista (entrada-de-hoja.ts). Van después del gesto del chat: se registran
+  // en orden, y la entrada del chat tiene que quedar abajo.
+  useEntradaDeHoja(showAvailability && !!activeConv, () => setShowAvailability(false), 'disponibilidad')
+  useEntradaDeHoja(showBooking && !!activeConv, () => setShowBooking(false), 'turno')
+  // Los menús del chat («…» y «+») se cierran con el chat. En el celular el
+  // chat queda montado (escondido) y, si el «atrás» del sistema lo cerraba con
+  // un menú abierto, el menú quedaba flotando sobre la lista y el resto de la
+  // pantalla sin poder tocarse (el menú de Radix es modal). Con otra clave se
+  // vuelven a montar, cerrados.
+  const claveDeLosMenus = esCelular && !showMobileChat ? 'chat-cerrado' : 'chat-abierto'
 
   // Los mensajes que ya estaban al abrir el chat se dibujan quietos (WhatsApp
   // abre el hilo sin animar); entran animados los que llegan después. La foto
@@ -361,20 +447,13 @@ export function ChatView({
     if (activeConv.client_id) loadVisits(activeConv.client_id)
   }
   // El campo no se deshabilita mientras sale un mensaje (en el iPhone eso cierra
-  // el teclado): lo que se frena es el envío siguiente.
+  // el teclado): lo que se frena es el envío siguiente. Una unión ya está en el
+  // contexto cuando se puede apretar algo (el efecto de layout de arriba):
+  // handleSend la manda entera.
   const enviar = () => {
     if (isSending || !activeConv) return
     const texto = valorCampo.trim()
     if (!texto) return
-    if (unido !== null) {
-      // El contexto todavía tiene sólo lo que había fallado: primero recibe el
-      // campo entero y después se manda con el handleSend de ese render.
-      const valor = unido
-      flushSync(() => ponerEnElCampo(valor))
-      setEnVuelo(texto)
-      enviarDelContexto.current()
-      return
-    }
     setEnVuelo(texto)
     handleSend()
   }
@@ -390,6 +469,8 @@ export function ChatView({
       aria-label={activeConv ? `Chat con ${nombre}` : 'Mensajería'}
       aria-hidden={tapado || undefined}
       inert={tapado}
+      // Con el teclado abierto (sólo en el celular), dónde está lo que se ve.
+      style={visible}
       className={cn(
         // El chat es un contenedor (@container/chat): el encabezado, el audio y
         // los documentos se acomodan a su ancho, que en la compu va de 356 px
@@ -410,10 +491,15 @@ export function ChatView({
           // wa-capa: lo de abajo se oscurece y el canto hace sombra mientras
           // entra y mientras se desliza para volver (globals.css). Entra desde
           // la derecha; la animación no deja el transform puesto al terminar.
+          // De la duración, sólo la de la animación: con duration-300 quedaba
+          // `transition: all 300ms` en el elemento que mueve el gesto, y lo que
+          // el gesto le saca al terminar volvía animado.
           'wa-capa relative flex min-h-0 flex-1 flex-col max-lg:touch-pan-y max-lg:touch-pinch-zoom',
-          'max-lg:duration-300 max-lg:ease-out max-lg:motion-safe:animate-in max-lg:motion-safe:slide-in-from-right',
+          'max-lg:animation-duration-300 max-lg:ease-out max-lg:motion-safe:animate-in max-lg:motion-safe:slide-in-from-right',
           activeConv ? 'bg-[var(--wa-wallpaper-base)]' : 'bg-[var(--wa-bg)]',
         )}
+        // El nombre de la capa en el historial (#/chat; deslizar-para-volver.ts).
+        data-capa="chat"
       >
         {!activeConv ? (
           <SinChat
@@ -431,8 +517,9 @@ export function ChatView({
                 chats (h-14), como la barra de arriba de WhatsApp para Mac, que
                 cruza las dos columnas a la misma altura. Con el chat angosto
                 (menos de 560 px: a 1024 mide 356) se aprieta: "Perfil" queda en
-                el ícono y la ventana de 24 h, en las horas. */}
-            <header className="absolute inset-x-0 top-0 z-20 flex h-14 items-center gap-1 border-b-[0.5px] border-[var(--wa-divider)] bg-[var(--wa-bar)] pl-0.5 pr-1.5 backdrop-blur-xl backdrop-saturate-150 lg:relative lg:shrink-0 lg:gap-3 lg:border-b lg:px-4 lg:@max-[560px]/chat:gap-2 lg:@max-[560px]/chat:px-3">
+                el ícono y la ventana de 24 h, en las horas. En el celular, con
+                el teclado abierto, arriba de lo que se ve (--visible-arriba). */}
+            <header className="absolute inset-x-0 top-[var(--visible-arriba,0px)] z-20 flex h-14 items-center gap-1 border-b-[0.5px] border-[var(--wa-divider)] bg-[var(--wa-bar)] pl-0.5 pr-1.5 backdrop-blur-xl backdrop-saturate-150 lg:relative lg:shrink-0 lg:gap-3 lg:border-b lg:px-4 lg:@max-[560px]/chat:gap-2 lg:@max-[560px]/chat:px-3">
               <button
                 type="button"
                 onClick={volverAnimado}
@@ -485,7 +572,7 @@ export function ChatView({
                 <span className="@max-[560px]/chat:sr-only">Perfil</span>
               </button>
 
-              <DropdownMenu>
+              <DropdownMenu key={claveDeLosMenus}>
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
@@ -530,11 +617,12 @@ export function ChatView({
             {/* La fecha flotante: aparece al scrollear, debajo del encabezado. */}
             <PastillaFlotante key={activeConv.id} hiloRef={hiloRef} contenidoRef={contenidoRef} etiquetas={etiquetas} />
 
-            {/* ── Hilo ── En el celular ocupa todo y deja arriba el alto del
+            {/* ── Hilo ── En el celular ocupa todo lo que se ve (con el teclado
+                abierto, lo de arriba de él) y deja arriba el alto del
                 encabezado y abajo el del composer, que flotan encima. */}
             <div
               ref={hiloRef}
-              className="wa-scroll relative z-0 min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain max-lg:absolute max-lg:inset-0 max-lg:touch-pan-y max-lg:touch-pinch-zoom"
+              className="wa-scroll relative z-0 min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain max-lg:absolute max-lg:inset-x-0 max-lg:top-[var(--visible-arriba,0px)] max-lg:h-[var(--visible-alto,100%)] max-lg:touch-pan-y max-lg:touch-pinch-zoom"
             >
               <div
                 ref={contenidoRef}
@@ -653,7 +741,14 @@ export function ChatView({
             {/* ── Composer ── */}
             <footer
               ref={composerRef}
-              className="absolute inset-x-0 bottom-0 z-20 border-t-[0.5px] border-[var(--wa-divider)] bg-[var(--wa-bar)] pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur-xl backdrop-saturate-150 lg:relative lg:shrink-0 lg:border-t lg:pb-0"
+              className={cn(
+                // Con el teclado abierto, abajo de lo que se ve: pegado al teclado.
+                'absolute inset-x-0 bottom-[calc(100%_-_var(--visible-arriba,0px)_-_var(--visible-alto,100%))] z-20 border-t-[0.5px] border-[var(--wa-divider)] bg-[var(--wa-bar)] backdrop-blur-xl backdrop-saturate-150 lg:relative lg:shrink-0 lg:border-t lg:pb-0',
+                // Abajo deja el área segura (la rayita de inicio). Con el teclado
+                // abierto la rayita queda tapada por el teclado: sin ella el
+                // composer va pegado al teclado (quedaba una franja de 34 px).
+                teclado ? 'pb-2' : 'pb-[max(0.5rem,env(safe-area-inset-bottom))]',
+              )}
             >
               {activeConv.status !== 'open' ? (
                 <div className="flex items-center justify-center gap-3 px-4 py-2 lg:py-3.5">
@@ -758,7 +853,7 @@ export function ChatView({
                       Sin micrófono ni emojis: no graban ni abren nada. Con el
                       campo vacío, enviar queda apagado. */}
                   <div className="flex items-end gap-1.5 px-2 pt-2 lg:gap-2 lg:px-4 lg:py-2.5">
-                    <DropdownMenu>
+                    <DropdownMenu key={claveDeLosMenus}>
                       <DropdownMenuTrigger asChild>
                         <button
                           type="button"
@@ -789,11 +884,15 @@ export function ChatView({
                         ref={messageTextareaRef}
                         rows={1}
                         aria-label="Mensaje"
-                        enterKeyHint="send"
                         // 16 px en el celular: con menos, el iPhone agranda la pantalla al enfocar.
                         // "Mensaje", corto: un placeholder largo se partía en dos renglones en
                         // el chat angosto y el campo arrancaba con el doble de alto.
                         className="wa-scroll block max-h-[min(40vh,17.5rem)] w-full resize-none overflow-y-auto rounded-[20px] border border-white/10 bg-[var(--wa-field)] px-3.5 py-[6px] text-[16px] leading-[22px] text-[var(--wa-text)] outline-none transition-colors placeholder:text-[var(--wa-text-2)] focus:border-white/20 lg:border-transparent lg:px-4 lg:py-[9px] lg:text-[15px] lg:leading-5 lg:focus:border-white/10"
+                        // Con el teclado abierto el tope es una parte de lo que se ve
+                        // (unos seis renglones en el iPhone), como en WhatsApp: el de
+                        // siempre (40vh, que no se entera del teclado) dejaba un campo
+                        // de 280 px en 409 visibles y del hilo quedaba una burbuja.
+                        style={teclado ? { maxHeight: Math.round(teclado.alto * TOPE_DEL_CAMPO_CON_TECLADO) } : undefined}
                         placeholder="Mensaje"
                         value={valorCampo}
                         onChange={(e) => {
@@ -819,7 +918,14 @@ export function ChatView({
                           }
                         }}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); enviar() }
+                          // Enter manda en la compu. Con pantalla táctil la tecla de
+                          // retorno baja de renglón y manda el botón verde, como en
+                          // WhatsApp: el teclado del iPhone no tiene Shift+Enter, y con
+                          // Enter = mandar no había forma de escribir dos renglones.
+                          if (
+                            e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing &&
+                            !window.matchMedia('(pointer: coarse)').matches
+                          ) { e.preventDefault(); enviar() }
                           if (e.key === 'Escape' && showQuickReplies) cerrarRapidas()
                         }}
                       />
@@ -891,6 +997,13 @@ export function ChatView({
           />
         </>
       )}
+
+      {/* El testigo del corte de la info. del contacto (perfilAlLado). */}
+      <span
+        ref={testigoRef}
+        aria-hidden="true"
+        className="pointer-events-none invisible absolute size-0 lg:@min-[1500px]/columnas:size-px"
+      />
     </section>
   )
 }
@@ -974,8 +1087,9 @@ function PastillaFlotante({
   }, [hiloRef, contenidoRef])
 
   const etiqueta = vista.dia ? etiquetas.get(vista.dia) : undefined
+  // Debajo del encabezado, que con el teclado abierto baja a lo que se ve.
   return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-16 z-10 flex justify-center">
+    <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-[calc(var(--visible-arriba,0px)_+_4rem)] z-10 flex justify-center">
       <span
         ref={pastillaRef}
         data-visible={vista.visible && etiqueta ? '' : undefined}
@@ -1212,7 +1326,23 @@ function VisorImagen({
 }
 
 function MediaBubble({ msg, isOut, tail, onResend, resending }: { msg: Message; isOut: boolean; tail: boolean; onResend?: (id: string) => void; resending?: boolean }) {
+  const { showMobileChat } = useMensajeria()
+  const esCelular = useEsCelular()
   const [expanded, setExpanded] = useState(false)
+  // En el celular el chat cerrado queda montado y escondido: la foto ampliada
+  // se cierra con él (si no, quedaba flotando sobre la lista y volvía a
+  // aparecer al reabrir el chat).
+  const chatALaVista = !esCelular || showMobileChat
+  const [chatALaVistaAntes, setChatALaVistaAntes] = useState(chatALaVista)
+  if (chatALaVistaAntes !== chatALaVista) {
+    setChatALaVistaAntes(chatALaVista)
+    if (!chatALaVista) setExpanded(false)
+  }
+  const visorAbierto = expanded && chatALaVista
+  // La foto ampliada es una entrada del historial, como las hojas: el «atrás»
+  // del sistema la cierra a ella y deja el chat, como en WhatsApp. Sin
+  // entrada, ese atrás cerraba el chat por debajo.
+  useEntradaDeHoja(visorAbierto, () => setExpanded(false), 'foto')
   const miniaturaRef = useRef<HTMLButtonElement>(null)
   const url = msg.media_url!
   const hasCaption = !!msg.content && msg.content_type !== 'document'
@@ -1246,7 +1376,7 @@ function MediaBubble({ msg, isOut, tail, onResend, resending }: { msg: Message; 
               </span>
             </>
           )}
-          {expanded && <VisorImagen url={url} devolverA={miniaturaRef} onCerrar={() => setExpanded(false)} />}
+          {visorAbierto && <VisorImagen url={url} devolverA={miniaturaRef} onCerrar={() => setExpanded(false)} />}
         </div>
       )}
 

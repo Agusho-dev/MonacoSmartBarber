@@ -1,16 +1,27 @@
 'use client'
 
+// Alertas, como una pantalla de WhatsApp para iOS (23/oct/2026, tercera
+// ronda): las sin leer arriba y las leídas abajo, cada una en una celda con el
+// ícono del color de su tipo (rojo urgente, ámbar advertencia, azul info), el
+// título, de quién es, el mensaje y la hora en 24 h. «Responder» abre el chat y
+// «Marcar como leída» la pasa abajo; «Leer todas» va en la barra. En la compu,
+// la misma lista con la piel de la Mac.
+
 import { useState, useEffect, useTransition, useCallback } from 'react'
-import { Bell, AlertTriangle, Info, AlertCircle, CheckCheck, MessageSquare, X, User, Clock } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { AlertCircle, AlertTriangle, Bell, Check, Info, MessageSquare, type LucideIcon } from 'lucide-react'
+import { toast } from 'sonner'
 import { getCrmAlerts, markAlertRead, markAllAlertsRead } from '@/lib/actions/workflows'
 import { useMensajeria } from '../shared/mensajeria-context'
 import { createClient } from '@/lib/supabase/client'
 import type { CrmAlert, CrmAlertType } from '@/lib/types/database'
-import { formatDistanceToNow } from 'date-fns'
-import { es } from 'date-fns/locale'
-import { displayName } from '../shared/helpers'
-import { AccionDeBarraIos, BotonTextoIos } from '../navegacion/barra-ios'
+import { cn } from '@/lib/utils'
+import { displayName, formatRelativeDate } from '../shared/helpers'
+import { useDiaLocal } from '../shared/use-dia-local'
+import { AccionDeBarraIos, BotonSecundario, BotonTextoIos, EncabezadoSeccion } from '../navegacion/barra-ios'
+import {
+  BotonTextoCeldaIos, CargandoIos, CLASE_CELDA, CLASE_CUERPO, ContenidoSeccion, GrupoIos, IconoCeldaIos,
+  TEXTO_PRINCIPAL, TEXTO_SECUNDARIO, TEXTO_TERCIARIO, VacioIos, avisarFalla, type ColorIcono,
+} from '../navegacion/lista-ios'
 
 type AlertWithConversation = CrmAlert & {
   conversation?: {
@@ -22,50 +33,10 @@ type AlertWithConversation = CrmAlert & {
   }
 }
 
-const ALERT_CONFIG: Record<CrmAlertType, {
-  icon: React.ElementType
-  label: string
-  bg: string
-  border: string
-  badge: string
-  iconWrapper: string
-  iconColor: string
-  hover: string
-  pulseText: string
-}> = {
-  urgent: {
-    icon: AlertCircle,
-    label: 'Urgente',
-    bg: 'bg-red-500/5',
-    border: 'border-red-500/20',
-    badge: 'bg-red-500/10 text-red-500',
-    iconWrapper: 'bg-red-500/10',
-    iconColor: 'text-red-500',
-    hover: 'hover:border-red-500/40 hover:bg-red-500/10',
-    pulseText: 'bg-red-500',
-  },
-  warning: {
-    icon: AlertTriangle,
-    label: 'Advertencia',
-    bg: 'bg-amber-500/5',
-    border: 'border-amber-500/20',
-    badge: 'bg-amber-500/10 text-amber-500',
-    iconWrapper: 'bg-amber-500/10',
-    iconColor: 'text-amber-500',
-    hover: 'hover:border-amber-500/40 hover:bg-amber-500/10',
-    pulseText: 'bg-amber-500',
-  },
-  info: {
-    icon: Info,
-    label: 'Info',
-    bg: 'bg-blue-500/5',
-    border: 'border-blue-500/20',
-    badge: 'bg-blue-500/10 text-blue-500',
-    iconWrapper: 'bg-blue-500/10',
-    iconColor: 'text-blue-500',
-    hover: 'hover:border-blue-500/40 hover:bg-blue-500/10',
-    pulseText: 'bg-blue-500',
-  },
+const ALERT_CONFIG: Record<CrmAlertType, { icon: LucideIcon; label: string; color: ColorIcono }> = {
+  urgent: { icon: AlertCircle, label: 'Urgente', color: 'rojo' },
+  warning: { icon: AlertTriangle, label: 'Advertencia', color: 'naranja' },
+  info: { icon: Info, label: 'Info', color: 'azul' },
 }
 
 export function CrmAlertsPanel({ onNavigateToInbox }: { onNavigateToInbox?: () => void } = {}) {
@@ -73,20 +44,30 @@ export function CrmAlertsPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =
   const [alerts, setAlerts] = useState<AlertWithConversation[]>([])
   const [loading, setLoading] = useState(true)
   const [isMarking, startMarking] = useTransition()
+  // La hora de cada celda ("14:32", "Ayer", "martes") cambia sola a la medianoche.
+  const dia = useDiaLocal()
 
   const loadAlerts = useCallback(async () => {
-    const result = await getCrmAlerts()
-    setAlerts(result.data as AlertWithConversation[])
+    try {
+      const result = await getCrmAlerts()
+      setAlerts(result.data as AlertWithConversation[])
+    } catch {
+      // Se queda la lista que había: es una relectura por Realtime.
+    }
     setLoading(false)
   }, [])
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const result = await getCrmAlerts()
-      if (cancelled) return
-      setAlerts(result.data as AlertWithConversation[])
-      setLoading(false)
+      try {
+        const result = await getCrmAlerts()
+        if (cancelled) return
+        setAlerts(result.data as AlertWithConversation[])
+      } catch {
+        // Sin red: se ve el vacío y la relectura de Realtime la trae después.
+      }
+      if (!cancelled) setLoading(false)
     })()
     return () => { cancelled = true }
   }, [])
@@ -110,15 +91,23 @@ export function CrmAlertsPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =
 
   const handleMarkRead = (alertId: string) => {
     startMarking(async () => {
-      await markAlertRead(alertId)
-      setAlerts(prev => prev.map(a => a.id === alertId ? { ...a, is_read: true, read_at: new Date().toISOString() } : a))
+      try {
+        await markAlertRead(alertId)
+        setAlerts(prev => prev.map(a => a.id === alertId ? { ...a, is_read: true, read_at: new Date().toISOString() } : a))
+      } catch (e) {
+        avisarFalla(e, 'No se pudo marcar como leída. Revisá la conexión y probá de nuevo.')
+      }
     })
   }
 
   const handleMarkAllRead = () => {
     startMarking(async () => {
-      await markAllAlertsRead()
-      setAlerts(prev => prev.map(a => ({ ...a, is_read: true, read_at: new Date().toISOString() })))
+      try {
+        await markAllAlertsRead()
+        setAlerts(prev => prev.map(a => ({ ...a, is_read: true, read_at: new Date().toISOString() })))
+      } catch (e) {
+        avisarFalla(e, 'No se pudieron marcar como leídas. Revisá la conexión y probá de nuevo.')
+      }
     })
   }
 
@@ -128,203 +117,126 @@ export function CrmAlertsPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =
       setActiveConv(conv)
       setShowMobileChat(true)
       onNavigateToInbox?.()
+      return
     }
+    // La lista trae las conversaciones más recientes: una vieja no está. Antes
+    // el botón no hacía nada.
+    toast.info('Esa conversación no está entre las últimas: buscala en Chats.')
   }
 
-  const unreadCount = alerts.filter(a => !a.is_read).length
+  const sinLeer = alerts.filter(a => !a.is_read)
+  const leidas = alerts.filter(a => a.is_read)
+  const resumen = sinLeer.length > 0 ? `${sinLeer.length} sin leer` : 'Todo al día'
 
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="size-10 rounded-full border-2 border-red-500/30 border-t-red-500 animate-spin" />
-          <span className="text-sm text-muted-foreground">Cargando alertas...</span>
-        </div>
-      </div>
-    )
-  }
-
-  const resumen = unreadCount > 0 ? `${unreadCount} sin leer` : 'Todo al día'
+  const celda = (alert: AlertWithConversation) => (
+    <CeldaAlerta
+      key={alert.id}
+      alert={alert}
+      dia={dia}
+      marcando={isMarking}
+      onResponder={alert.conversation_id ? () => handleGoToConversation(alert.conversation_id!) : undefined}
+      onLeida={() => handleMarkRead(alert.id)}
+    />
+  )
 
   return (
-    // A sangre adentro del marco de Mensajería (MarcoSeccion). En el celular el
-    // título va en la barra de iOS ("‹ Chats · Alertas") y "Leer todas" a su
-    // derecha; abajo, el resumen como el pie de un título. En la compu, el
-    // encabezado de 56 px.
-    <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-      {unreadCount > 0 && (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {sinLeer.length > 0 && (
         <AccionDeBarraIos>
           <BotonTextoIos onClick={handleMarkAllRead} disabled={isMarking}>Leer todas</BotonTextoIos>
         </AccionDeBarraIos>
       )}
-      {/* Header (compu) */}
-      <div className="hidden h-14 shrink-0 items-center justify-between gap-3 border-b bg-card/50 px-5 lg:flex">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="size-8 shrink-0 rounded-lg bg-red-500/15 flex items-center justify-center">
-            <Bell aria-hidden className="size-4 text-red-400" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold leading-tight">Alertas CRM</h2>
-            <p className="truncate text-[11px] leading-tight text-muted-foreground">{resumen}</p>
-          </div>
-          {unreadCount > 0 && (
-            <span aria-hidden className="min-w-6 h-6 flex items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white px-2 animate-pulse">
-              {unreadCount}
-            </span>
-          )}
-        </div>
-        {unreadCount > 0 && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleMarkAllRead}
-            disabled={isMarking}
-            className="text-xs h-8 gap-1.5 border-dashed"
-          >
-            <CheckCheck className="size-3.5" />
-            Marcar todas leídas
-          </Button>
+      <EncabezadoSeccion titulo="Alertas" subtitulo={loading ? undefined : resumen}>
+        {sinLeer.length > 0 && (
+          <BotonSecundario onClick={handleMarkAllRead} disabled={isMarking}>
+            <Check aria-hidden className="size-4" /> Leer todas
+          </BotonSecundario>
         )}
-      </div>
-      {/* Celular: el resumen, sin franja. */}
-      <p className="shrink-0 px-4 pb-1 pt-3 text-[13px] text-muted-foreground lg:hidden">{resumen}</p>
+      </EncabezadoSeccion>
 
-      {/* List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2 max-lg:touch-pan-y max-lg:touch-pinch-zoom">
-        {alerts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
-            <div className="size-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
-              <Bell className="size-8 opacity-30" />
-            </div>
-            <p className="text-sm font-medium">Sin alertas pendientes</p>
-            <p className="text-xs mt-1 text-center max-w-[220px]">Las alertas generadas por tus workflows aparecerán acá</p>
-          </div>
+      <ContenidoSeccion>
+        {loading ? (
+          <CargandoIos texto="Cargando alertas…" />
+        ) : alerts.length === 0 ? (
+          <VacioIos icono={Bell} titulo="Sin alertas" texto="Las que generan tus automatizaciones aparecen acá." />
         ) : (
-          alerts.map(alert => {
-            const config = ALERT_CONFIG[alert.alert_type] || ALERT_CONFIG.info
-            const Icon = config.icon
-            const rawAlertName =
-              alert.conversation?.client?.name
-              || alert.conversation?.platform_user_name
-              || alert.conversation?.platform_user_id
-            const clientName = rawAlertName
-              ? displayName(rawAlertName, alert.conversation?.channel?.platform)
-              : 'Desconocido'
-            const timeAgo = formatDistanceToNow(new Date(alert.created_at), { addSuffix: true, locale: es })
+          <>
+            {sinLeer.length > 0 ? (
+              <GrupoIos titulo={`Sin leer · ${sinLeer.length}`}>{sinLeer.map(celda)}</GrupoIos>
+            ) : (
+              <p className={cn(TEXTO_SECUNDARIO, 'px-4 pt-2 lg:px-3')}>Todo al día: no hay alertas sin leer.</p>
+            )}
+            {leidas.length > 0 && <GrupoIos titulo="Leídas">{leidas.map(celda)}</GrupoIos>}
+          </>
+        )}
+      </ContenidoSeccion>
+    </div>
+  )
+}
 
-            return (
-              <div
-                key={alert.id}
-                className={`
-                  relative rounded-xl border transition-all duration-300 text-left w-full overflow-hidden
-                  ${alert.is_read
-                    ? 'opacity-75 bg-card/40 border-border/50 grayscale-[0.2]'
-                    : `${config.bg} ${config.border} shadow-sm hover:shadow-md`
-                  }
-                `}
-              >
-                <div className="p-4">
-                  <div className="flex gap-4">
-                    {/* Icon */}
-                    <div className="shrink-0 mt-0.5">
-                      <div className={`size-10 rounded-2xl flex items-center justify-center shadow-sm ${alert.is_read ? 'bg-muted text-muted-foreground' : config.iconWrapper}`}>
-                        <Icon className={`size-5 ${alert.is_read ? 'text-muted-foreground' : config.iconColor}`} />
-                      </div>
-                    </div>
+function CeldaAlerta({
+  alert,
+  dia,
+  marcando,
+  onResponder,
+  onLeida,
+}: {
+  alert: AlertWithConversation
+  /** El día del navegador (useDiaLocal): null mientras no se sabe. */
+  dia: string | null
+  marcando: boolean
+  onResponder?: () => void
+  onLeida: () => void
+}) {
+  const config = ALERT_CONFIG[alert.alert_type] || ALERT_CONFIG.info
+  const rawAlertName =
+    alert.conversation?.client?.name
+    || alert.conversation?.platform_user_name
+    || alert.conversation?.platform_user_id
+  const clientName = rawAlertName
+    ? displayName(rawAlertName, alert.conversation?.channel?.platform)
+    : 'Sin chat'
+  const leida = alert.is_read
+  const calificacion = alert.metadata?.button_pressed
 
-                    {/* Content */}
-                    <div className="flex-1 min-w-0 flex flex-col gap-2.5">
-                      
-                      {/* Header: Name, Badge, Time */}
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 shrink min-w-0 max-w-[60%] lg:max-w-[70%]">
-                            <User className="size-3.5 shrink-0 text-muted-foreground/80" />
-                            <h4 className="text-[13px] font-bold text-foreground truncate leading-none">
-                              {clientName}
-                            </h4>
-                          </div>
-                          <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${alert.is_read ? 'bg-muted text-muted-foreground' : config.badge}`}>
-                            {config.label}
-                          </span>
-                          {!alert.is_read && (
-                            <span className="shrink-0 relative flex size-2">
-                              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${config.pulseText}`} />
-                              <span className={`relative inline-flex rounded-full size-2 ${config.pulseText}`} />
-                            </span>
-                          )}
-                        </div>
-                        
-                        <div className="flex items-center gap-3 shrink-0">
-                          <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground whitespace-nowrap">
-                            <Clock className="size-3 opacity-70" />
-                            {timeAgo}
-                          </span>
-                          {!alert.is_read ? (
-                            <button
-                              onClick={() => handleMarkRead(alert.id)}
-                              disabled={isMarking}
-                              className="size-6 -my-1 -mr-1.5 rounded-md flex items-center justify-center text-muted-foreground/50 hover:bg-background/80 hover:text-foreground transition-all"
-                              title="Marcar como leída"
-                            >
-                              <X className="size-4" />
-                            </button>
-                          ) : (
-                            <div className="size-6 -my-1 -mr-1.5" />
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Body: Title & Message */}
-                      <div className="pr-2 space-y-1">
-                        <h3 className={`text-[14px] font-semibold leading-tight ${alert.is_read ? 'text-muted-foreground' : 'text-foreground/90'}`}>
-                          {alert.title}
-                        </h3>
-                        {alert.message && (
-                          <p className="text-[12px] text-muted-foreground leading-relaxed line-clamp-2">
-                            {alert.message}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Footer: Metadata & Action */}
-                      <div className="flex items-center justify-between mt-0.5">
-                        <div className="flex items-center gap-2">
-                          {alert.metadata?.button_pressed != null && (
-                            <div className="flex items-center gap-1.5 bg-background/60 border border-border/40 px-2.5 py-1 rounded-md shadow-sm">
-                              <span className="text-[10px] font-medium text-muted-foreground">Calificación:</span>
-                              <span className="text-[11px] font-bold text-foreground">{String(alert.metadata.button_pressed)}</span>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          {alert.conversation_id && (
-                            <button
-                              onClick={() => handleGoToConversation(alert.conversation_id!)}
-                              className={`
-                                h-8 px-4 rounded-full flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider transition-all shadow-sm
-                                ${alert.is_read 
-                                  ? 'bg-muted text-muted-foreground hover:bg-muted/80' 
-                                  : 'bg-[var(--wa-accent)] hover:bg-[var(--wa-accent-hover)] text-[var(--wa-on-accent)] hover:shadow-md hover:-translate-y-0.5 active:translate-y-0'}
-                              `}
-                              title={`Responder a ${clientName}`}
-                            >
-                              <MessageSquare className="size-3.5 shrink-0" />
-                              Responder
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )
-          })
+  return (
+    <li className={cn(CLASE_CELDA, 'items-start')}>
+      <IconoCeldaIos icono={config.icon} color={leida ? 'gris' : config.color} className="mt-3 lg:mt-2.5" />
+      <div className={cn(CLASE_CUERPO, 'flex-col items-stretch gap-0.5 py-3 lg:py-2.5')}>
+        <div className="flex items-baseline gap-3">
+          {!leida && <span aria-hidden className="size-2 shrink-0 self-center rounded-full bg-[var(--wa-accent)]" />}
+          <p className={cn(TEXTO_PRINCIPAL, 'min-w-0 flex-1 truncate', leida ? 'text-[var(--wa-text-2)]' : 'font-semibold')}>
+            {!leida && <span className="sr-only">Sin leer: </span>}
+            {alert.title}
+          </p>
+          {dia && <span className={cn(TEXTO_TERCIARIO, 'shrink-0 tabular-nums')}>{formatRelativeDate(alert.created_at)}</span>}
+        </div>
+        <p className={cn(TEXTO_SECUNDARIO, 'truncate')}>
+          {clientName} · <span className={leida ? undefined : config.color === 'rojo' ? 'text-[#ff6961]' : config.color === 'naranja' ? 'text-[#ffa733]' : 'text-[#5aaeff]'}>{config.label}</span>
+        </p>
+        {alert.message && (
+          <p className={cn('line-clamp-3 text-[15px] leading-5 lg:text-[13px] lg:leading-[18px]', leida ? 'text-[var(--wa-text-2)]' : 'text-[var(--wa-text)]')}>
+            {alert.message}
+          </p>
+        )}
+        {calificacion != null && (
+          <p className={TEXTO_TERCIARIO}>Calificación: <span className="text-[var(--wa-text)]">{String(calificacion)}</span></p>
+        )}
+        {(onResponder || !leida) && (
+          <div className="-mb-1.5 mt-0.5 flex items-center gap-4 lg:-mb-1 lg:gap-3">
+            {onResponder && (
+              <BotonTextoCeldaIos icono={MessageSquare} onClick={onResponder} etiqueta={`Responder a ${clientName}`}>
+                Responder
+              </BotonTextoCeldaIos>
+            )}
+            {!leida && (
+              <BotonTextoCeldaIos tono="neutro" icono={Check} onClick={onLeida} deshabilitado={marcando}>
+                Marcar como leída
+              </BotonTextoCeldaIos>
+            )}
+          </div>
         )}
       </div>
-    </div>
+    </li>
   )
 }

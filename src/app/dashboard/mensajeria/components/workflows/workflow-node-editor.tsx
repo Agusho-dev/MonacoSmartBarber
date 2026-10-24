@@ -168,7 +168,7 @@ export function WorkflowNodeEditor({ node, workflow: _workflow, onUpdateConfig, 
 
         {node.node_type === 'wait_reply' && (
           <div className="text-xs text-muted-foreground">
-            El workflow se pausará hasta que el usuario responda. La respuesta (texto o botón) se almacena en el contexto.
+            La automatización se pausa hasta que el cliente responda. La respuesta (texto o botón) se almacena en el contexto.
           </div>
         )}
 
@@ -357,7 +357,7 @@ function SendButtonsConfig({ config, onUpdateConfig }: { config: Record<string, 
       </div>
 
       <p className="text-[10px] text-muted-foreground">
-        Después de enviar botones, el workflow esperará la respuesta automáticamente.
+        Después de mandar los botones, la automatización espera la respuesta sola.
         Conectá un nodo &ldquo;Condición&rdquo; para bifurcar según el botón presionado.
       </p>
     </div>
@@ -438,7 +438,7 @@ function SendListConfig({ config, onUpdateConfig }: { config: Record<string, unk
       ))}
 
       <p className="text-[10px] text-muted-foreground">
-        WPP soporta hasta 10 opciones en una lista. El workflow esperará la respuesta automáticamente.
+        WPP soporta hasta 10 opciones en una lista. La automatización espera la respuesta sola.
       </p>
     </div>
   )
@@ -1158,7 +1158,7 @@ function HandoffHumanConfig({ config, onChange }: { config: Record<string, unkno
       )}
 
       <p className="text-[10px] text-muted-foreground">
-        Al derivar, el workflow se detiene y un operador toma el control de la conversación manualmente.
+        Al derivar, la automatización se detiene y un operador toma el control de la conversación manualmente.
       </p>
     </div>
   )

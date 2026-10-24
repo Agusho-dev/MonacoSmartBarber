@@ -55,8 +55,11 @@ export default async function MensajeriaPage() {
           .eq('is_active', true)
           .order('platform')
       : Promise.resolve({ data: [] }),
-    // Programados: todos los pendientes y los últimos enviados o fallidos (no
-    // los 100 más viejos, como antes: ver leerProgramados).
+    // Programados: los pendientes y los últimos enviados o fallidos de los
+    // canales de la org (no los 100 más viejos, como antes). Son los
+    // programados a mano, las difusiones y los avisos de turnos: los
+    // automáticos de después del corte van sin canal y no entran (ver
+    // leerProgramados).
     leerProgramados(supabase, channelIds),
     // clients removido del initial load: NewChatDialog y ScheduleDialog
     // usan searchClients() on-demand para evitar traer 10k+ clientes en cada carga.

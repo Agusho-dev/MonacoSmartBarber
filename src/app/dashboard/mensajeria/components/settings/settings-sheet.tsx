@@ -1,28 +1,57 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+// La configuración de Mensajería, como la de WhatsApp para iOS (23/oct/2026,
+// tercera ronda): una lista de celdas con su ícono de color (WhatsApp,
+// Instagram, Facebook, IA, el registro de la IA y las etiquetas) y cada una
+// abre su pantalla, con «‹ Configuración» para volver. Adentro, listas
+// agrupadas: los campos con su nombre arriba, los secretos con el ojo, los
+// datos para copiar con su botón y las acciones en verde. Antes era una tira de
+// seis pestañas de 10 px («WA», «IG», «FB»…) y formularios del dashboard.
+// - Celular: la hoja ocupa la pantalla entera, con la barra de iOS («Listo»).
+// - Compu: el panel de la derecha, con la piel de WhatsApp para Mac.
+// Es la Sheet de @/components/ui (z-50): tapa la barra de vidrio y las capas.
+// Lleva .wa-scope porque el portal sale de la de Mensajería.
+
+import { useState, useTransition, type ReactNode } from 'react'
 import {
-  Copy, Eye, EyeOff, Wifi, WifiOff, ExternalLink, Instagram, Facebook, Bot, ScrollText, Tag,
+  Bot, Check, ChevronLeft, Copy, ExternalLink, Facebook, Instagram, ScrollText, Tag, Wifi, WifiOff, X,
 } from 'lucide-react'
-import { ModelPicker } from '../shared/model-picker'
-import { AiLogsPanel } from './ai-logs-panel'
-import { TagsSection } from './tags-section'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Label } from '@/components/ui/label'
-import { Separator } from '@/components/ui/separator'
-import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { toast } from 'sonner'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { saveOrgWhatsAppConfig } from '@/lib/actions/whatsapp-meta'
 import { saveOrgInstagramConfig } from '@/lib/actions/instagram-meta'
-import type { OrgWhatsAppConfig, OrgInstagramConfig } from '@/lib/types/database'
 import { saveOrgAiConfig } from '@/lib/actions/ai-config'
+import type { OrgWhatsAppConfig, OrgInstagramConfig } from '@/lib/types/database'
+import { cn } from '@/lib/utils'
+import { AiLogsPanel } from './ai-logs-panel'
+import { CeldaModeloIos } from './celda-modelo'
+import { TagsSection } from './tags-section'
 import { WhatsAppIcon } from '../shared/icons'
+import { MODEL_GROUPS } from '../shared/model-picker'
 import { TAG_COLORS } from '../shared/helpers'
 import { useMensajeria } from '../shared/mensajeria-context'
-import { TEMA_DIALOGO_SECCION } from '../navegacion/barra-ios'
+import { useEntradaDeHoja } from '../inbox/entrada-de-hoja'
+import {
+  BotonIconoIos, CeldaAccionIos, CeldaCampoIos, CeldaIos, CeldaNavegacionIos, CLASE_CELDA, CLASE_CUERPO, GrupoIos,
+  IconoCeldaIos, TEXTO_PRINCIPAL, TEXTO_SECUNDARIO, VacioIos, avisarFalla,
+} from '../navegacion/lista-ios'
 
-type SettingsTab = 'whatsapp' | 'instagram' | 'facebook' | 'ai' | 'logs' | 'tags'
+type Pantalla = 'whatsapp' | 'instagram' | 'facebook' | 'ai' | 'logs' | 'tags'
+
+const TITULOS: Record<Pantalla, string> = {
+  whatsapp: 'WhatsApp',
+  instagram: 'Instagram',
+  facebook: 'Facebook',
+  ai: 'IA',
+  logs: 'Registro',
+  tags: 'Etiquetas',
+}
+
+/** «GPT-5.2, GPT-5.1 y GPT-5 Mini»: los modelos de un proveedor, para la aclaración de su clave. */
+function modelosDe(proveedor: (typeof MODEL_GROUPS)[number]['provider']): string {
+  const nombres = MODEL_GROUPS.find((g) => g.provider === proveedor)?.models.map((m) => m.label) ?? []
+  return nombres.length > 1 ? `${nombres.slice(0, -1).join(', ')} y ${nombres.at(-1)}` : nombres.join('')
+}
 
 export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const {
@@ -33,7 +62,29 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
     creatingTag,
   } = useMensajeria()
 
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>('whatsapp')
+  // null: la lista de arriba. Al cerrar la hoja vuelve a la lista.
+  const [pantalla, setPantalla] = useState<Pantalla | null>(null)
+  // Cuando la trae el «atrás» del sistema del iPhone, la lista vuelve sin
+  // entrar animada: el sistema ya mostró su foto mientras se deslizaba.
+  const [listaQuieta, setListaQuieta] = useState(false)
+  const irA = (p: Pantalla | null) => {
+    setListaQuieta(false)
+    setPantalla(p)
+  }
+
+  // En el celular, la hoja y cada una de sus pantallas son entradas del
+  // historial (#/configuracion, #/configuracion/whatsapp): el «atrás» del
+  // sistema vuelve de una pantalla a la lista y de la lista cierra la hoja,
+  // como en la Configuración de iOS (entrada-de-hoja.ts).
+  useEntradaDeHoja(open, () => onOpenChange(false), 'configuracion')
+  useEntradaDeHoja(
+    open && pantalla !== null,
+    (deUna) => {
+      setListaQuieta(deUna)
+      setPantalla(null)
+    },
+    pantalla ?? 'pantalla',
+  )
 
   // WA config
   const [configForm, setConfigForm] = useState({
@@ -42,7 +93,6 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
     whatsapp_business_id: waConfig?.whatsapp_business_id ?? '',
     app_secret: waConfig?.app_secret ?? '',
   })
-  const [showToken, setShowToken] = useState(false)
   const [savingConfig, startSavingConfig] = useTransition()
 
   // IG config
@@ -52,7 +102,6 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
     instagram_account_id: igConfig?.instagram_account_id ?? '',
     app_secret: igConfig?.app_secret ?? '',
   })
-  const [showIgToken, setShowIgToken] = useState(false)
   const [savingIgConfig, startSavingIgConfig] = useTransition()
 
   // AI config
@@ -65,9 +114,6 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
     default_temperature: aiConfig?.default_temperature ?? 0.7,
     default_max_tokens: aiConfig?.default_max_tokens ?? 500,
   })
-  const [showOpenAiKey, setShowOpenAiKey] = useState(false)
-  const [showAnthropicKey, setShowAnthropicKey] = useState(false)
-  const [showOpenRouterKey, setShowOpenRouterKey] = useState(false)
   const [savingAiConfig, startSavingAiConfig] = useTransition()
 
   // Tags
@@ -76,14 +122,18 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
 
   const handleSaveConfig = () => {
     if (!configForm.whatsapp_access_token || !configForm.whatsapp_phone_id || !configForm.whatsapp_business_id) {
-      toast.error('Completá los tres campos'); return
+      toast.error('Completá el token, el Phone Number ID y el Business Account ID'); return
     }
     startSavingConfig(async () => {
-      const result = await saveOrgWhatsAppConfig(configForm)
-      if (result.error) { toast.error(result.error) }
-      else {
-        toast.success('Configuración guardada — el canal WhatsApp fue creado automáticamente')
-        if (result.data) setWaConfig(result.data as OrgWhatsAppConfig)
+      try {
+        const result = await saveOrgWhatsAppConfig(configForm)
+        if (result.error) { toast.error(result.error) }
+        else {
+          toast.success('Configuración guardada: el canal de WhatsApp quedó creado')
+          if (result.data) setWaConfig(result.data as OrgWhatsAppConfig)
+        }
+      } catch (e) {
+        avisarFalla(e, 'No se pudo guardar. Revisá la conexión y probá de nuevo.')
       }
     })
   }
@@ -93,25 +143,33 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
       toast.error('Completá el Page ID y el Access Token'); return
     }
     startSavingIgConfig(async () => {
-      const result = await saveOrgInstagramConfig(igConfigForm)
-      if (result.error) { toast.error(result.error) }
-      else {
-        toast.success('Instagram conectado — el canal fue creado automáticamente')
-        if (result.data) setIgConfig(result.data as OrgInstagramConfig)
+      try {
+        const result = await saveOrgInstagramConfig(igConfigForm)
+        if (result.error) { toast.error(result.error) }
+        else {
+          toast.success('Instagram conectado: el canal quedó creado')
+          if (result.data) setIgConfig(result.data as OrgInstagramConfig)
+        }
+      } catch (e) {
+        avisarFalla(e, 'No se pudo guardar. Revisá la conexión y probá de nuevo.')
       }
     })
   }
 
   const handleSaveAiConfig = () => {
     if (!aiConfigForm.openai_api_key && !aiConfigForm.anthropic_api_key && !aiConfigForm.openrouter_api_key) {
-      toast.error('Configurá al menos una API key (OpenAI o Anthropic)'); return
+      toast.error('Cargá al menos una clave (OpenAI, Anthropic u OpenRouter)'); return
     }
     startSavingAiConfig(async () => {
-      const result = await saveOrgAiConfig(aiConfigForm)
-      if (result.error) { toast.error(result.error) }
-      else {
-        toast.success('Configuración de IA guardada')
-        if (result.data) setAiConfig(result.data)
+      try {
+        const result = await saveOrgAiConfig(aiConfigForm)
+        if (result.error) { toast.error(result.error) }
+        else {
+          toast.success('Configuración de IA guardada')
+          if (result.data) setAiConfig(result.data)
+        }
+      } catch (e) {
+        avisarFalla(e, 'No se pudo guardar. Revisá la conexión y probá de nuevo.')
       }
     })
   }
@@ -119,428 +177,412 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
   const isAiConfigured = !!(aiConfig?.openai_api_key || aiConfig?.anthropic_api_key || aiConfig?.openrouter_api_key)
 
   const copyToClipboard = (text: string, label: string) => {
-    navigator.clipboard.writeText(text).then(() => toast.success(`${label} copiado`))
+    navigator.clipboard.writeText(text).then(
+      () => toast.success(`${label} copiado`),
+      () => toast.error('No se pudo copiar: mantené apretado el texto para copiarlo.'),
+    )
   }
 
   const webhookUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/webhooks/whatsapp` : '/api/webhooks/whatsapp'
   const webhookUrlInstagram = typeof window !== 'undefined' ? `${window.location.origin}/api/webhooks/instagram` : '/api/webhooks/instagram'
+
+  const titulo = pantalla ? TITULOS[pantalla] : 'Configuración'
+  const volver = pantalla ? () => irA(null) : undefined
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       {/* aria-describedby={undefined}: la hoja no tiene descripción (Radix avisa si no se dice). */}
       <SheetContent
         side="right"
+        showCloseButton={false}
         aria-describedby={undefined}
-        className={`w-full max-w-md flex flex-col p-0 ${TEMA_DIALOGO_SECCION.className}`}
-        style={TEMA_DIALOGO_SECCION.style}
+        // Al terminar de cerrarse, la próxima vez abre en la lista.
+        onCloseAutoFocus={() => irA(null)}
+        className={cn(
+          'wa-scope gap-0 overflow-hidden p-0 text-[var(--wa-text)] outline-none',
+          // En el celular ocupa la pantalla: sin el borde de la izquierda (quedaba una raya en el canto).
+          'w-full max-w-none border-[var(--wa-divider)] bg-[var(--wa-bg)] max-lg:border-l-0 sm:max-w-none lg:w-[440px]',
+          'data-[state=open]:duration-300 data-[state=open]:ease-out',
+        )}
       >
-        <div className="px-6 py-4 border-b border shrink-0">
-          {/* El título de la hoja (Radix lo exige: sin él avisaba «DialogContent requires a DialogTitle»). */}
-          <SheetTitle className="mb-3 text-base font-semibold text-foreground">Configuración</SheetTitle>
-          <div className="grid grid-cols-6 gap-1 bg-card p-1 rounded-lg">
-            {(['whatsapp', 'instagram', 'facebook', 'ai', 'logs', 'tags'] as SettingsTab[]).map(tab => (
-              <button key={tab} onClick={() => setSettingsTab(tab)}
-                className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-md text-[10px] font-medium transition-colors ${settingsTab === tab ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                {tab === 'whatsapp' && <WhatsAppIcon className="size-3.5 text-green-400" />}
-                {tab === 'instagram' && <Instagram className="size-3.5 text-pink-400" />}
-                {tab === 'facebook' && <Facebook className="size-3.5 text-blue-400" />}
-                {tab === 'ai' && <Bot className="size-3.5 text-purple-400" />}
-                {tab === 'logs' && <ScrollText className="size-3.5 text-amber-400" />}
-                {tab === 'tags' && <Tag aria-hidden className="size-3.5 text-teal-400" />}
-                <span>{tab === 'whatsapp' ? 'WA' : tab === 'instagram' ? 'IG' : tab === 'facebook' ? 'FB' : tab === 'ai' ? 'IA' : tab === 'logs' ? 'Logs' : 'Tags'}</span>
-              </button>
-            ))}
-          </div>
+        {/* Celular: la barra de iOS. */}
+        <div className="relative flex h-11 shrink-0 items-center justify-between border-b-[0.5px] border-[var(--wa-divider)] pl-1 pr-2 lg:hidden">
+          {volver ? (
+            <button
+              type="button"
+              onClick={volver}
+              className="relative z-10 flex h-11 items-center gap-0.5 rounded-lg pr-2 text-[17px] text-[var(--wa-accent)] outline-none transition-opacity duration-150 [-webkit-tap-highlight-color:transparent] active:opacity-40 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60"
+            >
+              <ChevronLeft aria-hidden className="size-7" strokeWidth={2.2} />
+              Configuración
+            </button>
+          ) : (
+            <span />
+          )}
+          {/* El título de Radix (siempre en el DOM): el de la compu es para la vista. */}
+          <SheetTitle
+            className={cn(
+              'pointer-events-none absolute truncate text-center text-[17px] font-semibold leading-[22px] text-[var(--wa-text)]',
+              volver ? 'inset-x-36' : 'inset-x-24',
+            )}
+          >
+            {titulo}
+          </SheetTitle>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            className="relative z-10 flex h-11 min-w-11 items-center justify-center rounded-lg px-2 text-[17px] font-semibold text-[var(--wa-accent)] outline-none transition-opacity duration-150 [-webkit-tap-highlight-color:transparent] active:opacity-40 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60"
+          >
+            Listo
+          </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">
-          {/* WhatsApp tab */}
-          {settingsTab === 'whatsapp' && (
-            <div className="space-y-6">
-              <div className="flex items-center gap-2">
-                <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${isConfigured ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-orange-500/10 text-orange-400 border border-orange-500/20'}`}>
-                  {isConfigured ? <Wifi className="size-3" /> : <WifiOff className="size-3" />}
-                  {isConfigured ? 'Conectado' : 'Sin configurar'}
-                </div>
-              </div>
+        {/* Compu: el encabezado del panel, con la flecha para volver a la lista y la X. */}
+        <div className="hidden h-14 shrink-0 items-center gap-1 border-b border-[var(--wa-divider)] pl-3 pr-3 lg:flex">
+          {volver && (
+            <button
+              type="button"
+              onClick={volver}
+              aria-label="Volver a Configuración"
+              title="Volver a Configuración"
+              className="flex size-8 shrink-0 items-center justify-center rounded-full text-[var(--wa-text-2)] outline-none transition-colors hover:bg-[var(--wa-hover)] hover:text-[var(--wa-text)] focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60"
+            >
+              <ChevronLeft aria-hidden className="size-5" />
+            </button>
+          )}
+          <p aria-hidden className={cn('min-w-0 flex-1 truncate text-[16px] font-semibold text-[var(--wa-text)]', !volver && 'pl-2')}>
+            {titulo}
+          </p>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            aria-label="Cerrar"
+            title="Cerrar"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-[var(--wa-text-2)] outline-none transition-colors hover:bg-[var(--wa-hover)] hover:text-[var(--wa-text)] focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60"
+          >
+            <X aria-hidden className="size-[18px]" />
+          </button>
+        </div>
 
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="size-5 rounded-full bg-green-500/10 flex items-center justify-center text-green-400 font-bold text-[10px]">1</div>
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Configurar Webhook en Meta</h3>
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed pl-7">
-                  En Meta Developer Console → <strong className="text-foreground">WhatsApp → Configuración → Webhook</strong>
-                </p>
-                <div className="pl-7 space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">URL de devolución de llamada</Label>
-                    <div className="flex items-center gap-2">
-                      <input readOnly className="flex-1 rounded-lg bg-card px-3 py-2 text-xs text-foreground outline-none font-mono truncate" value={webhookUrl} />
-                      <button className="shrink-0 p-2 rounded-lg bg-card hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" onClick={() => copyToClipboard(webhookUrl, 'URL')}>
-                        <Copy className="size-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">Token de verificación</Label>
-                    {waConfig?.verify_token ? (
-                      <div className="flex items-center gap-2">
-                        <input readOnly className="flex-1 rounded-lg bg-card px-3 py-2 text-xs text-foreground outline-none font-mono truncate" value={waConfig.verify_token} />
-                        <button className="shrink-0 p-2 rounded-lg bg-card hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" onClick={() => copyToClipboard(waConfig.verify_token, 'Token')}>
-                          <Copy className="size-3.5" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="rounded-lg bg-card px-3 py-2.5 text-xs text-muted-foreground italic">
-                        Se genera al guardar las credenciales →
-                      </div>
-                    )}
-                  </div>
-                  <div className="rounded-lg bg-muted border border p-3 flex items-start gap-2.5">
-                    <span className="text-green-400 text-[10px] font-mono shrink-0 mt-0.5">●</span>
-                    <div>
-                      <p className="text-[11px] text-muted-foreground">Evento a suscribir:</p>
-                      <code className="text-xs text-green-400 font-mono">messages</code>
-                    </div>
-                  </div>
-                </div>
-              </div>
+        {/* Cada pantalla entra desde la derecha (la lista, desde la izquierda), como en iOS. */}
+        <div
+          key={pantalla ?? 'lista'}
+          className={cn(
+            'wa-scroll min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 pb-[calc(env(safe-area-inset-bottom,0px)_+_2rem)] lg:px-4 lg:pb-8 lg:pt-4',
+            !listaQuieta && 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:animation-duration-200',
+            pantalla ? 'motion-safe:slide-in-from-right-8' : 'motion-safe:slide-in-from-left-8',
+          )}
+        >
+          {pantalla === null && (
+            <>
+              <GrupoIos titulo="Canales">
+                <CeldaNavegacionIos
+                  icono={<IconoCeldaIos glifo={<WhatsAppIcon className="size-[19px] lg:size-4" />} color="verde" />}
+                  detalle={isConfigured ? 'Conectado' : 'Sin conectar'}
+                  onClick={() => irA('whatsapp')}
+                >
+                  WhatsApp
+                </CeldaNavegacionIos>
+                <CeldaNavegacionIos
+                  icono={<IconoCeldaIos icono={Instagram} color="rosa" />}
+                  detalle={isInstagramConfigured ? 'Conectado' : 'Sin conectar'}
+                  onClick={() => irA('instagram')}
+                >
+                  Instagram
+                </CeldaNavegacionIos>
+                <CeldaNavegacionIos
+                  icono={<IconoCeldaIos icono={Facebook} color="azul" />}
+                  detalle="Próximamente"
+                  onClick={() => irA('facebook')}
+                >
+                  Facebook
+                </CeldaNavegacionIos>
+              </GrupoIos>
 
-              <Separator className="bg-white/5" />
+              <GrupoIos titulo="Inteligencia artificial">
+                <CeldaNavegacionIos
+                  icono={<IconoCeldaIos icono={Bot} color="violeta" />}
+                  detalle={isAiConfigured ? 'Configurada' : 'Sin configurar'}
+                  onClick={() => irA('ai')}
+                >
+                  IA
+                </CeldaNavegacionIos>
+                <CeldaNavegacionIos
+                  icono={<IconoCeldaIos icono={ScrollText} color="naranja" />}
+                  onClick={() => irA('logs')}
+                >
+                  Registro de la IA
+                </CeldaNavegacionIos>
+              </GrupoIos>
 
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="size-5 rounded-full bg-green-500/10 flex items-center justify-center text-green-400 font-bold text-[10px]">2</div>
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Credenciales Meta API</h3>
-                </div>
-                <div className="pl-7 space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">Access Token</Label>
-                    <div className="relative">
-                      <input type={showToken ? 'text' : 'password'}
-                        className="w-full rounded-lg bg-card px-3 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-green-500/40"
-                        placeholder="EAA..." value={configForm.whatsapp_access_token ?? ''}
-                        onChange={(e) => setConfigForm(prev => ({ ...prev, whatsapp_access_token: e.target.value }))} />
-                      <button className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setShowToken(v => !v)}>
-                        {showToken ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">Phone Number ID</Label>
-                    <input type="text" className="w-full rounded-lg bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-green-500/40"
-                      placeholder="1068552459672379" value={configForm.whatsapp_phone_id ?? ''}
-                      onChange={(e) => setConfigForm(prev => ({ ...prev, whatsapp_phone_id: e.target.value }))} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">WhatsApp Business Account ID</Label>
-                    <input type="text" className="w-full rounded-lg bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-green-500/40"
-                      placeholder="868078746261917" value={configForm.whatsapp_business_id ?? ''}
-                      onChange={(e) => setConfigForm(prev => ({ ...prev, whatsapp_business_id: e.target.value }))} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">App Secret <span className="text-muted-foreground font-normal">(para verificación HMAC)</span></Label>
-                    <input type="password" className="w-full rounded-lg bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-green-500/40"
-                      placeholder="abc123..." value={configForm.app_secret ?? ''}
-                      onChange={(e) => setConfigForm(prev => ({ ...prev, app_secret: e.target.value }))} />
-                    <p className="text-[10px] text-muted-foreground">Meta App → Configuración → Básica → Clave secreta de la app</p>
-                  </div>
-                  <Button className="w-full bg-[var(--wa-accent)] font-semibold text-[var(--wa-on-accent)] hover:bg-[var(--wa-accent-hover)]" onClick={handleSaveConfig} disabled={savingConfig}>
-                    {savingConfig ? 'Guardando...' : 'Guardar credenciales'}
-                  </Button>
-                </div>
-              </div>
-
-              <Separator className="bg-white/5" />
-              <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs text-green-400 hover:text-green-300">
-                <ExternalLink className="size-3" /> Guía Meta Cloud API
-              </a>
-            </div>
+              <GrupoIos titulo="Chats">
+                <CeldaNavegacionIos
+                  icono={<IconoCeldaIos icono={Tag} color="turquesa" />}
+                  detalle={tags.length > 0 ? String(tags.length) : undefined}
+                  onClick={() => irA('tags')}
+                >
+                  Etiquetas
+                </CeldaNavegacionIos>
+              </GrupoIos>
+            </>
           )}
 
-          {/* Instagram tab */}
-          {settingsTab === 'instagram' && (
-            <div className="space-y-6">
-              <div className="flex items-center gap-2">
-                <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${isInstagramConfigured ? 'bg-pink-500/10 text-pink-400 border border-pink-500/20' : 'bg-orange-500/10 text-orange-400 border border-orange-500/20'}`}>
-                  {isInstagramConfigured ? <Wifi className="size-3" /> : <WifiOff className="size-3" />}
-                  {isInstagramConfigured ? 'Conectado' : 'Sin configurar'}
-                </div>
-              </div>
+          {/* WhatsApp */}
+          {pantalla === 'whatsapp' && (
+            <>
+              <GrupoIos>
+                <CeldaEstado
+                  conectado={isConfigured}
+                  texto={isConfigured ? 'Conectado' : 'Sin conectar'}
+                  detalle={
+                    isConfigured
+                      ? 'Los mensajes de WhatsApp entran a Mensajería.'
+                      : 'Seguí los dos pasos de abajo para conectar el número.'
+                  }
+                />
+              </GrupoIos>
 
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="size-5 rounded-full bg-pink-500/10 flex items-center justify-center text-pink-400 font-bold text-[10px]">1</div>
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Configurar Webhook en Meta</h3>
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed pl-7">
-                  En Meta Developer Console → <strong className="text-foreground">Instagram → Webhooks</strong>, suscribite al campo <code className="text-pink-400">messages</code>.
-                </p>
-                <div className="pl-7 space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">URL de devolución de llamada</Label>
-                    <div className="flex items-center gap-2">
-                      <input readOnly className="flex-1 rounded-lg bg-card px-3 py-2 text-xs text-foreground outline-none font-mono truncate" value={webhookUrlInstagram} />
-                      <button className="shrink-0 p-2 rounded-lg bg-card hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" onClick={() => copyToClipboard(webhookUrlInstagram, 'URL')}>
-                        <Copy className="size-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">Token de verificación</Label>
-                    {igConfig?.verify_token ? (
-                      <div className="flex items-center gap-2">
-                        <input readOnly className="flex-1 rounded-lg bg-card px-3 py-2 text-xs text-foreground outline-none font-mono truncate" value={igConfig.verify_token} />
-                        <button className="shrink-0 p-2 rounded-lg bg-card hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" onClick={() => copyToClipboard(igConfig.verify_token, 'Token')}>
-                          <Copy className="size-3.5" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="rounded-lg bg-card px-3 py-2.5 text-xs text-muted-foreground italic">
-                        Se genera al guardar las credenciales →
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <GrupoIos
+                titulo="1. El webhook en Meta"
+                pie={<>En Meta for Developers: WhatsApp → Configuración → Webhook. Suscribite al evento <Codigo>messages</Codigo>.</>}
+              >
+                <CeldaCopiable etiqueta="URL de devolución de llamada" valor={webhookUrl} onCopiar={() => copyToClipboard(webhookUrl, 'URL')} />
+                <CeldaCopiable
+                  etiqueta="Token de verificación"
+                  valor={waConfig?.verify_token}
+                  vacio="Se genera al guardar las credenciales."
+                  onCopiar={() => waConfig?.verify_token && copyToClipboard(waConfig.verify_token, 'Token')}
+                />
+                <CeldaIos>
+                  <span className={cn(TEXTO_PRINCIPAL, 'flex-1')}>Evento a suscribir</span>
+                  <Codigo grande>messages</Codigo>
+                </CeldaIos>
+              </GrupoIos>
 
-              <Separator className="bg-white/5" />
+              <GrupoIos
+                titulo="2. Las credenciales de la API"
+                pie="El App Secret está en tu app de Meta → Configuración → Básica → Clave secreta de la app. Sirve para verificar que los mensajes vengan de Meta."
+              >
+                <CeldaCampoIos
+                  etiqueta="Access Token"
+                  secreto
+                  placeholder="EAA…"
+                  valor={configForm.whatsapp_access_token ?? ''}
+                  onCambio={(v) => setConfigForm((prev) => ({ ...prev, whatsapp_access_token: v }))}
+                />
+                <CeldaCampoIos
+                  etiqueta="Phone Number ID"
+                  inputMode="numeric"
+                  placeholder="1068552459672379"
+                  valor={configForm.whatsapp_phone_id ?? ''}
+                  onCambio={(v) => setConfigForm((prev) => ({ ...prev, whatsapp_phone_id: v }))}
+                />
+                <CeldaCampoIos
+                  etiqueta="WhatsApp Business Account ID"
+                  inputMode="numeric"
+                  placeholder="868078746261917"
+                  valor={configForm.whatsapp_business_id ?? ''}
+                  onCambio={(v) => setConfigForm((prev) => ({ ...prev, whatsapp_business_id: v }))}
+                />
+                <CeldaCampoIos
+                  etiqueta="App Secret"
+                  secreto
+                  placeholder="abc123…"
+                  valor={configForm.app_secret ?? ''}
+                  onCambio={(v) => setConfigForm((prev) => ({ ...prev, app_secret: v }))}
+                />
+              </GrupoIos>
 
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="size-5 rounded-full bg-pink-500/10 flex items-center justify-center text-pink-400 font-bold text-[10px]">2</div>
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Credenciales Instagram API</h3>
-                </div>
-                <div className="pl-7 space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">Facebook Page ID <span className="text-pink-400">*</span></Label>
-                    <input type="text" className="w-full rounded-lg bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-pink-500/40"
-                      placeholder="123456789012345" value={igConfigForm.instagram_page_id}
-                      onChange={(e) => setIgConfigForm(prev => ({ ...prev, instagram_page_id: e.target.value }))} />
-                    <p className="text-[10px] text-muted-foreground">El ID de la Página de Facebook conectada a tu Instagram Business</p>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">Page Access Token <span className="text-pink-400">*</span></Label>
-                    <div className="relative">
-                      <input type={showIgToken ? 'text' : 'password'}
-                        className="w-full rounded-lg bg-card px-3 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-pink-500/40"
-                        placeholder="EAA..." value={igConfigForm.instagram_page_access_token}
-                        onChange={(e) => setIgConfigForm(prev => ({ ...prev, instagram_page_access_token: e.target.value }))} />
-                      <button className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setShowIgToken(v => !v)}>
-                        {showIgToken ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">Instagram Account ID <span className="text-muted-foreground font-normal">(opcional)</span></Label>
-                    <input type="text" className="w-full rounded-lg bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-pink-500/40"
-                      placeholder="17841400000000000" value={igConfigForm.instagram_account_id}
-                      onChange={(e) => setIgConfigForm(prev => ({ ...prev, instagram_account_id: e.target.value }))} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">App Secret <span className="text-muted-foreground font-normal">(para verificación HMAC)</span></Label>
-                    <input type="password" className="w-full rounded-lg bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-pink-500/40"
-                      placeholder="abc123..." value={igConfigForm.app_secret ?? ''}
-                      onChange={(e) => setIgConfigForm(prev => ({ ...prev, app_secret: e.target.value }))} />
-                  </div>
-                  <Button className="w-full bg-pink-600 hover:bg-pink-500 text-white" onClick={handleSaveIgConfig} disabled={savingIgConfig}>
-                    {savingIgConfig ? 'Guardando...' : 'Guardar credenciales'}
-                  </Button>
-                </div>
-              </div>
+              <GrupoIos>
+                <CeldaAccionIos centrada onClick={handleSaveConfig} deshabilitada={savingConfig}>
+                  {savingConfig ? 'Guardando…' : 'Guardar credenciales'}
+                </CeldaAccionIos>
+              </GrupoIos>
 
-              <Separator className="bg-white/5" />
-              <div className="rounded-lg bg-muted border border p-3 space-y-1.5">
-                <p className="text-[11px] font-medium text-foreground">Requisitos previos</p>
+              <GrupoIos>
+                <CeldaEnlace href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started">
+                  La guía de la Cloud API de Meta
+                </CeldaEnlace>
+              </GrupoIos>
+            </>
+          )}
+
+          {/* Instagram */}
+          {pantalla === 'instagram' && (
+            <>
+              <GrupoIos>
+                <CeldaEstado
+                  conectado={isInstagramConfigured}
+                  texto={isInstagramConfigured ? 'Conectado' : 'Sin conectar'}
+                  detalle={
+                    isInstagramConfigured
+                      ? 'Los mensajes directos de Instagram entran a Mensajería.'
+                      : 'Seguí los dos pasos de abajo para conectar la cuenta.'
+                  }
+                />
+              </GrupoIos>
+
+              <GrupoIos
+                titulo="1. El webhook en Meta"
+                pie={<>En Meta for Developers: Instagram → Webhooks. Suscribite al campo <Codigo>messages</Codigo>.</>}
+              >
+                <CeldaCopiable
+                  etiqueta="URL de devolución de llamada"
+                  valor={webhookUrlInstagram}
+                  onCopiar={() => copyToClipboard(webhookUrlInstagram, 'URL')}
+                />
+                <CeldaCopiable
+                  etiqueta="Token de verificación"
+                  valor={igConfig?.verify_token}
+                  vacio="Se genera al guardar las credenciales."
+                  onCopiar={() => igConfig?.verify_token && copyToClipboard(igConfig.verify_token, 'Token')}
+                />
+              </GrupoIos>
+
+              <GrupoIos
+                titulo="2. Las credenciales de la API"
+                pie="El Page ID es el de la página de Facebook conectada a tu cuenta de Instagram Business. El Account ID y el App Secret son opcionales."
+              >
+                <CeldaCampoIos
+                  etiqueta="Facebook Page ID"
+                  inputMode="numeric"
+                  placeholder="123456789012345"
+                  valor={igConfigForm.instagram_page_id}
+                  onCambio={(v) => setIgConfigForm((prev) => ({ ...prev, instagram_page_id: v }))}
+                />
+                <CeldaCampoIos
+                  etiqueta="Page Access Token"
+                  secreto
+                  placeholder="EAA…"
+                  valor={igConfigForm.instagram_page_access_token}
+                  onCambio={(v) => setIgConfigForm((prev) => ({ ...prev, instagram_page_access_token: v }))}
+                />
+                <CeldaCampoIos
+                  etiqueta="Instagram Account ID"
+                  inputMode="numeric"
+                  placeholder="17841400000000000"
+                  valor={igConfigForm.instagram_account_id}
+                  onCambio={(v) => setIgConfigForm((prev) => ({ ...prev, instagram_account_id: v }))}
+                />
+                <CeldaCampoIos
+                  etiqueta="App Secret"
+                  secreto
+                  placeholder="abc123…"
+                  valor={igConfigForm.app_secret ?? ''}
+                  onCambio={(v) => setIgConfigForm((prev) => ({ ...prev, app_secret: v }))}
+                />
+              </GrupoIos>
+
+              <GrupoIos>
+                <CeldaAccionIos centrada onClick={handleSaveIgConfig} deshabilitada={savingIgConfig}>
+                  {savingIgConfig ? 'Guardando…' : 'Guardar credenciales'}
+                </CeldaAccionIos>
+              </GrupoIos>
+
+              <GrupoIos titulo="Antes de empezar">
                 {[
-                  'Cuenta de Instagram Business o Creator',
-                  'Página de Facebook conectada a la cuenta IG',
-                  'App de Meta con instagram_manage_messages',
-                  'Suscripción al webhook del producto Instagram',
-                ].map(r => (
-                  <div key={r} className="flex items-start gap-2">
-                    <div className="size-1.5 rounded-full bg-pink-400 mt-1.5 shrink-0" />
-                    <span className="text-[11px] text-muted-foreground">{r}</span>
-                  </div>
+                  'Una cuenta de Instagram Business o Creator',
+                  'La página de Facebook conectada a esa cuenta',
+                  'Una app de Meta con el permiso instagram_manage_messages',
+                  'El webhook del producto Instagram suscripto',
+                ].map((r) => (
+                  <CeldaIos key={r}>
+                    <Check aria-hidden className="size-5 shrink-0 text-[var(--wa-accent)] lg:size-4" strokeWidth={2.4} />
+                    <span className={cn(TEXTO_SECUNDARIO, 'flex-1 text-[var(--wa-text)]')}>{r}</span>
+                  </CeldaIos>
                 ))}
-              </div>
-            </div>
+              </GrupoIos>
+            </>
           )}
 
-          {/* Facebook tab */}
-          {settingsTab === 'facebook' && (
-            <div className="flex flex-col items-center justify-center py-16 text-center gap-4">
-              <div className="size-16 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
-                <Facebook className="size-8 text-blue-400" />
-              </div>
-              <div>
-                <p className="font-semibold text-foreground mb-1">Facebook Messenger</p>
-                <p className="text-sm text-muted-foreground max-w-xs leading-relaxed">
-                  Próximamente podrás conectar tu página de Facebook y atender todos los mensajes de Messenger desde el dashboard.
-                </p>
-              </div>
-              <Badge variant="outline" className="border-blue-500/30 text-blue-400 bg-blue-500/5">Próximamente</Badge>
-            </div>
+          {/* Facebook */}
+          {pantalla === 'facebook' && (
+            <VacioIos
+              icono={Facebook}
+              titulo="Facebook Messenger"
+              texto="Muy pronto vas a poder conectar la página de Facebook y atender los mensajes de Messenger desde acá."
+            >
+              <span className="inline-flex h-8 items-center rounded-full bg-[var(--wa-raised)] px-3.5 text-[15px] font-medium text-[var(--wa-text-2)] lg:text-[13px]">
+                Próximamente
+              </span>
+            </VacioIos>
           )}
 
-          {/* AI tab */}
-          {settingsTab === 'ai' && (
-            <div className="space-y-6">
-              <div className="flex items-center gap-2">
-                <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${isAiConfigured ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-orange-500/10 text-orange-400 border border-orange-500/20'}`}>
-                  {isAiConfigured ? <Wifi className="size-3" /> : <WifiOff className="size-3" />}
-                  {isAiConfigured ? 'Configurado' : 'Sin configurar'}
-                </div>
-              </div>
+          {/* IA */}
+          {pantalla === 'ai' && (
+            <>
+              <GrupoIos>
+                <CeldaEstado
+                  conectado={isAiConfigured}
+                  texto={isAiConfigured ? 'Configurada' : 'Sin configurar'}
+                  detalle="Con una clave de OpenAI, de Anthropic o de OpenRouter andan los pasos de IA de las automatizaciones."
+                />
+              </GrupoIos>
 
-              <div>
-                <p className="text-xs font-semibold text-foreground mb-1">Proveedores de IA</p>
-                <p className="text-[11px] text-muted-foreground">
-                  Configurá las API keys para usar nodos de IA en los workflows. Podés usar OpenAI, Anthropic, OpenRouter, o combinarlos.
-                </p>
-              </div>
+              <GrupoIos titulo="OpenAI" pie={`Modelos: ${modelosDe('OpenAI')}.`}>
+                <CeldaCampoIos
+                  etiqueta="API key de OpenAI"
+                  secreto
+                  placeholder="sk-…"
+                  valor={aiConfigForm.openai_api_key}
+                  onCambio={(v) => setAiConfigForm((p) => ({ ...p, openai_api_key: v }))}
+                />
+              </GrupoIos>
 
-              <Separator />
+              <GrupoIos titulo="Anthropic" pie={`Modelos: ${modelosDe('Anthropic')}.`}>
+                <CeldaCampoIos
+                  etiqueta="API key de Anthropic"
+                  secreto
+                  placeholder="sk-ant-…"
+                  valor={aiConfigForm.anthropic_api_key}
+                  onCambio={(v) => setAiConfigForm((p) => ({ ...p, anthropic_api_key: v }))}
+                />
+              </GrupoIos>
 
-              {/* OpenAI */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="size-5 rounded-full bg-green-500/10 flex items-center justify-center text-green-400 font-bold text-[10px]">1</div>
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">OpenAI</h3>
-                </div>
-                <div className="pl-7 space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">API Key</Label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type={showOpenAiKey ? 'text' : 'password'}
-                        className="flex-1 rounded-lg bg-card px-3 py-2 text-xs text-foreground outline-none font-mono border"
-                        placeholder="sk-..."
-                        value={aiConfigForm.openai_api_key}
-                        onChange={e => setAiConfigForm(p => ({ ...p, openai_api_key: e.target.value }))}
-                      />
-                      <button className="shrink-0 p-2 rounded-lg bg-card hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-                        onClick={() => setShowOpenAiKey(!showOpenAiKey)}>
-                        {showOpenAiKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">
-                      Modelos disponibles: GPT-4o Mini, GPT-4o, GPT-4.1 Mini, GPT-4.1
-                    </p>
-                  </div>
-                </div>
-              </div>
+              <GrupoIos
+                titulo="OpenRouter"
+                pie="Cientos de modelos (Llama, Mistral, Gemini y más) a través de openrouter.ai, también gratuitos."
+              >
+                <CeldaCampoIos
+                  etiqueta="API key de OpenRouter"
+                  secreto
+                  placeholder="sk-or-…"
+                  valor={aiConfigForm.openrouter_api_key}
+                  onCambio={(v) => setAiConfigForm((p) => ({ ...p, openrouter_api_key: v }))}
+                />
+              </GrupoIos>
 
-              <Separator />
+              <GrupoIos
+                titulo="Valores por defecto"
+                pie="El prompt se usa en los pasos de IA que no tienen uno propio."
+              >
+                <CeldaModeloIos
+                  etiqueta="Modelo"
+                  valor={aiConfigForm.default_model}
+                  onCambio={(id) => setAiConfigForm((p) => ({ ...p, default_model: id }))}
+                />
+                <CeldaCampoIos
+                  etiqueta="Prompt del sistema"
+                  multilinea
+                  placeholder="Sos el asistente de la barbería. Respondé consultas sobre horarios, servicios y precios…"
+                  valor={aiConfigForm.default_system_prompt}
+                  onCambio={(v) => setAiConfigForm((p) => ({ ...p, default_system_prompt: v }))}
+                />
+              </GrupoIos>
 
-              {/* Anthropic */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="size-5 rounded-full bg-purple-500/10 flex items-center justify-center text-purple-400 font-bold text-[10px]">2</div>
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Anthropic</h3>
-                </div>
-                <div className="pl-7 space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">API Key</Label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type={showAnthropicKey ? 'text' : 'password'}
-                        className="flex-1 rounded-lg bg-card px-3 py-2 text-xs text-foreground outline-none font-mono border"
-                        placeholder="sk-ant-..."
-                        value={aiConfigForm.anthropic_api_key}
-                        onChange={e => setAiConfigForm(p => ({ ...p, anthropic_api_key: e.target.value }))}
-                      />
-                      <button className="shrink-0 p-2 rounded-lg bg-card hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-                        onClick={() => setShowAnthropicKey(!showAnthropicKey)}>
-                        {showAnthropicKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">
-                      Modelos disponibles: Claude Haiku 4.5, Claude Sonnet 4.6
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* OpenRouter */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="size-5 rounded-full bg-cyan-500/10 flex items-center justify-center text-cyan-400 font-bold text-[10px]">3</div>
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">OpenRouter</h3>
-                </div>
-                <div className="pl-7 space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">API Key</Label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type={showOpenRouterKey ? 'text' : 'password'}
-                        className="flex-1 rounded-lg bg-card px-3 py-2 text-xs text-foreground outline-none font-mono border"
-                        placeholder="sk-or-..."
-                        value={aiConfigForm.openrouter_api_key}
-                        onChange={e => setAiConfigForm(p => ({ ...p, openrouter_api_key: e.target.value }))}
-                      />
-                      <button className="shrink-0 p-2 rounded-lg bg-card hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-                        onClick={() => setShowOpenRouterKey(!showOpenRouterKey)}>
-                        {showOpenRouterKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">
-                      Acceso a cientos de modelos (Llama, Mistral, Gemini, etc.) a través de openrouter.ai. Incluye modelos gratuitos.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Defaults */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="size-5 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-400 font-bold text-[10px]">4</div>
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Valores por defecto</h3>
-                </div>
-                <div className="pl-7 space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">Modelo por defecto</Label>
-                    <ModelPicker
-                      value={aiConfigForm.default_model}
-                      onChange={id => setAiConfigForm(p => ({ ...p, default_model: id }))}
-                    />
-                    <p className="text-[10px] text-muted-foreground">
-                      Buscá por nombre o pegá un model ID de OpenRouter (ej: <code className="text-cyan-400">google/gemma-2-9b-it:free</code>).
-                    </p>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] text-muted-foreground">System prompt por defecto</Label>
-                    <textarea
-                      className="w-full rounded-lg bg-card px-3 py-2 text-xs text-foreground outline-none border resize-none"
-                      rows={4}
-                      placeholder="Sos un asistente de la barbería. Respondé consultas sobre horarios, servicios y precios..."
-                      value={aiConfigForm.default_system_prompt}
-                      onChange={e => setAiConfigForm(p => ({ ...p, default_system_prompt: e.target.value }))}
-                    />
-                    <p className="text-[10px] text-muted-foreground">
-                      Este prompt se usará como base cuando un nodo de IA no tenga prompt propio configurado.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <Button onClick={handleSaveAiConfig} disabled={savingAiConfig} className="w-full bg-purple-600 hover:bg-purple-500 text-white">
-                {savingAiConfig ? 'Guardando...' : 'Guardar configuración de IA'}
-              </Button>
-            </div>
+              <GrupoIos>
+                <CeldaAccionIos centrada onClick={handleSaveAiConfig} deshabilitada={savingAiConfig}>
+                  {savingAiConfig ? 'Guardando…' : 'Guardar la configuración de IA'}
+                </CeldaAccionIos>
+              </GrupoIos>
+            </>
           )}
 
-          {/* Logs tab */}
-          {settingsTab === 'logs' && <AiLogsPanel />}
+          {/* Registro de la IA */}
+          {pantalla === 'logs' && <AiLogsPanel />}
 
-          {/* Tags tab */}
-          {settingsTab === 'tags' && (
+          {/* Etiquetas */}
+          {pantalla === 'tags' && (
             <TagsSection
               tags={tags}
               newTagName={newTagName}
@@ -558,5 +600,80 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
         </div>
       </SheetContent>
     </Sheet>
+  )
+}
+
+/** El estado de un canal: el ícono de color, «Conectado» y una línea de qué significa. */
+function CeldaEstado({ conectado, texto, detalle }: { conectado: boolean; texto: string; detalle: string }) {
+  return (
+    <CeldaIos icono={<IconoCeldaIos icono={conectado ? Wifi : WifiOff} color={conectado ? 'verde' : 'naranja'} />}>
+      <div className="min-w-0 flex-1">
+        <p className={cn(TEXTO_PRINCIPAL, 'font-semibold')}>{texto}</p>
+        <p className={TEXTO_SECUNDARIO}>{detalle}</p>
+      </div>
+    </CeldaIos>
+  )
+}
+
+/** Un dato para copiar (la URL del webhook, el token): el nombre arriba, el valor y el botón de copiar. */
+function CeldaCopiable({
+  etiqueta,
+  valor,
+  vacio,
+  onCopiar,
+}: {
+  etiqueta: string
+  valor: string | null | undefined
+  /** Lo que se lee mientras no hay valor. */
+  vacio?: string
+  onCopiar: () => void
+}) {
+  return (
+    <li className={CLASE_CELDA}>
+      <div className={cn(CLASE_CUERPO, 'py-1.5 pr-1.5 lg:py-1 lg:pr-1')}>
+        <div className="min-w-0 flex-1 py-1">
+          <p className="text-[13px] leading-[18px] text-[var(--wa-text-2)] lg:text-[12px] lg:leading-4">{etiqueta}</p>
+          {valor ? (
+            <p className="select-text truncate font-mono text-[15px] leading-[22px] text-[var(--wa-text)] lg:text-[13px] lg:leading-5">{valor}</p>
+          ) : (
+            <p className="text-[15px] leading-[22px] text-[var(--wa-text-2)] lg:text-[13px] lg:leading-5">{vacio}</p>
+          )}
+        </div>
+        {valor && <BotonIconoIos etiqueta={`Copiar ${etiqueta.toLowerCase()}`} icono={Copy} onClick={onCopiar} tono="acento" />}
+      </div>
+    </li>
+  )
+}
+
+/** Un enlace afuera (la guía de Meta), en verde y con la flecha de «se abre aparte». */
+function CeldaEnlace({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <li className={CLASE_CELDA}>
+      <div className="flex min-h-11 min-w-0 flex-1 items-stretch pr-4 lg:min-h-10 lg:pr-3">
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="relative flex min-w-0 flex-1 items-center gap-3 py-2.5 text-[17px] text-[var(--wa-accent)] outline-none [-webkit-tap-highlight-color:transparent] before:absolute before:inset-0 before:-left-4 before:-right-4 before:transition-colors active:before:bg-white/[0.08] focus-visible:before:ring-2 focus-visible:before:ring-inset focus-visible:before:ring-[var(--wa-accent)] lg:py-2 lg:text-[14px] lg:hover:before:bg-white/[0.04]"
+        >
+          <span className="min-w-0 flex-1 truncate">{children}</span>
+          <ExternalLink aria-hidden className="size-[18px] shrink-0 lg:size-4" />
+          <span className="sr-only"> (se abre en otra pestaña)</span>
+        </a>
+      </div>
+    </li>
+  )
+}
+
+function Codigo({ children, grande = false }: { children: ReactNode; grande?: boolean }) {
+  return (
+    <code
+      className={cn(
+        'rounded-[6px] bg-[var(--wa-raised-2)] px-1.5 py-px font-mono text-[var(--wa-accent)]',
+        grande ? 'text-[15px] lg:text-[13px]' : 'text-[13px] lg:text-[12px]',
+      )}
+    >
+      {children}
+    </code>
   )
 }

@@ -14,7 +14,7 @@ export interface ScheduledWithRelations {
   scheduled_for: string
   status: string
   client?: { name: string; phone: string }
-  /** La plantilla con la que sale (casi todos los de difusiones y reseñas no llevan texto). */
+  /** La plantilla con la que sale (casi todos los de difusiones y turnos no llevan texto). */
   template_name?: string | null
   error_message?: string | null
   sent_at?: string | null

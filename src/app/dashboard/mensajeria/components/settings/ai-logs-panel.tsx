@@ -1,138 +1,175 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
-import { AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Bot, User, Sparkles } from 'lucide-react'
+// El registro de la IA (Configuración → Registro de la IA), como una lista de
+// iOS (23/oct/2026, tercera ronda): las últimas 50 ejecuciones de los pasos de
+// IA, con el ícono verde o rojo, el modelo, la hora, el cliente y lo que
+// respondió (o el error); tocar una muestra el detalle. «Todas / Errores» es el
+// control segmentado de iOS. Antes: letra de 9 a 11 px y botones sin nombre.
+
+import { useEffect, useState } from 'react'
+import { AlertCircle, Bot, CheckCircle2, ChevronDown, RefreshCw } from 'lucide-react'
 import { getAiExecutionLogs, type AiExecutionLog } from '@/lib/actions/ai-config'
-import { formatRelativeDate } from '../shared/helpers'
+import { cn } from '@/lib/utils'
+import { formatRelativeDate, formatearTelefonoAr } from '../shared/helpers'
+import { MODEL_GROUPS } from '../shared/model-picker'
+import { useDiaLocal } from '../shared/use-dia-local'
+import {
+  BotonPildoraIos, CargandoIos, CLASE_BOTON_CELDA, CLASE_CELDA, CLASE_CUERPO_BOTON, GrupoIos, IconoCeldaIos, SegmentadoIos,
+  TEXTO_PRINCIPAL, TEXTO_SECUNDARIO, TEXTO_TERCIARIO, VacioIos,
+} from '../navegacion/lista-ios'
+
+const conError = (l: AiExecutionLog) => l.status === 'error' || l.used_fallback
+
+// El nombre de un modelo conocido («GPT-4.1»); uno pegado a mano va con su ID.
+const NOMBRE_DEL_MODELO = new Map(MODEL_GROUPS.flatMap((g) => g.models.map((m) => [m.id, m.label] as const)))
 
 export function AiLogsPanel() {
   const [logs, setLogs] = useState<AiExecutionLog[]>([])
+  const [lectura, setLectura] = useState<{ pedido: number; cargando: boolean; error: string | null }>({ pedido: 0, cargando: true, error: null })
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [loading, startLoading] = useTransition()
   const [filter, setFilter] = useState<'all' | 'error'>('all')
+  // La hora de cada celda ("14:32", "Ayer", "martes") cambia sola a la medianoche.
+  const dia = useDiaLocal()
 
-  const load = () => {
-    startLoading(async () => {
-      const res = await getAiExecutionLogs(50)
-      if (!res.error) setLogs(res.data)
-    })
-  }
+  // La lectura (y «Actualizar»): cada pedido nuevo vuelve a leer.
+  useEffect(() => {
+    let vigente = true
+    getAiExecutionLogs(50)
+      .then((res) => {
+        if (!vigente) return
+        if (!res.error) setLogs(res.data)
+        setLectura((l) => ({ ...l, cargando: false, error: res.error ?? null }))
+      })
+      .catch(() => {
+        if (vigente) setLectura((l) => ({ ...l, cargando: false, error: 'No pudimos leer el registro. Revisá la conexión.' }))
+      })
+    return () => { vigente = false }
+  }, [lectura.pedido])
 
-  useEffect(() => { load() }, [])
+  const actualizar = () => setLectura((l) => ({ pedido: l.pedido + 1, cargando: true, error: null }))
 
-  const visible = filter === 'all' ? logs : logs.filter(l => l.status === 'error' || l.used_fallback)
-  const errorCount = logs.filter(l => l.status === 'error' || l.used_fallback).length
+  const visible = filter === 'all' ? logs : logs.filter(conError)
+  const errorCount = logs.filter(conError).length
 
   return (
-    <div className="space-y-4">
-      <div>
-        <p className="text-xs font-semibold text-foreground mb-1">Diagnóstico de IA</p>
-        <p className="text-[11px] text-muted-foreground leading-relaxed">
-          Últimas 50 ejecuciones del nodo de IA. Si un error aparece acá, copialo y ajustá el modelo o la API key.
-        </p>
-      </div>
+    <>
+      <SegmentadoIos
+        etiqueta="Qué ejecuciones mostrar"
+        className="mt-3 lg:mt-2"
+        valor={filter}
+        onCambio={setFilter}
+        opciones={[
+          { valor: 'all', texto: `Todas (${logs.length})` },
+          { valor: 'error', texto: `Errores (${errorCount})` },
+        ]}
+      />
 
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1 bg-muted p-1 rounded-lg">
-          <button
-            onClick={() => setFilter('all')}
-            className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${filter === 'all' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-            Todas <span className="opacity-60">({logs.length})</span>
-          </button>
-          <button
-            onClick={() => setFilter('error')}
-            className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${filter === 'error' ? 'bg-red-500/15 text-red-300' : 'text-muted-foreground hover:text-foreground'}`}>
-            Errores <span className="opacity-60">({errorCount})</span>
-          </button>
-        </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-md hover:bg-accent/50 transition-colors">
-          <RefreshCw className={`size-3 ${loading ? 'animate-spin' : ''}`} /> Actualizar
-        </button>
-      </div>
-
-      {visible.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
-          <Bot className="mb-2 size-8 opacity-30" />
-          {filter === 'error' ? (
-            <p className="flex items-center gap-1.5 text-xs">
-              Sin errores recientes
-              <Sparkles aria-hidden className="size-3.5 text-emerald-400" />
-            </p>
-          ) : (
-            <p className="text-xs">Todavía no hay ejecuciones de IA</p>
-          )}
-        </div>
-      )}
-
-      <div className="space-y-1.5">
-        {visible.map(log => {
-          const isOpen = expanded === log.id
-          const isError = log.status === 'error' || log.used_fallback
-          return (
-            <div
+      {lectura.cargando && logs.length === 0 ? (
+        <CargandoIos texto="Leyendo el registro…" />
+      ) : visible.length === 0 ? (
+        <VacioIos
+          icono={Bot}
+          titulo={
+            lectura.error && logs.length === 0
+              ? 'No pudimos leer el registro'
+              : filter === 'error' ? 'Sin errores recientes' : 'Todavía no hay ejecuciones'
+          }
+          texto={
+            lectura.error && logs.length === 0
+              ? lectura.error
+              : filter === 'error'
+                ? 'Las últimas ejecuciones de la IA salieron bien.'
+                : 'Cuando un paso de IA de una automatización responda, aparece acá.'
+          }
+        >
+          <BotonPildoraIos icono={RefreshCw} onClick={actualizar}>Actualizar</BotonPildoraIos>
+        </VacioIos>
+      ) : (
+        <GrupoIos
+          titulo="Últimas 50 ejecuciones"
+          accion={
+            <button
+              type="button"
+              onClick={actualizar}
+              disabled={lectura.cargando}
+              className="-mr-2.5 flex h-11 items-center gap-1.5 rounded-full px-2.5 text-[15px] font-medium text-[var(--wa-accent)] outline-none transition-colors active:bg-white/10 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60 lg:h-8 lg:text-[13px] lg:hover:bg-white/[0.07]"
+            >
+              <RefreshCw aria-hidden className={cn('size-4', lectura.cargando && 'animate-spin')} />
+              Actualizar
+            </button>
+          }
+          pie="Si aparece un error, revisá el modelo o la API key en Configuración → IA."
+        >
+          {visible.map((log) => (
+            <CeldaEjecucion
               key={log.id}
-              className={`rounded-lg border transition-all duration-200 overflow-hidden ${isError ? 'border-red-500/30 bg-red-500/5' : 'border bg-card'}`}>
-              <button
-                onClick={() => setExpanded(isOpen ? null : log.id)}
-                className="w-full flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-accent/30 transition-colors">
-                <div className="shrink-0 mt-0.5">
-                  {isError
-                    ? <AlertCircle className="size-4 text-red-400" />
-                    : <CheckCircle2 className="size-4 text-emerald-400" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-mono text-foreground truncate">{log.model ?? 'modelo desconocido'}</span>
-                    {log.used_fallback && (
-                      <span className="text-[9px] bg-orange-500/15 text-orange-300 px-1.5 py-px rounded font-medium">FALLBACK</span>
-                    )}
-                    <span className="ml-auto text-[10px] text-muted-foreground shrink-0">{formatRelativeDate(log.executed_at)}</span>
-                  </div>
-                  {(log.client_name || log.client_phone) && (
-                    <div className="flex items-center gap-1 mt-0.5 text-[10px] text-muted-foreground">
-                      <User className="size-2.5" />
-                      <span className="truncate">{log.client_name ?? log.client_phone}</span>
-                    </div>
-                  )}
-                  <p className={`text-[11px] mt-1 line-clamp-1 ${isError ? 'text-red-300' : 'text-muted-foreground'}`}>
-                    {log.error_message ?? log.response_preview ?? '(sin contenido)'}
-                  </p>
-                </div>
-                <ChevronDown className={`size-3.5 text-muted-foreground shrink-0 mt-0.5 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
-              </button>
+              log={log}
+              dia={dia}
+              abierta={expanded === log.id}
+              onAlternar={() => setExpanded((e) => (e === log.id ? null : log.id))}
+            />
+          ))}
+        </GrupoIos>
+      )}
+    </>
+  )
+}
 
-              <div
-                className={`grid transition-all duration-200 ease-out ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
-                <div className="overflow-hidden">
-                  <div className="px-3 pb-3 pt-1 space-y-2 border-t border/50">
-                    {log.error_message && (
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-red-300/80 mb-1">Error</p>
-                        <pre className="text-[11px] text-red-200 bg-red-950/40 border border-red-500/20 rounded p-2 whitespace-pre-wrap break-all font-mono">
-                          {log.error_message}
-                        </pre>
-                      </div>
-                    )}
-                    {log.response_preview && (
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Respuesta (preview)</p>
-                        <p className="text-[11px] text-foreground bg-muted rounded p-2 whitespace-pre-wrap">{log.response_preview}</p>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-3 text-[10px] text-muted-foreground pt-1">
-                      <span>Modelo: <code className="text-foreground">{log.model ?? '—'}</code></span>
-                      <span>Estado: <code className={isError ? 'text-red-300' : 'text-emerald-300'}>{log.status}</code></span>
-                    </div>
-                  </div>
-                </div>
+function CeldaEjecucion({
+  log,
+  dia,
+  abierta,
+  onAlternar,
+}: {
+  log: AiExecutionLog
+  /** El día del navegador (useDiaLocal): null mientras no se sabe. */
+  dia: string | null
+  abierta: boolean
+  onAlternar: () => void
+}) {
+  const error = conError(log)
+  const cliente = log.client_name ?? (log.client_phone ? (formatearTelefonoAr(log.client_phone) ?? log.client_phone) : null)
+  const modelo = log.model ? (NOMBRE_DEL_MODELO.get(log.model) ?? log.model) : 'Modelo desconocido'
+  return (
+    <li className={cn(CLASE_CELDA, 'items-start')}>
+      <IconoCeldaIos icono={error ? AlertCircle : CheckCircle2} color={error ? 'rojo' : 'verde'} className="mt-3 lg:mt-2.5" />
+      <div className={cn(CLASE_CUERPO_BOTON, 'flex-col items-stretch gap-0')}>
+        <button type="button" aria-expanded={abierta} onClick={onAlternar} className={cn(CLASE_BOTON_CELDA, 'py-3 lg:py-2.5')}>
+          <span className="flex items-baseline gap-3">
+            <span className={cn(TEXTO_PRINCIPAL, 'min-w-0 flex-1 truncate font-semibold')}>{modelo}</span>
+            {dia && <span className={cn(TEXTO_TERCIARIO, 'shrink-0 tabular-nums')}>{formatRelativeDate(log.executed_at)}</span>}
+            <ChevronDown
+              aria-hidden
+              className={cn('size-4 shrink-0 self-center text-[var(--wa-text-2)] transition-transform duration-200', abierta && 'rotate-180')}
+            />
+          </span>
+          {(cliente || log.used_fallback) && (
+            <span className={cn(TEXTO_TERCIARIO, 'block truncate')}>
+              {cliente}
+              {cliente && log.used_fallback && ' · '}
+              {log.used_fallback && <span className="text-[#ffa733]">Usó el respaldo</span>}
+            </span>
+          )}
+          <span className={cn(TEXTO_SECUNDARIO, 'mt-0.5 block', abierta ? 'whitespace-pre-wrap' : 'line-clamp-2', error && 'text-[#ff8a80]')}>
+            {log.error_message ?? log.response_preview ?? '(sin contenido)'}
+          </span>
+        </button>
+        {abierta && (
+          <div className="space-y-2 pb-3 lg:pb-2.5">
+            {log.error_message && log.response_preview && (
+              <div>
+                <p className={TEXTO_TERCIARIO}>Lo que respondió</p>
+                <p className="mt-1 whitespace-pre-wrap rounded-[12px] bg-[var(--wa-raised-2)] px-3 py-2 text-[15px] leading-5 text-[var(--wa-text)] lg:rounded-md lg:text-[13px] lg:leading-[18px]">
+                  {log.response_preview}
+                </p>
               </div>
-            </div>
-          )
-        })}
+            )}
+            <p className={TEXTO_TERCIARIO}>
+              Estado: <span className={error ? 'text-[#ff8a80]' : 'text-[var(--wa-accent)]'}>{log.status}</span>
+            </p>
+          </div>
+        )}
       </div>
-    </div>
+    </li>
   )
 }

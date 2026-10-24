@@ -12,8 +12,12 @@
 // La columna la arma mensajeria-client: el contenedor de las columnas es
 // `relative`, define --ancho-secciones y --ancho-lista (de dónde arranca la
 // conversación) y es el @container/columnas. Este panel va después del chat.
+//
+// Al cerrarse, el foco vuelve a lo que lo abrió («Perfil», el nombre del
+// encabezado): en el celular lo hace el gesto de volver (es una capa), en la
+// compu el efecto de acá (foco-de-vuelta.ts).
 
-import { useEffect, useRef, type ComponentType, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, type ComponentType, type KeyboardEvent, type ReactNode } from 'react'
 import { Archive, CalendarClock, Check, CheckCircle2, ChevronLeft, Instagram, RotateCcw, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useEsCelular } from '@/hooks/use-es-celular'
@@ -21,7 +25,9 @@ import { Avatar } from '../shared/avatar'
 import { StatusBadge } from '../shared/icons'
 import { displayName, formatCurrency } from '../shared/helpers'
 import { useMensajeria } from '../shared/mensajeria-context'
+import type { ClienteInicial } from '../dialogs/schedule-dialog'
 import { useDeslizarParaVolver } from './deslizar-para-volver'
+import { devolverFoco, origenDelFoco } from './foco-de-vuelta'
 import { subtituloDeContacto } from './contacto'
 
 export function ClientProfile({
@@ -29,10 +35,11 @@ export function ClientProfile({
 }: {
   /**
    * Si se pasa, aparece «Programar» entre las acciones: abre el diálogo de
-   * mensajes programados con este cliente. Sólo con una ficha de cliente
-   * (una conversación sin client_id no tiene a quién programarle).
+   * mensajes programados con este cliente (con su foto, si tiene). Sólo con
+   * una ficha de cliente (una conversación sin client_id no tiene a quién
+   * programarle).
    */
-  onProgramar?: (cliente: { id: string; nombre: string }) => void
+  onProgramar?: (cliente: ClienteInicial) => void
 }) {
   const {
     activeConv, showProfile, setShowProfile,
@@ -46,6 +53,8 @@ export function ClientProfile({
   const cerrarRef = useRef<HTMLButtonElement>(null)
 
   // En el celular, volver al chat deslizando desde el borde (o con «‹», animado).
+  // Es una capa: una entrada del historial encima de la del chat, así el
+  // «atrás» del sistema vuelve al chat (deslizar-para-volver.ts).
   const volverAnimado = useDeslizarParaVolver(
     capaRef,
     esCelular && showProfile && !!activeConv,
@@ -60,6 +69,15 @@ export function ClientProfile({
     ;(esCelular ? volverRef : cerrarRef).current?.focus({ preventScroll: true })
   }, [showProfile, esCelular])
 
+  // En la compu, al cerrar, el foco vuelve a lo que lo abrió. De layout: anota
+  // el origen antes de que el efecto de arriba mueva el foco al panel.
+  useLayoutEffect(() => {
+    const panel = capaRef.current
+    if (!showProfile || esCelular || !panel) return
+    const origen = origenDelFoco(panel)
+    return () => devolverFoco(origen, panel)
+  }, [showProfile, esCelular])
+
   if (!showProfile || !activeConv) return null
 
   const nombre = displayName(activeConv.client?.name || activeConv.platform_user_name || activeConv.platform_user_id, activeConv.channel?.platform)
@@ -67,8 +85,13 @@ export function ClientProfile({
   const notas = activeConv.client?.notes?.trim()
   const cerrar = () => setShowProfile(false)
   const clienteId = activeConv.client_id
+  // Con la foto que se ve arriba: «Para» la muestra en vez de las iniciales.
   const programar = onProgramar && clienteId
-    ? () => onProgramar({ id: clienteId, nombre: activeConv.client?.name?.trim() || nombre })
+    ? () => onProgramar({
+        id: clienteId,
+        nombre: activeConv.client?.name?.trim() || nombre,
+        foto: activeConv.platform_user_avatar ?? null,
+      })
     : null
   // En la compu, Escape con el foco adentro cierra el panel.
   const alTeclear = (e: KeyboardEvent<HTMLElement>) => {
@@ -80,15 +103,20 @@ export function ClientProfile({
       ref={capaRef}
       // El shell cambia de sección deslizando de costado: acá no.
       data-sin-swipe=""
+      // El nombre de su entrada del historial (#/chat/perfil).
+      data-capa="perfil"
       aria-label="Info. del contacto"
       onKeyDown={alTeclear}
       className={cn(
         // Celular: pantalla entera, entra desde la derecha como en iOS; lo de
-        // abajo se oscurece mientras entra y mientras se desliza (wa-capa).
-        'wa-capa fixed inset-0 z-[60] flex min-h-0 flex-col bg-[var(--wa-bg)] max-lg:touch-pan-y max-lg:touch-pinch-zoom max-lg:duration-300 max-lg:ease-out max-lg:motion-safe:animate-in max-lg:motion-safe:slide-in-from-right',
+        // abajo se oscurece mientras entra y mientras se desliza (wa-capa). De
+        // la duración, sólo la de la animación de entrada: con duration-*, que
+        // fija transition-duration, el panel quedaba con `transition: all` y
+        // lo que el gesto le saca al terminar (el transform) volvía animado.
+        'wa-capa fixed inset-0 z-[60] flex min-h-0 flex-col bg-[var(--wa-bg)] max-lg:touch-pan-y max-lg:touch-pinch-zoom max-lg:animation-duration-300 max-lg:ease-out max-lg:motion-safe:animate-in max-lg:motion-safe:slide-in-from-right',
         // Compu sin lugar: encima de la conversación, exactamente sobre ella
         // (arranca donde terminan la columna de secciones y la lista).
-        'lg:absolute lg:inset-y-0 lg:right-0 lg:left-[calc(var(--ancho-secciones)+var(--ancho-lista))] lg:z-30 lg:duration-200 lg:motion-safe:animate-in lg:motion-safe:fade-in-0',
+        'lg:absolute lg:inset-y-0 lg:right-0 lg:left-[calc(var(--ancho-secciones)+var(--ancho-lista))] lg:z-30 lg:animation-duration-200 lg:motion-safe:animate-in lg:motion-safe:fade-in-0',
         // Compu con lugar (las columnas desde 1500 px: la conversación queda
         // en 550 px o más): una columna más, al lado.
         '@min-[1500px]/columnas:static @min-[1500px]/columnas:z-auto @min-[1500px]/columnas:w-[360px] @min-[1500px]/columnas:shrink-0 @min-[1500px]/columnas:border-l @min-[1500px]/columnas:border-[var(--wa-divider)]',
@@ -96,11 +124,13 @@ export function ClientProfile({
     >
       {/* En la compu, del alto del encabezado del chat y de la lista (h-14). */}
       <header className="relative flex h-14 shrink-0 items-center justify-center border-b-[0.5px] border-[var(--wa-divider)] bg-[var(--wa-bar)] px-12 backdrop-blur-xl backdrop-saturate-150 lg:justify-start lg:gap-3 lg:border-b lg:px-4">
+        {/* Con el teclado, el anillo verde de foco del resto de Mensajería (sin
+            él se veía el azul del sistema, cortado contra el borde). */}
         <button
           ref={volverRef}
           type="button"
           onClick={volverAnimado}
-          className="absolute left-0.5 top-1/2 flex h-11 -translate-y-1/2 items-center pr-2 text-[var(--wa-accent)] transition-opacity active:opacity-50 lg:hidden"
+          className="absolute left-0.5 top-1/2 flex h-11 -translate-y-1/2 items-center rounded-lg pr-2 text-[var(--wa-accent)] outline-none transition-opacity [-webkit-tap-highlight-color:transparent] active:opacity-50 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60 lg:hidden"
           aria-label="Volver al chat"
         >
           <ChevronLeft className="size-[30px]" strokeWidth={2.25} />
@@ -109,7 +139,7 @@ export function ClientProfile({
           ref={cerrarRef}
           type="button"
           onClick={cerrar}
-          className="hidden size-8 shrink-0 items-center justify-center rounded-full text-[var(--wa-text-2)] transition-colors hover:bg-[var(--wa-hover)] hover:text-[var(--wa-text)] lg:flex"
+          className="hidden size-8 shrink-0 items-center justify-center rounded-full text-[var(--wa-text-2)] outline-none transition-colors hover:bg-[var(--wa-hover)] hover:text-[var(--wa-text)] focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60 lg:flex"
           aria-label="Cerrar la info. del contacto"
           title="Cerrar"
         >

@@ -10,16 +10,25 @@
 // cancelar); abajo los últimos enviados o fallidos, del más nuevo al más viejo:
 // es lo que trae leerProgramados (src/lib/mensajeria/programados.ts). Al abrirse
 // la lista se vuelve a leer: el cron los manda mientras la pantalla está abierta.
+//
+// No es TODO lo programado: son los mensajes con canal de la org, o sea los que
+// se programan a mano, los de las difusiones y los avisos de turnos (la
+// confirmación, el recordatorio, la llegada y el turno liberado de la lista de
+// espera también llevan canal). Los de las automatizaciones de después del
+// corte (el pedido de reseña) se guardan sin canal y no aparecen: al
+// 23/oct/2026, en Monaco, 17.078 enviados y 291 fallidos. Mostrarlos o no lo
+// decide el dueño; mientras tanto la pantalla lo dice, abajo de todo.
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { CalendarClock, CalendarPlus, Clock, LayoutTemplate, RefreshCw, X } from 'lucide-react'
 import { obtenerProgramados } from '@/lib/actions/programados'
 import { cn } from '@/lib/utils'
 import { Avatar } from '../shared/avatar'
-import { formatFechaHora, nombreLegibleDePlantilla, plantillaDelMarcador } from '../shared/helpers'
+import { NOMBRE_DEL_ADJUNTO, formatFechaHora, nombreLegibleDePlantilla, plantillaDelMarcador } from '../shared/helpers'
 import { useMensajeria } from '../shared/mensajeria-context'
 import type { ScheduledWithRelations } from '../shared/types'
 import { BarraIos, CLASE_CAPA_IOS, useCapaIos } from '../navegacion/barra-ios'
+import { apretarAlTocar } from './apretado'
 
 const ESTADO: Record<string, { texto: string; clase: string }> = {
   sent: { texto: 'Enviado', clase: 'bg-[var(--wa-accent)]/15 text-[var(--wa-accent)]' },
@@ -63,6 +72,8 @@ export function VistaProgramados({ onVolver, onProgramar }: { onVolver: () => vo
     <section
       ref={capaRef}
       aria-label="Mensajes programados"
+      // El nombre de la capa en el historial (#/programados: historial-capas.ts).
+      data-capa="programados"
       // El shell cambia de sección deslizando de costado: acá no.
       data-sin-swipe=""
       className={cn(
@@ -78,11 +89,14 @@ export function VistaProgramados({ onVolver, onProgramar }: { onVolver: () => vo
         // La capa llega hasta el borde de abajo: que la rayita de inicio no tape el último.
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}
       >
-        {/* Como "Nuevo grupo" en la pantalla de chat nuevo de WhatsApp: una fila con el ícono verde. */}
+        {/* Como "Nuevo grupo" en la pantalla de chat nuevo de WhatsApp: una fila
+            con el ícono verde. Apretada con el dedo como las de la lista de
+            chats (apretado.ts): con :active quedaba gris mientras se scrolleaba. */}
         <button
           type="button"
           onClick={onProgramar}
-          className="flex w-full items-center gap-3 pl-4 text-left outline-none [-webkit-tap-highlight-color:transparent] transition-colors duration-100 active:bg-[var(--wa-hover)] focus-visible:bg-[var(--wa-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--wa-accent)] lg:mx-2 lg:mt-1 lg:w-[calc(100%-1rem)] lg:rounded-xl lg:pl-3 lg:hover:bg-[var(--wa-hover)]"
+          onPointerDown={apretarAlTocar}
+          className="flex w-full select-none items-center gap-3 pl-4 text-left outline-none [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] transition-colors duration-100 data-[apretada]:bg-[var(--wa-hover)] focus-visible:bg-[var(--wa-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--wa-accent)] lg:mx-2 lg:mt-1 lg:w-[calc(100%-1rem)] lg:rounded-xl lg:pl-3 lg:hover:bg-[var(--wa-hover)]"
         >
           <span className="flex size-13 shrink-0 items-center justify-center rounded-full bg-[var(--wa-accent)] text-[var(--wa-on-accent)] lg:size-12">
             <CalendarPlus aria-hidden className="size-6" strokeWidth={2} />
@@ -107,7 +121,7 @@ export function VistaProgramados({ onVolver, onProgramar }: { onVolver: () => vo
         )}
 
         {scheduled.length === 0 ? (
-          <div className="flex flex-col items-center px-8 pb-10 pt-16 text-center">
+          <div className="flex flex-col items-center px-8 pb-2 pt-16 text-center">
             <span className="flex size-16 items-center justify-center rounded-full bg-[var(--wa-field)]">
               <CalendarClock aria-hidden className="size-7 text-[var(--wa-text-2)]" strokeWidth={1.8} />
             </span>
@@ -134,6 +148,18 @@ export function VistaProgramados({ onVolver, onProgramar }: { onVolver: () => vo
             )}
           </>
         )}
+
+        {/* Qué entra en esta lista, como el pie de una tabla de iOS: no es todo
+            lo programado (ver arriba). */}
+        <p
+          className={cn(
+            'px-4 pb-2 pt-5 text-[13px] leading-[18px] text-[var(--wa-text-2)] lg:px-5 lg:text-[12px] lg:leading-4',
+            scheduled.length === 0 && 'mx-auto max-w-xs px-8 text-center lg:px-8',
+          )}
+        >
+          Acá ves los mensajes programados a mano, los de las difusiones y los avisos de turnos. Los que
+          salen solos después de cada corte (el pedido de reseña) no aparecen en esta lista.
+        </p>
       </div>
     </section>
   )
@@ -142,7 +168,9 @@ export function VistaProgramados({ onVolver, onProgramar }: { onVolver: () => vo
 function Grupo({ titulo, children }: { titulo: string; children: ReactNode }) {
   return (
     <section className="pt-4">
-      <h2 className="px-4 pb-1 text-[13px] font-semibold text-[var(--wa-text-2)] lg:px-5 lg:text-[12px]">{titulo}</h2>
+      <h2 className="select-none px-4 pb-1 text-[13px] font-semibold text-[var(--wa-text-2)] [-webkit-touch-callout:none] lg:px-5 lg:text-[12px]">
+        {titulo}
+      </h2>
       <ul>{children}</ul>
     </section>
   )
@@ -160,10 +188,12 @@ function FilaProgramado({
 }) {
   const estado = ESTADO[msg.status]
   const nombre = msg.client?.name || 'Cliente'
-  // Casi todos los de difusiones y reseñas salen con una plantilla y sin texto
-  // propio: se muestra cuál, legible ("Plantilla · resenia").
+  // Casi todos los de difusiones y turnos salen con una plantilla y sin texto
+  // propio: se muestra cuál, legible y con el ícono de plantilla, como en la
+  // lista de chats (el ícono ya dice qué es: sin "Plantilla · " adelante).
   const marcador = plantillaDelMarcador(msg.content)
   const plantilla = marcador ?? (msg.content ? null : msg.template_name ?? null)
+  const nombreDePlantilla = plantilla ? nombreLegibleDePlantilla(plantilla) : ''
   const texto = plantilla !== null ? null : msg.content
   return (
     <li className="flex gap-3 pl-4 lg:mx-2 lg:pl-3">
@@ -189,7 +219,14 @@ function FilaProgramado({
         {plantilla !== null ? (
           <p className="flex items-center gap-1.5 text-[15px] leading-5 text-[var(--wa-text-2)] lg:text-[14px]">
             <LayoutTemplate aria-hidden className="size-4 shrink-0" />
-            <span className="truncate">{plantilla ? `Plantilla · ${nombreLegibleDePlantilla(plantilla)}` : 'Plantilla'}</span>
+            {nombreDePlantilla ? (
+              <span className="truncate">
+                <span className="sr-only">{NOMBRE_DEL_ADJUNTO.template}: </span>
+                {nombreDePlantilla}
+              </span>
+            ) : (
+              <span className="truncate">{NOMBRE_DEL_ADJUNTO.template}</span>
+            )}
           </p>
         ) : texto ? (
           <p className="line-clamp-2 text-[15px] leading-5 text-[var(--wa-text-2)] lg:text-[14px]">{texto}</p>
@@ -206,7 +243,8 @@ function FilaProgramado({
             <button
               type="button"
               onClick={() => onCancelar(msg.id)}
-              className="-mr-1 flex h-8 items-center gap-1 rounded-full px-2.5 text-[14px] font-medium text-[var(--wa-danger)] outline-none transition-colors active:bg-[var(--wa-danger)]/15 focus-visible:ring-2 focus-visible:ring-[var(--wa-danger)]/50 lg:h-7 lg:text-[13px] lg:hover:bg-[var(--wa-danger)]/10"
+              onPointerDown={apretarAlTocar}
+              className="-mr-1 flex h-8 select-none items-center gap-1 rounded-full px-2.5 text-[14px] font-medium text-[var(--wa-danger)] outline-none transition-colors data-[apretada]:bg-[var(--wa-danger)]/15 focus-visible:ring-2 focus-visible:ring-[var(--wa-danger)]/50 lg:h-7 lg:text-[13px] lg:hover:bg-[var(--wa-danger)]/10"
             >
               <X aria-hidden className="size-4" />
               Cancelar

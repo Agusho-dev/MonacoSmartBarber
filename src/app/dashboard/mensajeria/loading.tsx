@@ -25,19 +25,20 @@ export default function MensajeriaLoading() {
       <div
         className={cn(
           'flex min-h-0 min-w-0 flex-1',
-          '[--ancho-secciones:0px] lg:[--ancho-secciones:72px] lg:@min-[1180px]/columnas:[--ancho-secciones:220px]',
+          '[--ancho-secciones:0px] lg:[--ancho-secciones:72px] lg:@min-[1600px]/columnas:[--ancho-secciones:220px]',
           'lg:[--ancho-lista:340px] lg:@min-[1000px]/columnas:[--ancho-lista:380px]',
         )}
       >
-        {/* Columna de secciones: riel de íconos, o lista con etiquetas cuando hay lugar. */}
-        <div className="hidden w-[var(--ancho-secciones)] shrink-0 flex-col gap-1 border-r border-[var(--wa-divider)] bg-[var(--wa-sidebar)] px-1 py-3 lg:flex @min-[1180px]/columnas:gap-0.5 @min-[1180px]/columnas:px-2.5">
+        {/* Columna de secciones: el riel de íconos, o la lista con etiquetas en
+            las pantallas grandes (columnas de 1600 px o más). */}
+        <div className="hidden w-[var(--ancho-secciones)] shrink-0 flex-col gap-1 border-r border-[var(--wa-divider)] bg-[var(--wa-sidebar)] px-1 py-3 lg:flex @min-[1600px]/columnas:gap-0.5 @min-[1600px]/columnas:px-2.5">
           {Array.from({ length: 7 }).map((_, i) => (
             <div
               key={i}
-              className="flex h-[52px] flex-col items-center justify-center gap-1.5 @min-[1180px]/columnas:h-10 @min-[1180px]/columnas:flex-row @min-[1180px]/columnas:justify-start @min-[1180px]/columnas:gap-3 @min-[1180px]/columnas:px-3"
+              className="flex h-[52px] flex-col items-center justify-center gap-1.5 @min-[1600px]/columnas:h-10 @min-[1600px]/columnas:flex-row @min-[1600px]/columnas:justify-start @min-[1600px]/columnas:gap-3 @min-[1600px]/columnas:px-3"
             >
-              <Hueso className="size-[22px] rounded-md @min-[1180px]/columnas:size-5" />
-              <Hueso className="h-2 w-10 rounded-full @min-[1180px]/columnas:h-3 @min-[1180px]/columnas:w-24" />
+              <Hueso className="size-[22px] rounded-md @min-[1600px]/columnas:size-5" />
+              <Hueso className="h-2 w-10 rounded-full @min-[1600px]/columnas:h-3 @min-[1600px]/columnas:w-24" />
             </div>
           ))}
         </div>

@@ -11,6 +11,17 @@
 // Antes la página pedía `.order('scheduled_for', asc).limit(100)`, o sea los
 // 100 MÁS VIEJOS. Con 208 filas en Monaco (oct/2026) eran del 08/04 al 27/07 y
 // nada programado después aparecía nunca, tampoco al recargar.
+//
+// Programados NO es todo lo programado: filtra por los canales de la org. Los
+// que se programan a mano (scheduleMessage*) y las difusiones guardan el canal;
+// los avisos de turnos y de la lista de espera también, cuando la org tiene
+// canal de WhatsApp. Las automatizaciones de después del corte (completeService
+// en queue.ts: el pedido de reseña) se guardan con channel_id NULL y no
+// aparecen: al 23/oct/2026, en Monaco, 17.078 enviados y 291 fallidos sin
+// canal, contra 48 enviados y 40 fallidos con canal. Mostrarlos o no lo decide
+// el dueño (sería sumar `and(channel_id.is.null,organization_id.eq.<org>)` al
+// filtro: scheduled_messages tiene organization_id). Mientras tanto la vista
+// dice qué muestra.
 // =============================================================================
 
 import 'server-only'
@@ -78,17 +89,20 @@ const SELECT_PROGRAMADOS = `
   created_by_staff:staff(full_name)
 `
 
-// TODOS los pendientes: son los que alguien todavía puede cancelar. El .limit
-// es explícito y alto porque PostgREST corta en silencio en 1000 filas
+// Todos los pendientes de esos canales: son los que alguien todavía puede
+// cancelar (los automáticos sin canal no están: ver arriba). El .limit es
+// explícito y alto porque PostgREST corta en silencio en 1000 filas
 // (max-rows); en Monaco hay 0 a 30 pendientes a la vez.
 const TOPE_PENDIENTES = 500
 // De lo que ya salió (o falló), los últimos: el historial reciente.
 const TOPE_HISTORIAL = 100
 
 /**
- * Los mensajes programados de esos canales: todos los pendientes (del más
- * próximo al más lejano) y después los últimos enviados o fallidos (del más
- * nuevo al más viejo). Ese orden es el de la lista.
+ * Los mensajes programados de esos canales (los programados a mano, las
+ * difusiones y los avisos de turnos; no los automáticos de después del corte,
+ * que van sin canal):
+ * todos los pendientes (del más próximo al más lejano) y después los últimos
+ * enviados o fallidos (del más nuevo al más viejo). Ese orden es el de la lista.
  */
 export async function leerProgramados(
   supabase: SupabaseClient,

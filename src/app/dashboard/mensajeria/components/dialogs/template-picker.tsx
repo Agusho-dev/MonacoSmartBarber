@@ -1,13 +1,20 @@
 'use client'
 
 // Elegir una plantilla de WhatsApp para mandar (desde el chat, fuera de la
-// ventana de 24 h). Con los colores de WhatsApp: el diálogo va en un portal
-// fuera de .wa-scope y la lleva de nuevo para que los --wa-* resuelvan.
+// ventana de 24 h), con la hoja de WhatsApp (hoja-whatsapp.tsx): en el celular,
+// la de iOS de pantalla entera; en la compu, el diálogo de la Mac. Cada
+// plantilla es una celda con su nombre legible, su texto y «Enviar».
 
 import { FileText, Loader2, RefreshCw } from 'lucide-react'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { nombreLegibleDePlantilla } from '../shared/helpers'
+import { cn } from '@/lib/utils'
 import { useMensajeria } from '../shared/mensajeria-context'
+import { HojaWhatsApp } from './hoja-whatsapp'
+import {
+  BotonPildoraIos, CargandoIos, CLASE_CELDA, CLASE_CUERPO, GrupoIos, TEXTO_PRINCIPAL, TEXTO_SECUNDARIO, TEXTO_TERCIARIO, VacioIos,
+  nombreDePlantilla,
+} from '../navegacion/lista-ios'
+
+const CATEGORIA: Record<string, string> = { MARKETING: 'Marketing', UTILITY: 'Utilidad', AUTHENTICATION: 'Autenticación' }
 
 export function TemplatePicker() {
   const {
@@ -16,79 +23,67 @@ export function TemplatePicker() {
     syncingTemplates, sendingTemplate,
   } = useMensajeria()
 
-  return (
-    <Dialog open={showTemplateDialog} onOpenChange={setShowTemplateDialog}>
-      <DialogContent className="wa-scope max-w-md gap-3 border-0 bg-[var(--wa-raised)] text-[var(--wa-text)] shadow-[0_24px_70px_-12px_rgba(0,0,0,0.8),0_0_0_0.5px_rgba(255,255,255,0.08)] sm:rounded-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-[17px] text-[var(--wa-text)] lg:text-[16px]">
-            <FileText aria-hidden className="size-4 text-[var(--wa-accent)]" />
-            Enviar plantilla de WhatsApp
-          </DialogTitle>
-          <DialogDescription className="text-[13px] text-[var(--wa-text-2)]">
-            Las plantillas aprobadas por Meta: se pueden mandar aunque el cliente no haya escrito en las últimas 24 horas.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-[12px] font-semibold text-[var(--wa-text-2)]">Aprobadas</p>
-            <button
-              type="button"
-              onClick={handleSyncTemplates}
-              disabled={syncingTemplates}
-              className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[13px] font-medium text-[var(--wa-accent)] outline-none transition-colors hover:bg-[var(--wa-hover)] disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60"
-            >
-              <RefreshCw aria-hidden className={`size-3.5 ${syncingTemplates ? 'animate-spin' : ''}`} />
-              Sincronizar
-            </button>
-          </div>
+  const sincronizar = (
+    <button
+      type="button"
+      onClick={handleSyncTemplates}
+      disabled={syncingTemplates}
+      className="-mr-2.5 flex h-11 items-center gap-1.5 rounded-full px-2.5 text-[15px] font-medium text-[var(--wa-accent)] outline-none transition-colors active:bg-white/10 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60 lg:h-8 lg:text-[13px] lg:hover:bg-white/[0.07]"
+    >
+      <RefreshCw aria-hidden className={cn('size-4', syncingTemplates && 'animate-spin')} />
+      Sincronizar
+    </button>
+  )
 
-          {syncingTemplates && waTemplates.length === 0 ? (
-            <div role="status" className="flex justify-center py-8 text-[var(--wa-text-2)]">
-              <Loader2 aria-hidden className="size-5 animate-spin" />
-              <span className="sr-only">Sincronizando plantillas</span>
-            </div>
-          ) : waTemplates.length === 0 ? (
-            <div className="py-8 text-center">
-              <FileText aria-hidden className="mx-auto mb-2 size-8 text-[var(--wa-text-3)]" />
-              <p className="text-[13px] text-[var(--wa-text)]">No se encontraron plantillas aprobadas</p>
-              <p className="mt-1 text-[12px] text-[var(--wa-text-2)]">Creá una en Meta Business y tocá Sincronizar.</p>
-            </div>
-          ) : (
-            <div className="wa-scroll max-h-[300px] space-y-2 overflow-y-auto">
-              {waTemplates.map((tpl) => (
-                <div key={tpl.id} className="rounded-xl bg-[var(--wa-field)] p-3">
-                  <div className="flex items-start justify-between gap-2">
+  return (
+    <HojaWhatsApp
+      open={showTemplateDialog}
+      onOpenChange={setShowTemplateDialog}
+      titulo="Plantillas"
+      descripcion="Las plantillas aprobadas por Meta: se pueden mandar aunque el cliente no haya escrito en las últimas 24 horas."
+    >
+      <div className="wa-scroll min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 pb-[calc(env(safe-area-inset-bottom,0px)_+_1.5rem)] lg:px-5 lg:pb-5 lg:pt-4">
+        {syncingTemplates && waTemplates.length === 0 ? (
+          <CargandoIos texto="Sincronizando las plantillas…" />
+        ) : waTemplates.length === 0 ? (
+          <VacioIos icono={FileText} titulo="No hay plantillas aprobadas" texto="Creá una en Meta Business y tocá Sincronizar.">
+            <BotonPildoraIos icono={RefreshCw} onClick={handleSyncTemplates}>Sincronizar</BotonPildoraIos>
+          </VacioIos>
+        ) : (
+          <GrupoIos
+            titulo="Aprobadas"
+            accion={sincronizar}
+            pie="Se pueden mandar aunque el cliente no haya escrito en las últimas 24 horas."
+          >
+            {waTemplates.map((tpl) => {
+              const cuerpo = tpl.components?.find((c) => c.type === 'BODY' && c.text)?.text
+              const nombre = nombreDePlantilla(tpl.name)
+              return (
+                <li key={tpl.id} className={cn(CLASE_CELDA, 'items-start')}>
+                  <div className={cn(CLASE_CUERPO, 'items-start gap-3 py-3 lg:py-2.5')}>
                     <div className="min-w-0 flex-1">
-                      <p className="text-[14px] font-medium text-[var(--wa-text)]">{nombreLegibleDePlantilla(tpl.name)}</p>
-                      <div className="mt-1 flex items-center gap-1.5">
-                        <span className="rounded-full bg-[var(--wa-accent)]/15 px-1.5 py-0.5 text-[10.5px] font-medium text-[var(--wa-accent)]">
-                          {tpl.language}
-                        </span>
-                        <span className="rounded-full bg-sky-400/15 px-1.5 py-0.5 text-[10.5px] font-medium text-sky-300">
-                          {tpl.category}
-                        </span>
-                      </div>
-                      {tpl.components?.map((comp: { type?: string; text?: string }, i: number) => (
-                        comp.type === 'BODY' && comp.text ? (
-                          <p key={i} className="mt-1.5 line-clamp-3 text-[12px] leading-snug text-[var(--wa-text-2)]">{comp.text}</p>
-                        ) : null
-                      ))}
+                      <p className={cn(TEXTO_PRINCIPAL, 'truncate font-semibold')}>{nombre}</p>
+                      <p className={TEXTO_TERCIARIO}>
+                        {[tpl.language, CATEGORIA[tpl.category?.toUpperCase()] ?? tpl.category].filter(Boolean).join(' · ')}
+                      </p>
+                      {cuerpo && <p className={cn(TEXTO_SECUNDARIO, 'mt-1 line-clamp-3')}>{cuerpo}</p>}
                     </div>
                     <button
                       type="button"
                       onClick={() => handleSendTemplate(tpl)}
                       disabled={sendingTemplate}
-                      className="shrink-0 rounded-full bg-[var(--wa-accent)] px-3.5 py-1.5 text-[13px] font-semibold text-[var(--wa-on-accent)] outline-none transition-colors hover:bg-[var(--wa-accent-hover)] disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--wa-field)]"
+                      aria-label={`Enviar la plantilla «${nombre}»`}
+                      className="flex h-11 shrink-0 items-center rounded-full bg-[var(--wa-accent)] px-4 text-[15px] font-semibold text-[var(--wa-on-accent)] outline-none transition-colors active:bg-[var(--wa-accent-hover)] disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--wa-raised)] lg:h-8 lg:px-3.5 lg:text-[13px] lg:hover:bg-[var(--wa-accent-hover)]"
                     >
                       {sendingTemplate ? <Loader2 aria-label="Enviando" className="size-4 animate-spin" /> : 'Enviar'}
                     </button>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+                </li>
+              )
+            })}
+          </GrupoIos>
+        )}
+      </div>
+    </HojaWhatsApp>
   )
 }

@@ -1,6 +1,6 @@
 // Las secciones de Mensajería y cómo se nombran en cada lugar: la columna de
 // la compu (riel de íconos, o lista con etiquetas cuando las columnas miden
-// 1180 px o más), el menú "…" del celular y la barra de iOS de cada pantalla.
+// 1600 px o más), el menú "…" del celular y la barra de iOS de cada pantalla.
 //
 // "Chats" y "Programados" son dos vistas de la sección inbox (la lista de
 // chats y la de mensajes programados, `inboxTab` en el contexto); las demás
@@ -28,7 +28,10 @@ export interface ItemSeccion {
 export const ITEMS_SECCIONES: readonly ItemSeccion[] = [
   { destino: 'chats', etiqueta: 'Chats', corta: 'Chats', titulo: 'Chats', icono: MessageSquare },
   { destino: 'broadcasts', etiqueta: 'Difusiones', corta: 'Difusiones', titulo: 'Difusiones', icono: Megaphone },
-  { destino: 'automations', etiqueta: 'Workflows', corta: 'Workflows', titulo: 'Workflows', icono: Zap },
+  // «Automatizaciones» en todo lo que se ve (23/oct/2026): convivían
+  // «Workflows», «Automatizaciones» y «Workflows de automatización». En el riel
+  // de 68 px, la palabra entera no entra a 10 px.
+  { destino: 'automations', etiqueta: 'Automatizaciones', corta: 'Automatiz.', titulo: 'Automatizaciones', icono: Zap },
   { destino: 'alerts', etiqueta: 'Alertas', corta: 'Alertas', titulo: 'Alertas', icono: Bell },
   { destino: 'casos', etiqueta: 'Casos', corta: 'Casos', titulo: 'Casos', icono: Frown },
   { destino: 'quick-replies', etiqueta: 'Respuestas rápidas', corta: 'Rápidas', titulo: 'Respuestas rápidas', icono: MessageCircle },

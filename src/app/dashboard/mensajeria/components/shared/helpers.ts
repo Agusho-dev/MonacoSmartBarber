@@ -102,8 +102,10 @@ export const TAG_COLORS = [
 // Cuando una plantilla sale sin su texto renderizado, el envío guarda en
 // `messages.content` (y en `scheduled_messages`) el marcador "[Template: nombre]"
 // (whatsapp-meta.ts, workflow-engine.ts, rrhh.ts, process-scheduled-messages).
-// Es un dato interno: en pantalla va "Plantilla · nombre", con el nombre de Meta
-// legible. Lo usan la lista de chats, Programados y la burbuja del chat.
+// Es un dato interno y nunca se muestra crudo: va el nombre de Meta legible
+// ("recordatorio turno"). En la lista de chats y en Programados, con el ícono
+// de plantilla al lado (el ícono ya dice qué es); en la burbuja del chat,
+// "Plantilla · nombre".
 
 const MARCADOR_PLANTILLA = /^\[Template:\s*([^\]]*?)\s*\]$/
 
@@ -146,9 +148,30 @@ export function lastMessageMediaKind(
 }
 
 /**
+ * Cómo se llama cada tipo de adjunto: el texto de la vista previa cuando no hay
+ * otro (una foto sin epígrafe) y lo que lee el lector de pantalla en lugar del
+ * ícono (fila-chat.tsx).
+ */
+export const NOMBRE_DEL_ADJUNTO: Record<LastMessageMediaKind, string> = {
+  image: 'Foto',
+  video: 'Video',
+  audio: 'Mensaje de voz',
+  document: 'Documento',
+  template: 'Plantilla',
+  sticker: 'Sticker',
+  location: 'Ubicación',
+}
+
+/**
  * Devuelve siempre un preview del último mensaje, incluso cuando el content es null
  * (ej: imágenes sin caption, audios, templates). Nunca devuelve string vacío.
  * Sin emojis: el ícono lo pone la lista con lucide (ver lastMessageMediaKind).
+ *
+ * Como WhatsApp, el ícono y el texto, sin repetir el tipo (23/oct/2026): una
+ * foto con epígrafe es el epígrafe, un documento es su nombre, una plantilla es
+ * su texto o su nombre legible. Antes iba "Plantilla · resenia" o
+ * "Documento · Comprobante.pdf" AL LADO del ícono, que ya decía lo mismo. Sin
+ * otro texto va el nombre del tipo (NOMBRE_DEL_ADJUNTO: "Foto", "Documento").
  */
 export function formatLastMessagePreview(
   msg: { content: string | null; direction: string; content_type: string } | undefined | null,
@@ -158,18 +181,13 @@ export function formatLastMessagePreview(
 
   const content = (msg.content ?? '').trim()
   const plantilla = plantillaDelMarcador(content)
-  if (plantilla !== null) return plantilla ? `Plantilla · ${nombreLegibleDePlantilla(plantilla)}` : 'Plantilla'
+  if (plantilla !== null) return nombreLegibleDePlantilla(plantilla) || NOMBRE_DEL_ADJUNTO.template
 
-  switch (msg.content_type) {
-    case 'image':    return `Foto${content ? ` · ${content}` : ''}`
-    case 'video':    return `Video${content ? ` · ${content}` : ''}`
-    case 'audio':    return 'Mensaje de voz'
-    case 'document': return `Documento${content ? ` · ${content}` : ''}`
-    case 'template': return `Plantilla${content ? ` · ${content}` : ''}`
-    case 'sticker':  return 'Sticker'
-    case 'location': return 'Ubicación'
-    default:         return content || '(mensaje sin contenido)'
-  }
+  const tipo = lastMessageMediaKind(msg)
+  // De la nota de voz, el sticker y la ubicación no hay texto que mostrar.
+  if (tipo === 'audio' || tipo === 'sticker' || tipo === 'location') return NOMBRE_DEL_ADJUNTO[tipo]
+  if (tipo) return content || NOMBRE_DEL_ADJUNTO[tipo]
+  return content || '(mensaje sin contenido)'
 }
 
 /**

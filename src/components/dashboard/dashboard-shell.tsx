@@ -111,6 +111,18 @@ const TexPanel = dynamic(() => import('@/components/tex/tex-panel').then((m) => 
 
 // El número va oculto para el lector de pantalla: quien lo usa lo dice entero
 // ("3 descansos pendientes", también con más de 99) en un sr-only.
+// iOS (la app instalada y Safari) tiene su propio «atrás» deslizando desde el
+// borde izquierdo, y «adelante» desde el derecho. Un gesto que arranca en esa
+// franja es del sistema: si el shell también lo tomaba para cambiar de pestaña,
+// corrían los dos a la vez (la foto de la pantalla anterior y la pestaña
+// vecina), ganaba el shell y navegaba a la vecina en vez de volver (simulador
+// de iOS 26.3, 23/oct/2026). La misma detección que historial-capas.ts.
+const FRANJA_DEL_SISTEMA_IOS_PX = 20
+function hayAtrasDelSistema(): boolean {
+  const ua = navigator.userAgent
+  return /AppleWebKit/.test(ua) && !/Chrome\/|Chromium|Android/.test(ua) && navigator.maxTouchPoints > 0
+}
+
 function BadgeDescansos({ cantidad }: { cantidad: number }) {
   return (
     <span aria-hidden className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold tabular-nums text-amber-950">
@@ -427,6 +439,8 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   const touchStartX = useRef(0)
   const touchStartY = useRef(0)
   const touchStartTime = useRef(0)
+  // El gesto arrancó en la franja del «atrás» del sistema de iOS: no es del shell.
+  const gestoDelSistemaRef = useRef(false)
   const mainRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const swipeDirectionRef = useRef<'left' | 'right' | null>(null)
@@ -571,9 +585,12 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
   const indiceActual = pestanaActiva ? secuencia.findIndex((s) => s.pestana.href === pestanaActiva.href) : -1
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX
+    const x = e.touches[0].clientX
+    touchStartX.current = x
     touchStartY.current = e.touches[0].clientY
     touchStartTime.current = Date.now()
+    gestoDelSistemaRef.current =
+      hayAtrasDelSistema() && (x < FRANJA_DEL_SISTEMA_IOS_PX || x > window.innerWidth - FRANJA_DEL_SISTEMA_IOS_PX)
   }, [])
 
   // Listener nativo para touchmove — necesario para llamar preventDefault()
@@ -599,6 +616,9 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
     }
 
     const onMove = (e: TouchEvent) => {
+      // Lo que arranca en la franja del «atrás» de iOS lo maneja el sistema.
+      if (gestoDelSistemaRef.current) return
+
       // Gráficos, tablas, carruseles y el composer de Tex se excluyen con
       // `data-sin-swipe`: deslizar sobre ellos no cambia de sección.
       if ((e.target as Element | null)?.closest?.('[data-sin-swipe]')) return
@@ -1024,7 +1044,14 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
           </DropdownMenu>
         </header>
 
-        {/* Contenedor de swipe — overflow-hidden recorta el panel entrante.
+        {/* Contenedor de swipe — overflow-clip recorta el panel entrante. Clip y
+            no hidden: un overflow hidden es un contenedor de scroll, y lo
+            scrolleaba el código (Next al montar la página nueva mientras <main>
+            seguía corrido por el gesto): quedaba con scrollLeft 65–76 y todas
+            las pantallas corridas a la izquierda, con una franja negra, hasta
+            recargar (simulador de iOS 26.3). Con clip no hay nada que correr; el
+            min-w-0/min-h-0 es porque clip no anula el tamaño mínimo automático
+            del ítem flex.
             Las capas de la pantalla inmersiva (fixed inset-0 z-[41], adentro del
             <main>) tienen que pintarse encima del encabezado y de la barra
             (fixed z-40): ni este contenedor, ni el <main>, ni ningún ancestro
@@ -1034,7 +1061,7 @@ export function DashboardShell({ user, permissions, allowedBranchIds, organizati
             recorta: un fixed se escapa. El transform del deslizar entre
             pestañas existe sólo durante ese gesto, que con la inmersiva está
             apagado. */}
-        <div className="relative flex-1 overflow-hidden">
+        <div className="relative min-h-0 min-w-0 flex-1 overflow-clip">
           {/* El padding cambia sólo con la ruta (Tex, Mensajería) y de golpe:
               animado, una pantalla de alto completo desbordaría el <main> mientras
               tanto y aparecería un scroll. */}

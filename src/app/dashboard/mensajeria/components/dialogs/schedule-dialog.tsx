@@ -30,6 +30,11 @@ import { HojaWhatsApp } from './hoja-whatsapp'
 export interface ClienteInicial {
   id: string
   nombre: string
+  /**
+   * La foto de perfil de la conversación (la de Instagram), si la hay: «Para»
+   * la muestra, como la info. del contacto. Sin ella, las iniciales.
+   */
+  foto?: string | null
 }
 
 type ClienteEncontrado = { id: string; name: string; phone: string }
@@ -162,7 +167,7 @@ export function ScheduleDialog({
           <p id="programar-para" className={etiqueta}>Para</p>
           {cliente ? (
             <div className="flex items-center gap-3 rounded-xl bg-[var(--wa-field)] py-2 pl-2.5 pr-1.5">
-              <Avatar name={cliente.nombre} size={40} />
+              <Avatar name={cliente.nombre} size={40} avatarUrl={cliente.foto} />
               <span className="min-w-0 flex-1 truncate text-[16px] font-medium text-[var(--wa-text)] lg:text-[14px]">
                 {cliente.nombre}
               </span>

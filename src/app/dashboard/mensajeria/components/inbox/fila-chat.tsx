@@ -15,10 +15,11 @@ import {
 import { cn } from '@/lib/utils'
 import { Avatar } from '../shared/avatar'
 import {
-  displayName, formatLastMessagePreview, formatRelativeDate, lastMessageMediaKind,
+  NOMBRE_DEL_ADJUNTO, displayName, formatLastMessagePreview, formatRelativeDate, lastMessageMediaKind,
   type LastMessageMediaKind,
 } from '../shared/helpers'
 import type { ConversationWithRelations } from '../shared/types'
+import { apretarAlTocar } from './apretado'
 import { cuantasEtiquetasEntran } from './medir-etiquetas'
 
 const ICONO_ADJUNTO: Record<LastMessageMediaKind, typeof Camera> = {
@@ -66,10 +67,14 @@ export const FilaChat = memo(function FilaChat({
   const adjunto = lastMessageMediaKind(ultimo)
   const IconoAdjunto = adjunto ? ICONO_ADJUNTO[adjunto] : null
   const saliente = ultimo?.direction === 'outbound'
+  // El ícono y el texto, como WhatsApp: el texto ya no repite el tipo
+  // (formatLastMessagePreview). El ícono no se lee: el lector de pantalla dice
+  // el tipo, salvo que el texto ya sea ése ("Foto" de una foto sin epígrafe).
   const vistaPrevia = formatLastMessagePreview(
     ultimo,
     conv.client?.phone || (plataforma === 'instagram' ? (conv.client?.instagram || 'Instagram DM') : conv.platform_user_id),
   )
+  const tipoParaLeer = adjunto && NOMBRE_DEL_ADJUNTO[adjunto] !== vistaPrevia ? NOMBRE_DEL_ADJUNTO[adjunto] : null
   const hora = dia && conv.last_message_at ? formatRelativeDate(conv.last_message_at) : null
   const etiquetas: Etiqueta[] = (conv.tags ?? []).flatMap(({ tag_id, tag }) =>
     tag ? [{ id: tag_id, nombre: tag.name, color: tag.color || '#6B7280' }] : [],
@@ -79,6 +84,10 @@ export const FilaChat = memo(function FilaChat({
     <button
       type="button"
       onClick={() => onElegir(conv)}
+      // Apretada con el dedo (data-apretada): aparece con una demora corta y se
+      // va apenas la lista scrollea (apretado.ts). Con :active, en el iPhone la
+      // fila quedaba gris durante todo el scroll.
+      onPointerDown={apretarAlTocar}
       aria-current={elegida ? 'true' : undefined}
       className={cn(
         'flex w-full items-stretch gap-3 pl-4 text-left outline-none [-webkit-tap-highlight-color:transparent]',
@@ -86,7 +95,7 @@ export const FilaChat = memo(function FilaChat({
         // "Copiar | Consultar" de iOS (en WhatsApp una fila nunca se selecciona).
         'select-none [-webkit-touch-callout:none]',
         // Con el teclado, el anillo verde por dentro: el fondo gris solo no se veía (1,1:1).
-        'transition-colors duration-100 active:bg-[var(--wa-hover)] focus-visible:bg-[var(--wa-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--wa-accent)]',
+        'transition-colors duration-100 data-[apretada]:bg-[var(--wa-hover)] focus-visible:bg-[var(--wa-hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--wa-accent)]',
         'lg:mx-2 lg:w-[calc(100%-1rem)] lg:rounded-xl lg:pl-3 lg:hover:bg-[var(--wa-hover)]',
         elegida && 'lg:bg-[var(--wa-selected)] lg:hover:bg-[var(--wa-selected)]',
       )}
@@ -142,6 +151,7 @@ export const FilaChat = memo(function FilaChat({
               </>
             )}
             {IconoAdjunto && <IconoAdjunto aria-hidden className="mr-1 inline-block size-4 align-[-3px]" />}
+            {tipoParaLeer && <span className="sr-only">{tipoParaLeer}: </span>}
             {vistaPrevia}
           </span>
           {noLeidos && (

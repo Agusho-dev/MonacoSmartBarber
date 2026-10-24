@@ -9,7 +9,7 @@ import {
   Bot, UserCheck, Globe, Inbox, RefreshCw, Sparkles,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -135,7 +135,7 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
         setNodes(result.data.nodes)
         setEdges(result.data.edges)
       } else {
-        toast.error(result.error ?? 'Error cargando workflow')
+        toast.error(result.error ?? 'No se pudo cargar la automatización')
       }
       setLoading(false)
     })
@@ -440,7 +440,7 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
         const msg = problems.slice(0, 3).join(' · ') + (problems.length > 3 ? ` (+${problems.length - 3} más)` : '')
         // Un workflow ACTIVO no puede quedar roto → bloquear. Borrador → avisar y permitir.
         if (workflow?.is_active) {
-          toast.error('No se puede guardar un workflow activo con errores: ' + msg)
+          toast.error('No se puede guardar una automatización activa con errores: ' + msg)
           return
         }
         toast.warning('Guardado con advertencias: ' + msg)
@@ -457,7 +457,7 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
       }
       const result = await saveWorkflowGraph(workflowId, currentNodes, currentEdges)
       if (result.error) { toast.error(result.error); return }
-      toast.success('Workflow guardado')
+      toast.success('Automatización guardada')
     })
   }
 
@@ -580,7 +580,7 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
   if (!workflow) {
     return (
       <div className="flex flex-1 items-center justify-center bg-background text-muted-foreground">
-        Workflow no encontrado
+        No encontramos la automatización
       </div>
     )
   }
@@ -616,7 +616,7 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
               size="sm"
               onClick={() => setShowSettingsDialog(true)}
               className="relative z-30 h-7 shrink-0 px-2 text-muted-foreground hover:text-foreground"
-              title="Configuración del workflow"
+              title="Configuración de la automatización"
             >
               <Settings2 className="size-4" />
             </Button>
@@ -761,7 +761,7 @@ export function WorkflowBuilder({ workflowId, onBack }: Props) {
                     {/* Body preview */}
                     <div className="px-3 py-2 bg-card text-[11px] text-muted-foreground min-h-[32px]">
                       {node.node_type === 'trigger' && (
-                        <span>Cuando se activa el workflow</span>
+                        <span>Cuando se activa la automatización</span>
                       )}
                       {node.node_type === 'send_message' && (
                         <span className="line-clamp-2">{(node.config.text as string) || 'Sin mensaje configurado'}</span>
@@ -1129,8 +1129,12 @@ function WorkflowSettingsDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings2 className="size-4 text-amber-400" />
-            Configuración del workflow
+            Configuración de la automatización
           </DialogTitle>
+          {/* Sin descripción, Radix avisaba «Missing Description» en la consola. */}
+          <DialogDescription className="sr-only">
+            El nombre, la descripción, el canal y cómo se activa la automatización.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
@@ -1142,7 +1146,7 @@ function WorkflowSettingsDialog({
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Descripción (opcional)</Label>
             <Textarea className="bg-muted border text-foreground resize-none" rows={2}
-              placeholder="¿Qué hace este workflow?"
+              placeholder="¿Qué hace esta automatización?"
               value={description} onChange={e => setDescription(e.target.value)} />
           </div>
 
@@ -1245,7 +1249,7 @@ function WorkflowSettingsDialog({
                 </select>
               )}
               <p className="text-[10px] text-muted-foreground">
-                El workflow se activa cuando un cliente responde a este template.
+                La automatización se activa cuando un cliente responde a esta plantilla.
               </p>
             </div>
           )}
@@ -1311,19 +1315,19 @@ function WorkflowSettingsDialog({
           {/* Avanzado: categoría, overlap, ventana Meta */}
           <div className="space-y-3 border rounded-lg p-3 bg-muted/30">
             <div>
-              <p className="text-xs font-medium text-foreground">Convivencia entre workflows y ventana Meta</p>
+              <p className="text-xs font-medium text-foreground">Convivencia entre automatizaciones y la ventana de Meta</p>
               <p className="text-[10px] text-muted-foreground mt-1">
                 La <span className="text-foreground/80">categoría</span> identifica este flujo para solapamientos y para las reglas de &quot;silencio&quot; del trigger Cualquier mensaje.
               </p>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Categoría de este workflow</Label>
+              <Label className="text-xs text-muted-foreground">Categoría de esta automatización</Label>
               <Input className="bg-muted border text-foreground" placeholder="review, promo, support…"
                 value={category} onChange={e => setCategory(e.target.value)} />
               <p className="text-[10px] text-muted-foreground">Ej.: los flujos de reseña suelen usar <code className="text-amber-400/90">review</code>.</p>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Política si hay otro workflow activo</Label>
+              <Label className="text-xs text-muted-foreground">Si hay otra automatización activa</Label>
               <select value={overlapPolicy} onChange={e => setOverlapPolicy(e.target.value)}
                 className="w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none border">
                 <option value="skip_if_active">No disparar si hay activo (recomendado)</option>

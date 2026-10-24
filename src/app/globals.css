@@ -486,7 +486,11 @@
      viaja con ella. Mientras entra, el oscurecido aparece de a poco; durante el
      gesto, se aclara con --volver (0 con la capa en su lugar, 1 afuera), que
      pone el hook. La clase va en el elemento que se mueve: el que recibe el ref
-     de useDeslizarParaVolver. En la compu no hace nada. */
+     de useDeslizarParaVolver. En la compu no hace nada.
+     El velo baja con el cuadrado del progreso, no en línea recta: en línea
+     recta, a mitad del gesto quedaba en 0,12 y la lista se veía casi a pleno
+     (verificación en el simulador de iOS 26.3, 23/oct/2026); así queda en
+     0,23, y en 0,13 a los tres cuartos. */
   @media (max-width: 1023.98px) {
     /* Sin posición propia, la capa es la referencia del ::before; las
        utilidades (fixed, absolute) le ganan: esto va en components. */
@@ -501,7 +505,7 @@
       pointer-events: none;
       background:
         linear-gradient(to left, rgb(0 0 0 / calc(0.4 * (1 - var(--volver)))), transparent 16px),
-        rgb(0 0 0 / calc(0.24 * (1 - var(--volver))));
+        rgb(0 0 0 / calc(0.3 * (1 - var(--volver) * var(--volver))));
     }
   }
   @media (max-width: 1023.98px) and (prefers-reduced-motion: no-preference) {
@@ -519,6 +523,58 @@
 }
 @keyframes wa-capa-oscurece {
   from { opacity: 0; }
+}
+
+/* ── Paralaje de la lista ─────────────────────────────────────────────────
+   Como la pantalla de abajo en iOS: con una capa encima (el chat, una sección,
+   Programados), la lista de chats se corre un 30 % a la izquierda y vuelve
+   siguiendo al dedo. El momento lo pone historial-capas.ts en
+   <html data-wa-paralaje> (lo decide la capa de más abajo de la pila) y el
+   progreso, en la lista misma: --wa-paralaje (1 tapada del todo, 0
+   descubierta; sin él, 1). Va en la lista y no en <html> porque cambia en cada
+   cuadro del gesto: en <html>, y heredada, haría recalcular el estilo de toda
+   la página en cada cuadro; registrada sin herencia, sólo el de la lista.
+   - abierta: la entrada, con la misma curva y duración que la capa (animate-in
+     de 300 ms con ease-out);
+   - arrastrando: sigue al dedo, sin transición;
+   - volviendo / saliendo: las curvas del final del gesto
+     (deslizar-para-volver.ts: 200 y 220 ms).
+   El elemento es la raíz de la lista ([data-wa-lista-paralaje],
+   conversation-list.tsx), que no tiene nada fixed adentro ni es ancestro de
+   ninguna capa: el transform no atrapa a nadie. Sin capa no hay atributo y no
+   queda ningún transform puesto. Con movimiento reducido, nada. Va fuera de
+   las capas de Tailwind: ninguna utilidad le gana. */
+@property --wa-paralaje {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 1;
+}
+@media (max-width: 1023.98px) and (prefers-reduced-motion: no-preference) {
+  :root[data-wa-paralaje] [data-wa-lista-paralaje] {
+    transform: translate3d(calc(-30% * var(--wa-paralaje, 1)), 0, 0);
+    transition: transform 300ms cubic-bezier(0, 0, 0.2, 1);
+    will-change: transform;
+  }
+  :root[data-wa-paralaje='arrastrando'] [data-wa-lista-paralaje] {
+    transition: none;
+  }
+  :root[data-wa-paralaje='volviendo'] [data-wa-lista-paralaje] {
+    transition: transform 200ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  :root[data-wa-paralaje='saliendo'] [data-wa-lista-paralaje] {
+    transition: transform 220ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+}
+
+/* ── Una hoja que cierra el «atrás» del sistema en el iPhone ──────────────
+   Se va de una, sin la animación de salida del Dialog o de la Sheet: iOS ya
+   mostró la foto de la pantalla de abajo mientras se deslizaba, y animada
+   volvía a aparecer para bajar. <html data-hoja-sin-salida> lo pone
+   entrada-de-hoja.ts sólo mientras la cierra; sin animación, Radix la desmonta
+   en el mismo commit. Fuera de las capas de Tailwind: le gana a animate-out. */
+:root[data-hoja-sin-salida]
+  :is([data-slot='dialog-content'], [data-slot='dialog-overlay'], [data-slot='sheet-content'], [data-slot='sheet-overlay'])[data-state='closed'] {
+  animation: none;
 }
 
 /* ── Auth/Onboarding premium animations ────────────────────────────────────── */
@@ -1237,26 +1293,30 @@ html[data-giro='css'] .giro-solo-normal { display: none; }
     transition: opacity 160ms ease-out;
   }
 
-  /* La lente: la píldora levantada, como la de iOS 26. Más grande que la barra
-     (80 px de alto: sale 10 px arriba y 10 abajo de la cápsula, y 12 px más
-     ancha de cada lado) y de vidrio CLARO: un velo blanco con más luz arriba,
-     un filtro que aclara y satura lo de abajo, el canto de arriba brillante y
-     el borde iridiscente (magenta de un lado, cian del otro). Lo que agranda
-     son las pestañas mismas, que van encima (--barra-brillo y `scale`).
+  /* La lente: la píldora levantada, como la de iOS 26. Una CÁPSULA más ancha
+     que alta y más grande que la barra: 1,4 ranuras de ancho (20 % de la
+     píldora de cada lado; los porcentajes de left/right son del ancho de la
+     píldora, que mide una ranura) y 70 px de alto (9 px arriba y abajo de la
+     píldora de 52: sale 5 px de la cápsula). Hasta el 23/oct/2026 medía
+     98×80 y, con el radio de 9999, se veía casi redonda: una burbuja.
+     De vidrio CLARO: un velo blanco con más luz arriba, un filtro que aclara y
+     satura lo de abajo, el canto de arriba brillante y el borde iridiscente
+     (magenta de un lado, cian del otro). Lo que agranda son las pestañas
+     mismas, que van encima (--barra-brillo y `scale`).
      Lo claro lo da el velo, no el filtro: Safari no le muestra a la lente el
      vidrio de la cápsula (ve la página directo) y con un filtro fuerte los
      colores de abajo quedaban de neón; Chrome sí se lo muestra.
-     En reposo está desinflada al tamaño de la píldora y escondida: con
-     `visibility` no se pinta ni se calcula su filtro (sólo `scale` y
-     `opacity` se animan: nada de layout por cuadro). */
+     En reposo está desinflada al tamaño de la píldora (1/1,4 de ancho y 52/70
+     de alto) y escondida: con `visibility` no se pinta ni se calcula su filtro
+     (sólo `scale` y `opacity` se animan: nada de layout por cuadro). */
   .barra-pildora-lente {
     position: absolute;
-    inset: -14px -12px;
+    inset: -9px -20%;
     border-radius: 9999px;
     pointer-events: none;
     visibility: hidden;
     opacity: 0;
-    scale: 0.75 0.65;
+    scale: 0.714 0.743;
     background:
       linear-gradient(to bottom, rgb(255 255 255 / 0.24), rgb(255 255 255 / 0.06) 46%, rgb(255 255 255 / 0.12)),
       rgb(255 255 255 / 0.05);
@@ -1302,7 +1362,7 @@ html[data-giro='css'] .giro-solo-normal { display: none; }
   .barra-vidrio[data-lente-fuera] .barra-pildora-lente {
     visibility: hidden;
     opacity: 0;
-    scale: 0.75 0.65;
+    scale: 0.714 0.743;
     transition:
       opacity 160ms ease-out,
       scale 300ms cubic-bezier(0.2, 0, 0, 1),
@@ -1453,7 +1513,8 @@ html[data-giro='css'] .giro-solo-normal { display: none; }
      scrollea movía la página por debajo; al volver, el banner tapaba el
      encabezado. */
   :root[data-pantalla-inmersiva] {
-    --avisos-abajo-mensajeria: calc(var(--alto-composer-chat, env(safe-area-inset-bottom, 0px)) + 12px);
+    --avisos-abajo-mensajeria: calc(var(--alto-composer-chat, env(safe-area-inset-bottom, 0px)) + var(--teclado-tapa, 0px) + 12px);
+    /* Con el teclado abierto se suma lo que tapa el teclado (--teclado-tapa, de chat-view.tsx). */
     overflow: hidden;
   }
 }

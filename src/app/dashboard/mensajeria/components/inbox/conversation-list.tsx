@@ -10,10 +10,14 @@
 //   una CAPA fija que la tapa: la lista queda montada debajo, quieta.
 // - Compu: la columna del medio de la Mac, con el buscador y los chips fijos
 //   arriba de las filas. Mide --ancho-lista (mensajeria-client.tsx).
+// - Lo táctil, como iOS: las filas, los chips y los botones de la lista se
+//   resaltan al apretarlos con el dedo quieto y el resaltado se va apenas la
+//   lista scrollea (apretado.ts; con :active quedaba marcado todo el scroll), y
+//   mantener el dedo no selecciona texto ni abre el menú de iOS.
 
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
-  type Dispatch, type ReactNode, type SetStateAction, type UIEvent,
+  type Dispatch, type MouseEvent as ReactMouseEvent, type ReactNode, type SetStateAction, type UIEvent,
 } from 'react'
 import {
   CalendarClock, ChevronLeft, ChevronRight, Instagram, Loader2, MessageSquare, Plus, Search, SearchX, Settings, Tag, X,
@@ -25,6 +29,7 @@ import { WhatsAppIcon } from '../shared/icons'
 import { useMensajeria } from '../shared/mensajeria-context'
 import type { ConversationWithRelations, PlatformFilter } from '../shared/types'
 import { useDiaLocal } from '../shared/use-dia-local'
+import { apretarAlTocar } from './apretado'
 import { FilaChat } from './fila-chat'
 import { VistaProgramados } from './vista-programados'
 
@@ -73,6 +78,13 @@ export function ConversationList({
         aria-label="Chats"
         aria-hidden={tapada || undefined}
         inert={tapada}
+        // La "pantalla de abajo" de iOS (la barra de "Chats", el buscador, los
+        // chips y las filas): con una capa encima, en el celular, el paralaje la
+        // corre (globals.css, «Paralaje de la lista»). Por eso no tiene nada fixed
+        // adentro (el menú "…" va a un portal) y las capas (el chat, Programados,
+        // las secciones) son hermanas suyas, nunca hijas: con un transform acá,
+        // una capa adentro se mediría contra la lista y no contra la pantalla.
+        data-wa-lista-paralaje=""
         className={cn(
           'flex min-h-0 w-full shrink-0 flex-col overflow-clip bg-[var(--wa-bg)] lg:w-[var(--ancho-lista)] lg:border-r lg:border-[var(--wa-divider)]',
           ocultaEnLaCompu && 'lg:hidden',
@@ -112,6 +124,7 @@ function ListaChats({
   menu: ReactNode
 }) {
   const {
+    conversations,
     activeConv, setActiveConv,
     search, setSearch,
     platformFilter, setPlatformFilter,
@@ -127,9 +140,15 @@ function ListaChats({
   const dia = useDiaLocal()
   const esCelular = useEsCelular()
 
+  // El número de «No leídos» es el de los chats sin leer cargados, el mismo del
+  // globo de Chats en la columna de secciones (y el de WhatsApp): no cambia al
+  // elegir una etiqueta o un canal, ni al buscar. Antes contaba sólo lo
+  // filtrado: al elegir una etiqueta sin chats sin leer el número desaparecía,
+  // la fila de chips se corría 14 px y la etiqueta recién elegida quedaba
+  // debajo del degradé.
   const unreadTotal = useMemo(
-    () => filteredConversations.filter((c) => c.unread_count > 0).length,
-    [filteredConversations],
+    () => conversations.filter((c) => c.unread_count > 0).length,
+    [conversations],
   )
   const visibles = useMemo(
     () => (unreadOnly ? filteredConversations.filter((c) => c.unread_count > 0) : filteredConversations),
@@ -232,6 +251,9 @@ function ListaChats({
       <header
         className={cn(
           'relative flex h-11 shrink-0 items-center gap-2 border-b-[0.5px] bg-[var(--wa-bg)] px-4 transition-colors duration-200 lg:h-14 lg:px-3',
+          // Mantener el dedo sobre la barra no selecciona "Chats" ni abre el
+          // menú de iOS (como las filas y los chips).
+          'select-none [-webkit-touch-callout:none]',
           tituloChico ? 'border-[var(--wa-divider)] lg:border-transparent' : 'border-transparent',
         )}
       >
@@ -278,7 +300,7 @@ function ListaChats({
         <p
           ref={tituloRef}
           aria-hidden
-          className="px-4 pb-1.5 pt-0.5 text-[34px] font-bold leading-[41px] tracking-tight text-[var(--wa-text)] lg:hidden"
+          className="select-none px-4 pb-1.5 pt-0.5 text-[34px] font-bold leading-[41px] tracking-tight text-[var(--wa-text)] [-webkit-touch-callout:none] lg:hidden"
         >
           Chats
         </p>
@@ -327,7 +349,7 @@ function ListaChats({
             </div>
           </div>
 
-          <FilaChips>
+          <FilaChips oculta={ocultaEnLaCompu}>
             <Chip prendido={sinFiltros} onClick={limpiarFiltros}>Todos</Chip>
             <Chip prendido={unreadOnly} onClick={() => setUnreadOnly((v) => !v)}>
               No leídos
@@ -442,12 +464,40 @@ function describirFiltro(unreadOnly: boolean, plataforma: PlatformFilter, etique
   return partes.length > 0 ? partes.join(' ') : null
 }
 
+// Lo que se deja a cada lado de un chip al traerlo a la vista: en la compu, el
+// degradé de BordeChips (w-14), que con la flecha encima tapaba el chip recién
+// elegido; en el celular, el padding de la fila.
+const MARGEN_CHIP_COMPU = 56
+const MARGEN_CHIP_CELULAR = 16
+
+/**
+ * Corre la fila de chips lo justo para que `chip` quede entero a la vista, con
+ * scrollLeft (scrollIntoView movería también la lista y la página).
+ */
+function traerALaVista(fila: HTMLElement, chip: HTMLElement, suave: boolean) {
+  const maximo = fila.scrollWidth - fila.clientWidth
+  if (maximo <= 0) return
+  const margen = window.matchMedia('(min-width: 1024px)').matches ? MARGEN_CHIP_COMPU : MARGEN_CHIP_CELULAR
+  // La fila es el offsetParent de los chips (relative): offsetLeft es la
+  // posición en el contenido, sin importar cuánto esté corrida.
+  const izquierda = chip.offsetLeft
+  const derecha = izquierda + chip.offsetWidth
+  let destino = fila.scrollLeft
+  if (izquierda - margen < destino) destino = izquierda - margen
+  else if (derecha + margen > destino + fila.clientWidth) destino = derecha + margen - fila.clientWidth
+  destino = Math.min(maximo, Math.max(0, Math.round(destino)))
+  if (Math.abs(destino - fila.scrollLeft) < 1) return
+  const sinMovimiento = !suave || window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  fila.scrollTo({ left: destino, behavior: sinMovimiento ? 'auto' : 'smooth' })
+}
+
 // La fila de chips. En el celular se desliza con el dedo, como en WhatsApp. En
 // la compu, con el mouse no había forma de llegar a Instagram ni a las
 // etiquetas (la fila mide ~1.600 px y la columna 340): la rueda vertical la
 // corre de costado, el borde con más contenido se funde con un degradé y, al
 // pasar el mouse, aparece una flecha de ese lado (también se llega con Tab).
-function FilaChips({ children }: { children: ReactNode }) {
+// El chip que se toca queda entero a la vista (traerALaVista).
+function FilaChips({ oculta, children }: { oculta: boolean; children: ReactNode }) {
   const filaRef = useRef<HTMLDivElement>(null)
   const [hay, setHay] = useState({ antes: false, despues: false })
 
@@ -487,18 +537,28 @@ function FilaChips({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Al montar, si el filtro prendido (una etiqueta, un canal) quedó afuera, se
-  // corre la fila hasta él con scrollLeft (scrollIntoView movería también la
-  // lista y la página).
+  // Al verse (al montar, y en la compu al cerrar Programados o una sección, que
+  // esconden la lista con display: none y la fila pierde lo que estaba
+  // corrida), el filtro prendido que quedó afuera (una etiqueta, un canal) se
+  // trae a la vista de una.
   useLayoutEffect(() => {
     const fila = filaRef.current
-    if (!fila) return
+    if (oculta || !fila) return
     const prendidos = fila.querySelectorAll<HTMLElement>('[aria-pressed="true"]')
     const ultimo = prendidos[prendidos.length - 1]
-    if (!ultimo) return
-    const derecha = ultimo.offsetLeft + ultimo.offsetWidth
-    if (derecha > fila.clientWidth) fila.scrollLeft = derecha - fila.clientWidth + 16
-  }, [])
+    if (ultimo) traerALaVista(fila, ultimo, false)
+  }, [oculta])
+
+  // El chip tocado (con el dedo, el mouse o el teclado) queda entero a la
+  // vista: si estaba cortado por el borde, o en la compu debajo del degradé y
+  // la flecha, la fila se corre lo justo. Un cuadro después, con el filtro ya
+  // aplicado.
+  const alElegir = (e: ReactMouseEvent<HTMLDivElement>) => {
+    const fila = filaRef.current
+    const chip = (e.target as Element).closest<HTMLElement>('button[aria-pressed]')
+    if (!fila || !chip || !fila.contains(chip)) return
+    requestAnimationFrame(() => traerALaVista(fila, chip, true))
+  }
 
   const correr = (sentido: -1 | 1) => {
     const fila = filaRef.current
@@ -515,7 +575,9 @@ function FilaChips({ children }: { children: ReactNode }) {
         aria-label="Filtrar chats"
         // Deslizar los chips no tiene que cambiar de sección del dashboard.
         data-sin-swipe
-        className="relative flex overflow-x-auto px-4 pb-2.5 [scrollbar-width:none] lg:px-3 lg:pb-2 [&::-webkit-scrollbar]:hidden"
+        onClick={alElegir}
+        // Mantener el dedo sobre un chip no selecciona su texto ni abre el menú de iOS.
+        className="relative flex select-none overflow-x-auto px-4 pb-2.5 [-webkit-touch-callout:none] [scrollbar-width:none] lg:px-3 lg:pb-2 [&::-webkit-scrollbar]:hidden"
       >
         <div className="flex w-max gap-2">{children}</div>
       </div>
@@ -595,12 +657,15 @@ function Chip({ prendido, onClick, children }: { prendido: boolean; onClick: () 
       type="button"
       aria-pressed={prendido}
       onClick={onClick}
+      // Apretado con el dedo como las filas (apretado.ts): con :active quedaba
+      // marcado mientras se deslizaba la fila de chips.
+      onPointerDown={apretarAlTocar}
       className={cn(
-        'inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 text-[14px] font-medium outline-none [-webkit-tap-highlight-color:transparent]',
+        'inline-flex h-8 shrink-0 select-none items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 text-[14px] font-medium outline-none [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none]',
         'transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60 lg:h-7 lg:px-3 lg:text-[13px]',
         prendido
           ? 'border-transparent bg-[var(--wa-chip-on-bg)] text-[var(--wa-chip-on-text)]'
-          : 'border-white/10 text-[var(--wa-text)]/85 active:bg-[var(--wa-hover)] lg:hover:bg-[var(--wa-hover)]',
+          : 'border-white/10 text-[var(--wa-text)]/85 data-[apretada]:bg-[var(--wa-hover)] lg:hover:bg-[var(--wa-hover)]',
       )}
     >
       {children}
@@ -646,10 +711,13 @@ function describirVacio(p: {
     }
   }
   if (p.unreadOnly) {
+    // Con una etiqueta o un canal además, puede haber chats sin leer en otro
+    // lado (el número de «No leídos» los cuenta a todos): no se dice "al día".
+    const conOtroFiltro = !!p.tagFilter || p.platformFilter !== 'all'
     return {
       icono: MessageSquare,
-      titulo: 'No hay chats sin leer',
-      texto: 'Estás al día.',
+      titulo: conOtroFiltro ? 'No hay chats sin leer con ese filtro' : 'No hay chats sin leer',
+      texto: conOtroFiltro ? undefined : 'Estás al día.',
       accion: { texto: 'Ver todos los chats', onClick: p.onVerTodos },
     }
   }
@@ -681,8 +749,11 @@ function EstadoVacio({ icono: Icono, girando = false, titulo, texto, accion }: P
         <button
           type="button"
           onClick={accion.onClick}
+          // Con el dedo, apretado.ts (con :active quedaba achicado si el dedo
+          // scrolleaba la lista); con el mouse, :active.
+          onPointerDown={apretarAlTocar}
           className={cn(
-            'mt-5 h-9 rounded-full px-4 text-[15px] font-semibold outline-none transition-[background-color,scale] duration-150 active:scale-95 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60 lg:h-8 lg:text-[13px]',
+            'mt-5 h-9 select-none rounded-full px-4 text-[15px] font-semibold outline-none transition-[background-color,scale] duration-150 data-[apretada]:scale-95 pointer-fine:active:scale-95 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60 lg:h-8 lg:text-[13px]',
             accion.principal
               ? 'bg-[var(--wa-accent)] text-[var(--wa-on-accent)] lg:hover:bg-[var(--wa-accent-hover)]'
               : 'bg-[var(--wa-field)] text-[var(--wa-text)] lg:hover:bg-[var(--wa-raised-2)]',
@@ -720,7 +791,9 @@ function PieLista({
         <button
           type="button"
           onClick={onCargarMas}
-          className="rounded-full px-3 py-1 font-medium text-[var(--wa-accent)] outline-none transition-colors active:bg-[var(--wa-hover)] focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60 lg:hover:bg-[var(--wa-hover)]"
+          // Apretado con el dedo como las filas (apretado.ts): está al final de la lista que scrollea.
+          onPointerDown={apretarAlTocar}
+          className="select-none rounded-full px-3 py-1 font-medium text-[var(--wa-accent)] outline-none transition-colors data-[apretada]:bg-[var(--wa-hover)] focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60 lg:hover:bg-[var(--wa-hover)]"
         >
           Cargar conversaciones anteriores
         </button>

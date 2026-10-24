@@ -1,14 +1,16 @@
 'use client'
 
 // La primera columna de Mensajería en la compu, como la barra lateral de
-// WhatsApp para Mac: un riel de íconos con una etiqueta mínima y, cuando las
-// columnas tienen lugar (contenedor de 1180 px o más), una lista con etiquetas
-// y contadores a la derecha. Mide por el contenedor de las columnas
-// (@container/columnas, en mensajeria-client.tsx) y no por la pantalla: el menú
-// del dashboard ocupa 256 px y el modo foco los devuelve. Su ancho es
-// --ancho-secciones, el mismo que usa la info. del contacto para ubicarse. En
-// el celular no existe: ahí las secciones van en el menú "…" de la lista
-// (menu-secciones.tsx).
+// WhatsApp para Mac: un riel de íconos con una etiqueta mínima y, sólo en las
+// pantallas grandes (columnas de 1600 px o más: una pantalla de 1856 px con el
+// menú del dashboard), una lista con etiquetas y contadores a la derecha. Hasta
+// el 23/oct/2026 la lista arrancaba en 1180 y desde 1436 px de pantalla había
+// dos barras laterales seguidas (el menú del dashboard y ésta). Mide por el
+// contenedor de las columnas (@container/columnas, en mensajeria-client.tsx) y
+// no por la pantalla: el menú del dashboard ocupa 256 px y el modo foco los
+// devuelve. Su ancho es --ancho-secciones, el mismo que usa la info. del
+// contacto para ubicarse. En el celular no existe: ahí las secciones van en el
+// menú "…" de la lista (menu-secciones.tsx).
 
 import { Maximize2, Minimize2, Settings, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -59,9 +61,9 @@ export function BarraSecciones({
   return (
     <nav
       aria-label="Secciones de Mensajería"
-      className="hidden w-[var(--ancho-secciones)] shrink-0 flex-col border-r border-[var(--wa-divider)] bg-[var(--wa-sidebar)] px-0.5 py-3 lg:flex @min-[1180px]/columnas:px-2.5"
+      className="hidden w-[var(--ancho-secciones)] shrink-0 flex-col border-r border-[var(--wa-divider)] bg-[var(--wa-sidebar)] px-0.5 py-3 lg:flex @min-[1600px]/columnas:px-2.5"
     >
-      <ul className="flex flex-col gap-1 @min-[1180px]/columnas:gap-0.5">
+      <ul className="flex flex-col gap-1 @min-[1600px]/columnas:gap-0.5">
         {ITEMS_SECCIONES.map((item) => (
           <li key={item.destino} className="flex justify-center">
             <ItemBarra
@@ -78,7 +80,7 @@ export function BarraSecciones({
         ))}
       </ul>
 
-      <div className="mt-auto flex flex-col items-center gap-1 border-t border-[var(--wa-divider)] pt-2 @min-[1180px]/columnas:items-stretch @min-[1180px]/columnas:gap-0.5">
+      <div className="mt-auto flex flex-col items-center gap-1 border-t border-[var(--wa-divider)] pt-2 @min-[1600px]/columnas:items-stretch @min-[1600px]/columnas:gap-0.5">
         <ItemBarra
           icono={Settings}
           etiqueta="Configuración"
@@ -137,7 +139,7 @@ function ItemBarra({
         'relative flex shrink-0 flex-col items-center justify-center gap-1 rounded-xl outline-none transition-colors duration-150',
         // Riel: 68 px de ancho para que "Programados" entre entero a 10 px.
         'h-[52px] w-[68px]',
-        '@min-[1180px]/columnas:h-10 @min-[1180px]/columnas:w-full @min-[1180px]/columnas:flex-row @min-[1180px]/columnas:justify-start @min-[1180px]/columnas:gap-3 @min-[1180px]/columnas:rounded-lg @min-[1180px]/columnas:px-3',
+        '@min-[1600px]/columnas:h-10 @min-[1600px]/columnas:w-full @min-[1600px]/columnas:flex-row @min-[1600px]/columnas:justify-start @min-[1600px]/columnas:gap-3 @min-[1600px]/columnas:rounded-lg @min-[1600px]/columnas:px-3',
         'focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60',
         marcado
           ? 'bg-[var(--wa-selected)] text-white'
@@ -145,12 +147,12 @@ function ItemBarra({
       )}
     >
       <span className="relative flex shrink-0">
-        <Icono aria-hidden className="size-[22px] @min-[1180px]/columnas:size-5" strokeWidth={marcado ? 2.2 : 1.8} />
+        <Icono aria-hidden className="size-[22px] @min-[1600px]/columnas:size-5" strokeWidth={marcado ? 2.2 : 1.8} />
         {conContador && tonoRiel && tonoRiel !== 'gris' && (
           <span
             aria-hidden
             className={cn(
-              'absolute -right-3 -top-2 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10.5px] font-semibold leading-none tabular-nums ring-2 ring-[var(--wa-sidebar)] @min-[1180px]/columnas:hidden',
+              'absolute -right-3 -top-2 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10.5px] font-semibold leading-none tabular-nums ring-2 ring-[var(--wa-sidebar)] @min-[1600px]/columnas:hidden',
               CLASE_GLOBO[tonoRiel],
             )}
           >
@@ -158,13 +160,13 @@ function ItemBarra({
           </span>
         )}
       </span>
-      <span className="max-w-full truncate px-0.5 text-[10px] font-medium leading-none tracking-tight @min-[1180px]/columnas:hidden">{corta}</span>
-      <span className="hidden min-w-0 flex-1 truncate text-left text-[14px] @min-[1180px]/columnas:block">{etiqueta}</span>
+      <span className="max-w-full truncate px-0.5 text-[10px] font-medium leading-none tracking-tight @min-[1600px]/columnas:hidden">{corta}</span>
+      <span className="hidden min-w-0 flex-1 truncate text-left text-[14px] @min-[1600px]/columnas:block">{etiqueta}</span>
       {conContador && tonoLista && (
         <span
           aria-hidden
           className={cn(
-            'hidden shrink-0 tabular-nums @min-[1180px]/columnas:inline-flex',
+            'hidden shrink-0 tabular-nums @min-[1600px]/columnas:inline-flex',
             tonoLista === 'gris'
               ? 'text-[13px] text-[var(--wa-text-2)]'
               : cn('h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11.5px] font-semibold leading-none', CLASE_GLOBO[tonoLista]),

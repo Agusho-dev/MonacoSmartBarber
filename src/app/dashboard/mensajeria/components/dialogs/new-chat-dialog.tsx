@@ -104,7 +104,8 @@ function BuscadorDeClientes({
             value={texto}
             onChange={(e) => setTexto(e.target.value)}
             // 16 px en lo táctil: iOS agranda la pantalla al enfocar un campo de menos.
-            className="h-full w-full appearance-none rounded-full bg-transparent pl-10 pr-10 text-base text-[var(--wa-text)] outline-none placeholder:text-[var(--wa-text-2)] lg:pl-9 lg:pointer-fine:text-[14px] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
+            // 44 de alto en una píldora de 40 (se toca en 44, se ve como la de iOS).
+            className="-my-0.5 h-11 w-full appearance-none rounded-full bg-transparent pl-10 pr-10 text-base text-[var(--wa-text)] outline-none placeholder:text-[var(--wa-text-2)] lg:my-0 lg:h-full lg:pl-9 lg:pointer-fine:text-[14px] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
           />
           {texto && (
             <button

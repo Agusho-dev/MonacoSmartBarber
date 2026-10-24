@@ -17,9 +17,10 @@
 //
 // La píldora de la marcada es UN solo elemento que viaja de ranura en ranura,
 // con resorte y un leve estiramiento. Deslizar el dedo de costado sobre la barra
-// (o mantenerlo quieto) la levanta como una lente de vidrio, más grande que la
-// barra, que lo sigue y agranda las pestañas que va pasando; al soltar se
-// asienta en la más cercana y ese grupo queda elegido. Como en iOS:
+// (o mantenerlo quieto) la levanta como una lente de vidrio: una cápsula más
+// ancha que alta y más grande que la barra (1,4 ranuras × 70 px, en globals.css),
+// que lo sigue y agranda las pestañas que va pasando; al soltar se asienta en la
+// más cercana y ese grupo queda elegido. Como en iOS:
 // - un dedo que se va en vertical antes de levantar la lente quiso scrollear:
 //   el gesto se abandona (sin lente, sin navegar y sin clic);
 // - con la lente arriba, el dedo que se aleja de la cápsula la desinfla, y

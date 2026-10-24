@@ -1,32 +1,47 @@
 'use client'
 
+// Casos (reseñas de 2 estrellas o menos), como una pantalla de WhatsApp para
+// iOS (23/oct/2026, tercera ronda): una celda por caso con el ícono naranja,
+// el cliente, las estrellas, el comentario, lo que marcó para mejorar y la
+// hora en 24 h. «Contactar» abre su chat y el estado se cambia con el menú de
+// la celda (abierto, contactado, resuelto o descartado: los cuatro botones de
+// antes en uno). «Ver todos» va en la barra. En la compu, la misma lista con
+// la piel de la Mac.
+
 import { useState, useEffect, useTransition, useCallback, useMemo } from 'react'
-import { Frown, Star, MessageSquare, Check, X, Clock, User, RotateCcw } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Check, ChevronDown, Frown, MessageSquare, Star } from 'lucide-react'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { getCrmCases, updateCrmCase, type CrmCaseRow, type CrmCaseStatus } from '@/lib/actions/crm-cases'
 import { useMensajeria } from '../shared/mensajeria-context'
 import { createClient } from '@/lib/supabase/client'
-import { displayName } from '../shared/helpers'
-import { AccionDeBarraIos, BotonTextoIos } from '../navegacion/barra-ios'
+import { cn } from '@/lib/utils'
+import { displayName, formatRelativeDate } from '../shared/helpers'
+import { useDiaLocal } from '../shared/use-dia-local'
+import { AccionDeBarraIos, BotonSecundario, BotonTextoIos, EncabezadoSeccion } from '../navegacion/barra-ios'
+import {
+  BotonTextoCeldaIos, CargandoIos, CLASE_CELDA, CLASE_CUERPO, CLASE_ITEM_MENU_IOS, CLASE_MENU_IOS, ContenidoSeccion,
+  GrupoIos, IconoCeldaIos, TEXTO_PRINCIPAL, TEXTO_SECUNDARIO, TEXTO_TERCIARIO, VacioIos, avisarFalla,
+} from '../navegacion/lista-ios'
 import { toast } from 'sonner'
-import { formatDistanceToNow } from 'date-fns'
-import { es } from 'date-fns/locale'
 
-const STATUS_CONFIG: Record<CrmCaseStatus, { label: string; badge: string; dot: string }> = {
-  open:      { label: 'Abierto',    badge: 'bg-red-500/10 text-red-400 border-red-500/20',     dot: 'bg-red-500' },
-  contacted: { label: 'Contactado', badge: 'bg-amber-500/10 text-amber-400 border-amber-500/20', dot: 'bg-amber-500' },
-  resolved:  { label: 'Resuelto',   badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20', dot: 'bg-emerald-500' },
-  dismissed: { label: 'Descartado', badge: 'bg-muted text-muted-foreground border-border',     dot: 'bg-muted-foreground' },
+const STATUS_CONFIG: Record<CrmCaseStatus, { label: string; dot: string; texto: string }> = {
+  open:      { label: 'Abierto',    dot: 'bg-[#ff453a]', texto: 'text-[#ff6961]' },
+  contacted: { label: 'Contactado', dot: 'bg-[#ff9f0a]', texto: 'text-[#ffa733]' },
+  resolved:  { label: 'Resuelto',   dot: 'bg-[var(--wa-accent)]', texto: 'text-[var(--wa-accent)]' },
+  dismissed: { label: 'Descartado', dot: 'bg-[#8e8e93]', texto: 'text-[var(--wa-text-2)]' },
 }
+const ESTADOS: CrmCaseStatus[] = ['open', 'contacted', 'resolved', 'dismissed']
 
 function Stars({ rating }: { rating: number | null }) {
   const r = rating ?? 0
   return (
-    <div className="flex items-center gap-0.5">
+    <span role="img" aria-label={`${r} de 5 estrellas`} className="flex items-center gap-0.5">
       {[1, 2, 3, 4, 5].map((i) => (
-        <Star key={i} className={`size-3.5 ${i <= r ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground/30'}`} />
+        <Star key={i} aria-hidden className={cn('size-4 lg:size-3.5', i <= r ? 'fill-[#ffcc00] text-[#ffcc00]' : 'text-[#5a5a5e]')} />
       ))}
-    </div>
+    </span>
   )
 }
 
@@ -36,18 +51,29 @@ export function CrmCasesPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =>
   const [loading, setLoading] = useState(true)
   const [showResolved, setShowResolved] = useState(false)
   const [isActing, startActing] = useTransition()
+  // La hora de cada celda ("14:32", "Ayer", "martes") cambia sola a la medianoche.
+  const dia = useDiaLocal()
 
   const loadCases = useCallback(async () => {
-    const result = await getCrmCases()
-    setCases(result.data)
+    try {
+      const result = await getCrmCases()
+      setCases(result.data)
+    } catch {
+      // Se queda la lista que había.
+    }
     setLoading(false)
   }, [])
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const result = await getCrmCases()
-      if (!cancelled) { setCases(result.data); setLoading(false) }
+      try {
+        const result = await getCrmCases()
+        if (!cancelled) setCases(result.data)
+      } catch {
+        // Sin red: se ve el vacío.
+      }
+      if (!cancelled) setLoading(false)
     })()
     return () => { cancelled = true }
   }, [])
@@ -68,8 +94,13 @@ export function CrmCasesPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =>
       ? { ...c, status, resolved_at: ['resolved', 'dismissed'].includes(status) ? new Date().toISOString() : null }
       : c))
     startActing(async () => {
-      const res = await updateCrmCase(caseId, { status })
-      if (res.error) { toast.error(res.error); loadCases() }
+      try {
+        const res = await updateCrmCase(caseId, { status })
+        if (res.error) { toast.error(res.error); loadCases() }
+      } catch (e) {
+        avisarFalla(e, 'No se pudo cambiar el estado. Revisá la conexión y probá de nuevo.')
+        loadCases()
+      }
     })
   }
 
@@ -86,172 +117,122 @@ export function CrmCasesPanel({ onNavigateToInbox }: { onNavigateToInbox?: () =>
     }
   }
 
-  const visible = useMemo(
-    () => cases.filter(c => showResolved || (c.status !== 'resolved' && c.status !== 'dismissed')),
-    [cases, showResolved],
-  )
-  const pendingCount = useMemo(() => cases.filter(c => c.status === 'open' || c.status === 'contacted').length, [cases])
-
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="size-10 rounded-full border-2 border-orange-500/30 border-t-orange-500 animate-spin" />
-          <span className="text-sm text-muted-foreground">Cargando casos...</span>
-        </div>
-      </div>
-    )
-  }
+  const pendientes = useMemo(() => cases.filter(c => c.status === 'open' || c.status === 'contacted'), [cases])
+  const cerrados = useMemo(() => cases.filter(c => c.status === 'resolved' || c.status === 'dismissed'), [cases])
 
   // Las estrellas, con palabras: un glifo de estrella como adorno va contra la regla de íconos (sin emojis ni glifos).
-  const resumen = pendingCount > 0
-    ? `${pendingCount} pendiente${pendingCount === 1 ? '' : 's'} · reseñas de 2 estrellas o menos`
+  const resumen = pendientes.length > 0
+    ? `${pendientes.length} pendiente${pendientes.length === 1 ? '' : 's'} · reseñas de 2 estrellas o menos`
     : 'Sin casos pendientes'
 
+  const celda = (c: CrmCaseRow) => (
+    <CeldaCaso key={c.id} caso={c} dia={dia} ocupado={isActing} onContactar={() => handleResponder(c.client?.id)} onEstado={(s) => handleStatus(c.id, s)} />
+  )
+
   return (
-    // A sangre adentro del marco de Mensajería (MarcoSeccion). En el celular el
-    // título va en la barra de iOS ("‹ Chats · Casos") y "Ver todos" a su
-    // derecha; abajo, el resumen como el pie de un título. En la compu, el
-    // encabezado de 56 px.
-    <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <AccionDeBarraIos>
         <BotonTextoIos onClick={() => setShowResolved(v => !v)}>{showResolved ? 'Pendientes' : 'Ver todos'}</BotonTextoIos>
       </AccionDeBarraIos>
-      {/* Header (compu) */}
-      <div className="hidden h-14 shrink-0 items-center justify-between gap-3 border-b bg-card/50 px-5 lg:flex">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="size-8 shrink-0 rounded-lg bg-orange-500/15 flex items-center justify-center">
-            <Frown aria-hidden className="size-4 text-orange-400" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold leading-tight">Casos de atención</h2>
-            <p className="truncate text-[11px] leading-tight text-muted-foreground">{resumen}</p>
-          </div>
-          {pendingCount > 0 && (
-            <span aria-hidden className="min-w-6 h-6 flex items-center justify-center rounded-full bg-orange-500 text-xs font-bold text-white px-2">
-              {pendingCount}
-            </span>
-          )}
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setShowResolved(v => !v)}
-          className="text-xs h-8 gap-1.5 border-dashed"
-        >
-          {showResolved ? 'Ocultar cerrados' : 'Ver todos'}
-        </Button>
-      </div>
-      {/* Celular: el resumen, sin franja. */}
-      <p className="shrink-0 px-4 pb-1 pt-3 text-[13px] text-muted-foreground lg:hidden">{resumen}</p>
+      <EncabezadoSeccion titulo="Casos" subtitulo={loading ? undefined : resumen}>
+        <BotonSecundario onClick={() => setShowResolved(v => !v)}>{showResolved ? 'Sólo pendientes' : 'Ver todos'}</BotonSecundario>
+      </EncabezadoSeccion>
 
-      {/* List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2 max-lg:touch-pan-y max-lg:touch-pinch-zoom">
-        {visible.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
-            <div className="size-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
-              <Frown className="size-8 opacity-30" />
-            </div>
-            <p className="text-sm font-medium">Sin casos {showResolved ? '' : 'pendientes'}</p>
-            <p className="text-xs mt-1 text-center max-w-[240px]">
-              Cuando un cliente deja una reseña de 2 estrellas o menos, aparece acá para que puedas hacer seguimiento.
-            </p>
-          </div>
+      <ContenidoSeccion>
+        {loading ? (
+          <CargandoIos texto="Cargando casos…" />
+        ) : pendientes.length === 0 && (!showResolved || cerrados.length === 0) ? (
+          <VacioIos
+            icono={Frown}
+            titulo={showResolved ? 'Sin casos' : 'Sin casos pendientes'}
+            texto="Cuando un cliente deja una reseña de 2 estrellas o menos, aparece acá para que puedas hacer el seguimiento."
+          />
         ) : (
-          visible.map((c) => {
-            const cfg = STATUS_CONFIG[c.status] ?? STATUS_CONFIG.open
-            const name = displayName(c.client?.name || c.client?.phone || 'Cliente', c.client?.instagram ? 'instagram' : 'whatsapp')
-            const when = formatDistanceToNow(new Date(c.review?.created_at ?? c.created_at), { addSuffix: true, locale: es })
-            const categories = c.review?.improvement_categories ?? []
-            const closed = c.status === 'resolved' || c.status === 'dismissed'
-            return (
-              <div
-                key={c.id}
-                className={`relative rounded-xl border p-4 transition-all ${closed ? 'opacity-70 bg-card/40 border-border/50' : 'bg-card border shadow-sm'}`}
-              >
-                <div className="flex gap-4">
-                  <div className="shrink-0 mt-0.5">
-                    <div className="size-10 rounded-2xl bg-orange-500/10 flex items-center justify-center">
-                      <User className="size-5 text-orange-400" />
-                    </div>
-                  </div>
-                  <div className="flex-1 min-w-0 flex flex-col gap-2.5">
-                    {/* Header */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-[13px] font-bold text-foreground truncate">{name}</h4>
-                          <span className={`shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${cfg.badge}`}>
-                            <span className={`size-1.5 rounded-full ${cfg.dot}`} />{cfg.label}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Stars rating={c.review?.rating ?? null} />
-                          {c.branch?.name && <span className="text-[11px] text-muted-foreground">· {c.branch.name}</span>}
-                        </div>
-                      </div>
-                      <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground whitespace-nowrap shrink-0">
-                        <Clock className="size-3 opacity-70" />{when}
-                      </span>
-                    </div>
-
-                    {/* Comment */}
-                    {c.review?.comment && (
-                      <p className="text-[13px] text-foreground/90 leading-relaxed bg-background/60 border border-border/40 rounded-lg px-3 py-2">
-                        “{c.review.comment}”
-                      </p>
-                    )}
-
-                    {/* Categories */}
-                    {categories.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {categories.map((cat, i) => (
-                          <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-300 border border-orange-500/20">
-                            {cat}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Actions */}
-                    <div className="flex items-center justify-between gap-2 mt-0.5 flex-wrap">
-                      <div className="flex items-center gap-1.5">
-                        {c.status !== 'contacted' && !closed && (
-                          <button onClick={() => handleStatus(c.id, 'contacted')} disabled={isActing}
-                            className="h-7 px-2.5 rounded-md text-[11px] font-medium bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 disabled:opacity-50 transition-colors">
-                            Marcar contactado
-                          </button>
-                        )}
-                        {!closed ? (
-                          <>
-                            <button onClick={() => handleStatus(c.id, 'resolved')} disabled={isActing}
-                              className="h-7 px-2.5 rounded-md text-[11px] font-medium bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50 inline-flex items-center gap-1 transition-colors">
-                              <Check className="size-3" /> Resolver
-                            </button>
-                            <button onClick={() => handleStatus(c.id, 'dismissed')} disabled={isActing}
-                              className="h-7 px-2.5 rounded-md text-[11px] font-medium text-muted-foreground hover:bg-muted disabled:opacity-50 inline-flex items-center gap-1 transition-colors">
-                              <X className="size-3" /> Descartar
-                            </button>
-                          </>
-                        ) : (
-                          <button onClick={() => handleStatus(c.id, 'open')} disabled={isActing}
-                            className="h-7 px-2.5 rounded-md text-[11px] font-medium text-muted-foreground hover:bg-muted disabled:opacity-50 inline-flex items-center gap-1 transition-colors">
-                            <RotateCcw className="size-3" /> Reabrir
-                          </button>
-                        )}
-                      </div>
-                      <button onClick={() => handleResponder(c.client?.id)}
-                        className="h-8 px-4 rounded-full inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider bg-[var(--wa-accent)] hover:bg-[var(--wa-accent-hover)] text-[var(--wa-on-accent)] transition-all shadow-sm hover:shadow-md">
-                        <MessageSquare className="size-3.5" /> Contactar
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )
-          })
+          <>
+            {pendientes.length > 0 ? (
+              <GrupoIos titulo={`Pendientes · ${pendientes.length}`} pie="Reseñas de 2 estrellas o menos.">
+                {pendientes.map(celda)}
+              </GrupoIos>
+            ) : (
+              <p className={cn(TEXTO_SECUNDARIO, 'px-4 pt-2 lg:px-3')}>No hay casos pendientes.</p>
+            )}
+            {showResolved && cerrados.length > 0 && <GrupoIos titulo="Cerrados">{cerrados.map(celda)}</GrupoIos>}
+          </>
         )}
-      </div>
+      </ContenidoSeccion>
     </div>
+  )
+}
+
+function CeldaCaso({
+  caso: c,
+  dia,
+  ocupado,
+  onContactar,
+  onEstado,
+}: {
+  caso: CrmCaseRow
+  /** El día del navegador (useDiaLocal): null mientras no se sabe. */
+  dia: string | null
+  ocupado: boolean
+  onContactar: () => void
+  onEstado: (estado: CrmCaseStatus) => void
+}) {
+  const cfg = STATUS_CONFIG[c.status] ?? STATUS_CONFIG.open
+  const name = displayName(c.client?.name || c.client?.phone || 'Cliente', c.client?.instagram ? 'instagram' : 'whatsapp')
+  const categories = c.review?.improvement_categories ?? []
+  const closed = c.status === 'resolved' || c.status === 'dismissed'
+  return (
+    <li className={cn(CLASE_CELDA, 'items-start')}>
+      <IconoCeldaIos icono={Frown} color={closed ? 'gris' : 'naranja'} className="mt-3 lg:mt-2.5" />
+      <div className={cn(CLASE_CUERPO, 'flex-col items-stretch gap-1 py-3 lg:py-2.5')}>
+        <div className="flex items-baseline gap-3">
+          <p className={cn(TEXTO_PRINCIPAL, 'min-w-0 flex-1 truncate font-semibold', closed && 'text-[var(--wa-text-2)]')}>{name}</p>
+          {dia && <span className={cn(TEXTO_TERCIARIO, 'shrink-0 tabular-nums')}>{formatRelativeDate(c.review?.created_at ?? c.created_at)}</span>}
+        </div>
+        <div className="flex items-center gap-2">
+          <Stars rating={c.review?.rating ?? null} />
+          {c.branch?.name && <span className={TEXTO_TERCIARIO}>{c.branch.name}</span>}
+        </div>
+        {c.review?.comment && (
+          <p className="text-[15px] leading-5 text-[var(--wa-text)] lg:text-[13px] lg:leading-[18px]">“{c.review.comment}”</p>
+        )}
+        {categories.length > 0 && (
+          <p className={TEXTO_TERCIARIO}>Para mejorar: {categories.join(' · ')}</p>
+        )}
+        <div className="-mb-1.5 mt-0.5 flex items-center gap-4 lg:-mb-1 lg:gap-3">
+          <BotonTextoCeldaIos icono={MessageSquare} onClick={onContactar} etiqueta={`Contactar a ${name}`}>
+            Contactar
+          </BotonTextoCeldaIos>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                disabled={ocupado}
+                aria-label={`Estado del caso de ${name}: ${cfg.label}. Cambiar`}
+                className={cn(
+                  'relative z-10 -ml-2.5 flex h-11 items-center gap-1.5 rounded-full px-2.5 text-[17px] font-medium outline-none transition-colors [-webkit-tap-highlight-color:transparent]',
+                  'active:bg-white/10 data-[state=open]:bg-white/10 disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-[var(--wa-accent)]/60 lg:-ml-2 lg:h-8 lg:px-2 lg:text-[13px] lg:hover:bg-white/[0.07]',
+                  cfg.texto,
+                )}
+              >
+                <span aria-hidden className={cn('size-2 rounded-full', cfg.dot)} />
+                {cfg.label}
+                <ChevronDown aria-hidden className="size-4" strokeWidth={2.2} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" sideOffset={4} collisionPadding={12} className={CLASE_MENU_IOS}>
+              {ESTADOS.map((s) => (
+                <DropdownMenuItem key={s} onSelect={() => { if (s !== c.status) onEstado(s) }} className={CLASE_ITEM_MENU_IOS}>
+                  <span aria-hidden className={cn('ml-1 size-2.5 shrink-0 rounded-full', STATUS_CONFIG[s].dot)} />
+                  <span className="flex-1">{s === 'open' && closed ? 'Reabrir' : STATUS_CONFIG[s].label}</span>
+                  {s === c.status && <Check aria-hidden className="text-[var(--wa-accent)]" strokeWidth={2.4} />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+    </li>
   )
 }

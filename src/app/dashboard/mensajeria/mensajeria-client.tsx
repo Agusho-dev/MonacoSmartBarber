@@ -14,7 +14,7 @@
 //   conversación, con anchos que salen del lugar que tienen las columnas.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { usePantallaInmersiva } from '@/components/dashboard/pantalla-inmersiva'
 import { useEsCelular } from '@/hooks/use-es-celular'
 import { getOpenCrmCaseCount } from '@/lib/actions/crm-cases'
@@ -45,8 +45,17 @@ import type { MensajeriaProps, CrmSection } from './components/shared/types'
 // ocupa 256 px y el modo foco los devuelve. Medidos por la pantalla, a 1280 px
 // la columna de secciones con etiquetas (220) y la lista ancha (380) dejaban
 // la conversación en 424 px (a 1279, en 611).
-// - --ancho-secciones: el riel de íconos (72) o, desde 1180 px de columnas, la
+// - --ancho-secciones: el riel de íconos (72) o, desde 1600 px de columnas, la
 //   lista con etiquetas (220). 0 donde la columna no se dibuja (el celular).
+//   La lista con etiquetas arrancaba en 1180, y desde una pantalla de 1436 px
+//   quedaban dos barras laterales seguidas: el menú del dashboard y ella, 476
+//   px de navegación antes de los chats y la conversación en 584 a 1440.
+//   WhatsApp para Mac tiene un solo riel de íconos. Con 1600 el riel llega
+//   hasta una pantalla de 1855 px con el menú (1600 en el modo foco, donde el
+//   menú plegado deja su borde de 1 px): a 1440 la conversación mide 732 y a
+//   1536, 828. La lista con etiquetas queda para las pantallas grandes, donde
+//   no le saca lugar a nadie: a 1920, con ella, la conversación mide 1064 (704
+//   con la info. del contacto al lado).
 // - --ancho-lista: 340, o 380 desde 1000 px de columnas. Lo usan la lista y
 //   Programados.
 // La info. del contacto (client-profile.tsx) es hija de este mismo envoltorio:
@@ -55,7 +64,7 @@ import type { MensajeriaProps, CrmSection } from './components/shared/types'
 // columnas va al lado. En el celular las columnas miden lo que la pantalla: por
 // eso todo va con lg: además del container query.
 const ANCHOS_DE_COLUMNAS =
-  '[--ancho-secciones:0px] lg:[--ancho-secciones:72px] lg:@min-[1180px]/columnas:[--ancho-secciones:220px] ' +
+  '[--ancho-secciones:0px] lg:[--ancho-secciones:72px] lg:@min-[1600px]/columnas:[--ancho-secciones:220px] ' +
   'lg:[--ancho-lista:340px] lg:@min-[1000px]/columnas:[--ancho-lista:380px]'
 
 export function MensajeriaClient(props: MensajeriaProps) {
@@ -79,7 +88,6 @@ export function MensajeriaClient(props: MensajeriaProps) {
 // Adentro del provider: la navegación necesita la vista del inbox (chats o
 // programados) y la pantalla inmersiva necesita saber si hay un chat abierto.
 function MarcoMensajeria() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const isFocusMode = searchParams.get('foco') === '1'
   const { inboxTab, setInboxTab, conversations, scheduled, showMobileChat, activeConv } = useMensajeria()
@@ -104,13 +112,18 @@ function MarcoMensajeria() {
     esCelular && ((showMobileChat && !!activeConv) || section !== 'inbox' || inboxTab === 'scheduled')
   usePantallaInmersiva(capaAbierta)
 
+  // ?foco lo leen sólo el shell y esta pantalla, en el cliente: alcanza con el
+  // replaceState de la ventana (el de Next lo parchea y actualiza
+  // useSearchParams en el acto, sin ir al servidor). Con router.replace había
+  // una navegación en vuelo, y si en ese rato se abría una capa (que empuja su
+  // entrada del historial) Next la descartaba y el modo foco no se aplicaba.
   const toggleFocusMode = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString())
     if (isFocusMode) params.delete('foco')
     else params.set('foco', '1')
     const qs = params.toString()
-    router.replace(`/dashboard/mensajeria${qs ? `?${qs}` : ''}`, { scroll: false })
-  }, [isFocusMode, router, searchParams])
+    window.history.replaceState(null, '', `/dashboard/mensajeria${qs ? `?${qs}` : ''}${window.location.hash}`)
+  }, [isFocusMode, searchParams])
 
   // Alertas no leídas y casos pendientes. Sólo pinta la última consulta: si
   // una vieja llega tarde no pisa el número nuevo.
@@ -173,11 +186,15 @@ function MarcoMensajeria() {
   const abrirConfiguracion = () => setShowSettings(true)
   const abrirChatNuevo = () => setShowNewChat(true)
   // Lo que no traiga id y nombre (por ejemplo, el evento del clic si quien
-  // llama pasa el handler tal cual) abre el diálogo sin cliente.
+  // llama pasa el handler tal cual) abre el diálogo sin cliente. La foto (la de
+  // la info. del contacto) pasa si es un texto: «Para» la muestra.
   const abrirProgramar = (cliente?: ClienteInicial) =>
     setProgramar({
       abierto: true,
-      cliente: typeof cliente?.id === 'string' && typeof cliente.nombre === 'string' ? { id: cliente.id, nombre: cliente.nombre } : null,
+      cliente:
+        typeof cliente?.id === 'string' && typeof cliente.nombre === 'string'
+          ? { id: cliente.id, nombre: cliente.nombre, foto: typeof cliente.foto === 'string' ? cliente.foto : null }
+          : null,
     })
 
   return (
@@ -266,23 +283,33 @@ function MarcoMensajeria() {
 
 function DeepLinkHandler({ onSection }: { onSection: (s: CrmSection) => void }) {
   const searchParams = useSearchParams()
-  const router = useRouter()
   const { handleStartConversation, activeConv, setConversations, tags } = useMensajeria()
   const [pendingTag, setPendingTag] = useState<{ clientId: string; tagId: string } | null>(null)
+  // Cada enlace se atiende una sola vez: si el ?clientId vuelve a aparecer
+  // (una entrada del historial que lo conservó), no reabre el chat ni vuelve
+  // a llamar a handleStartConversation.
+  const atendidoRef = useRef('')
 
   useEffect(() => {
     const clientId = searchParams.get('clientId')
     if (!clientId) return
     const tag = searchParams.get('tag')
+    const clave = `${clientId}|${tag ?? ''}`
+    if (atendidoRef.current === clave) return
+    atendidoRef.current = clave
     onSection('inbox')
     handleStartConversation(clientId)
     if (tag) setPendingTag({ clientId, tagId: tag })
-    // Se consumen clientId y tag; lo demás (?foco=1, ?settings=1) queda.
+    // Se consumen clientId y tag; lo demás (?foco=1, ?settings=1) queda. Con el
+    // replaceState de la ventana (el de Next lo parchea) y no con
+    // router.replace: nadie los lee en el servidor, y una navegación en vuelo
+    // la descartaba la entrada del historial del chat que se abre (con la red
+    // lenta, la entrada quedaba con ?clientId y el chat se volvía a abrir).
     const params = new URLSearchParams(searchParams.toString())
     params.delete('clientId')
     params.delete('tag')
     const qs = params.toString()
-    router.replace(`/dashboard/mensajeria${qs ? `?${qs}` : ''}`, { scroll: false })
+    window.history.replaceState(null, '', `/dashboard/mensajeria${qs ? `?${qs}` : ''}${window.location.hash}`)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 
