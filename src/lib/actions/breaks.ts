@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 import { leerBarberSession } from '@/lib/barber-cookie'
 import { getCurrentOrgId, validateBranchAccess } from './org'
+import { errorSinAccesoASucursal } from '@/lib/sesion-vencida'
 
 // ─── Configuración de descansos (CRUD) ──────────────────────────────────────
 
@@ -157,7 +158,7 @@ async function calculateGhostPosition(
 
 export async function requestBreak(staffId: string, branchId: string, breakConfigId: string) {
     const orgAccess = await validateBranchAccess(branchId)
-    if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+    if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
     const supabase = createAdminClient()
 
@@ -291,7 +292,7 @@ export async function rejectBreak(requestId: string, notes?: string) {
     if (!req) return { error: 'Solicitud no encontrada o ya procesada' }
 
     const orgAccess = await validateBranchAccess(req.branch_id)
-    if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+    if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
     const { error } = await supabase
         .from('break_requests')
@@ -324,7 +325,7 @@ export async function cancelBreakRequest(requestId: string) {
     if (!req) return { error: 'Solicitud no encontrada' }
 
     const orgAccess = await validateBranchAccess(req.branch_id)
-    if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+    if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
     if (req.status === 'approved') {
         await supabase
@@ -361,7 +362,7 @@ export async function completeBreakRequest(queueEntryId: string) {
     if (!entry) return { error: 'Descanso no encontrado o no activo' }
 
     const orgAccess = await validateBranchAccess(entry.branch_id)
-    if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+    if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
     const completedAt = new Date()
     let overtimeSeconds = 0
@@ -469,7 +470,7 @@ export async function startPendingBreakIfReady(staffId: string, branchId: string
     const supabase = createAdminClient()
 
     const orgAccess = await validateBranchAccess(branchId)
-    if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+    if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
     // Buscar el ghost waiting más viejo del barbero
     const { data: ghost } = await supabase
@@ -542,7 +543,7 @@ export async function startPendingBreakIfReady(staffId: string, branchId: string
 
 export async function createScheduledBreakRequests(branchId: string, breakConfigId: string) {
   const orgAccess = await validateBranchAccess(branchId)
-  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+  if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
   const supabase = createAdminClient()
 

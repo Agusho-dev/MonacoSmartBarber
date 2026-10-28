@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { validateBranchAccess } from './org'
+import { errorSinAccesoASucursal } from '@/lib/sesion-vencida'
 import { isValidUUID } from '@/lib/validation'
 import { getBarberSession } from './auth'
 
@@ -33,7 +34,7 @@ export async function fetchBarberShiftSummary(
   }
 
   const orgAccess = await validateBranchAccess(branchId)
-  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+  if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
   const supabase = createAdminClient()
   const { data, error } = await supabase.rpc('get_barber_day_summary', {
@@ -143,7 +144,7 @@ export async function setBranchOpeningCash(
   if (!Number.isFinite(amount) || amount < 0) return { error: 'Monto inválido' }
 
   const orgAccess = await validateBranchAccess(branchId)
-  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+  if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
   const supabase = createAdminClient()
   const { error } = await supabase

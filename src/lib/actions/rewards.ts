@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { validateBranchAccess } from './org'
+import { errorSinAccesoASucursal } from '@/lib/sesion-vencida'
 import { getBarberSession } from './auth'
 import { isValidUUID } from '@/lib/validation'
 import {
@@ -134,7 +135,7 @@ export async function validateCouponForCheckout(
   if (!isValidUUID(branchId)) return { error: 'Sucursal inválida' }
 
   const orgId = await validateBranchAccess(branchId)
-  if (!orgId) return { error: 'No autorizado para esta sucursal' }
+  if (!orgId) return { error: await errorSinAccesoASucursal() }
 
   const supabase = createAdminClient()
   const { data: reward, error } = await supabase
@@ -239,7 +240,7 @@ export async function deliverRewardByQr(
   if (!isValidUUID(branchId)) return { error: 'Sucursal inválida' }
 
   const orgId = await validateBranchAccess(branchId)
-  if (!orgId) return { error: 'No autorizado para esta sucursal' }
+  if (!orgId) return { error: await errorSinAccesoASucursal() }
 
   // Quién entrega (auditoría en client_rewards.delivered_by). Sin sesión de barbero
   // (p. ej. cobro desde el dashboard) va null: la RPC lo admite.
@@ -301,7 +302,7 @@ export async function validateBenefitQrForCheckout(
   if (clientId && !isValidUUID(clientId)) return { error: 'Cliente inválido' }
 
   const orgId = await validateBranchAccess(branchId)
-  if (!orgId) return { error: 'No autorizado para esta sucursal' }
+  if (!orgId) return { error: await errorSinAccesoASucursal() }
 
   const supabase = createAdminClient()
   const { data, error } = await supabase.rpc('validate_referral_for_checkout', {

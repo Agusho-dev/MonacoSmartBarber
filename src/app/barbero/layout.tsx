@@ -15,6 +15,7 @@ import { LoyaltyResultHost } from '@/components/barber/loyalty-result-host'
 import { GiroPanelRaiz } from '@/components/barber/giro-panel-raiz'
 import { ControlPantalla } from '@/components/barber/control-pantalla'
 import { BandaReloj } from '@/components/barber/reloj/banda-reloj'
+import { VigiaSesion } from '@/components/barber/vigia-sesion'
 import { SCRIPT_GIRO_PRE_PAINT } from '@/lib/giro-panel/script-pre-paint'
 
 // Metadata scopeada a /barbero: inyecta el manifest PWA y los meta de
@@ -123,6 +124,9 @@ export default async function BarberLayout({
           ) : (
             <ControlPantalla variante="flotante" />
           )}
+          {/* La cookie del PIN dura 14 h y el panel queda abierto de un día para
+              el otro: sin esto, la fila se seguía viendo y ninguna acción andaba. */}
+          {session && <VigiaSesion staffId={session.staff_id} />}
           {/* Tarjeta del programa de fidelización tras el cobro (store global). */}
           <LoyaltyResultHost />
         </div>

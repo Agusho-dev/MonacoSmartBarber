@@ -154,8 +154,9 @@ function anotarRecarga(guarda: Guarda, clave: string, ahora: number): boolean {
  * del panel en el navegador) y volver a entrar exige un toque. Se anota antes
  * de recargar y se restaura con el primer toque después. La pantalla completa
  * de una app instalada (display-mode) no pasa por acá: sobrevive a la recarga.
+ * Exportada para el vigía de la sesión del panel (src/lib/vigia-sesion-panel.ts).
  */
-function recordarPantallaCompleta() {
+export function recordarPantallaCompleta() {
   try {
     if (document.fullscreenElement) window.sessionStorage.setItem(CLAVE_PANTALLA_COMPLETA, '1')
   } catch {
@@ -212,8 +213,16 @@ function recargarConGuarda(clave: string, exigirGuarda: boolean): boolean {
   return true
 }
 
-function hayFotosSubiendo(): boolean {
+// Las guardas de "hay algo a medio hacer" (éstas dos y `hayCampoEnfocado`, más
+// abajo) se exportan para el vigía de la sesión del panel
+// (src/lib/vigia-sesion-panel.ts), que espera lo mismo.
+
+export function hayFotosSubiendo(): boolean {
   return document.documentElement.dataset.subiendoFotos === 'true'
+}
+
+export function hayDialogoAbierto(): boolean {
+  return document.querySelector(SELECTOR_DIALOGO) !== null
 }
 
 const pausa = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms))
@@ -318,13 +327,13 @@ function motivoParaNoRecargar(superficie: SuperficieRecarga, ultimaInteraccion: 
   const raiz = document.documentElement
   if (hayFotosSubiendo()) return 'fotos subiendo'
   if (superficie === 'kiosko' && raiz.dataset.kioskoEnReposo !== 'true') return 'kiosko fuera de reposo'
-  if (document.querySelector(SELECTOR_DIALOGO)) return 'diálogo abierto'
+  if (hayDialogoAbierto()) return 'diálogo abierto'
   if (hayCampoEnfocado()) return 'campo enfocado'
   if (document.querySelector(SELECTOR_AVISO_CON_ACCION)) return 'aviso con acción'
   return null
 }
 
-function hayCampoEnfocado(): boolean {
+export function hayCampoEnfocado(): boolean {
   const el = document.activeElement
   if (!el || el === document.body) return false
   if (el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return true

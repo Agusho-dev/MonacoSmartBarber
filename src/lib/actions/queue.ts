@@ -4,6 +4,7 @@ import { createAdminClient, createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 import { validateBranchAccess } from './org'
+import { errorSinAccesoASucursal } from '@/lib/sesion-vencida'
 import { getScopedBranchIds } from './branch-access'
 import { getActiveTimezone } from '@/lib/i18n'
 import { isValidUUID } from '@/lib/validation'
@@ -805,7 +806,7 @@ export async function startService(queueEntryId: string, barberId: string) {
   if (!entry) return { error: 'Entrada no encontrada' }
 
   const orgAccess = await validateBranchAccess(entry.branch_id)
-  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+  if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
   // `.select('id')` da el rowcount: la UPDATE está condicionada a 'waiting', y
   // con 0 filas el cliente ya no estaba esperando (otro barbero lo tomó, lo
@@ -872,7 +873,7 @@ export async function attendNextClient(barberId: string, branchId: string, prefe
   const supabase = createAdminClient()
 
   const orgAccess = await validateBranchAccess(branchId)
-  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+  if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
   const { data, error } = await supabase.rpc('claim_next_for_barber', {
     p_barber_id: barberId,
@@ -970,7 +971,7 @@ export async function completeService(
   if (!entryForValidation) return { error: 'Entrada no encontrada' }
 
   const orgAccess = await validateBranchAccess(entryForValidation.branch_id)
-  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+  if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
   // 0. Una entrada que no está en curso no se cobra, y se dice por qué ANTES de
   //    la seña: seguir de largo consumía la seña de un turno que nadie iba a
@@ -2125,7 +2126,7 @@ export async function cancelQueueEntry(
   if (!entry) return { error: 'Entrada no encontrada' }
 
   const orgAccess = await validateBranchAccess(entry.branch_id)
-  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+  if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
   // Override de admin (solo dashboard): permitir cancelar un corte YA iniciado
   // (in_progress). Se exige sesión de Supabase Auth — el panel del barbero usa cookie
@@ -2274,7 +2275,7 @@ export async function cerrarSoloAsesoria(
   if (!entry) return { error: 'Entrada no encontrada' }
 
   const orgAccess = await validateBranchAccess(entry.branch_id)
-  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+  if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
   // Quién la cierra. Con la cookie del panel manda la cookie (mismo criterio que
   // getCurrentOrgId): aunque la tablet tenga una sesión del dashboard residual.
@@ -2377,7 +2378,7 @@ export async function reassignBarber(
   if (!entry) return { error: 'Entrada no encontrada' }
 
   const orgAccess = await validateBranchAccess(entry.branch_id)
-  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+  if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
   const { error } = await supabase
     .from('queue_entries')
@@ -2635,7 +2636,7 @@ export async function updateQueueOrder(
 
   // Validar la primera sucursal (todas deben pertenecer a la misma org)
   const orgAccess = await validateBranchAccess(allEntries[0].branch_id)
-  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+  if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
   // Verificar que todas las entradas pertenecen al scope del usuario (org + sucursal permitida)
   const scopedBranchIds = await getScopedBranchIds()
@@ -2683,7 +2684,7 @@ export async function pauseActiveService(queueEntryId: string) {
   if (entry.status !== 'in_progress') return { error: 'El corte no está activo' }
 
   const orgAccess = await validateBranchAccess(entry.branch_id)
-  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+  if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
   if (entry.paused_at) return { success: true, alreadyPaused: true }
 
@@ -2743,7 +2744,7 @@ export async function createBreakEntry(branchId: string, barberId: string, _brea
 
   // Validar que la sucursal pertenece a la org activa
   const orgAccess = await validateBranchAccess(branchId)
-  if (!orgAccess) return { error: 'No autorizado para esta sucursal' }
+  if (!orgAccess) return { error: await errorSinAccesoASucursal() }
 
   const { data: position } = await supabase.rpc('next_queue_position', {
     p_branch_id: branchId,
