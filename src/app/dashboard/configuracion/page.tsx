@@ -3,11 +3,13 @@ import { getCurrentOrgId } from '@/lib/actions/org'
 import { getScopedBranchIds } from '@/lib/actions/branch-access'
 import { obtenerMenorEspera } from '@/lib/actions/menor-espera'
 import { obtenerAsesoriaSucursales, obtenerMetricasAsesoria } from '@/lib/actions/asesoria'
+import { obtenerJuegoSucursales } from '@/lib/actions/juego-config'
 import { redirect } from 'next/navigation'
 import { ConfiguracionClient } from './configuracion-client'
 import { CheckinPinCard } from '@/components/dashboard/checkin-pin-card'
 import { MenorEsperaCard } from '@/components/dashboard/menor-espera-card'
 import { AsesoriaCard } from '@/components/dashboard/asesoria-card'
+import { JuegoCard } from '@/components/dashboard/juego-card'
 
 export default async function ConfiguracionPage() {
   const orgId = await getCurrentOrgId()
@@ -16,7 +18,7 @@ export default async function ConfiguracionPage() {
   const supabase = createAdminClient()
   const scopedIds = await getScopedBranchIds()
 
-  const [{ data: appSettings }, { data: branches }, { data: org }, menorEspera, asesoria, metricasAsesoria] = await Promise.all([
+  const [{ data: appSettings }, { data: branches }, { data: org }, menorEspera, asesoria, metricasAsesoria, juego] = await Promise.all([
     supabase.from('app_settings').select('*').eq('organization_id', orgId).single(),
     scopedIds.length > 0
       ? supabase.from('branches').select('id, name, checkin_bg_color').eq('organization_id', orgId).in('id', scopedIds).order('name')
@@ -45,11 +47,18 @@ export default async function ConfiguracionPage() {
       ok: false as const,
       error: `No pudimos calcular cómo le va a la asesoría: ${e instanceof Error ? e.message : String(e)}`,
     })),
+    // «Corte Final» (mig 233): QR del juego en la tablet, por sucursal. Sólo la org del
+    // juego ve la tarjeta (`sinPermiso` también cuando la organización no es Monaco).
+    obtenerJuegoSucursales().catch((e: unknown) => ({
+      ok: false as const,
+      error: `No pudimos cargar el juego: ${e instanceof Error ? e.message : String(e)}`,
+    })),
   ])
 
   const hasCheckinPin = !!(org as { checkin_pin_hash?: string | null } | null)?.checkin_pin_hash
   // Sin `settings.view` la card no se muestra: un «Reintentar» no arregla un permiso.
   const asesoriaSinPermiso = !asesoria.ok && 'sinPermiso' in asesoria && asesoria.sinPermiso === true
+  const juegoSinPermiso = !juego.ok && 'sinPermiso' in juego && juego.sinPermiso === true
 
   return (
     <div className="space-y-6">
@@ -66,6 +75,12 @@ export default async function ConfiguracionPage() {
           inicial={asesoria.ok ? { sucursales: asesoria.sucursales, puedeEditar: asesoria.puedeEditar } : null}
           errorInicial={asesoria.ok ? null : asesoria.error}
           metricasIniciales={metricasAsesoria}
+        />
+      )}
+      {!juegoSinPermiso && (
+        <JuegoCard
+          inicial={juego.ok ? { sucursales: juego.sucursales, puedeEditar: juego.puedeEditar } : null}
+          errorInicial={juego.ok ? null : juego.error}
         />
       )}
       <CheckinPinCard hasPin={hasCheckinPin} />
