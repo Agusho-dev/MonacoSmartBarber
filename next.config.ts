@@ -69,7 +69,8 @@ const nextConfig: NextConfig = {
         // /_next/image (CDN de imágenes optimizadas) y favicon.
         // El patrón anterior '/:path*' aplicaba no-store a TODO incluyendo bundles
         // hasheados, derrotando el caching del CDN y forzando re-download en cada nav.
-        source: '/((?!_next/static|_next/image|favicon.ico).*)',
+        // También quedan afuera los assets de «Corte Final» (regla siguiente).
+        source: '/((?!_next/static|_next/image|favicon.ico|juego/(?:personajes|arenas|efectos)/).*)',
         headers: [
           {
             key: 'Cache-Control',
@@ -82,6 +83,18 @@ const nextConfig: NextConfig = {
           {
             key: 'Expires',
             value: '0',
+          },
+        ],
+      },
+      {
+        // Sprites, arenas y efectos del juego (~4,6 MB): con no-store el celular del cliente
+        // los volvía a bajar en cada visita. Se revalidan siempre por ETag (304 sin bajar
+        // nada), así un atlas.json nuevo nunca convive con un atlas.png viejo del caché.
+        source: '/juego/:carpeta(personajes|arenas|efectos)/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=0, must-revalidate',
           },
         ],
       },

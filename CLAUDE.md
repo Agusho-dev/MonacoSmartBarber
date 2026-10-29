@@ -276,6 +276,10 @@ El detalle está en `../.claude/rules/mensajeria.md` (y el contrato con el shell
 - El teclado del iPhone no achica la pantalla: el chat y las hojas siguen al viewport visual (`src/hooks/use-viewport-visual.ts`).
 - `components/shared/mensajeria-context.tsx` (el realtime) no se toca.
 
+### «Corte Final»: el juego de pelea para la espera (29/oct/2026, migración 232)
+
+El detalle está en `../.claude/rules/juego.md`. Lo mínimo: `/juego` es público (el kiosko muestra un QR con token firmado después del check-in); contratos en `src/lib/juego/tipos.ts`; el motor (`src/lib/juego/motor`) es puro y determinista y se valida con `scripts/juego/simulador`; los sprites salen de las hojas del dueño con `scripts/juego/*.py` (rembg, no por color); `juego_partidas` sólo por service role; el juego es sólo de la org de Monaco (sucursal ancla `rondeau`). Sumar un barbero = hoja → atlas → ficha en `personajes.ts` → movimientos → simular.
+
 ### Tex y la conciliación con Mercado Pago (oct/2026, migraciones 227–230)
 
 El detalle está en `../.claude/rules/tex.md` y `../.claude/rules/conciliacion-mp.md`. Mapa del código:
@@ -309,7 +313,7 @@ Los crons se disparan desde **pg_cron en Supabase** (ver migración 087) haciend
 
 ## SQL Migrations
 
-Located in `supabase/migrations/`, numbered sequentially (through `230` at oct/2026). Las escritas pero NO aplicadas (con gate) viven en `supabase/migrations_pendientes/` con un README del orden: no moverlas a `migrations/` hasta aplicarlas. Always use `IF NOT EXISTS`/`IF EXISTS` for idempotency. Comments in Spanish. Migrations 030–036 added mobile app support; 047–051 added multi-tenant org support. Changes to those tables affect the Flutter mobile app (`../Monaco-mobile`).
+Located in `supabase/migrations/`, numbered sequentially (through `232` at oct/2026). Las escritas pero NO aplicadas (con gate) viven en `supabase/migrations_pendientes/` con un README del orden: no moverlas a `migrations/` hasta aplicarlas. Always use `IF NOT EXISTS`/`IF EXISTS` for idempotency. Comments in Spanish. Migrations 030–036 added mobile app support; 047–051 added multi-tenant org support. Changes to those tables affect the Flutter mobile app (`../Monaco-mobile`).
 
 ## Environment Variables
 

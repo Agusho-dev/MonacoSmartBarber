@@ -42,3 +42,7 @@ next-env.d.ts
 
 # claude code — config local por desarrollador (NO compartir en el repo)
 .claude/settings.local.json
+
+# Intermedios del extractor de sprites del juego
+scripts/juego/personajes/.cache/
+scripts/juego/simulador/resultado.json

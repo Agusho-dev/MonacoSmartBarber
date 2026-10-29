@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 import { esErrorDeVersion, avisarYRecargarPorVersion, TEXTO_RECARGA_MANUAL } from '@/lib/recarga-version'
 import { checkinClient, checkinClientByFace, reassignMyBarber } from '@/lib/actions/queue'
 import { pedirAsesoriaDesdeMiTurno } from '@/lib/actions/asesoria'
+import { crearEnlaceJuego } from '@/lib/actions/juego'
 import {
   lookupAppointmentByPhone,
   lookupAppointmentForClient,
@@ -77,6 +78,7 @@ import {
   AsesoriaKioskMensaje,
   AsesoriaKioskPedirBoton,
 } from '@/components/checkin/asesoria-kiosk-band'
+import { QrJuego } from '@/components/checkin/qr-juego'
 import {
   TerminalAmbient,
   TerminalGlobalStyles,
@@ -135,6 +137,8 @@ const LOCALSTORAGE_KEY = 'checkin_branch'
 
 const PHONE_LENGTH = 10
 const RESET_DELAY_MS = 5_000
+/** Con el QR de «Corte Final» a la vista: tiempo para sacar el celular y escanearlo. */
+const RESET_DELAY_JUEGO_MS = 15_000
 const KEYPAD = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const
 
 /**
@@ -400,6 +404,8 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
 
   const [queueEntryId, setQueueEntryId] = useState<string | null>(null)
   const [changingBarberInSuccess, setChangingBarberInSuccess] = useState(false)
+  /** Link del QR de «Corte Final» para una entrada (ver `entradaParaJuego`). */
+  const [enlaceJuego, setEnlaceJuego] = useState<{ entryId: string; url: string } | null>(null)
 
   const [myQueueEntry, setMyQueueEntry] = useState<QueueEntry | null>(null)
   const [changingBarberInManage, setChangingBarberInManage] = useState(false)
@@ -902,6 +908,7 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
 
     setQueueEntryId(null)
     setChangingBarberInSuccess(false)
+    setEnlaceJuego(null)
     setMyQueueEntry(null)
     setChangingBarberInManage(false)
     setYaEstabaEnFila(false)
@@ -950,6 +957,43 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
     goTo('home')
   }, [goTo, onExit])
 
+  // ── QR de «Corte Final» (el juego para la espera) ──
+  // El cartel de éxito y «Mi turno» (mientras el cliente espera) ofrecen el
+  // juego con un QR. Es un EXTRA: el link se pide al entrar y, si falla o la
+  // sucursal no es de la organización del juego (`crearEnlaceJuego` lo
+  // rechaza), no se muestra nada y la pantalla queda exactamente como antes.
+  // Con el QR a la vista, la vuelta al inicio espera 15 s en vez de 5.
+  const entradaParaJuego =
+    step === 'success'
+      ? queueEntryId
+      : step === 'manage_turn' && myQueueEntry?.status === 'waiting'
+        ? myQueueEntry.id
+        : null
+
+  useEffect(() => {
+    if (!entradaParaJuego) return
+    let vigente = true
+    crearEnlaceJuego(entradaParaJuego)
+      .then((r) => {
+        if (vigente && r.ok) setEnlaceJuego({ entryId: entradaParaJuego, url: r.url })
+      })
+      .catch(() => {
+        // Sin QR y sin aviso (tampoco el de versión vieja): lo que importa acá es el check-in.
+      })
+    return () => {
+      vigente = false
+    }
+  }, [entradaParaJuego])
+
+  const urlJuego =
+    enlaceJuego !== null &&
+    enlaceJuego.entryId === entradaParaJuego &&
+    !(step === 'success' && changingBarberInSuccess) &&
+    !(step === 'manage_turn' && changingBarberInManage)
+      ? enlaceJuego.url
+      : null
+  const demoraReset = urlJuego ? RESET_DELAY_JUEGO_MS : RESET_DELAY_MS
+
   // ── Auto-reset declarativo ──
   // Único dueño del timer de "Volviendo al inicio". Antes esto se programaba con
   // `setTimeout(reset)` imperativo y disperso en cada goTo('success')/goTo('manage_turn'),
@@ -961,15 +1005,17 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
   // «Pedir asesoría» en vuelo también pausa «Mi turno», y cada resultado nuevo
   // (`avisoAsesoriaMiTurno`) reinicia la cuenta: el mensaje queda a la vista los
   // 5 s enteros, en sincronía con la barra, que se vuelve a montar con él.
+  // Cuando aparece el QR del juego, `demoraReset` pasa a 15 s: la cuenta vuelve
+  // a empezar y la barra (con `key` en la demora) también, juntas.
   useEffect(() => {
     const onTerminalScreen =
       (step === 'success' && !changingBarberInSuccess) ||
       (step === 'manage_turn' && !changingBarberInManage && !pidiendoAsesoria) ||
       (step === 'staff_action_confirm' && staffActionDone)
     if (!onTerminalScreen) return
-    const t = setTimeout(() => reset(), RESET_DELAY_MS)
+    const t = setTimeout(() => reset(), demoraReset)
     return () => clearTimeout(t)
-  }, [step, changingBarberInSuccess, changingBarberInManage, pidiendoAsesoria, avisoAsesoriaMiTurno, staffActionDone, reset])
+  }, [step, changingBarberInSuccess, changingBarberInManage, pidiendoAsesoria, avisoAsesoriaMiTurno, staffActionDone, reset, demoraReset])
 
   // ── Timeout de inactividad en las pantallas intermedias ──
   // El auto-reset de arriba sólo cubre las pantallas terminales, así que un
@@ -3256,71 +3302,80 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
       {step === 'success' && (
         <div
           key={`success-${animKey}`}
-          className="relative z-[1] w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-2.5 md:gap-4 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500"
+          className={cn(
+            'relative z-[1] w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-2.5 md:gap-4 px-4 md:px-6 pt-6 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in zoom-in-95 duration-500',
+            // Con el QR del juego, la tablet apaisada (800 px de alto) lo pone al costado.
+            urlJuego && 'lg:max-w-5xl'
+          )}
         >
           <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
           {!changingBarberInSuccess ? (
             <>
-              <div
-                className={cn(
-                  'w-full max-w-xl p-5 md:p-10 flex flex-col items-center gap-3 md:gap-5 animate-in zoom-in-50 duration-700',
-                  isLightBg
-                    ? 'rounded-2xl md:rounded-3xl border border-zinc-200 bg-white shadow-lg'
-                    : terminalGlassCard
-                )}
-              >
-                <div className={cn(
-                  'size-12 md:size-16 rounded-full border flex items-center justify-center',
-                  isLightBg
-                    ? 'bg-emerald-50 border-emerald-300'
-                    : 'bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.15)]'
-                )}>
-                  <CheckCircle2 className={cn('size-6 md:size-9', isLightBg ? 'text-emerald-600' : 'text-emerald-400')} strokeWidth={1.5} />
-                </div>
+              <div className={cn('w-full flex flex-col items-center gap-2.5 md:gap-4', urlJuego && 'lg:flex-row lg:items-stretch lg:justify-center lg:gap-6')}>
+                <div
+                  className={cn(
+                    'w-full max-w-xl p-5 md:p-10 flex flex-col items-center gap-3 md:gap-5 animate-in zoom-in-50 duration-700',
+                    urlJuego && 'lg:flex-1 lg:justify-center',
+                    isLightBg
+                      ? 'rounded-2xl md:rounded-3xl border border-zinc-200 bg-white shadow-lg'
+                      : terminalGlassCard
+                  )}
+                >
+                  <div className={cn(
+                    'size-12 md:size-16 rounded-full border flex items-center justify-center',
+                    isLightBg
+                      ? 'bg-emerald-50 border-emerald-300'
+                      : 'bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.15)]'
+                  )}>
+                    <CheckCircle2 className={cn('size-6 md:size-9', isLightBg ? 'text-emerald-600' : 'text-emerald-400')} strokeWidth={1.5} />
+                  </div>
 
-                <h2 className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
-                  {appointmentConfirmed ? '¡Llegada registrada!' : '¡Estás en la fila!'}
-                </h2>
+                  <h2 className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
+                    {appointmentConfirmed ? '¡Llegada registrada!' : '¡Estás en la fila!'}
+                  </h2>
 
-                <div className="text-center">
-                  <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
-                    ¡Tomá asiento!
-                  </p>
-                  {appointmentConfirmed ? (
-                    <p className={cn('text-lg md:text-xl font-medium mt-3', isLightBg ? 'text-emerald-600' : 'text-emerald-400')}>
-                      {appointment?.barber_name
-                        ? `${appointment.barber_name} ya sabe que llegaste`
-                        : 'Tu barbero ya sabe que llegaste'}
-                      {turnoHora ? ` · turno de las ${turnoHora}` : ''}
+                  <div className="text-center">
+                    <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
+                      ¡Tomá asiento!
                     </p>
-                  ) : (
-                    effectiveAhead && effectiveAhead.label && (
+                    {appointmentConfirmed ? (
                       <p className={cn('text-lg md:text-xl font-medium mt-3', isLightBg ? 'text-emerald-600' : 'text-emerald-400')}>
-                        {effectiveAhead.label}
+                        {appointment?.barber_name
+                          ? `${appointment.barber_name} ya sabe que llegaste`
+                          : 'Tu barbero ya sabe que llegaste'}
+                        {turnoHora ? ` · turno de las ${turnoHora}` : ''}
                       </p>
-                    )
-                  )}
-                  {/* Asesoría (mig 217): lo que confirmó el servidor, no lo que se
-                      tocó. Dice A QUIÉN le avisamos, sin prometer que «ya lo sabe»
-                      (hallazgo asesoria-03). */}
-                  {asesoriaEnExito && (
-                    <AsesoriaKioskMensaje variante={varianteAsesoria} tono={asesoriaEnExito} className="mt-3">
-                      {asesoriaEnExito === 'avisale'
-                        ? TEXTO_AVISALE_ASESORIA
-                        : destinoAsesoriaExito
-                          ? `Pediste asesoría: ${aQuienLeAvisamos(destinoAsesoriaExito)} y te va a recomendar antes de empezar.`
-                          : `Pediste asesoría: ${aQuienLeAvisamos(null)} y el que te atienda te va a recomendar antes de empezar.`}
-                    </AsesoriaKioskMensaje>
-                  )}
-                  {appointmentConfirmed && adoptedQueueEntry && (
-                    <p className={cn('text-sm md:text-base mt-2', isLightBg ? 'text-cyan-700' : 'text-cyan-200/80')}>
-                      Ya estabas en la fila: tu turno quedó sumado a ese lugar.
+                    ) : (
+                      effectiveAhead && effectiveAhead.label && (
+                        <p className={cn('text-lg md:text-xl font-medium mt-3', isLightBg ? 'text-emerald-600' : 'text-emerald-400')}>
+                          {effectiveAhead.label}
+                        </p>
+                      )
+                    )}
+                    {/* Asesoría (mig 217): lo que confirmó el servidor, no lo que se
+                        tocó. Dice A QUIÉN le avisamos, sin prometer que «ya lo sabe»
+                        (hallazgo asesoria-03). */}
+                    {asesoriaEnExito && (
+                      <AsesoriaKioskMensaje variante={varianteAsesoria} tono={asesoriaEnExito} className="mt-3">
+                        {asesoriaEnExito === 'avisale'
+                          ? TEXTO_AVISALE_ASESORIA
+                          : destinoAsesoriaExito
+                            ? `Pediste asesoría: ${aQuienLeAvisamos(destinoAsesoriaExito)} y te va a recomendar antes de empezar.`
+                            : `Pediste asesoría: ${aQuienLeAvisamos(null)} y el que te atienda te va a recomendar antes de empezar.`}
+                      </AsesoriaKioskMensaje>
+                    )}
+                    {appointmentConfirmed && adoptedQueueEntry && (
+                      <p className={cn('text-sm md:text-base mt-2', isLightBg ? 'text-cyan-700' : 'text-cyan-200/80')}>
+                        Ya estabas en la fila: tu turno quedó sumado a ese lugar.
+                      </p>
+                    )}
+                    <p className={cn('text-base md:text-lg mt-2', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>
+                      Te llamaremos cuando sea tu turno
                     </p>
-                  )}
-                  <p className={cn('text-base md:text-lg mt-2', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>
-                    Te llamaremos cuando sea tu turno
-                  </p>
+                  </div>
                 </div>
+
+                {urlJuego && <QrJuego url={urlJuego} claro={isLightBg} className="lg:w-[22rem] lg:shrink-0" />}
               </div>
 
               <div className="w-full max-w-xl flex flex-col items-center gap-2">
@@ -3364,16 +3419,35 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
                 )}
               </div>
 
-              {/* Countdown bar */}
+              {/* Countdown bar: dura lo mismo que el timer (`demoraReset`) y, con la
+                  `key`, vuelve a empezar con él cuando aparece el QR del juego. */}
               <div className={cn(isLightBg ? 'w-full max-w-xs h-1 rounded-full bg-zinc-200 overflow-hidden border border-zinc-300' : terminalProgressTrack, 'mt-2')}>
                 <div
+                  key={`cuenta-${demoraReset}`}
                   className={isLightBg ? 'h-full rounded-full origin-left bg-gradient-to-r from-cyan-500 via-zinc-700 to-violet-500' : terminalProgressFill}
                   style={{
-                    animation: `checkin-countdown ${RESET_DELAY_MS}ms linear forwards`,
+                    animation: `checkin-countdown ${demoraReset}ms linear forwards`,
                   }}
                 />
               </div>
-              <p className={cn('text-xs', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>Volviendo al inicio...</p>
+              <div className="flex items-center gap-3">
+                <p className={cn('text-xs', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>Volviendo al inicio...</p>
+                {/* Con el QR la pantalla queda 15 s: el que viene atrás no tiene por qué esperarlos. */}
+                {urlJuego && (
+                  <button
+                    type="button"
+                    onClick={() => reset()}
+                    className={cn(
+                      'h-10 px-5 rounded-xl border text-sm font-medium transition-all active:scale-[0.97]',
+                      isLightBg
+                        ? 'border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50'
+                        : 'border-cyan-500/25 bg-zinc-950/40 text-cyan-100 hover:bg-cyan-950/30'
+                    )}
+                  >
+                    Listo
+                  </button>
+                )}
+              </div>
             </>
           ) : (
             <>
@@ -3793,81 +3867,90 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
       {step === 'manage_turn' && (
         <div
           key={`manage-turn-${animKey}`}
-          className="relative z-[1] w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-4 md:gap-5 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400"
+          className={cn(
+            'relative z-[1] w-full max-w-sm md:max-w-xl flex flex-col items-center justify-center gap-4 md:gap-5 px-4 md:px-6 pt-10 md:pt-12 pb-4 flex-1 min-h-0 animate-in fade-in slide-in-from-right-4 duration-400',
+            // Con el QR del juego, la tablet apaisada (800 px de alto) lo pone al costado.
+            urlJuego && 'lg:max-w-5xl'
+          )}
         >
           <TerminalSectionGlow className={isLightBg ? 'hidden' : undefined} />
 
           {!changingBarberInManage ? (
             <>
-              <div
-                className={cn(
-                  'w-full max-w-xl p-5 md:p-10 flex flex-col items-center gap-3 md:gap-5 animate-in zoom-in-50 duration-700',
-                  isLightBg
-                    ? 'rounded-2xl md:rounded-3xl border border-zinc-200 bg-white shadow-lg'
-                    : terminalGlassCard
-                )}
-              >
-                {myQueueEntry?.status === 'in_progress' ? (
-                  <>
-                    <div className={cn('size-12 md:size-16 rounded-full border flex items-center justify-center', isLightBg ? 'bg-emerald-50 border-emerald-300' : 'bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.12)]')}>
-                      <CheckCircle2 className={cn('size-6 md:size-9', isLightBg ? 'text-emerald-600' : 'text-emerald-400')} strokeWidth={1.5} />
-                    </div>
-                    <h2 className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>¡Ya es tu turno!</h2>
-                    <div className="text-center">
-                      <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
-                        ¡Acercate!
-                      </p>
-                      <p className={cn('text-base md:text-lg mt-2', isLightBg ? 'text-emerald-600' : 'text-emerald-400')}>
-                        Tu barbero te está esperando
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className={cn('size-12 md:size-16 rounded-full border flex items-center justify-center', isLightBg ? 'bg-emerald-50 border-emerald-300' : 'bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.12)]')}>
-                      <CheckCircle2 className={cn('size-6 md:size-9', isLightBg ? 'text-emerald-600' : 'text-emerald-400')} strokeWidth={1.5} />
-                    </div>
-                    <h2 className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
-                      {yaEstabaEnFila ? 'Ya estabas en la fila' : '¡Estás en la fila!'}
-                    </h2>
-                    <div className="text-center">
-                      <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
-                        ¡Tomá asiento!
-                      </p>
-                      {/* Misma cuenta que el cartel de éxito (RPC get_client_queue_position). */}
-                      {miEsperaEnFila && (
-                        <p className={cn('text-lg md:text-xl font-medium mt-3', isLightBg ? 'text-emerald-600' : 'text-emerald-400')}>
-                          {miEsperaEnFila}
-                        </p>
-                      )}
-                      <p className={cn('text-base md:text-lg mt-2', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>
-                        {yaEstabaEnFila
-                          ? 'No hace falta que te anotes de nuevo: ya te llamamos cuando sea tu turno'
-                          : 'Ya te llamamos cuando sea tu turno'}
-                      </p>
-                    </div>
-                  </>
-                )}
-
-                {chipAsesoriaEnTarjeta && (
-                  <AsesoriaKioskChip variante={varianteAsesoria}>Pediste asesoría</AsesoriaKioskChip>
-                )}
-
-                {myQueueEntry?.barber && (
-                  <div className={cn('w-full p-3 md:p-4 mt-1', isLightBg ? 'rounded-xl border border-zinc-200 bg-zinc-50' : terminalGlassCardInner)}>
-                    <div className="flex items-center gap-3 justify-center">
-                      <div className={cn('flex size-10 md:size-12 items-center justify-center rounded-full border text-sm md:text-base font-bold shrink-0', isLightBg ? 'border-cyan-300 bg-cyan-50 text-cyan-700' : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-100')}>
-                        {(myQueueEntry.barber as Staff).full_name.charAt(0).toUpperCase()}
+              <div className={cn('w-full flex flex-col items-center gap-4 md:gap-5', urlJuego && 'lg:flex-row lg:items-stretch lg:justify-center lg:gap-6')}>
+                <div
+                  className={cn(
+                    'w-full max-w-xl p-5 md:p-10 flex flex-col items-center gap-3 md:gap-5 animate-in zoom-in-50 duration-700',
+                    urlJuego && 'lg:flex-1 lg:justify-center',
+                    isLightBg
+                      ? 'rounded-2xl md:rounded-3xl border border-zinc-200 bg-white shadow-lg'
+                      : terminalGlassCard
+                  )}
+                >
+                  {myQueueEntry?.status === 'in_progress' ? (
+                    <>
+                      <div className={cn('size-12 md:size-16 rounded-full border flex items-center justify-center', isLightBg ? 'bg-emerald-50 border-emerald-300' : 'bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.12)]')}>
+                        <CheckCircle2 className={cn('size-6 md:size-9', isLightBg ? 'text-emerald-600' : 'text-emerald-400')} strokeWidth={1.5} />
                       </div>
-                      <div className="min-w-0">
-                        <p className={cn('text-base md:text-lg font-semibold truncate', isLightBg && 'text-zinc-900')}>
-                          {(myQueueEntry.barber as Staff).full_name}
+                      <h2 className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>¡Ya es tu turno!</h2>
+                      <div className="text-center">
+                        <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
+                          ¡Acercate!
                         </p>
-                        <p className={cn('text-xs md:text-sm', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>Tu barbero asignado</p>
+                        <p className={cn('text-base md:text-lg mt-2', isLightBg ? 'text-emerald-600' : 'text-emerald-400')}>
+                          Tu barbero te está esperando
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className={cn('size-12 md:size-16 rounded-full border flex items-center justify-center', isLightBg ? 'bg-emerald-50 border-emerald-300' : 'bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_24px_rgba(52,211,153,0.12)]')}>
+                        <CheckCircle2 className={cn('size-6 md:size-9', isLightBg ? 'text-emerald-600' : 'text-emerald-400')} strokeWidth={1.5} />
+                      </div>
+                      <h2 className={cn('text-lg md:text-2xl font-bold', isLightBg ? 'text-zinc-600' : terminalBodyMuted)}>
+                        {yaEstabaEnFila ? 'Ya estabas en la fila' : '¡Estás en la fila!'}
+                      </h2>
+                      <div className="text-center">
+                        <p className={cn('text-4xl md:text-6xl font-bold leading-tight mt-2', isLightBg ? 'text-zinc-900' : terminalH1Gradient)}>
+                          ¡Tomá asiento!
+                        </p>
+                        {/* Misma cuenta que el cartel de éxito (RPC get_client_queue_position). */}
+                        {miEsperaEnFila && (
+                          <p className={cn('text-lg md:text-xl font-medium mt-3', isLightBg ? 'text-emerald-600' : 'text-emerald-400')}>
+                            {miEsperaEnFila}
+                          </p>
+                        )}
+                        <p className={cn('text-base md:text-lg mt-2', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>
+                          {yaEstabaEnFila
+                            ? 'No hace falta que te anotes de nuevo: ya te llamamos cuando sea tu turno'
+                            : 'Ya te llamamos cuando sea tu turno'}
+                        </p>
+                      </div>
+                    </>
+                  )}
+
+                  {chipAsesoriaEnTarjeta && (
+                    <AsesoriaKioskChip variante={varianteAsesoria}>Pediste asesoría</AsesoriaKioskChip>
+                  )}
+
+                  {myQueueEntry?.barber && (
+                    <div className={cn('w-full p-3 md:p-4 mt-1', isLightBg ? 'rounded-xl border border-zinc-200 bg-zinc-50' : terminalGlassCardInner)}>
+                      <div className="flex items-center gap-3 justify-center">
+                        <div className={cn('flex size-10 md:size-12 items-center justify-center rounded-full border text-sm md:text-base font-bold shrink-0', isLightBg ? 'border-cyan-300 bg-cyan-50 text-cyan-700' : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-100')}>
+                          {(myQueueEntry.barber as Staff).full_name.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <p className={cn('text-base md:text-lg font-semibold truncate', isLightBg && 'text-zinc-900')}>
+                            {(myQueueEntry.barber as Staff).full_name}
+                          </p>
+                          <p className={cn('text-xs md:text-sm', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>Tu barbero asignado</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
+
+                {urlJuego && <QrJuego url={urlJuego} claro={isLightBg} className="lg:w-[22rem] lg:shrink-0" />}
               </div>
 
               <div className="w-full max-w-xl flex flex-col items-center gap-2">
@@ -3917,17 +4000,34 @@ export function CheckinWalkIn({ onExit, startWith, conTurnos = false }: CheckinW
 
               {/* Countdown bar. Mientras se manda el pedido de asesoría el timer
                   está en pausa y la barra también; con la respuesta, la `key`
-                  la vuelve a montar y arranca entera, igual que el timer. */}
+                  la vuelve a montar y arranca entera, igual que el timer. Lo
+                  mismo cuando aparece el QR del juego (`demoraReset`, 15 s). */}
               <div className={isLightBg ? 'w-full max-w-xs h-1 rounded-full bg-zinc-200 overflow-hidden border border-zinc-300' : terminalProgressTrack}>
                 <div
-                  key={`cuenta-${avisoAsesoriaMiTurno ?? 'inicial'}`}
+                  key={`cuenta-${avisoAsesoriaMiTurno ?? 'inicial'}-${demoraReset}`}
                   className={isLightBg ? 'h-full rounded-full origin-left bg-gradient-to-r from-cyan-500 via-zinc-700 to-violet-500' : terminalProgressFill}
                   style={{
-                    animation: `checkin-countdown ${RESET_DELAY_MS}ms linear forwards ${pidiendoAsesoria ? 'paused' : 'running'}`,
+                    animation: `checkin-countdown ${demoraReset}ms linear forwards ${pidiendoAsesoria ? 'paused' : 'running'}`,
                   }}
                 />
               </div>
-              <p className={cn('text-xs md:text-sm text-center', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>Volviendo al inicio...</p>
+              <div className="flex items-center justify-center gap-3">
+                <p className={cn('text-xs md:text-sm text-center', isLightBg ? 'text-zinc-500' : terminalBodyMuted)}>Volviendo al inicio...</p>
+                {urlJuego && !pidiendoAsesoria && (
+                  <button
+                    type="button"
+                    onClick={() => reset()}
+                    className={cn(
+                      'h-10 px-5 rounded-xl border text-sm font-medium transition-all active:scale-[0.97]',
+                      isLightBg
+                        ? 'border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50'
+                        : 'border-cyan-500/25 bg-zinc-950/40 text-cyan-100 hover:bg-cyan-950/30'
+                    )}
+                  >
+                    Listo
+                  </button>
+                )}
+              </div>
             </>
           ) : (
             <>
