@@ -424,7 +424,7 @@ interface FilaEntradaParaEnlace {
   status: string
   is_break: boolean | null
   checked_in_at: string
-  branch: { timezone: string | null } | null
+  branch: { timezone: string | null; juego_qr_kiosko: boolean | null } | null
 }
 
 /** Una tablet de un local hace un check-in por cliente: 60 cada 10 min por IP es holgado. */
@@ -448,7 +448,7 @@ export async function crearEnlaceJuego(
       orgDelJuego(admin),
       admin
         .from('queue_entries')
-        .select('branch_id, organization_id, status, is_break, checked_in_at, branch:branches!queue_entries_branch_id_fkey(timezone)')
+        .select('branch_id, organization_id, status, is_break, checked_in_at, branch:branches!queue_entries_branch_id_fkey(timezone, juego_qr_kiosko)')
         .eq('id', queueEntryId)
         .maybeSingle(),
     ])
@@ -460,6 +460,8 @@ export async function crearEnlaceJuego(
     const entrada = lectura.data as unknown as FilaEntradaParaEnlace | null
     if (!entrada) return { ok: false, error: 'No encontramos ese lugar en la fila.' }
     if (entrada.organization_id !== orgId) return { ok: false, error: 'El juego no está disponible en esta sucursal.' }
+    // Interruptor por sucursal (mig 233, apagado por defecto): sin la marca no hay QR en el kiosko.
+    if (entrada.branch?.juego_qr_kiosko !== true) return { ok: false, error: 'El juego no está disponible en esta sucursal.' }
     if ((entrada.status !== 'waiting' && entrada.status !== 'in_progress') || entrada.is_break === true) {
       return { ok: false, error: 'Ese lugar ya no está en la fila.' }
     }
