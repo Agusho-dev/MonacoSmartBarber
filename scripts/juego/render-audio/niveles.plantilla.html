@@ -1,0 +1,94 @@
+<!doctype html><html lang="es"><meta charset="utf-8"><title>Niveles del elenco</title>
+<body><pre id="salida">midiendo…</pre>
+<script>
+// sin red: la canción no se baja (y no ensucia la consola)
+window.fetch = function () { return Promise.reject(new Error('sin red')) }
+</script>
+<script>/*__BUNDLE__*/</script>
+<script>
+// Niveles (pico y RMS de 50 ms, cadena maestra real) de los sonidos del elenco contra los de
+// referencia. Lo arma y lo corre niveles.mjs.
+var I = CorteFinalAudio.internos
+var SR = 48000, PREVIO = 1
+function analizar(buf) {
+  var pico = 0, maxRms = 0, primero = -1, ultimoS = 0, n = buf.length, ventana = 2400, desde = Math.floor((PREVIO - 0.05) * SR)
+  var d0 = buf.getChannelData(0), d1 = buf.getChannelData(1), recortes = 0
+  for (var i = desde; i < n; i++) {
+    var a = Math.max(Math.abs(d0[i]), Math.abs(d1[i]))
+    if (a > pico) pico = a
+    if (a >= 0.999) recortes++
+    if (a > 0.001) { if (primero < 0) primero = i; ultimoS = i }
+  }
+  for (var w = desde; w + ventana <= n; w += 1200) {
+    var s = 0
+    for (var j = w; j < w + ventana; j++) s += (d0[j] * d0[j] + d1[j] * d1[j]) / 2
+    var rms = Math.sqrt(s / ventana); if (rms > maxRms) maxRms = rms
+  }
+  var db = function (x) { return x > 0 ? 20 * Math.log10(x) : -Infinity }
+  return { pico: db(pico), rms: db(maxRms), largo: primero < 0 ? 0 : (ultimoS - primero) / SR, recortes: recortes }
+}
+function partida(personajes) {
+  return { config: { personajes: personajes || ['simon', 'chipi'], cpu: [false, true] }, fase: 'pelea', escalaTiempo: 1, luchadores: [{ x: 300 }, { x: 660 }], proyectiles: [] }
+}
+async function evs(lista, seg, personajes) {
+  var oc = new OfflineAudioContext(2, Math.ceil(SR * (PREVIO + seg)), SR)
+  var m = new I.mesa.Mesa(oc), mus = new I.musica.Musica(m), est = I.eventos.crearEstadoEventos(), pp = partida(personajes)
+  oc.suspend(PREVIO).then(function () { I.eventos.procesarEventos(m, mus, lista, pp, est); oc.resume() })
+  return analizar(await oc.startRendering())
+}
+async function fn(f, seg) {
+  var oc = new OfflineAudioContext(2, Math.ceil(SR * (PREVIO + seg)), SR)
+  var m = new I.mesa.Mesa(oc)
+  f(m, PREVIO)
+  return analizar(await oc.startRendering())
+}
+function golpe(h, extra) {
+  return Object.assign({ tipo: 'golpe', atacante: 0, victima: 1, x: 600, y: 120, danio: 60, critico: false, bloqueado: false, fuerza: 'medio', herramienta: h }, extra || {})
+}
+var E = I.elenco
+var MED = [
+  ['REF Puño leve', function () { return evs([{ tipo: 'swing', quien: 0, fuerza: 'leve', herramienta: 'puno' }, golpe('puno', { fuerza: 'leve' })], 1) }],
+  ['REF Golpe fuerte', function () { return evs([golpe('patada', { fuerza: 'fuerte' })], 1.2) }],
+  ['REF Crítico', function () { return evs([golpe('patada', { fuerza: 'fuerte', critico: true })], 1.4) }],
+  ['REF Sillón (impacto)', function () { return evs([golpe('sillon', { fuerza: 'especial' })], 1.5) }],
+  ['REF Super flash Simón', function () { return evs([{ tipo: 'especial', quien: 0, numero: 1, nombre: '' }], 1.6) }],
+  ['REF Tornado en vuelo', function () { return fn(function (m, t) { I.poderes.torbellino(m, t, 0, 1.5) }, 1.6) }],
+]
+var HERR = ['bombo', 'navaja', 'celular', 'anteojos', 'guante', 'moto', 'bala', 'graffiti', 'break', 'trago', 'botella', 'baile', 'onda', 'gorro', 'dragon', 'pelota', 'leche', 'panal', 'mate', 'agua', 'sismo', 'agarre', 'pesado']
+HERR.forEach(function (h) {
+  MED.push(['golpe ' + h, function () { return evs([{ tipo: 'swing', quien: 0, fuerza: 'fuerte', herramienta: h }, golpe(h, { fuerza: 'fuerte' })], 1.6) }])
+})
+MED.push(['golpe navaja crítico', function () { return evs([golpe('navaja', { fuerza: 'especial', critico: true })], 1.6) }])
+var ELENCO = ['nico_u', 'fabri', 'luciano', 'gabriel', 'guillermo', 'rodrigo', 'joaquin', 'nahuel', 'lucas', 'stefano', 'brian']
+ELENCO.forEach(function (id) {
+  [1, 2].forEach(function (n) {
+    MED.push(['especial ' + id + ' ' + n, function () { return evs([{ tipo: 'especial', quien: 0, numero: n, nombre: '' }], 1.6, [id, 'simon']) }])
+  })
+})
+;['bombo', 'graffiti', 'trago', 'botella', 'onda', 'gorro', 'pelota', 'panal', 'mate', 'guante'].forEach(function (pr) {
+  MED.push(['lanza ' + pr, function () { return evs([{ tipo: 'proyectil', quien: 0, proyectil: pr }], 1.4) }])
+})
+var BUCLES = { bombo: 'bomboRodando', onda: 'ondaVolando', gorro: 'zumbido', guante: 'fuegoVolando', nube: 'gas', sismo: 'retumbe' }
+Object.keys(BUCLES).forEach(function (k) {
+  MED.push(['bucle ' + k, function () { return fn(function (m, t) { E[BUCLES[k]](m, t, 0, 1.5) }, 1.6) }])
+})
+MED.push(['bucle leche', function () { return fn(function (m, t) { E.chorro(m, t, { pan: 0, dur: 1.5, caliente: false }) }, 1.6) }])
+MED.push(['bucle agua', function () { return fn(function (m, t) { E.chorro(m, t, { pan: 0, dur: 1.5, caliente: true }) }, 1.6) }])
+MED.push(['bucle aerosol', function () { return fn(function (m, t) { E.aerosol(m, t, 0, 0.55) }, 1) }])
+;[['curacion', { tipo: 'curacion', quien: 0, cantidad: 30 }], ['agarre', { tipo: 'agarre', atacante: 1, victima: 0 }], ['aturdido', { tipo: 'aturdido', quien: 1 }], ['mareado', { tipo: 'mareado', quien: 1 }], ['quemado', { tipo: 'quemado', quien: 1 }], ['nube', { tipo: 'nube', quien: 0, x: 600 }], ['sismo', { tipo: 'sismo', quien: 1, x: 640 }], ['disparo', { tipo: 'disparo', quien: 0, x: 360, y: 120 }]].forEach(function (par) {
+  MED.push(['evento ' + par[0], function () { return evs([par[1]], 1.8) }])
+})
+MED.push(['fin trago', function () { return fn(function (m, t) { E.salpicadura(m, t, 0) }, 1) }])
+MED.push(['fin botella', function () { return fn(function (m, t) { E.botellaRota(m, t, 0) }, 1) }])
+MED.push(['fin mate', function () { return fn(function (m, t) { E.mate(m, t, 0) }, 1) }])
+MED.push(['estalla graffiti', function () { return fn(function (m, t) { E.graffitiEstalla(m, t, 0) }, 1.2) }])
+MED.push(['ráfaga 3 tiros', function () { return evs([{ tipo: 'disparo', quien: 0, x: 360, y: 120 }], 0.3).then(function () { return fn(function (m, t) { E.disparo(m, t, 0); E.disparo(m, t + 0.12, 0); E.disparo(m, t + 0.24, 0) }, 1) }) }])
+window.medirTodo = async function () {
+  var filas = []
+  for (var k = 0; k < MED.length; k++) {
+    var r = await MED[k][1]()
+    filas.push([MED[k][0], +r.pico.toFixed(1), +r.rms.toFixed(1), +r.largo.toFixed(2), r.recortes])
+  }
+  return filas
+}
+</script></body></html>

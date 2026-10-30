@@ -70,7 +70,7 @@ export function PantallaVs({
         <div className="cf-vs__retrato">
           <ImagenJuego src={jugador.rutas.retrato} alt="" tipo="cuerpo" color={jugador.color} espejar prioridad />
         </div>
-        <div className="cf-vs__placa">
+        <div className="cf-vs__placa" style={{ '--cf-letras': Math.max(4, jugador.nombre.length) } as CSSProperties}>
           <span className="cf-vs__etiqueta" data-jugador={online ? '' : undefined}>
             {etiquetas[0]}
             {online?.lado === 0 && <span className="cf-vs__vos">Vos</span>}
@@ -85,7 +85,7 @@ export function PantallaVs({
         <div className="cf-vs__retrato">
           <ImagenJuego src={rival.rutas.retrato} alt="" tipo="cuerpo" color={rival.color} prioridad />
         </div>
-        <div className="cf-vs__placa">
+        <div className="cf-vs__placa" style={{ '--cf-letras': Math.max(4, rival.nombre.length) } as CSSProperties}>
           <span className="cf-vs__etiqueta" data-jugador={online ? '' : undefined}>
             {etiquetas[1]}
             {online?.lado === 1 && <span className="cf-vs__vos">Vos</span>}

@@ -1,0 +1,127 @@
+{
+  "_nota": "Joaquín «Cham-poo» para «Corte Final» (30/oct/2026). Se procesa con scripts/juego/extraer_joaquin.py (importa el extractor compartido sin tocarlo y entiende las claves de este archivo: ventanas, sinFondo, quitar, cortes, porCuadro, escala, prestados, alias). Hoja de 18 paneles: herramienta1 y herramienta2 son alias del remate del combo y de la patada. La fila de abajo de la hoja está dibujada más grande: va con escala. Las patadas voladoras del especial 2 vienen envueltas en fuego y humo: se usa la patada voladora limpia del panel CAER (animación oculta _voladora, prestada: mismo rectángulo del atlas); el fuego lo dibuja el render.",
+  "personaje": "joaquin",
+  "hoja": "../../../../juego-fuentes/joaquin_anim.jpg",
+  "salida": "../../../public/juego/personajes/joaquin",
+  "sinFondo": { "tol": 14 },
+  "limpiezas": [
+    { "nota": "saltar 2: franja azul del título detrás del sombrero", "zona": [652, 174, 1013, 194], "regla": { "bMenosRMin": 25 } },
+    { "nota": "saltar: letras del título", "poligono": [[652, 174], [745, 174], [745, 194], [652, 194]] }
+  ],
+  "retrato": { "anim": "victoria", "cuadro": 0, "alto": 720, "cara": [20, -2, 50] },
+  "animaciones": {
+    "quieto": { "region": [12, 34, 351, 160], "cuadros": 6 },
+    "caminar": { "region": [360, 34, 718, 160], "cuadros": 5 },
+    "correr": {
+      "_nota": "revisión 30/oct: con la tolerancia global (14) quedaba el humo oscuro de la velocidad detrás de las piernas",
+      "sinFondo": { "tol": 24 },
+      "region": [729, 34, 1086, 160],
+      "cortes": [[790, 838], [888, 938], [968, 1012]],
+      "quitar": [{ "zona": [1030, 115, 1088, 160], "bMenosRMin": 4, "lumMin": 55 }],
+      "porCuadro": { "3": { "excluir": [[1040, 110, 1088, 160]] } }
+    },
+    "dash": {
+      "sinFondo": { "tol": 24 },
+      "region": [1097, 34, 1525, 160],
+      "cuadros": 3,
+      "usar": [0, 0, 0],
+      "quitar": [{ "zona": [1097, 105, 1525, 160], "bMenosRMin": 4, "lumMin": 55 }]
+    },
+    "guardia": { "region": [14, 194, 344, 315], "cuadros": 4 },
+    "agachado": { "region": [355, 194, 641, 315], "cuadros": 4 },
+    "saltar": {
+      "region": [652, 177, 1013, 315],
+      "cuadros": 4,
+      "limite": [[652, 194, 1013, 315]],
+      "porCuadro": {
+        "0": { "excluir": [[[691, 296], [717, 295], [720, 315], [690, 315]]] },
+        "2": { "limite": [[830, 177, 960, 315]], "umbral": 0.3, "sinFondo": { "tol": 14 } }
+      }
+    },
+    "_voladora": {
+      "_nota": "oculta (no va al atlas.json): la patada voladora del panel CAER, para los prestados del especial 2",
+      "region": [1025, 194, 1525, 315], "cuadros": 5, "usar": [0]
+    },
+    "caer": {
+      "_nota": "bajada del salto: la pose de saltar 3 (prestada) y el aterrizaje; la patada voladora del panel se ve como un ataque y confundía",
+      "region": [1025, 194, 1525, 315], "cuadros": 5, "usar": [1, 2],
+      "prestados": [{ "pos": 0, "de": "saltar", "cuadro": 3 }, { "pos": 1, "de": "saltar", "cuadro": 3 }, { "pos": 2, "de": "saltar", "cuadro": 3 }]
+    },
+    "golpe": { "region": [12, 353, 437, 472], "cuadros": 5, "impactos": [4] },
+    "patada": { "region": [449, 353, 815, 472], "cuadros": 4, "usar": [0, 1, 2], "impactos": [1] },
+    "combo": {
+      "region": [827, 353, 1525, 472],
+      "cortes": [[895, 912], [975, 995], [1040, 1062], [1120, 1145], [1212, 1235], [1288, 1306], [1380, 1400]],
+      "usar": [0, 1, 2, 3, 5, 6, 7],
+      "impactos": [3, 6],
+      "porCuadro": {
+        "3": {
+          "excluir": [[[1070, 472], [1070, 458], [1076, 446], [1086, 437], [1098, 428], [1106, 424], [1132, 421], [1132, 472]]],
+          "quitar": [{ "zona": [1114, 360, 1140, 432], "lumMax": 45 }]
+        },
+        "6": {
+          "excluir": [[[1319, 449], [1352, 449], [1352, 472], [1319, 472]]],
+          "quitar": [{ "zona": [1296, 418, 1332, 472], "rMenosGMin": 60, "lumMin": 40 }]
+        },
+        "7": {
+          "excluir": [
+            [[1380, 353], [1452, 353], [1452, 370], [1444, 380], [1441, 388], [1435, 394], [1428, 401], [1422, 410], [1380, 410]],
+            [[1442, 459], [1470, 459], [1470, 472], [1442, 472]],
+            [[1488, 370], [1528, 370], [1528, 472], [1468, 472], [1468, 460], [1475, 445], [1485, 428], [1495, 418], [1508, 412], [1508, 390], [1500, 386], [1490, 386]],
+            [[1402, 458], [1442, 452], [1442, 472], [1402, 472]]
+          ],
+          "quitar": [
+            { "zona": [1418, 368, 1447, 412], "rMenosGMin": 60, "lumMin": 40 },
+            { "zona": [1438, 432, 1480, 472], "rMenosGMin": 60, "lumMin": 40 }
+          ]
+        }
+      }
+    },
+    "especial1": {
+      "region": [12, 513, 1525, 635],
+      "cajas": [
+        [14, 513, 112, 635],
+        [116, 513, 230, 635],
+        [236, 513, 354, 635],
+        [354, 513, 470, 635],
+        [470, 513, 612, 635],
+        [866, 513, 1012, 635],
+        [1040, 513, 1152, 635]
+      ],
+      "usar": [0, 2, 4, 5, 6],
+      "impactos": [2],
+      "quitar": [{ "zona": [12, 590, 1525, 635], "bMenosRMin": 4, "lumMin": 55 }]
+    },
+    "especial2": {
+      "region": [12, 673, 1525, 799],
+      "cajas": [
+        [14, 673, 112, 799],
+        [118, 673, 228, 799],
+        [236, 673, 382, 799],
+        [895, 673, 1042, 799]
+      ],
+      "prestados": [{ "pos": 3, "de": "_voladora", "cuadro": 0 }, { "pos": 4, "de": "_voladora", "cuadro": 0 }],
+      "impactos": [3, 4],
+      "quitar": [{ "zona": [12, 750, 1525, 799], "bMenosRMin": 4, "lumMin": 55 }]
+    },
+    "danio": { "region": [12, 835, 362, 988], "cuadros": 5, "escala": 0.87 },
+    "ko": { "region": [373, 835, 680, 988], "cuadros": 4, "escala": 0.87 },
+    "levantarse": { "region": [692, 835, 943, 988], "cuadros": 4, "escala": 0.92 },
+    "victoria": { "region": [954, 835, 1224, 988], "cuadros": 4, "escala": 0.87 },
+    "burla": { "region": [1235, 835, 1524, 988], "cuadros": 4, "escala": 0.87 }
+  },
+  "alias": {
+    "herramienta1": { "de": "combo", "cuadros": [4, 5, 6], "impactos": [2] },
+    "herramienta2": { "de": "patada", "impactos": [1] }
+  },
+  "efectos": {
+    "gorro": {
+      "_nota": "el gorro chino en vuelo del especial 1 (el chico, de perfil); el modelo no lo ve sobre las estelas: va por color",
+      "caja": [712, 534, 778, 576],
+      "modo": "color",
+      "regla": { "lumMin": 95, "rMenosGMax": 85, "gMenosBMin": 6 },
+      "limite": [[[745, 536], [776, 560], [773, 566], [751, 566], [751, 575], [735, 575], [735, 566], [714, 566], [715, 560]]],
+      "anillo": 1
+    }
+  }
+}

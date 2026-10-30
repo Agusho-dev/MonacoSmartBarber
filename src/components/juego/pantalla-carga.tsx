@@ -3,17 +3,18 @@
 import { ChevronLeft, Lightbulb, RotateCcw } from 'lucide-react'
 import { useEffect, useEffectEvent, useState, type CSSProperties } from 'react'
 import { ARENAS } from '@/lib/juego/arenas'
+import { PERSONAJES } from '@/lib/juego/personajes'
 import { CARGA_MAX } from '@/lib/juego/tipos'
 import type { RecursosJuego } from '@/lib/juego/tipos'
 import type { EstadoPrecarga } from '@/lib/juego/ui/precarga'
-import { TIPS } from '@/lib/juego/ui/textos'
+import { consejosDePelea, TIPS } from '@/lib/juego/ui/textos'
 import type { Eleccion } from '@/lib/juego/ui/tipos-ui'
 import { IconoMaquina } from './iconos'
 import { LogoCorteFinal } from './logo-corte-final'
 
 const CADA_TIP_MS = 4200
 
-/** Para que cada carga arranque con un consejo distinto. */
+/** Para que cada carga siga con consejos generales distintos. */
 let siguienteTip = 0
 
 export function PantallaCarga({
@@ -29,7 +30,12 @@ export function PantallaCarga({
   onReintentar: () => void
   onVolver: () => void
 }) {
-  const [tip, setTip] = useState(() => siguienteTip % TIPS.length)
+  // Primero los de ESTA pelea (los especiales del rival, la pasiva propia); después los generales.
+  const [consejos] = useState(() => {
+    const generales = TIPS.map((_, i) => TIPS[(siguienteTip + i) % TIPS.length])
+    return [...consejosDePelea(PERSONAJES[eleccion.jugador], PERSONAJES[eleccion.rival]), ...generales]
+  })
+  const [tip, setTip] = useState(0)
   const listo = useEffectEvent(onListo)
   const recursos = precarga.estado === 'listo' ? precarga.recursos : null
   const fallo = precarga.estado === 'error'
@@ -41,10 +47,10 @@ export function PantallaCarga({
   useEffect(() => {
     const t = window.setInterval(() => {
       siguienteTip += 1
-      setTip((n) => (n + 1) % TIPS.length)
+      setTip((n) => (n + 1) % consejos.length)
     }, CADA_TIP_MS)
     return () => window.clearInterval(t)
-  }, [])
+  }, [consejos.length])
 
   const progreso = Math.round(precarga.progreso * 100)
   const llenos = precarga.progreso * CARGA_MAX
@@ -93,7 +99,7 @@ export function PantallaCarga({
           </div>
           <p className="cf-tip" key={tip} aria-live="polite">
             <Lightbulb aria-hidden="true" />
-            <span>{TIPS[tip]}</span>
+            <span>{consejos[tip]}</span>
           </p>
         </>
       )}

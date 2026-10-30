@@ -1,6 +1,7 @@
 import { JuegoRaiz } from '@/components/juego/juego-raiz'
 import { obtenerDatosEntradaJuego } from '@/lib/juego/servidor'
 import type { DatosEntradaJuego } from '@/lib/juego/tipos'
+import { leerPeleaDePrueba, leerQrDePrueba, type PeleaDePrueba } from '@/lib/juego/ui/prueba'
 import { fuenteNumeros, fuenteTitulo } from './fuentes'
 
 export const dynamic = 'force-dynamic'
@@ -35,10 +36,25 @@ export default async function PaginaJuego({
     console.error('[juego] no se pudieron leer los datos de entrada', error)
     datos = SIN_DATOS
   }
+  // Atajos de pruebas, SÓLO en desarrollo (Next reemplaza NODE_ENV al compilar: en producción ni
+  // se leen). ?prueba=<jugador>,<rival>[,<arena>[,<dificultad>]]: directo a una pelea contra la
+  // CPU. ?qr=<barbero>[,<nombre>]: simula el QR de un cliente de ese barbero (ver prueba.ts).
+  let prueba: PeleaDePrueba | null = null
+  // Retratos y caras que todavía no están en public/ (sprites en proceso): silueta sin pedirlos.
+  let faltantes: string[] = []
+  if (process.env.NODE_ENV !== 'production') {
+    prueba = leerPeleaDePrueba(parametro(sp.prueba))
+    const qr = leerQrDePrueba(parametro(sp.qr))
+    if (qr) datos = { ...datos, ...qr }
+    const { recursosFaltantes } = await import('./recursos-faltantes')
+    faltantes = recursosFaltantes()
+  }
   return (
     <JuegoRaiz
       datos={datos}
       fuentes={{ titulo: fuenteTitulo.style.fontFamily, numeros: fuenteNumeros.style.fontFamily }}
+      prueba={prueba}
+      faltantes={faltantes}
     />
   )
 }

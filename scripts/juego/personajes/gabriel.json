@@ -1,0 +1,253 @@
+{
+  "_nota": "Gabriel para «Corte Final» (30/oct/2026), hoja de 18 paneles. Se procesa con scripts/juego/extraer_gabriel.py (importa el extractor compartido sin modificarlo; ver su docstring): inferencia por cuadro rellenado a lo ancho, cruzada con la del panel en las poses paradas; los remolinos azules y el graffiti se pintan con el fondo antes de inferir y se restan después; herramienta1/2 son alias del combo y la patada. La fila de abajo está dibujada ~11 % más grande: escala 0,9. La hoja no tiene un KO en el piso que se pueda separar (es una pila de cuerpos): ko = los últimos cuadros de daño. Correr sólo extraer_sprites.py sobre este archivo ignora casi todas las claves y pisa el atlas con uno peor.",
+  "personaje": "gabriel",
+  "hoja": "../../../../juego-fuentes/gabriel_anim.jpg",
+  "salida": "../../../public/juego/personajes/gabriel",
+  "reglas": {
+    "efectos": [
+      {
+        "nota": "azules, violetas y celestes (remolinos, graffiti, sus contornos azul marino)",
+        "bMenosRMin": 25,
+        "bMenosGMin": 18,
+        "lumMin": 18
+      },
+      {"nota": "magentas y rosas del graffiti", "rMenosGMin": 40, "bMenosGMin": 40}
+    ],
+    "restos": [
+      {
+        "nota": "azul marino de los remolinos que el JPG mezcla con lo negro (sobre el promedio 5x5)",
+        "suavizar": 5,
+        "bMenosRMin": 9,
+        "lumMax": 110
+      },
+      {"nota": "núcleo blanco azulado de los remolinos", "lumMin": 175, "bMenosRMin": 12}
+    ]
+  },
+  "animaciones": {
+    "quieto": {
+      "inferencia": "ancho&panel",
+      "cajas": [[14, 32, 86, 161], [84, 32, 152, 161], [150, 32, 212, 161], [212, 32, 282, 161], [278, 32, 352, 161]],
+      "region": [11, 32, 354, 161]
+    },
+    "caminar": {
+      "inferencia": "ancho&panel",
+      "cajas": [
+        [366, 32, 440, 161],
+        [438, 32, 512, 161],
+        [505, 32, 580, 161],
+        [575, 32, 650, 161],
+        [645, 32, 744, 161]
+      ],
+      "sombra": {"zona": [366, 146, 744, 161], "lumMax": 40, "recuperar": 1},
+      "region": [365, 32, 744, 161]
+    },
+    "correr": {
+      "inferencia": "ancho",
+      "cajas": [[755, 32, 864, 161], [862, 32, 968, 161], [966, 32, 1101, 161]],
+      "inferenciaPorCuadro": {"2": "panel"},
+      "region": [755, 32, 1101, 161],
+      "excluir": {"0": [[855, 118, 864, 161]], "1": [[958, 118, 968, 161]], "2": [[1062, 100, 1101, 161]]}
+    },
+    "dash": {
+      "inferencia": "ancho",
+      "cajas": [[1111, 32, 1245, 161], [1243, 32, 1383, 161], [1380, 32, 1526, 161]],
+      "excluir": {
+        "2": [
+          [[1376, 100], [1416, 100], [1416, 122], [1406, 125], [1376, 125]],
+          [[1376, 125], [1386, 125], [1383, 140], [1386, 153], [1376, 162]],
+          [1376, 152, 1440, 162],
+          [1404, 137, 1438, 152]
+        ]
+      },
+      "incluir": {
+        "2": [
+          [
+            [1386, 127],
+            [1398, 126],
+            [1406, 128],
+            [1408, 134],
+            [1404, 140],
+            [1398, 146],
+            [1393, 152],
+            [1386, 151],
+            [1384, 140]
+          ]
+        ]
+      }
+    },
+    "guardia": {
+      "inferencia": "ancho&panel",
+      "cajas": [[11, 194, 84, 316], [84, 194, 165, 316], [163, 194, 250, 316], [248, 194, 351, 316]],
+      "region": [11, 194, 351, 316],
+      "excluir": {"3": [[248, 298, 256, 316]]}
+    },
+    "agachado": {
+      "inferencia": "ancho&panel",
+      "cajas": [[362, 194, 431, 316], [429, 194, 499, 316], [497, 194, 566, 316], [563, 194, 648, 316]],
+      "sombra": {"zona": [362, 292, 648, 316], "lumMax": 40, "recuperar": 1},
+      "region": [362, 194, 648, 316],
+      "excluir": {"1": [[490, 255, 499, 316]]}
+    },
+    "saltar": {
+      "inferencia": "ancho",
+      "cajas": [[659, 194, 750, 316], [742, 194, 838, 316], [836, 170, 935, 316], [925, 194, 1013, 316]],
+      "usar": [0, 1, 2],
+      "sombra": {"0": {"zona": [659, 292, 750, 316], "lumMax": 40, "recuperar": 1}}
+    },
+    "caer": {
+      "inferencia": "ancho",
+      "cajas": [
+        [1025, 194, 1088, 316],
+        [1172, 194, 1262, 316],
+        [1262, 194, 1345, 316],
+        [1347, 194, 1435, 316],
+        [1435, 194, 1526, 316]
+      ],
+      "usar": [["saltar", 3], ["saltar", 3], ["saltar", 3], 1, 4],
+      "excluir": {"1": [[1174, 282, 1184, 296]]}
+    },
+    "golpe": {
+      "inferencia": "ancho",
+      "cajas": [
+        [11, 352, 84, 473],
+        [84, 352, 160, 473],
+        [160, 352, 244, 473],
+        [242, 352, 348, 473],
+        [330, 352, 434, 473]
+      ],
+      "usar": [0, 2, 3, 4, 2],
+      "impactos": [3],
+      "limite": {"4": [[[330, 352], [402, 352], [402, 440], [422, 440], [422, 473], [330, 473]]]},
+      "excluir": {"3": [[240, 448, 251, 473], [338, 445, 349, 473]], "4": [[330, 368, 348, 400]]}
+    },
+    "patada": {
+      "inferencia": "ancho",
+      "cajas": [[446, 352, 515, 473], [515, 352, 612, 473], [612, 352, 716, 473], [712, 352, 822, 473]],
+      "usar": [0, 1, 2, 3, 0],
+      "impactos": [3],
+      "limite": {"3": [[716, 352, 796, 473]]},
+      "sombra": {"1": {"zona": [515, 422, 562, 473], "lumMax": 45, "recuperar": 1}},
+      "quitarColor": {
+        "3": [
+          {"zona": [780, 355, 797, 402], "lumMin": 225},
+          {"zona": [780, 355, 797, 402], "tono": [32, 75], "satMin": 0.3, "lumMin": 120}
+        ]
+      },
+      "excluir": {"1": [[515, 440, 525, 473]], "2": [[612, 352, 622, 400]]}
+    },
+    "combo": {
+      "inferencia": "ancho",
+      "cajas": [
+        [833, 352, 907, 473],
+        [905, 352, 1003, 473],
+        [1000, 352, 1088, 473],
+        [1086, 352, 1153, 473],
+        [1150, 352, 1238, 473],
+        [1234, 352, 1307, 473],
+        [1305, 352, 1405, 473]
+      ],
+      "impactos": [1, 2, 4, 6],
+      "pintar": "efectos",
+      "quitarColor": ["efectos", "restos"],
+      "excluir": {
+        "3": [[1086, 466, 1115, 473], [1143, 450, 1153, 473]],
+        "4": [[1230, 445, 1238, 473]],
+        "5": [[1233, 395, 1243, 432]],
+        "6": [[1308, 372, 1322, 390]]
+      },
+      "incluir": {"6": [[[1326, 456], [1338, 455], [1346, 462], [1346, 471], [1322, 472], [1321, 465]]]},
+      "sombra": {
+        "4": {"zona": [1150, 445, 1238, 473], "lumMax": 40, "recuperar": 1}
+      }
+    },
+    "herramienta1": {"alias": "combo", "usar": [3, 5, 6, 5], "impactos": [2]},
+    "herramienta2": {"alias": "patada", "usar": [0, 1, 2, 3, 0], "impactos": [3]},
+    "especial1": {
+      "inferencia": "ancho",
+      "cajas": [
+        [11, 511, 106, 634],
+        [104, 511, 232, 634],
+        [232, 511, 378, 634],
+        [375, 511, 480, 634],
+        [478, 511, 602, 634],
+        [600, 511, 712, 634],
+        [708, 511, 862, 634],
+        [900, 511, 1052, 634],
+        [1052, 511, 1222, 634],
+        [1222, 511, 1403, 634]
+      ],
+      "impactos": [2, 3, 4, 5, 6, 7],
+      "pintar": "efectos",
+      "quitarColor": ["efectos", "restos"],
+      "region": [11, 511, 1525, 633],
+      "inferenciaPorCuadro": {"2": "panel"},
+      "usar": [0, 1, 3, 4, 5, 6, 7, 8],
+      "excluir": {"6": [[706, 563, 746, 606]]}
+    },
+    "especial2": {
+      "inferencia": "ancho",
+      "cajas": [
+        [11, 671, 98, 801],
+        [96, 671, 197, 801],
+        [245, 671, 352, 801],
+        [385, 671, 497, 801],
+        [528, 671, 652, 801],
+        [690, 671, 800, 801],
+        [898, 671, 1058, 801]
+      ],
+      "impactos": [6],
+      "pintar": "efectos",
+      "quitarColor": {
+        "0": ["efectos", "restos"],
+        "1": ["efectos", "restos"],
+        "2": ["efectos", "restos"],
+        "3": ["efectos", "restos"],
+        "4": ["efectos", "restos"],
+        "5": ["efectos"],
+        "6": ["efectos", "restos"]
+      },
+      "region": [11, 671, 1525, 800],
+      "inferenciaPorCuadro": {"5": "panel"},
+      "agregar": {"2": [[326, 765, 354, 801]]},
+      "excluir": {"3": [[380, 708, 394, 730], [445, 674, 472, 684]], "6": [[1048, 705, 1060, 745], [925, 708, 945, 730]]}
+    },
+    "danio": {
+      "inferencia": "ancho&panel",
+      "cajas": [
+        [11, 834, 76, 982],
+        [72, 834, 130, 982],
+        [125, 834, 197, 982],
+        [195, 834, 262, 982],
+        [258, 834, 365, 982]
+      ],
+      "usar": [0, 1, 2, 1],
+      "escala": 0.9,
+      "sombra": {"zona": [11, 962, 365, 982], "lumMax": 40, "recuperar": 1},
+      "region": [11, 834, 365, 982],
+      "excluir": {"1": [[95, 972, 110, 982]], "3": [[215, 972, 244, 982]]}
+    },
+    "ko": {"usar": [["danio", 2], ["danio", 3], ["danio", 4]]},
+    "levantarse": {
+      "inferencia": "ancho&panel",
+      "cajas": [[660, 834, 724, 982], [722, 834, 790, 982], [790, 834, 862, 982], [860, 834, 921, 982]],
+      "escala": 0.9,
+      "sombra": {"zona": [660, 960, 921, 982], "lumMax": 40, "recuperar": 1},
+      "region": [660, 834, 921, 982]
+    },
+    "victoria": {
+      "inferencia": "ancho&panel",
+      "cajas": [[932, 834, 1000, 982], [998, 834, 1072, 982], [1070, 834, 1128, 982], [1128, 834, 1200, 982]],
+      "escala": 0.9,
+      "region": [932, 834, 1200, 982]
+    },
+    "burla": {
+      "inferencia": "ancho&panel",
+      "cajas": [[1211, 834, 1322, 982], [1318, 834, 1376, 982], [1374, 834, 1442, 982], [1440, 834, 1526, 982]],
+      "escala": 0.9,
+      "incluir": {"3": [[[1461, 959], [1473, 959], [1476, 966], [1476, 977], [1459, 978], [1459, 968]]]},
+      "region": [1211, 834, 1526, 982],
+      "inferenciaPorCuadro": {"0": "ancho"}
+    }
+  },
+  "retrato": {"anim": "victoria", "cuadro": 1, "alto": 720, "cara": {"lado": 40, "arriba": 2, "filas": 16}}
+}

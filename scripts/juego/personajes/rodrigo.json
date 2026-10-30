@@ -1,0 +1,368 @@
+{
+  "_nota": "Rodrigo para «Corte Final» (30/oct/2026), hoja de 18 paneles. Se procesa con scripts/juego/extraer_rodrigo.py (atajo del motor de extraer_gabriel.py, que importa el extractor compartido sin modificarlo). Sus zapatillas blancas se pierden con la inferencia del panel: casi todo va con 'ancho' y 'pegados' (saca los pies del cuadro vecino). La patada y el remate del combo van con la del panel recortada por 'limite' (la de 'ancho' se come la pierna estirada). Remolinos azules, aura magenta y ondas del grito se pintan con el fondo; el rival del especial 1 y del grito no entra en ningún cuadro. Correr sólo extraer_sprites.py sobre este archivo pisa el atlas con uno peor.",
+  "personaje": "rodrigo",
+  "hoja": "../../../../juego-fuentes/rodrigo_anim.jpg",
+  "salida": "../../../public/juego/personajes/rodrigo",
+  "reglas": {
+    "magentas": [
+      {
+        "nota": "luces magenta y violeta (ondas del grito, golpe de energía)",
+        "rMenosGMin": 45,
+        "bMenosGMin": 45,
+        "lumMin": 40
+      }
+    ],
+    "azules": [{"nota": "remolinos azules y celestes del combo", "bMenosRMin": 25, "bMenosGMin": 15, "lumMin": 20}],
+    "destellos": [{"nota": "destellos amarillos y naranjas", "tono": [25, 95], "satMin": 0.4, "lumMin": 110}],
+    "purpuras": [{"nota": "borde violeta oscuro del aura del grito", "rMenosGMin": 22, "bMenosGMin": 25, "lumMin": 12}]
+  },
+  "animaciones": {
+    "quieto": {
+      "inferencia": "ancho",
+      "cajas": [[10, 36, 79, 172], [78, 36, 149, 172], [147, 36, 217, 172], [215, 36, 285, 172], [283, 36, 353, 172]],
+      "pegados": 2,
+      "sombra": {"lumMax": 24, "recuperar": 1}
+    },
+    "caminar": {
+      "inferencia": "ancho",
+      "cajas": [
+        [361, 36, 439, 172],
+        [432, 36, 512, 172],
+        [495, 36, 575, 172],
+        [560, 36, 640, 172],
+        [625, 36, 721, 172]
+      ],
+      "pegados": 2,
+      "excluir": {
+        "1": [[[503, 140], [525, 140], [525, 173], [508, 173], [506, 166], [503, 158]]],
+        "2": [
+          [[490, 158], [503, 158], [506, 166], [508, 173], [490, 173]],
+          [[568, 140], [590, 140], [590, 173], [572, 173], [570, 166], [568, 160]]
+        ],
+        "3": [
+          [[555, 160], [568, 160], [570, 166], [572, 173], [555, 173]],
+          [[632, 140], [660, 140], [660, 173], [638, 173], [636, 166], [632, 160]]
+        ],
+        "4": [[[615, 158], [632, 158], [636, 166], [638, 173], [615, 173]]]
+      },
+      "sombra": {"lumMax": 24, "recuperar": 1}
+    },
+    "correr": {
+      "inferencia": "ancho",
+      "cajas": [[731, 36, 832, 172], [815, 36, 932, 172], [904, 36, 1012, 172], [983, 36, 1107, 172]],
+      "pegados": 2,
+      "excluir": {
+        "0": [[812, 130, 845, 173]],
+        "1": [[815, 36, 846, 128]],
+        "2": [[904, 36, 932, 130], [986, 108, 1015, 173], [984, 92, 1015, 110]],
+        "3": [[983, 36, 1012, 108], [983, 106, 1000, 122]]
+      }
+    },
+    "dash": {
+      "inferencia": "panel",
+      "region": [1116, 36, 1527, 172],
+      "cajas": [[1116, 36, 1225, 172], [1225, 36, 1375, 172], [1370, 36, 1527, 172]],
+      "pegados": 2
+    },
+    "guardia": {
+      "inferencia": "ancho&panel",
+      "region": [10, 208, 346, 340],
+      "cajas": [[10, 208, 85, 340], [83, 208, 162, 340], [158, 208, 246, 340], [246, 208, 346, 340]],
+      "pegados": 2
+    },
+    "agachado": {
+      "inferencia": "ancho&panel",
+      "region": [355, 208, 641, 340],
+      "cajas": [[355, 208, 430, 340], [428, 208, 500, 340], [497, 208, 566, 340], [563, 208, 641, 340]],
+      "pegados": 2
+    },
+    "saltar": {
+      "inferencia": "ancho",
+      "cajas": [[651, 208, 728, 340], [735, 208, 840, 340], [910, 208, 1008, 340]],
+      "pegados": 2
+    },
+    "caer": {
+      "inferencia": "ancho",
+      "cajas": [[1140, 208, 1240, 340], [1240, 208, 1335, 340], [1335, 208, 1425, 340], [1425, 208, 1527, 340]],
+      "usar": [["saltar", 2], ["saltar", 2], ["saltar", 2], 1, 3],
+      "pegados": 2
+    },
+    "golpe": {
+      "inferencia": "ancho&panel",
+      "region": [10, 377, 439, 508],
+      "cajas": [
+        [10, 377, 85, 508],
+        [83, 377, 160, 508],
+        [158, 377, 250, 508],
+        [246, 377, 345, 508],
+        [340, 377, 439, 508]
+      ],
+      "usar": [0, 1, 2, 3, 0],
+      "impactos": [2],
+      "pegados": 2
+    },
+    "patada": {
+      "inferencia": "ancho",
+      "region": [448, 377, 845, 508],
+      "cajas": [[448, 377, 535, 508], [535, 377, 675, 508], [668, 377, 726, 508], [721, 377, 845, 508]],
+      "inferenciaPorCuadro": {"1": "panel", "3": "panel"},
+      "usar": [0, 1, 3, 0],
+      "impactos": [2],
+      "pegados": 2,
+      "limite": {
+        "1": [
+          [
+            [545, 377],
+            [675, 377],
+            [675, 412],
+            [652, 416],
+            [640, 422],
+            [622, 436],
+            [603, 450],
+            [598, 462],
+            [596, 490],
+            [600, 508],
+            [566, 508],
+            [568, 480],
+            [576, 462],
+            [548, 462],
+            [545, 440]
+          ]
+        ],
+        "3": [
+          [
+            [722, 377],
+            [822, 377],
+            [822, 421],
+            [805, 422],
+            [790, 426],
+            [770, 440],
+            [754, 452],
+            [752, 470],
+            [752, 490],
+            [756, 508],
+            [738, 508],
+            [739, 485],
+            [744, 462],
+            [740, 458],
+            [724, 456],
+            [722, 430]
+          ]
+        ]
+      },
+      "quitarColor": {"3": [{"tono": [25, 95], "satMin": 0.35, "lumMin": 100}]}
+    },
+    "combo": {
+      "inferencia": "ancho",
+      "cajas": [
+        [851, 377, 925, 508],
+        [922, 377, 1000, 508],
+        [998, 377, 1072, 508],
+        [1070, 377, 1147, 508],
+        [1143, 377, 1228, 508],
+        [1198, 377, 1318, 508],
+        [1320, 377, 1402, 508],
+        [1388, 377, 1505, 508]
+      ],
+      "impactos": [1, 3, 5, 7],
+      "pintar": "azules",
+      "quitarColor": ["azules", "magentas"],
+      "pegados": 2,
+      "region": [851, 377, 1527, 508],
+      "inferenciaPorCuadro": {"4": "ancho&panel", "5": "ancho&panel", "6": "ancho&panel", "7": "panel"},
+      "limite": {
+        "2": [
+          [
+            [998, 377],
+            [1065, 377],
+            [1065, 428],
+            [1054, 434],
+            [1050, 470],
+            [1070, 490],
+            [1070, 508],
+            [998, 508]
+          ]
+        ],
+        "4": [
+          [
+            [1143, 388],
+            [1200, 388],
+            [1216, 404],
+            [1216, 427],
+            [1196, 432],
+            [1193, 452],
+            [1206, 462],
+            [1212, 478],
+            [1216, 486],
+            [1216, 508],
+            [1143, 508]
+          ]
+        ],
+        "5": [
+          [
+            [1198, 482],
+            [1214, 474],
+            [1232, 465],
+            [1243, 445],
+            [1243, 405],
+            [1268, 388],
+            [1298, 388],
+            [1300, 412],
+            [1312, 414],
+            [1314, 432],
+            [1300, 437],
+            [1294, 447],
+            [1303, 462],
+            [1303, 488],
+            [1307, 508],
+            [1198, 508]
+          ]
+        ],
+        "6": [
+          [
+            [1326, 470],
+            [1330, 432],
+            [1340, 412],
+            [1352, 390],
+            [1384, 390],
+            [1388, 425],
+            [1386, 445],
+            [1390, 470],
+            [1384, 485],
+            [1370, 500],
+            [1360, 508],
+            [1326, 508]
+          ]
+        ],
+        "7": [
+          [
+            [1388, 478],
+            [1412, 466],
+            [1414, 445],
+            [1428, 440],
+            [1428, 418],
+            [1450, 400],
+            [1456, 393],
+            [1478, 393],
+            [1482, 412],
+            [1490, 418],
+            [1504, 419],
+            [1504, 433],
+            [1484, 436],
+            [1478, 446],
+            [1484, 470],
+            [1488, 480],
+            [1488, 490],
+            [1458, 490],
+            [1452, 478],
+            [1430, 486],
+            [1410, 490],
+            [1408, 508],
+            [1388, 508]
+          ]
+        ]
+      },
+      "excluir": {
+        "3": [[1070, 455, 1082, 475]],
+        "4": [
+          [[1162, 488], [1176, 474], [1194, 472], [1199, 482], [1199, 508], [1162, 508]],
+          [1214, 484, 1218, 508]
+        ],
+        "5": [[[1214, 496], [1262, 478], [1276, 486], [1276, 508], [1214, 508]]],
+        "7": [
+          [[1410, 490], [1452, 480], [1460, 508], [1410, 508]],
+          [[1440, 475], [1462, 470], [1462, 490], [1440, 490]]
+        ],
+        "6": [[1326, 455, 1331, 508]]
+      }
+    },
+    "herramienta1": {"alias": "combo", "usar": [4, 5, 7, 5], "impactos": [2]},
+    "herramienta2": {"alias": "patada", "usar": [0, 1, 3, 0], "impactos": [2]},
+    "especial1": {
+      "inferencia": "ancho",
+      "cajas": [
+        [10, 546, 92, 683],
+        [88, 546, 178, 683],
+        [172, 546, 277, 683],
+        [266, 546, 354, 683],
+        [352, 546, 432, 683],
+        [428, 546, 517, 683],
+        [512, 546, 612, 683],
+        [600, 546, 745, 683]
+      ],
+      "impactos": [7],
+      "pintar": "magentas",
+      "quitarColor": "magentas",
+            "region": [10, 546, 845, 683],
+      "inferenciaPorCuadro": {"7": "panel"},
+      "limite": {"7": [[600, 546, 738, 683]]},
+      "_nota": "revisión 30/oct: las cajas se pisan y los cuadros 2 y 3 se llevaban el zapato y la mano del vecino",
+      "excluir": {"2": [[266, 652, 278, 684]], "3": [[262, 546, 281, 604], [343, 652, 355, 684]]}
+    },
+    "especial2": {
+      "inferencia": "ancho",
+      "cajas": [[851, 546, 925, 683], [928, 546, 1005, 683], [1008, 546, 1090, 683], [1100, 546, 1210, 683]],
+      "impactos": [3],
+      "pintar": "magentas",
+      "quitarColor": ["magentas", "purpuras"],
+      "pegados": 2,
+      "sombra": {"lumMax": 26, "recuperar": 1}
+    },
+    "danio": {
+      "_nota": "revisión 30/oct: la fila de abajo de la hoja (paneles de 156 px contra 136 de la de arriba) está dibujada ~1,14x: sin escala, al festejar o recibir un golpe crecía de golpe",
+      "escala": 0.88,
+      "inferencia": "ancho",
+      "cajas": [
+        [10, 739, 82, 895],
+        [78, 739, 147, 895],
+        [143, 739, 208, 895],
+        [204, 739, 262, 895],
+        [258, 739, 331, 895]
+      ],
+      "pegados": 2,
+      "inferenciaPorCuadro": {"3": "caja"},
+      "sombra": {
+        "0": {"lumMax": 24, "recuperar": 1},
+        "1": {"lumMax": 24, "recuperar": 1},
+        "2": {"zona": [143, 884, 208, 895], "lumMax": 34, "recuperar": 1},
+        "3": {"zona": [204, 884, 262, 895], "lumMax": 34, "recuperar": 1},
+        "4": {"lumMax": 24, "recuperar": 1}
+      }
+    },
+    "ko": {
+      "escala": 0.88,
+      "inferencia": "ancho",
+      "cajas": [[339, 739, 418, 895], [413, 739, 500, 895], [495, 739, 691, 895]],
+      "pegados": 2
+    },
+    "levantarse": {
+      "escala": 0.88,
+      "inferencia": "ancho",
+      "cajas": [[700, 739, 756, 895], [756, 739, 838, 895], [835, 739, 897, 895], [897, 739, 955, 895]],
+      "pegados": 2,
+      "usar": [["ko", 2], 0, 1, 2, 3],
+      "sombra": {"lumMax": 24, "recuperar": 1}
+    },
+    "victoria": {
+      "escala": 0.88,
+      "inferencia": "ancho",
+      "cajas": [[963, 739, 1045, 895], [1040, 739, 1128, 895], [1125, 739, 1207, 895]],
+      "pegados": 2,
+      "sombra": {"lumMax": 24, "recuperar": 1}
+    },
+    "burla": {
+      "escala": 0.88,
+      "inferencia": "ancho",
+      "cajas": [[1216, 739, 1333, 895], [1330, 739, 1396, 895], [1398, 739, 1452, 895], [1452, 739, 1527, 895]],
+      "pegados": 2,
+      "excluir": {"0": [[1295, 789, 1335, 815]], "3": [[1452, 800, 1461, 895]]},
+      "sombra": {"lumMax": 24, "recuperar": 1}
+    }
+  },
+  "retrato": {
+    "anim": "victoria",
+    "cuadro": 2,
+    "alto": 720,
+    "cara": {"anim": "quieto", "cuadro": 0, "lado": 40, "arriba": 2, "filas": 16}
+  }
+}

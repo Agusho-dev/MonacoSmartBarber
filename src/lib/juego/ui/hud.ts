@@ -8,7 +8,7 @@
  */
 import { PERSONAJES } from '../personajes'
 import { CARGA_MAX, TPS } from '../tipos'
-import type { EventoJuego, FuerzaGolpe, IdPersonaje, Partida } from '../tipos'
+import type { EventoJuego, FuerzaGolpe, IdPersonaje, LuchadorEstado, Partida } from '../tipos'
 import type { CapturaEntrada } from './entrada'
 import { vibrar } from './vibrar'
 
@@ -20,6 +20,8 @@ export interface OpcionesHud {
   entrada: CapturaEntrada
   /** Costo de los dos especiales del jugador (para llenar las cartas). */
   costos: [number, number]
+  /** Rutas que se sabe que no existen (desarrollo): la cara pelada que falta ni se pide. */
+  faltantes?: ReadonlySet<string>
 }
 
 /** Cuánto espera el «chip» blanco antes de bajar (ms) y a qué velocidad baja (fracción/ms). */
@@ -29,6 +31,42 @@ const CHIP_VELOCIDAD = 0.00075
 const VIBRACION_GOLPE: Record<FuerzaGolpe, number> = { leve: 14, medio: 22, fuerte: 34, especial: 48 }
 
 const q = (v: number) => Math.round(v * 1000) / 1000
+
+/** Los íconos de estado del HUD (estados-hud.tsx los dibuja con `data-hud="estado-<lado>-<estado>"`). */
+export const ESTADOS_HUD = [
+  'congelado',
+  'electrocutado',
+  'guardia-rota',
+  'aturdido',
+  'mareado',
+  'quemado',
+  'lento',
+  'curando',
+] as const
+export type EstadoHud = (typeof ESTADOS_HUD)[number]
+
+/** ¿Ese estado está encendido? (los efectos nuevos con `?? 0`: una partida vieja no los trae). */
+function estadoActivo(L: LuchadorEstado, e: EstadoHud): boolean {
+  const ef = L.efectos
+  switch (e) {
+    case 'congelado':
+      return ef.congelado > 0 || L.estado === 'congelado'
+    case 'electrocutado':
+      return ef.electrocutado > 0 || L.estado === 'electrocutado'
+    case 'guardia-rota':
+      return ef.guardiaRota > 0 || L.estado === 'guardia_rota'
+    case 'aturdido':
+      return (ef.aturdido ?? 0) > 0
+    case 'mareado':
+      return (ef.mareado ?? 0) > 0
+    case 'quemado':
+      return (ef.quemado ?? 0) > 0
+    case 'lento':
+      return (ef.lento ?? 0) > 0
+    case 'curando':
+      return (ef.curando ?? 0) > 0
+  }
+}
 
 export function crearHud(raiz: HTMLElement, op: OpcionesHud): ControlHud {
   const uno = (sel: string) => raiz.querySelector<HTMLElement>(sel)
@@ -41,9 +79,7 @@ export function crearHud(raiz: HTMLElement, op: OpcionesHud): ControlHud {
     guardia: uno(`[data-hud="guardia-${l}"]`),
     barraGuardia: uno(`[data-hud="barra-guardia-${l}"]`),
     rondas: todos(`[data-hud="ronda-${l}"]`),
-    congelado: uno(`[data-hud="estado-${l}-congelado"]`),
-    electrocutado: uno(`[data-hud="estado-${l}-electrocutado"]`),
-    guardiaRota: uno(`[data-hud="estado-${l}-guardia-rota"]`),
+    estados: ESTADOS_HUD.map((e) => uno(`[data-hud="estado-${l}-${e}"]`)),
     cara: uno(`[data-hud="cara-${l}"]`),
   }))
   const reloj = uno('[data-hud="reloj"]')
@@ -66,9 +102,7 @@ export function crearHud(raiz: HTMLElement, op: OpcionesHud): ControlHud {
     nivel: ['', ''],
     guardiaBaja: [false, false],
     rondas: [-1, -1],
-    congelado: [false, false],
-    electrocutado: [false, false],
-    guardiaRota: [false, false],
+    estados: [ESTADOS_HUD.map(() => false), ESTADOS_HUD.map(() => false)],
     reloj: '',
     urgente: false,
     turbo: false,
@@ -120,16 +154,17 @@ export function crearHud(raiz: HTMLElement, op: OpcionesHud): ControlHud {
     }
   }
 
-  /** ¡AL CERO!: la cara del HUD del que lo recibió pasa a la pelada (si el archivo existe). */
+  /** ¡AL CERO!: la cara del HUD del que lo recibió pasa a la pelada (si el barbero la tiene). */
   const raparCara = (lado: 0 | 1, id: IdPersonaje) => {
     const img = lados[lado].cara?.querySelector('img')
-    const ruta = PERSONAJES[id]?.rutas.cara
-    if (!img || !ruta || !/cara\.webp$/.test(ruta)) return
+    const rapada = PERSONAJES[id]?.rutas.rapado?.cara
+    if (!img || !rapada) return
+    if (op.faltantes?.has(rapada)) return
     const nueva = new Image()
     nueva.onload = () => {
       img.src = nueva.src
     }
-    nueva.src = ruta.replace(/cara\.webp$/, 'cara_rapado.webp')
+    nueva.src = rapada
   }
 
   const destellarSegmento = (indice: number) => {
@@ -249,20 +284,12 @@ export function crearHud(raiz: HTMLElement, op: OpcionesHud): ControlHud {
           el.rondas.forEach((r, i) => atributo(r, 'data-ganada', i < rondas))
         }
 
-        const congelado = L.efectos.congelado > 0 || L.estado === 'congelado'
-        if (congelado !== ult.congelado[l]) {
-          ult.congelado[l] = congelado
-          atributo(el.congelado, 'data-on', congelado)
-        }
-        const electro = L.efectos.electrocutado > 0 || L.estado === 'electrocutado'
-        if (electro !== ult.electrocutado[l]) {
-          ult.electrocutado[l] = electro
-          atributo(el.electrocutado, 'data-on', electro)
-        }
-        const rota = L.efectos.guardiaRota > 0 || L.estado === 'guardia_rota'
-        if (rota !== ult.guardiaRota[l]) {
-          ult.guardiaRota[l] = rota
-          atributo(el.guardiaRota, 'data-on', rota)
+        for (let i = 0; i < ESTADOS_HUD.length; i++) {
+          const on = estadoActivo(L, ESTADOS_HUD[i])
+          if (on !== ult.estados[l][i]) {
+            ult.estados[l][i] = on
+            atributo(el.estados[i], 'data-on', on)
+          }
         }
       }
 

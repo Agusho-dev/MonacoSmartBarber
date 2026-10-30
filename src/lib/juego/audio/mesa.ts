@@ -75,6 +75,25 @@ const TOPES: Readonly<Record<string, number>> = {
   derribo: 2,
   ui: 4,
   puntos: 3,
+  // elenco nuevo (30/oct)
+  bombo: 2,
+  navaja: 2,
+  celular: 2,
+  fuego: 3,
+  moto: 1,
+  disparo: 3,
+  graffiti: 2,
+  break: 2,
+  liquido: 3,
+  grito: 1,
+  cuarteto: 1,
+  pelota: 3,
+  moscas: 1,
+  mate: 3,
+  sismo: 2,
+  agarre: 1,
+  cura: 2,
+  estado: 3,
 }
 const TOPE_EFECTOS = 4
 const TOPE_MUSICA = 6

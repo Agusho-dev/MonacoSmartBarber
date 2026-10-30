@@ -25,13 +25,24 @@ interface Props {
   prefs: PreferenciasJuego
   turno: EstadoTurnoJuego | null
   tactil: boolean
+  /** Etiqueta del golpe pesado del luchador (Máquina, Remate, Celular…) para la leyenda de teclas. */
+  herramienta?: string
   onContinuar: () => void
   onReiniciar: () => void
   onComoSeJuega: () => void
   onSalir: () => void
 }
 
-export function MenuPausa({ prefs, turno, tactil, onContinuar, onReiniciar, onComoSeJuega, onSalir }: Props) {
+export function MenuPausa({
+  prefs,
+  turno,
+  tactil,
+  herramienta = 'Máquina',
+  onContinuar,
+  onReiniciar,
+  onComoSeJuega,
+  onSalir,
+}: Props) {
   const [confirmarSalida, setConfirmarSalida] = useState(false)
   const pantallaCompleta = usePantallaCompleta()
   const puedeVibrar = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function'
@@ -135,7 +146,7 @@ export function MenuPausa({ prefs, turno, tactil, onContinuar, onReiniciar, onCo
               <dt>
                 <kbd>K</kbd>
               </dt>
-              <dd>Máquina</dd>
+              <dd>{herramienta}</dd>
             </div>
             <div>
               <dt>

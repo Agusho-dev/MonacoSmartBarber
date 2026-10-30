@@ -1,0 +1,378 @@
+{
+  "_nota": "Guillermo para «Corte Final» (30/oct/2026), hoja de 18 paneles. Se procesa con scripts/juego/extraer_guillermo.py (atajo del motor de extraer_gabriel.py, que importa el extractor compartido sin modificarlo). El especial 1 de la hoja es un primer plano cortado en los muslos: 'injerto' le pone las piernas de golpe[0] y lo lleva a la escala del resto (0,78). El especial 2 está dibujado más chico: escala 1,12. Las botellas de la mano son vidrio azul: en sus cuadros no se pinta el azul (se perderían). Efectos 'botella' y 'vaso' por brillo. El KO de la hoja es una pila de cuerpos: ko = los últimos cuadros de daño. Correr sólo extraer_sprites.py sobre este archivo pisa el atlas con uno peor.",
+  "personaje": "guillermo",
+  "hoja": "../../../../juego-fuentes/guillermo_anim.jpg",
+  "salida": "../../../public/juego/personajes/guillermo",
+  "reglas": {
+    "efectos": [
+      {
+        "nota": "azules, violetas y celestes (remolinos, chispas violetas, salpicaduras)",
+        "bMenosRMin": 25,
+        "bMenosGMin": 18,
+        "lumMin": 18
+      },
+      {"nota": "magentas", "rMenosGMin": 40, "bMenosGMin": 40}
+    ],
+    "naranjas": [
+      {
+        "nota": "remolinos naranjas y destellos (la piel no llega a esa saturación)",
+        "tono": [18, 58],
+        "satMin": 0.7,
+        "lumMin": 120
+      }
+    ],
+    "restos": [
+      {
+        "nota": "azul marino de los remolinos mezclado con lo negro",
+        "suavizar": 5,
+        "bMenosRMin": 9,
+        "lumMax": 110
+      },
+      {"nota": "núcleo blanco azulado de los remolinos", "lumMin": 175, "bMenosRMin": 12}
+    ],
+    "barra": [
+      {
+        "nota": "la barra azul del título (la cabeza del salto se le mete)",
+        "zona": [700, 150, 1070, 188],
+        "bMenosRMin": 18
+      }
+    ],
+    "destellos": [
+      {
+        "nota": "destellos amarillos y naranjas de los impactos",
+        "tono": [25, 95],
+        "satMin": 0.45,
+        "lumMin": 110
+      }
+    ]
+  },
+  "animaciones": {
+    "quieto": {
+      "inferencia": "ancho&panel",
+      "region": [10, 29, 370, 154],
+      "cajas": [[10, 29, 82, 154], [80, 29, 150, 154], [150, 29, 218, 154], [218, 29, 290, 154], [290, 29, 370, 154]],
+      "sombra": {"zona": [10, 110, 370, 154], "lumMax": 18, "recuperar": 2}
+    },
+    "caminar": {
+      "inferencia": "ancho&panel",
+      "region": [381, 29, 750, 154],
+      "cajas": [
+        [381, 29, 456, 154],
+        [454, 29, 528, 154],
+        [524, 29, 600, 154],
+        [596, 29, 670, 154],
+        [666, 29, 750, 154]
+      ],
+      "sombra": {"zona": [381, 110, 750, 154], "lumMax": 18, "recuperar": 2}
+    },
+    "correr": {
+      "region": [761, 29, 1131, 154],
+      "inferencia": "panel",
+      "cajas": [[761, 29, 878, 154], [874, 29, 1000, 154], [998, 29, 1131, 154]],
+      "inferenciaPorCuadro": {"0": "ancho"},
+      "excluir": {
+        "0": [[[815, 132], [866, 124], [866, 154], [815, 154]], [866, 120, 878, 154]],
+        "1": [[[930, 136], [983, 128], [983, 154], [930, 154]], [983, 100, 1000, 154]]
+      },
+      "sombra": {"zona": [761, 112, 1131, 154], "lumMax": 20, "recuperar": 2}
+    },
+    "dash": {
+      "inferencia": "ancho&panel",
+      "region": [1142, 29, 1591, 154],
+      "cajas": [[1142, 29, 1280, 154], [1280, 29, 1420, 154], [1430, 29, 1591, 154]],
+      "_nota": "revisión 30/oct: el tobillo de la pierna de adelante (pantalón oscuro) quedaba afuera y el zapato flotaba",
+      "incluir": {"0": [[[1212, 124], [1228, 121], [1233, 134], [1222, 139], [1212, 132]]]}
+    },
+    "guardia": {
+      "inferencia": "ancho&panel",
+      "region": [10, 184, 369, 294],
+      "cajas": [[10, 184, 94, 294], [93, 184, 180, 294], [180, 184, 270, 294], [270, 184, 369, 294]],
+      "sombra": {"zona": [10, 250, 369, 294], "lumMax": 18, "recuperar": 2}
+    },
+    "agachado": {
+      "inferencia": "ancho&panel",
+      "region": [380, 184, 696, 294],
+      "cajas": [[380, 184, 450, 294], [448, 184, 527, 294], [525, 184, 604, 294], [604, 184, 696, 294]],
+      "sombra": {"zona": [380, 250, 696, 294], "lumMax": 18, "recuperar": 2}
+    },
+    "saltar": {
+      "inferencia": "ancho",
+      "cajas": [[707, 184, 792, 294], [783, 160, 870, 294], [875, 156, 968, 294], [966, 170, 1064, 294]],
+      "usar": [0, 1, 2],
+      "pintar": "barra",
+      "quitarColor": ["barra", "efectos"]
+    },
+    "caer": {
+      "inferencia": "ancho&panel",
+      "region": [1076, 184, 1590, 294],
+      "cajas": [
+        [1076, 184, 1153, 294],
+        [1153, 184, 1232, 294],
+        [1222, 184, 1318, 294],
+        [1325, 184, 1415, 294],
+        [1420, 184, 1505, 294],
+        [1505, 184, 1590, 294]
+      ],
+      "usar": [["saltar", 3], ["saltar", 3], ["saltar", 3], 2, 4],
+      "humo": {
+        "2": {"zona": [1296, 236, 1320, 294], "lumMin": 60, "lumMax": 250, "satMax": 0.25, "pasos": 6}
+      },
+      "inferenciaPorCuadro": {"2": "ancho"},
+      "sombra": {
+        "2": {"zona": [1222, 276, 1318, 294], "lumMax": 18, "recuperar": 1}
+      },
+      "excluir": {"2": [[[1301, 246], [1320, 246], [1320, 294], [1307, 294], [1307, 272], [1301, 266]]]}
+    },
+    "golpe": {
+      "inferencia": "ancho&panel",
+      "region": [10, 324, 442, 436],
+      "cajas": [
+        [10, 324, 94, 436],
+        [93, 324, 178, 436],
+        [178, 324, 270, 436],
+        [270, 324, 360, 436],
+        [355, 324, 442, 436]
+      ],
+      "usar": [0, 1, 2, 3, 2],
+      "impactos": [3],
+      "sombra": {"zona": [10, 395, 442, 436], "lumMax": 18, "recuperar": 2}
+    },
+    "patada": {
+      "inferencia": "ancho&panel",
+      "region": [453, 324, 842, 436],
+      "cajas": [[453, 324, 535, 436], [533, 324, 617, 436], [617, 324, 733, 436], [730, 324, 842, 436]],
+      "usar": [0, 1, 2, 0],
+      "impactos": [2],
+      "sombra": {"zona": [453, 395, 842, 436], "lumMax": 18, "recuperar": 2}
+    },
+    "combo": {
+      "inferencia": "ancho",
+      "cajas": [
+        [853, 324, 935, 436],
+        [933, 324, 1010, 436],
+        [1008, 324, 1090, 436],
+        [1076, 324, 1180, 436],
+        [1178, 324, 1260, 436],
+        [1258, 324, 1349, 436],
+        [1348, 324, 1448, 436]
+      ],
+      "impactos": [1, 3, 4, 5],
+      "pintar": "efectos",
+      "quitarColor": {
+        "0": ["efectos"],
+        "1": ["efectos"],
+        "2": ["efectos"],
+        "3": ["efectos"],
+        "4": ["efectos"],
+        "5": ["efectos"],
+        "6": [
+          {
+            "zona": [
+              [1348, 324],
+              [1450, 324],
+              [1450, 437],
+              [1400, 437],
+              [1400, 410],
+              [1358, 410],
+              [1358, 437],
+              [1348, 437]
+            ],
+            "bMenosRMin": 25,
+            "bMenosGMin": 18,
+            "lumMin": 18
+          },
+          {
+            "zona": [
+              [1348, 324],
+              [1450, 324],
+              [1450, 437],
+              [1400, 437],
+              [1400, 410],
+              [1358, 410],
+              [1358, 437],
+              [1348, 437]
+            ],
+            "rMenosGMin": 40,
+            "bMenosGMin": 40
+          }
+        ]
+      },
+      "usar": [0, 1, 2, 3, 5, 6],
+      "excluir": {
+        "3": [[1158, 418, 1180, 437]],
+        "5": [[1258, 330, 1276, 410], [1337, 340, 1349, 400]],
+        "6": [[1348, 335, 1362, 410], [1405, 395, 1450, 437], [[1400, 382], [1440, 378], [1440, 400], [1400, 400]]]
+      },
+      "sombra": {
+        "5": {"zona": [1318, 330, 1350, 405], "lumMax": 24, "recuperar": 1}
+      }
+    },
+    "herramienta1": {"alias": "combo", "usar": [3, 5, 6, 5], "impactos": [2]},
+    "herramienta2": {"alias": "patada", "usar": [0, 1, 2, 0], "impactos": [2]},
+    "especial1": {
+      "inferencia": "ancho",
+      "cajas": [
+        [12, 466, 98, 572],
+        [98, 466, 190, 572],
+        [190, 466, 285, 572],
+        [295, 466, 372, 572],
+        [415, 466, 500, 572],
+        [515, 466, 612, 572],
+        [612, 466, 705, 572]
+      ],
+      "usar": [1, 2, 4, 5, 6],
+      "impactos": [4],
+      "injerto": {
+        "donante": ["golpe", 0],
+        "escala": 0.78,
+        "cuadros": {
+          "1": {"corte": 562, "cabeza": 471},
+          "2": {"corte": 562, "cabeza": 471},
+          "4": {"corte": 560, "cabeza": 472},
+          "5": {"corte": 556, "cabeza": 472},
+          "6": {"corte": 557, "cabeza": 476}
+        }
+      },
+      "excluir": {
+        "5": [[[567, 515], [597, 515], [597, 536], [616, 536], [616, 560], [556, 560], [561, 548], [566, 530]]],
+        "6": [[[667, 516], [690, 516], [690, 527], [708, 527], [708, 560], [655, 560], [660, 545], [665, 530]]]
+      }
+    },
+    "especial2": {
+      "region": [10, 603, 1590, 717],
+      "inferencia": "ancho",
+      "cajas": [
+        [12, 603, 98, 717],
+        [98, 603, 190, 717],
+        [190, 603, 310, 717],
+        [340, 603, 450, 717],
+        [470, 603, 595, 717],
+        [598, 603, 705, 717],
+        [890, 603, 1015, 717],
+        [1040, 603, 1160, 717],
+        [1210, 603, 1320, 717],
+        [1345, 603, 1455, 717]
+      ],
+      "inferenciaPorCuadro": {"4": "panel", "6": "panel", "7": "panel"},
+      "usar": [0, 1, 2, 4, 6, 7, 8],
+      "impactos": [2, 4, 6],
+      "escala": 1.12,
+      "excluir": {
+        "2": [[294, 620, 310, 717], [240, 703, 284, 717]],
+        "8": [
+          [[1290, 662], [1322, 662], [1322, 717], [1302, 717], [1300, 700], [1290, 698]],
+          [[1283, 660], [1300, 655], [1300, 697], [1287, 697], [1283, 690]],
+          [1300, 643, 1316, 658]
+        ]
+      },
+      "quitarColor": {
+        "2": [{"zona": [262, 668, 310, 717], "tono": [18, 60], "satMin": 0.55, "lumMin": 100}],
+        "8": ["naranjas", {"zona": [1270, 603, 1320, 717], "bMenosRMin": 25, "bMenosGMin": 18, "lumMin": 18}],
+        "4": [{"zona": [[478, 694], [494, 690], [497, 704], [492, 714], [477, 714]], "lumMax": 30}],
+        "1": [
+          {
+            "zona": [[172, 660], [194, 660], [194, 700], [181, 700], [172, 688]],
+            "suavizar": 3,
+            "bMenosRMin": 16
+          }
+        ]
+      },
+      "sombra": {"2": {"zona": [212, 696, 296, 717], "lumMax": 26, "recuperar": 1}},
+      "incluir": {"4": [[[478, 694], [494, 690], [497, 704], [492, 714], [477, 714]]]}
+    },
+    "danio": {
+      "inferencia": "ancho&panel",
+      "region": [10, 748, 349, 873],
+      "cajas": [
+        [10, 748, 75, 873],
+        [75, 748, 140, 873],
+        [140, 748, 208, 873],
+        [206, 748, 276, 873],
+        [274, 748, 349, 873]
+      ],
+      "usar": [0, 1, 2, 1],
+      "sombra": {"zona": [10, 830, 349, 873], "lumMax": 18, "recuperar": 2}
+    },
+    "ko": {"usar": [["danio", 2], ["danio", 3], ["danio", 4]]},
+    "levantarse": {
+      "inferencia": "ancho&panel",
+      "region": [680, 748, 971, 873],
+      "cajas": [[680, 748, 754, 873], [752, 748, 832, 873], [830, 748, 900, 873], [900, 748, 971, 873]],
+      "sombra": {"zona": [680, 830, 971, 873], "lumMax": 18, "recuperar": 2}
+    },
+    "victoria": {
+      "inferencia": "ancho&panel",
+      "region": [982, 748, 1259, 873],
+      "cajas": [[982, 748, 1056, 873], [1054, 748, 1124, 873], [1122, 748, 1190, 873], [1188, 748, 1259, 873]],
+      "sombra": {"zona": [982, 830, 1259, 873], "lumMax": 18, "recuperar": 2}
+    },
+    "burla": {
+      "inferencia": "ancho&panel",
+      "region": [1271, 748, 1590, 873],
+      "cajas": [[1271, 748, 1356, 873], [1350, 748, 1440, 873], [1440, 748, 1590, 873]],
+      "anclaZona": {"2": [[1440, 748, 1530, 873]]},
+      "sombra": {
+        "0": {"zona": [1271, 830, 1356, 873], "lumMax": 18, "recuperar": 2},
+        "1": {"zona": [1350, 830, 1440, 873], "lumMax": 18, "recuperar": 2}
+      },
+      "incluir": {
+        "2": [
+          [
+            [1466, 826],
+            [1540, 826],
+            [1540, 810],
+            [1549, 810],
+            [1549, 782],
+            [1566, 782],
+            [1566, 810],
+            [1580, 810],
+            [1582, 826],
+            [1584, 873],
+            [1466, 873]
+          ]
+        ]
+      },
+      "quitarColor": {
+        "2": [
+          {
+            "zona": [
+              [1466, 826],
+              [1540, 826],
+              [1540, 810],
+              [1549, 810],
+              [1549, 782],
+              [1566, 782],
+              [1566, 810],
+              [1580, 810],
+              [1582, 826],
+              [1584, 873],
+              [1466, 873]
+            ],
+            "lumMax": 22
+          }
+        ]
+      },
+      "excluir": {"2": [[1494, 869, 1590, 874]]}
+    }
+  },
+  "retrato": {"anim": "victoria", "cuadro": 0, "alto": 720, "cara": {"lado": 40, "arriba": 2, "filas": 16}},
+  "efectos": {
+    "botella": {
+      "caja": [333, 602, 366, 634],
+      "inferencia": "brillo",
+      "lumMin": 45,
+      "dilatar": 1,
+      "componentes": "principal",
+      "rellenar": 400,
+      "rotar": -45
+    },
+    "vaso": {
+      "caja": [379, 542, 410, 569],
+      "inferencia": "brillo",
+      "lumMin": 45,
+      "dilatar": 1,
+      "componentes": "principal",
+      "rellenar": 400
+    }
+  }
+}

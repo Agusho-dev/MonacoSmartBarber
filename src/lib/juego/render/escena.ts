@@ -6,6 +6,7 @@ import type { Camara } from './camara'
 import type { EfectosComunes } from './efectos'
 import type { Particulas, Tajos } from './particulas'
 import type { Sprites } from './sprites'
+import type { Utileria } from './utileria'
 
 export type Calidad = 'alta' | 'media' | 'baja'
 
@@ -18,6 +19,8 @@ export interface Escena {
   parts: Particulas
   tajos: Tajos
   spr: Sprites
+  /** Objetos dibujados a mano (bombo, pelota, mate, notas, cruces…): respaldo de atlas.efectos. */
+  util: Utileria
   /** Atlas de efectos compartidos (pixel art); null = todo procedural. */
   fx: EfectosComunes | null
   /** ms reales desde que se creó el renderizador (corren aunque el motor esté en hitstop). */

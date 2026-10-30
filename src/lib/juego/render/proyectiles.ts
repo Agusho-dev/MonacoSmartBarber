@@ -1,5 +1,6 @@
 /**
- * Proyectiles de los especiales. De dónde sale cada dibujo, en orden de preferencia:
+ * Proyectiles de Simón y Chipi (los del elenco nuevo están en arsenal.ts). De dónde sale cada
+ * dibujo, en orden de preferencia:
  *  - tornado: el embudo animado del atlas compartido → el `tornado` del atlas del dueño → a mano
  *    (anillos de viento). Siempre con tijeras orbitando y pelo que vuela.
  *  - tijeras del tornado: la `tijera` animada compartida → la del dueño → la dibujada.
@@ -28,10 +29,10 @@ const SALIDA_SILLON = { dx: 42, dy: -13, ticks: 10 }
 const ZIGZAG = new Float32Array(9)
 
 /** Registro del último efecto encontrado (sin crear objetos por cuadro). */
-const EF = { at: null as AtlasPreparado | null, c: null as CuadroAtlas[] | null }
+export const EF = { at: null as AtlasPreparado | null, c: null as CuadroAtlas[] | null }
 
 /** Busca el sprite `nombre` en el atlas del dueño (o en el del otro). Deja el resultado en EF. */
-function buscarEfecto(atlas: readonly (AtlasPreparado | null)[], duenio: number, nombre: string): boolean {
+export function buscarEfecto(atlas: readonly (AtlasPreparado | null)[], duenio: number, nombre: string): boolean {
   const propio = atlas[duenio]
   const lista = propio?.efectos[nombre]
   if (propio && lista && lista.length) {
@@ -328,12 +329,9 @@ export function dibujarProyectiles(E: Escena, p: Partida, atlas: readonly (Atlas
       case 'rayo':
         dibujarRayo(E, pr, atlas)
         break
-      default: {
-        const cy = E.sueloY - Math.max(40, (pr as ProyectilEstado).y)
-        E.ctx.globalCompositeOperation = 'lighter'
-        spriteMundo(E, E.spr.brillo('#FFFFFF'), (pr as ProyectilEstado).x, cy, 80, 80, 0, 0.9)
-        E.ctx.globalCompositeOperation = 'source-over'
-      }
+      default:
+        // los del elenco nuevo los dibuja arsenal.ts
+        break
     }
   }
   E.ctx.globalAlpha = 1

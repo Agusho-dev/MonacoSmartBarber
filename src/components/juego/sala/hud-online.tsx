@@ -1,12 +1,13 @@
 'use client'
 
-import { Flag, LoaderCircle, Menu, Play, ShieldOff, Snowflake, Zap } from 'lucide-react'
+import { Flag, LoaderCircle, Menu, Play, Zap } from 'lucide-react'
 import { useState, type CSSProperties } from 'react'
 import { ARENAS } from '@/lib/juego/arenas'
 import { LENTA_MS, ABANDONO_MS, type Lockstep } from '@/lib/juego/online/lockstep'
 import { PERSONAJES } from '@/lib/juego/personajes'
 import { VISTA_ANCHO } from '@/lib/juego/tipos'
 import type { FichaPersonaje, IdArena, IdPersonaje, Lado, Partida } from '@/lib/juego/tipos'
+import { EstadosHud } from '../estados-hud'
 import { IconoMaquina } from '../iconos'
 import { ImagenJuego } from '../imagen-juego'
 
@@ -91,17 +92,7 @@ function LadoOnline({
           <span className="cf-hud__jugador" data-yo={yo ? '' : undefined}>
             {yo ? 'Vos' : nombre}
           </span>
-          <span className="cf-hud__estados">
-            <span className="cf-estado cf-estado--hielo" data-hud={`estado-${v}-congelado`}>
-              <Snowflake />
-            </span>
-            <span className="cf-estado cf-estado--rayo" data-hud={`estado-${v}-electrocutado`}>
-              <Zap />
-            </span>
-            <span className="cf-estado cf-estado--rota" data-hud={`estado-${v}-guardia-rota`}>
-              <ShieldOff />
-            </span>
-          </span>
+          <EstadosHud lado={v} />
         </div>
         <div className="cf-vida" data-hud={`barra-vida-${v}`} data-nivel="alta">
           <div className="cf-vida__chip" data-hud={`chip-${v}`} />

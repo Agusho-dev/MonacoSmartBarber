@@ -62,6 +62,11 @@ export function hashPartida(p: Partida): number {
     h = mezclarNumero(h, l.efectos.congelado)
     h = mezclarNumero(h, l.efectos.electrocutado)
     h = mezclarNumero(h, l.efectos.guardiaRota)
+    h = mezclarNumero(h, l.efectos.aturdido)
+    h = mezclarNumero(h, l.efectos.mareado)
+    h = mezclarNumero(h, l.efectos.quemado)
+    h = mezclarNumero(h, l.efectos.lento)
+    h = mezclarNumero(h, l.efectos.curando)
   }
   h = mezclarEntero(h, p.proyectiles.length)
   for (const pr of p.proyectiles) {
@@ -69,6 +74,9 @@ export function hashPartida(p: Partida): number {
     h = mezclarNumero(h, pr.x)
     h = mezclarNumero(h, pr.y)
     h = mezclarEntero(h, pr.golpesRestantes)
+    h = mezclarEntero(h, pr.vuelta ? 1 : 0)
+    h = mezclarNumero(h, pr.ancho)
+    h = mezclarNumero(h, pr.alto)
   }
   // El estado del azar del combate (críticos, desempates): si difiere, la partida ya se fue.
   const interno = internoSiExiste(p)

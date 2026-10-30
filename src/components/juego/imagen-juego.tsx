@@ -1,7 +1,16 @@
 'use client'
 
 import Image from 'next/image'
-import { useState } from 'react'
+import { createContext, use, useState } from 'react'
+
+/**
+ * Las rutas que se sabe que NO existen (en desarrollo, los sprites que todavía no llegaron;
+ * ver src/app/juego/recursos-faltantes.ts): se dibuja la silueta sin pedir nada.
+ */
+export const RecursosFaltantes = createContext<ReadonlySet<string>>(new Set())
+
+/** Las que fallaron en esta visita: las demás copias (grilla, duelo, HUD) no las vuelven a pedir. */
+const fallidas = new Set<string>()
 
 type Tipo = 'cuerpo' | 'cara' | 'arena'
 
@@ -16,6 +25,8 @@ interface Props {
   /** Dar vuelta horizontal (el de la izquierda mira hacia el centro). */
   espejar?: boolean
   posicion?: string
+  /** Otra imagen antes de la silueta (el retrato pelado que falta → el retrato de siempre). */
+  alternativa?: string | null
 }
 
 /**
@@ -23,9 +34,23 @@ interface Props {
  * o no carga, se dibuja una silueta con el color del personaje en vez de un ícono roto.
  * Sin optimizador de Next: el pixel art se ve tal cual.
  */
-export function ImagenJuego({ src, alt, tipo, color = '#8a8f99', className, prioridad, espejar, posicion }: Props) {
+export function ImagenJuego({
+  src: pedida,
+  alt,
+  tipo,
+  color = '#8a8f99',
+  className,
+  prioridad,
+  espejar,
+  posicion,
+  alternativa = null,
+}: Props) {
   const [fallida, setFallida] = useState<string | null>(null)
-  if (!src || fallida === src) {
+  const faltantes = use(RecursosFaltantes)
+  const sirve = (ruta: string | null): ruta is string =>
+    !!ruta && fallida !== ruta && !faltantes.has(ruta) && !fallidas.has(ruta)
+  const src = sirve(pedida) ? pedida : sirve(alternativa) ? alternativa : null
+  if (!src) {
     return <Silueta tipo={tipo} color={color} className={className} espejar={espejar} />
   }
   return (
@@ -43,7 +68,10 @@ export function ImagenJuego({ src, alt, tipo, color = '#8a8f99', className, prio
         objectPosition: posicion ?? (tipo === 'cuerpo' ? 'center bottom' : 'center'),
         transform: espejar ? 'scaleX(-1)' : undefined,
       }}
-      onError={() => setFallida(src)}
+      onError={() => {
+        fallidas.add(src)
+        setFallida(src)
+      }}
     />
   )
 }

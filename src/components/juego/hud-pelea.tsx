@@ -1,8 +1,9 @@
 'use client'
 
-import { Pause, ShieldOff, Snowflake, Zap } from 'lucide-react'
+import { Pause, Zap } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import type { FichaPersonaje, Lado } from '@/lib/juego/tipos'
+import { EstadosHud } from './estados-hud'
 import { IconoMaquina } from './iconos'
 import { ImagenJuego } from './imagen-juego'
 
@@ -56,17 +57,7 @@ function LadoHud({ lado, ficha, rondas }: { lado: Lado; ficha: FichaPersonaje; r
         <div className="cf-hud__fila">
           <span className="cf-hud__nombre">{ficha.nombre}</span>
           {lado === 1 && <span className="cf-hud__cpu">CPU</span>}
-          <span className="cf-hud__estados">
-            <span className="cf-estado cf-estado--hielo" data-hud={`estado-${lado}-congelado`}>
-              <Snowflake />
-            </span>
-            <span className="cf-estado cf-estado--rayo" data-hud={`estado-${lado}-electrocutado`}>
-              <Zap />
-            </span>
-            <span className="cf-estado cf-estado--rota" data-hud={`estado-${lado}-guardia-rota`}>
-              <ShieldOff />
-            </span>
-          </span>
+          <EstadosHud lado={lado} />
         </div>
         <div className="cf-vida" data-hud={`barra-vida-${lado}`} data-nivel="alta">
           <div className="cf-vida__chip" data-hud={`chip-${lado}`} />

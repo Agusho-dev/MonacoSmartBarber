@@ -1,10 +1,12 @@
 /**
  * Traduce los eventos del motor (EventoJuego) a sonidos y a cambios de la música. Guarda el
  * estado mínimo entre cuadros: los bucles de los proyectiles en vuelo (suenan mientras el
- * proyectil existe en `p.proyectiles` y se paneán con él) y la tensión del «¡DEJALO AL CERO!».
+ * proyectil existe en `p.proyectiles` y se paneán con él), los proyectiles del elenco que siguen
+ * vivos (para que el trago salpique, la botella se rompa o el graffiti estalle cuando toca), la
+ * escala que sube de la curación y la tensión del «¡DEJALO AL CERO!».
  */
-import type { EventoJuego, Lado, Partida, ProyectilEstado } from '../tipos'
-import { CARGA_MAX, TPS, VISTA_ANCHO } from '../tipos'
+import type { EventoJuego, FasePartida, Lado, Partida, ProyectilEstado, TipoProyectil } from '../tipos'
+import { CARGA_MAX, TIEMPOS_PROYECTIL, TPS, VISTA_ANCHO } from '../tipos'
 import { PERSONAJES } from '../personajes'
 import type { Mesa, Voz } from './mesa'
 import { limitar, suavizar } from './mesa'
@@ -40,20 +42,70 @@ import {
   zap,
 } from './poderes'
 import { aPelear, burla, carga, comboTic, finRound, gong, ko, presentacion, sinCarga, tension, tiempo, turbo } from './anuncios'
+import {
+  agarre,
+  aturdido,
+  bucleElenco,
+  capaElenco,
+  curacion,
+  disparo,
+  finElenco,
+  graffitiEstalla,
+  lanzamientoElenco,
+  mareado,
+  panal,
+  quemado,
+  sismo,
+  superFlashElenco,
+  swingElenco,
+} from './elenco'
+
+/** Lo último que se supo de un proyectil del elenco (para sonar cuando desaparece). */
+interface Seguido {
+  tipo: TipoProyectil
+  x: number
+  edad: number
+  estallo: boolean
+  visto: boolean
+}
 
 export interface EstadoEventos {
   /** Bucles de los proyectiles en vuelo, por id del proyectil. */
   bucles: Map<number, Voz>
   tension: Voz | null
+  /** Proyectiles del elenco vivos, por id. */
+  seguidos: Map<number, Seguido>
+  /** La curación llega de a pedacitos: cada uno suena una nota más arriba. */
+  curaPaso: number
+  curaHasta: number
 }
 
 export function crearEstadoEventos(): EstadoEventos {
-  return { bucles: new Map(), tension: null }
+  return { bucles: new Map(), tension: null, seguidos: new Map(), curaPaso: 0, curaHasta: 0 }
 }
 
 /** Como mucho, tantos eventos por cuadro (una ráfaga rara no satura). */
 const MAX_EVENTOS_POR_CUADRO = 32
-const MAX_BUCLES = 4
+const MAX_BUCLES = 5
+/** En estas fases no se oyen golpes contra el piso de proyectiles que se limpian. */
+const FASES_SIN_FINALES: ReadonlySet<FasePartida> = new Set<FasePartida>(['presentacion', 'anuncio', 'terminada'])
+const TIPOS_ELENCO: ReadonlySet<TipoProyectil> = new Set<TipoProyectil>([
+  'bombo',
+  'bala',
+  'graffiti',
+  'trago',
+  'botella',
+  'onda',
+  'gorro',
+  'pelota',
+  'leche',
+  'panal',
+  'nube',
+  'mate',
+  'agua',
+  'sismo',
+  'guante',
+])
 const FASES_SIN_TENSION: ReadonlySet<Partida['fase']> = new Set<Partida['fase']>([
   'presentacion',
   'anuncio',
@@ -87,6 +139,7 @@ type EventoDe<T extends EventoJuego['tipo']> = Extract<EventoJuego, { tipo: T }>
 
 function alSwing(m: Mesa, t: number, e: EventoDe<'swing'>, p: Partida): void {
   const pan = panLado(p, e.quien)
+  if (swingElenco(m, t, e.herramienta, e.fuerza, pan)) return
   switch (e.herramienta) {
     case 'maquina':
       maquina(m, t, { dur: e.fuerza === 'especial' ? 0.45 : 0.28, pan, fuerza: 0.8 })
@@ -149,6 +202,7 @@ function alGolpe(m: Mesa, t: number, e: EventoDe<'golpe'>, p: Partida): void {
     default:
       impacto(m, t, { fuerza: e.fuerza, critico: e.critico, pan, lento })
       capaHerramienta(m, t, e.herramienta, pan)
+      capaElenco(m, t, e.herramienta, pan)
   }
 }
 
@@ -185,12 +239,46 @@ function uno(m: Mesa, mus: Musica, e: EventoJuego, p: Partida, est: EstadoEvento
     case 'especial': {
       const ficha = PERSONAJES[p.config.personajes[e.quien]]
       const icono = ficha ? ficha.especiales[e.numero - 1].icono : 'rayo'
-      superFlash(m, t, icono, panLado(p, e.quien))
+      const pan = panLado(p, e.quien)
+      superFlash(m, t, icono, pan)
+      superFlashElenco(m, t, icono, pan)
       mus.agachar(0.4, 0.55)
       break
     }
-    case 'proyectil':
-      lanzamiento(m, t, e.proyectil, panLado(p, e.quien))
+    case 'proyectil': {
+      const pan = panLado(p, e.quien)
+      if (!lanzamientoElenco(m, t, e.proyectil, pan)) lanzamiento(m, t, e.proyectil, pan)
+      break
+    }
+    case 'curacion': {
+      const ahora = m.ctx.currentTime
+      est.curaPaso = ahora < est.curaHasta ? est.curaPaso + 1 : 0
+      est.curaHasta = ahora + 0.6
+      curacion(m, t, panLado(p, e.quien), est.curaPaso)
+      break
+    }
+    case 'agarre':
+      agarre(m, t, panLado(p, e.atacante))
+      mus.agachar(0.55, 0.4)
+      break
+    case 'aturdido':
+      aturdido(m, t, panLado(p, e.quien))
+      break
+    case 'mareado':
+      mareado(m, t, panLado(p, e.quien))
+      break
+    case 'quemado':
+      quemado(m, t, panLado(p, e.quien))
+      break
+    case 'nube':
+      panal(m, t, panDeX(e.x))
+      break
+    case 'sismo':
+      sismo(m, t, panDeX(e.x))
+      mus.agachar(0.5, 0.45)
+      break
+    case 'disparo':
+      disparo(m, t, panDeX(e.x))
       break
     case 'guardia_rota':
       guardiaRota(m, t, panDeX(e.x))
@@ -263,6 +351,48 @@ function existe(lista: readonly ProyectilEstado[], id: number): ProyectilEstado 
   return null
 }
 
+function enPantalla(x: number): boolean {
+  return x > 12 && x < VISTA_ANCHO - 12
+}
+
+/**
+ * Los proyectiles del elenco: el graffiti estalla a su edad, y el trago, la botella, el mate,
+ * la pelota, el bombo y el guante suenan al desaparecer (caen al piso o pegan).
+ */
+function seguirElenco(m: Mesa, p: Partida, est: EstadoEventos, t: number): void {
+  for (const s of est.seguidos.values()) s.visto = false
+  for (const pr of p.proyectiles) {
+    if (!TIPOS_ELENCO.has(pr.tipo)) continue
+    let s = est.seguidos.get(pr.id)
+    if (!s) {
+      s = { tipo: pr.tipo, x: pr.x, edad: pr.edad, estallo: false, visto: true }
+      est.seguidos.set(pr.id, s)
+    }
+    s.visto = true
+    s.x = pr.x
+    s.edad = pr.edad
+    if (pr.tipo === 'graffiti' && !s.estallo && pr.edad >= TIEMPOS_PROYECTIL.graffitiEstalla) {
+      s.estallo = true
+      // se corta el aerosol y estalla
+      const siseo = est.bucles.get(pr.id)
+      if (siseo) {
+        m.cortar(siseo, 0.04)
+        est.bucles.delete(pr.id)
+      }
+      graffitiEstalla(m, t, panDeX(pr.x))
+    }
+  }
+  const callar = FASES_SIN_FINALES.has(p.fase)
+  for (const [id, s] of est.seguidos) {
+    if (s.visto) continue
+    est.seguidos.delete(id)
+    if (callar || !enPantalla(s.x)) continue
+    if (s.tipo === 'graffiti') {
+      if (!s.estallo) graffitiEstalla(m, t, panDeX(s.x))
+    } else finElenco(m, t, s.tipo, panDeX(s.x))
+  }
+}
+
 /** Cada proyectil en vuelo tiene su bucle; se panea con él y se apaga cuando desaparece. */
 function seguirProyectiles(m: Mesa, p: Partida, est: EstadoEventos, t: number): void {
   const vivos = p.proyectiles
@@ -272,6 +402,7 @@ function seguirProyectiles(m: Mesa, p: Partida, est: EstadoEventos, t: number): 
       est.bucles.delete(id)
     }
   }
+  seguirElenco(m, p, est, t)
   const ahora = m.ctx.currentTime
   for (const pr of vivos) {
     const pan = panDeX(pr.x)
@@ -283,12 +414,19 @@ function seguirProyectiles(m: Mesa, p: Partida, est: EstadoEventos, t: number): 
     if (est.bucles.size >= MAX_BUCLES) continue
     // El spray no lleva bucle: su chorro corto ya sonó con el lanzamiento.
     if (pr.tipo === 'spray') continue
+    // El graffiti que ya estalló no vuelve a sisear.
+    if (pr.tipo === 'graffiti' && pr.edad >= TIEMPOS_PROYECTIL.graffitiEstalla) continue
+    const elenco = bucleElenco(m, t, pr.tipo, pan)
+    // null = ése no lleva bucle; para no volver a probar cada cuadro, se anota sin voz
+    if (elenco === null) continue
     const nuevo =
-      pr.tipo === 'tornado'
-        ? torbellino(m, t, pan)
-        : pr.tipo === 'sillon'
-          ? sillonVolando(m, t, pan)
-          : electrico(m, t, { dur: 1.5, pan, fuerza: 0.6 })
+      elenco !== undefined
+        ? elenco
+        : pr.tipo === 'tornado'
+          ? torbellino(m, t, pan)
+          : pr.tipo === 'sillon'
+            ? sillonVolando(m, t, pan)
+            : electrico(m, t, { dur: 1.5, pan, fuerza: 0.6 })
     if (nuevo) est.bucles.set(pr.id, nuevo)
   }
 }
@@ -311,7 +449,7 @@ export function procesarEventos(
   }
   // Red de seguridad: si la partida siguió sin pasar por el remate ni por fin_partida.
   if (est.tension && FASES_SIN_TENSION.has(p.fase)) cortarTension(m, est, 0.3)
-  if (p.proyectiles.length > 0 || est.bucles.size > 0) {
+  if (p.proyectiles.length > 0 || est.bucles.size > 0 || est.seguidos.size > 0) {
     try {
       seguirProyectiles(m, p, est, t)
     } catch {

@@ -1,7 +1,8 @@
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import type { AtlasPersonaje } from '../../../src/lib/juego/tipos.ts'
 import { metaDesdeAtlas } from '../../../src/lib/juego/motor/index.ts'
-for (const id of ['simon', 'chipi']) {
+import { IDS_PERSONAJES } from '../../../src/lib/juego/personajes.ts'
+for (const id of IDS_PERSONAJES) {
   const ruta = new URL(`../../../public/juego/personajes/${id}/atlas.json`, import.meta.url).pathname
   if (!existsSync(ruta)) { console.log(id, 'sin atlas'); continue }
   const a = JSON.parse(readFileSync(ruta, 'utf8')) as AtlasPersonaje

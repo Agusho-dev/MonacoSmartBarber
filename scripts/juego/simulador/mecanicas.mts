@@ -13,6 +13,15 @@ import type {
 import { CLAVES_ANIMACION, ENTRADA_VACIA } from '../../../src/lib/juego/tipos.ts'
 import { avanzar, calcularPuntaje, crearPartida, metaDesdeAtlas } from '../../../src/lib/juego/motor/index.ts'
 import { cuadroDeAtaque, cuadrosDeImpacto } from '../../../src/lib/juego/motor/animacion.ts'
+import { MOVIMIENTOS } from '../../../src/lib/juego/motor/movimientos.ts'
+import { EFECTO } from '../../../src/lib/juego/motor/constantes.ts'
+
+// Los daños salen de los kits (ya con el factor de balance de DANIO_KIT): las pruebas miden la
+// mecánica (reducción de Chipi, escalado, crítico), no los números de diseño.
+const S = MOVIMIENTOS.simon
+const C = MOVIMIENTOS.chipi
+const PUNO_S = S.movimientos.puno.ventanas[0].danio
+const PUNO_C = C.movimientos.puno.ventanas[0].danio
 
 const TIPICA: Record<string, [number, number[]]> = {
   quieto: [5, []], caminar: [6, []], correr: [4, []], dash: [3, []], guardia: [4, []], agachado: [4, []],
@@ -166,7 +175,13 @@ function acercar(p: Partida, d = 100) {
   ok(de(evs, 'swing').filter((s) => s.quien === 0).length === 4, 'un swing por ventana activa')
   const danios = golpes.map((g) => g.danio)
   const sinCrit = golpes.every((g) => !g.critico)
-  if (sinCrit) ok(danios.join(',') === '35,48,31,43', 'daños con −12 % de Chipi y escalado desde el 4.º', danios.join(','))
+  const esperado = [
+    Math.round(PUNO_S * 0.88),
+    Math.round(S.movimientos.patada.ventanas[0].danio * 0.88),
+    Math.round(S.movimientos.combo.ventanas[0].danio * 0.88),
+    Math.round(S.movimientos.combo.ventanas[1].danio * 0.88 * 0.88),
+  ].join(',')
+  if (sinCrit) ok(danios.join(',') === esperado, 'daños con −12 % de Chipi y escalado desde el 4.º', `${danios.join(',')} (esperado ${esperado})`)
 }
 {
   // Buffer: apretar 6 ticks antes de que se abra la ventana igual encadena.
@@ -187,7 +202,9 @@ function acercar(p: Partida, d = 100) {
   acercar(p)
   const evs = correr(p, 40, (t) => [{ golpe: t < 2 }, { guardia: true }])
   const g = de(evs, 'golpe')[0]
-  ok(!!g && g.bloqueado && g.danio === 5, 'puño bloqueado: chip 15 % (con −12 %) = 5', g ? `${g.danio}` : 'sin golpe')
+  // El chip sale del puño del kit (con su factor de balance): 15 %, menos el 12 % de Chipi.
+  const chip = Math.max(1, Math.round(S.movimientos.puno.ventanas[0].danio * 0.15 * (1 - 0.12)))
+  ok(!!g && g.bloqueado && g.danio === chip, `puño bloqueado: chip 15 % (con −12 %) = ${chip}`, g ? `${g.danio}` : 'sin golpe')
   ok(p.estadisticas[1].golpesBloqueados === 1, 'estadística golpesBloqueados (del que bloquea)')
   const p2 = nueva()
   acercar(p2)
@@ -255,7 +272,7 @@ function acercar(p: Partida, d = 100) {
     const evs = correr(p, 8, (t) => [{ golpe: t < 2 }, {}])
     const g = de(evs, 'golpe')[0]
     if (g && g.critico) {
-      ok(g.danio === Math.round(40 * 1.6 * 0.88), 'crítico ×1,6', String(g.danio))
+      ok(g.danio === Math.round(PUNO_S * 1.6 * 0.88), 'crítico ×1,6', String(g.danio))
       ok(p.luchadores[0].efectos.critico > 25, 'aura de crítico', String(p.luchadores[0].efectos.critico))
       ok(p.luchadores[0].carga > 2 + 0.2 + 0.5 - 0.01, 'Simón: +0,5 de carga por crítico', p.luchadores[0].carga.toFixed(3))
       break
@@ -298,7 +315,8 @@ function acercar(p: Partida, d = 100) {
   ok(flash === 24, 'super flash: 24 ticks de mundo congelado', String(flash))
   ok(de(evs, 'proyectil').some((x) => x.proyectil === 'rayo') && invProy, 'rayo visual acompaña la corrida')
   const g = de(evs, 'golpe').find((x) => x.herramienta === 'rayo')
-  ok(!!g && !g.bloqueado && g.danio === 132, 'Corte Relámpago: 150 (−12 %) = 132', g ? String(g.danio) : 'no pegó')
+  const corte = Math.round(S.especiales[0].ventanas[0].danio * 0.88)
+  ok(!!g && !g.bloqueado && g.danio === corte, `Corte Relámpago (−12 %) = ${corte}`, g ? String(g.danio) : 'no pegó')
   ok(de(evs, 'electrocutado').length === 1, 'electrocutado')
   ok(p.luchadores[0].carga < 1.6, 'gastó 4 de carga', p.luchadores[0].carga.toFixed(2))
   ok(p.estadisticas[0].especialesUsados === 1 && p.estadisticas[0].especialesAcertados === 1, 'estadísticas de especiales')
@@ -309,7 +327,8 @@ function acercar(p: Partida, d = 100) {
   p.luchadores[0].carga = 5
   const evs = correr(p, 80, (t) => [{ especial1: t < 2 }, { guardia: true }])
   const g = de(evs, 'golpe').find((x) => x.herramienta === 'rayo')
-  ok(!!g && g.bloqueado && Math.abs(p.luchadores[1].guardia - 60) < 2, 'Corte bloqueado: −40 de guardia', `${p.luchadores[1].guardia.toFixed(1)}`)
+  const gCorte = S.especiales[0].ventanas[0].danioGuardia
+  ok(!!g && g.bloqueado && Math.abs(p.luchadores[1].guardia - (100 - gCorte)) < 2, `Corte bloqueado: −${gCorte} de guardia`, `${p.luchadores[1].guardia.toFixed(1)}`)
   ok(Math.abs(p.luchadores[1].x - p.luchadores[0].x) < 110, 'queda pegado al rival', `${Math.abs(p.luchadores[1].x - p.luchadores[0].x).toFixed(0)} px`)
 }
 {
@@ -340,7 +359,8 @@ function acercar(p: Partida, d = 100) {
     return [{ especial1: t < 2 }, {}]
   })
   const g = de(evs, 'golpe').find((x) => x.herramienta === 'sillon')
-  ok(!!g && g.danio === 190 && !g.bloqueado, 'Sillonazo: 190 de daño', g ? String(g.danio) : 'no pegó')
+  const sillon = C.especiales[0].proyectil?.danio ?? 0
+  ok(!!g && g.danio === sillon && !g.bloqueado, `Sillonazo: ${sillon} de daño`, g ? String(g.danio) : 'no pegó')
   ok(de(evs, 'derribo').length === 1 && derribado > 50, 'derribo', `${derribado} ticks derribado`)
   ok(vioLevantarse && levantInv, 'se levanta invulnerable')
   const p2 = nueva(['chipi', 'simon'])
@@ -379,7 +399,7 @@ function acercar(p: Partida, d = 100) {
   const roto = de(evs3, 'descongelado').find((d) => d.roto)
   const golpeRompe = de(evs3, 'golpe').find((g) => g.herramienta === 'puno')
   ok(!!roto, 'pegarle lo descongela (roto: true)')
-  ok(!!golpeRompe && (golpeRompe.danio === Math.round(40 * 1.3) || golpeRompe.danio === Math.round(40 * 1.3 * 1.6)), 'el golpe que rompe el hielo hace ×1,3', golpeRompe ? String(golpeRompe.danio) : '-')
+  ok(!!golpeRompe && (golpeRompe.danio === Math.round(PUNO_C * 1.3) || golpeRompe.danio === Math.round(PUNO_C * 1.3 * 1.6)), 'el golpe que rompe el hielo hace ×1,3', golpeRompe ? String(golpeRompe.danio) : '-')
   const p4 = nueva(['chipi', 'simon'])
   acercar(p4, 140)
   p4.luchadores[0].carga = 6
@@ -388,7 +408,7 @@ function acercar(p: Partida, d = 100) {
     if (q.luchadores[1].efectos.congelado > 0) cong4++
     return [{ especial2: t < 2 }, { guardia: true }]
   })
-  ok(cong4 >= 35 && cong4 <= 45, 'bloqueado: congela 35 igual (+ hitstop)', String(cong4))
+  ok(cong4 >= EFECTO.congeladoBloqueo && cong4 <= EFECTO.congeladoBloqueo + 10, `bloqueado: congela ${EFECTO.congeladoBloqueo} igual (+ hitstop)`, String(cong4))
 }
 
 // ─── Armadura de Chipi (máquina contra leves) ───
@@ -419,7 +439,7 @@ function acercar(p: Partida, d = 100) {
 {
   const p = nueva()
   acercar(p)
-  p.luchadores[1].vida = 30
+  p.luchadores[1].vida = 1
   let escalaMin = 1
   const fases = new Set<string>()
   const evs = correr(p, 400, (t, q) => {
@@ -437,11 +457,12 @@ function acercar(p: Partida, d = 100) {
 }
 
 // ─── Fase final: ¡DEJALO AL CERO! ───
+// (Al rival lo dejamos en 1: el daño del puño depende del factor de balance de cada momento.)
 {
   const p = nueva()
   p.rondasGanadas[0] = 1
   acercar(p)
-  p.luchadores[1].vida = 30
+  p.luchadores[1].vida = 1
   let mareado = false
   const evs = correr(p, 700, (t, q) => {
     if (q.luchadores[1].estado === 'mareado') mareado = true
@@ -460,7 +481,7 @@ function acercar(p: Partida, d = 100) {
   const p2 = nueva()
   p2.rondasGanadas[0] = 1
   acercar(p2)
-  p2.luchadores[1].vida = 30
+  p2.luchadores[1].vida = 1
   const evs2 = correr(p2, 700, (t) => [{ golpe: t < 2 }, {}])
   ok(de(evs2, 'final_al_cero').length === 0 && de(evs2, 'ko').length === 1 && p2.fase === 'terminada', 'sin remate: KO a los 3 s y termina')
 }

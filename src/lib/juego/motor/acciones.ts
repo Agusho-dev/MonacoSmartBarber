@@ -1,9 +1,11 @@
 /**
  * Movimientos en curso: empezar un golpe o un especial, hacerlos avanzar tick a tick (avances,
- * embestida, lanzamiento de proyectiles, eventos de swing) y el remate «AL CERO».
+ * embestidas por el piso y por el aire, ráfagas de proyectiles, curación, agarre, eventos de
+ * swing) y el remate «AL CERO».
  */
 import type { ClaveAnimacion, Herramienta, Lado, Partida } from '../tipos'
 import { PERSONAJES } from '../personajes'
+import { contarAcierto, progresarAgarre } from './combate'
 import { SUPER_FLASH } from './constantes'
 import { finVentanas, mirarA } from './cuerpo'
 import type { Accion, EstadoInterno } from './interno'
@@ -26,8 +28,9 @@ export function iniciarMovimiento(
   const l = p.luchadores[lado]
   const li = I.luchadores[lado]
   const esp = mov as DefEspecial
-  const ventanasAnim =
-    mov.ventanas.length > 0
+  const ventanasAnim = mov.animLineal
+    ? []
+    : mov.ventanas.length > 0
       ? mov.ventanas.map((v) => ({ desde: v.desde, ticks: v.ticks }))
       : esp.lanzamiento
         ? [{ desde: esp.lanzamiento.desde, ticks: esp.lanzamiento.ticks }]
@@ -38,6 +41,8 @@ export function iniciarMovimiento(
     t: 0,
     total: mov.total,
     resueltas: mov.ventanas.map(() => false),
+    contactos: mov.ventanas.map(() => 0),
+    esperaVentana: mov.ventanas.map(() => 0),
     contacto: false,
     acerto: false,
     cancelDesde: especial || remate ? SIN_CANCEL : finVentanas(mov),
@@ -49,6 +54,9 @@ export function iniciarMovimiento(
     remate,
     avanceRemate: 0,
     sello: ++I.sello,
+    lanzados: 0,
+    enAire: false,
+    agarre: null,
   }
   li.accion = a
   l.movimiento = mov.id
@@ -97,6 +105,7 @@ export function avanzarAccion(p: Partida, I: EstadoInterno, lado: Lado, enPelea:
   const mov = a.mov
   const esp = mov as DefEspecial
 
+  for (let i = 0; i < a.esperaVentana.length; i++) if (a.esperaVentana[i] > 0) a.esperaVentana[i]--
   if (!a.remate && enPelea) {
     for (const v of mov.ventanas) {
       if (!esp.embestida && a.t === Math.max(0, v.desde - 2)) {
@@ -108,13 +117,22 @@ export function avanzarAccion(p: Partida, I: EstadoInterno, lado: Lado, enPelea:
 
   if (esp.embestida) {
     const e = esp.embestida
+    // La embestida aérea salta en `desde` (con su gravedad, ver luchador.fisica).
+    if (e.salto && a.t === e.desde && l.enSuelo && !a.enAire && !a.detenido) {
+      l.enSuelo = false
+      l.y = 0
+      l.vy = e.salto.vy
+      li.tAire = 0
+      li.tSuelo = 0
+      a.enAire = true
+    }
     const corre = !a.detenido && a.t >= e.desde && a.t < e.desde + e.ticks
-    if (corre && l.enSuelo) {
+    if (corre && (l.enSuelo || a.enAire)) {
       li.vMov = l.mira * (e.distancia / e.ticks)
-      li.invulnProyectil = true
+      li.invulnProyectil = e.atraviesa ?? true
       if (a.t === e.desde) {
         emitir(p, { tipo: 'swing', quien: lado, fuerza: 'especial', herramienta: mov.herramienta })
-        if (enPelea) crearRayo(p, I, lado, a.sello, a.especial === 2 ? 2 : 1)
+        if (enPelea && mov.herramienta === 'rayo') crearRayo(p, I, lado, a.sello, a.especial === 2 ? 2 : 1)
       }
     } else {
       li.vMov = 0
@@ -126,10 +144,41 @@ export function avanzarAccion(p: Partida, I: EstadoInterno, lado: Lado, enPelea:
     else li.vMov = 0
   }
 
-  if (esp.proyectil && esp.lanzamiento && !a.lanzado && a.t >= esp.lanzamiento.desde) {
-    a.lanzado = true
-    if (enPelea) lanzarProyectil(p, I, lado, esp)
+  // Proyectiles: uno, o una ráfaga (uno cada `cada` ticks).
+  if (esp.proyectil && esp.lanzamiento) {
+    const cantidad = esp.rafaga ? esp.rafaga.cantidad : 1
+    const cada = esp.rafaga ? esp.rafaga.cada : 0
+    while (a.lanzados < cantidad && a.t >= esp.lanzamiento.desde + a.lanzados * cada) {
+      const i = a.lanzados++
+      a.lanzado = true
+      if (enPelea) lanzarProyectil(p, I, lado, esp, i, a.sello)
+    }
   }
+
+  // Curación: de a pedacitos (se corta sola si le pegan: interrumpir() saca la acción).
+  if (esp.cura && enPelea) {
+    const c = esp.cura
+    const k = a.t - c.desde
+    if (k >= 0 && k < c.ticks) {
+      l.efectos.curando = c.ticks - k
+      if (k % c.cada === 0) {
+        const n = Math.max(1, Math.ceil(c.ticks / c.cada))
+        const i = k / c.cada
+        const total = Math.round(l.vidaMax * c.fraccion)
+        const pedazo = Math.round((total * (i + 1)) / n) - Math.round((total * i) / n)
+        const real = Math.min(pedazo, l.vidaMax - l.vida)
+        if (real > 0) {
+          l.vida += real
+          p.estadisticas[lado].curado += real
+          emitir(p, { tipo: 'curacion', quien: lado, cantidad: real })
+        }
+        if (i === n - 1) contarAcierto(p, I, lado, a.sello)
+      }
+    } else if (k >= c.ticks) l.efectos.curando = 0
+  }
+
+  // Agarre en curso: lo sostiene, lo aprieta y lo tira (fuera de la pelea lo suelta sin daño).
+  if (a.agarre && esp.agarre) progresarAgarre(p, I, lado, a, esp.agarre, enPelea)
 }
 
 /** Fin del tick: avanza el reloj del movimiento y lo termina si corresponde. */
@@ -139,7 +188,7 @@ export function cerrarTickAccion(p: Partida, I: EstadoInterno, lado: Lado): void
   const a = li.accion
   if (!a) return
   a.t++
-  if (a.mov.aereo && !l.enSuelo) return
+  if ((a.mov.aereo || a.enAire) && !l.enSuelo) return
   if (a.t >= a.total || a.mov.aereo) {
     li.accion = null
     l.movimiento = null

@@ -10,6 +10,7 @@ import type { EventoJuego, FuerzaGolpe, Herramienta, IdPersonaje, Lado, Partida 
 import { empujarZoom, temblar } from './camara'
 import { fx, FX_ARCO, FX_BLOQUEO, FX_CHISPA, FX_CHISPA_CRITICA, FX_ONDA, FX_RAYO } from './efectos'
 import type { Escena } from './escena'
+import { impactoEspecial, rasgoEspecial } from './especiales'
 import { tieneImpactos, type VisualLuchador } from './luchadores'
 import { destellar, iniciarSuperFlash, type Destello, type SuperFlash } from './pantalla'
 import {
@@ -17,19 +18,34 @@ import {
   emitirAnim,
   emitirBrillos,
   emitirChispas,
+  emitirCruces,
   emitirElectricas,
   emitirEsquirlas,
   emitirEstallido,
+  emitirLlamas,
   emitirMechones,
+  emitirMoscas,
   emitirNiebla,
+  emitirNotas,
   emitirPolvo,
+  emitirSalpicadura,
+  emitirTrozos,
+  G_CALIENTE,
+  G_LECHE,
+  G_PINTURA,
+  G_TRAGO,
+  G_YERBA,
   P_HIELO,
   P_VIDRIO,
   PAL_AZUL,
+  PAL_BLANCO,
   PAL_ELECTRICA,
   PAL_FUEGO,
   PAL_HIELO,
+  PAL_MAGENTA,
   PAL_ORO,
+  PAL_TIERRA,
+  PAL_VIOLETA,
 } from './particulas'
 import type { Textos } from './textos'
 import { azar } from './util'
@@ -54,7 +70,7 @@ export interface Mundo {
 }
 
 const NIVEL: Record<FuerzaGolpe, number> = { leve: 0, medio: 1, fuerte: 2, especial: 3 }
-const CORTA: Record<Herramienta, boolean> = {
+const CORTA: Partial<Record<Herramienta, boolean>> = {
   puno: false,
   patada: false,
   maquina: true,
@@ -64,8 +80,100 @@ const CORTA: Record<Herramienta, boolean> = {
   tornado: true,
   sillon: false,
   spray: false,
+  // la navaja de barbería corta pelo de verdad
+  navaja: true,
 }
 const TEMBLOR = [2.5, 4, 6.5, 9]
+/** Golpes que sacuden más que su fuerza (el sillón, la moto, el agarre contra el piso, el sismo). */
+const TEMBLOR_EXTRA: Partial<Record<Herramienta, number>> = { sillon: 15, moto: 12, agarre: 12, sismo: 11, pesado: 10, guante: 10 }
+
+/** Lo propio de cada herramienta del elenco cuando el golpe entra (además de chispas y pelo). */
+function capaHerramienta(M: Mundo, h: Herramienta, x: number, y: number, dir: number): void {
+  const E = M.E
+  switch (h) {
+    case 'bombo':
+      emitirAnillo(E, x, y, 8, 60, 0.24, PAL_ORO, 4)
+      emitirBrillos(E, x, y, 4, 1, 24, 50)
+      break
+    case 'navaja':
+      emitirChispas(E, x, y, 8, dir, 0.4, 260, 620, PAL_BLANCO, 1.5)
+      emitirBrillos(E, x, y, 2, 0, 10, 20)
+      break
+    case 'celular':
+      emitirBrillos(E, x, y, 3, 2, 14, 30)
+      break
+    case 'anteojos':
+      emitirBrillos(E, x, y, 2, 0, 12, 30)
+      break
+    case 'guante':
+      emitirLlamas(E, x, y, 8, dir * 120, -60, 30, 14)
+      break
+    case 'moto':
+      emitirPolvo(E, x, E.sueloY, 8, 40, 1.4, dir)
+      emitirChispas(E, x, y, 8, dir, 0.7, 200, 520, PAL_FUEGO)
+      break
+    case 'bala':
+      emitirChispas(E, x, y, 5, dir, 0.6, 150, 380, PAL_ORO, 1.8)
+      break
+    case 'graffiti':
+      emitirSalpicadura(E, x, y, 14, G_PINTURA, dir > 0 ? -0.5 : Math.PI + 0.5, 1.1, 120, 380, 1.2)
+      break
+    case 'break':
+      emitirBrillos(E, x, y, 4, 3, 20, 40)
+      break
+    case 'trago':
+      emitirSalpicadura(E, x, y, 10, G_TRAGO, -Math.PI / 2, 1.2, 80, 260, 1)
+      break
+    case 'botella':
+      emitirTrozos(E, x, y, 4, 1, 0.6)
+      emitirBrillos(E, x, y, 3, 0, 14, 40)
+      break
+    case 'baile':
+    case 'onda':
+      emitirAnillo(E, x, y, 8, 54, 0.24, PAL_MAGENTA, 4)
+      emitirNotas(E, x, y, 2, 20, 100, 20)
+      break
+    case 'gorro':
+      emitirBrillos(E, x, y, 3, 6, 16, 30)
+      break
+    case 'dragon':
+      emitirLlamas(E, x, y, 10, dir * 140, -80, 32, 16)
+      emitirEstallido(E, x, y, 90, 0, 0.18)
+      break
+    case 'pelota':
+      emitirAnillo(E, x, y, 8, 46, 0.22, PAL_AZUL, 4)
+      emitirBrillos(E, x, y, 3, 2, 14, 30)
+      break
+    case 'leche':
+      emitirSalpicadura(E, x, y, 8, G_LECHE, dir > 0 ? -0.4 : Math.PI + 0.4, 1, 80, 240, 1)
+      break
+    case 'panal':
+    case 'nube':
+      for (let k = 0; k < 4; k++) emitirNiebla(E, x, y, dir * azar(20, 90), -azar(10, 40), 18, 0.5, 4)
+      break
+    case 'mate':
+      emitirSalpicadura(E, x, y, 8, G_YERBA, -Math.PI / 2, 1.2, 70, 220, 0.9)
+      break
+    case 'agua':
+      emitirSalpicadura(E, x, y, 6, G_CALIENTE, dir > 0 ? -0.4 : Math.PI + 0.4, 1, 80, 220, 1)
+      for (let k = 0; k < 3; k++) emitirNiebla(E, x, y, azar(-30, 30), -azar(40, 90), 16, 0.6, 2)
+      break
+    case 'sismo':
+      emitirTrozos(E, x, E.sueloY - 6, 6, 0, 0.9)
+      emitirPolvo(E, x, E.sueloY, 6, 30, 1.2, dir)
+      break
+    case 'agarre':
+      emitirPolvo(E, x, E.sueloY, 10, 50, 1.5)
+      emitirEstallido(E, x, E.sueloY - 24, 120, 0, 0.2)
+      break
+    case 'pesado':
+      emitirAnillo(E, x, y, 10, 64, 0.24, PAL_FUEGO, 5)
+      emitirPolvo(E, x, E.sueloY, 6, 30, 1.2, dir)
+      break
+    default:
+      break
+  }
+}
 const ZOOM = [0, 0.006, 0.014, 0.024]
 
 function otro(l: Lado): Lado {
@@ -151,10 +259,11 @@ function alGolpe(M: Mundo, e: Extract<EventoJuego, { tipo: 'golpe' }>): void {
       emitirBrillos(E, x, y, 3, 0, 14, 40)
       break
     default:
+      capaHerramienta(M, e.herramienta, x, y, dir)
       break
   }
   if (nivel >= 2) emitirPolvo(E, vic.x, E.sueloY, 4, 30, 1, dir)
-  temblar(E.cam, e.herramienta === 'sillon' ? 15 : TEMBLOR[nivel] + (crit ? 3 : 0))
+  temblar(E.cam, TEMBLOR_EXTRA[e.herramienta] ?? (TEMBLOR[nivel] + (crit ? 3 : 0)))
   empujarZoom(E.cam, ZOOM[nivel] + (crit ? 0.02 : 0))
   vV.sacudida = Math.max(vV.sacudida, (4 + nivel * 2 + (crit ? 4 : 0)) * 16.7)
   vV.destelloMs = 0
@@ -181,6 +290,16 @@ function alEspecial(M: Mundo, e: Extract<EventoJuego, { tipo: 'especial' }>): vo
   M.focoLado = e.quien
   v.superBlanco = 0.8
   emitirBrillos(M.E, l.x, M.E.sueloY - l.y - alto(v) * 0.5, 10, 1, 50, 120)
+  const icono = ficha.especiales[e.numero - 1]?.icono
+  if (icono) {
+    // el rasgo propio va ENCIMA del oscurecido del super flash (si no, quedaba tapado)
+    M.E.parts.capaNueva = 2
+    try {
+      rasgoEspecial(M.E, l, v, icono)
+    } finally {
+      M.E.parts.capaNueva = 1
+    }
+  }
 }
 
 function alProyectil(M: Mundo, e: Extract<EventoJuego, { tipo: 'proyectil' }>): void {
@@ -205,6 +324,62 @@ function alProyectil(M: Mundo, e: Extract<EventoJuego, { tipo: 'proyectil' }>): 
     case 'rayo':
       emitirElectricas(E, manoX, manoY, 10, 10)
       estallido(E, manoX, manoY, 70, 3)
+      break
+    case 'bombo':
+      emitirAnillo(E, manoX, manoY, 10, 64, 0.26, PAL_AZUL, 5)
+      emitirAnillo(E, manoX, manoY, 6, 46, 0.22, PAL_ORO, 4)
+      emitirPolvo(E, l.x + l.mira * 40, E.sueloY, 6, 26, 1, l.mira)
+      break
+    case 'bala':
+      // el fogonazo lo pone el evento `disparo` (uno por tiro)
+      break
+    case 'graffiti':
+      emitirSalpicadura(E, manoX, manoY, 10, G_PINTURA, l.mira > 0 ? -0.3 : Math.PI + 0.3, 0.5, 160, 380, 1)
+      for (let k = 0; k < 3; k++) emitirNiebla(E, manoX, manoY, l.mira * azar(60, 180), azar(-30, 10), 18, 0.5, 5)
+      break
+    case 'trago':
+      emitirSalpicadura(E, manoX, manoY, 8, G_TRAGO, l.mira > 0 ? -0.8 : Math.PI + 0.8, 0.5, 100, 260, 1)
+      break
+    case 'botella':
+      emitirBrillos(E, manoX, manoY, 3, 1, 16, 40)
+      break
+    case 'onda': {
+      const bocaY = v.cajaY + v.cajaH * 0.16
+      emitirAnillo(E, l.x + l.mira * 24, bocaY, 12, 110, 0.32, PAL_MAGENTA, 7)
+      emitirNotas(E, l.x + l.mira * 34, bocaY, 4, 30, 120, 24)
+      destellar(M.destello, '#F5D0FE', 0.12, 140)
+      break
+    }
+    case 'gorro':
+      E.tajos.nuevo(l.x, v.cajaY + 20, 56, -2.4, -0.5, 10, 160, l.mira, '#FF3B30')
+      emitirBrillos(E, l.x + l.mira * 20, v.cajaY + 20, 4, 6, 20, 40)
+      break
+    case 'pelota':
+      emitirPolvo(E, l.x + l.mira * 40, E.sueloY, 5, 20, 0.9, l.mira)
+      emitirAnillo(E, l.x + l.mira * 50, E.sueloY - 24, 6, 32, 0.18, PAL_AZUL, 3)
+      emitirBrillos(E, l.x + l.mira * 50, E.sueloY - 30, 3, 2, 16, 40)
+      break
+    case 'leche':
+      emitirSalpicadura(E, manoX, manoY, 10, G_LECHE, l.mira > 0 ? -0.2 : Math.PI + 0.2, 0.5, 120, 300, 1)
+      break
+    case 'panal':
+      for (let k = 0; k < 4; k++) emitirNiebla(E, manoX, manoY, l.mira * azar(20, 80), -azar(10, 40), 18, 0.5, 4)
+      break
+    case 'mate':
+      emitirSalpicadura(E, manoX, manoY, 6, G_YERBA, -Math.PI / 2, 1, 60, 180, 0.9)
+      emitirNiebla(E, manoX, manoY - 10, 0, -60, 16, 0.6, 2)
+      break
+    case 'agua':
+      for (let k = 0; k < 6; k++) emitirNiebla(E, manoX, manoY, l.mira * azar(30, 120), -azar(30, 80), 18, 0.7, 2)
+      emitirSalpicadura(E, manoX, manoY, 6, G_CALIENTE, l.mira > 0 ? -0.2 : Math.PI + 0.2, 0.5, 120, 280, 1)
+      break
+    case 'guante':
+      emitirLlamas(E, manoX, manoY, 10, l.mira * 160, -60, 30, 14)
+      emitirEstallido(E, manoX, manoY, 90, 0, 0.18)
+      emitirChispas(E, manoX, manoY, 8, l.mira, 0.6, 200, 480, PAL_FUEGO)
+      break
+    default:
+      // nube y sismo: los anuncian sus propios eventos (con la x de dónde aparecen)
       break
   }
 }
@@ -256,6 +431,7 @@ export function alImpactoAnimacion(M: Mundo, lado: Lado, k: number): void {
     case 'especial1':
     case 'especial2': {
       const icono = at.ficha.especiales[l.anim === 'especial1' ? 0 : 1]?.icono
+      if (icono && impactoEspecial(E, l, v, icono, k)) break
       const manoX = l.x + m * 52
       const manoY = yPie - h * 0.58
       if (icono === 'rayo') {
@@ -357,6 +533,97 @@ export function procesarEventos(M: Mundo, eventos: readonly EventoJuego[]): void
         emitirChispas(E, cx, cy, 8, 0, Math.PI, 150, 420, PAL_ELECTRICA, 2)
         M.textos.impacto('electrocutado', l.x, v.cajaY - 30)
         destellar(M.destello, '#FFF4B0', 0.22, 140)
+        break
+      }
+      case 'curacion': {
+        const l = M.p.luchadores[e.quien]
+        const v = M.vis[e.quien]
+        if (!l) break
+        M.textos.curar(e.quien, e.cantidad, l.x, v.cajaY - 14)
+        emitirBrillos(E, centroX(v), centroY(v), 4, 4, 40, 90)
+        emitirCruces(E, centroX(v), centroY(v), 2, 30)
+        break
+      }
+      case 'agarre': {
+        const vic = M.p.luchadores[e.victima]
+        const atk = M.p.luchadores[e.atacante]
+        const vV = M.vis[e.victima]
+        if (!vic || !atk) break
+        const x = (vic.x + atk.x) / 2
+        const y = centroY(vV)
+        estallido(E, x, y, 110, 0, 0.18)
+        emitirBrillos(E, x, y, 6, 1, 30, 40)
+        emitirAnillo(E, x, y, 10, 70, 0.26, PAL_FUEGO, 5)
+        emitirPolvo(E, atk.x, E.sueloY, 8, 40, 1.2)
+        temblar(E.cam, 6)
+        empujarZoom(E.cam, 0.03)
+        vV.sacudida = Math.max(vV.sacudida, 200)
+        M.focoMs = Math.max(M.focoMs, 500)
+        M.focoLado = e.atacante
+        break
+      }
+      case 'aturdido': {
+        const l = M.p.luchadores[e.quien]
+        const v = M.vis[e.quien]
+        if (!l) break
+        emitirBrillos(E, l.x, v.cajaY, 8, 1, 40, 30)
+        emitirAnillo(E, l.x, v.cajaY - 6, 10, 70, 0.28, PAL_ORO, 4)
+        M.textos.impacto('aturdido', l.x, v.cajaY - 30)
+        destellar(M.destello, '#FFF3B0', 0.16, 140)
+        break
+      }
+      case 'mareado': {
+        const l = M.p.luchadores[e.quien]
+        const v = M.vis[e.quien]
+        if (!l) break
+        emitirSalpicadura(E, centroX(v), v.cajaY + 20, 10, G_TRAGO, -Math.PI / 2, 1.3, 60, 200, 1)
+        emitirBrillos(E, l.x, v.cajaY, 6, 3, 36, 30)
+        emitirAnillo(E, l.x, v.cajaY - 6, 10, 64, 0.28, PAL_VIOLETA, 4)
+        M.textos.impacto('mareado', l.x, v.cajaY - 30)
+        break
+      }
+      case 'quemado': {
+        const l = M.p.luchadores[e.quien]
+        const v = M.vis[e.quien]
+        if (!l) break
+        const cx = centroX(v)
+        const cy = centroY(v)
+        for (let k = 0; k < 8; k++) emitirNiebla(E, cx + azar(-30, 30), cy + azar(-50, 40), azar(-40, 40), -azar(60, 140), 20, 0.8, 2)
+        estallido(E, cx, cy, 90, 0, 0.18)
+        emitirChispas(E, cx, cy, 8, 0, Math.PI, 120, 360, PAL_FUEGO, 2)
+        M.textos.impacto('quemado', l.x, v.cajaY - 30)
+        destellar(M.destello, '#FFD0A0', 0.14, 140)
+        break
+      }
+      case 'nube': {
+        // el pañal cayó: «plaf» y aparece la nube
+        for (let k = 0; k < 8; k++) emitirNiebla(E, e.x + azar(-40, 40), E.sueloY - azar(4, 30), azar(-90, 90), -azar(10, 60), 26, 0.7, 4)
+        emitirPolvo(E, e.x, E.sueloY, 8, 40, 1.1)
+        emitirMoscas(E, e.x, E.sueloY - 50, 3, 2)
+        temblar(E.cam, 2.5)
+        break
+      }
+      case 'sismo': {
+        // el puño al piso: de acá sale la onda sísmica
+        temblar(E.cam, 13)
+        empujarZoom(E.cam, 0.035)
+        emitirPolvo(E, e.x, E.sueloY, 16, 70, 1.6)
+        emitirTrozos(E, e.x, E.sueloY - 6, 10, 0, 1.1)
+        emitirAnillo(E, e.x, E.sueloY - 4, 10, 130, 0.36, PAL_TIERRA, 7)
+        destellar(M.destello, '#FFE2B0', 0.18, 160)
+        break
+      }
+      case 'disparo': {
+        // fogonazo de dibujo animado en la boca del arma, humito y el casquillo que salta
+        const l = M.p.luchadores[e.quien]
+        const y = E.sueloY - e.y
+        const m = l ? l.mira : 1
+        estallido(E, e.x, y, 64, 2, 0.12)
+        emitirChispas(E, e.x, y, 6, m, 0.5, 200, 520, PAL_ORO, 2)
+        emitirNiebla(E, e.x, y, m * 40, -20, 12, 0.45, 3)
+        emitirTrozos(E, e.x - m * 16, y - 4, 1, 2, 0.6, -m)
+        temblar(E.cam, 1.6)
+        if (l) M.vis[e.quien].sacudida = Math.max(M.vis[e.quien].sacudida, 50)
         break
       }
       case 'turbo':

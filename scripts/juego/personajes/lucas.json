@@ -1,0 +1,92 @@
+{
+  "_nota": "Lucas «El Papá» para «Corte Final» (30/oct/2026). Se procesa con scripts/juego/extraer_lucas.py (la lógica está en extraer_joaquin.py). Hoja de 18 paneles: herramienta1 y herramienta2 son alias del remate del combo y de la patada. El bebé en la mochila es parte del personaje. SIN sinFondo: la remera y el pantalón negros son del mismo negro que el fondo y la inundación se comía la ropa. El combo va sin sus dos cuadros envueltos en el remolino (el giro y el remate final); la patada sin el cuadro de la doble imagen. Los chorros de leche, el pañal en vuelo, la nube y las siluetas del rival de los especiales se dejan afuera (los dibuja el render). La fila de abajo está dibujada ~14 % más grande: va con escala.",
+  "personaje": "lucas",
+  "hoja": "../../../../juego-fuentes/lucas_anim.jpg",
+  "salida": "../../../public/juego/personajes/lucas",
+  "retrato": { "anim": "levantarse", "cuadro": 3, "alto": 720, "cara": [16, -2, 50] },
+  "animaciones": {
+    "quieto": { "region": [11, 33, 350, 162], "cuadros": 5 },
+    "caminar": { "region": [362, 33, 718, 162], "cuadros": 5 },
+    "correr": {
+      "region": [729, 33, 1084, 162],
+      "cuadros": 4,
+      "porCuadro": {
+        "1": { "excluir": [[[840, 162], [840, 146], [850, 138], [858, 140], [858, 152], [894, 152], [894, 162]]] },
+        "3": { "excluir": [[1002, 146, 1050, 162], [[1006, 146], [1012, 138], [1022, 134], [1028, 146]]] }
+      }
+    },
+    "dash": { "region": [1096, 33, 1525, 162], "cuadros": 3, "usar": [1, 2, 2] },
+    "guardia": { "region": [12, 194, 344, 318], "cuadros": 4 },
+    "agachado": { "region": [356, 194, 640, 318], "cuadros": 4 },
+    "saltar": { "region": [652, 194, 1011, 318], "cuadros": 4 },
+    "caer": {
+      "region": [1023, 194, 1525, 318],
+      "cajas": [[1140, 194, 1228, 318], [1232, 194, 1318, 318], [1322, 194, 1402, 318], [1410, 194, 1522, 318]],
+      "usar": [0, 3],
+      "prestados": [{ "pos": 0, "de": "saltar", "cuadro": 3 }, { "pos": 1, "de": "saltar", "cuadro": 3 }, { "pos": 2, "de": "saltar", "cuadro": 3 }]
+    },
+    "golpe": {
+      "region": [12, 352, 436, 474],
+      "cortes": [[78, 92], [158, 166], [232, 250], [330, 346]],
+      "usar": [0, 1, 2, 3],
+      "impactos": [3],
+      "porCuadro": { "2": { "excluir": [[148, 380, 164, 416]] } }
+    },
+    "patada": {
+      "inferencia": "caja",
+      "region": [449, 352, 816, 474],
+      "cajas": [[452, 352, 530, 474], [532, 352, 660, 474]],
+      "usar": [0, 1, 0],
+      "impactos": [1]
+    },
+    "combo": {
+      "region": [828, 352, 1525, 474],
+      "cortes": [[896, 904], [976, 986], [1044, 1054], [1128, 1140], [1230, 1240], [1294, 1303], [1386, 1396]],
+      "usar": [0, 1, 2, 3, 5, 6],
+      "impactos": [3, 5],
+      "porCuadro": {
+        "2": { "excluir": [[[996, 474], [996, 463], [1008, 458], [1024, 458], [1024, 474]], [1024, 462, 1048, 474]] },
+        "6": { "quitar": [{ "zona": [1340, 370, 1390, 430], "bMenosRMin": 25, "lumMin": 100 }], "excluir": [[1379, 446, 1400, 478]] }
+      },
+      "_nota": "revisión 30/oct: el zapato del cuadro de al lado quedaba flotando abajo a la derecha del remate (combo 5 = herramienta1 2)"
+    },
+    "especial1": {
+      "inferencia": "caja",
+      "region": [12, 512, 1525, 638],
+      "cajas": [[15, 516, 112, 638], [120, 516, 252, 638], [268, 516, 400, 638], [418, 516, 535, 638], [586, 516, 722, 638]],
+      "impactos": [3, 4]
+    },
+    "especial2": {
+      "inferencia": "caja",
+      "region": [12, 672, 1525, 799],
+      "cajas": [[15, 676, 112, 799], [126, 676, 250, 799], [290, 676, 392, 799], [446, 676, 556, 799], [686, 676, 800, 799]],
+      "impactos": [3]
+    },
+    "danio": {
+      "region": [13, 832, 361, 988],
+      "cajas": [[16, 850, 92, 988], [92, 850, 152, 988], [252, 850, 358, 988]],
+      "inferencia": "caja",
+      "escala": 0.88
+    },
+    "ko": { "region": [374, 832, 666, 988], "cortes": [[452, 470], [530, 548]], "escala": 0.88 },
+    "levantarse": { "region": [678, 832, 941, 988], "cuadros": 4, "escala": 0.88 },
+    "victoria": { "region": [954, 832, 1205, 988], "cuadros": 3, "escala": 0.88 },
+    "burla": { "region": [1218, 832, 1525, 988], "cuadros": 4, "escala": 0.88 }
+  },
+  "alias": {
+    "herramienta1": { "de": "combo", "cuadros": [1, 2, 5], "impactos": [2] },
+    "herramienta2": { "de": "patada", "impactos": [1] }
+  },
+  "efectos": {
+    "panal": {
+      "_nota": "el pañal en vuelo del especial 2 (sobre estelas grises): por color, dentro de su contorno",
+      "caja": [598, 668, 690, 754],
+      "modo": "color",
+      "regla": { "lumMin": 150 },
+      "cerrar": 1,
+      "anillo": 2,
+      "lumAnillo": 90,
+      "limite": [[[633, 671], [687, 710], [656, 752], [601, 711]]]
+    }
+  }
+}

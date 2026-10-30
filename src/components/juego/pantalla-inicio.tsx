@@ -4,8 +4,8 @@ import { CircleHelp, Trophy, Volume2, VolumeX } from 'lucide-react'
 import Image from 'next/image'
 import { useEffect, useEffectEvent, useState, type CSSProperties } from 'react'
 import { ARENAS } from '@/lib/juego/arenas'
-import { IDS_PERSONAJES, PERSONAJES } from '@/lib/juego/personajes'
-import type { DatosEntradaJuego, EstadoTurnoJuego } from '@/lib/juego/tipos'
+import { PERSONAJES } from '@/lib/juego/personajes'
+import type { DatosEntradaJuego, EstadoTurnoJuego, IdPersonaje } from '@/lib/juego/tipos'
 import type { PreferenciasJuego } from '@/lib/juego/ui/preferencias'
 import { ImagenJuego } from './imagen-juego'
 import { LogoCorteFinal } from './logo-corte-final'
@@ -13,6 +13,8 @@ import { ChipTurno } from './turno'
 
 interface Props {
   datos: DatosEntradaJuego
+  /** Los dos de la portada: el luchador que le toca al jugador y su rival (su barbero, si vino por QR). */
+  luchadores: [IdPersonaje, IdPersonaje]
   turno: EstadoTurnoJuego | null
   prefs: PreferenciasJuego
   onJugar: () => void
@@ -24,7 +26,7 @@ interface Props {
 /** El logo de Monaco, transparente (sale de public/logo-monaco.png; 720×199). */
 const LOGO_MONACO = { src: '/juego/logo-monaco.webp', ancho: 720, alto: 199 } as const
 
-export function PantallaInicio({ datos, turno, prefs, onJugar, onRanking, onComoSeJuega, onSonido }: Props) {
+export function PantallaInicio({ datos, luchadores, turno, prefs, onJugar, onRanking, onComoSeJuega, onSonido }: Props) {
   const arena = ARENAS[datos.arenaInicial]
   const jugar = useEffectEvent(onJugar)
   const [sinLogo, setSinLogo] = useState(false)
@@ -41,7 +43,7 @@ export function PantallaInicio({ datos, turno, prefs, onJugar, onRanking, onComo
     window.addEventListener('keydown', alTeclear)
     return () => window.removeEventListener('keydown', alTeclear)
   }, [])
-  const [izquierda, derecha] = [PERSONAJES[IDS_PERSONAJES[0]], PERSONAJES[IDS_PERSONAJES[1] ?? IDS_PERSONAJES[0]]]
+  const [izquierda, derecha] = [PERSONAJES[luchadores[0]], PERSONAJES[luchadores[1]]]
 
   return (
     <section className="cf-pantalla cf-inicio" aria-label="Corte Final">

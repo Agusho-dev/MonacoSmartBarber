@@ -4,7 +4,7 @@ import { HandFist, Shield, Wind } from 'lucide-react'
 import { CARGA_MAX } from '@/lib/juego/tipos'
 import type { FichaPersonaje } from '@/lib/juego/tipos'
 import { nombreCortoEspecial } from '@/lib/juego/ui/textos'
-import { IconoDeEspecial, IconoMaquina } from './iconos'
+import { IconoDeEspecial, IconoHerramienta, IconoMaquina } from './iconos'
 
 /**
  * Estructura de los controles de la pelea: barra «CARGA DE LA MÁQUINA», las dos cartas
@@ -82,7 +82,7 @@ export function ControlesPelea({ ficha }: { ficha: FichaPersonaje }) {
           <span className="cf-bp__texto">Golpe</span>
         </div>
         <div className="cf-bp cf-bp--herramienta" data-boton="herramienta">
-          <IconoMaquina className="cf-bp__icono" />
+          <IconoHerramienta nombre={ficha.herramientas[0]} className="cf-bp__icono" />
           <span className="cf-bp__texto">{ficha.herramientas[0]}</span>
         </div>
         <div className="cf-bp cf-bp--guardia" data-boton="guardia">

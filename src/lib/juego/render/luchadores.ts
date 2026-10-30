@@ -7,10 +7,21 @@
  * Los tintes (blanco, hielo, aura, silueta, paleta alternativa) se pintan UNA vez por cuadro del
  * atlas en un lienzo aparte y se reusan: en el cuadro sólo hay drawImage.
  */
-import type { AnimacionAtlas, AtlasPersonaje, ClaveAnimacion, CuadroAtlas, FichaPersonaje, Lado, LuchadorEstado } from '../tipos'
+import type {
+  AnimacionAtlas,
+  AtlasPersonaje,
+  ClaveAnimacion,
+  CuadroAtlas,
+  FichaPersonaje,
+  IconoEspecial,
+  Lado,
+  LuchadorEstado,
+} from '../tipos'
 import { CLAVES_ANIMACION } from '../tipos'
 import { cuadroFx, dibujarFx, fx, FX_ARCO, FX_ESTRELLAS, FX_HIELO, type FxAnim } from './efectos'
 import { caminoRedondeado, enMundo, spriteMundo, type Escena } from './escena'
+import { dibujarEspecialVisual, especialContinuo, ICONOS_ESTELA } from './especiales'
+import { aroCuracion, dibujarEstadosEncima, emitirEstados } from './estados'
 import { contexto, crearLienzo, liberarLienzo, medidas } from './lienzo'
 import { emitirBrillos, emitirElectricas, emitirGotas, emitirNiebla } from './particulas'
 import { acotar, azar, ruido, salidaConRebote, suavizar, TAU } from './util'
@@ -20,7 +31,13 @@ export const TINTE_BLANCO = 1
 export const TINTE_HIELO = 2
 export const TINTE_AURA = 3
 export const TINTE_SILUETA = 4
-const PAD_TINTE = [0, 0, 0, 12, 0]
+/** Quemado (el termo): naranja encima del sprite. */
+export const TINTE_QUEMADO = 5
+/** Lento (la nube): verdoso. */
+export const TINTE_LENTO = 6
+/** Aura verde de la curación (como la dorada del crítico). */
+export const TINTE_AURA_VERDE = 7
+const PAD_TINTE = [0, 0, 0, 12, 0, 0, 0, 12]
 
 /** Si a un atlas le falta una animación, se usa la primera de estas que tenga. */
 const RESPALDOS: Record<ClaveAnimacion, readonly ClaveAnimacion[]> = {
@@ -134,7 +151,7 @@ export function prepararAtlas(ficha: FichaPersonaje, datos: AtlasPersonaje, imag
     escala: ficha.alturaMundo / ref,
     cuadros,
     anims,
-    tintes: [[], [], [], [], []],
+    tintes: [[], [], [], [], [], [], [], []],
     efectos,
     reflejoMitad: Math.ceil(mitad + 2),
     reflejoAlto: Math.ceil(ref * 0.62),
@@ -222,13 +239,13 @@ function crearTinte(at: AtlasPreparado, tinte: number, plano: number): HTMLCanva
   const pad = PAD_TINTE[tinte]
   const c = crearLienzo(f.w + pad * 2, f.h + pad * 2)
   const g = contexto(c)
-  if (tinte === TINTE_AURA) {
-    // silueta dorada repetida alrededor: un halo suave sin filtros ni sombras
+  if (tinte === TINTE_AURA || tinte === TINTE_AURA_VERDE) {
+    // silueta dorada (o verde) repetida alrededor: un halo suave sin filtros ni sombras
     const s = crearLienzo(f.w, f.h)
     const gs = contexto(s)
     gs.drawImage(at.imagen, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h)
     gs.globalCompositeOperation = 'source-in'
-    gs.fillStyle = '#FFC93A'
+    gs.fillStyle = tinte === TINTE_AURA ? '#FFC93A' : '#4ADE80'
     gs.fillRect(0, 0, f.w, f.h)
     const anillos: [number, number][] = [
       [pad, 0.13],
@@ -265,6 +282,17 @@ function crearTinte(at: AtlasPreparado, tinte: number, plano: number): HTMLCanva
     // segunda paleta para la pelea espejo (mismo barbero de los dos lados)
     g.globalCompositeOperation = 'source-atop'
     g.fillStyle = 'rgba(255,44,92,0.27)'
+    g.fillRect(0, 0, c.width, c.height)
+  } else if (tinte === TINTE_QUEMADO) {
+    g.globalCompositeOperation = 'source-atop'
+    const d = g.createLinearGradient(0, c.height, 0, 0)
+    d.addColorStop(0, 'rgba(255,70,20,0.75)')
+    d.addColorStop(1, 'rgba(255,170,60,0.55)')
+    g.fillStyle = d
+    g.fillRect(0, 0, c.width, c.height)
+  } else if (tinte === TINTE_LENTO) {
+    g.globalCompositeOperation = 'source-atop'
+    g.fillStyle = 'rgba(110,200,60,0.62)'
     g.fillRect(0, 0, c.width, c.height)
   }
   return c
@@ -394,6 +422,8 @@ export interface VisualLuchador {
   arcosMs: number
   sprayMs: number
   sprayDesde: number
+  /** ms que lleva agarrado (-1 = no lo está): al soltarlo, el golpe contra el piso. */
+  agarradoMs: number
   animPrev: string
   tickPrev: number
   cuadroPrev: number
@@ -439,6 +469,7 @@ export function crearVisual(lado: Lado): VisualLuchador {
     arcosMs: 0,
     sprayMs: 0,
     sprayDesde: -1e9,
+    agarradoMs: -1,
     animPrev: '',
     tickPrev: 0,
     cuadroPrev: -1,
@@ -467,6 +498,7 @@ export function reiniciarVisual(v: VisualLuchador, at: AtlasPreparado | null, al
   v.nCristales = 0
   v.nArcos = 0
   v.sprayMs = 0
+  v.agarradoMs = -1
   v.animPrev = ''
   v.cuadroPrev = -1
   if (cambiaAtlas || (conReflejo && !v.reflejo)) {
@@ -505,7 +537,7 @@ function cajaDe(at: AtlasPreparado, plano: number, x: number, yPie: number, mira
   v.cajaY = yPie - f.ay * e
 }
 
-function iconoEnCurso(at: AtlasPreparado, l: LuchadorEstado): string | null {
+export function iconoEnCurso(at: AtlasPreparado, l: LuchadorEstado): IconoEspecial | null {
   if (l.anim === 'especial1') return at.ficha.especiales[0]?.icono ?? null
   if (l.anim === 'especial2') return at.ficha.especiales[1]?.icono ?? null
   return null
@@ -613,10 +645,12 @@ export function actualizarVisual(E: Escena, l: LuchadorEstado, v: VisualLuchador
   const icono = iconoEnCurso(at, l)
   const velX = Math.abs(l.vx)
 
-  // post-imágenes: dash, Corte Relámpago o cualquier desplazamiento muy rápido
+  // post-imágenes: dash, Corte Relámpago, la moto, el break, el dragón… o cualquier desplazamiento muy rápido
   const relampago = icono === 'rayo'
   const enDash = l.estado === 'dash' || l.anim === 'dash'
-  if (velX > 10 || ((enDash || relampago) && velX > 2.5)) {
+  const conEstela = icono !== null && ICONOS_ESTELA.has(icono)
+  const umbral = icono === 'break' || icono === 'baile' ? 0.6 : 2.5
+  if (velX > 10 || ((enDash || conEstela) && velX > umbral)) {
     v.estAcum += dtMs
     if (v.estAcum >= 30) {
       v.estAcum = 0
@@ -687,6 +721,10 @@ export function actualizarVisual(E: Escena, l: LuchadorEstado, v: VisualLuchador
   if (l.efectos.critico > 0 && Math.random() < dtS * 16 * E.densidad) {
     emitirBrillos(E, v.cajaX + Math.random() * v.cajaW, v.cajaY + v.cajaH * azar(0.1, 0.9), 1, 1, 4, 90)
   }
+
+  // los especiales del elenco (humo de la moto, notas, fuego…) y los estados nuevos
+  if (icono !== null) especialContinuo(E, l, v, icono, dtS)
+  emitirEstados(E, l, v, dtMs)
 
   // impactos de la animación cruzados en este cuadro
   let mascara = 0
@@ -973,8 +1011,11 @@ export function dibujarLuchador(E: Escena, l: LuchadorEstado, v: VisualLuchador,
   if (v.sacudida > 0) x += (Math.floor(E.ms / 34) % 2 === 0 ? 1 : -1) * Math.min(4, 1.6 + v.sacudida * 0.02)
   const electro = l.efectos.electrocutado > 0 || l.estado === 'electrocutado'
   if (electro) x += (Math.random() - 0.5) * 3.2
+  const agarrado = l.estado === 'agarrado'
+  if (agarrado) x += Math.sin(E.ms / 21) * 2.4
   const plano = v.plano
   const congelado = v.congelado
+  const mareo = l.efectos.mareado > 0
   let sx = 1
   let sy = 1
   let rot = 0
@@ -989,6 +1030,16 @@ export function dibujarLuchador(E: Escena, l: LuchadorEstado, v: VisualLuchador,
       sx += v.aplastar * 0.6
     }
     if (l.estado === 'mareado' || l.estado === 'guardia_rota') rot = Math.sin(E.s * 2.6 + v.fase) * 0.045
+    // mareado por el trago: se hamaca para los costados
+    if (mareo) {
+      rot += Math.sin(E.s * 3.1 + v.fase) * 0.075
+      x += Math.sin(E.s * 1.55 + v.fase) * 4
+    }
+    // agarrado: lo aprietan
+    if (agarrado) {
+      sx *= 0.92 + 0.05 * Math.sin(E.s * 28)
+      sy *= 1.04
+    }
   }
   const nitido = at.escala * E.cam.esc >= 2
 
@@ -1000,6 +1051,14 @@ export function dibujarLuchador(E: Escena, l: LuchadorEstado, v: VisualLuchador,
     pintar(E, at, plano, TINTE_AURA, x, yPie, l.mira, sx, sy, rot, a)
     ctx.globalCompositeOperation = 'source-over'
   }
+  // curándose: aro en el piso y aura verde
+  if (l.efectos.curando > 0) {
+    aroCuracion(E, l, v)
+    ctx.imageSmoothingEnabled = true
+    ctx.globalCompositeOperation = 'lighter'
+    pintar(E, at, plano, TINTE_AURA_VERDE, x, yPie, l.mira, sx, sy, rot, 0.5 + 0.3 * Math.sin(E.s * 11))
+    ctx.globalCompositeOperation = 'source-over'
+  }
   ctx.imageSmoothingEnabled = !nitido
   dibujarEstela(E, at, v)
 
@@ -1007,6 +1066,14 @@ export function dibujarLuchador(E: Escena, l: LuchadorEstado, v: VisualLuchador,
   if (l.invulnerable && l.estado === 'levantandose') alfa = Math.floor(E.ms / 60) % 2 ? 0.55 : 1
   const base = congelado ? TINTE_HIELO : v.alterno ? TINTE_ALTERNO : -1
   pintar(E, at, plano, base, x, yPie, l.mira, sx, sy, rot, alfa)
+  // quemado y lento: el color encima del sprite (latiendo un poco)
+  if (!congelado && l.efectos.quemado > 0) {
+    const q = l.efectos.quemado
+    pintar(E, at, plano, TINTE_QUEMADO, x, yPie, l.mira, sx, sy, rot, alfa * Math.min(1, q / 10) * (0.42 + 0.2 * Math.sin(E.s * 14)))
+  }
+  if (!congelado && l.efectos.lento > 0) {
+    pintar(E, at, plano, TINTE_LENTO, x, yPie, l.mira, sx, sy, rot, alfa * Math.min(1, l.efectos.lento / 10) * 0.42)
+  }
 
   // pulso corto: lleno 60 ms y se apaga hacia los 210 ms, dure lo que dure el hitstop
   let blanco = v.destelloMs < 60 ? 0.85 : v.destelloMs < 210 ? 0.85 * (1 - (v.destelloMs - 60) / 150) : 0
@@ -1029,4 +1096,7 @@ export function dibujarLuchador(E: Escena, l: LuchadorEstado, v: VisualLuchador,
   }
   dibujarEscudo(E, l, v, at, x, yPie)
   if (l.estado === 'mareado' || l.estado === 'guardia_rota') dibujarMareo(E, l, v, x)
+  dibujarEstadosEncima(E, l, v, x)
+  const icono = iconoEnCurso(at, l)
+  if (icono !== null) dibujarEspecialVisual(E, l, v, icono)
 }

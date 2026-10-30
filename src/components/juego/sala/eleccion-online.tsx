@@ -1,13 +1,16 @@
 'use client'
 
-import { Check, LoaderCircle, Lock, Sparkles, Swords, X } from 'lucide-react'
+import { Check, LoaderCircle, Swords, X } from 'lucide-react'
 import { useEffect, useState, type CSSProperties } from 'react'
 import { ELECCION_MS, type EstadoDuelo } from '@/lib/juego/online/duelo'
-import { IDS_PERSONAJES, PERSONAJES, PROXIMAMENTE } from '@/lib/juego/personajes'
+import { IDS_PERSONAJES, PERSONAJES } from '@/lib/juego/personajes'
 import type { IdPersonaje } from '@/lib/juego/tipos'
-import { IconoDeEspecial } from '../iconos'
+import { plantelOrdenado, proximamenteOrdenado, sucursalesDelPlantel } from '@/lib/juego/ui/plantel'
 import { ImagenJuego } from '../imagen-juego'
-import { BarrasAtributos } from '../pantalla-seleccion'
+import { EspecialesLuchador, FiltroSucursal, GrillaPlantel, HeroeLuchador, ProximamentePlantel } from '../plantel'
+
+/** Las sucursales del filtro salen del catálogo (una vez). */
+const SUCURSALES = sucursalesDelPlantel()
 
 /** Segundos que quedan para elegir: arranca en 20 al entrar a la elección. */
 function useReloj(activo: boolean, confirmada: boolean): number {
@@ -23,29 +26,42 @@ function useReloj(activo: boolean, confirmada: boolean): number {
   return restante
 }
 
+/**
+ * La elección de la pelea online: los mismos luchadores que contra la CPU (grilla, filtro por
+ * sucursal y ficha grande), sin rival que elegir (es el otro jugador) y con el reloj de 20 s.
+ */
 export function EleccionOnline({
   estado,
+  sucursal,
   onElegir,
   onConfirmar,
   onSalir,
   onBloqueado,
+  onTocar,
 }: {
   estado: EstadoDuelo
+  /** La sucursal de la sala (sus barberos van primero). */
+  sucursal: string | null
   onElegir: (id: IdPersonaje) => void
   onConfirmar: () => void
   onSalir: () => void
   onBloqueado: (nombre: string) => void
+  onTocar?: () => void
 }) {
+  const [filtro, setFiltro] = useState<string | null>(null)
   const conectando = estado.fase === 'conectando'
   const restante = useReloj(estado.fase === 'eligiendo', estado.confirmada)
   const ficha = PERSONAJES[estado.mia]
   const rival = estado.rival.nombre
   const urgente = !estado.confirmada && restante <= 5
+  const ids = plantelOrdenado(sucursal, filtro)
+  const prontos = proximamenteOrdenado(sucursal, filtro)
 
   return (
     <section
       className="cf-pantalla cf-seleccion cf-eleccion-online"
       aria-label={`Elegí tu barbero para pelear contra ${rival}`}
+      data-modo="jugador"
       style={{ '--cf-acento': ficha.color, '--cf-acento-2': ficha.colorSecundario } as CSSProperties}
     >
       <div className="cf-seleccion__fondo" aria-hidden="true">
@@ -90,98 +106,42 @@ export function EleccionOnline({
       </div>
 
       <div className="cf-seleccion__cuerpo">
-        <div className="cf-heroe" key={ficha.id}>
-          <div className="cf-heroe__retrato">
-            <ImagenJuego src={ficha.rutas.retrato} alt={ficha.nombre} tipo="cuerpo" color={ficha.color} espejar prioridad />
-          </div>
-          <div className="cf-heroe__placa">
-            <p className="cf-heroe__apodo">{ficha.apodo}</p>
-            <h2 className="cf-heroe__nombre">{ficha.nombre}</h2>
-            <BarrasAtributos atributos={ficha.atributos} />
-          </div>
-        </div>
+        <HeroeLuchador ficha={ficha} rol={estado.confirmada ? 'Elegido' : 'Vos'} esBarbero={false} espejar />
 
         <div className="cf-seleccion__panel">
-          <div className="cf-plantel" role="group" aria-label="Barberos">
-            {IDS_PERSONAJES.map((id) => {
-              const f = PERSONAJES[id]
-              const elegido = id === ficha.id
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  className="cf-ficha"
-                  aria-pressed={elegido}
-                  data-elegido={elegido ? '' : undefined}
-                  disabled={estado.confirmada && !elegido}
-                  style={{ '--cf-acento': f.color } as CSSProperties}
-                  onClick={() => onElegir(id)}
-                >
-                  <span className="cf-ficha__cara">
-                    <ImagenJuego src={f.rutas.cara} alt="" tipo="cara" color={f.color} prioridad />
-                  </span>
-                  <span className="cf-ficha__nombre">{f.nombre}</span>
-                </button>
-              )
-            })}
-            {PROXIMAMENTE.map((p) => (
-              <button
-                key={p.nombre}
-                type="button"
-                className="cf-ficha cf-ficha--bloqueada"
-                onClick={() => onBloqueado(p.nombre)}
-                aria-label={`${p.nombre}: próximamente`}
-              >
-                <span className="cf-ficha__cara">
-                  <Lock aria-hidden="true" />
-                </span>
-                <span className="cf-ficha__nombre">{p.nombre}</span>
-                <span className="cf-ficha__pronto">Pronto</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="cf-bloque">
-            <h3 className="cf-rotulo">Especiales</h3>
-            <ul className="cf-especiales">
-              {ficha.especiales.map((esp) => (
-                <li key={esp.nombre} className="cf-especial">
-                  <span className="cf-especial__icono">
-                    <IconoDeEspecial icono={esp.icono} />
-                  </span>
-                  <span className="cf-especial__texto">
-                    <b>{esp.nombre}</b>
-                    <span>{esp.descripcion}</span>
-                  </span>
-                  <span className="cf-rombo" aria-label={`Cuesta ${esp.costo} de carga`}>
-                    <span>{esp.costo}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <p className="cf-pasiva">
-              <Sparkles aria-hidden="true" />
-              <span>
-                <b>{ficha.pasiva.nombre}.</b> {ficha.pasiva.descripcion}
-              </span>
-            </p>
-          </div>
+          <FiltroSucursal
+            sucursales={SUCURSALES}
+            filtro={filtro}
+            total={IDS_PERSONAJES.length}
+            propia={sucursal}
+            onFiltro={(f) => {
+              if (f === filtro) return
+              onTocar?.()
+              setFiltro(f)
+            }}
+          />
+          <GrillaPlantel ids={ids} jugador={estado.mia} bloqueada={estado.confirmada} onElegir={onElegir} />
+          <ProximamentePlantel lista={prontos} onBloqueado={onBloqueado} />
+          <EspecialesLuchador ficha={ficha} />
         </div>
       </div>
 
       <footer className="cf-seleccion__pie cf-eleccion-online__pie">
-        <p className="cf-eleccion-online__nota">Pueden elegir el mismo barbero. Si se acaba el tiempo, va el que tengas marcado.</p>
+        <div className="cf-eleccion-online__fila">
+          <span className="cf-duelo__cara cf-eleccion-online__cara" style={{ '--cf-acento': ficha.color } as CSSProperties}>
+            <ImagenJuego src={ficha.rutas.cara} alt="" tipo="cara" color={ficha.color} />
+          </span>
+          <p className="cf-eleccion-online__nota">Pueden elegir el mismo barbero. Si se acaba el tiempo, va el que tengas marcado.</p>
+        </div>
         {estado.confirmada ? (
           <p className="cf-eleccion-online__esperando" role="status">
             <LoaderCircle className="cf-girando" aria-hidden="true" />
-            <span>
-              {estado.rivalConfirmo ? '¡A pelear!' : `Esperando a ${rival}…`}
-            </span>
+            <span>{estado.rivalConfirmo ? '¡A pelear!' : `Esperando a ${rival}…`}</span>
           </p>
         ) : (
           <button type="button" className="cf-btn cf-btn--grande cf-seleccion__pelear" onClick={onConfirmar}>
             <Check aria-hidden="true" />
-            <span>Listo</span>
+            <span>Listo con {ficha.nombre}</span>
           </button>
         )}
       </footer>

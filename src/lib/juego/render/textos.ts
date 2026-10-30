@@ -43,6 +43,7 @@ const ROJO = ['#FFFFFF', '#FFD6CF', '#FF5340', '#D0140A', '#5E0000']
 const HIELO = ['#FFFFFF', '#E8FCFF', '#92E8FF', '#35B4FF', '#123F9C']
 const CROMO = ['#FFFFFF', '#F2F5F9', '#BCC5D0', '#7A8594', '#2F3742']
 const ELECTRICO = ['#FFFFFF', '#FFFCD8', '#FFF06B', '#FFC400', '#B86E00']
+const VIOLETA = ['#FFFFFF', '#F5E8FF', '#D7A8FF', '#A855F7', '#4C1D95']
 
 function estilo(tam: number, colores: readonly string[], exterior: string, extra: Partial<EstiloTexto> = {}): EstiloTexto {
   return {
@@ -92,13 +93,16 @@ const ANUNCIOS: Record<ClaveAnuncio, DefAnuncio> = {
   turbo: { estilo: estilo(94, ELECTRICO, '#4A2A00', { espaciado: 0.06 }), dur: 1250, entrada: 'deslizar' },
 }
 
-export type ClaveImpacto = 'critico' | 'guardia' | 'congelado' | 'electrocutado'
+export type ClaveImpacto = 'critico' | 'guardia' | 'congelado' | 'electrocutado' | 'aturdido' | 'mareado' | 'quemado'
 
 const IMPACTOS: Record<ClaveImpacto, { texto: string; estilo: EstiloTexto }> = {
   critico: { texto: '¡CRÍTICO!', estilo: estilo(46, ORO, '#4A2200') },
   guardia: { texto: '¡GUARDIA ROTA!', estilo: estilo(42, CROMO, '#0B2440') },
   congelado: { texto: '¡CONGELADO!', estilo: estilo(42, HIELO, '#06204F') },
   electrocutado: { texto: '¡ELECTROCUTADO!', estilo: estilo(38, ELECTRICO, '#4A2A00') },
+  aturdido: { texto: '¡ATURDIDO!', estilo: estilo(40, ORO, '#4A2200') },
+  mareado: { texto: '¡MAREADO!', estilo: estilo(40, VIOLETA, '#2E0A4F') },
+  quemado: { texto: '¡QUEMADO!', estilo: estilo(40, FUEGO, '#4A0E00') },
 }
 
 const NUM_NORMAL = estilo(31, ['#FFFFFF', '#FFFFFF', '#FFE6A6'], '#1A0F00', {
@@ -110,6 +114,12 @@ const NUM_NORMAL = estilo(31, ['#FFFFFF', '#FFFFFF', '#FFE6A6'], '#1A0F00', {
 const NUM_CRITICO = estilo(46, ['#FFFFFF', '#FFF27A', '#FFC400', '#FF7A00'], '#4A1500', {
   familia: 'numeros',
   paradas: [0, 0.35, 0.6, 1],
+  espaciado: 0,
+})
+/** «+N» de la curación: verde, sube despacio y se va sumando mientras dura. */
+const NUM_CURA = estilo(34, ['#FFFFFF', '#D1FAE5', '#4ADE80', '#15803D'], '#052E16', {
+  familia: 'numeros',
+  paradas: [0, 0.35, 0.65, 1],
   espaciado: 0,
 })
 const NUM_BLOQUEO = estilo(22, ['#EEF4F8', '#AFC0CF'], '#0E1620', {
@@ -294,6 +304,11 @@ export class Textos {
   private saliente: Anuncio | null = null
   private readonly cola: Anuncio[] = []
   private readonly combos: [ComboVis, ComboVis]
+  /** El «+N» de la curación que se está sumando, por lado. */
+  private readonly curas: [{ n: Numero | null; total: number; desde: number }, { n: Numero | null; total: number; desde: number }] = [
+    { n: null, total: 0, desde: -1e9 },
+    { n: null, total: 0, desde: -1e9 },
+  ]
   numerosVisibles = true
 
   constructor(E: Escena) {
@@ -337,6 +352,10 @@ export class Textos {
 
   vaciar(): void {
     for (const n of this.numeros) n.activo = false
+    for (const c of this.curas) {
+      c.n = null
+      c.total = 0
+    }
     for (const i of this.impactos) i.activo = false
     this.actual = null
     this.saliente = null
@@ -388,6 +407,47 @@ export class Textos {
     n.edad = 0
     n.vida = tipo === 1 ? 950 : 750
     n.tipo = tipo
+  }
+
+  /** Un número libre (o el más viejo). */
+  private tomarNumero(): Numero {
+    let n = this.numeros[0]
+    for (const c of this.numeros) {
+      if (!c.activo) return c
+      if (c.edad > n.edad) n = c
+    }
+    return n
+  }
+
+  /**
+   * «+N» verde sobre el que se cura. La curación llega de a pedacitos: mientras siguen llegando
+   * (menos de 650 ms entre uno y otro) se suman en el mismo número, que vuelve a latir.
+   */
+  curar(lado: Lado, cantidad: number, x: number, y: number): void {
+    if (!this.numerosVisibles || !(cantidad > 0)) return
+    const c = this.curas[lado]
+    let n = c.n
+    if (!n || !n.activo || n.tipo !== 3 || this.E.ms - c.desde > 650) {
+      n = this.tomarNumero()
+      c.total = 0
+      n.x = x
+      n.y = y
+      n.vx = 0
+      n.vy = 0
+      n.edad = 0
+      n.vida = 1150
+      n.tipo = 3
+    } else {
+      // vuelve a latir y estira la vida
+      n.edad = Math.min(n.edad, 40)
+      n.vida = Math.max(n.vida, n.edad + 900)
+    }
+    c.total += cantidad
+    c.desde = this.E.ms
+    c.n = n
+    if (!n.lienzo) n.lienzo = crearLienzo(4, 4)
+    n.pintado = pintarTexto(n.lienzo, `+${Math.round(c.total)}`, NUM_CURA, this.E.familias, this.escalaPintado() * this.E.escalaTextos)
+    n.activo = true
   }
 
   impacto(clave: ClaveImpacto, x: number, y: number): void {
@@ -466,6 +526,11 @@ export class Textos {
       n.edad += dtMs
       if (n.edad >= n.vida) {
         n.activo = false
+        continue
+      }
+      if (n.tipo === 3) {
+        // la curación sube despacio, sin gravedad
+        n.y -= 34 * dtS
         continue
       }
       n.vy += 520 * dtS

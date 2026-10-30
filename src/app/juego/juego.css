@@ -1149,6 +1149,13 @@ html.cf-html body {
   transition: background 0.4s;
 }
 
+/* Eligiendo al rival, la franja del color del enfocado cruza por el otro lado. */
+.cf-seleccion[data-modo='rival'] .cf-seleccion__franja {
+  left: auto;
+  right: -30%;
+  transform: skewX(18deg);
+}
+
 .cf-seleccion__trama {
   position: absolute;
   inset: 0;
@@ -1173,45 +1180,101 @@ html.cf-html body {
 .cf-heroe {
   position: relative;
   display: grid;
-  grid-template-columns: 44% 1fr;
+  grid-template-columns: 42% minmax(0, 1fr);
   align-items: end;
   gap: 6px;
-  min-height: 300px;
+}
+
+/* Eligiendo al rival la ficha se da vuelta: el retrato a la derecha, mirando hacia el centro. */
+.cf-seleccion[data-modo='rival'] .cf-heroe {
+  grid-template-columns: minmax(0, 1fr) 42%;
+}
+
+.cf-seleccion[data-modo='rival'] .cf-heroe__retrato {
+  order: 2;
+  animation-name: cf-entrar-der;
 }
 
 .cf-heroe__retrato {
   position: relative;
-  height: min(46vh, 380px);
-  min-height: 260px;
+  height: clamp(190px, 33vh, 330px);
   filter: drop-shadow(0 0 22px color-mix(in srgb, var(--cf-acento) 45%, transparent))
     drop-shadow(0 8px 0 rgba(0, 0, 0, 0.55));
   animation: cf-entrar-izq 0.6s var(--cf-rebote) both;
 }
 
 .cf-heroe__placa {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding-bottom: 10px;
+  min-width: 0;
+  padding-bottom: 8px;
   animation: cf-entrar-der 0.6s var(--cf-salida) 0.05s both;
+}
+
+.cf-seleccion[data-modo='rival'] .cf-heroe__placa {
+  animation-name: cf-entrar-izq;
+}
+
+.cf-heroe__roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0 0 2px;
+}
+
+.cf-heroe__rol {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px 1px;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #0b0b0f;
+  background: linear-gradient(180deg, #fff, color-mix(in srgb, var(--cf-acento) 70%, #fff));
+  clip-path: polygon(5px 0, 100% 0, calc(100% - 5px) 100%, 0 100%);
+}
+
+.cf-seleccion[data-modo='rival'] .cf-heroe__rol:not([data-barbero]) {
+  color: #fff;
+  background: linear-gradient(180deg, #ff6b7a, var(--cf-rojo));
+}
+
+.cf-heroe__rol[data-barbero] {
+  color: #140d00;
+  background: linear-gradient(180deg, #fff3c4, var(--cf-oro));
+}
+
+.cf-heroe__rol svg {
+  width: 12px;
+  height: 12px;
+  margin-top: -2px;
 }
 
 .cf-heroe__apodo {
   margin: 0;
   font-family: var(--cf-numeros);
   font-weight: 600;
-  font-size: 19px;
+  font-size: 18px;
+  line-height: 1;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--cf-acento);
 }
 
+/* El nombre llena el ancho de la placa: «Simón» grande, «Guillermo» más chico (container query). */
 .cf-heroe__nombre {
   margin: 0 0 2px;
   font-family: var(--cf-titulo);
   font-weight: 400;
-  font-size: clamp(54px, 16vw, 96px);
+  font-size: clamp(38px, 11vw, 84px);
   line-height: 0.86;
+  white-space: nowrap;
   text-transform: uppercase;
   background: var(--cf-cromo);
   -webkit-background-clip: text;
@@ -1222,13 +1285,27 @@ html.cf-html body {
   transform-origin: left bottom;
 }
 
+@supports (width: 1cqi) {
+  .cf-heroe__nombre {
+    font-size: clamp(30px, calc(92cqi / (var(--cf-letras, 6) * 0.56)), 84px);
+  }
+}
+
 .cf-heroe__sucursal {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
+  gap: 3px 12px;
   margin: 0 0 8px;
   font-size: 13px;
   color: var(--cf-texto-2);
+}
+
+.cf-heroe__sucursal > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
 }
 
 .cf-heroe__sucursal svg {
@@ -1315,97 +1392,313 @@ html.cf-html body {
   flex-shrink: 0;
 }
 
-.cf-plantel {
+/* Filtro por sucursal: chips en una fila (se desliza si no entra). */
+.cf-filtro {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   overflow-x: auto;
   margin: 0 calc(-14px - var(--cf-sa-r)) 0 calc(-14px - var(--cf-sa-l));
-  padding: 6px calc(var(--cf-sa-r) + 14px) 6px calc(var(--cf-sa-l) + 14px);
+  padding: 2px calc(var(--cf-sa-r) + 14px) 2px calc(var(--cf-sa-l) + 14px);
   touch-action: pan-x pan-y;
   scrollbar-width: none;
 }
 
-.cf-plantel::-webkit-scrollbar {
+.cf-filtro::-webkit-scrollbar {
   display: none;
+}
+
+.cf-filtro__chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 3px 11px 0;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cf-texto-2);
+  background: rgba(255, 255, 255, 0.06);
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  transition:
+    background 0.15s,
+    color 0.15s,
+    transform 0.12s var(--cf-salida);
+}
+
+.cf-filtro__chip:active {
+  transform: scale(0.95);
+}
+
+.cf-filtro__chip small {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--cf-texto-3);
+}
+
+.cf-filtro__chip svg {
+  width: 13px;
+  height: 13px;
+  margin-top: -3px;
+  color: var(--cf-oro);
+}
+
+.cf-filtro__chip[aria-checked='true'] {
+  color: #0b0b0f;
+  background: linear-gradient(180deg, #fff, #c9cdd6);
+}
+
+.cf-filtro__chip[aria-checked='true'] small {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.cf-filtro__chip[aria-checked='true'] svg {
+  color: #8f5a00;
+}
+
+/* En los celulares angostos (o la columna de un celular acostado) los cuatro filtros entran en
+   una fila sin los números. */
+@media (max-width: 400px) {
+  .cf-filtro__chip {
+    padding: 3px 10px 0;
+  }
+
+  .cf-filtro__chip small {
+    display: none;
+  }
+}
+
+.cf-seleccion__panel {
+  container-type: inline-size;
+}
+
+@container (max-width: 400px) {
+  .cf-filtro__chip {
+    padding: 3px 10px 0;
+  }
+
+  .cf-filtro__chip small {
+    display: none;
+  }
+}
+
+/* La grilla de caras: 7 por fila (13 luchadores = 2 filas) en un celular. */
+.cf-plantel {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 9px 5px;
+  max-width: 560px;
+  padding-top: 6px;
+}
+
+@media (max-width: 330px) {
+  .cf-plantel {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
 }
 
 .cf-ficha {
   position: relative;
-  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  width: 70px;
-  padding: 6px 4px 6px;
-  background: linear-gradient(180deg, #1c1c24, #0d0d12);
-  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
-  box-shadow: inset 0 0 0 1.5px var(--cf-linea);
+  min-width: 0;
+  padding: 0;
+  background: none;
   transition: transform 0.15s var(--cf-salida);
 }
 
 .cf-ficha:active {
-  transform: scale(0.94);
+  transform: scale(0.93);
 }
 
-.cf-ficha[data-elegido] {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--cf-acento) 55%, #111), #120f08);
-  box-shadow: inset 0 0 0 2.5px var(--cf-acento);
+.cf-ficha:disabled {
+  opacity: 0.35;
+}
+
+.cf-ficha__marco {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  transition: transform 0.2s var(--cf-rebote);
 }
 
 .cf-ficha__cara {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 56px;
-  height: 56px;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
-  border-radius: 4px;
-  background: radial-gradient(circle at 50% 35%, #2c2c36, #0b0b0f);
+  background:
+    radial-gradient(circle at 50% 120%, color-mix(in srgb, var(--cf-acento) 70%, transparent), transparent 62%),
+    radial-gradient(circle at 50% 30%, #2c2c36, #0b0b0f 80%);
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.1);
+  transition: box-shadow 0.15s;
 }
 
-.cf-ficha__cara > svg:not([style]) {
-  width: 22px;
-  height: 22px;
-  color: var(--cf-texto-3);
+/* El que tiene marcado el modo actual: aro del color del luchador, un poco más grande. */
+.cf-ficha[data-elegido] .cf-ficha__marco {
+  transform: translateY(-2px) scale(1.07);
+  filter: drop-shadow(0 0 9px color-mix(in srgb, var(--cf-acento) 75%, transparent));
+}
+
+.cf-ficha[data-elegido] .cf-ficha__cara {
+  box-shadow: inset 0 0 0 3px var(--cf-acento);
+}
+
+/* El elegido del OTRO lado (vos eligiendo rival, o al revés): aro fino. */
+.cf-ficha[data-otro] .cf-ficha__cara {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.55);
+}
+
+.cf-ficha[data-barbero]:not([data-elegido]) .cf-ficha__cara {
+  box-shadow: inset 0 0 0 2px var(--cf-oro);
 }
 
 .cf-ficha__nombre {
   max-width: 100%;
-  overflow: hidden;
   font-family: var(--cf-numeros);
   font-weight: 600;
-  font-size: 16px;
-  line-height: 1.3;
-  letter-spacing: 0.04em;
+  font-size: 13px;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--cf-texto-2);
 }
 
-.cf-ficha__marca,
-.cf-ficha__pronto {
+/* «Guillermo» entra en una cara de 44 px: un poco más apretado. */
+.cf-ficha__nombre[data-largo] {
+  max-width: none;
+  font-size: 12px;
+  letter-spacing: -0.01em;
+}
+
+.cf-ficha[data-elegido] .cf-ficha__nombre {
+  color: #fff;
+}
+
+.cf-ficha[data-barbero] .cf-ficha__nombre {
+  color: var(--cf-oro);
+}
+
+.cf-ficha__tags {
+  position: absolute;
+  top: -6px;
+  left: -3px;
+  right: -3px;
+  display: flex;
+  pointer-events: none;
+}
+
+.cf-ficha__tag {
+  padding: 2px 4px 0;
   font-family: var(--cf-numeros);
+  font-weight: 600;
   font-size: 11px;
   line-height: 1;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  clip-path: polygon(3px 0, 100% 0, calc(100% - 3px) 100%, 0 100%);
 }
 
-.cf-ficha__marca {
-  color: var(--cf-acento);
+.cf-ficha__tag[data-tag='vos'] {
+  margin-right: auto;
+  color: #0b0b0f;
+  background: #fff;
 }
 
-.cf-ficha__pronto {
+.cf-ficha__tag[data-tag='rival'] {
+  margin-left: auto;
+  color: #fff;
+  background: var(--cf-rojo);
+}
+
+.cf-ficha__barbero {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  color: #140d00;
+  background: linear-gradient(180deg, #fff3c4, var(--cf-oro));
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #0b0b0f;
+}
+
+.cf-ficha__barbero svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Próximamente: chiquitos, en una sola fila que se desliza. */
+.cf-prontos {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: -2px;
+}
+
+.cf-prontos__rotulo {
+  flex: 0 0 auto;
+  font-family: var(--cf-numeros);
+  font-weight: 500;
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   color: var(--cf-texto-3);
 }
 
-.cf-ficha--bloqueada {
-  opacity: 0.6;
+.cf-prontos__lista {
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+  overflow-x: auto;
+  margin-right: calc(-14px - var(--cf-sa-r));
+  padding: 1px calc(var(--cf-sa-r) + 14px) 1px 1px;
+  touch-action: pan-x pan-y;
+  scrollbar-width: none;
 }
 
-.cf-ficha--bloqueada .cf-ficha__nombre {
+.cf-prontos__lista::-webkit-scrollbar {
+  display: none;
+}
+
+.cf-pronto {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 3px 9px 0;
+  font-family: var(--cf-numeros);
+  font-weight: 500;
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--cf-texto-3);
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transition: transform 0.12s var(--cf-salida);
+}
+
+.cf-pronto:active {
+  transform: scale(0.94);
+}
+
+.cf-pronto svg {
+  width: 11px;
+  height: 11px;
+  margin-top: -3px;
 }
 
 .cf-aviso-barbero {
@@ -1704,94 +1997,215 @@ html.cf-html body {
   background: var(--cf-oro);
 }
 
+/* La barra del duelo: VOS contra el RIVAL (cada lado se toca para elegirlo) y «¡A pelear!». */
 .cf-seleccion__pie {
   position: relative;
   z-index: 2;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px calc(var(--cf-sa-r) + 14px) calc(var(--cf-sa-b) + 10px) calc(var(--cf-sa-l) + 14px);
+  background: linear-gradient(180deg, rgba(5, 5, 7, 0), rgba(5, 5, 7, 0.94) 22%);
+}
+
+.cf-duelo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px calc(var(--cf-sa-r) + 14px) calc(var(--cf-sa-b) + 12px) calc(var(--cf-sa-l) + 14px);
-  background: linear-gradient(180deg, rgba(5, 5, 7, 0), rgba(5, 5, 7, 0.94) 30%);
+  gap: 4px;
 }
 
-.cf-seleccion__pelear {
-  flex-shrink: 0;
-}
-
-@media (max-width: 430px) {
-  .cf-seleccion__pelear {
-    --cf-corte: 14px;
-    padding: 3px 20px 0;
-    font-size: 26px;
-  }
-
-  .cf-rival {
-    gap: 6px;
-  }
-
-  .cf-rival__vs {
-    display: none;
-  }
-}
-
-.cf-rival {
+.cf-duelo__lado {
+  --cf-corte: 11px;
+  position: relative;
+  isolation: isolate;
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  height: 52px;
+  padding: 0 14px 0 6px;
+  color: var(--cf-texto-2);
+  text-align: left;
+  transition:
+    transform 0.12s var(--cf-salida),
+    color 0.15s;
 }
 
-.cf-rival__vs {
+.cf-duelo__lado[data-lado='rival'] {
+  justify-content: flex-end;
+  padding: 0 6px 0 14px;
+  text-align: right;
+}
+
+.cf-duelo__lado::before,
+.cf-duelo__lado::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  clip-path: polygon(0 0, 100% 0, calc(100% - var(--cf-corte)) 100%, 0 100%);
+}
+
+.cf-duelo__lado[data-lado='rival']::before,
+.cf-duelo__lado[data-lado='rival']::after {
+  clip-path: polygon(0 0, 100% 0, 100% 100%, var(--cf-corte) 100%);
+}
+
+.cf-duelo__lado::before {
+  inset: 0;
+  z-index: -2;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.cf-duelo__lado::after {
+  inset: 1.5px;
+  z-index: -1;
+  background: linear-gradient(180deg, #1c1c25, #0b0b10);
+}
+
+.cf-duelo__lado:active {
+  transform: scale(0.97);
+}
+
+.cf-duelo__lado[aria-pressed='true'] {
+  color: #fff;
+}
+
+.cf-duelo__lado[aria-pressed='true']::before {
+  background: linear-gradient(180deg, #fff, var(--cf-acento));
+}
+
+.cf-duelo__lado[aria-pressed='true']::after {
+  inset: 2.5px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 50%),
+    linear-gradient(180deg, color-mix(in srgb, var(--cf-acento) 58%, #121218), color-mix(in srgb, var(--cf-acento) 16%, #08080b));
+}
+
+.cf-duelo__cara {
+  position: relative;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--cf-acento) 40%, #15151b), #08080b);
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+}
+
+.cf-duelo__texto {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  line-height: 1;
+}
+
+.cf-duelo__texto small {
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cf-acento);
+}
+
+.cf-duelo__lado[data-lado='rival'] .cf-duelo__texto small {
+  color: #ff6b7a;
+}
+
+.cf-duelo__lado[aria-pressed='true'] .cf-duelo__texto small {
+  color: #fff;
+  opacity: 0.85;
+}
+
+.cf-duelo__texto b {
+  overflow: hidden;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 22px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cf-duelo__vs {
+  padding: 0 2px;
   font-family: var(--cf-titulo);
   font-size: 22px;
   line-height: 1;
   color: var(--cf-rojo);
   transform: skewX(-10deg);
+  filter: drop-shadow(0 2px 0 #000);
 }
 
-.cf-rival__cara {
-  position: relative;
-  flex-shrink: 0;
-  width: 44px;
-  height: 44px;
-  overflow: hidden;
-  background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--cf-acento) 40%, #111), #0a0a0d);
-  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+.cf-seleccion__accion {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.cf-rival__texto {
+.cf-seleccion__resumen {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
+  gap: 3px;
   min-width: 0;
-  line-height: 1.05;
-}
-
-.cf-rival__texto b {
+  margin: 0;
   font-family: var(--cf-numeros);
-  font-weight: 600;
-  font-size: 22px;
-  letter-spacing: 0.04em;
+  font-weight: 500;
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  color: var(--cf-texto-3);
 }
 
-.cf-rival__texto span {
-  font-size: 12px;
-  line-height: 1.15;
-  color: var(--cf-texto-3);
+.cf-seleccion__resumen span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cf-seleccion__resumen span:first-child {
+  color: var(--cf-texto-2);
+}
+
+.cf-seleccion__pelear {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 430px) {
+  .cf-seleccion__pelear {
+    --cf-corte: 14px;
+    padding: 3px 22px 0;
+    font-size: 27px;
+  }
+}
+
+@media (max-width: 370px) {
+  .cf-duelo__texto b {
+    font-size: 20px;
+  }
+
+  .cf-duelo__cara {
+    width: 38px;
+    height: 38px;
+  }
 }
 
 @media (orientation: landscape) {
   .cf-seleccion__cuerpo {
     display: grid;
-    grid-template-columns: minmax(260px, 42%) 1fr;
+    grid-template-columns: minmax(250px, 40%) minmax(0, 1fr);
     gap: 18px;
     overflow: hidden;
     padding-bottom: 0;
   }
 
-  .cf-heroe {
-    grid-template-columns: 1fr;
+  .cf-heroe,
+  .cf-seleccion[data-modo='rival'] .cf-heroe {
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: 1fr auto;
     align-items: stretch;
     min-height: 0;
@@ -1806,15 +2220,27 @@ html.cf-html body {
     opacity: 0.95;
   }
 
+  /* Acostado, la columna de la ficha queda siempre a la izquierda: el rival también mira hacia
+     el centro (la grilla). `scale` y no `transform`, que lo usa la animación de entrada. */
+  .cf-seleccion[data-modo='rival'] .cf-heroe__retrato {
+    scale: -1 1;
+  }
+
   .cf-heroe__placa {
     position: relative;
     grid-row: 2;
-    padding: 0 0 12px;
-    background: linear-gradient(180deg, transparent, rgba(5, 5, 7, 0.85) 40%);
+    padding: 18px 0 10px;
+    background: linear-gradient(180deg, transparent, rgba(5, 5, 7, 0.85) 34%);
   }
 
   .cf-heroe__nombre {
-    font-size: clamp(48px, 9vh, 80px);
+    font-size: clamp(40px, 9vh, 76px);
+  }
+
+  @supports (width: 1cqi) {
+    .cf-heroe__nombre {
+      font-size: clamp(30px, min(calc(92cqi / (var(--cf-letras, 6) * 0.56)), 13vh), 76px);
+    }
   }
 
   .cf-seleccion__panel {
@@ -1824,15 +2250,87 @@ html.cf-html body {
     padding: 4px 2px 18px;
   }
 
-  .cf-plantel,
+  .cf-filtro,
   .cf-arenas {
     margin: 0;
     padding-left: 0;
     padding-right: 0;
   }
 
+  .cf-prontos__lista {
+    margin-right: 0;
+    padding-right: 0;
+  }
+
   .cf-seleccion__pie {
-    padding-top: 8px;
+    grid-template-columns: minmax(0, 430px) minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
+    padding-top: 6px;
+  }
+
+  .cf-duelo__lado {
+    height: 48px;
+  }
+
+  .cf-duelo__cara {
+    width: 38px;
+    height: 38px;
+  }
+}
+
+/* Celulares acostados (667 a 760 de ancho): sin el resumen, el duelo y el botón entran en una fila. */
+@media (orientation: landscape) and (max-width: 760px) {
+  .cf-seleccion__resumen {
+    display: none;
+  }
+
+  .cf-seleccion__accion {
+    justify-content: flex-end;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .cf-seleccion__pelear {
+    --cf-btn-alto: 50px;
+    --cf-corte: 14px;
+    padding: 3px 22px 0;
+    font-size: 26px;
+  }
+
+  .cf-heroe__placa {
+    gap: 3px;
+    padding: 14px 0 4px;
+  }
+
+  .cf-heroe__roles {
+    margin: 0;
+  }
+
+  .cf-heroe__apodo {
+    font-size: 16px;
+  }
+
+  .cf-heroe__nombre {
+    font-size: clamp(34px, 11vh, 56px);
+  }
+
+  @supports (width: 1cqi) {
+    .cf-heroe__nombre {
+      font-size: clamp(30px, min(calc(92cqi / (var(--cf-letras, 6) * 0.56)), 11vh), 56px);
+    }
+  }
+
+  .cf-heroe__sucursal {
+    margin-bottom: 3px;
+  }
+
+  .cf-atributos {
+    gap: 3px;
+  }
+
+  .cf-atributo dt {
+    font-size: 14px;
   }
 }
 
@@ -1964,7 +2462,9 @@ html.cf-html body {
 
 .cf-vs__nombre {
   font-family: var(--cf-titulo);
-  font-size: clamp(54px, 15vw, 110px);
+  /* Con 13 barberos hay nombres largos («Guillermo»): el tamaño se achica para entrar en su lado. */
+  font-size: min(clamp(54px, 15vw, 110px), calc(var(--cf-ancho-nombre, 46vw) / (var(--cf-letras, 6) * 0.56)));
+  white-space: nowrap;
   line-height: 0.86;
   text-transform: uppercase;
   background: var(--cf-cromo);
@@ -2088,6 +2588,10 @@ html.cf-html body {
 }
 
 @media (orientation: portrait) {
+  .cf-vs__placa {
+    --cf-ancho-nombre: 86vw;
+  }
+
   .cf-vs__lado--1 {
     inset: 0 0 50% 0;
     width: 100%;
@@ -2489,6 +2993,54 @@ html.cf-html body {
 .cf-estado--rota {
   color: #ff8080;
   box-shadow: 0 0 0 1.5px #ff3b3b;
+}
+
+.cf-estado[data-estado='congelado'] {
+  color: #aef0ff;
+  box-shadow: 0 0 0 1.5px #38d6ff;
+}
+
+.cf-estado[data-estado='electrocutado'] {
+  color: #ffe14d;
+  box-shadow: 0 0 0 1.5px #ffd000;
+}
+
+.cf-estado[data-estado='guardia-rota'] {
+  color: #ff8080;
+  box-shadow: 0 0 0 1.5px #ff3b3b;
+}
+
+.cf-estado[data-estado='aturdido'] {
+  color: #fff3a8;
+  box-shadow: 0 0 0 1.5px #ffc400;
+}
+
+.cf-estado[data-estado='aturdido'][data-on] svg {
+  animation: cf-girar 1.2s linear infinite;
+}
+
+.cf-estado[data-estado='mareado'] {
+  color: #c4f5d0;
+  box-shadow: 0 0 0 1.5px #34d399;
+}
+
+.cf-estado[data-estado='mareado'][data-on] svg {
+  animation: cf-girar 1.6s linear infinite;
+}
+
+.cf-estado[data-estado='quemado'] {
+  color: #ffb27a;
+  box-shadow: 0 0 0 1.5px #ff6a00;
+}
+
+.cf-estado[data-estado='lento'] {
+  color: #e9d5ff;
+  box-shadow: 0 0 0 1.5px #a855f7;
+}
+
+.cf-estado[data-estado='curando'] {
+  color: #b9ffd9;
+  box-shadow: 0 0 0 1.5px #22e58a;
 }
 
 /* Barra de vida: la vida «vive» del lado de la cara y se come desde el centro. */

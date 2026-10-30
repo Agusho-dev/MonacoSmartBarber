@@ -2,7 +2,9 @@
 
 import { ChevronRight, HandFist, Shield, Wind } from 'lucide-react'
 import { useState } from 'react'
-import { IconoDeEspecial, IconoMaquina } from './iconos'
+import { IDS_PERSONAJES, PERSONAJES } from '@/lib/juego/personajes'
+import type { FichaPersonaje } from '@/lib/juego/tipos'
+import { IconoDeEspecial, IconoHerramienta } from './iconos'
 
 interface Paso {
   titulo: string
@@ -10,7 +12,13 @@ interface Paso {
   teclado: string
 }
 
-const PASOS: readonly Paso[] = [
+/**
+ * Los textos nombran el golpe pesado del barbero elegido (MÁQUINA, REMATE, CELULAR…): con 13
+ * luchadores el botón no siempre dice «máquina».
+ */
+function pasos(herramienta: string): readonly Paso[] {
+  const h = herramienta.toUpperCase()
+  return [
   {
     titulo: 'Movete',
     tactil:
@@ -19,21 +27,34 @@ const PASOS: readonly Paso[] = [
   },
   {
     titulo: 'Pegá y esquivá',
-    tactil:
-      'GOLPE encadena puño, patada y combo. MÁQUINA pega más fuerte y rompe guardias. Mantené GUARDIA para bloquear. ESQUIVA te saca para atrás, o hacia donde apuntes el stick (también sale con dos empujones rápidos del stick).',
-    teclado: 'J golpe (tocalo seguido para el combo), K máquina, mantené L para la guardia y Shift para esquivar: para atrás, o hacia donde caminás.',
+    tactil: `GOLPE encadena puño, patada y combo. ${h} pega más fuerte y rompe guardias. Mantené GUARDIA para bloquear. ESQUIVA te saca para atrás, o hacia donde apuntes el stick (también sale con dos empujones rápidos del stick).`,
+    teclado: `J golpe (tocalo seguido para el combo), K ${herramienta.toLowerCase()} (golpe pesado), mantené L para la guardia y Shift para esquivar: para atrás, o hacia donde caminás.`,
   },
   {
     titulo: 'Cargá la máquina',
     tactil:
-      'La barra se llena sola, y más rápido si pegás o te pegan. Cuando una carta late, tocala: es tu especial. En el TURBO carga el doble.',
-    teclado: 'La barra se llena sola. Cuando una carta late, U o I tiran el especial. En el TURBO carga el doble. Esc pausa.',
+      'La barra se llena sola, y más rápido si pegás o te pegan. Cuando una carta late, tocala: es tu especial. Ojo con los del rival: el sismo y el bombo se saltan, la onda se pasa con la ESQUIVA y el agarre no se bloquea.',
+    teclado: 'La barra se llena sola. Cuando una carta late, U o I tiran el especial. El sismo y el bombo se saltan, la onda se pasa con Shift y el agarre no se bloquea. Esc pausa.',
   },
-]
+  ]
+}
 
-/** Tres tarjetas cortas antes de la primera pelea (y desde «Cómo se juega»). */
-export function Tutorial({ tactil, onCerrar }: { tactil: boolean; onCerrar: () => void }) {
+/**
+ * Tres tarjetas cortas antes de la primera pelea (y desde «Cómo se juega»), con los botones y
+ * las cartas del barbero elegido.
+ */
+export function Tutorial({
+  tactil,
+  ficha = PERSONAJES[IDS_PERSONAJES[0]],
+  onCerrar,
+}: {
+  tactil: boolean
+  /** El luchador del jugador: su golpe pesado y sus dos especiales en las ilustraciones. */
+  ficha?: FichaPersonaje
+  onCerrar: () => void
+}) {
   const [paso, setPaso] = useState(0)
+  const PASOS = pasos(ficha.herramientas[0])
   const ultimo = paso === PASOS.length - 1
   const actual = PASOS[paso]
 
@@ -51,8 +72,9 @@ export function Tutorial({ tactil, onCerrar }: { tactil: boolean; onCerrar: () =
 
         <div className="cf-tuto__ilustracion" key={paso} aria-hidden="true">
           {paso === 0 && (tactil ? <IlustracionJoystick /> : <Teclas grupos={[['A', 'D'], ['W'], ['S']]} />)}
-          {paso === 1 && (tactil ? <IlustracionBotones /> : <Teclas grupos={[['J'], ['K'], ['L'], ['Shift']]} />)}
-          {paso === 2 && <IlustracionCarga tactil={tactil} />}
+          {paso === 1 &&
+            (tactil ? <IlustracionBotones herramienta={ficha.herramientas[0]} /> : <Teclas grupos={[['J'], ['K'], ['L'], ['Shift']]} />)}
+          {paso === 2 && <IlustracionCarga tactil={tactil} ficha={ficha} />}
         </div>
 
         <h2 id="cf-tuto-titulo" className="cf-tuto__titulo">
@@ -93,7 +115,7 @@ function IlustracionJoystick() {
   )
 }
 
-function IlustracionBotones() {
+function IlustracionBotones({ herramienta }: { herramienta: string }) {
   return (
     <div className="cf-ilu-botones">
       <div className="cf-ilu-bp cf-ilu-bp--golpe">
@@ -101,8 +123,8 @@ function IlustracionBotones() {
         <span>Golpe</span>
       </div>
       <div className="cf-ilu-bp cf-ilu-bp--herramienta">
-        <IconoMaquina />
-        <span>Máquina</span>
+        <IconoHerramienta nombre={herramienta} />
+        <span>{herramienta}</span>
       </div>
       <div className="cf-ilu-bp cf-ilu-bp--guardia">
         <Shield />
@@ -116,7 +138,8 @@ function IlustracionBotones() {
   )
 }
 
-function IlustracionCarga({ tactil }: { tactil: boolean }) {
+function IlustracionCarga({ tactil, ficha }: { tactil: boolean; ficha: FichaPersonaje }) {
+  const [e1, e2] = ficha.especiales
   return (
     <div className="cf-ilu-carga">
       <div className="cf-ilu-carga__barra">
@@ -126,13 +149,13 @@ function IlustracionCarga({ tactil }: { tactil: boolean }) {
       </div>
       <div className="cf-ilu-carga__cartas">
         <div className="cf-ilu-carta" data-lista="">
-          <IconoDeEspecial icono="rayo" />
-          <b>4</b>
+          <IconoDeEspecial icono={e1.icono} />
+          <b>{e1.costo}</b>
           {!tactil && <kbd>U</kbd>}
         </div>
         <div className="cf-ilu-carta">
-          <IconoDeEspecial icono="tijera" />
-          <b>6</b>
+          <IconoDeEspecial icono={e2.icono} />
+          <b>{e2.costo}</b>
           {!tactil && <kbd>I</kbd>}
         </div>
       </div>

@@ -1,17 +1,30 @@
 /**
  * Catálogo de luchadores de «Corte Final». Cada barbero es un personaje.
  *
- * Sumar uno nuevo: (1) procesar su hoja con scripts/juego/extraer_sprites.py (deja el atlas,
- * el retrato y la cara en public/juego/personajes/<id>/), (2) agregar el id a IdPersonaje en
- * tipos.ts, (3) su ficha acá y (4) sus movimientos en src/lib/juego/motor/movimientos.ts.
- * Los costos de los especiales y la vida salen de acá: el motor no los duplica.
+ * Sumar uno nuevo (detalle en .claude/rules/juego.md, «Sumar un barbero nuevo»): (1) recortar su
+ * hoja con un extractor de scripts/juego/ (deja el atlas, el retrato y la cara en
+ * public/juego/personajes/<id>/), (2) agregar el id a IdPersonaje en tipos.ts, (3) su ficha acá
+ * (`ruta(id, true)` recién cuando existan sus sprites pelados del remate) y (4) sus movimientos en
+ * src/lib/juego/motor/movimientos.ts. Los costos de los especiales y la vida salen de acá: el motor
+ * no los duplica.
  */
 import type { FichaPersonaje, FichaProximamente, IdPersonaje } from './tipos'
 
-const ruta = (id: IdPersonaje) => ({
+/**
+ * `conRapado` = ya existen los sprites pelados del remate (generar_rapado.py: rapado.json,
+ * retrato_rapado.webp y cara_rapado.webp). Sin ellos nadie los pide: el remate sólo vuela pelo.
+ */
+const ruta = (id: IdPersonaje, conRapado = false): FichaPersonaje['rutas'] => ({
   atlas: `/juego/personajes/${id}/atlas.json`,
   retrato: `/juego/personajes/${id}/retrato.webp`,
   cara: `/juego/personajes/${id}/cara.webp`,
+  rapado: conRapado
+    ? {
+        atlas: `/juego/personajes/${id}/rapado.json`,
+        retrato: `/juego/personajes/${id}/retrato_rapado.webp`,
+        cara: `/juego/personajes/${id}/cara_rapado.webp`,
+      }
+    : null,
 })
 
 export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
@@ -30,7 +43,9 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
     especiales: [
       {
         nombre: 'Corte Relámpago',
-        costo: 4,
+        // 5 (era 4): barato y encadenado después de cada golpe que entraba, Simón le ganaba 6 de
+        // cada 10 a la CPU difícil y 3 de 10 en fácil (revisión del 30/oct, simulado).
+        costo: 5,
         icono: 'rayo',
         efecto: 'electrocuta',
         descripcion: 'Cruza la pantalla con la máquina cargada de electricidad y deja al rival electrocutado.',
@@ -48,7 +63,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: '15 % de golpes críticos. Cada crítico le devuelve carga a la máquina.',
     },
     frases: ['Siguiente, por favor.', 'Te dejé el degradé perfecto.', '¿Quién sigue? Tengo la máquina caliente.'],
-    rutas: ruta('simon'),
+    rutas: ruta('simon', true),
   },
   chipi: {
     id: 'chipi',
@@ -83,22 +98,404 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       descripcion: 'Recibe 12 % menos de daño y los golpes leves no lo frenan mientras ataca con la herramienta.',
     },
     frases: ['Quedate quieto que te emparejo.', 'Con gel no se despeina nadie.', 'Pasá por caja.'],
-    rutas: ruta('chipi'),
+    rutas: ruta('chipi', true),
+  },
+  nico_u: {
+    id: 'nico_u',
+    nombre: 'Nico U.',
+    apodo: 'El Xeneize',
+    staffId: '2f381ec9-78c7-4951-bd51-5c06eabf817a',
+    sucursal: 'rondeau',
+    color: '#2563EB',
+    colorSecundario: '#FFD100',
+    atributos: { fuerza: 7, velocidad: 7, defensa: 6, tecnica: 7, alcance: 7 },
+    vidaMax: 1050,
+    alturaMundo: 210,
+    herramientas: ['Máquina', 'Tijeras'],
+    especiales: [
+      {
+        nombre: 'Bombo Aturdidor',
+        costo: 4,
+        icono: 'bombo',
+        efecto: 'aturde',
+        descripcion: 'Larga el bombo rodando por el piso: si te alcanza, quedás aturdido. Se esquiva saltando.',
+      },
+      {
+        nombre: 'Navajazo de Barbería',
+        costo: 5,
+        icono: 'navaja',
+        efecto: 'critico',
+        descripcion: 'Un tajo rapidísimo con la navaja, de corto alcance. Siempre es crítico.',
+      },
+    ],
+    pasiva: {
+      nombre: 'La 12 no para',
+      descripcion: 'Con menos de 35 % de vida pega 20 % más fuerte.',
+    },
+    frases: ['Dale, que el bombo no para.', 'Esto no es un corte, es un clásico.', 'Te hago el degradé en dos tiempos.'],
+    rutas: ruta('nico_u'),
+  },
+  fabri: {
+    id: 'fabri',
+    nombre: 'Fabri',
+    apodo: 'El Facha',
+    staffId: '8f479fc1-3c7f-45da-be1a-6f1f9df6d21d',
+    sucursal: 'rondeau',
+    color: '#22E58A',
+    colorSecundario: '#FF4D4D',
+    atributos: { fuerza: 6, velocidad: 6, defensa: 8, tecnica: 8, alcance: 6 },
+    vidaMax: 1000,
+    alturaMundo: 208,
+    herramientas: ['Celular', 'Anteojos'],
+    especiales: [
+      {
+        nombre: 'Curación',
+        costo: 5,
+        icono: 'cura',
+        efecto: 'cura',
+        descripcion: 'Se toma la bebida verde y se cura de a poco. Si le pegan mientras toma, se le corta.',
+      },
+      {
+        nombre: 'Modo Boxeador',
+        costo: 6,
+        icono: 'guante',
+        efecto: 'rompe_guardia',
+        descripcion: 'Se pone el guante y remata con un piñón gigante: te tira al piso y, si te cubrís, te rompe la guardia.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Batería externa',
+      descripcion: 'La carga de la máquina se le llena 15 % más rápido.',
+    },
+    frases: ['Esperá que subo una historia.', 'Con estilo hasta para pelear.', 'Me curo y sigo como si nada.'],
+    rutas: ruta('fabri'),
+  },
+  luciano: {
+    id: 'luciano',
+    nombre: 'Luciano',
+    apodo: 'El Motoquero',
+    staffId: 'e4141ff1-c3dd-49fd-a600-3985c668679d',
+    sucursal: 'rondeau',
+    color: '#EF4444',
+    colorSecundario: '#F97316',
+    atributos: { fuerza: 7, velocidad: 9, defensa: 5, tecnica: 6, alcance: 7 },
+    vidaMax: 980,
+    alturaMundo: 210,
+    herramientas: ['Remate', 'Patada'],
+    especiales: [
+      {
+        nombre: 'Moto',
+        costo: 5,
+        icono: 'moto',
+        efecto: 'derriba',
+        descripcion: 'Cruza la pantalla en la moto y te pasa por arriba: te tira al piso.',
+      },
+      {
+        nombre: 'Pistola',
+        costo: 4,
+        icono: 'pistola',
+        efecto: 'multigolpe',
+        descripcion: 'Ráfaga de tres tiros rápidos: cada uno empuja y el último te tira al piso.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Acelerado',
+      descripcion: 'Corre 15 % más rápido y su esquiva llega más lejos.',
+    },
+    frases: ['Agarrate, que acelero.', 'Te paso por arriba con la moto.', 'Corte rápido, como la moto.'],
+    rutas: ruta('luciano'),
+  },
+  gabriel: {
+    id: 'gabriel',
+    nombre: 'Gabriel',
+    apodo: 'El B-Boy',
+    staffId: '7d0e9810-a59b-4189-953a-a7c18fee193a',
+    sucursal: 'caseros',
+    color: '#A855F7',
+    colorSecundario: '#22D3EE',
+    atributos: { fuerza: 5, velocidad: 9, defensa: 6, tecnica: 9, alcance: 5 },
+    vidaMax: 950,
+    alturaMundo: 204,
+    herramientas: ['Remate', 'Patada'],
+    especiales: [
+      {
+        nombre: 'Break Dance',
+        costo: 5,
+        icono: 'break',
+        efecto: 'multigolpe',
+        descripcion: 'Molino que avanza pegando varias veces. Al arrancar no le entra nada.',
+      },
+      {
+        nombre: 'Graffiti Slam',
+        costo: 6,
+        icono: 'graffiti',
+        efecto: 'derriba',
+        descripcion: 'Pinta un graffiti a media distancia que estalla al ratito: si no salís a tiempo, te tira al piso, y cubriéndote te gasta mucha guardia.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Flow',
+      descripcion: 'Su esquiva lo deja intocable más tiempo y se recupera antes.',
+    },
+    frases: ['El flow no se enseña.', 'Te hago un molino y quedás mareado.', 'Firmé tu derrota con aerosol.'],
+    rutas: ruta('gabriel'),
+  },
+  guillermo: {
+    id: 'guillermo',
+    nombre: 'Guillermo',
+    apodo: 'El Bartender',
+    staffId: 'f77f4381-73fa-454a-a152-9b554796eb4a',
+    sucursal: 'caseros',
+    color: '#14B8A6',
+    colorSecundario: '#F59E0B',
+    atributos: { fuerza: 6, velocidad: 6, defensa: 7, tecnica: 8, alcance: 7 },
+    vidaMax: 1000,
+    alturaMundo: 212,
+    herramientas: ['Remate', 'Patada'],
+    especiales: [
+      {
+        nombre: 'Trago Mareador',
+        costo: 4,
+        icono: 'trago',
+        efecto: 'marea',
+        descripcion: 'Te tira el trago encima: quedás mareado, no te podés cubrir y caminás lento.',
+      },
+      {
+        nombre: 'Flair Bartender',
+        costo: 6,
+        icono: 'botella',
+        efecto: 'multigolpe',
+        descripcion: 'Revolea tres botellas girando que caen a distintas distancias.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Happy hour',
+      descripcion: 'Arranca cada round con 2 de carga de más.',
+    },
+    frases: ['¿Te sirvo algo? Una derrota.', 'Este trago marea.', 'La casa invita… a perder.'],
+    rutas: ruta('guillermo'),
+  },
+  rodrigo: {
+    id: 'rodrigo',
+    nombre: 'Rodrigo',
+    apodo: 'El Cuartetero',
+    staffId: '9657e51d-84f8-44cf-9451-f7aeaa5f7a4d',
+    sucursal: 'parana',
+    color: '#D946EF',
+    colorSecundario: '#8B5CF6',
+    atributos: { fuerza: 7, velocidad: 5, defensa: 8, tecnica: 6, alcance: 8 },
+    vidaMax: 1050,
+    alturaMundo: 210,
+    herramientas: ['Remate', 'Patada'],
+    especiales: [
+      {
+        nombre: 'Paso de Cuarteto',
+        costo: 5,
+        icono: 'baile',
+        efecto: 'empuja',
+        descripcion: 'Avanza bailando (los tiros lo atraviesan) y remata con un golpe que te manda lejos.',
+      },
+      {
+        nombre: 'Grito',
+        costo: 6,
+        icono: 'grito',
+        efecto: 'aturde',
+        descripcion: 'Un grito al micrófono: una onda enorme que te arrastra hasta la pared. Se pasa con la esquiva.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Aguante',
+      descripcion: 'Su guardia aguanta 25 % más.',
+    },
+    frases: ['¡Y ahora, el cuarteto!', 'Bailá conmigo, que igual te gano.', 'Este grito se escucha en todo Córdoba.'],
+    rutas: ruta('rodrigo'),
+  },
+  joaquin: {
+    id: 'joaquin',
+    nombre: 'Joaquín',
+    apodo: 'Cham-poo',
+    staffId: '06032640-fae2-4124-98a5-5074955dc359',
+    sucursal: 'parana',
+    color: '#FF6B35',
+    colorSecundario: '#FCD34D',
+    atributos: { fuerza: 6, velocidad: 7, defensa: 6, tecnica: 9, alcance: 6 },
+    vidaMax: 1000,
+    alturaMundo: 206,
+    herramientas: ['Remate', 'Patada'],
+    especiales: [
+      {
+        nombre: 'Gorro Lanzador',
+        costo: 4,
+        icono: 'gorro',
+        efecto: 'multigolpe',
+        descripcion: 'Tira el gorro chino como un bumerán: te puede pegar a la ida y a la vuelta.',
+      },
+      {
+        nombre: 'Patada del Dragón',
+        costo: 6,
+        icono: 'dragon',
+        efecto: 'derriba',
+        descripcion: 'Patada voladora que cruza la pantalla pegando varias veces y te tira al piso.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Disciplina',
+      descripcion: 'Cada golpe que bloquea le da carga.',
+    },
+    frases: ['Cham-poo no perdona.', 'Disciplina, respeto y fade.', 'Mi gorro vuelve. Vos no.'],
+    rutas: ruta('joaquin'),
+  },
+  nahuel: {
+    id: 'nahuel',
+    nombre: 'Nahuel',
+    apodo: 'El 10',
+    staffId: 'bc50d7ff-e9bf-4c63-9685-5dc831b5d1bc',
+    sucursal: 'parana',
+    color: '#60A5FA',
+    colorSecundario: '#FFFFFF',
+    atributos: { fuerza: 6, velocidad: 8, defensa: 5, tecnica: 7, alcance: 8 },
+    vidaMax: 1000,
+    alturaMundo: 206,
+    herramientas: ['Remate', 'Patada'],
+    especiales: [
+      {
+        nombre: 'Pelotazo',
+        costo: 3,
+        icono: 'pelota',
+        efecto: 'empuja',
+        descripcion: 'Un pelotazo rápido y recto que te manda para atrás.',
+      },
+      {
+        nombre: 'Chilena',
+        costo: 6,
+        icono: 'chilena',
+        efecto: 'rompe_guardia',
+        descripcion: 'Salta y remata de chilena: te pega aunque estés saltando y, si te cubrís, te rompe la guardia.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Gambeta',
+      descripcion: 'Camina más rápido y salta más lejos.',
+    },
+    frases: ['La pido y la meto.', 'De chilena, como en el potrero.', 'Te tiré un caño.'],
+    rutas: ruta('nahuel'),
+  },
+  lucas: {
+    id: 'lucas',
+    nombre: 'Lucas',
+    apodo: 'El Papá',
+    staffId: 'd6c5600b-10c0-4012-bb15-3440401f81a7',
+    sucursal: 'parana',
+    color: '#F472B6',
+    colorSecundario: '#FDE68A',
+    atributos: { fuerza: 6, velocidad: 5, defensa: 8, tecnica: 8, alcance: 7 },
+    vidaMax: 1080,
+    alturaMundo: 212,
+    herramientas: ['Remate', 'Patada'],
+    especiales: [
+      {
+        nombre: 'Mamadera a Presión',
+        costo: 4,
+        icono: 'mamadera',
+        efecto: 'empuja',
+        descripcion: 'Un chorro de leche a presión que te pega varias veces y te va empujando.',
+      },
+      {
+        nombre: 'Pañalazo',
+        costo: 5,
+        icono: 'panal',
+        efecto: 'nube',
+        descripcion: 'Tira un pañal: donde cae queda una nube que daña de a poco y te hace caminar lento.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Noches sin dormir',
+      descripcion: 'Congelado, aturdido, mareado, quemado y los demás estados le duran 30 % menos.',
+    },
+    frases: ['Shh, que se duerme el nene.', 'Papá no pierde.', 'Te cambio como a un pañal.'],
+    rutas: ruta('lucas'),
+  },
+  stefano: {
+    id: 'stefano',
+    nombre: 'Stefano',
+    apodo: 'El Matero',
+    staffId: 'b81bffc8-ff44-413b-9c71-efecd416d048',
+    sucursal: 'parana',
+    color: '#84CC16',
+    colorSecundario: '#A16207',
+    atributos: { fuerza: 6, velocidad: 6, defensa: 6, tecnica: 7, alcance: 9 },
+    vidaMax: 1000,
+    alturaMundo: 210,
+    herramientas: ['Remate', 'Matezo'],
+    especiales: [
+      {
+        nombre: 'Lluvia de Mates',
+        costo: 5,
+        icono: 'mate',
+        efecto: 'multigolpe',
+        descripcion: 'Cuatro mates por el aire que caen uno detrás de otro a distintas distancias. Gastan la guardia.',
+      },
+      {
+        nombre: 'Termo de Agua Caliente',
+        costo: 4,
+        icono: 'termo',
+        efecto: 'quema',
+        descripcion: 'Un chorro de agua caliente del termo: te quema y te sigue sacando vida unos segundos.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Mate compartido',
+      descripcion: 'Cada especial que acierta le devuelve 1 de carga.',
+    },
+    frases: ['¿Un mate? Arranca la ronda.', 'Cuidado, que está caliente.', 'Amargo como tu derrota.'],
+    rutas: ruta('stefano'),
+  },
+  brian: {
+    id: 'brian',
+    nombre: 'Brian',
+    apodo: 'El Tanque',
+    staffId: 'e431f2ca-4dea-41b3-bb8a-62a876415da2',
+    sucursal: 'parana',
+    color: '#F59E0B',
+    colorSecundario: '#78350F',
+    atributos: { fuerza: 10, velocidad: 3, defensa: 9, tecnica: 6, alcance: 6 },
+    vidaMax: 1250,
+    alturaMundo: 222,
+    herramientas: ['Remate', 'Golpe pesado'],
+    especiales: [
+      {
+        nombre: 'Agarre y Apretón',
+        costo: 5,
+        icono: 'agarre',
+        efecto: 'agarre',
+        descripcion: 'Te agarra de cerca (no se puede bloquear), te aprieta y te estampa contra el piso. En el aire no agarra.',
+      },
+      {
+        nombre: 'Puño Sísmico',
+        costo: 6,
+        icono: 'sismo',
+        efecto: 'sismo',
+        descripcion: 'Golpe al piso: una onda sísmica con rocas que corre por el suelo. No se bloquea: hay que saltarla.',
+      },
+    ],
+    pasiva: {
+      nombre: 'Mole',
+      descripcion: 'Los golpes leves no lo frenan mientras pega con la herramienta o un especial.',
+    },
+    frases: ['Vení, que te doy un abrazo.', 'Quedate quieto, que te aprieto.', 'Puño al piso, y vos también.'],
+    rutas: ruta('brian'),
   },
 }
 
 export const IDS_PERSONAJES = Object.keys(PERSONAJES) as IdPersonaje[]
 
-/** Los barberos de Rondeau que todavía no tienen hoja de sprites. */
+/** Los barberos que todavía no tienen hoja de sprites. */
 export const PROXIMAMENTE: FichaProximamente[] = [
-  { nombre: 'Fabri', sucursal: 'rondeau' },
-  { nombre: 'Lucho', sucursal: 'rondeau' },
   { nombre: 'Nico M.', sucursal: 'rondeau' },
-  { nombre: 'Nico U.', sucursal: 'rondeau' },
   { nombre: 'Tony', sucursal: 'rondeau' },
+  { nombre: 'Nehuen', sucursal: 'caseros' },
+  { nombre: 'Chino', sucursal: 'parana' },
+  { nombre: 'Fran', sucursal: 'pueyrredon' },
+  { nombre: 'Lautaro', sucursal: 'pueyrredon' },
+  { nombre: 'Leo', sucursal: 'pueyrredon' },
 ]
-
-export function rivalPorDefecto(jugador: IdPersonaje): IdPersonaje {
-  const otros = IDS_PERSONAJES.filter((id) => id !== jugador)
-  return otros[0] ?? jugador
-}

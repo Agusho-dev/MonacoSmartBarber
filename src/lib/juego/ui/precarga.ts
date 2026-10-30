@@ -1,10 +1,13 @@
 /**
  * Precarga de recursos (atlas, caras y arena) con progreso real.
  *
- * Se arranca apenas hay una elección (ya en el inicio, en segundo plano) para que el
- * VS no espere. Un caché chico por combinación (personajes + arena): volver a elegir lo
- * mismo no vuelve a bajar nada, y los recursos que no se usan se sueltan (un atlas
- * decodificado pesa varios MB en un celular).
+ * Con 13 luchadores, SÓLO se bajan los dos atlas de la pelea que va a empezar: la carga
+ * arranca con «¡A pelear!» (el VS dura lo que tarda en llegar, y si no alcanza aparece la
+ * pantalla de carga), con la elección de los dos en una pelea online, o con el atajo de
+ * pruebas. Recorrer la grilla no baja nada más que caras y el retrato del enfocado (≈ 1,3 MB
+ * por atlas: tocar las 13 caras eran 15 MB de datos del celular). Un caché chico por
+ * combinación (personajes + arena): la revancha no vuelve a bajar nada, y los recursos que no
+ * se usan se sueltan (un atlas decodificado pesa varios MB en un celular).
  */
 import { useEffect, useSyncExternalStore } from 'react'
 import { cargarRecursos } from '../render'
@@ -110,8 +113,16 @@ function servidor(): EstadoPrecarga {
   return ESPERANDO
 }
 
-/** Estado de la precarga de una combinación; la arranca si hace falta. */
-export function usePrecarga(jugador: IdPersonaje, rival: IdPersonaje, arena: IdArena): EstadoPrecarga {
+/**
+ * Estado de la precarga de una combinación. Con `arrancar` (la pelea ya está decidida) la
+ * arranca si hace falta; sin él sólo mira (en la selección no se baja ningún atlas).
+ */
+export function usePrecarga(
+  jugador: IdPersonaje,
+  rival: IdPersonaje,
+  arena: IdArena,
+  arrancar = true,
+): EstadoPrecarga {
   const clave = clavePrecarga(jugador, rival, arena)
   const estado = useSyncExternalStore(
     (oyente) => suscribir(clave, oyente),
@@ -119,7 +130,7 @@ export function usePrecarga(jugador: IdPersonaje, rival: IdPersonaje, arena: IdA
     servidor,
   )
   useEffect(() => {
-    precargar(jugador, rival, arena)
-  }, [jugador, rival, arena])
+    if (arrancar) precargar(jugador, rival, arena)
+  }, [jugador, rival, arena, arrancar])
   return estado
 }

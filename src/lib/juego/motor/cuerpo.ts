@@ -31,7 +31,7 @@ export function altoParado(l: LuchadorEstado): number {
 
 /** Caja de daño en coordenadas del mundo, o null si no se le puede pegar (tirado, cayendo). */
 export function cajaCuerpo(l: LuchadorEstado, li: InternoLuchador): Caja | null {
-  if (li.derribo > 0 || li.levantar > 0 || li.caidaDerribo > 0 || li.pose === 'ko') return null
+  if (li.derribo > 0 || li.levantar > 0 || li.caidaDerribo > 0 || li.pose === 'ko' || li.agarradoPor !== null) return null
   if (!l.enSuelo) {
     const m = CUERPO_AIRE.ancho / 2
     return { x0: l.x - m, x1: l.x + m, y0: l.y, y1: l.y + CUERPO_AIRE.alto }
@@ -46,6 +46,8 @@ export function cajaCuerpo(l: LuchadorEstado, li: InternoLuchador): Caja | null 
 
 /** Franja vertical de la caja de empuje. */
 export function franjaEmpuje(l: LuchadorEstado, li: InternoLuchador): { y0: number; y1: number } {
+  // El agarrado no empuja ni es empujado: lo sostiene el que lo agarró.
+  if (li.agarradoPor !== null) return { y0: 0, y1: 0 }
   if (l.enSuelo && (li.derribo > 0 || li.pose === 'ko')) return { y0: 0, y1: EMPUJE_CAJA.tirado }
   if (!l.enSuelo) return { y0: l.y + EMPUJE_CAJA.aireDesde, y1: l.y + EMPUJE_CAJA.aireHasta }
   if (li.agachado) return { y0: 0, y1: EMPUJE_CAJA.agachado }
@@ -82,7 +84,9 @@ export function puedeActuar(l: LuchadorEstado, li: InternoLuchador): boolean {
     li.aterrizaje === 0 &&
     l.efectos.congelado === 0 &&
     l.efectos.electrocutado === 0 &&
-    l.efectos.guardiaRota === 0
+    l.efectos.guardiaRota === 0 &&
+    l.efectos.aturdido === 0 &&
+    li.agarradoPor === null
   )
 }
 
@@ -95,7 +99,9 @@ export function puedeActuarEnAire(l: LuchadorEstado, li: InternoLuchador): boole
     li.stun === 0 &&
     li.caidaDerribo === 0 &&
     l.efectos.congelado === 0 &&
-    l.efectos.electrocutado === 0
+    l.efectos.electrocutado === 0 &&
+    l.efectos.aturdido === 0 &&
+    li.agarradoPor === null
   )
 }
 
@@ -106,12 +112,14 @@ export function enCombo(l: LuchadorEstado, li: InternoLuchador): boolean {
     l.efectos.congelado > 0 ||
     l.efectos.electrocutado > 0 ||
     l.efectos.guardiaRota > 0 ||
-    li.caidaDerribo > 0
+    l.efectos.aturdido > 0 ||
+    li.caidaDerribo > 0 ||
+    li.agarradoPor !== null
   )
 }
 
 export function golpeable(l: LuchadorEstado, li: InternoLuchador, esProyectil: boolean): boolean {
-  if (l.invulnerable || li.pose !== null) return false
+  if (l.invulnerable || li.pose !== null || li.agarradoPor !== null) return false
   if (esProyectil && li.invulnProyectil) return false
   return true
 }
@@ -120,6 +128,8 @@ export function golpeable(l: LuchadorEstado, li: InternoLuchador, esProyectil: b
 export function bloquea(l: LuchadorEstado, li: InternoLuchador, origenX: number): boolean {
   if (!l.enSuelo || li.pose !== null) return false
   if (l.efectos.congelado > 0 || l.efectos.electrocutado > 0 || l.efectos.guardiaRota > 0) return false
+  // Mareado no se puede cubrir; aturdido y agarrado, tampoco.
+  if (l.efectos.mareado > 0 || l.efectos.aturdido > 0 || li.agarradoPor !== null) return false
   if (li.derribo > 0 || li.levantar > 0 || li.caidaDerribo > 0 || li.accion !== null || li.dash !== null) return false
   const enGuardia = li.stun > 0 ? li.stunBloqueo : li.guardia
   if (!enGuardia) return false
@@ -140,6 +150,7 @@ export function interrumpir(l: LuchadorEstado, li: InternoLuchador): void {
   li.tAdelante = 0
   li.atras = false
   li.invulnProyectil = false
+  l.efectos.curando = 0
 }
 
 export function contraPared(l: LuchadorEstado, dir: number): boolean {
@@ -177,6 +188,14 @@ export function alcanceDe(mov: DefMovimiento): number {
   if (esp.embestida) x += esp.embestida.distancia
   if (esp.proyectil) x = Math.max(x, 700)
   return x + CUERPO_ANCHO / 2
+}
+
+/** Invulnerable por el movimiento en curso (el arranque del molino). */
+export function invulnerablePorAccion(li: InternoLuchador): boolean {
+  const a = li.accion
+  if (!a) return false
+  const h = (a.mov as DefEspecial).embestida?.invulnerableHasta
+  return h !== undefined && a.t < h
 }
 
 export function enRecuperacion(a: Accion): boolean {

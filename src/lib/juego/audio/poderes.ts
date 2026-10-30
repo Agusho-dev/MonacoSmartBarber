@@ -3,7 +3,7 @@
  * vuelo (bucles que viven mientras el proyectil existe), el «super flash» de los especiales y
  * el remate «AL CERO».
  */
-import type { IconoEspecial } from '../tipos'
+import type { IconoEspecial, TipoProyectil } from '../tipos'
 import type { Mesa, Voz } from './mesa'
 import { aleatorio, barrido, envPercusion, envSostenida, midiHz, variar } from './mesa'
 import { maquina, silbido, tijera } from './golpes'
@@ -243,7 +243,7 @@ export function sillonVolando(m: Mesa, t: number, pan: number, dur = 3): Voz | n
 }
 
 /** Lanzamiento de un proyectil (el bucle en vuelo va aparte). */
-export function lanzamiento(m: Mesa, t: number, tipo: 'tornado' | 'sillon' | 'spray' | 'rayo', pan: number): void {
+export function lanzamiento(m: Mesa, t: number, tipo: TipoProyectil, pan: number): void {
   if (tipo === 'tornado') {
     silbido(m, t, { fuerza: 'especial', pan })
     tijera(m, t + 0.03, { pan, cortes: 3, volumen: 0.6 })
@@ -259,9 +259,12 @@ export function lanzamiento(m: Mesa, t: number, tipo: 'tornado' | 'sillon' | 'sp
   } else if (tipo === 'rayo') {
     zap(m, t, pan)
     electrico(m, t, { dur: 0.25, pan, fuerza: 0.6 })
-  } else {
+  } else if (tipo === 'spray') {
     // El cono de spray es corto: un chorro de medio segundo cubre el disparo entero.
     spray(m, t, { pan, dur: 0.5 })
+  } else {
+    // Los del elenco nuevo suenan con lanzamientoElenco (elenco.ts): esto es sólo la red.
+    silbido(m, t, { fuerza: 'especial', pan })
   }
 }
 
@@ -301,7 +304,8 @@ export function superFlash(m: Mesa, t: number, icono: IconoEspecial, pan: number
   if (icono === 'rayo') electrico(m, t + 0.02, { dur: 0.4, pan, fuerza: 0.8 })
   else if (icono === 'tijera') tijera(m, t + 0.05, { pan, cortes: 3, volumen: 0.7 })
   else if (icono === 'sillon') grunido(m, t, pan)
-  else brilloHelado(m, t + 0.03, pan)
+  else if (icono === 'spray') brilloHelado(m, t + 0.03, pan)
+  // los del elenco nuevo suman su capa desde eventos.ts (superFlashElenco, elenco.ts)
 }
 
 /** Sillonazo Brutal: un gruñido grave saturado. */

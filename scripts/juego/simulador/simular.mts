@@ -8,9 +8,10 @@
  * Corre CPU vs CPU (todas las combinaciones de personajes y dificultades, semillas distintas) y
  * un «jugador humano simple» (sólo aprieta GOLPE cerca y a veces guardia) contra la CPU. Verifica
  * invariantes (terminan, sin NaN, dentro del escenario, nadie trabado, cuadros válidos), que todo
- * ocurra alguna vez, la duración de los rounds y el balance. Si existen los atlas reales
- * (public/juego/personajes/<id>/atlas.json) usa su meta; si no, la meta típica.
- * Sale con código 1 si algo no da.
+ * ocurra alguna vez (cada especial y cada efecto del elenco), la duración de los rounds y un
+ * balance grueso (cada luchador entre 40 y 60 %). El balance fino (13×13, las metas del dueño)
+ * está en balance.mts, con hilos. Si existen los atlas reales (public/juego/personajes/<id>/atlas.json)
+ * usa su meta; si no, la meta típica. Sale con código 1 si algo no da.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -28,18 +29,18 @@ import type {
 import { CLAVES_ANIMACION, ENTRADA_VACIA, TPS } from '../../../src/lib/juego/tipos.ts'
 import { avanzar, calcularPuntaje, crearPartida, metaDesdeAtlas } from '../../../src/lib/juego/motor/index.ts'
 import { duracionesDeRounds } from '../../../src/lib/juego/motor/partida.ts'
+import { IDS_PERSONAJES } from '../../../src/lib/juego/personajes.ts'
 
 const REPO = new URL('../../../', import.meta.url).pathname.replace(/\/$/, '')
 const ARGS = process.argv.slice(2)
 const RAPIDO = ARGS.includes('--rapido')
-// Por defecto 400 semillas por cruce: 4800 partidas CPU vs CPU (800 Simón-Chipi por dificultad: el
-// error estándar del balance queda en ≈1,8 %; con 200 por dificultad el ruido mueve ±7 %) y 480 del
-// humano simple. Tarda ≈35 s. --rapido para iterar.
-const SEMILLAS = Number(ARGS.find((a) => a.startsWith('--semillas='))?.split('=')[1] ?? (RAPIDO ? 8 : 400))
-const SEMILLAS_HUMANO = Number(ARGS.find((a) => a.startsWith('--humano='))?.split('=')[1] ?? (RAPIDO ? 6 : 40))
+// Con 13 luchadores: por defecto 12 semillas por cruce ordenado y dificultad (6084 partidas CPU vs
+// CPU, ≈ 40 s en un hilo) y 3 del humano simple por cruce (1521). --rapido para iterar.
+const SEMILLAS = Number(ARGS.find((a) => a.startsWith('--semillas='))?.split('=')[1] ?? (RAPIDO ? 2 : 12))
+const SEMILLAS_HUMANO = Number(ARGS.find((a) => a.startsWith('--humano='))?.split('=')[1] ?? (RAPIDO ? 1 : 3))
 const MAX_TICKS = 6 * 60 * TPS
 const TRABADO_TICKS = 6 * TPS
-const PERSONAJES: IdPersonaje[] = ['simon', 'chipi']
+const PERSONAJES: IdPersonaje[] = [...IDS_PERSONAJES]
 const DIFICULTADES: Dificultad[] = ['facil', 'normal', 'dificil']
 
 // ─── Meta de animaciones ─────────────────────────────────────────────────────
@@ -87,7 +88,7 @@ function metaDe(id: IdPersonaje): MetaAnimaciones {
   } else ORIGEN_META[id] = 'meta típica (no hay atlas todavía)'
   return metaTipica()
 }
-const META: Record<IdPersonaje, MetaAnimaciones> = { simon: metaDe('simon'), chipi: metaDe('chipi') }
+const META = Object.fromEntries(PERSONAJES.map((id) => [id, metaDe(id)])) as Record<IdPersonaje, MetaAnimaciones>
 
 // Meta rara para probar robustez (1 cuadro, impactos vacíos o fuera de rango).
 function metaRara(semilla: number): MetaAnimaciones {
@@ -364,7 +365,8 @@ for (const dif of DIFICULTADES) {
 }
 // Robustez con metas raras (n = 1, impactos vacíos o fuera de rango).
 for (let s = 0; s < (RAPIDO ? 4 : 12); s++) {
-  const r = jugar(['simon', 'chipi'], DIFICULTADES[s % 3], 50000 + s, null, [metaRara(s + 1), metaRara(s + 99)])
+  const par: [IdPersonaje, IdPersonaje] = [PERSONAJES[s % PERSONAJES.length], PERSONAJES[(s * 5 + 3) % PERSONAJES.length]]
+  const r = jugar(par, DIFICULTADES[s % 3], 50000 + s, null, [metaRara(s + 1), metaRara(s + 99)])
   if (!r.terminada || r.violaciones.length) fallas.push(`meta rara ${s}: ${r.violaciones.slice(0, 3).join(' | ') || 'no terminó'}`)
 }
 
@@ -397,23 +399,31 @@ const roundsCpu = resultadosCpu.flatMap((x) => x.r.rounds)
 const mediaRound = roundsCpu.reduce((s, x) => s + x, 0) / Math.max(1, roundsCpu.length) / TPS
 if (mediaRound < 25 || mediaRound > 55) fallas.push(`duración media de round ${mediaRound.toFixed(1)} s (fuera de 25–55)`)
 
-const porDif: Record<string, { rounds: number[]; kos: number; tiempos: number; simon: number; mixtas: number }> = {}
+const porDif: Record<string, { rounds: number[]; kos: number; tiempos: number; gana: Record<string, [number, number]> }> = {}
 for (const { pj, dif, r } of resultadosCpu) {
-  const d = (porDif[dif] ??= { rounds: [], kos: 0, tiempos: 0, simon: 0, mixtas: 0 })
+  const d = (porDif[dif] ??= { rounds: [], kos: 0, tiempos: 0, gana: {} })
   d.rounds.push(...r.rounds)
   d.kos += r.kos
   d.tiempos += r.tiempos
   if (pj[0] !== pj[1] && r.ganador !== null) {
-    d.mixtas++
-    if (pj[r.ganador] === 'simon') d.simon++
+    for (const lado of [0, 1] as const) {
+      const g = (d.gana[pj[lado]] ??= [0, 0])
+      g[0]++
+      if (r.ganador === lado) g[1]++
+    }
   }
 }
-const balance: Record<string, number> = {}
+// Balance grueso por luchador (el fino, con las metas del dueño, en balance.mts).
+const balance: Record<string, Record<string, number>> = {}
 for (const dif of DIFICULTADES) {
   const d = porDif[dif]
-  const pct = (100 * d.simon) / Math.max(1, d.mixtas)
-  balance[dif] = pct
-  if (pct < 40 || pct > 60) fallas.push(`balance en ${dif}: Simón gana ${pct.toFixed(1)} % (fuera de 40–60)`)
+  balance[dif] = {}
+  for (const id of PERSONAJES) {
+    const g = d.gana[id] ?? [0, 0]
+    const pct = (100 * g[1]) / Math.max(1, g[0])
+    balance[dif][id] = pct
+    if (!RAPIDO && (pct < 40 || pct > 60)) fallas.push(`balance en ${dif}: ${id} gana ${pct.toFixed(1)} % (fuera de 40–60)`)
+  }
 }
 
 const humano: Record<string, { ganadas: number; total: number }> = {}
@@ -437,14 +447,22 @@ const DEBEN_OCURRIR: [string, string][] = [
   ['ev:final_al_cero', 'al cero'],
   ['ev:turbo', 'turbo'],
   ['perfecto', 'round perfecto'],
-  ['especial:simon:1', 'Corte Relámpago'],
-  ['especial:simon:2', 'Tijera Tormenta'],
-  ['especial:chipi:1', 'Sillonazo Brutal'],
-  ['especial:chipi:2', 'Fijación Extrema'],
+  ...PERSONAJES.flatMap((id) => [1, 2].map((n): [string, string] => [`especial:${id}:${n}`, `${id}: especial ${n}`])),
   ['herramienta:rayo', 'golpe del Corte Relámpago'],
   ['herramienta:tornado', 'golpe del tornado'],
   ['herramienta:sillon', 'golpe del sillón'],
   ['herramienta:spray', 'golpe del spray'],
+  ...(['bombo', 'navaja', 'guante', 'moto', 'bala', 'break', 'graffiti', 'trago', 'botella', 'baile', 'onda', 'gorro', 'dragon', 'pelota', 'leche', 'panal', 'mate', 'agua', 'agarre', 'sismo'] as const).map(
+    (h): [string, string] => [`herramienta:${h}`, `golpe de ${h}`],
+  ),
+  ['ev:agarre', 'agarre'],
+  ['ev:aturdido', 'aturdido'],
+  ['ev:mareado', 'mareado'],
+  ['ev:quemado', 'quemado'],
+  ['ev:nube', 'nube'],
+  ['ev:sismo', 'sismo'],
+  ['ev:disparo', 'disparo'],
+  ['ev:curacion', 'curación'],
   ['ev:tiempo', 'round por tiempo'],
   ['ev:dash', 'dash'],
   ['ev:salto', 'salto'],
@@ -463,7 +481,7 @@ if (det1 === det3) fallas.push('semillas distintas dieron la misma partida')
 const pct = (n: number, d: number) => `${((100 * n) / Math.max(1, d)).toFixed(1)} %`
 const prom = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / Math.max(1, xs.length)
 console.log(`\nCORTE FINAL — simulador del motor (${(ms / 1000).toFixed(1)} s)`)
-console.log(`meta: simon = ${ORIGEN_META.simon}; chipi = ${ORIGEN_META.chipi}`)
+console.log(`meta: ${PERSONAJES.map((id) => `${id} = ${ORIGEN_META[id]}`).join('; ')}`)
 console.log(`partidas CPU vs CPU: ${resultadosCpu.length}; humano simple vs CPU: ${resultadosHumano.length}; metas raras: ${RAPIDO ? 4 : 12}`)
 console.log(`terminan: ${todos.length - noTerminan}/${todos.length} (máx ${(maxTicks / TPS / 60).toFixed(2)} min simulados)`)
 console.log(`violaciones (NaN, fuera de escenario, cuadros, trabados): ${conViolaciones.length} partidas`)
@@ -471,8 +489,9 @@ console.log(`round medio CPU vs CPU: ${mediaRound.toFixed(1)} s`)
 for (const dif of DIFICULTADES) {
   const d = porDif[dif]
   const rs = d.rounds.map((x) => x / TPS)
+  const vals = Object.values(balance[dif])
   console.log(
-    `  ${dif.padEnd(7)} round ${prom(rs).toFixed(1)} s (min ${Math.min(...rs).toFixed(1)}, máx ${Math.max(...rs).toFixed(1)}) · KO ${d.kos} / tiempo ${d.tiempos} · Simón vs Chipi: Simón gana ${balance[dif].toFixed(1)} % (${d.simon}/${d.mixtas})`,
+    `  ${dif.padEnd(7)} round ${prom(rs).toFixed(1)} s (min ${Math.min(...rs).toFixed(1)}, máx ${Math.max(...rs).toFixed(1)}) · KO ${d.kos} / tiempo ${d.tiempos} · victorias por luchador entre ${Math.min(...vals).toFixed(1)} y ${Math.max(...vals).toFixed(1)} %`,
   )
 }
 for (const dif of DIFICULTADES) {
@@ -533,7 +552,7 @@ writeFileSync(
       partidas: { cpu: resultadosCpu.length, humano: resultadosHumano.length },
       mediaRound,
       porDificultad: Object.fromEntries(
-        DIFICULTADES.map((d) => [d, { roundMedio: prom(porDif[d].rounds) / TPS, kos: porDif[d].kos, tiempos: porDif[d].tiempos, simonGana: balance[d] }]),
+        DIFICULTADES.map((d) => [d, { roundMedio: prom(porDif[d].rounds) / TPS, kos: porDif[d].kos, tiempos: porDif[d].tiempos, victorias: balance[d] }]),
       ),
       humano: Object.fromEntries(DIFICULTADES.map((d) => [d, pctHumano(d)])),
       conteo: CONTEO,

@@ -75,6 +75,15 @@ export const CHIP = { normal: 0.15, especial: 0.25 } as const
 /** A partir del golpe `desde` de un combo, cada golpe hace `factor` veces el anterior (con piso). */
 export const ESCALADO_COMBO = { desde: 4, factor: 0.88, minimo: 0.45 } as const
 
+/**
+ * Desde el golpe `desde` de un combo, el aturdimiento de cada golpe dura `factor` veces el del
+ * anterior (con piso): ningún combo se sostiene para siempre. Sin esto, Gabriel contra la pared
+ * encadenaba GOLPE → Break Dance → GOLPE → Break Dance: 20 golpes y 6 s sin que el otro pudiera
+ * moverse (lo encontró simular.mts, revisión del 30/oct). Un combo normal (cadena + especial) no
+ * llega a notarlo.
+ */
+export const ESCALADO_STUN = { desde: 8, factor: 0.8, minimo: 0.3 } as const
+
 // ─── Guardia («romper escudos») ──────────────────────────────────────────────
 
 export const GUARDIA = {
@@ -105,13 +114,33 @@ export const CARGA = {
 export const EFECTO = {
   electrocutado: 40,
   congelado: 100,
-  congeladoBloqueo: 35,
+  /** Bloqueado congela menos (con 35 castigaba tanto al que se cubre que Chipi sólo era fuerte en difícil). */
+  congeladoBloqueo: 22,
   /** Pegarle a un congelado lo rompe con este multiplicador. */
   rompeCongelado: 1.3,
   derribo: 50,
   /** Tirado en el piso después de un golpe en el aire. */
   derriboAereo: 30,
   levantarse: 26,
+  /** Si el kit no dice cuánto: aturdido, mareado y quemado. */
+  aturdido: 50,
+  mareado: 140,
+  quemado: 180,
+  /** Velocidad de caminar con LENTO (la nube) y MAREADO (el trago). */
+  multLento: 0.55,
+  multMareado: 0.65,
+} as const
+
+/**
+ * Inmunidad (ticks) a un estado de control después de salir de él: los estados no se encadenan
+ * infinito (un aturdido no se puede volver a aturdir enseguida).
+ */
+export const INMUNIDAD = {
+  aturdido: 90,
+  mareado: 120,
+  quemado: 60,
+  congelado: 60,
+  electrocutado: 60,
 } as const
 
 // ─── Fases (ticks simulados) ─────────────────────────────────────────────────

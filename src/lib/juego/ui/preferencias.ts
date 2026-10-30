@@ -7,6 +7,7 @@
  * bloqueado, el juego sigue andando con lo que tenga en memoria.
  */
 import { useSyncExternalStore } from 'react'
+import { IDS_PERSONAJES } from '../personajes'
 import type { Dificultad, IdPersonaje } from '../tipos'
 
 const CLAVE = 'cf.preferencias.v1'
@@ -43,7 +44,8 @@ export const PREFERENCIAS_INICIALES: PreferenciasJuego = {
 }
 
 const DIFICULTADES: readonly Dificultad[] = ['facil', 'normal', 'dificil']
-const PERSONAJES: readonly IdPersonaje[] = ['simon', 'chipi']
+/** Del catálogo vivo: un luchador nuevo se guarda solo y uno que se fue se descarta al leer. */
+const PERSONAJES: readonly IdPersonaje[] = IDS_PERSONAJES
 
 let cache: PreferenciasJuego | null = null
 const oyentes = new Set<() => void>()

@@ -1,7 +1,7 @@
 'use client'
 
 import { LogOut, RotateCcw, Smartphone } from 'lucide-react'
-import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { use, useEffect, useEffectEvent, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { avanzar, calcularPuntaje, crearPartida, metaDesdeAtlas } from '@/lib/juego/motor'
 import type { ArranqueDuelo, Duelo, FinPeleaLocal } from '@/lib/juego/online/duelo'
 import { hashPartida } from '@/lib/juego/online/hash'
@@ -35,6 +35,7 @@ import { guardarPreferencias, type PreferenciasJuego } from '@/lib/juego/ui/pref
 import type { Eleccion, FuentesJuego, ResultadoPelea } from '@/lib/juego/ui/tipos-ui'
 import { ControlesPelea } from './controles-pelea'
 import { HudPelea } from './hud-pelea'
+import { RecursosFaltantes } from './imagen-juego'
 import { MenuPausa } from './menu-pausa'
 import { CapasOnline, crearCapasOnline, HudOnline, MenuOnline } from './sala/hud-online'
 import { Tutorial } from './tutorial'
@@ -119,6 +120,8 @@ interface Props {
   turno: EstadoTurnoJuego | null
   /** Hay algo encima (el «¡te toca!»): la pelea se congela. */
   bloqueada: boolean
+  /** Sin el tutorial de la primera vez (el atajo de pruebas `?prueba=`, sólo en desarrollo). */
+  sinTutorial?: boolean
   onTerminar: (r: ResultadoPelea) => void
   onReiniciar: () => void
   onSalir: () => void
@@ -141,6 +144,7 @@ export function PantallaPelea({
   prefs,
   turno,
   bloqueada,
+  sinTutorial = false,
   onTerminar,
   onReiniciar,
   onSalir,
@@ -163,11 +167,12 @@ export function PantallaPelea({
 
   // Si la pelea arranca con el «¡te toca!» encima (llegó durante el VS), arranca en pausa.
   const [pausa, setPausa] = useState(() => bloqueada)
-  const [tutorial, setTutorial] = useState(() => !prefs.tutorialVisto && !online)
+  const [tutorial, setTutorial] = useState(() => !prefs.tutorialVisto && !online && !sinTutorial)
   const [error, setError] = useState(false)
   /** Online: el menú del botón de pausa (la pelea NO se detiene). */
   const [menuOnline, setMenuOnline] = useState(false)
   const tactil = useConsultaMedia('(any-pointer: coarse)')
+  const faltantes = use(RecursosFaltantes)
 
   // Un «¡te toca!» encima deja la pelea en PAUSA: al cerrarlo no arranca sola a espaldas
   // del jugador (patrón de React para ajustar estado cuando cambia una prop).
@@ -275,7 +280,7 @@ export function PantallaPelea({
     const entrada = crearCapturaEntrada()
     entradaRef.current = entrada
     const ficha = PERSONAJES[personajes[lado]]
-    const hud = crearHud(raiz, { entrada, costos: [ficha.especiales[0].costo, ficha.especiales[1].costo] })
+    const hud = crearHud(raiz, { entrada, costos: [ficha.especiales[0].costo, ficha.especiales[1].costo], faltantes })
 
     // ─── Online: lockstep, vistas del lado propio y capas ──────────────────
     let lock: Lockstep | null = null
@@ -464,7 +469,7 @@ export function PantallaPelea({
         // Ya no importa: la pantalla se va.
       }
     }
-  }, [jugador, rival, arena, dificultad, recursos, fuenteTitulo, fuenteNumeros, audio, online])
+  }, [jugador, rival, arena, dificultad, recursos, fuenteTitulo, fuenteNumeros, audio, online, faltantes])
 
   // Pausa, tutorial, avisos y errores congelan la pelea (y sueltan lo que estaba apretado).
   useEffect(() => {
@@ -554,6 +559,7 @@ export function PantallaPelea({
           prefs={prefs}
           turno={turno}
           tactil={tactil}
+          herramienta={fichaJugador.herramientas[0]}
           onContinuar={() => {
             audio.ui('confirmar')
             setPausa(false)
@@ -586,7 +592,7 @@ export function PantallaPelea({
           }}
         />
       )}
-      {tutorial && !error && <Tutorial tactil={tactil} onCerrar={cerrarTutorial} />}
+      {tutorial && !error && <Tutorial tactil={tactil} ficha={fichaJugador} onCerrar={cerrarTutorial} />}
       {superpuesto}
       {error &&
         (online ? (

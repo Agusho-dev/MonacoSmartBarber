@@ -116,8 +116,12 @@ export function PantallaResultado({
   sala,
 }: Props) {
   const jugador = PERSONAJES[resultado.eleccion.jugador]
-  /** La CPU le dio el remate ¡AL CERO!: el retrato sale pelado (public/juego/personajes/<id>/retrato_rapado.webp). */
-  const peladoAlCero = !resultado.gano && resultado.estadisticasRival.finalAlCero
+  /**
+   * La CPU le dio el remate ¡AL CERO!: el retrato sale pelado (`rutas.rapado.retrato`), si el
+   * barbero ya tiene sus sprites pelados; si no, el de siempre.
+   */
+  const retratoPelado =
+    !resultado.gano && resultado.estadisticasRival.finalAlCero ? (jugador.rutas.rapado?.retrato ?? null) : null
   const rival = PERSONAJES[resultado.eleccion.rival]
   const arena = ARENAS[resultado.eleccion.arena]
   const { desglose, estadisticas: est, gano } = resultado
@@ -295,8 +299,9 @@ export function PantallaResultado({
           <div className="cf-resultado__heroe">
             <div className="cf-resultado__retrato">
               <ImagenJuego
-                src={peladoAlCero ? jugador.rutas.retrato.replace(/retrato\.webp$/, 'retrato_rapado.webp') : jugador.rutas.retrato}
-                alt={peladoAlCero ? `${jugador.nombre}, pelado al cero` : jugador.nombre}
+                src={retratoPelado ?? jugador.rutas.retrato}
+                alternativa={retratoPelado ? jugador.rutas.retrato : null}
+                alt={retratoPelado ? `${jugador.nombre}, pelado al cero` : jugador.nombre}
                 tipo="cuerpo"
                 color={jugador.color}
                 espejar

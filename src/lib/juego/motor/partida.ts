@@ -13,13 +13,14 @@ import { avanzarAccion, cerrarTickAccion, iniciarRemate, REMATE_IMPACTO } from '
 import { animar, normalizarMeta } from './animacion'
 import { azar, crearAzar } from './azar'
 import { aplicarImpacto, contactosCuerpoACuerpo } from './combate'
-import { CARGA, ESCALA_KO, FASE, HITSTOP_KO } from './constantes'
-import { enCombo, interrumpir } from './cuerpo'
+import { CARGA, EFECTO, ESCALA_KO, FASE, HITSTOP_KO } from './constantes'
+import { enCombo, interrumpir, puedeActuar } from './cuerpo'
 import { crearCerebro, entradaCpu, reiniciarCerebro } from './cpu'
 import type { EstadoInterno, InternoLuchador } from './interno'
 import { emitir, guardarInterno, internoDe } from './interno'
 import {
   actualizarEstado,
+  cargaDeInicio,
   crearEstadisticas,
   crearInternoLuchador,
   crearLuchador,
@@ -49,6 +50,14 @@ function limpiarEfectos(l: LuchadorEstado, li: InternoLuchador): void {
   l.efectos.congelado = 0
   l.efectos.electrocutado = 0
   l.efectos.guardiaRota = 0
+  l.efectos.aturdido = 0
+  l.efectos.mareado = 0
+  l.efectos.quemado = 0
+  l.efectos.lento = 0
+  l.efectos.curando = 0
+  li.quema = null
+  // Si lo tenían agarrado, lo suelta (cae); el que agarraba lo nota y termina su agarre.
+  li.agarradoPor = null
   li.stun = 0
   li.stunBloqueo = false
   li.caidaDerribo = 0
@@ -89,8 +98,8 @@ export function crearPartida(config: ConfigPartida): Partida {
     azar: crearAzar(semilla, 1),
     luchadores: [crearInternoLuchador(p.luchadores[0].vida), crearInternoLuchador(p.luchadores[1].vida)],
     cerebros: [
-      config.cpu?.[0] ? crearCerebro(0, config.dificultad, semilla) : null,
-      config.cpu?.[1] ? crearCerebro(1, config.dificultad, semilla) : null,
+      config.cpu?.[0] ? crearCerebro(0, config.dificultad, semilla, kit0.cpu.pericia?.[config.dificultad] ?? 0) : null,
+      config.cpu?.[1] ? crearCerebro(1, config.dificultad, semilla, kit1.cpu.pericia?.[config.dificultad] ?? 0) : null,
     ],
     proyectiles: [],
     sigIdProyectil: 0,
@@ -102,7 +111,9 @@ export function crearPartida(config: ConfigPartida): Partida {
     koT: 0,
     ticksPelea: 0,
     duracionesRound: [],
+    ultimoAcierto: [0, 0],
   }
+  for (const lado of LADOS) p.luchadores[lado].carga = cargaDeInicio(I.kits[lado])
   guardarInterno(p, I)
   emitir(p, { tipo: 'presentacion' })
   I.luchadores[0].pose = 'burla'
@@ -114,9 +125,29 @@ export function crearPartida(config: ConfigPartida): Partida {
   return p
 }
 
+/**
+ * Un agarrado cuyo agarre ya no existe (al que agarraba le pegaron o terminó el round) se suelta
+ * y cae. Así nadie queda colgado en el aire.
+ */
+function soltarAgarresHuerfanos(p: Partida, I: EstadoInterno): void {
+  for (const lado of LADOS) {
+    const li = I.luchadores[lado]
+    if (li.agarradoPor === null) continue
+    const a = I.luchadores[li.agarradoPor].accion
+    if (a && a.agarre && a.agarre.victima === lado) continue
+    li.agarradoPor = null
+    const l = p.luchadores[lado]
+    if (!l.enSuelo) {
+      l.vy = Math.min(l.vy, 0)
+      li.caidaDerribo = Math.max(li.caidaDerribo, EFECTO.derriboAereo)
+    }
+  }
+}
+
 /** Física y relojes sin control de los jugadores (presentación, anuncios, KO, festejo). */
 function simularSinControl(p: Partida, I: EstadoInterno): void {
   for (const lado of LADOS) avanzarAccion(p, I, lado, false)
+  soltarAgarresHuerfanos(p, I)
   for (const lado of LADOS) fisica(p, I, lado)
   resolverEmpuje(p, I)
   actualizarProyectiles(p, I, false)
@@ -148,6 +179,7 @@ function nuevoRound(p: Partida, I: EstadoInterno): void {
   p.congelamientoGolpe = 0
   for (const lado of LADOS) {
     reiniciarLuchador(p.luchadores[lado], I.luchadores[lado])
+    p.luchadores[lado].carga = cargaDeInicio(I.kits[lado])
     const c = I.cerebros[lado]
     if (c) reiniciarCerebro(c)
   }
@@ -270,6 +302,7 @@ function pasoPelea(p: Partida, I: EstadoInterno, e: readonly [EntradaJugador, En
   for (const lado of LADOS) I.luchadores[lado].vidaAntes = p.luchadores[lado].vida
   for (const lado of LADOS) decidir(p, I, lado, e[lado])
   for (const lado of LADOS) avanzarAccion(p, I, lado, true)
+  soltarAgarresHuerfanos(p, I)
   for (const lado of LADOS) fisica(p, I, lado)
   resolverEmpuje(p, I)
   actualizarProyectiles(p, I, true)
@@ -325,7 +358,9 @@ function pasoFinal(p: Partida, I: EstadoInterno, e: readonly [EntradaJugador, En
   const g = F.ganador
   const G = p.luchadores[g]
   const Gi = I.luchadores[g]
-  if (!F.remate && p.ticksFase >= FASE.remateGracia && Gi.accion === null && G.enSuelo && Gi.stun === 0) {
+  // El remate sale sólo con el ganador libre: si en el mismo tick del KO lo tiraron, lo congelaron
+  // o lo aturdieron, espera a levantarse (antes remataba tirado en el piso, sin animación).
+  if (!F.remate && p.ticksFase >= FASE.remateGracia && puedeActuar(G, Gi)) {
     const boton = botonRemate(Gi)
     if (boton) {
       vaciarBuffer(Gi)
@@ -335,6 +370,7 @@ function pasoFinal(p: Partida, I: EstadoInterno, e: readonly [EntradaJugador, En
   }
   if (!F.remate) decidir(p, I, g, e[g], true)
   avanzarAccion(p, I, g, false)
+  soltarAgarresHuerfanos(p, I)
   const a = Gi.accion
   if (a && a.remate && a.t === REMATE_IMPACTO) rematar(p, I)
   for (const lado of LADOS) fisica(p, I, lado)

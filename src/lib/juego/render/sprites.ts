@@ -14,13 +14,24 @@ export interface Sprites {
   sombra: HTMLCanvasElement
   /** Brillo suave de núcleo claro, por color (cacheado). */
   brillo(color: string): HTMLCanvasElement
-  /** Destellos de 4 puntas: 0 blanco, 1 oro, 2 celeste. */
+  /**
+   * Estela que se afina hacia la cola (izquierda transparente, cabeza a la derecha), por color.
+   * 128×16 px: se estira entre la cola y la cabeza del proyectil (ver `trazarEstela` en arsenal.ts).
+   */
+  estela(color: string): HTMLCanvasElement
+  /** Destellos de 4 puntas: 0 blanco, 1 oro, 2 celeste, 3 violeta, 4 verde, 5 magenta, 6 rojo. */
   estrella: HTMLCanvasElement[]
   /** Estrellitas del mareo: 0 oro, 1 celeste (guardia rota). */
   estrella5: HTMLCanvasElement[]
-  /** Estallidos de golpe: 0 fuego, 1 azul (bloqueo), 2 oro (crítico), 3 eléctrico, 4 hielo. */
+  /**
+   * Estallidos de golpe: 0 fuego, 1 azul (bloqueo), 2 oro (crítico), 3 eléctrico, 4 hielo,
+   * 5 violeta (graffiti, grito), 6 verde (curación, gas).
+   */
   estallido: HTMLCanvasElement[]
-  /** Nubes suaves: 0 polvo, 1 niebla del spray, 2 viento blanco. */
+  /**
+   * Nubes suaves: 0 polvo, 1 niebla del spray, 2 viento blanco, 3 humo gris (moto, pólvora),
+   * 4 gas verde (el pañal), 5 vapor violeta (el trago).
+   */
   nube: HTMLCanvasElement[]
   mechones: HTMLCanvasElement[]
   /** Escudo de la guardia del color del personaje (cacheado por color). */
@@ -43,6 +54,39 @@ function brilloSuave(color: string, tam = 64): HTMLCanvasElement {
   d.addColorStop(1, rgba(color, 0))
   g.fillStyle = d
   g.fillRect(0, 0, tam, tam)
+  return c
+}
+
+function estela(color: string): HTMLCanvasElement {
+  const W = 128
+  const H = 16
+  const c = crearLienzo(W, H)
+  const g = contexto(c)
+  const r = H / 2
+  const d = g.createLinearGradient(0, 0, W, 0)
+  d.addColorStop(0, rgba(color, 0))
+  d.addColorStop(0.55, rgba(color, 0.45))
+  d.addColorStop(1, rgba(aclarar(color, 0.35), 0.95))
+  g.fillStyle = d
+  g.beginPath()
+  g.moveTo(0, r - 0.6)
+  g.lineTo(W - r, 1)
+  g.arc(W - r, r, r - 1, -Math.PI / 2, Math.PI / 2)
+  g.lineTo(0, r + 0.6)
+  g.closePath()
+  g.fill()
+  const n = g.createLinearGradient(0, 0, W, 0)
+  n.addColorStop(0, 'rgba(255,255,255,0)')
+  n.addColorStop(0.7, 'rgba(255,255,255,0.55)')
+  n.addColorStop(1, 'rgba(255,255,255,1)')
+  g.fillStyle = n
+  g.beginPath()
+  g.moveTo(W * 0.25, r - 0.3)
+  g.lineTo(W - r, r - 2.6)
+  g.arc(W - r, r, 2.6, -Math.PI / 2, Math.PI / 2)
+  g.lineTo(W * 0.25, r + 0.3)
+  g.closePath()
+  g.fill()
   return c
 }
 
@@ -424,6 +468,7 @@ const COLORES_PELO = ['#2B1A10', '#3E2616', '#15100C', '#5A3A22']
 
 export function crearSprites(): Sprites {
   const brillos = new Map<string, HTMLCanvasElement>()
+  const estelas = new Map<string, HTMLCanvasElement>()
   const escudos = new Map<string, HTMLCanvasElement>()
   let elSillon: HTMLCanvasElement | null = null
   let laTijera: HTMLCanvasElement | null = null
@@ -439,7 +484,23 @@ export function crearSprites(): Sprites {
       }
       return b
     },
-    estrella: [estrella4('#FFFFFF'), estrella4('#FFC93A'), estrella4('#7EDCFF')],
+    estela(color: string) {
+      let e = estelas.get(color)
+      if (!e) {
+        e = estela(color)
+        estelas.set(color, e)
+      }
+      return e
+    },
+    estrella: [
+      estrella4('#FFFFFF'),
+      estrella4('#FFC93A'),
+      estrella4('#7EDCFF'),
+      estrella4('#C084FC'),
+      estrella4('#4ADE80'),
+      estrella4('#F472D0'),
+      estrella4('#FF5A4A'),
+    ],
     estrella5: [estrella5('#FFD43B', '#7A3E00'), estrella5('#B8F0FF', '#145C9E')],
     estallido: [
       estallido('#FFE9A0', '#FF7A1A'),
@@ -447,8 +508,17 @@ export function crearSprites(): Sprites {
       estallido('#FFF3B0', '#F5B301'),
       estallido('#FFFBD0', '#FFC400'),
       estallido('#E9FCFF', '#38B6FF'),
+      estallido('#FFE3FF', '#A855F7'),
+      estallido('#E9FFE6', '#22C55E'),
     ],
-    nube: [nube('#B9AE9F', 0.55), nube('#EAFBFF', 0.6), nube('#FFFFFF', 0.5)],
+    nube: [
+      nube('#B9AE9F', 0.55),
+      nube('#EAFBFF', 0.6),
+      nube('#FFFFFF', 0.5),
+      nube('#6B7078', 0.55),
+      nube('#86C846', 0.5),
+      nube('#B57BFF', 0.5),
+    ],
     mechones,
     escudo(color: string) {
       let e = escudos.get(color)
@@ -468,8 +538,10 @@ export function crearSprites(): Sprites {
     },
     liberar() {
       for (const b of brillos.values()) liberarLienzo(b)
+      for (const e of estelas.values()) liberarLienzo(e)
       for (const e of escudos.values()) liberarLienzo(e)
       brillos.clear()
+      estelas.clear()
       escudos.clear()
       liberarLienzo(elSillon)
       liberarLienzo(laTijera)

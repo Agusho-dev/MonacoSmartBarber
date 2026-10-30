@@ -301,12 +301,20 @@ async function cargarEfectos(tJson: Tarea, tPng: Tarea): Promise<RecursoEfectos 
   }
 }
 
-/** Los sprites pelados del remate (opcionales: sin ellos el remate no pela a nadie). */
+/**
+ * Los sprites pelados del remate (opcionales: sin ellos el remate no pela a nadie). Sólo se piden
+ * si la ficha dice que existen (`rutas.rapado`): un barbero recién sumado no deja un 404.
+ */
 async function cargarRapado(id: IdPersonaje, tJson: Tarea, tPng: Tarea): Promise<RecursoRapado | null> {
   const ficha = PERSONAJES[id]
+  if (ficha && !ficha.rutas.rapado) {
+    tJson.avanzar(1)
+    tPng.avanzar(1)
+    return null
+  }
   try {
-    if (!ficha) throw new Error('personaje desconocido')
-    const ruta = absoluta('rapado.json', absoluta(ficha.rutas.atlas))
+    if (!ficha?.rutas.rapado) throw new Error('personaje desconocido')
+    const ruta = absoluta(ficha.rutas.rapado.atlas)
     const blob = await bajar(ruta, tJson)
     const datos = JSON.parse(await blob.text()) as AtlasRapado
     tJson.avanzar(1)

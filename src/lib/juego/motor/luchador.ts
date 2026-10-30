@@ -7,7 +7,7 @@ import type { EntradaJugador, EstadisticasLuchador, IdPersonaje, Lado, LuchadorE
 import { ENTRADA_VACIA } from '../tipos'
 import { PERSONAJES } from '../personajes'
 import { iniciarMovimiento, intentarEspecial } from './acciones'
-import { sumarCarga } from './combate'
+import { danioContinuo, sumarCarga } from './combate'
 import {
   ATERRIZAJE_TICKS,
   CARGA,
@@ -21,15 +21,32 @@ import {
   FRICCION_SUELO,
   GRAVEDAD,
   GUARDIA,
+  INMUNIDAD,
   TICKS_BUFFER,
   VEL_SALTO,
   X_INICIO,
   X_MAX,
   X_MIN,
 } from './constantes'
-import { dirDe, franjaEmpuje, limitar, mirarA, puedeActuar, puedeActuarEnAire } from './cuerpo'
-import type { BotonBuffer, EstadoInterno, InternoLuchador } from './interno'
+import { dirDe, franjaEmpuje, invulnerablePorAccion, limitar, mirarA, puedeActuar, puedeActuarEnAire } from './cuerpo'
+import type { BotonBuffer, EstadoControl, EstadoInterno, InternoLuchador } from './interno'
 import { emitir } from './interno'
+import type { DefEspecial, KitPersonaje } from './movimientos'
+
+const ESTADOS_CONTROL: readonly EstadoControl[] = ['aturdido', 'mareado', 'quemado', 'congelado', 'electrocutado']
+
+/** Velocidad de caminar con LENTO o MAREADO (no se suman: vale la peor). */
+function multVelocidad(l: LuchadorEstado): number {
+  let m = 1
+  if (l.efectos.lento > 0) m = Math.min(m, EFECTO.multLento)
+  if (l.efectos.mareado > 0) m = Math.min(m, EFECTO.multMareado)
+  return m
+}
+
+/** Carga con la que arranca cada round (Happy hour suma). */
+export function cargaDeInicio(kit: KitPersonaje): number {
+  return CARGA.inicio + (kit.pasiva?.cargaInicial ?? 0)
+}
 
 const BOTONES_BUFFER: readonly BotonBuffer[] = ['golpe', 'herramienta', 'especial1', 'especial2', 'salto', 'dash']
 
@@ -65,7 +82,17 @@ export function crearLuchador(id: IdPersonaje, lado: Lado): LuchadorEstado {
     carga: CARGA.inicio,
     destello: 0,
     invulnerable: false,
-    efectos: { congelado: 0, electrocutado: 0, guardiaRota: 0, critico: 0 },
+    efectos: {
+      congelado: 0,
+      electrocutado: 0,
+      guardiaRota: 0,
+      critico: 0,
+      aturdido: 0,
+      mareado: 0,
+      quemado: 0,
+      lento: 0,
+      curando: 0,
+    },
     combo: 0,
   }
 }
@@ -85,6 +112,7 @@ export function crearEstadisticas(): EstadisticasLuchador {
     congelamientos: 0,
     rondasPerfectas: 0,
     finalAlCero: false,
+    curado: 0,
   }
 }
 
@@ -127,6 +155,9 @@ export function crearInternoLuchador(vida: number): InternoLuchador {
     danioRecibidoRound: 0,
     danioHechoRound: 0,
     vidaAntes: vida,
+    inmune: { aturdido: 0, mareado: 0, quemado: 0, congelado: 0, electrocutado: 0 },
+    quema: null,
+    agarradoPor: null,
   }
 }
 
@@ -149,6 +180,11 @@ export function reiniciarLuchador(l: LuchadorEstado, li: InternoLuchador): void 
   l.efectos.electrocutado = 0
   l.efectos.guardiaRota = 0
   l.efectos.critico = 0
+  l.efectos.aturdido = 0
+  l.efectos.mareado = 0
+  l.efectos.quemado = 0
+  l.efectos.lento = 0
+  l.efectos.curando = 0
   l.combo = 0
   for (const b of BOTONES_BUFFER) li.buf[b] = 0
   li.toque = null
@@ -178,6 +214,9 @@ export function reiniciarLuchador(l: LuchadorEstado, li: InternoLuchador): void 
   li.danioRecibidoRound = 0
   li.danioHechoRound = 0
   li.vidaAntes = l.vida
+  for (const e of ESTADOS_CONTROL) li.inmune[e] = 0
+  li.quema = null
+  li.agarradoPor = null
 }
 
 export function vaciarBuffer(li: InternoLuchador): void {
@@ -257,7 +296,7 @@ function saltar(p: Partida, I: EstadoInterno, lado: Lado, dir: -1 | 0 | 1): void
   l.enSuelo = false
   l.vy = VEL_SALTO
   l.y = 0
-  li.vMov = dir * I.kits[lado].saltoVx
+  li.vMov = dir * I.kits[lado].saltoVx * multVelocidad(l)
   li.pateoAereo = false
   li.guardia = false
   li.agachado = false
@@ -273,7 +312,14 @@ function iniciarDash(p: Partida, I: EstadoInterno, lado: Lado, dirPedida: -1 | 0
   const k = I.kits[lado]
   const dir: -1 | 1 = dirPedida === 0 ? (l.mira === 1 ? -1 : 1) : dirPedida
   const adelante = dir === l.mira
-  li.dash = { t: 0, total: k.dash.ticks, dir, adelante, dist: adelante ? k.dash.adelante : k.dash.atras }
+  li.dash = {
+    t: 0,
+    total: k.dash.ticks,
+    dir,
+    adelante,
+    dist: adelante ? k.dash.adelante : k.dash.atras,
+    invul: k.dash.invulnerable ?? DASH.invulnerable,
+  }
   li.selloDash++
   li.guardia = false
   li.agachado = false
@@ -295,8 +341,11 @@ export function decidir(p: Partida, I: EstadoInterno, lado: Lado, e: EntradaJuga
 
   const a = li.accion
   if (a) {
-    // Cadenas y cancelación en especial, desde el contacto (o desde que terminó la ventana).
-    if (!soloMoverse && a.especial === 0 && !a.remate && !a.mov.aereo && a.t >= a.cancelDesde) {
+    // Cadenas y cancelación en especial: sólo si el golpe TOCÓ (pegó, lo bloquearon o lo aguantó
+    // una armadura), desde el contacto de la última ventana o desde que terminó. Un golpe al aire
+    // se paga con su recuperación entera: si encadenaba igual, machacar GOLPE de lejos era gratis
+    // (el puño al aire salía en patada y le ganaba a cualquiera que quisiera castigarlo).
+    if (!soloMoverse && a.especial === 0 && !a.remate && !a.mov.aereo && a.contacto && a.t >= a.cancelDesde) {
       if (intentarEspecial(p, I, lado)) return
       const sig = a.mov.siguiente
       const boton = a.mov.boton
@@ -377,15 +426,16 @@ export function decidir(p: Partida, I: EstadoInterno, lado: Lado, e: EntradaJuga
   }
   if (dir !== 0) {
     const adelante = dir === l.mira
+    const mv = multVelocidad(l)
     if (adelante) {
       li.tAdelante++
       li.corriendo = li.tAdelante >= CORRER_DESDE && Math.abs(rival.x - l.x) > CORRER_DISTANCIA_MIN
-      li.vMov = dir * (li.corriendo ? k.correr : k.caminar)
+      li.vMov = dir * (li.corriendo ? k.correr : k.caminar) * mv
       li.atras = false
     } else {
       li.tAdelante = 0
       li.corriendo = false
-      li.vMov = dir * k.caminarAtras
+      li.vMov = dir * k.caminarAtras * mv
       li.atras = true
     }
   } else {
@@ -423,6 +473,14 @@ function aterrizar(p: Partida, I: EstadoInterno, lado: Lado): void {
     li.accion = null
     l.movimiento = null
     li.aterrizaje = a.mov.aterrizaje ?? ATERRIZAJE_TICKS
+  } else if (a && a.enAire) {
+    // Embestida aérea (Patada del Dragón, Chilena): termina al aterrizar, con su recuperación.
+    const emb = (a.mov as DefEspecial).embestida
+    li.accion = null
+    l.movimiento = null
+    li.invulnProyectil = false
+    // Si pegó, se recupera rápido; bloqueada o al aire, queda expuesto.
+    li.aterrizaje = emb ? (a.acerto ? emb.recuperacionGolpe : emb.recuperacionBloqueo) : ATERRIZAJE_TICKS
   } else if (!a && l.efectos.congelado === 0 && li.stun === 0) {
     li.aterrizaje = ATERRIZAJE_TICKS
   }
@@ -435,6 +493,11 @@ function aterrizar(p: Partida, I: EstadoInterno, lado: Lado): void {
 export function fisica(p: Partida, I: EstadoInterno, lado: Lado): void {
   const l = p.luchadores[lado]
   const li = I.luchadores[lado]
+  // El agarrado no se mueve solo: lo sostiene el que lo agarró (combate.progresarAgarre).
+  if (li.agarradoPor !== null) {
+    l.vx = 0
+    return
+  }
   if (l.efectos.congelado > 0) li.vMov = 0
   // Dash: avance con salida rápida y frenado (curva cuadrática).
   if (li.dash) {
@@ -446,8 +509,12 @@ export function fisica(p: Partida, I: EstadoInterno, lado: Lado): void {
     li.vMov = d.dir * d.dist * (f(d.t + 1) - f(d.t))
   }
   if (!l.enSuelo) {
-    l.y += l.vy - GRAVEDAD / 2
-    l.vy -= GRAVEDAD
+    // Las embestidas aéreas caen con su propia gravedad.
+    const a = li.accion
+    const salto = a && a.enAire ? (a.mov as DefEspecial).embestida?.salto : undefined
+    const g = salto ? salto.gravedad : GRAVEDAD
+    l.y += l.vy - g / 2
+    l.vy -= g
     if (l.vy <= 0) li.tAire++
     l.x += li.vMov + li.vEmpuje
     li.vEmpuje *= FRICCION_AIRE
@@ -496,16 +563,47 @@ export function resolverEmpuje(p: Partida, I: EstadoInterno): void {
 export function relojes(p: Partida, I: EstadoInterno, lado: Lado, pelea: boolean): void {
   const l = p.luchadores[lado]
   const li = I.luchadores[lado]
+  const k = I.kits[lado]
   const ef = l.efectos
   if (li.stun > 0) {
     li.stun--
     if (li.stun === 0) li.stunBloqueo = false
   }
+  // Inmunidad: corre y, al terminar un estado de control (o al romperse el hielo), arranca.
+  for (const e of ESTADOS_CONTROL) if (li.inmune[e] > 0) li.inmune[e]--
   if (ef.congelado > 0) {
     ef.congelado--
-    if (ef.congelado === 0) emitir(p, { tipo: 'descongelado', quien: lado, roto: false })
+    if (ef.congelado === 0) {
+      li.inmune.congelado = INMUNIDAD.congelado
+      emitir(p, { tipo: 'descongelado', quien: lado, roto: false })
+    }
   }
-  if (ef.electrocutado > 0) ef.electrocutado--
+  if (ef.electrocutado > 0) {
+    ef.electrocutado--
+    if (ef.electrocutado === 0) li.inmune.electrocutado = INMUNIDAD.electrocutado
+  }
+  if (ef.aturdido > 0) {
+    ef.aturdido--
+    if (ef.aturdido === 0) li.inmune.aturdido = INMUNIDAD.aturdido
+  }
+  if (ef.mareado > 0) {
+    ef.mareado--
+    if (ef.mareado === 0) li.inmune.mareado = INMUNIDAD.mareado
+  }
+  if (ef.quemado > 0) {
+    // Quemado: pierde vida cada tanto (sólo en la pelea).
+    const q = li.quema
+    if (q && pelea) {
+      q.t++
+      if (q.t % q.cada === 0) danioContinuo(p, I, q.de, lado, q.danio)
+    }
+    ef.quemado--
+    if (ef.quemado === 0) {
+      li.inmune.quemado = INMUNIDAD.quemado
+      li.quema = null
+    }
+  }
+  if (ef.lento > 0) ef.lento--
   if (ef.guardiaRota > 0) {
     ef.guardiaRota--
     if (ef.guardiaRota === 0) l.guardia = Math.max(l.guardia, GUARDIA.vuelve)
@@ -521,7 +619,7 @@ export function relojes(p: Partida, I: EstadoInterno, lado: Lado, pelea: boolean
     if (li.dash.t >= li.dash.total) {
       li.dash = null
       li.vMov = 0
-      li.dashEspera = DASH.espera
+      li.dashEspera = k.dash.espera ?? DASH.espera
     }
   } else if (li.dashEspera > 0) li.dashEspera--
   if (li.aterrizaje > 0) li.aterrizaje--
@@ -534,7 +632,7 @@ export function relojes(p: Partida, I: EstadoInterno, lado: Lado, pelea: boolean
     if (li.sinBloquear >= GUARDIA.espera && ef.guardiaRota === 0 && l.guardia < GUARDIA.max) {
       l.guardia = Math.min(GUARDIA.max, l.guardia + GUARDIA.regen)
     }
-    sumarCarga(p, lado, (p.turbo ? CARGA.turboMult : 1) / CARGA.ticksPorUnidad)
+    sumarCarga(p, lado, ((p.turbo ? CARGA.turboMult : 1) * (k.pasiva?.multCarga ?? 1)) / CARGA.ticksPorUnidad)
   }
 }
 
@@ -545,12 +643,13 @@ export function actualizarEstado(l: LuchadorEstado, li: InternoLuchador): void {
   else if (li.pose === 'victoria') l.estado = 'victoria'
   else if (li.pose === 'burla') l.estado = 'burla'
   else if (li.pose === 'mareado') l.estado = 'mareado'
+  else if (li.agarradoPor !== null) l.estado = 'agarrado'
   else if (ef.congelado > 0) l.estado = 'congelado'
   else if (ef.electrocutado > 0) l.estado = 'electrocutado'
   else if (li.derribo > 0 || li.caidaDerribo > 0) l.estado = 'derribado'
   else if (li.levantar > 0) l.estado = 'levantandose'
   else if (ef.guardiaRota > 0) l.estado = 'guardia_rota'
-  else if (li.stun > 0) l.estado = 'aturdido'
+  else if (li.stun > 0 || ef.aturdido > 0) l.estado = 'aturdido'
   else if (li.dash) l.estado = 'dash'
   else if (li.accion) l.estado = 'atacando'
   else if (!l.enSuelo) l.estado = 'saltando'
@@ -559,7 +658,8 @@ export function actualizarEstado(l: LuchadorEstado, li: InternoLuchador): void {
   else if (li.vMov !== 0) l.estado = 'caminando'
   else l.estado = 'quieto'
   l.invulnerable =
-    (li.dash !== null && li.dash.t < DASH.invulnerable) ||
+    (li.dash !== null && li.dash.t < li.dash.invul) ||
+    invulnerablePorAccion(li) ||
     li.derribo > 0 ||
     li.levantar > 0 ||
     li.caidaDerribo > 0 ||

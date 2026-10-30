@@ -19,7 +19,20 @@ export const VISTA_ALTO = 540
 /** «Carga de la máquina»: el elixir del juego. */
 export const CARGA_MAX = 10
 
-export type IdPersonaje = 'simon' | 'chipi'
+export type IdPersonaje =
+  | 'simon'
+  | 'chipi'
+  | 'nico_u'
+  | 'fabri'
+  | 'luciano'
+  | 'gabriel'
+  | 'guillermo'
+  | 'rodrigo'
+  | 'joaquin'
+  | 'nahuel'
+  | 'lucas'
+  | 'stefano'
+  | 'brian'
 export type IdArena = 'rondeau' | 'caseros' | 'pueyrredon' | 'parana'
 export type Dificultad = 'facil' | 'normal' | 'dificil'
 export type Lado = 0 | 1
@@ -62,9 +75,22 @@ export interface AtlasPersonaje {
   /** Alto en px del cuadro 0 de «quieto»: el render escala a FichaPersonaje.alturaMundo. */
   alturaReferencia: number
   animaciones: Record<ClaveAnimacion, AnimacionAtlas>
-  /** Sprites sueltos (proyectiles, objetos): 'tornado', 'sillon', etc. Pueden faltar. */
+  /**
+   * Sprites sueltos (proyectiles, objetos): 'tornado', 'sillon', etc. y los de EFECTOS_ATLAS.
+   * TODOS opcionales: el render dibuja cada proyectil con su sprite si existe (girando con
+   * `rot`) y si no, con un dibujo propio. Nada depende de que exista.
+   */
   efectos: Record<string, { cuadros: CuadroAtlas[] }>
 }
+
+/**
+ * Sprites sueltos que se pueden sacar de las hojas de los barberos nuevos (todos opcionales).
+ * 'pocion' es la bebida de Fabri, 'vaso' el de Guillermo, 'roca' las piedras del sismo de Brian.
+ */
+export const EFECTOS_ATLAS = [
+  'bombo', 'guante', 'pocion', 'graffiti', 'botella', 'vaso', 'gorro', 'pelota', 'panal', 'mamadera', 'mate', 'roca',
+] as const
+export type EfectoAtlas = (typeof EFECTOS_ATLAS)[number]
 
 /** Lo que el motor necesita saber del atlas para sincronizar golpes con dibujos. */
 export type MetaAnimaciones = Record<ClaveAnimacion, { n: number; impactos: number[] }>
@@ -80,8 +106,58 @@ export interface Atributos {
   alcance: number
 }
 
-export type IconoEspecial = 'rayo' | 'tijera' | 'sillon' | 'spray'
-export type EfectoEspecial = 'electrocuta' | 'multigolpe' | 'rompe_guardia' | 'congela'
+export type IconoEspecial =
+  | 'rayo'
+  | 'tijera'
+  | 'sillon'
+  | 'spray'
+  | 'bombo'
+  | 'navaja'
+  | 'cura'
+  | 'guante'
+  | 'moto'
+  | 'pistola'
+  | 'break'
+  | 'graffiti'
+  | 'trago'
+  | 'botella'
+  | 'baile'
+  | 'grito'
+  | 'gorro'
+  | 'dragon'
+  | 'pelota'
+  | 'chilena'
+  | 'mamadera'
+  | 'panal'
+  | 'mate'
+  | 'termo'
+  | 'agarre'
+  | 'sismo'
+export type EfectoEspecial =
+  | 'electrocuta'
+  | 'multigolpe'
+  | 'rompe_guardia'
+  | 'congela'
+  /** Estrellas: no se mueve ≈1 s. */
+  | 'aturde'
+  /** Siempre crítico. */
+  | 'critico'
+  /** Se cura él (de a pedacitos; se corta si le pegan). */
+  | 'cura'
+  /** Lo tira al piso. */
+  | 'derriba'
+  /** Mareado: no puede cubrirse y camina lento. */
+  | 'marea'
+  /** Quemado: daño por segundo. */
+  | 'quema'
+  /** Empuje enorme. */
+  | 'empuja'
+  /** Deja una nube en el piso que daña de a poco y hace caminar lento. */
+  | 'nube'
+  /** Agarre: imbloqueable, corto; no agarra en el aire. */
+  | 'agarre'
+  /** Va por el piso: imbloqueable de pie, se salta. */
+  | 'sismo'
 
 export interface FichaEspecial {
   nombre: string
@@ -110,7 +186,17 @@ export interface FichaPersonaje {
   especiales: [FichaEspecial, FichaEspecial]
   pasiva: { nombre: string; descripcion: string }
   frases: string[]
-  rutas: { atlas: string; retrato: string; cara: string }
+  rutas: {
+    atlas: string
+    retrato: string
+    cara: string
+    /**
+     * Los sprites pelados del remate «¡AL CERO!» (scripts/juego/generar_rapado.py): `atlas` es el
+     * rapado.json de al lado del atlas, y `retrato`/`cara` los webp pelados. null mientras no
+     * existan: nadie los pide (ni el render ni la UI) y el remate sólo hace volar pelo.
+     */
+    rapado: { atlas: string; retrato: string; cara: string } | null
+  }
 }
 
 /** Un lugar de la grilla de selección para un barbero que todavía no tiene personaje. */
@@ -194,6 +280,7 @@ export type EstadoLuchador =
   | 'electrocutado'
   | 'guardia_rota'
   | 'mareado' // el perdedor durante la fase 'final'
+  | 'agarrado' // lo tienen agarrado: el render lo dibuja con la anim 'danio', levantado y temblando
   | 'ko'
   | 'victoria'
   | 'burla'
@@ -232,12 +319,48 @@ export interface LuchadorEstado {
     electrocutado: number
     guardiaRota: number
     critico: number // aura breve después de meter un crítico
+    /** Estrellas: no puede moverse (el Bombo, el Grito). */
+    aturdido: number
+    /** No puede cubrirse y camina lento (el Trago Mareador). */
+    mareado: number
+    /** Daño por segundo (el Termo de Agua Caliente). */
+    quemado: number
+    /** Camina lento (la nube del Pañalazo). */
+    lento: number
+    /** Se está curando (la Curación de Fabri). */
+    curando: number
   }
   /** Golpes seguidos que ESTE luchador metió sin que el rival se recupere. */
   combo: number
 }
 
-export type TipoProyectil = 'tornado' | 'sillon' | 'spray' | 'rayo'
+/**
+ * Tiempos de proyectiles que el render necesita para dibujarlos (ticks de `edad`).
+ * graffitiEstalla: el graffiti (Graffiti Slam) aparece pintado y estalla a esa edad; antes no
+ * pega. Al estallar, `ancho`/`alto` pasan del mural al área de la explosión.
+ */
+export const TIEMPOS_PROYECTIL = { graffitiEstalla: 30 } as const
+
+export type TipoProyectil =
+  | 'tornado'
+  | 'sillon'
+  | 'spray'
+  | 'rayo'
+  | 'bombo'
+  | 'bala'
+  | 'graffiti'
+  | 'trago'
+  | 'botella'
+  | 'onda'
+  | 'gorro'
+  | 'pelota'
+  | 'leche'
+  | 'panal'
+  | 'nube'
+  | 'mate'
+  | 'agua'
+  | 'sismo'
+  | 'guante'
 
 export interface ProyectilEstado {
   id: number
@@ -254,6 +377,14 @@ export interface ProyectilEstado {
   edad: number
   /** Golpes que le quedan por dar. */
   golpesRestantes: number
+  /** Bumerán (el gorro) de regreso hacia el que lo tiró. */
+  vuelta: boolean
+  /**
+   * Caja ACTUAL en px del mundo, centrada en (x, y). Los chorros, las ondas, las nubes y el
+   * graffiti se dibujan de este tamaño (cambia con la edad).
+   */
+  ancho: number
+  alto: number
 }
 
 export interface EstadisticasLuchador {
@@ -270,6 +401,8 @@ export interface EstadisticasLuchador {
   congelamientos: number
   rondasPerfectas: number
   finalAlCero: boolean
+  /** Vida que se curó (la Curación de Fabri). */
+  curado: number
 }
 
 export interface Partida {
@@ -315,6 +448,30 @@ export type Herramienta =
   | 'tornado'
   | 'sillon'
   | 'spray'
+  | 'bombo'
+  | 'navaja'
+  | 'celular'
+  | 'anteojos'
+  | 'guante'
+  | 'moto'
+  | 'bala'
+  | 'graffiti'
+  | 'break'
+  | 'trago'
+  | 'botella'
+  | 'baile'
+  | 'onda'
+  | 'gorro'
+  | 'dragon'
+  | 'pelota'
+  | 'leche'
+  | 'panal'
+  | 'nube'
+  | 'mate'
+  | 'agua'
+  | 'sismo'
+  | 'agarre'
+  | 'pesado'
 
 export type EventoJuego =
   | { tipo: 'presentacion' }
@@ -341,6 +498,22 @@ export type EventoJuego =
   | { tipo: 'congelado'; quien: Lado }
   | { tipo: 'descongelado'; quien: Lado; roto: boolean }
   | { tipo: 'electrocutado'; quien: Lado }
+  /** Se curó `cantidad` de vida (sale por cada pedacito de la curación). */
+  | { tipo: 'curacion'; quien: Lado; cantidad: number }
+  /** Lo agarró: la víctima queda 'agarrado' hasta que la tira al piso. */
+  | { tipo: 'agarre'; atacante: Lado; victima: Lado }
+  /** Quedó aturdido (estrellas). */
+  | { tipo: 'aturdido'; quien: Lado }
+  /** Quedó mareado (no puede cubrirse, camina lento). */
+  | { tipo: 'mareado'; quien: Lado }
+  /** Quedó quemado (daño por segundo). */
+  | { tipo: 'quemado'; quien: Lado }
+  /** Apareció una nube en el piso en `x` (de `quien`, el que la tiró). */
+  | { tipo: 'nube'; quien: Lado; x: number }
+  /** Golpe al piso: sale la onda sísmica desde `x`. */
+  | { tipo: 'sismo'; quien: Lado; x: number }
+  /** Un tiro de una ráfaga de arma (fogonazo y sonido) en (x, y) del mundo. */
+  | { tipo: 'disparo'; quien: Lado; x: number; y: number }
   | { tipo: 'carga'; quien: Lado; nivel: number } // cruzó una unidad entera
   | { tipo: 'sin_carga'; quien: Lado } // apretó un especial sin carga
   | { tipo: 'turbo' }

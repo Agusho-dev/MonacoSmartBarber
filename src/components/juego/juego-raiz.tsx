@@ -10,7 +10,7 @@ import { marcadorCon, registrarResultadoOnline, useRegistroOnline } from '@/lib/
 import type { Emparejamiento } from '@/lib/juego/online/sala'
 import { textoCierre } from '@/lib/juego/online/textos'
 import { abrirTransportePelea } from '@/lib/juego/online/transporte'
-import { IDS_PERSONAJES, PERSONAJES, rivalPorDefecto } from '@/lib/juego/personajes'
+import { PERSONAJES } from '@/lib/juego/personajes'
 import { createClient } from '@/lib/supabase/client'
 import type {
   DatosEntradaJuego,
@@ -25,10 +25,13 @@ import type {
 import { AudioSeguro } from '@/lib/juego/ui/audio-seguro'
 import { esPantallaTactil, prefiereMenosMovimiento, useConsultaMedia, usePestanaVisible } from '@/lib/juego/ui/media'
 import { pedirPantallaCompleta } from '@/lib/juego/ui/pantalla-completa'
+import { jugadorSugerido, personajeDelBarbero, rivalSugerido } from '@/lib/juego/ui/plantel'
 import { estadoPrecarga, precargar, usePrecarga } from '@/lib/juego/ui/precarga'
 import { guardarPreferencias, registrarPelea, usePreferencias } from '@/lib/juego/ui/preferencias'
+import type { PeleaDePrueba } from '@/lib/juego/ui/prueba'
 import type { Eleccion, FuentesJuego, Pantalla, ResultadoPelea } from '@/lib/juego/ui/tipos-ui'
 import { vibrar } from '@/lib/juego/ui/vibrar'
+import { RecursosFaltantes } from './imagen-juego'
 import { LogoCorteFinal } from './logo-corte-final'
 import { PantallaCarga } from './pantalla-carga'
 import { PantallaInicio } from './pantalla-inicio'
@@ -55,16 +58,23 @@ const AVISO_PROXIMO_MS = 7000
 /** Un aviso corto de la sala («Juan canceló el desafío»). */
 const AVISO_SALA_MS = 2800
 
+/** Lo que el jugador tocó en la selección (lo que falta se deriva del QR y de la sucursal). */
+interface EleccionUsuario {
+  jugador?: IdPersonaje
+  rival?: IdPersonaje
+  arena?: IdArena
+  /** Sólo la del atajo de pruebas: la que el jugador elige va a las preferencias. */
+  dificultad?: Dificultad
+}
+
 /** Las pantallas de siempre más las de la sala y las peleas online. */
 type PantallaRaiz = Pantalla | 'sala' | 'online-eleccion' | 'online-vs' | 'online-pelea' | 'online-resultado'
 
+/** Con la pelea contra la CPU ya decidida: recién ahí se bajan los atlas de los dos. */
+const PANTALLAS_CON_PELEA: readonly PantallaRaiz[] = ['vs', 'carga', 'pelea', 'resultado']
+
 /** Dónde se avisa que llegó alguien a la sala (en la pelea contra la CPU, sólo el chip chico). */
 const CON_AVISO_DE_SALA: readonly PantallaRaiz[] = ['inicio', 'seleccion', 'resultado']
-
-function personajeDelBarbero(staffId: string | null): IdPersonaje | null {
-  if (!staffId) return null
-  return IDS_PERSONAJES.find((id) => PERSONAJES[id].staffId === staffId) ?? null
-}
 
 function sinTildes(texto: string): string {
   return texto
@@ -120,16 +130,38 @@ function AvisoCortoSala({ texto, onCerrar }: { texto: string; onCerrar: () => vo
  * además, la SALA: quién más tiene el juego abierto en el local, los desafíos y las peleas
  * online entre ellos (src/lib/juego/online).
  */
-export function JuegoRaiz({ datos, fuentes }: { datos: DatosEntradaJuego; fuentes: FuentesJuego }) {
+export function JuegoRaiz({
+  datos,
+  fuentes,
+  prueba = null,
+  faltantes,
+}: {
+  datos: DatosEntradaJuego
+  fuentes: FuentesJuego
+  /** SÓLO en desarrollo (`?prueba=a,b[,arena[,dificultad]]`): directo a una pelea contra la CPU. */
+  prueba?: PeleaDePrueba | null
+  /** SÓLO en desarrollo: retratos y caras que todavía no existen (ver recursos-faltantes.ts). */
+  faltantes?: string[]
+}) {
+  const [recursosFaltantes] = useState<ReadonlySet<string>>(() => new Set(faltantes ?? []))
   const prefs = usePreferencias()
   const visible = usePestanaVisible()
   const tactil = useConsultaMedia('(any-pointer: coarse)')
   const registroOnline = useRegistroOnline()
   const [audio] = useState(() => new AudioSeguro())
 
-  const [pantalla, setPantalla] = useState<PantallaRaiz>('inicio')
+  const [pantalla, setPantalla] = useState<PantallaRaiz>(() => (prueba ? 'carga' : 'inicio'))
   const [cortina, setCortina] = useState<'cerrando' | 'abriendo' | null>(null)
-  const [eleccionUsuario, setEleccionUsuario] = useState<{ jugador?: IdPersonaje; arena?: IdArena }>({})
+  const [eleccionUsuario, setEleccionUsuario] = useState<EleccionUsuario>(() =>
+    prueba
+      ? {
+          jugador: prueba.jugador,
+          rival: prueba.rival,
+          arena: prueba.arena ?? undefined,
+          dificultad: prueba.dificultad ?? undefined,
+        }
+      : {},
+  )
   const [recursosPelea, setRecursosPelea] = useState<RecursosJuego | null>(null)
   const [idPelea, setIdPelea] = useState(0)
   const [resultado, setResultado] = useState<ResultadoPelea | null>(null)
@@ -164,12 +196,13 @@ export function JuegoRaiz({ datos, fuentes }: { datos: DatosEntradaJuego; fuente
   const timers = useRef<number[]>([])
 
   // La elección se DERIVA: las preferencias llegan después de hidratar y el barbero del QR manda.
+  // Lo que el jugador tocó gana; lo que no tocó sale de su barbero y de su sucursal (plantel.ts).
   const barbero = personajeDelBarbero(datos.barberoAsignado)
-  const jugador =
-    eleccionUsuario.jugador ?? (barbero ? rivalPorDefecto(barbero) : (prefs.ultimoPersonaje ?? IDS_PERSONAJES[0]))
-  const rival = barbero && barbero !== jugador ? barbero : rivalPorDefecto(jugador)
+  const contextoPlantel = { barbero, sucursal: datos.sucursal?.slug ?? null }
+  const jugador = eleccionUsuario.jugador ?? jugadorSugerido(prefs.ultimoPersonaje, contextoPlantel)
+  const rival = eleccionUsuario.rival ?? rivalSugerido(jugador, contextoPlantel)
   const arena = arenaJugable(eleccionUsuario.arena ?? datos.arenaInicial)
-  const eleccion: Eleccion = { jugador, rival, arena, dificultad: prefs.dificultad }
+  const eleccion: Eleccion = { jugador, rival, arena, dificultad: eleccionUsuario.dificultad ?? prefs.dificultad }
   const rivalEsBarbero = barbero !== null && rival === barbero
 
   // Online la arena es la de la sucursal (la misma para los dos: están en la misma sala).
@@ -181,12 +214,15 @@ export function JuegoRaiz({ datos, fuentes }: { datos: DatosEntradaJuego; fuente
     (registroOnline.numero > 0 ? `Jugador ${registroOnline.numero}` : 'Jugador')
   const personajesOnline = estadoDuelo?.personajes ?? null
 
-  // Se precarga desde el inicio, en segundo plano: el VS casi nunca espera. En un duelo,
-  // lo que se precarga es la pelea online.
+  // Sólo se bajan los atlas de la pelea que va a empezar (ver precarga.ts): desde el VS (o la
+  // carga, o la pelea misma) contra la CPU, y online cuando los dos ya eligieron. En el inicio
+  // y la selección, nada: recorrer las 13 caras no gasta datos del celular.
+  const peleaDecidida = personajesOnline !== null || PANTALLAS_CON_PELEA.includes(pantalla)
   const precarga = usePrecarga(
     personajesOnline ? personajesOnline[0] : jugador,
     personajesOnline ? personajesOnline[1] : rival,
     personajesOnline ? arenaOnline : arena,
+    peleaDecidida,
   )
 
   const alAvisoTurno = (aviso: AvisoTurno, estado: EstadoTurnoJuego) => {
@@ -527,6 +563,13 @@ export function JuegoRaiz({ datos, fuentes }: { datos: DatosEntradaJuego; fuente
     guardarPreferencias({ ultimoPersonaje: id })
   }
 
+  const elegirRival = (id: IdPersonaje) => {
+    if (id === rival) return
+    audio.ui('elegir')
+    vibrar(10)
+    setEleccionUsuario((e) => ({ ...e, rival: id }))
+  }
+
   const elegirArena = (id: IdArena) => {
     audio.ui('tocar')
     setEleccionUsuario((e) => ({ ...e, arena: id }))
@@ -534,6 +577,7 @@ export function JuegoRaiz({ datos, fuentes }: { datos: DatosEntradaJuego; fuente
 
   const elegirDificultad = (d: Dificultad) => {
     audio.ui('tocar')
+    setEleccionUsuario((e) => (e.dificultad ? { ...e, dificultad: undefined } : e))
     guardarPreferencias({ dificultad: d })
   }
 
@@ -623,297 +667,305 @@ export function JuegoRaiz({ datos, fuentes }: { datos: DatosEntradaJuego; fuente
   const llegadaVisibleAhora = entrante ? null : llegada
 
   return (
-    <div ref={raizRef} className="cf-juego" data-pantalla={pantalla}>
-      {pantalla === 'inicio' && (
-        <PantallaInicio
-          datos={datos}
-          turno={turno}
-          prefs={prefs}
-          onJugar={jugar}
-          onRanking={() => {
-            audio.desbloquear()
-            verRanking()
-          }}
-          onComoSeJuega={() => {
-            audio.desbloquear()
-            audio.ui('tocar')
-            setVerTutorial(true)
-          }}
-          onSonido={() => {
-            audio.desbloquear()
-            guardarPreferencias({ sonido: !prefs.sonido })
-          }}
-        />
-      )}
-      {pantalla === 'inicio' && chipSala && !llegadaVisibleAhora && <div className="cf-sala-flotante">{chipSala}</div>}
+    <RecursosFaltantes value={recursosFaltantes}>
+      <div ref={raizRef} className="cf-juego" data-pantalla={pantalla}>
+        {pantalla === 'inicio' && (
+          <PantallaInicio
+            datos={datos}
+            luchadores={[jugador, rival]}
+            turno={turno}
+            prefs={prefs}
+            onJugar={jugar}
+            onRanking={() => {
+              audio.desbloquear()
+              verRanking()
+            }}
+            onComoSeJuega={() => {
+              audio.desbloquear()
+              audio.ui('tocar')
+              setVerTutorial(true)
+            }}
+            onSonido={() => {
+              audio.desbloquear()
+              guardarPreferencias({ sonido: !prefs.sonido })
+            }}
+          />
+        )}
+        {pantalla === 'inicio' && chipSala && !llegadaVisibleAhora && <div className="cf-sala-flotante">{chipSala}</div>}
 
-      {pantalla === 'seleccion' && (
-        <PantallaSeleccion
-          eleccion={eleccion}
-          datos={datos}
-          barbero={barbero}
-          stats={stats}
-          prefs={prefs}
-          turno={turno}
-          onElegirPersonaje={elegirPersonaje}
-          onElegirArena={elegirArena}
-          onElegirDificultad={elegirDificultad}
-          onBloqueado={alBloqueado}
-          onVolver={() => {
-            audio.ui('atras')
-            irA('inicio')
-          }}
-          onPelear={pelear}
-          sala={chipSala}
-        />
-      )}
+        {pantalla === 'seleccion' && (
+          <PantallaSeleccion
+            eleccion={eleccion}
+            datos={datos}
+            barbero={barbero}
+            stats={stats}
+            prefs={prefs}
+            turno={turno}
+            onElegirPersonaje={elegirPersonaje}
+            onElegirRival={elegirRival}
+            onElegirArena={elegirArena}
+            onElegirDificultad={elegirDificultad}
+            onBloqueado={alBloqueado}
+            onVolver={() => {
+              audio.ui('atras')
+              irA('inicio')
+            }}
+            onPelear={pelear}
+            onTocar={() => audio.ui('tocar')}
+            sala={chipSala}
+          />
+        )}
 
-      {pantalla === 'vs' && (
-        <PantallaVs eleccion={eleccion} rivalEsBarbero={rivalEsBarbero} audio={audio} onListo={alTerminarVs} />
-      )}
+        {pantalla === 'vs' && (
+          <PantallaVs eleccion={eleccion} rivalEsBarbero={rivalEsBarbero} audio={audio} onListo={alTerminarVs} />
+        )}
 
-      {(pantalla === 'carga' || (pantalla === 'pelea' && !recursosPelea)) && (
-        <PantallaCarga
-          precarga={precarga}
-          eleccion={eleccion}
-          onListo={empezarPelea}
-          onReintentar={() => {
-            audio.ui('confirmar')
-            precargar(jugador, rival, arena)
-          }}
-          onVolver={() => {
-            audio.ui('atras')
-            irA('seleccion')
-          }}
-        />
-      )}
+        {(pantalla === 'carga' || (pantalla === 'pelea' && !recursosPelea)) && (
+          <PantallaCarga
+            precarga={precarga}
+            eleccion={eleccion}
+            onListo={empezarPelea}
+            onReintentar={() => {
+              audio.ui('confirmar')
+              precargar(jugador, rival, arena)
+            }}
+            onVolver={() => {
+              audio.ui('atras')
+              irA('seleccion')
+            }}
+          />
+        )}
 
-      {pantalla === 'pelea' && recursosPelea && (
-        <PantallaPelea
-          key={idPelea}
-          eleccion={eleccion}
-          recursos={recursosPelea}
-          fuentes={fuentes}
-          audio={audio}
-          prefs={prefs}
-          turno={turno}
-          bloqueada={teToca !== null}
-          onTerminar={terminarPelea}
-          onReiniciar={() => irA('pelea', () => setIdPelea((n) => n + 1))}
-          onSalir={() => irA('seleccion')}
-          superpuesto={
-            <>
-              {estadoSala && estadoSala.otros.length > 0 && (
-                <div className="cf-sala-flotante cf-sala-flotante--pelea">
-                  <ChipSala estado={estadoSala} sucursal={nombreSucursal} chico />
-                </div>
-              )}
-              {desafioEntrante}
-            </>
-          }
-        />
-      )}
+        {pantalla === 'pelea' && recursosPelea && (
+          <PantallaPelea
+            key={idPelea}
+            eleccion={eleccion}
+            recursos={recursosPelea}
+            fuentes={fuentes}
+            audio={audio}
+            prefs={prefs}
+            turno={turno}
+            bloqueada={teToca !== null}
+            sinTutorial={prueba !== null}
+            onTerminar={terminarPelea}
+            onReiniciar={() => irA('pelea', () => setIdPelea((n) => n + 1))}
+            onSalir={() => irA('seleccion')}
+            superpuesto={
+              <>
+                {estadoSala && estadoSala.otros.length > 0 && (
+                  <div className="cf-sala-flotante cf-sala-flotante--pelea">
+                    <ChipSala estado={estadoSala} sucursal={nombreSucursal} chico />
+                  </div>
+                )}
+                {desafioEntrante}
+              </>
+            }
+          />
+        )}
 
-      {pantalla === 'resultado' && resultado && (
-        <PantallaResultado
-          key={resultado.id}
-          resultado={resultado}
-          datos={datos}
-          prefs={prefs}
-          audio={audio}
-          turno={turno}
-          onRevancha={revancha}
-          onCambiarBarbero={() => {
-            audio.ui('atras')
-            irA('seleccion')
-          }}
-          onRanking={verRanking}
-          onGuardado={(apodo, puntaje) => setUltimoGuardado({ apodo, puntaje })}
-          sala={chipSala}
-        />
-      )}
+        {pantalla === 'resultado' && resultado && (
+          <PantallaResultado
+            key={resultado.id}
+            resultado={resultado}
+            datos={datos}
+            prefs={prefs}
+            audio={audio}
+            turno={turno}
+            onRevancha={revancha}
+            onCambiarBarbero={() => {
+              audio.ui('atras')
+              irA('seleccion')
+            }}
+            onRanking={verRanking}
+            onGuardado={(apodo, puntaje) => setUltimoGuardado({ apodo, puntaje })}
+            sala={chipSala}
+          />
+        )}
 
-      {pantalla === 'ranking' && (
-        <PantallaRanking
-          datos={datos}
-          audio={audio}
-          turno={turno}
-          resaltado={ultimoGuardado}
-          onVolver={() => {
-            audio.ui('atras')
-            irA(volverDelRanking)
-          }}
-        />
-      )}
+        {pantalla === 'ranking' && (
+          <PantallaRanking
+            datos={datos}
+            audio={audio}
+            turno={turno}
+            resaltado={ultimoGuardado}
+            onVolver={() => {
+              audio.ui('atras')
+              irA(volverDelRanking)
+            }}
+          />
+        )}
 
-      {pantalla === 'sala' && (
-        <PantallaSala
-          estado={estadoSala}
-          sucursal={nombreSucursal}
-          fondo={ARENAS[arenaOnline].imagen}
-          onDesafiar={(id) => {
-            audio.desbloquear()
-            audio.ui('confirmar')
-            vibrar(15)
-            sala?.desafiar(id)
-          }}
-          onCancelar={() => {
-            audio.ui('atras')
-            sala?.cancelarDesafio()
-          }}
-          onVolver={() => {
-            audio.ui('atras')
-            irA(volverDeSala === 'sala' ? 'inicio' : volverDeSala)
-          }}
-          onJugarCpu={() => {
-            audio.ui('confirmar')
-            irA('seleccion')
-          }}
-        />
-      )}
+        {pantalla === 'sala' && (
+          <PantallaSala
+            estado={estadoSala}
+            sucursal={nombreSucursal}
+            fondo={ARENAS[arenaOnline].imagen}
+            onDesafiar={(id) => {
+              audio.desbloquear()
+              audio.ui('confirmar')
+              vibrar(15)
+              sala?.desafiar(id)
+            }}
+            onCancelar={() => {
+              audio.ui('atras')
+              sala?.cancelarDesafio()
+            }}
+            onVolver={() => {
+              audio.ui('atras')
+              irA(volverDeSala === 'sala' ? 'inicio' : volverDeSala)
+            }}
+            onJugarCpu={() => {
+              audio.ui('confirmar')
+              irA('seleccion')
+            }}
+          />
+        )}
 
-      {pantalla === 'online-eleccion' && duelo && estadoDuelo && (
-        <EleccionOnline
-          estado={estadoDuelo}
-          onElegir={(id) => {
-            audio.ui('elegir')
-            vibrar(10)
-            duelo.elegir(id)
-            guardarPreferencias({ ultimoPersonaje: id })
-          }}
-          onConfirmar={() => {
-            audio.ui('confirmar')
-            duelo.confirmar()
-          }}
-          onSalir={salirDelDuelo}
-          onBloqueado={alBloqueado}
-        />
-      )}
+        {pantalla === 'online-eleccion' && duelo && estadoDuelo && (
+          <EleccionOnline
+            estado={estadoDuelo}
+            sucursal={datos.sucursal?.slug ?? null}
+            onTocar={() => audio.ui('tocar')}
+            onElegir={(id) => {
+              audio.ui('elegir')
+              vibrar(10)
+              duelo.elegir(id)
+              guardarPreferencias({ ultimoPersonaje: id })
+            }}
+            onConfirmar={() => {
+              audio.ui('confirmar')
+              duelo.confirmar()
+            }}
+            onSalir={salirDelDuelo}
+            onBloqueado={alBloqueado}
+          />
+        )}
 
-      {pantalla === 'online-vs' && duelo && estadoDuelo?.personajes && precarga.estado !== 'error' && (
-        <PantallaVs
-          key={`vs-${estadoDuelo.k}`}
-          eleccion={{
-            jugador: estadoDuelo.personajes[estadoDuelo.lado],
-            rival: estadoDuelo.personajes[estadoDuelo.lado === 0 ? 1 : 0],
-            arena: arenaOnline,
-            dificultad: prefs.dificultad,
-          }}
-          rivalEsBarbero={false}
-          audio={audio}
-          online={{
-            personajes: estadoDuelo.personajes,
-            nombres:
-              estadoDuelo.lado === 0
-                ? [estadoDuelo.yo.nombre, estadoDuelo.rival.nombre]
-                : [estadoDuelo.rival.nombre, estadoDuelo.yo.nombre],
-            lado: estadoDuelo.lado,
-            esperando: vsVisto && !estadoDuelo.arranque,
-          }}
-          onListo={() => setVsOnlineVisto(estadoDuelo.k)}
-        />
-      )}
-      {pantalla === 'online-vs' && duelo && estadoDuelo?.personajes && precarga.estado === 'error' && (
-        <PantallaCarga
-          precarga={precarga}
-          eleccion={{
-            jugador: estadoDuelo.personajes[0],
-            rival: estadoDuelo.personajes[1],
-            arena: arenaOnline,
-            dificultad: prefs.dificultad,
-          }}
-          onListo={() => {}}
-          onReintentar={() => {
-            audio.ui('confirmar')
-            if (estadoDuelo.personajes) precargar(estadoDuelo.personajes[0], estadoDuelo.personajes[1], arenaOnline)
-          }}
-          onVolver={salirDelDuelo}
-        />
-      )}
+        {pantalla === 'online-vs' && duelo && estadoDuelo?.personajes && precarga.estado !== 'error' && (
+          <PantallaVs
+            key={`vs-${estadoDuelo.k}`}
+            eleccion={{
+              jugador: estadoDuelo.personajes[estadoDuelo.lado],
+              rival: estadoDuelo.personajes[estadoDuelo.lado === 0 ? 1 : 0],
+              arena: arenaOnline,
+              dificultad: prefs.dificultad,
+            }}
+            rivalEsBarbero={false}
+            audio={audio}
+            online={{
+              personajes: estadoDuelo.personajes,
+              nombres:
+                estadoDuelo.lado === 0
+                  ? [estadoDuelo.yo.nombre, estadoDuelo.rival.nombre]
+                  : [estadoDuelo.rival.nombre, estadoDuelo.yo.nombre],
+              lado: estadoDuelo.lado,
+              esperando: vsVisto && !estadoDuelo.arranque,
+            }}
+            onListo={() => setVsOnlineVisto(estadoDuelo.k)}
+          />
+        )}
+        {pantalla === 'online-vs' && duelo && estadoDuelo?.personajes && precarga.estado === 'error' && (
+          <PantallaCarga
+            precarga={precarga}
+            eleccion={{
+              jugador: estadoDuelo.personajes[0],
+              rival: estadoDuelo.personajes[1],
+              arena: arenaOnline,
+              dificultad: prefs.dificultad,
+            }}
+            onListo={() => {}}
+            onReintentar={() => {
+              audio.ui('confirmar')
+              if (estadoDuelo.personajes) precargar(estadoDuelo.personajes[0], estadoDuelo.personajes[1], arenaOnline)
+            }}
+            onVolver={salirDelDuelo}
+          />
+        )}
 
-      {pantalla === 'online-pelea' && recursosPelea && peleaOnline && (
-        <PantallaPelea
-          key={idPelea}
-          eleccion={{
-            jugador: peleaOnline.arranque.personajes[peleaOnline.lado],
-            rival: peleaOnline.arranque.personajes[peleaOnline.lado === 0 ? 1 : 0],
-            arena: arenaOnline,
-            dificultad: 'normal',
-          }}
-          recursos={recursosPelea}
-          fuentes={fuentes}
-          audio={audio}
-          prefs={prefs}
-          turno={turno}
-          bloqueada={false}
-          onTerminar={() => {}}
-          onReiniciar={() => {}}
-          onSalir={() => {}}
-          online={peleaOnline}
-          onAbandonarOnline={() => {
-            const rivalNombre = peleaOnline.nombres[peleaOnline.lado === 0 ? 1 : 0]
-            mostrarToast(`Abandonaste: la gana ${rivalNombre}`)
-            peleaOnline.duelo.salir('abandono')
-          }}
-        />
-      )}
+        {pantalla === 'online-pelea' && recursosPelea && peleaOnline && (
+          <PantallaPelea
+            key={idPelea}
+            eleccion={{
+              jugador: peleaOnline.arranque.personajes[peleaOnline.lado],
+              rival: peleaOnline.arranque.personajes[peleaOnline.lado === 0 ? 1 : 0],
+              arena: arenaOnline,
+              dificultad: 'normal',
+            }}
+            recursos={recursosPelea}
+            fuentes={fuentes}
+            audio={audio}
+            prefs={prefs}
+            turno={turno}
+            bloqueada={false}
+            onTerminar={() => {}}
+            onReiniciar={() => {}}
+            onSalir={() => {}}
+            online={peleaOnline}
+            onAbandonarOnline={() => {
+              const rivalNombre = peleaOnline.nombres[peleaOnline.lado === 0 ? 1 : 0]
+              mostrarToast(`Abandonaste: la gana ${rivalNombre}`)
+              peleaOnline.duelo.salir('abandono')
+            }}
+          />
+        )}
 
-      {pantalla === 'online-resultado' && duelo && estadoDuelo?.resultado && (
-        <ResultadoOnline
-          key={`res-${estadoDuelo.k}`}
-          estado={estadoDuelo}
-          onRevancha={() => {
-            audio.ui('confirmar')
-            duelo.pedirRevancha()
-          }}
-          onVolverSala={salirDelDuelo}
-        />
-      )}
+        {pantalla === 'online-resultado' && duelo && estadoDuelo?.resultado && (
+          <ResultadoOnline
+            key={`res-${estadoDuelo.k}`}
+            estado={estadoDuelo}
+            onRevancha={() => {
+              audio.ui('confirmar')
+              duelo.pedirRevancha()
+            }}
+            onVolverSala={salirDelDuelo}
+          />
+        )}
 
-      {toast && (
-        <div key={toast.n} className="cf-toast" role="status">
-          {toast.texto}
-        </div>
-      )}
-      {estadoSala?.aviso && !toast && (
-        <AvisoCortoSala key={estadoSala.aviso.n} texto={estadoSala.aviso.texto} onCerrar={() => sala?.descartarAviso()} />
-      )}
+        {toast && (
+          <div key={toast.n} className="cf-toast" role="status">
+            {toast.texto}
+          </div>
+        )}
+        {estadoSala?.aviso && !toast && (
+          <AvisoCortoSala key={estadoSala.aviso.n} texto={estadoSala.aviso.texto} onCerrar={() => sala?.descartarAviso()} />
+        )}
 
-      {llegadaVisibleAhora && (
-        <AvisoLlegada
-          key={llegadaVisibleAhora.n}
-          nombre={llegadaVisibleAhora.nombre}
-          cuantos={llegadaVisibleAhora.cuantos}
-          sucursal={nombreSucursal}
-          onVer={abrirSala}
-          onCerrar={() => sala?.descartarLlegada()}
-        />
-      )}
+        {llegadaVisibleAhora && (
+          <AvisoLlegada
+            key={llegadaVisibleAhora.n}
+            nombre={llegadaVisibleAhora.nombre}
+            cuantos={llegadaVisibleAhora.cuantos}
+            sucursal={nombreSucursal}
+            onVer={abrirSala}
+            onCerrar={() => sala?.descartarLlegada()}
+          />
+        )}
 
-      {!enPeleaCpu && desafioEntrante}
+        {!enPeleaCpu && desafioEntrante}
 
-      {verTutorial && <Tutorial tactil={tactil} onCerrar={cerrarTutorialInicio} />}
+        {verTutorial && <Tutorial tactil={tactil} ficha={PERSONAJES[jugador]} onCerrar={cerrarTutorialInicio} />}
 
-      {avisoProximo && !teToca && <AvisoProximo onCerrar={() => setAvisoProximo(false)} />}
+        {avisoProximo && !teToca && <AvisoProximo onCerrar={() => setAvisoProximo(false)} />}
 
-      {teToca && (
-        <PantallaTeToca
-          nombreCliente={datos.cliente?.nombre ?? null}
-          nombreBarbero={teToca.barbero ?? (barbero ? PERSONAJES[barbero].nombre : null)}
-          ficha={fichaDelQueLlama(barbero, teToca.barbero)}
-          onCerrar={() => {
-            audio.ui('confirmar')
-            setTeToca(null)
-          }}
-        />
-      )}
+        {teToca && (
+          <PantallaTeToca
+            nombreCliente={datos.cliente?.nombre ?? null}
+            nombreBarbero={teToca.barbero ?? (barbero ? PERSONAJES[barbero].nombre : null)}
+            ficha={fichaDelQueLlama(barbero, teToca.barbero)}
+            onCerrar={() => {
+              audio.ui('confirmar')
+              setTeToca(null)
+            }}
+          />
+        )}
 
-      {cortina && (
-        <div className="cf-cortina" data-fase={cortina} aria-hidden="true">
-          <span className="cf-cortina__filo" />
-          <LogoCorteFinal className="cf-cortina__logo" />
-        </div>
-      )}
-    </div>
+        {cortina && (
+          <div className="cf-cortina" data-fase={cortina} aria-hidden="true">
+            <span className="cf-cortina__filo" />
+            <LogoCorteFinal className="cf-cortina__logo" />
+          </div>
+        )}
+      </div>
+    </RecursosFaltantes>
   )
 }

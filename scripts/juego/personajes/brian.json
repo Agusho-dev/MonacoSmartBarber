@@ -1,0 +1,1619 @@
+{
+ "_nota": "Lo procesa scripts/juego/extraer_brian.py (el motor está en extraer_stefano.py, que importa extraer_sprites.py y extraer_chipi.py sin tocarlos). Correr sólo el compartido sobre este JSON da un atlas peor. Brian viste todo negro sobre fondo casi negro: inferencia por cuadro rellenado a lo ancho. En el especial 1 la víctima (figura azul marino con contorno claro) se saca: dentro de su zona sólo queda la piel del brazo de Brian.",
+ "personaje": "brian",
+ "hoja": "../../../../juego-fuentes/brian_anim.jpg",
+ "salida": "../../../public/juego/personajes/brian",
+ "escalaGlobal": 1.25,
+ "animaciones": {
+  "quieto": {
+   "mascara": [
+    11,
+    31,
+    292,
+    133
+   ],
+   "cortes": [
+    [
+     62,
+     75
+    ],
+    [
+     115,
+     130
+    ],
+    [
+     170,
+     184
+    ],
+    [
+     224,
+     238
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    }
+   }
+  },
+  "caminar": {
+   "mascara": [
+    302,
+    31,
+    600,
+    133
+   ],
+   "cortes": [
+    [
+     356,
+     370
+    ],
+    [
+     412,
+     428
+    ],
+    [
+     470,
+     488
+    ],
+    [
+     520,
+     550
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    }
+   }
+  },
+  "correr": {
+   "mascara": [
+    611,
+    31,
+    922,
+    133
+   ],
+   "cortes": [
+    [
+     700,
+     718
+    ],
+    [
+     772,
+     790
+    ],
+    [
+     846,
+     860
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    },
+    "pelar": [
+     {
+      "lumMin": 70,
+      "lumMax": 235,
+      "satMax": 0.16,
+      "stdMax": 7,
+      "pasos": 25
+     }
+    ]
+   },
+   "usar": [
+    0,
+    1,
+    2
+   ]
+  },
+  "dash": {
+   "mascara": [
+    932,
+    31,
+    1270,
+    133
+   ],
+   "cortes": [
+    [
+     1040,
+     1060
+    ],
+    [
+     1150,
+     1175
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    },
+    "pelar": [
+     {
+      "lumMin": 70,
+      "lumMax": 235,
+      "satMax": 0.16,
+      "stdMax": 7,
+      "pasos": 25
+     }
+    ]
+   },
+   "retoques": {
+    "0": {
+     "quitarColor": [
+      {
+       "zona": [
+        930,
+        100,
+        1272,
+        136
+       ],
+       "satMax": 0.17,
+       "lumMin": 72,
+       "lumMax": 214
+      }
+     ],
+     "restaurar": [
+      [
+       [
+        936,
+        117
+       ],
+       [
+        953,
+        117
+       ],
+       [
+        956,
+        124
+       ],
+       [
+        954,
+        131
+       ],
+       [
+        936,
+        131
+       ]
+      ],
+      [
+       [
+        978,
+        106
+       ],
+       [
+        999,
+        106
+       ],
+       [
+        1001,
+        116
+       ],
+       [
+        998,
+        123
+       ],
+       [
+        980,
+        123
+       ]
+      ]
+     ],
+     "limite": [
+      [
+       [
+        1016,
+        44
+       ],
+       [
+        1046,
+        44
+       ],
+       [
+        1050,
+        60
+       ],
+       [
+        1053,
+        72
+       ],
+       [
+        1053,
+        90
+       ],
+       [
+        1030,
+        94
+       ],
+       [
+        1018,
+        100
+       ],
+       [
+        1014,
+        110
+       ],
+       [
+        1008,
+        118
+       ],
+       [
+        1006,
+        129
+       ],
+       [
+        986,
+        129
+       ],
+       [
+        984,
+        119
+       ],
+       [
+        974,
+        116
+       ],
+       [
+        960,
+        121
+       ],
+       [
+        950,
+        127
+       ],
+       [
+        936,
+        129
+       ],
+       [
+        934,
+        116
+       ],
+       [
+        948,
+        108
+       ],
+       [
+        962,
+        98
+       ],
+       [
+        966,
+        86
+       ],
+       [
+        966,
+        72
+       ],
+       [
+        980,
+        60
+       ],
+       [
+        1000,
+        54
+       ]
+      ]
+     ]
+    },
+    "1": {
+     "quitarColor": [
+      {
+       "zona": [
+        930,
+        100,
+        1272,
+        136
+       ],
+       "satMax": 0.17,
+       "lumMin": 72,
+       "lumMax": 214
+      }
+     ],
+     "restaurar": [
+      [
+       [
+        1048,
+        118
+       ],
+       [
+        1064,
+        118
+       ],
+       [
+        1066,
+        125
+       ],
+       [
+        1064,
+        131
+       ],
+       [
+        1048,
+        131
+       ]
+      ],
+      [
+       [
+        1091,
+        102
+       ],
+       [
+        1113,
+        102
+       ],
+       [
+        1115,
+        112
+       ],
+       [
+        1112,
+        119
+       ],
+       [
+        1093,
+        119
+       ]
+      ]
+     ],
+     "limite": [
+      [
+       [
+        1136,
+        42
+       ],
+       [
+        1160,
+        42
+       ],
+       [
+        1166,
+        55
+       ],
+       [
+        1168,
+        78
+       ],
+       [
+        1168,
+        92
+       ],
+       [
+        1150,
+        94
+       ],
+       [
+        1140,
+        98
+       ],
+       [
+        1132,
+        104
+       ],
+       [
+        1136,
+        112
+       ],
+       [
+        1137,
+        124
+       ],
+       [
+        1118,
+        124
+       ],
+       [
+        1112,
+        112
+       ],
+       [
+        1098,
+        110
+       ],
+       [
+        1080,
+        116
+       ],
+       [
+        1066,
+        124
+       ],
+       [
+        1062,
+        132
+       ],
+       [
+        1046,
+        132
+       ],
+       [
+        1046,
+        112
+       ],
+       [
+        1062,
+        104
+       ],
+       [
+        1080,
+        96
+       ],
+       [
+        1090,
+        88
+       ],
+       [
+        1092,
+        72
+       ],
+       [
+        1100,
+        62
+       ],
+       [
+        1115,
+        56
+       ],
+       [
+        1130,
+        50
+       ]
+      ]
+     ]
+    },
+    "2": {
+     "quitarColor": [
+      {
+       "zona": [
+        930,
+        100,
+        1272,
+        136
+       ],
+       "satMax": 0.17,
+       "lumMin": 72,
+       "lumMax": 214
+      }
+     ],
+     "restaurar": [
+      [
+       [
+        1158,
+        119
+       ],
+       [
+        1172,
+        119
+       ],
+       [
+        1173,
+        126
+       ],
+       [
+        1171,
+        131
+       ],
+       [
+        1158,
+        131
+       ]
+      ],
+      [
+       [
+        1210,
+        107
+       ],
+       [
+        1230,
+        107
+       ],
+       [
+        1233,
+        118
+       ],
+       [
+        1229,
+        127
+       ],
+       [
+        1211,
+        127
+       ]
+      ]
+     ],
+     "limite": [
+      [
+       [
+        1244,
+        42
+       ],
+       [
+        1268,
+        42
+       ],
+       [
+        1272,
+        55
+       ],
+       [
+        1272,
+        94
+       ],
+       [
+        1258,
+        96
+       ],
+       [
+        1246,
+        100
+       ],
+       [
+        1238,
+        106
+       ],
+       [
+        1234,
+        114
+       ],
+       [
+        1232,
+        130
+       ],
+       [
+        1210,
+        130
+       ],
+       [
+        1206,
+        122
+       ],
+       [
+        1196,
+        116
+       ],
+       [
+        1182,
+        118
+       ],
+       [
+        1174,
+        126
+       ],
+       [
+        1172,
+        132
+       ],
+       [
+        1156,
+        132
+       ],
+       [
+        1156,
+        112
+       ],
+       [
+        1170,
+        106
+       ],
+       [
+        1188,
+        98
+       ],
+       [
+        1200,
+        90
+       ],
+       [
+        1204,
+        74
+       ],
+       [
+        1214,
+        62
+       ],
+       [
+        1230,
+        54
+       ]
+      ]
+     ]
+    }
+   }
+  },
+  "guardia": {
+   "mascara": [
+    11,
+    164,
+    288,
+    260
+   ],
+   "cortes": [
+    [
+     74,
+     86
+    ],
+    [
+     142,
+     155
+    ],
+    [
+     210,
+     223
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    }
+   }
+  },
+  "agachado": {
+   "mascara": [
+    298,
+    164,
+    533,
+    260
+   ],
+   "cortes": [
+    [
+     347,
+     359
+    ],
+    [
+     404,
+     416
+    ],
+    [
+     463,
+     476
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    }
+   }
+  },
+  "saltar": {
+   "mascara": [
+    544,
+    164,
+    844,
+    260
+   ],
+   "cortes": [
+    [
+     612,
+     631
+    ],
+    [
+     696,
+     719
+    ],
+    [
+     767,
+     776
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    }
+   }
+  },
+  "caer": {
+   "mascara": [
+    854,
+    164,
+    1270,
+    261
+   ],
+   "cortes": [
+    [
+     960,
+     985
+    ],
+    [
+     1040,
+     1060
+    ],
+    [
+     1110,
+     1125
+    ],
+    [
+     1180,
+     1200
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    },
+    "pelar": [
+     {
+      "lumMin": 70,
+      "lumMax": 235,
+      "satMax": 0.16,
+      "stdMax": 7,
+      "pasos": 25
+     }
+    ]
+   },
+   "usar": [
+    "saltar:3",
+    "saltar:3",
+    "saltar:3",
+    1,
+    3
+   ]
+  },
+  "golpe": {
+   "mascara": [
+    11,
+    296,
+    370,
+    394
+   ],
+   "cortes": [
+    [
+     70,
+     82
+    ],
+    [
+     140,
+     152
+    ],
+    [
+     233,
+     241
+    ],
+    [
+     300,
+     306
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    }
+   },
+   "impactos": [
+    2
+   ],
+   "usar": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  "patada": {
+   "mascara": [
+    381,
+    296,
+    701,
+    394
+   ],
+   "cortes": [
+    [
+     445,
+     465
+    ],
+    [
+     549,
+     568
+    ]
+   ],
+   "inferencia": "ancho",
+   "impactos": [
+    2
+   ],
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    }
+   }
+  },
+  "combo": {
+   "mascara": [
+    712,
+    296,
+    1270,
+    394
+   ],
+   "cortes": [
+    [
+     775,
+     787
+    ],
+    [
+     841,
+     850
+    ],
+    [
+     904,
+     924
+    ],
+    [
+     972,
+     988
+    ],
+    [
+     1036,
+     1048
+    ],
+    [
+     1105,
+     1120
+    ],
+    [
+     1166,
+     1180
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    }
+   },
+   "usar": [
+    0,
+    "golpe:2",
+    2,
+    "especial1:0"
+   ],
+   "impactos": [
+    1,
+    3
+   ]
+  },
+  "especial1": {
+   "cajas": [
+    [
+     12,
+     427,
+     135,
+     533
+    ],
+    [
+     130,
+     427,
+     255,
+     533
+    ],
+    [
+     360,
+     427,
+     478,
+     533
+    ],
+    [
+     755,
+     427,
+     880,
+     533
+    ],
+    [
+     920,
+     427,
+     1050,
+     533
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    },
+    "pelar": [
+     {
+      "lumMin": 70,
+      "lumMax": 235,
+      "satMax": 0.16,
+      "stdMax": 7,
+      "pasos": 25
+     }
+    ]
+   },
+   "escalaPorCuadro": {
+    "0": 0.93,
+    "1": 0.93,
+    "2": 0.93,
+    "3": 0.74,
+    "4": 0.74
+   },
+   "retoques": {
+    "1": {
+     "quitar": [
+      [
+       [
+        214,
+        452
+       ],
+       [
+        253,
+        452
+       ],
+       [
+        253,
+        536
+       ],
+       [
+        197,
+        536
+       ],
+       [
+        197,
+        505
+       ],
+       [
+        203,
+        490
+       ],
+       [
+        212,
+        484
+       ],
+       [
+        216,
+        478
+       ]
+      ]
+     ]
+    },
+    "2": {
+     "quitar": [
+      [
+       [
+        443,
+        455
+       ],
+       [
+        478,
+        455
+       ],
+       [
+        478,
+        536
+       ],
+       [
+        436,
+        536
+       ],
+       [
+        436,
+        505
+       ],
+       [
+        440,
+        490
+       ],
+       [
+        443,
+        483
+       ]
+      ]
+     ]
+    },
+    "3": {
+     "quitar": [
+      [
+       [
+        848,
+        428
+       ],
+       [
+        881,
+        428
+       ],
+       [
+        881,
+        536
+       ],
+       [
+        828,
+        536
+       ],
+       [
+        828,
+        470
+       ],
+       [
+        840,
+        462
+       ],
+       [
+        848,
+        455
+       ]
+      ]
+     ]
+    },
+    "4": {
+     "quitar": [
+      [
+       [
+        1012,
+        428
+       ],
+       [
+        1051,
+        428
+       ],
+       [
+        1051,
+        536
+       ],
+       [
+        995,
+        536
+       ],
+       [
+        995,
+        470
+       ],
+       [
+        1000,
+        450
+       ],
+       [
+        1012,
+        445
+       ]
+      ]
+     ]
+    },
+    "0": {
+     "sumarColor": [
+      {
+       "caja": [
+        92,
+        470,
+        134,
+        490
+       ],
+       "tono": [
+        5,
+        40
+       ],
+       "satMin": 0.22,
+       "lumMin": 70
+      }
+     ]
+    }
+   },
+   "injertos": {
+    "3": {
+     "donante": "quieto:0",
+     "corte": 509,
+     "corteDonante": 93,
+     "caderaX": [
+      762,
+      832
+     ],
+     "caderaXDonante": [
+      16,
+      58
+     ],
+     "apoyo": "pies",
+     "conservar": [
+      [
+       755,
+       500,
+       778,
+       526
+      ]
+     ]
+    },
+    "4": {
+     "donante": "quieto:0",
+     "corte": 509,
+     "corteDonante": 93,
+     "caderaX": [
+      926,
+      997
+     ],
+     "caderaXDonante": [
+      16,
+      58
+     ],
+     "apoyo": "pies",
+     "conservar": [
+      [
+       919,
+       500,
+       942,
+       526
+      ]
+     ]
+    }
+   },
+   "usar": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    "especial2:2"
+   ],
+   "impactos": [
+    1,
+    5
+   ]
+  },
+  "especial2": {
+   "cajas": [
+    [
+     12,
+     566,
+     98,
+     669
+    ],
+    [
+     98,
+     566,
+     230,
+     669
+    ],
+    [
+     232,
+     566,
+     362,
+     669
+    ]
+   ],
+   "inferencia": "ancho",
+   "escala": 0.93,
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    },
+    "pelar": [
+     {
+      "lumMin": 70,
+      "lumMax": 235,
+      "satMax": 0.16,
+      "stdMax": 7,
+      "pasos": 25
+     }
+    ]
+   },
+   "retoques": {
+    "1": {
+     "quitar": [
+      [
+       145,
+       650,
+       166,
+       669
+      ]
+     ]
+    },
+    "2": {
+     "limite": [
+      [
+       [
+        238,
+        669
+       ],
+       [
+        238,
+        640
+       ],
+       [
+        255,
+        630
+       ],
+       [
+        275,
+        620
+       ],
+       [
+        290,
+        600
+       ],
+       [
+        310,
+        585
+       ],
+       [
+        330,
+        578
+       ],
+       [
+        352,
+        578
+       ],
+       [
+        354,
+        640
+       ],
+       [
+        350,
+        669
+       ],
+       [
+        328,
+        669
+       ],
+       [
+        326,
+        645
+       ],
+       [
+        305,
+        641
+       ],
+       [
+        285,
+        648
+       ],
+       [
+        262,
+        660
+       ],
+       [
+        258,
+        669
+       ]
+      ]
+     ]
+    }
+   },
+   "impactos": [
+    2
+   ]
+  },
+  "danio": {
+   "mascara": [
+    11,
+    699,
+    271,
+    821
+   ],
+   "cortes": [
+    [
+     70,
+     78
+    ],
+    [
+     120,
+     126
+    ],
+    [
+     173,
+     179
+    ],
+    [
+     223,
+     228
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    }
+   },
+   "escala": 0.87,
+   "retoques": {
+    "0": {
+     "quitar": [
+      [
+       18,
+       710,
+       39,
+       734
+      ]
+     ]
+    }
+   }
+  },
+  "ko": {
+   "mascara": [
+    281,
+    699,
+    547,
+    821
+   ],
+   "cortes": [
+    [
+     333,
+     343
+    ],
+    [
+     395,
+     406
+    ],
+    [
+     499,
+     506
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    }
+   },
+   "escala": 0.87,
+   "usar": [
+    0,
+    1,
+    2
+   ],
+   "_nota": "revisión 30/oct: el último corte (459-468) partía al tirado en dos cuadros (piernas y torso); ahora el cuadro 2 es el cuerpo entero tirado y el resto del panel (el segundo cuerpo encimado) no se usa"
+  },
+  "levantarse": {
+   "mascara": [
+    558,
+    699,
+    770,
+    821
+   ],
+   "cortes": [
+    [
+     612,
+     620
+    ],
+    [
+     664,
+     672
+    ],
+    [
+     718,
+     726
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    }
+   },
+   "escala": 0.87,
+   "retoques": {
+    "3": {
+     "quitar": [
+      [
+       715,
+       755,
+       724,
+       802
+      ]
+     ]
+    }
+   }
+  },
+  "victoria": {
+   "mascara": [
+    781,
+    699,
+    1014,
+    821
+   ],
+   "cortes": [
+    [
+     852,
+     864
+    ],
+    [
+     934,
+     945
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    }
+   },
+   "escala": 0.87
+  },
+  "burla": {
+   "mascara": [
+    1024,
+    699,
+    1270,
+    821
+   ],
+   "cortes": [
+    [
+     1087,
+     1106
+    ],
+    [
+     1158,
+     1170
+    ]
+   ],
+   "inferencia": "ancho",
+   "retoqueTodos": {
+    "pelarFondo": {
+     "lumMax": 32,
+     "stdMax": 99,
+     "gMenosRMin": 0.5,
+     "ventanaTinte": 7,
+     "pasos": 40
+    }
+   },
+   "escala": 0.87
+  },
+  "herramienta1": {
+   "alias": "combo",
+   "usar": [
+    2,
+    3
+   ],
+   "impactos": [
+    1
+   ]
+  },
+  "herramienta2": {
+   "alias": "patada",
+   "usar": [
+    0,
+    1,
+    2
+   ],
+   "impactos": [
+    2
+   ]
+  }
+ },
+ "retratoDesde": {
+  "anim": "victoria",
+  "cuadro": 2,
+  "alto": 720,
+  "cara": [
+   953,
+   705,
+   995,
+   747
+  ],
+  "nitidez": 70
+ },
+ "efectos": {
+  "roca": {
+   "caja": [
+    1132,
+    596,
+    1164,
+    630
+   ],
+   "modo": "recorte",
+   "lumMin": 0,
+   "poligono": [
+    [
+     1136,
+     606
+    ],
+    [
+     1142,
+     600
+    ],
+    [
+     1152,
+     599
+    ],
+    [
+     1158,
+     604
+    ],
+    [
+     1160,
+     612
+    ],
+    [
+     1158,
+     620
+    ],
+    [
+     1152,
+     626
+    ],
+    [
+     1142,
+     626
+    ],
+    [
+     1137,
+     620
+    ],
+    [
+     1135,
+     612
+    ]
+   ],
+   "quitarColor": [
+    {
+     "lumMin": 128
+    },
+    {
+     "satMax": 0.35,
+     "lumMin": 105
+    }
+   ]
+  }
+ }
+}

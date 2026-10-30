@@ -406,7 +406,13 @@ export function crearAudio(): AudioJuego {
 
   function procesar(eventos: readonly EventoJuego[], p: Partida): void {
     if (destruido || !mesa || !musica) return
-    if (eventos.length === 0 && p.proyectiles.length === 0 && estadoEventos.bucles.size === 0 && !estadoEventos.tension) {
+    if (
+      eventos.length === 0 &&
+      p.proyectiles.length === 0 &&
+      estadoEventos.bucles.size === 0 &&
+      estadoEventos.seguidos.size === 0 &&
+      !estadoEventos.tension
+    ) {
       return
     }
     // Aunque esté callada, la mesa procesa: la música tiene que saber del TURBO o del KO
@@ -516,6 +522,7 @@ export function crearAudio(): AudioJuego {
       }
     }
     estadoEventos.bucles.clear()
+    estadoEventos.seguidos.clear()
     estadoEventos.tension = null
     analizador = null
     ctx = null

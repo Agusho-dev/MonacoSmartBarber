@@ -1,0 +1,328 @@
+{
+  "_nota": "Fabri (30/oct/2026). Hoja fabri_anim.jpg (la _b es el mismo personaje, un poco más chico y blando; no se mezclan). Se procesa con scripts/juego/extraer_fabri.py (llama al motor de extraer_nico_u.py). Coordenadas en px de la hoja. La fila de abajo (daño, KO, levantarse, victoria, burla) está dibujada 1,17x más grande: escala 0,855. El Modo Boxeador de la hoja está en primer plano y cortado a la altura de los muslos (sin pies): no sirve como cuadro del luchador; especial2 usa los cuadros del remate del combo (alias, sin duplicar píxeles) y el guante gigante sale como efecto «guante» para el proyectil. La 2.ª herramienta (anteojos) termina con los anteojos volando: ese cuadro no es del luchador y no se usa. Combo sin su último cuadro (un destello tapa la cara); el celular sin el barrido azul; daño con las tres figuras de pie; aterrizaje = impulso del salto (humo).",
+  "personaje": "fabri",
+  "hoja": "../../../../juego-fuentes/fabri_anim.jpg",
+  "salida": "../../../public/juego/personajes/fabri",
+  "retrato": {
+    "caja": [930, 855, 1003, 998],
+    "espejo": true,
+    "alto": 720,
+    "cara": [947, 856, 993, 902],
+    "nitidez": 110,
+    "fondoLiso": [
+      {
+        "std": 4.5,
+        "azul": 2,
+        "lumMax": 50
+      },
+      {
+        "std": 6.5,
+        "azul": 9,
+        "lumMax": 75
+      }
+    ],
+    "excluir": [[930, 855, 955, 886]]
+  },
+  "porDefecto": {
+    "fondoLiso": [
+      {
+        "std": 4.5,
+        "azul": 2,
+        "lumMax": 50
+      },
+      {
+        "std": 6.5,
+        "azul": 9,
+        "lumMax": 75
+      }
+    ],
+    "cortes": "auto",
+    "variantes": [[0, 0, 0, 0], [0, 0, 0, 2], [0, -3, 0, 0], [-5, 0, 5, 0]]
+  },
+  "animaciones": {
+    "quieto": {
+      "panel": [9, 33, 354, 154],
+      "cuadros": 5
+    },
+    "caminar": {
+      "panel": [360, 33, 721, 154],
+      "cuadros": 5
+    },
+    "correr": {
+      "_nota": "revisión 30/oct: el zapato de atrás de cada cuadro quedaba pegado al cuadro anterior",
+      "panel": [726, 33, 1087, 154],
+      "cuadros": 4,
+      "porCuadro": {
+        "0": {"excluir": [[806, 126, 836, 160]]},
+        "1": {"agregar": [[806, 126, 836, 160]], "excluir": [[898, 128, 930, 160]]},
+        "2": {"agregar": [[898, 128, 930, 160]], "excluir": [[958, 126, 988, 160]]},
+        "3": {"agregar": [[958, 126, 988, 160]]}
+      }
+    },
+    "dash": {
+      "panel": [1093, 33, 1528, 154],
+      "cuadros": 3,
+      "pintar": [
+        {
+          "zona": [1093, 105, 1528, 154],
+          "lumMin": 50,
+          "satMax": 0.4,
+          "azulMin": 0,
+          "stdMax": 40
+        }
+      ]
+    },
+    "guardia": {
+      "panel": [9, 198, 349, 317],
+      "cuadros": 4
+    },
+    "agachado": {
+      "panel": [356, 198, 646, 317],
+      "cuadros": 3
+    },
+    "saltar": {
+      "_nota": "revisión 30/oct: la cabeza de los cuadros 1 y 2 sube a la barra del título; sin esto saltar[2] salía sin cabeza",
+      "panel": [652, 172, 1010, 317],
+      "cuadros": 4,
+      "pintar": [{"zona": [652, 160, 745, 199]}, {"zona": [745, 160, 1010, 199], "azulMin": 28, "lumMin": 15}],
+      "porCuadro": {
+        "1": {"caja": [750, 172, 850, 317], "inferencia": "ancho"},
+        "2": {"caja": [840, 168, 928, 317], "inferencia": "ancho"}
+      }
+    },
+    "caer": {
+      "panel": [1017, 198, 1528, 317],
+      "cuadros": 5,
+      "usar": [0, 0, 1],
+      "sumar": [[
+          "saltar",
+          0
+        ], [
+          "saltar",
+          0
+        ]]
+    },
+    "golpe": {
+      "panel": [9, 352, 451, 469],
+      "cuadros": 5,
+      "usar": [0, 1, 2, 3],
+      "impactos": [3]
+    },
+    "patada": {
+      "panel": [458, 352, 852, 469],
+      "cuadros": 4,
+      "usar": [0, 1, 2],
+      "impactos": [1]
+    },
+    "combo": {
+      "panel": [860, 352, 1528, 469],
+      "cuadros": 8,
+      "impactos": [3, 6],
+      "cortes": [[933, 947], [1008, 1022], [1088, 1102], [1173, 1187], [1258, 1272], [1343, 1357], [1428, 1442]],
+      "pintar": [
+        {
+          "zona": [860, 352, 1528, 469],
+          "azulMin": 25,
+          "lumMin": 45
+        },
+        {
+          "zona": [1492, 352, 1528, 432],
+          "lumMin": 90
+        },
+        {
+          "zona": [1100, 352, 1528, 445],
+          "lumMin": 160,
+          "satMax": 0.25,
+          "azulMin": -5
+        },
+        {
+          "zona": [1492, 352, 1528, 432],
+          "rojoMin": 10,
+          "lumMin": 30,
+          "satMin": 0.3
+        },
+        {
+          "zona": [1100, 352, 1528, 450],
+          "azulMin": 12,
+          "lumMin": 15
+        }
+      ],
+      "porCuadro": {
+        "0": {
+          "excluir": [[860, 352, 868, 469]]
+        }
+      },
+      "usar": [0, 1, 2, 3, 4, 5, 6]
+    },
+    "herramienta1": {
+      "panel": [9, 508, 490, 628],
+      "cuadros": 5,
+      "impactos": [2],
+      "cortes": [
+        [80, 90],
+        [168, 178],
+        [[271, 508], [271, 566], [266, 575], [266, 630]],
+        [333, 343]
+      ],
+      "pintar": [
+        {
+          "zona": [290, 508, 490, 628],
+          "excepto": [[298, 540, 322, 572], [366, 556, 414, 582]],
+          "azulMin": 30,
+          "lumMin": 55
+        },
+        {
+          "zona": [418, 508, 490, 628],
+          "lumMin": 45
+        },
+        {
+          "zona": [296, 508, 345, 628],
+          "excepto": [[298, 540, 322, 572]],
+          "lumMin": 120,
+          "satMax": 0.3
+        }
+      ],
+      "usar": [0, 1, 2, 4]
+    },
+    "herramienta2": {
+      "panel": [498, 508, 917, 628],
+      "cuadros": 4,
+      "usar": [0, 1, 2],
+      "impactos": [2],
+      "porCuadro": {
+        "0": {
+          "excluir": [
+            [[530, 610], [562, 610], [564, 628], [527, 628]]
+          ]
+        },
+        "2": {
+          "excluir": [[772, 590, 806, 628]]
+        }
+      },
+      "fondoLiso": {
+        "std": 7,
+        "azul": 1,
+        "lumMax": 55
+      }
+    },
+    "especial1": {
+      "panel": [926, 508, 1528, 628],
+      "cuadros": 5,
+      "impactos": [2],
+      "pintar": [
+        {
+          "zona": [926, 508, 1528, 628],
+          "excepto": [[996, 516, 1020, 550], [1110, 538, 1142, 572], [1196, 538, 1230, 570]],
+          "verdeMin": 25,
+          "lumMin": 50
+        },
+        {
+          "zona": [926, 508, 1528, 628],
+          "excepto": [[996, 516, 1020, 550], [1110, 538, 1142, 572], [1196, 538, 1230, 570]],
+          "verdeMin": 40,
+          "lumMin": 25
+        },
+        {
+          "zona": [926, 590, 1240, 628],
+          "lumMin": 120,
+          "satMax": 0.3,
+          "stdMax": 30
+        }
+      ],
+      "porCuadro": {
+        "4": {
+          "escala": 0.94
+        }
+      },
+      "_nota": "revisión 30/oct: el cuadro 2 salía cortado en la cintura (un torso apoyado en el piso): repite el 1",
+      "usar": [0, 1, 1, 3, 4]
+    },
+    "especial2": {
+      "alias": {
+        "de": "combo",
+        "usar": [3, 4, 6],
+        "impactos": [2]
+      }
+    },
+    "danio": {
+      "panel": [9, 847, 368, 997],
+      "cuadros": 5,
+      "usar": [0, 1, 2],
+      "escala": 0.855,
+      "cortes": [
+        [76, 79],
+        [140, 146],
+        [[209, 847], [209, 955], [214, 965], [214, 997]],
+        [[262, 847], [262, 997]]
+      ],
+      "pintar": [
+        {
+          "zona": [9, 852, 92, 940],
+          "excepto": [[38, 866, 52, 896]],
+          "rojoMin": 25,
+          "bgMin": -6,
+          "lumMin": 30
+        },
+        {
+          "zona": [[26, 876], [25, 879], [24, 882], [21, 883], [18, 884], [15, 883], [12, 882], [11, 879], [10, 876], [11, 873], [12, 870], [15, 869], [18, 868], [21, 869], [24, 870], [25, 873]],
+          "lumMin": 140
+        },
+        {
+          "zona": [[74, 876], [73, 879], [72, 882], [69, 883], [66, 884], [63, 883], [60, 882], [59, 879], [58, 876], [59, 873], [60, 870], [63, 869], [66, 868], [69, 869], [72, 870], [73, 873]],
+          "lumMin": 140
+        },
+        {
+          "zona": [64, 900, 92, 940],
+          "rojoMin": 15,
+          "bgMin": -6,
+          "lumMin": 20
+        }
+      ],
+      "porCuadro": {
+        "0": {
+          "excluir": [
+            [[40, 948], [50, 948], [52, 976], [50, 988], [38, 988], [37, 976]]
+          ]
+        }
+      }
+    },
+    "ko": {
+      "panel": [375, 847, 603, 997],
+      "cuadros": 2,
+      "escala": 0.855
+    },
+    "levantarse": {
+      "panel": [610, 847, 821, 997],
+      "cuadros": 3,
+      "escala": 0.855
+    },
+    "victoria": {
+      "panel": [829, 847, 1188, 997],
+      "cuadros": 4,
+      "escala": 0.855
+    },
+    "burla": {
+      "panel": [1194, 847, 1528, 997],
+      "cuadros": 5,
+      "escala": 0.855,
+      "cortes": [[1255, 1263], [1322, 1332], [1389, 1398], [1460, 1470]],
+      "pintar": [
+        {
+          "zona": [1200, 895, 1300, 960],
+          "satMin": 0.6,
+          "rojoMin": 70,
+          "lumMin": 50
+        }
+      ]
+    }
+  },
+  "efectos": {
+    "guante": {
+      "caja": [840, 668, 980, 790],
+      "inferencia": "caja",
+      "limite": [
+        [[961, 722], [959, 732], [955, 742], [948, 750], [938, 757], [928, 761], [916, 762], [904, 761], [894, 757], [884, 750], [877, 742], [874, 732], [874, 722], [874, 712], [877, 702], [884, 694], [894, 687], [904, 683], [916, 682], [928, 683], [938, 687], [948, 694], [955, 702], [959, 712]]
+      ]
+    }
+  }
+}

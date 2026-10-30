@@ -2,9 +2,10 @@
  * El renderizador: arma la escena, procesa los eventos drenados del motor, avanza los efectos en
  * tiempo real (dtMs, aunque el motor esté en hitstop o cámara lenta) y dibuja el cuadro.
  *
- * Orden del cuadro: arena → luces → sombras y reflejos → polvo de atrás → luchadores (el que pega
- * adelante) → proyectiles → partículas → tajos → números y textos de impacto → super flash →
- * viñeta → banda del especial → destello → anuncios y combos. El HUD (vidas, reloj, carga) es DOM.
+ * Orden del cuadro: arena → luces → sombras y reflejos → grieta del sismo y polvo de atrás →
+ * luchadores (el que pega adelante; el agarrado, delante de Brian) → proyectiles (los de Simón y
+ * Chipi y los del elenco nuevo, arsenal.ts) → partículas → tajos → números y textos de impacto →
+ * super flash → viñeta → banda del especial → destello → anuncios y combos. El HUD es DOM.
  */
 import { PERSONAJES } from '../personajes'
 import { VISTA_ANCHO } from '../tipos'
@@ -19,6 +20,7 @@ import type {
   RecursosJuego,
   Renderizador,
 } from '../tipos'
+import { actualizarArsenal, dibujarArsenal, dibujarArsenalFondo, Rastros } from './arsenal'
 import { actualizarCamara, ajustarCamara, crearCamara } from './camara'
 import type { Calidad, Escena } from './escena'
 import { prepararEfectos } from './efectos'
@@ -61,6 +63,7 @@ import { actualizarProyectiles, dibujarProyectiles } from './proyectiles'
 import type { RecursosConEfectos } from './recursos'
 import { crearSprites } from './sprites'
 import { Textos } from './textos'
+import { crearUtileria } from './utileria'
 import { acotar, azar, mezcla, pasoSuave } from './util'
 
 const LIMITE_PARTICULAS: Record<Calidad, number> = { alta: 250, media: 150, baja: 70 }
@@ -90,10 +93,12 @@ function caido(l: LuchadorEstado): boolean {
   return l.estado === 'ko' || l.estado === 'derribado'
 }
 
-/** Quién va adelante: el que pega; si nadie, el jugador 1; el que está en el piso, atrás. */
+/** Quién va adelante: el agarrado (lo levantan delante); el que pega; si nadie, el jugador 1; el caído, atrás. */
 function ladoAdelante(p: Partida): Lado {
   const a = p.luchadores[0]
   const b = p.luchadores[1]
+  if (a.estado === 'agarrado') return 0
+  if (b.estado === 'agarrado') return 1
   if (caido(a) && !caido(b)) return 1
   if (caido(b) && !caido(a)) return 0
   if (b.estado === 'atacando' && a.estado !== 'atacando') return 1
@@ -119,6 +124,7 @@ export function crearRenderizadorImpl(
     parts: new Particulas(LIMITE_PARTICULAS.alta, LIMITE_PARTICULAS[calidad]),
     tajos: new Tajos(),
     spr: crearSprites(),
+    util: crearUtileria(),
     fx: prepararEfectos((recursos as RecursosConEfectos).efectosComunes),
     ms: 0,
     s: 0,
@@ -157,6 +163,8 @@ export function crearRenderizadorImpl(
   }
   const destello = crearDestello()
   const sf = crearSuperFlash()
+  /** Seguimiento de los proyectiles del elenco nuevo (estallidos al desaparecer, grieta, nube). */
+  const rastros = new Rastros()
   let mundo: Mundo | null = null
   let listo = false
   let destruido = false
@@ -308,6 +316,7 @@ export function crearRenderizadorImpl(
     }
     E.parts.vaciar()
     E.tajos.vaciar()
+    rastros.vaciar()
     textos.vaciar()
     sf.activo = false
     destello.edad = destello.dur
@@ -401,6 +410,7 @@ export function crearRenderizadorImpl(
       }
     }
     actualizarProyectiles(E, p, dtS)
+    actualizarArsenal(E, p, rastros, dtMs)
     moverGorra(dtS)
     E.parts.actualizar(dtS, E.sueloY, E.s)
     E.tajos.actualizar(dtMs)
@@ -431,6 +441,7 @@ export function crearRenderizadorImpl(
       dibujarReflejo(E, a, vis[0])
       dibujarReflejo(E, b, vis[1])
     }
+    dibujarArsenalFondo(E, rastros)
     dibujarParticulas(E, 0)
     const frente = ladoAdelante(p)
     const atras = frente === 0 ? 1 : 0
@@ -438,10 +449,12 @@ export function crearRenderizadorImpl(
     dibujarLuchador(E, p.luchadores[frente], vis[frente])
     dibujarGorra()
     dibujarProyectiles(E, p, atlasLados)
+    dibujarArsenal(E, p, rastros, atlasLados)
     dibujarParticulas(E, 1)
     E.tajos.dibujar(E)
     textos.dibujarMundo()
     if (sf.activo) dibujarSuperFlashMundo(E, sf, p.luchadores[sf.lado], vis[sf.lado])
+    dibujarParticulas(E, 2)
     dibujarVineta(E, escenario, p.turbo)
     dibujarSuperFlashBanda(E, sf, cam.altoVista)
     dibujarDestello(E, destello)
@@ -480,6 +493,7 @@ export function crearRenderizadorImpl(
     liberarPelados()
     E.spr.liberar()
     E.spr = crearSprites()
+    E.util.liberar()
     liberarEscenario(escenario)
     escenario = crearEscenario(def, recursos.arena.imagen)
     for (let lado = 0; lado < 2; lado++) {
@@ -510,9 +524,11 @@ export function crearRenderizadorImpl(
     liberarVisual(vis[1])
     textos.liberar()
     E.spr.liberar()
+    E.util.liberar()
     liberarEscenario(escenario)
     liberarSuperFlash(sf)
     E.parts.vaciar()
+    rastros.vaciar()
     mundo = null
   }
 

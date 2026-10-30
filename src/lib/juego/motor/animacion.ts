@@ -21,6 +21,7 @@ const CPS = {
   victoria: 9,
   mareado: 5,
   guardiaRota: 6,
+  agarrado: 14,
 } as const
 
 /** Ticks en los que se reparten los cuadros de caer (tiempo típico desde la cima hasta el piso). */
@@ -154,10 +155,12 @@ function elegir(l: LuchadorEstado, li: InternoLuchador): { clave: ClaveAnimacion
   if (li.pose === 'victoria') return { clave: 'victoria', sello: 2 }
   if (li.pose === 'burla') return { clave: 'burla', sello: 3 }
   if (li.pose === 'mareado') return { clave: 'danio', sello: 4 }
+  if (li.agarradoPor !== null) return { clave: 'danio', sello: 17 }
   if (ef.congelado > 0) return { clave: 'danio', sello: 5 }
   if (li.caidaDerribo > 0 || li.derribo > 0) return { clave: 'ko', sello: 100 + li.selloStun }
   if (li.levantar > 0) return { clave: 'levantarse', sello: 6 }
   if (ef.electrocutado > 0) return { clave: 'danio', sello: 7 }
+  if (ef.aturdido > 0 && li.stun === 0) return { clave: 'danio', sello: 18 }
   if (ef.guardiaRota > 0 && li.stun === 0) return { clave: 'danio', sello: 8 }
   if (li.stun > 0) {
     if (li.stunBloqueo) return { clave: li.agachado ? 'agachado' : 'guardia', sello: 9 }
@@ -216,8 +219,10 @@ function cuadroPara(l: LuchadorEstado, li: InternoLuchador, clave: ClaveAnimacio
     }
     case 'danio':
       if (li.pose === 'mareado') return vaiven(t, CPS.mareado, n)
+      if (li.agarradoPor !== null) return vaiven(t, CPS.agarrado, n)
       if (ef.congelado > 0) return Math.min(1, n - 1)
       if (ef.electrocutado > 0) return Math.min(n - 1, Math.floor(t / 3) % 2)
+      if (ef.aturdido > 0 && li.stun === 0) return vaiven(t, CPS.mareado, n)
       if (ef.guardiaRota > 0 && li.stun === 0) return vaiven(t, CPS.guardiaRota, n)
       return repartido(li.stunTotal - li.stun, li.stunTotal, n)
     case 'ko':

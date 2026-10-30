@@ -1,0 +1,1318 @@
+{
+ "_nota": "Lo procesa scripts/juego/extraer_stefano.py (importa extraer_sprites.py y extraer_chipi.py sin tocarlos). Correr sólo el compartido sobre este JSON da un atlas peor: no aplica costuras, retoques, injertos, escalas ni alias. La fila de abajo está dibujada ~1,16x y las de los especiales ~1,28x: escala 0.86 y 0.78. Los especiales están cortados a la altura de las canillas: torso del especial + cadera y piernas de un cuadro con la misma postura (injertos).",
+ "personaje": "stefano",
+ "hoja": "../../../../juego-fuentes/stefano_anim.jpg",
+ "salida": "../../../public/juego/personajes/stefano",
+ "retratoDesde": {
+  "anim": "burla",
+  "cuadro": 3,
+  "alto": 720,
+  "cara": [
+   47,
+   682,
+   99,
+   734
+  ],
+  "nitidez": 70,
+  "caraDesde": {
+   "anim": "especial2",
+   "cuadro": 0
+  }
+ },
+ "animaciones": {
+  "quieto": {
+   "mascara": [
+    13,
+    37,
+    349,
+    165
+   ],
+   "cortes": [
+    [
+     74,
+     91
+    ],
+    [
+     141,
+     158
+    ],
+    [
+     208,
+     224
+    ],
+    [
+     274,
+     290
+    ]
+   ],
+   "inferencia": "ancho"
+  },
+  "caminar": {
+   "mascara": [
+    362,
+    37,
+    720,
+    165
+   ],
+   "cortes": [
+    [
+     439,
+     448
+    ],
+    [
+     509,
+     519
+    ],
+    [
+     576,
+     586
+    ],
+    [
+     642,
+     654
+    ]
+   ],
+   "inferencia": "ancho",
+   "usar": [
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  "correr": {
+   "mascara": [
+    732,
+    37,
+    1084,
+    165
+   ],
+   "cortes": [
+    [
+     820,
+     850
+    ],
+    [
+     905,
+     943
+    ],
+    [
+     985,
+     1017
+    ]
+   ]
+  },
+  "dash": {
+   "mascara": [
+    1097,
+    37,
+    1524,
+    165
+   ],
+   "cortes": [
+    [
+     1238,
+     1248
+    ],
+    [
+     1380,
+     1390
+    ]
+   ]
+  },
+  "guardia": {
+   "mascara": [
+    13,
+    202,
+    345,
+    325
+   ],
+   "cortes": [
+    [
+     87,
+     98
+    ],
+    [
+     172,
+     183
+    ],
+    [
+     256,
+     266
+    ]
+   ],
+   "inferencia": "ancho"
+  },
+  "agachado": {
+   "mascara": [
+    357,
+    202,
+    640,
+    325
+   ],
+   "cortes": [
+    [
+     422,
+     433
+    ],
+    [
+     491,
+     504
+    ],
+    [
+     562,
+     574
+    ]
+   ],
+   "inferencia": "ancho"
+  },
+  "saltar": {
+   "mascara": [
+    652,
+    176,
+    1011,
+    325
+   ],
+   "cortes": [
+    [
+     731,
+     744
+    ],
+    [
+     841,
+     861
+    ],
+    [
+     928,
+     938
+    ]
+   ],
+   "unirCaja": {
+    "2": [
+     848,
+     176,
+     940,
+     224
+    ]
+   },
+   "retoques": {
+    "0": {
+     "quitar": [
+      [
+       652,
+       170,
+       760,
+       202
+      ]
+     ]
+    },
+    "2": {
+     "quitarColor": [
+      {
+       "zona": [
+        846,
+        170,
+        946,
+        199
+       ],
+       "tono": [
+        200,
+        260
+       ],
+       "satMin": 0.3
+      }
+     ]
+    }
+   },
+   "_nota": "revisión 30/oct: la cabeza del cuadro 2 sube a la barra del título; con la máscara desde y=200 saltar[2] salía sin cabeza"
+  },
+  "caer": {
+   "mascara": [
+    1023,
+    202,
+    1524,
+    326
+   ],
+   "cortes": [
+    [
+     1105,
+     1145
+    ],
+    [
+     1247,
+     1258
+    ],
+    [
+     1332,
+     1344
+    ],
+    [
+     1431,
+     1441
+    ]
+   ],
+   "usar": [
+    "saltar:3",
+    "saltar:3",
+    "saltar:3",
+    1,
+    4
+   ]
+  },
+  "golpe": {
+   "mascara": [
+    13,
+    364,
+    440,
+    484
+   ],
+   "cortes": [
+    [
+     85,
+     94
+    ],
+    [
+     166,
+     175
+    ],
+    [
+     249,
+     261
+    ],
+    [
+     336,
+     340
+    ]
+   ],
+   "inferencia": "ancho",
+   "agregar": {
+    "3": [
+     [
+      [
+       316,
+       383
+      ],
+      [
+       372,
+       380
+      ],
+      [
+       373,
+       396
+      ],
+      [
+       345,
+       400
+      ],
+      [
+       316,
+       400
+      ]
+     ]
+    ]
+   },
+   "retoques": {
+    "4": {
+     "quitar": [
+      [
+       411,
+       364,
+       440,
+       450
+      ]
+     ]
+    }
+   },
+   "impactos": [
+    3
+   ]
+  },
+  "patada": {
+   "mascara": [
+    452,
+    364,
+    827,
+    484
+   ],
+   "cortes": [
+    [
+     535,
+     545
+    ],
+    [
+     668,
+     690
+    ]
+   ],
+   "inferencia": "ancho",
+   "fuentePorCuadro": {
+    "1": "union_ancho",
+    "2": "union_ancho"
+   },
+   "retoques": {
+    "2": {
+     "quitar": [
+      [
+       [
+        761,
+        364
+       ],
+       [
+        830,
+        364
+       ],
+       [
+        830,
+        487
+       ],
+       [
+        740,
+        487
+       ],
+       [
+        740,
+        400
+       ],
+       [
+        761,
+        395
+       ]
+      ],
+      [
+       [
+        722,
+        420
+       ],
+       [
+        762,
+        416
+       ],
+       [
+        762,
+        446
+       ],
+       [
+        722,
+        446
+       ]
+      ],
+      [
+       650,
+       356,
+       688,
+       399
+      ]
+     ]
+    },
+    "1": {
+     "sumar": [
+      {
+       "caja": [
+        638,
+        356,
+        684,
+        400
+       ]
+      }
+     ]
+    }
+   },
+   "injertos": {
+    "2": {
+     "donante": "patada:1",
+     "corte": 444,
+     "corteDonante": 444,
+     "caderaX": [
+      670,
+      725
+     ]
+    }
+   },
+   "impactos": [
+    2
+   ]
+  },
+  "combo": {
+   "mascara": [
+    839,
+    364,
+    1524,
+    484
+   ],
+   "cortes": [
+    [
+     906,
+     920
+    ],
+    [
+     988,
+     999
+    ],
+    [
+     1070,
+     1082
+    ],
+    [
+     1168,
+     1185
+    ],
+    [
+     1228,
+     1250
+    ],
+    [
+     1305,
+     1322
+    ],
+    [
+     1428,
+     1442
+    ]
+   ],
+   "inferencia": "ancho",
+   "fuentePorCuadro": {
+    "6": "union_ancho"
+   },
+   "retoques": {
+    "3": {
+     "quitar": [
+      [
+       [
+        1117,
+        452
+       ],
+       [
+        1128,
+        449
+       ],
+       [
+        1134,
+        452
+       ],
+       [
+        1136,
+        466
+       ],
+       [
+        1134,
+        480
+       ],
+       [
+        1101,
+        480
+       ],
+       [
+        1110,
+        468
+       ]
+      ],
+      [
+       [
+        1153,
+        487
+       ],
+       [
+        1155,
+        470
+       ],
+       [
+        1160,
+        455
+       ],
+       [
+        1168,
+        438
+       ],
+       [
+        1182,
+        438
+       ],
+       [
+        1182,
+        487
+       ]
+      ],
+      [
+       [
+        1141,
+        436
+       ],
+       [
+        1153,
+        436
+       ],
+       [
+        1153,
+        452
+       ],
+       [
+        1146,
+        452
+       ]
+      ]
+     ],
+     "quitarColor": [
+      {
+       "zona": [
+        1136,
+        432,
+        1162,
+        478
+       ],
+       "lumMax": 50
+      },
+      {
+       "zona": [
+        1095,
+        479,
+        1140,
+        487
+       ],
+       "lumMax": 95
+      }
+     ]
+    },
+    "6": {
+     "limite": [
+      [
+       [
+        1338,
+        385
+       ],
+       [
+        1345,
+        375
+       ],
+       [
+        1385,
+        375
+       ],
+       [
+        1386,
+        400
+       ],
+       [
+        1398,
+        402
+       ],
+       [
+        1404,
+        396
+       ],
+       [
+        1412,
+        392
+       ],
+       [
+        1428,
+        402
+       ],
+       [
+        1428,
+        428
+       ],
+       [
+        1403,
+        430
+       ],
+       [
+        1390,
+        434
+       ],
+       [
+        1388,
+        445
+       ],
+       [
+        1390,
+        470
+       ],
+       [
+        1396,
+        476
+       ],
+       [
+        1396,
+        487
+       ],
+       [
+        1308,
+        487
+       ],
+       [
+        1309,
+        478
+       ],
+       [
+        1316,
+        468
+       ],
+       [
+        1326,
+        445
+       ],
+       [
+        1327,
+        400
+       ]
+      ]
+     ],
+     "quitar": [
+      [
+       [
+        1350,
+        456
+       ],
+       [
+        1364,
+        456
+       ],
+       [
+        1366,
+        474
+       ],
+       [
+        1350,
+        476
+       ]
+      ],
+      [
+       [
+        1386,
+        420
+       ],
+       [
+        1404,
+        431
+       ],
+       [
+        1404,
+        447
+       ],
+       [
+        1386,
+        447
+       ]
+      ],
+      [
+       1403,
+       431,
+       1434,
+       447
+      ]
+     ],
+     "quitarColor": [
+      {
+       "zona": [
+        1403,
+        386,
+        1434,
+        442
+       ],
+       "lumMax": 50
+      },
+      {
+       "zona": [
+        1388,
+        421,
+        1404,
+        446
+       ],
+       "lumMax": 45
+      }
+     ]
+    }
+   },
+   "usar": [
+    0,
+    1,
+    2,
+    3,
+    6
+   ],
+   "impactos": [
+    3,
+    4
+   ],
+   "injertos": {
+    "6": {
+     "donante": "combo:2",
+     "corte": 446,
+     "corteDonante": 442,
+     "caderaX": [
+      1330,
+      1385
+     ]
+    }
+   }
+  },
+  "especial1": {
+   "cajas": [
+    [
+     15,
+     524,
+     150,
+     641
+    ],
+    [
+     160,
+     524,
+     280,
+     641
+    ],
+    [
+     285,
+     524,
+     410,
+     641
+    ],
+    [
+     375,
+     524,
+     505,
+     641
+    ],
+    [
+     490,
+     524,
+     605,
+     641
+    ],
+    [
+     610,
+     524,
+     770,
+     641
+    ]
+   ],
+   "inferencia": "ancho",
+   "escala": 0.78,
+   "injertos": {
+    "1": {
+     "donante": "golpe:1",
+     "corte": 612,
+     "corteDonante": 440,
+     "caderaX": [
+      180,
+      250
+     ],
+     "apoyo": "pies"
+    },
+    "3": {
+     "donante": "combo:1",
+     "corte": 615,
+     "corteDonante": 441,
+     "caderaX": [
+      432,
+      495
+     ],
+     "apoyo": "pies"
+    },
+    "5": {
+     "donante": "combo:2",
+     "corte": 617,
+     "corteDonante": 442,
+     "caderaX": [
+      665,
+      740
+     ],
+     "apoyo": "pies"
+    }
+   },
+   "usar": [
+    1,
+    3,
+    5
+   ],
+   "impactos": [
+    2
+   ]
+  },
+  "especial2": {
+   "cajas": [
+    [
+     15,
+     679,
+     130,
+     798
+    ],
+    [
+     120,
+     679,
+     242,
+     798
+    ],
+    [
+     245,
+     679,
+     372,
+     798
+    ],
+    [
+     395,
+     679,
+     520,
+     798
+    ],
+    [
+     565,
+     679,
+     692,
+     798
+    ],
+    [
+     770,
+     679,
+     935,
+     798
+    ]
+   ],
+   "inferencia": "ancho",
+   "escala": 0.78,
+   "injertos": {
+    "1": {
+     "donante": "combo:0",
+     "corte": 767,
+     "corteDonante": 440,
+     "caderaX": [
+      140,
+      210
+     ],
+     "apoyo": "pies"
+    },
+    "3": {
+     "donante": "combo:1",
+     "corte": 763,
+     "corteDonante": 441,
+     "caderaX": [
+      415,
+      485
+     ],
+     "apoyo": "pies"
+    },
+    "4": {
+     "donante": "combo:2",
+     "corte": 765,
+     "corteDonante": 442,
+     "caderaX": [
+      590,
+      660
+     ],
+     "apoyo": "pies"
+    }
+   },
+   "usar": [
+    1,
+    3,
+    4
+   ],
+   "impactos": [
+    2
+   ]
+  },
+  "danio": {
+   "mascara": [
+    13,
+    838,
+    332,
+    990
+   ],
+   "cortes": [
+    [
+     87,
+     95
+    ],
+    [
+     157,
+     167
+    ],
+    [
+     247,
+     261
+    ]
+   ],
+   "inferencia": "ancho",
+   "escala": 0.86,
+   "fuentePorCuadro": {
+    "1": "union_ancho",
+    "2": "union_ancho"
+   },
+   "retoques": {
+    "2": {
+     "quitar": [
+      [
+       150,
+       950,
+       182,
+       972
+      ],
+      [
+       [
+        238,
+        947
+       ],
+       [
+        262,
+        947
+       ],
+       [
+        262,
+        970
+       ],
+       [
+        238,
+        970
+       ]
+      ],
+      [
+       229,
+       950,
+       242,
+       972
+      ]
+     ],
+     "quitarColor": [
+      {
+       "zona": [
+        158,
+        932,
+        264,
+        993
+       ],
+       "tono": [
+        38,
+        100
+       ],
+       "satMin": 0.25
+      }
+     ]
+    }
+   },
+   "usar": [
+    0,
+    1,
+    2
+   ]
+  },
+  "ko": {
+   "mascara": [
+    342,
+    838,
+    649,
+    990
+   ],
+   "cortes": [
+    [
+     413,
+     420
+    ],
+    [
+     483,
+     491
+    ],
+    [
+     563,
+     578
+    ]
+   ],
+   "inferencia": "ancho",
+   "escala": 0.86,
+   "retoques": {
+    "2": {
+     "quitar": [
+      [
+       532,
+       961,
+       566,
+       992
+      ]
+     ]
+    }
+   },
+   "usar": [
+    0,
+    1,
+    3
+   ],
+   "_nota": "revisión 30/oct: el cuadro 2 quedaba con un agujero rectangular en las piernas (el «quitar» del mate del vecino): no se usa"
+  },
+  "levantarse": {
+   "mascara": [
+    661,
+    838,
+    924,
+    990
+   ],
+   "cortes": [
+    [
+     728,
+     739
+    ],
+    [
+     794,
+     803
+    ],
+    [
+     858,
+     873
+    ]
+   ],
+   "inferencia": "ancho",
+   "escala": 0.86,
+   "retoques": {
+    "0": {
+     "quitarColor": [
+      {
+       "zona": [
+        660,
+        965,
+        740,
+        992
+       ],
+       "tono": [
+        35,
+        95
+       ],
+       "satMin": 0.3
+      }
+     ]
+    }
+   }
+  },
+  "victoria": {
+   "mascara": [
+    941,
+    838,
+    1203,
+    990
+   ],
+   "cortes": [
+    [
+     1022,
+     1032
+    ],
+    [
+     1088,
+     1100
+    ],
+    [
+     1147,
+     1154
+    ]
+   ],
+   "inferencia": "ancho",
+   "escala": 0.86,
+   "retoques": {
+    "2": {
+     "quitarColor": [
+      {
+       "zona": [
+        1139,
+        892,
+        1151,
+        995
+       ],
+       "lumMax": 60
+      },
+      {
+       "zona": [
+        1139,
+        892,
+        1151,
+        995
+       ],
+       "tono": [
+        240,
+        330
+       ],
+       "satMin": 0.2,
+       "lumMax": 120
+      },
+      {
+       "zona": [
+        1096,
+        943,
+        1105,
+        992
+       ],
+       "lumMax": 70
+      }
+     ]
+    },
+    "3": {
+     "quitarColor": [
+      {
+       "zona": [
+        1143,
+        905,
+        1153,
+        995
+       ],
+       "lumMax": 75
+      },
+      {
+       "zona": [
+        1143,
+        858,
+        1153,
+        995
+       ],
+       "tono": [
+        240,
+        330
+       ],
+       "satMin": 0.2,
+       "lumMax": 120
+      },
+      {
+       "zona": [
+        1192,
+        880,
+        1204,
+        995
+       ],
+       "tono": [
+        240,
+        330
+       ],
+       "satMin": 0.2,
+       "lumMax": 140
+      },
+      {
+       "zona": [
+        1194,
+        905,
+        1206,
+        995
+       ],
+       "lumMax": 60
+      }
+     ]
+    }
+   }
+  },
+  "burla": {
+   "mascara": [
+    1215,
+    838,
+    1524,
+    990
+   ],
+   "cortes": [
+    [
+     1295,
+     1304
+    ],
+    [
+     1370,
+     1378
+    ],
+    [
+     1439,
+     1450
+    ]
+   ],
+   "inferencia": "ancho",
+   "escala": 0.86
+  },
+  "herramienta1": {
+   "alias": "combo",
+   "usar": [
+    2,
+    3,
+    4
+   ],
+   "impactos": [
+    2
+   ]
+  },
+  "herramienta2": {
+   "alias": "patada",
+   "usar": [
+    0,
+    1,
+    2
+   ],
+   "impactos": [
+    2
+   ]
+  }
+ },
+ "efectos": {
+  "mate": {
+   "caja": [
+    950,
+    553,
+    992,
+    598
+   ],
+   "modo": "recorte",
+   "escala": 0.78,
+   "lumMin": 12,
+   "poligono": [
+    [
+     956,
+     572
+    ],
+    [
+     960,
+     565
+    ],
+    [
+     966,
+     561
+    ],
+    [
+     972,
+     557
+    ],
+    [
+     978,
+     557
+    ],
+    [
+     985,
+     565
+    ],
+    [
+     989,
+     576
+    ],
+    [
+     988,
+     585
+    ],
+    [
+     982,
+     591
+    ],
+    [
+     975,
+     595
+    ],
+    [
+     965,
+     594
+    ],
+    [
+     958,
+     589
+    ],
+    [
+     955,
+     580
+    ]
+   ],
+   "quitarColor": [
+    {
+     "tono": [
+      185,
+      265
+     ],
+     "satMin": 0.15,
+     "lumMax": 75
+    }
+   ]
+  }
+ }
+}

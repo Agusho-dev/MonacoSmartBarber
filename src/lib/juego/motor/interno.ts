@@ -5,11 +5,20 @@
  * Vive en un WeakMap colgado de la Partida, así el objeto público queda con la forma exacta de
  * tipos.ts (el render, el HUD y el audio no ven nada raro) y se libera solo con la partida.
  */
-import type { ClaveAnimacion, EntradaJugador, EventoJuego, Lado, MetaAnimaciones, Partida, ProyectilEstado } from '../tipos'
+import type {
+  ClaveAnimacion,
+  EfectoEspecial,
+  EntradaJugador,
+  EventoJuego,
+  Lado,
+  MetaAnimaciones,
+  Partida,
+  ProyectilEstado,
+} from '../tipos'
 import type { Azar } from './azar'
 import { MAX_EVENTOS } from './constantes'
 import type { Cerebro } from './cpu'
-import type { DefMovimiento, DefProyectil, KitPersonaje } from './movimientos'
+import type { DefMovimiento, DefNube, DefProyectil, KitPersonaje } from './movimientos'
 
 export type BotonBuffer = 'golpe' | 'herramienta' | 'especial1' | 'especial2' | 'salto' | 'dash'
 export type Pose = 'burla' | 'victoria' | 'mareado' | 'ko'
@@ -27,8 +36,11 @@ export interface Accion {
   /** Tick del movimiento (0 = el primero). */
   t: number
   total: number
-  /** Por ventana: ya hizo contacto (golpe, bloqueo o armadura). */
+  /** Por ventana: ya hizo todos sus contactos (golpe, bloqueo o armadura). */
   resueltas: boolean[]
+  /** Por ventana multigolpe: contactos hechos y ticks hasta poder volver a pegar. */
+  contactos: number[]
+  esperaVentana: number[]
   contacto: boolean
   acerto: boolean
   /** Desde qué tick se puede encadenar el siguiente o cancelar en especial. */
@@ -46,6 +58,12 @@ export interface Accion {
   avanceRemate: number
   /** Identificador único (la animación y la CPU lo usan para saber que es otro movimiento). */
   sello: number
+  /** Proyectiles que ya salieron (ráfagas). */
+  lanzados: number
+  /** El especial saltó (embestida aérea): sigue hasta aterrizar. */
+  enAire: boolean
+  /** Agarre en curso: a quién tiene y hace cuánto. */
+  agarre: { victima: Lado; t: number } | null
 }
 
 export interface ProyectilInterno {
@@ -59,7 +77,18 @@ export interface ProyectilInterno {
   acerto: boolean
   /** El rayo del Corte Relámpago: no pega, acompaña al que corre. */
   cosmetico: boolean
+  /** Sello del especial que lo tiró (un especial acierta una sola vez aunque tire varios). */
   selloAccion: number
+  /** Efecto de este tiro de la ráfaga (undefined = el del proyectil o la ficha). */
+  efectoTiro: EfectoEspecial | null | undefined
+  empujeTiro: number | undefined
+  /** Bumerán: ya pegó en la ida / en la vuelta. */
+  pegoIda: boolean
+  pegoVuelta: boolean
+  /** Área diferida: ya estalló. */
+  estallo: boolean
+  /** Es una nube en el piso (la deja el pañal). */
+  nube: DefNube | null
 }
 
 export interface DashEnCurso {
@@ -68,7 +97,12 @@ export interface DashEnCurso {
   dir: -1 | 1
   adelante: boolean
   dist: number
+  /** Ticks invulnerable al principio. */
+  invul: number
 }
+
+/** Estados de control con inmunidad a sí mismos al terminar (no se encadenan infinito). */
+export type EstadoControl = 'aturdido' | 'mareado' | 'quemado' | 'congelado' | 'electrocutado'
 
 export interface InternoLuchador {
   /** Entrada del tick anterior (para detectar flancos). */
@@ -116,6 +150,12 @@ export interface InternoLuchador {
   danioRecibidoRound: number
   danioHechoRound: number
   vidaAntes: number
+  /** Ticks de inmunidad a cada estado de control (después de salir de él). */
+  inmune: Record<EstadoControl, number>
+  /** La quemadura en curso (efectos.quemado cuenta los ticks): cuánto y cada cuánto, y de quién. */
+  quema: { cada: number; danio: number; de: Lado; t: number } | null
+  /** Lo tiene agarrado ese lado (el Agarre de Brian). */
+  agarradoPor: Lado | null
 }
 
 export interface EstadoFinal {
@@ -144,6 +184,8 @@ export interface EstadoInterno {
   /** Ticks de pelea del round actual y de los terminados (diagnóstico y simulador). */
   ticksPelea: number
   duracionesRound: number[]
+  /** Sello del último especial que contó como acertado, por lado. */
+  ultimoAcierto: [number, number]
 }
 
 const INTERNOS = new WeakMap<Partida, EstadoInterno>()

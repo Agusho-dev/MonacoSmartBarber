@@ -1,0 +1,142 @@
+{
+  "_nota": "Nahuel «El 10» para «Corte Final» (30/oct/2026). Se procesa con scripts/juego/extraer_nahuel.py (la lógica está en extraer_joaquin.py). Hoja de 18 paneles (1600x900): herramienta1 y herramienta2 son alias del remate del combo y de la patada. El fondo, el contorno y el pelo de esta hoja son el mismo negro: las sombras encerradas entre las piernas salen con quitarOscuro (sólo debajo de la cabeza; nunca en los cuadros cabeza abajo o acostado). Los cuadros con movimiento, humo y arcos de energía van con una inferencia propia por caja (inferencia \"caja\" o reinferir); el humo de los pies se corta con excluir. La pelota del pelotazo la dibuja el render: en los cuadros del especial 1 sólo queda la que pisa en la preparación.",
+  "personaje": "nahuel",
+  "hoja": "../../../../juego-fuentes/nahuel_anim.jpg",
+  "salida": "../../../public/juego/personajes/nahuel",
+  "sinFondo": { "tol": 14, "piso": 3 },
+  "limpiezas": [
+    { "nota": "saltar: franja azul del título detrás de las cabezas", "zona": [706, 150, 1067, 184], "regla": { "bMenosRMin": 40 } },
+    { "nota": "saltar: letras del título", "poligono": [[706, 150], [785, 150], [785, 184], [706, 184]] }
+  ],
+  "retrato": { "anim": "quieto", "cuadro": 0, "alto": 720, "cara": [8, -2, 44] },
+  "animaciones": {
+    "quieto": { "region": [9, 30, 370, 151], "cuadros": 5, "usar": [0, 1, 2, 4], "quitarOscuro": { "desde": 0.4 } },
+    "caminar": {
+      "region": [380, 30, 750, 151],
+      "cuadros": 5,
+      "quitarOscuro": { "desde": 0.4 },
+      "porCuadro": { "4": { "excluir": [[[723, 141], [726, 132], [734, 129], [742, 132], [748, 141], [744, 150], [734, 152], [726, 150]]] } }
+    },
+    "correr": {
+      "inferencia": "caja",
+      "region": [760, 30, 1131, 151],
+      "cajas": [[760, 30, 892, 151], [868, 30, 1006, 151], [984, 30, 1131, 151]],
+      "quitarOscuro": { "desde": 0.4 },
+      "porCuadro": {
+        "0": {
+          "limite": [[[760, 30], [892, 30], [892, 76], [880, 80], [874, 90], [868, 151], [760, 151]]],
+          "excluir": [[[784, 151], [786, 135], [798, 127], [812, 121], [818, 118], [818, 137], [842, 137], [844, 118], [852, 108], [866, 104], [880, 102], [880, 151]]]
+        },
+        "1": {
+          "limite": [[[889, 30], [1004, 30], [1004, 76], [996, 80], [990, 95], [986, 151], [870, 151], [872, 110], [876, 90], [878, 77], [889, 77]]],
+          "excluir": [[[893, 151], [894, 132], [905, 125], [920, 120], [927, 118], [927, 142], [954, 142], [956, 120], [965, 110], [980, 105], [1000, 102], [1000, 151]]]
+        },
+        "2": {
+          "limite": [[[1004, 30], [1131, 30], [1131, 151], [986, 151], [990, 110], [994, 92], [996, 78], [1004, 77]]],
+          "excluir": [[[1010, 151], [1011, 132], [1022, 126], [1040, 120], [1060, 114], [1085, 110], [1095, 108], [1110, 104], [1131, 100], [1131, 151]]]
+        }
+      }
+    },
+    "dash": {
+      "region": [1141, 30, 1591, 151],
+      "cortes": [[1270, 1300], [1420, 1450]],
+      "usar": [1, 1, 1],
+      "quitarOscuro": { "desde": 0.4 },
+      "porCuadro": {
+        "1": {
+          "reinferir": [1280, 30, 1440, 151],
+          "excluir": [[[1288, 151], [1290, 141], [1305, 136], [1322, 131], [1335, 126], [1335, 149], [1371, 149], [1373, 124], [1385, 116], [1405, 110], [1440, 106], [1440, 151]]]
+        }
+      }
+    },
+    "guardia": { "region": [9, 184, 370, 293], "cuadros": 4, "quitarOscuro": { "desde": 0.4 } },
+    "agachado": { "region": [380, 184, 697, 293], "cuadros": 4, "quitarOscuro": { "desde": 0.5 } },
+    "saltar": {
+      "region": [706, 156, 1067, 293],
+      "cuadros": 4,
+      "limite": [[706, 183, 1067, 293]],
+      "quitarOscuro": { "desde": 0.4 },
+      "porCuadro": { "1": { "limite": [[706, 156, 1067, 293]] }, "2": { "limite": [[706, 156, 1067, 293]] } }
+    },
+    "caer": {
+      "region": [1077, 184, 1591, 293],
+      "cuadros": 5,
+      "usar": [0, 0, 0, 1, 2],
+      "porCuadro": { "1": { "quitarOscuro": { "desde": 0.45 } }, "2": { "quitarOscuro": { "desde": 0.45 } } }
+    },
+    "golpe": {
+      "inferencia": "caja",
+      "region": [9, 325, 442, 435],
+      "cajas": [[12, 325, 86, 435], [88, 325, 170, 435], [170, 325, 258, 435], [262, 325, 372, 435]],
+      "impactos": [3],
+      "quitarOscuro": { "desde": 0.4 }
+    },
+    "patada": {
+      "inferencia": "caja",
+      "region": [453, 325, 843, 435],
+      "cajas": [[455, 325, 538, 435], [556, 325, 694, 435]],
+      "usar": [0, 1, 0],
+      "impactos": [1],
+      "quitarOscuro": { "desde": 0.4 },
+      "porCuadro": {
+        "1": {
+          "reinferir": [556, 325, 672, 435],
+          "unirCaja": [[600, 325, 694, 435]],
+          "excluir": [
+            [[556, 375], [559, 366], [565, 361], [574, 361], [580, 365], [583, 375], [580, 384], [574, 389], [565, 389], [559, 384]],
+            [[626, 402], [694, 402], [694, 435], [626, 435]]
+          ]
+        }
+      }
+    },
+    "combo": {
+      "_nota": "los golpes del combo de la hoja vienen envueltos en remolinos azules, humo y la pelota: quedan sus 3 cuadros de preparación y los golpes se toman prestados (el puñetazo del golpe, la patada y la volea del especial 1), sin duplicar píxeles",
+      "inferencia": "caja",
+      "region": [854, 325, 1590, 435],
+      "cajas": [[857, 325, 922, 435], [925, 325, 1000, 435], [1002, 325, 1082, 435]],
+      "prestados": [{ "pos": 3, "de": "golpe", "cuadro": 3 }, { "pos": 4, "de": "patada", "cuadro": 1 }, { "pos": 5, "de": "patada", "cuadro": 1 }],
+      "_nota2": "revisión 30/oct: la volea del especial 1 tenía la pierna cortada al ras (el pie queda detrás de la pelota en la hoja): el remate del combo es la patada",
+      "impactos": [3, 5],
+      "quitarOscuro": { "desde": 0.4 }
+    },
+    "especial1": {
+      "inferencia": "caja",
+      "region": [9, 468, 1591, 577],
+      "_nota": "revisión 30/oct: la volea de la hoja tiene el pie tapado por la pelota y quedaba una pierna cortada al ras; el remate es la patada limpia (prestada) y la pelota que sale la dibuja el render",
+      "cajas": [[168, 468, 258, 577], [356, 468, 448, 577]],
+      "usar": [0, 1],
+      "prestados": [{ "pos": 2, "de": "patada", "cuadro": 1 }, { "pos": 3, "de": "patada", "cuadro": 1 }],
+      "impactos": [2],
+      "quitarOscuro": { "desde": 0.4 }
+    },
+    "especial2": {
+      "_nota": "la chilena de la hoja (cabeza abajo sobre remolinos azules y humo) no sale limpia: isnet pierde las piernas y u2net se lleva el fondo. Se arma con la preparación agachada de la hoja y prestados limpios: el salto alto (saltar 2) y la vuelta en el aire con las piernas arriba (caer 0), que se lee como la chilena; la pelota y la energía las dibuja el render",
+      "inferencia": "caja",
+      "region": [9, 612, 1591, 721],
+      "cajas": [[85, 612, 172, 721]],
+      "usar": [0, 0],
+      "prestados": [{ "pos": 1, "de": "saltar", "cuadro": 2 }, { "pos": 2, "de": "caer", "cuadro": 0 }, { "pos": 3, "de": "caer", "cuadro": 0 }],
+      "impactos": [2, 3],
+      "porCuadro": { "0": { "limite": [[93, 612, 172, 721]], "quitarOscuro": { "desde": 0.45 } } }
+    },
+    "danio": { "escala": 0.97, "region": [10, 755, 300, 882], "cuadros": 4, "quitarOscuro": { "desde": 0.45 } },
+    "ko": { "escala": 0.97, "region": [312, 755, 660, 882], "cuadros": 3, "porCuadro": { "0": { "quitarOscuro": { "desde": 0.45 } } } },
+    "levantarse": { "escala": 0.97, "region": [672, 755, 965, 882], "cuadros": 4, "porCuadro": { "1": { "quitarOscuro": { "desde": 0.45 } }, "2": { "quitarOscuro": { "desde": 0.4 } }, "3": { "quitarOscuro": { "desde": 0.4 } } } },
+    "victoria": { "escala": 0.97, "region": [977, 755, 1253, 882], "cuadros": 4, "componentes": "todos" },
+    "burla": { "escala": 0.97, "region": [1265, 755, 1590, 882], "cuadros": 4, "componentes": "todos" }
+  },
+  "alias": {
+    "herramienta1": { "de": "combo", "cuadros": [2, 5, 5], "impactos": [1] },
+    "herramienta2": { "de": "patada", "impactos": [1] }
+  },
+  "efectos": {
+    "pelota": {
+      "_nota": "la pelota que hace jueguito en la burla (cuadro 0), sobre fondo negro: el disco entero",
+      "caja": [1314, 775, 1346, 806],
+      "modo": "color",
+      "regla": { "lumMin": 0 },
+      "cerrar": 0,
+      "limite": [[[1341.1, 790.0], [1340.5, 793.6], [1338.9, 796.8], [1336.3, 799.4], [1333.1, 801.0], [1329.5, 801.6], [1325.9, 801.0], [1322.7, 799.4], [1320.1, 796.8], [1318.5, 793.6], [1317.9, 790.0], [1318.5, 786.4], [1320.1, 783.2], [1322.7, 780.6], [1325.9, 779.0], [1329.5, 778.4], [1333.1, 779.0], [1336.3, 780.6], [1338.9, 783.2], [1340.5, 786.4]]]
+    }
+  }
+}
