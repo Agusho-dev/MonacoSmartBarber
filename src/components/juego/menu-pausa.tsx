@@ -154,7 +154,7 @@ export function MenuPausa({ prefs, turno, tactil, onContinuar, onReiniciar, onCo
               <dt>
                 <kbd>Shift</kbd>
               </dt>
-              <dd>Dash</dd>
+              <dd>Esquiva</dd>
             </div>
           </dl>
         )}

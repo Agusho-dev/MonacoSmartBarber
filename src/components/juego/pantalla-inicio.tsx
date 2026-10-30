@@ -1,7 +1,8 @@
 'use client'
 
 import { CircleHelp, Trophy, Volume2, VolumeX } from 'lucide-react'
-import { useEffect, useEffectEvent, type CSSProperties } from 'react'
+import Image from 'next/image'
+import { useEffect, useEffectEvent, useState, type CSSProperties } from 'react'
 import { ARENAS } from '@/lib/juego/arenas'
 import { IDS_PERSONAJES, PERSONAJES } from '@/lib/juego/personajes'
 import type { DatosEntradaJuego, EstadoTurnoJuego } from '@/lib/juego/tipos'
@@ -20,9 +21,13 @@ interface Props {
   onSonido: () => void
 }
 
+/** El logo de Monaco, transparente (sale de public/logo-monaco.png; 720×199). */
+const LOGO_MONACO = { src: '/juego/logo-monaco.webp', ancho: 720, alto: 199 } as const
+
 export function PantallaInicio({ datos, turno, prefs, onJugar, onRanking, onComoSeJuega, onSonido }: Props) {
   const arena = ARENAS[datos.arenaInicial]
   const jugar = useEffectEvent(onJugar)
+  const [sinLogo, setSinLogo] = useState(false)
 
   // En la compu: Enter o espacio también arrancan.
   useEffect(() => {
@@ -69,17 +74,28 @@ export function PantallaInicio({ datos, turno, prefs, onJugar, onRanking, onComo
 
       <div className="cf-inicio__contenido">
         <header className="cf-inicio__arriba">
-          <p className="cf-inicio__saludo">
-            {datos.cliente ? (
-              <>
-                Hola, <b>{datos.cliente.nombre}</b>
-              </>
-            ) : (
-              <>
-                Monaco <b>Smart Barber</b>
-              </>
-            )}
-          </p>
+          {sinLogo ? (
+            <p className="cf-inicio__saludo">
+              Monaco <b>Barber Studio</b>
+            </p>
+          ) : (
+            <Image
+              src={LOGO_MONACO.src}
+              alt="Monaco Barber Studio"
+              width={LOGO_MONACO.ancho}
+              height={LOGO_MONACO.alto}
+              unoptimized
+              loading="eager"
+              draggable={false}
+              className="cf-inicio__monaco"
+              onError={() => setSinLogo(true)}
+            />
+          )}
+          {datos.cliente && (
+            <p className="cf-inicio__saludo">
+              Hola, <b>{datos.cliente.nombre}</b>
+            </p>
+          )}
           <ChipTurno turno={turno} />
         </header>
 

@@ -51,6 +51,8 @@ export interface Disposicion {
   golpe: Circulo
   herramienta: Circulo
   guardia: Circulo
+  /** ESQUIVA: en el rincón entre HERRAMIENTA y GUARDIA, un anillo más afuera (no tapa GOLPE). */
+  esquiva: Circulo
 }
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v))
@@ -66,26 +68,55 @@ function relativo(c: Circulo, zona: Caja): Circulo {
   return { x: r0(c.x - zona.x), y: r0(c.y - zona.y), r: c.r }
 }
 
-function botonesEnArco(
-  W: number,
-  H: number,
-  ins: Insets,
-  zona: Caja,
-  escala: number,
-  margenAbajo: number,
-): Pick<Disposicion, 'golpe' | 'herramienta' | 'guardia'> {
+type Botones = Pick<Disposicion, 'golpe' | 'herramienta' | 'guardia' | 'esquiva'>
+
+const ANGULO_HERRAMIENTA = 102
+const ANGULO_GUARDIA = 166
+
+/** Los cuatro botones en coordenadas ABSOLUTAS de la pantalla. */
+function botonesEnArco(W: number, H: number, ins: Insets, escala: number, margenAbajo: number): Botones {
   const rG = r0(44 * escala)
   const rB = r0(32 * escala)
+  const rE = r0(29 * escala)
   const golpe: Circulo = {
     x: r0(W - ins.derecha - 20 * escala - rG),
     y: r0(H - ins.abajo - margenAbajo - rG),
     r: rG,
   }
   const d = rG + rB + 13 * escala
+  // ESQUIVA en la bisectriz del hueco entre HERRAMIENTA y GUARDIA, a la distancia justa para
+  // quedar a `separacion` de las dos: D = d·cos(m) + √(s² − (d·sen m)²), m = medio ángulo.
+  const medio = ((ANGULO_GUARDIA - ANGULO_HERRAMIENTA) / 2) * (Math.PI / 180)
+  const s = rB + rE + 6 * escala
+  const D = d * Math.cos(medio) + Math.sqrt(Math.max(0, s * s - (d * Math.sin(medio)) ** 2))
   return {
-    golpe: relativo(golpe, zona),
-    herramienta: relativo(enArco(golpe, rB, d, 102), zona),
-    guardia: relativo(enArco(golpe, rB, d, 166), zona),
+    golpe,
+    herramienta: enArco(golpe, rB, d, ANGULO_HERRAMIENTA),
+    guardia: enArco(golpe, rB, d, ANGULO_GUARDIA),
+    esquiva: enArco(golpe, rE, Math.max(D, rG + rE + 6 * escala), (ANGULO_HERRAMIENTA + ANGULO_GUARDIA) / 2),
+  }
+}
+
+/**
+ * Las dos zonas táctiles de abajo: joystick a la izquierda y botones a la derecha. El corte va
+ * a la mitad, salvo que algún botón se meta en la mitad del joystick (vertical en celulares
+ * angostos): ahí el corte se corre para que todo el botón quede en su zona (un toque en su borde
+ * iba al joystick).
+ */
+function zonasDeControl(W: number, H: number, y: number, b: Botones): { joystick: Caja; botones: Caja; relativos: Botones } {
+  const izquierdaBotones = Math.min(...[b.golpe, b.herramienta, b.guardia, b.esquiva].map((c) => c.x - c.r))
+  const corte = Math.max(r0(W * 0.4), Math.min(r0(W * 0.5), r0(izquierdaBotones - 8)))
+  const joystick: Caja = { x: 0, y, w: corte, h: H - y }
+  const botones: Caja = { x: corte, y, w: W - corte, h: H - y }
+  return {
+    joystick,
+    botones,
+    relativos: {
+      golpe: relativo(b.golpe, botones),
+      herramienta: relativo(b.herramienta, botones),
+      guardia: relativo(b.guardia, botones),
+      esquiva: relativo(b.esquiva, botones),
+    },
   }
 }
 
@@ -147,9 +178,7 @@ function vertical(W: number, H: number, ins: Insets): Disposicion {
   const altoUtil = Math.max(150, H - ins.abajo - yCtrl)
   const escala = clamp(altoUtil / 270, 0.74, 1.14)
 
-  const mitad = r0(W * 0.5)
-  const joystick: Caja = { x: 0, y: yCtrl, w: mitad, h: H - yCtrl }
-  const botones: Caja = { x: mitad, y: yCtrl, w: W - mitad, h: H - yCtrl }
+  const { joystick, botones, relativos } = zonasDeControl(W, H, yCtrl, botonesEnArco(W, H, ins, escala, 22 * escala))
   const R = r0(56 * escala)
   const joyAbs: Circulo = {
     x: r0(ins.izquierda + 26 * escala + R),
@@ -169,7 +198,7 @@ function vertical(W: number, H: number, ins: Insets): Disposicion {
     joystick,
     botones,
     joy: relativo(joyAbs, joystick),
-    ...botonesEnArco(W, H, ins, botones, escala, 22 * escala),
+    ...relativos,
   }
 }
 
@@ -192,9 +221,7 @@ function horizontal(W: number, H: number, ins: Insets): Disposicion {
   const cargaH = r0(clamp(cartaH * 0.52, 28, 38))
 
   const yZonas = ly + hudH + 4
-  const mitad = r0(W * 0.5)
-  const joystick: Caja = { x: 0, y: yZonas, w: mitad, h: H - yZonas }
-  const botones: Caja = { x: mitad, y: yZonas, w: W - mitad, h: H - yZonas }
+  const { joystick, botones, relativos } = zonasDeControl(W, H, yZonas, botonesEnArco(W, H, ins, escala, 20 * escala))
   const R = r0(54 * escala)
   const joyAbs: Circulo = {
     x: r0(ins.izquierda + 30 * escala + R),
@@ -219,7 +246,7 @@ function horizontal(W: number, H: number, ins: Insets): Disposicion {
     joystick,
     botones,
     joy: relativo(joyAbs, joystick),
-    ...botonesEnArco(W, H, ins, botones, escala, 20 * escala),
+    ...relativos,
   }
 }
 
@@ -249,6 +276,7 @@ export function aplicarDisposicion(el: HTMLElement, d: Disposicion): void {
   circulo('bg', d.golpe)
   circulo('bh', d.herramienta)
   circulo('bd', d.guardia)
+  circulo('be', d.esquiva)
   el.dataset.orientacion = d.orientacion
   if (d.fila) el.dataset.fila = ''
   else delete el.dataset.fila

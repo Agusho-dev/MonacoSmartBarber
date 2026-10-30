@@ -11,7 +11,7 @@ import {
   Swords,
   Trophy,
 } from 'lucide-react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { ARENAS, IDS_ARENAS } from '@/lib/juego/arenas'
 import { IDS_PERSONAJES, PERSONAJES, PROXIMAMENTE } from '@/lib/juego/personajes'
 import type {
@@ -62,6 +62,8 @@ interface Props {
   onBloqueado: (nombre: string) => void
   onVolver: () => void
   onPelear: () => void
+  /** El chip de la sala de la sucursal (si hay alguien más con el juego abierto). */
+  sala?: ReactNode
 }
 
 export function PantallaSeleccion({
@@ -77,6 +79,7 @@ export function PantallaSeleccion({
   onBloqueado,
   onVolver,
   onPelear,
+  sala,
 }: Props) {
   const ficha = PERSONAJES[eleccion.jugador]
   const rival = PERSONAJES[eleccion.rival]
@@ -102,6 +105,7 @@ export function PantallaSeleccion({
         </button>
         <h1 className="cf-titulo cf-barra-sup__titulo">Elegí tu barbero</h1>
         <ChipTurno turno={turno} compacto />
+        {sala}
       </header>
 
       <div className="cf-seleccion__cuerpo">
@@ -291,7 +295,7 @@ export function PantallaSeleccion({
   )
 }
 
-function BarrasAtributos({ atributos }: { atributos: Atributos }) {
+export function BarrasAtributos({ atributos }: { atributos: Atributos }) {
   return (
     <dl className="cf-atributos">
       {ORDEN_ATRIBUTOS.map((clave) => {

@@ -1,0 +1,1446 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   «CORTE FINAL» — la SALA de la sucursal y las peleas online.
+   Mismo lenguaje que juego.css (oscuro, cromo y neón, cortes diagonales). Todo
+   vive debajo de .cf-raiz. El acento de lo online es el «hielo» (#38d6ff): se
+   distingue de un vistazo del dorado del turno.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.cf-raiz {
+  --cf-online: #38d6ff;
+  --cf-online-2: #0a84ff;
+  --cf-libre: #3ddc84;
+}
+
+/* ─── Chip de la sala ─────────────────────────────────────────────────────── */
+
+.cf-sala-flotante {
+  position: absolute;
+  top: calc(var(--cf-sa-t) + 12px);
+  right: calc(var(--cf-sa-r) + 12px);
+  z-index: 8;
+  max-width: calc(50% - 12px);
+  pointer-events: none;
+}
+
+.cf-sala-flotante > * {
+  pointer-events: auto;
+}
+
+/* En la pelea contra la CPU: chico, debajo del HUD (al centro) y sin tocarse. Vive adentro de
+   .cf-pelea, que tiene las cajas de la disposición en variables (--hud-x/y/w/h). */
+.cf-sala-flotante--pelea {
+  top: calc(var(--hud-y, 0px) + var(--hud-h, 64px) + 4px);
+  right: auto;
+  left: calc(var(--hud-x, 0px) + var(--hud-w, 100%) / 2);
+  transform: translateX(-50%);
+  max-width: none;
+  opacity: 0.85;
+}
+
+.cf-sala-flotante--pelea > * {
+  pointer-events: none;
+}
+
+.cf-sala-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 7px 12px 5px;
+  font-family: var(--cf-numeros);
+  font-weight: 500;
+  font-size: 17px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--cf-texto);
+  background: rgba(6, 16, 24, 0.86);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--cf-online) 55%, transparent);
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  animation: cf-pop 0.4s var(--cf-rebote) both;
+  transition: transform 0.12s var(--cf-salida);
+}
+
+button.cf-sala-chip:active {
+  transform: scale(0.95);
+}
+
+.cf-sala-chip svg {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: -2px;
+  color: var(--cf-online);
+}
+
+.cf-sala-chip__punto {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  margin-top: -2px;
+  border-radius: 50%;
+  background: var(--cf-texto-3);
+}
+
+.cf-sala-chip[data-libres] .cf-sala-chip__punto {
+  background: var(--cf-libre);
+  box-shadow: 0 0 8px var(--cf-libre);
+  animation: cf-parpadeo 1.6s ease-in-out infinite;
+}
+
+.cf-sala-chip__largo {
+  overflow: hidden;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+}
+
+.cf-sala-chip__corto {
+  display: none;
+  line-height: 1.3;
+}
+
+/* Celular angosto: «Sala · 3». */
+@media (max-width: 560px) {
+  .cf-sala-chip__largo {
+    display: none;
+  }
+
+  .cf-sala-chip__corto {
+    display: inline;
+  }
+}
+
+.cf-sala-chip[data-chico] {
+  gap: 5px;
+  padding: 4px 9px 3px;
+  font-size: 13px;
+  background: rgba(6, 16, 24, 0.7);
+  animation: none;
+}
+
+.cf-sala-chip[data-chico] svg {
+  width: 13px;
+  height: 13px;
+}
+
+.cf-sala-chip[data-chico] .cf-sala-chip__largo {
+  display: none;
+}
+
+.cf-sala-chip[data-chico] .cf-sala-chip__corto {
+  display: inline;
+}
+
+.cf-barra-sup .cf-sala-chip {
+  flex-shrink: 0;
+}
+
+/* En la selección, si no hay chip del turno, la sala se va a la derecha. */
+.cf-barra-sup > .cf-sala-chip:not(.cf-chip-turno + .cf-sala-chip) {
+  margin-left: auto;
+}
+
+.cf-resultado__cabeza {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ─── «¡Hay alguien para pelear!» ─────────────────────────────────────────── */
+
+.cf-sala-aviso {
+  position: absolute;
+  top: calc(var(--cf-sa-t) + 10px);
+  left: 50%;
+  z-index: 140;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(calc(100% - 24px), 480px);
+  padding: 10px 8px 10px 12px;
+  color: #001522;
+  background: linear-gradient(180deg, #c9f4ff, var(--cf-online));
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6);
+  clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%);
+  transform: translateX(-50%);
+  animation: cf-bajar 0.5s var(--cf-rebote) both;
+}
+
+.cf-sala-aviso__icono {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  color: #fff;
+  background: #00202f;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+
+.cf-sala-aviso__icono svg {
+  width: 19px;
+  height: 19px;
+}
+
+.cf-sala-aviso__texto {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cf-sala-aviso__texto strong {
+  font-family: var(--cf-titulo);
+  font-weight: 400;
+  font-size: 22px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.cf-sala-aviso__texto span {
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cf-sala-aviso__ver {
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 3px 14px 0;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+  background: #00202f;
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+
+.cf-sala-aviso__ver:active {
+  transform: scale(0.95);
+}
+
+.cf-sala-aviso__cerrar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 40px;
+  color: #00202f;
+}
+
+.cf-sala-aviso__cerrar svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cf-toast--sala {
+  bottom: auto;
+  top: calc(var(--cf-sa-t) + 64px);
+}
+
+/* ─── Desafío entrante ────────────────────────────────────────────────────── */
+
+.cf-desafio-capa {
+  z-index: 120;
+  background:
+    radial-gradient(80% 60% at 50% 40%, rgba(10, 60, 90, 0.5), transparent 70%),
+    rgba(2, 4, 8, 0.86);
+}
+
+.cf-desafio {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(100%, 420px);
+  padding: 22px 18px 18px;
+  text-align: center;
+  background: linear-gradient(180deg, #0c1a24, #07090d);
+  clip-path: polygon(18px 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%, 0 18px);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--cf-online) 60%, transparent);
+  animation: cf-pop 0.35s var(--cf-rebote) both;
+}
+
+.cf-desafio__rayos {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: repeating-conic-gradient(from 0deg at 50% 22%, rgba(56, 214, 255, 0.1) 0 6deg, transparent 6deg 18deg);
+  animation: cf-girar 24s linear infinite;
+  opacity: 0.8;
+}
+
+.cf-desafio__icono {
+  display: grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  color: #001522;
+  background: linear-gradient(180deg, #e3fbff, var(--cf-online));
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  animation: cf-latido-suave 1s ease-in-out infinite;
+}
+
+.cf-desafio__icono svg {
+  width: 28px;
+  height: 28px;
+}
+
+.cf-desafio__rotulo {
+  margin: 0;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--cf-online);
+}
+
+.cf-desafio__nombre {
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  padding-top: 0.2em;
+  margin-top: -0.2em;
+  font-family: var(--cf-titulo);
+  font-weight: 400;
+  font-size: clamp(44px, 13vw, 72px);
+  line-height: 0.95;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--cf-cromo);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 3px 0 #000);
+  transform: skewX(-7deg);
+}
+
+.cf-desafio__bajada {
+  margin: -4px 0 4px;
+  font-family: var(--cf-numeros);
+  font-weight: 500;
+  font-size: 20px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cf-texto-2);
+}
+
+.cf-desafio__tiempo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.cf-desafio__segundos {
+  min-width: 34px;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 18px;
+  color: #fff;
+}
+
+.cf-desafio-reloj {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.1);
+  transform: skewX(-20deg);
+}
+
+.cf-desafio-reloj::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--cf-online-2), var(--cf-online));
+  transform-origin: left center;
+  animation: cf-desafio-vacia var(--cf-desafio-ms, 15000ms) linear forwards;
+}
+
+@keyframes cf-desafio-vacia {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.cf-desafio__botones {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.cf-desafio__aceptar {
+  --cf-acento: #7ee6ff;
+  --cf-acento-2: var(--cf-online-2);
+  width: 100%;
+  color: #00131f;
+}
+
+.cf-desafio__rechazar {
+  width: 100%;
+}
+
+/* Celular acostado (pantalla baja): compacto, sin el rombo y con los botones lado a lado. */
+@media (max-height: 560px) {
+  .cf-desafio {
+    gap: 6px;
+    width: min(100%, 560px);
+    padding: 12px 16px 14px;
+  }
+
+  .cf-desafio__icono {
+    display: none;
+  }
+
+  .cf-desafio__rotulo {
+    font-size: 14px;
+  }
+
+  .cf-desafio__nombre {
+    font-size: clamp(36px, 9vh, 52px);
+  }
+
+  .cf-desafio__bajada {
+    margin: -2px 0 2px;
+    font-size: 17px;
+  }
+
+  .cf-desafio__botones {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .cf-desafio__aceptar {
+    flex: 1.4;
+  }
+
+  .cf-desafio__rechazar {
+    flex: 1;
+  }
+}
+
+/* Banner (durante una pelea contra la CPU): debajo del HUD, no tapa ni las barras ni los controles. */
+.cf-desafio-banner {
+  position: absolute;
+  top: calc(var(--hud-y, var(--cf-sa-t)) + var(--hud-h, 54px) + 6px);
+  left: 50%;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(calc(100% - 20px), 520px);
+  padding: 8px 8px 12px 12px;
+  color: #fff;
+  background: rgba(4, 18, 28, 0.95);
+  box-shadow:
+    inset 0 0 0 1.5px var(--cf-online),
+    0 14px 40px rgba(0, 0, 0, 0.6);
+  clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%);
+  transform: translateX(-50%);
+  animation: cf-bajar 0.5s var(--cf-rebote) both;
+}
+
+.cf-desafio-banner__icono svg {
+  width: 22px;
+  height: 22px;
+  color: var(--cf-online);
+}
+
+.cf-desafio-banner__texto {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--cf-numeros);
+  font-weight: 500;
+  font-size: 19px;
+  line-height: 1.1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cf-desafio-banner__texto b {
+  color: var(--cf-online);
+}
+
+.cf-desafio-banner__nota {
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--cf-texto-2);
+}
+
+.cf-desafio-banner__botones {
+  display: flex;
+  gap: 6px;
+}
+
+.cf-desafio-banner__si,
+.cf-desafio-banner__no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 42px;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+
+.cf-desafio-banner__si {
+  padding: 3px 14px 0;
+  color: #00131f;
+  background: linear-gradient(180deg, #c9f4ff, var(--cf-online));
+}
+
+.cf-desafio-banner__no {
+  width: 44px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.cf-desafio-banner__si svg,
+.cf-desafio-banner__no svg {
+  width: 18px;
+  height: 18px;
+  margin-top: -2px;
+}
+
+.cf-desafio-banner .cf-desafio-reloj {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 4px;
+  height: 3px;
+}
+
+/* ─── Pantalla SALA ───────────────────────────────────────────────────────── */
+
+.cf-sala {
+  display: flex;
+  flex-direction: column;
+}
+
+.cf-sala__fondo {
+  position: absolute;
+  inset: -4%;
+  filter: blur(6px) saturate(0.8);
+  transform: scale(1.04);
+}
+
+.cf-sala__velo {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(90% 60% at 50% 0%, rgba(10, 60, 90, 0.45), transparent 70%),
+    linear-gradient(180deg, rgba(3, 5, 9, 0.78), rgba(3, 5, 9, 0.94));
+}
+
+.cf-sala__conexion {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  padding: 6px 11px 4px;
+  font-family: var(--cf-numeros);
+  font-weight: 500;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--cf-texto-2);
+  background: rgba(6, 16, 24, 0.8);
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+
+.cf-sala__conexion-punto {
+  width: 8px;
+  height: 8px;
+  margin-top: -2px;
+  border-radius: 50%;
+  background: var(--cf-turbo-2);
+  animation: cf-parpadeo 0.9s ease-in-out infinite;
+}
+
+.cf-sala__conexion[data-conectada] .cf-sala__conexion-punto {
+  background: var(--cf-libre);
+  box-shadow: 0 0 8px var(--cf-libre);
+  animation-duration: 1.8s;
+}
+
+.cf-sala__cuerpo {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(100%, 640px);
+  margin: 0 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  padding: 4px calc(var(--cf-sa-r) + 14px) calc(var(--cf-sa-b) + 18px) calc(var(--cf-sa-l) + 14px);
+}
+
+.cf-sala__rotulo {
+  margin-top: 4px;
+  --cf-acento: var(--cf-online);
+}
+
+.cf-sala-avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 46px;
+  height: 46px;
+  padding-top: 3px;
+  font-family: var(--cf-titulo);
+  font-size: 26px;
+  line-height: 1;
+  color: #fff;
+  background: linear-gradient(160deg, #2b3542, #10141a);
+  clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
+  box-shadow: inset 0 0 0 1.5px var(--cf-linea-fuerte);
+}
+
+.cf-sala-avatar--yo {
+  width: 58px;
+  height: 58px;
+  font-size: 34px;
+  color: #00131f;
+  background: linear-gradient(160deg, #e3fbff, var(--cf-online));
+  box-shadow: none;
+}
+
+.cf-sala-yo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: linear-gradient(90deg, rgba(56, 214, 255, 0.16), rgba(56, 214, 255, 0.03));
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--cf-online) 40%, transparent);
+}
+
+.cf-sala-yo__texto {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cf-sala-yo__vos {
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--cf-online);
+}
+
+.cf-sala-yo__nombre {
+  overflow: hidden;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 26px;
+  line-height: 1.1;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cf-sala-yo__record {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--cf-texto-2);
+}
+
+.cf-sala-yo__record svg {
+  width: 14px;
+  height: 14px;
+  color: var(--cf-oro);
+}
+
+.cf-sala-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cf-sala-fila {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 70px;
+  padding: 10px 10px 10px 12px;
+  background: linear-gradient(180deg, rgba(28, 30, 38, 0.92), rgba(13, 14, 19, 0.92));
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  box-shadow: inset 0 0 0 1.5px var(--cf-linea);
+  animation: cf-entrar-fila 0.4s var(--cf-salida) both;
+}
+
+@keyframes cf-entrar-fila {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.cf-sala-fila__texto {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cf-sala-fila__texto b {
+  overflow: hidden;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 22px;
+  line-height: 1.1;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cf-sala-estado {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--cf-texto-2);
+}
+
+.cf-sala-estado::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cf-texto-3);
+}
+
+.cf-sala-fila[data-estado='libre'] .cf-sala-estado::before {
+  background: var(--cf-libre);
+  box-shadow: 0 0 6px var(--cf-libre);
+}
+
+.cf-sala-fila[data-estado='eligiendo'] .cf-sala-estado::before {
+  background: var(--cf-oro);
+}
+
+.cf-sala-fila[data-estado='peleando'] .cf-sala-estado::before {
+  background: var(--cf-rojo);
+  animation: cf-parpadeo 0.9s ease-in-out infinite;
+}
+
+.cf-sala-fila__desafiar {
+  --cf-btn-alto: 46px;
+  --cf-corte: 12px;
+  --cf-acento: #7ee6ff;
+  --cf-acento-2: var(--cf-online-2);
+  flex-shrink: 0;
+  padding: 3px 18px 0;
+  font-size: 20px;
+  color: #00131f;
+}
+
+.cf-sala-fila__desafiar:disabled {
+  filter: grayscale(1) brightness(0.6);
+}
+
+.cf-sala-fila__espera {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-family: var(--cf-numeros);
+  font-weight: 500;
+  font-size: 17px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--cf-online);
+}
+
+.cf-sala-fila__espera svg {
+  width: 17px;
+  height: 17px;
+}
+
+.cf-sala-fila__cancelar {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+
+.cf-sala-fila__cancelar svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cf-sala-fila__respuesta {
+  flex-shrink: 1;
+  max-width: 46%;
+  font-size: 13px;
+  line-height: 1.3;
+  text-align: right;
+  color: var(--cf-turbo-1);
+}
+
+/* Celular angosto: que entre el nombre al lado del botón. */
+@media (max-width: 420px) {
+  .cf-sala-fila {
+    gap: 10px;
+  }
+
+  .cf-sala-avatar {
+    width: 40px;
+    height: 40px;
+    font-size: 22px;
+  }
+
+  .cf-sala-fila__texto b {
+    font-size: 20px;
+  }
+
+  .cf-sala-fila__desafiar {
+    --cf-btn-alto: 44px;
+    padding: 3px 14px 0;
+    font-size: 18px;
+  }
+
+  .cf-sala-fila__respuesta {
+    max-width: 38%;
+  }
+}
+
+.cf-sala-vacia {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0 0;
+  padding: 22px 16px;
+  text-align: center;
+  color: var(--cf-texto-2);
+  font-size: 14px;
+  line-height: 1.45;
+  background: rgba(10, 12, 16, 0.6);
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+
+.cf-sala-vacia b {
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 22px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+.cf-sala-vacia > svg {
+  width: 22px;
+  height: 22px;
+  color: var(--cf-online);
+}
+
+.cf-sala-vacia__icono {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  color: var(--cf-online);
+  background: rgba(56, 214, 255, 0.1);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+
+.cf-sala-vacia__icono svg {
+  width: 28px;
+  height: 28px;
+}
+
+.cf-sala-vacia .cf-btn {
+  margin-top: 8px;
+}
+
+/* ─── Elección online ─────────────────────────────────────────────────────── */
+
+.cf-eleccion-online__reloj {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 52px;
+  height: 46px;
+  padding-top: 3px;
+  margin-left: auto;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 30px;
+  line-height: 1;
+  color: #fff;
+  background: linear-gradient(180deg, #2a2b35, #0b0b0f);
+  clip-path: polygon(0 0, 100% 0, 100% 70%, 80% 100%, 20% 100%, 0 70%);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.28);
+}
+
+.cf-eleccion-online__reloj[data-urgente] {
+  color: #ff5050;
+  animation: cf-latido-reloj 0.5s ease-in-out infinite;
+}
+
+.cf-eleccion-online__reloj[data-listo] {
+  color: #00131f;
+  background: linear-gradient(180deg, #c9f4ff, var(--cf-online));
+}
+
+.cf-eleccion-online__reloj svg {
+  width: 24px;
+  height: 24px;
+}
+
+.cf-eleccion-online__contra {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 calc(var(--cf-sa-r) + 14px) 4px calc(var(--cf-sa-l) + 14px);
+  padding: 7px 12px 5px;
+  font-family: var(--cf-numeros);
+  font-weight: 500;
+  font-size: 18px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cf-texto);
+  background: rgba(6, 16, 24, 0.8);
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+
+.cf-eleccion-online__contra > svg {
+  width: 17px;
+  height: 17px;
+  margin-top: -2px;
+  color: var(--cf-online);
+}
+
+.cf-eleccion-online__contra b {
+  color: var(--cf-online);
+}
+
+.cf-eleccion-online__estado {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  font-size: 15px;
+  color: var(--cf-texto-2);
+}
+
+.cf-eleccion-online__estado svg {
+  width: 15px;
+  height: 15px;
+  margin-top: -2px;
+}
+
+.cf-eleccion-online__estado[data-listo] {
+  color: var(--cf-libre);
+}
+
+.cf-eleccion-online__pie {
+  flex-wrap: wrap;
+}
+
+.cf-eleccion-online__nota {
+  flex: 1 1 200px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--cf-texto-3);
+}
+
+.cf-eleccion-online__esperando {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  min-height: 60px;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 22px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cf-online);
+}
+
+.cf-eleccion-online__esperando svg {
+  width: 22px;
+  height: 22px;
+}
+
+.cf-eleccion-online__conectando {
+  z-index: 50;
+}
+
+.cf-eleccion-online__girando {
+  width: 40px;
+  height: 40px;
+  color: var(--cf-online);
+}
+
+.cf-eleccion-online__titulo-conectando {
+  font-size: clamp(44px, 12vw, 72px);
+}
+
+/* ─── VS online ───────────────────────────────────────────────────────────── */
+
+.cf-vs__etiqueta[data-jugador] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cf-vs__vos {
+  padding: 2px 5px 0;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: #00131f;
+  background: var(--cf-online);
+}
+
+.cf-vs__esperando {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--cf-sa-b) + 58px);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 14px 4px;
+  font-family: var(--cf-numeros);
+  font-weight: 500;
+  font-size: 17px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--cf-online);
+  background: rgba(0, 0, 0, 0.75);
+  clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+  transform: translateX(-50%);
+  animation: cf-aparecer 0.3s ease-out both;
+}
+
+.cf-vs__esperando svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* ─── Pelea online: HUD, «VOS», conexión ──────────────────────────────────── */
+
+.cf-hud__jugador {
+  overflow: hidden;
+  flex-shrink: 1;
+  max-width: 9ch;
+  padding: 2px 5px 0;
+  font-family: var(--cf-numeros);
+  font-size: 12px;
+  line-height: 1.1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.cf-hud__jugador[data-yo] {
+  color: #00131f;
+  background: var(--cf-online);
+}
+
+/* La mini carga del rival vive del lado del rival: a la izquierda, se llena desde la izquierda. */
+.cf-hud--online .cf-hud__lado[data-lado='0'] .cf-mini-carga__relleno {
+  transform-origin: left center;
+}
+
+.cf-hud__lado[data-yo] .cf-hud__cara {
+  box-shadow:
+    inset 0 0 0 2px var(--cf-acento),
+    0 0 0 2px var(--cf-online);
+}
+
+.cf-online-senal {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+  margin-top: 1px;
+}
+
+.cf-online-senal span {
+  width: 4px;
+  background: var(--cf-libre);
+  transition: background 0.3s;
+}
+
+.cf-online-senal span:nth-child(1) {
+  height: 5px;
+}
+
+.cf-online-senal span:nth-child(2) {
+  height: 8px;
+}
+
+.cf-online-senal span:nth-child(3) {
+  height: 12px;
+}
+
+.cf-online-senal[data-calidad='regular'] span {
+  background: var(--cf-oro);
+}
+
+.cf-online-senal[data-calidad='regular'] span:nth-child(3) {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.cf-online-senal[data-calidad='mala'] span {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.cf-online-senal[data-calidad='mala'] span:nth-child(1) {
+  background: var(--cf-rojo);
+}
+
+.cf-online-vos {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 6;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s;
+  will-change: transform;
+}
+
+.cf-online-vos[data-visible] {
+  opacity: 1;
+}
+
+.cf-online-vos span {
+  position: relative;
+  display: block;
+  padding: 5px 12px 3px;
+  font-family: var(--cf-titulo);
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #00131f;
+  background: linear-gradient(180deg, #e3fbff, var(--cf-online));
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+  transform: translate(-50%, -100%);
+  animation: cf-vos-salto 0.9s ease-in-out infinite;
+}
+
+.cf-online-vos span::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 8px solid var(--cf-online);
+  transform: translateX(-50%);
+}
+
+@keyframes cf-vos-salto {
+  50% {
+    transform: translate(-50%, calc(-100% - 6px));
+  }
+}
+
+.cf-online-lenta {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  z-index: 8;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 18px 10px;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 21px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(4, 10, 16, 0.86);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--cf-online) 50%, transparent);
+  clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.cf-online-lenta[data-visible] {
+  display: flex;
+  animation: cf-pop 0.3s var(--cf-rebote) both;
+}
+
+.cf-online-lenta svg {
+  width: 24px;
+  height: 24px;
+  color: var(--cf-online);
+}
+
+.cf-online-lenta__rival {
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-weight: 400;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--cf-texto-2);
+}
+
+/* El menú online no frena la pelea: fondo liviano y sin desenfoque (no cargar el cuadro). */
+.cf-online-menu {
+  background: rgba(4, 4, 7, 0.6);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.cf-online-menu__titulo {
+  font-size: clamp(44px, 12vw, 72px);
+}
+
+/* ─── Resultado online ────────────────────────────────────────────────────── */
+
+.cf-online-etiqueta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px 4px;
+  font-family: var(--cf-numeros);
+  font-weight: 500;
+  font-size: 15px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cf-online);
+  background: rgba(6, 16, 24, 0.82);
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+
+.cf-online-etiqueta svg {
+  width: 15px;
+  height: 15px;
+  margin-top: -2px;
+}
+
+.cf-resultado-online__titulo {
+  max-width: 100%;
+  font-size: clamp(34px, 9vw, 64px);
+  line-height: 0.95;
+  overflow-wrap: anywhere;
+}
+
+/* Acostado (o en compu) el título vive en la columna angosta del retrato. */
+@media (orientation: landscape) {
+  .cf-resultado-online__titulo {
+    font-size: clamp(28px, 5vw, 60px);
+  }
+}
+
+.cf-resultado-online:not([data-gano]) .cf-resultado-online__titulo {
+  background: linear-gradient(180deg, #fff 0%, #dfe6ee 40%, #8d96a3 55%, #e9eef4 85%, #fff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  filter: drop-shadow(0 3px 0 #000);
+}
+
+.cf-resultado-online__bajada {
+  margin: 8px 0 0;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--cf-texto-2);
+}
+
+.cf-marcador-online {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: linear-gradient(90deg, rgba(56, 214, 255, 0.14), rgba(56, 214, 255, 0.03));
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--cf-online) 40%, transparent);
+  --cf-acento: var(--cf-online);
+}
+
+.cf-marcador-online__fila {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.cf-marcador-online__nombre {
+  overflow: hidden;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.cf-marcador-online__nombre[data-yo] {
+  text-align: right;
+  color: var(--cf-online);
+}
+
+.cf-marcador-online__num {
+  min-width: 1ch;
+  font-family: var(--cf-titulo);
+  font-weight: 400;
+  font-size: 54px;
+  line-height: 0.9;
+  color: var(--cf-texto-2);
+}
+
+.cf-marcador-online__num[data-adelante] {
+  color: #fff;
+  text-shadow: 0 0 18px rgba(56, 214, 255, 0.6);
+}
+
+.cf-marcador-online__guion {
+  font-family: var(--cf-titulo);
+  font-size: 34px;
+  color: var(--cf-texto-3);
+}
+
+.cf-resultado-online__nota {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--cf-texto-3);
+}
+
+.cf-resultado-online__nota svg {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  color: var(--cf-oro);
+}
+
+.cf-resultado-online .cf-resultado__acciones {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  align-items: center;
+}
+
+.cf-resultado-online .cf-resultado__acciones .cf-btn {
+  min-width: 0;
+}
+
+.cf-resultado-online .cf-resultado__acciones .cf-btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cf-resultado-online .cf-btn[data-pide] {
+  animation: cf-latido-suave 0.9s ease-in-out infinite;
+}
+
+.cf-resultado-online__ausente {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.35;
+  text-align: center;
+  color: var(--cf-texto-2);
+}
+
+/* «Juan quiere la revancha»: pegado arriba de la barra de botones, en las dos orientaciones. Antes
+   iba a 84 px del borde y en vertical (REVANCHA a todo el ancho y «Volver a la sala» abajo) caía
+   justo sobre el centro de REVANCHA: tapaba el texto y se comía el toque. No se toca (los toques
+   pasan) y se centra sin transform, que es lo que anima cf-pop (antes entraba corriéndose de costado). */
+.cf-resultado-online__pide {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 3;
+  width: max-content;
+  max-width: calc(100% - 28px);
+  margin: 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  padding: 7px 14px 5px;
+  font-family: var(--cf-numeros);
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #00131f;
+  background: linear-gradient(180deg, #c9f4ff, var(--cf-online));
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  animation: cf-pop 0.4s var(--cf-rebote) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cf-sala-chip,
+  .cf-sala-aviso,
+  .cf-desafio,
+  .cf-desafio-banner,
+  .cf-sala-fila,
+  .cf-online-vos span,
+  .cf-desafio__icono,
+  .cf-desafio__rayos,
+  .cf-resultado-online .cf-btn[data-pide] {
+    animation: none;
+  }
+}

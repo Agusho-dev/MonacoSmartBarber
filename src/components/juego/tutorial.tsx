@@ -1,6 +1,6 @@
 'use client'
 
-import { ChevronRight, HandFist, Shield } from 'lucide-react'
+import { ChevronRight, HandFist, Shield, Wind } from 'lucide-react'
 import { useState } from 'react'
 import { IconoDeEspecial, IconoMaquina } from './iconos'
 
@@ -14,14 +14,14 @@ const PASOS: readonly Paso[] = [
   {
     titulo: 'Movete',
     tactil:
-      'Apoyá el pulgar izquierdo donde quieras y deslizá. Arriba saltás, abajo te agachás. Dos deslizadas rápidas para un costado: dash.',
-    teclado: 'A y D (o las flechas) para caminar. W o espacio para saltar, S para agacharte. Shift: dash.',
+      'Apoyá el pulgar izquierdo donde quieras y deslizá. Arriba saltás, también en diagonal, y si lo dejás apretado seguís saltando. Abajo te agachás.',
+    teclado: 'A y D (o las flechas) para caminar. W o espacio para saltar (con A o D, en diagonal), S para agacharte.',
   },
   {
-    titulo: 'Pegá',
+    titulo: 'Pegá y esquivá',
     tactil:
-      'GOLPE encadena puño, patada y combo si lo tocás seguido. MÁQUINA pega más fuerte y rompe guardias. Mantené GUARDIA para bloquear.',
-    teclado: 'J golpe (tocalo seguido para el combo), K máquina y mantené L para la guardia.',
+      'GOLPE encadena puño, patada y combo. MÁQUINA pega más fuerte y rompe guardias. Mantené GUARDIA para bloquear. ESQUIVA te saca para atrás, o hacia donde apuntes el stick (también sale con dos empujones rápidos del stick).',
+    teclado: 'J golpe (tocalo seguido para el combo), K máquina, mantené L para la guardia y Shift para esquivar: para atrás, o hacia donde caminás.',
   },
   {
     titulo: 'Cargá la máquina',
@@ -50,8 +50,8 @@ export function Tutorial({ tactil, onCerrar }: { tactil: boolean; onCerrar: () =
         </div>
 
         <div className="cf-tuto__ilustracion" key={paso} aria-hidden="true">
-          {paso === 0 && (tactil ? <IlustracionJoystick /> : <Teclas grupos={[['A', 'D'], ['W'], ['S'], ['Shift']]} />)}
-          {paso === 1 && (tactil ? <IlustracionBotones /> : <Teclas grupos={[['J'], ['K'], ['L']]} />)}
+          {paso === 0 && (tactil ? <IlustracionJoystick /> : <Teclas grupos={[['A', 'D'], ['W'], ['S']]} />)}
+          {paso === 1 && (tactil ? <IlustracionBotones /> : <Teclas grupos={[['J'], ['K'], ['L'], ['Shift']]} />)}
           {paso === 2 && <IlustracionCarga tactil={tactil} />}
         </div>
 
@@ -107,6 +107,10 @@ function IlustracionBotones() {
       <div className="cf-ilu-bp cf-ilu-bp--guardia">
         <Shield />
         <span>Guardia</span>
+      </div>
+      <div className="cf-ilu-bp cf-ilu-bp--esquiva">
+        <Wind />
+        <span>Esquiva</span>
       </div>
     </div>
   )

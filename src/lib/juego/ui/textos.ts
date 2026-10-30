@@ -39,7 +39,7 @@ export const TIPS: readonly string[] = [
   'Mantené GUARDIA para bloquear. Si te rompen el escudo, quedás regalado.',
   'La carga de la máquina se llena sola. Cuando una carta late, ya la podés usar.',
   'En los últimos 20 segundos viene el TURBO: la máquina carga el doble.',
-  'Deslizá dos veces rápido para un costado y hacés un dash.',
+  'ESQUIVA te saca de un apuro: sola va para atrás y, con el stick, hacia donde apuntes.',
   'La HERRAMIENTA pega más fuerte, rompe guardias y tiene más chance de crítico.',
   'Si aparece «¡DEJALO AL CERO!», apretá cualquier golpe: son puntos extra.',
   'Pegarle a alguien congelado lo rompe con un golpe extra.',

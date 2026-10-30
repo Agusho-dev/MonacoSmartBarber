@@ -9,12 +9,21 @@
  * (setPointerCapture), así que se puede caminar con el pulgar izquierdo mientras el
  * derecho sostiene GUARDIA y después toca GOLPE.
  *
+ * Joystick: el centro es el punto exacto donde se apoya el pulgar (nada de corregirlo hacia
+ * adentro: eso daba una dirección fantasma al apoyar cerca del borde) y la base lo sigue
+ * cuando el dedo se aleja más de `CORREA` radios. Las direcciones salen por ángulo
+ * (`leerStick`, stick.ts): arriba incluye las diagonales y mantenerla vuelve a saltar (lo
+ * resuelve el motor). Esquiva: el botón ESQUIVA, dos empujones rápidos al mismo costado o
+ * dos toques quietos en el joystick (hacia atrás).
+ *
  * Elementos que busca dentro de `raiz`:
  *   [data-zona="joystick"]  con  [data-joy="base"] > [data-joy="perilla"]
- *   [data-zona="botones"]   con  [data-boton="golpe"|"herramienta"|"guardia"]
+ *   [data-zona="botones"]   con  [data-boton="golpe"|"herramienta"|"guardia"|"dash"]
  *   [data-carta="1"|"2"]
  */
+import { publicarDepuracion } from './depuracion'
 import type { CapturaEntrada, Control } from './entrada'
+import { crearDetectorEmpujones, leerStick, STICK_SUELTO, type DireccionesStick } from './stick'
 import { vibrar } from './vibrar'
 
 export interface OpcionesControlesTactiles {
@@ -29,14 +38,15 @@ export interface ControlesTactiles {
   destruir(): void
 }
 
-/** Dos toques más cerca que esto (ms) cuentan como doble toque. */
-const VENTANA_DOBLE = 280
+/** Dos toques quietos en el joystick más cerca que esto (ms): esquiva hacia atrás. */
+const VENTANA_DOBLE_TOQUE = 280
 /** Un toque «quieto» dura menos que esto (ms) y se mueve menos de 12 px. */
 const TOQUE_CORTO = 220
-/** Para el dash por doble deslizamiento, el primer empujón tiene que ser corto (no una caminata). */
-const EMPUJON_CORTO = 260
+/** La base sigue al dedo cuando se aleja más que esto (en radios): volver para el otro lado responde enseguida. */
+const CORREA = 1.3
 
-type Direccion = 'izquierda' | 'derecha' | 'arriba' | 'abajo'
+type Direccion = keyof DireccionesStick
+const DIRECCIONES: readonly Direccion[] = ['izquierda', 'derecha', 'arriba', 'abajo']
 
 export function conectarControlesTactiles(raiz: HTMLElement, op: OpcionesControlesTactiles): ControlesTactiles {
   const limpiezas: (() => void)[] = []
@@ -58,73 +68,74 @@ export function conectarControlesTactiles(raiz: HTMLElement, op: OpcionesControl
   const perilla = raiz.querySelector<HTMLElement>('[data-joy="perilla"]')
 
   let joyId: number | null = null
-  let rect = { left: 0, top: 0, width: 0, height: 0 }
+  let rect = { left: 0, top: 0 }
   let R = 56
+  /** Centro de la base y el último desplazamiento del dedo, en px relativos a la zona. */
   let bx = 0
   let by = 0
+  let dx = 0
+  let dy = 0
   let inicio = 0
   let xIni = 0
   let yIni = 0
   let seMovio = false
   let ultimoToqueQuieto = -Infinity
-  const dirs: Record<Direccion, boolean> = { izquierda: false, derecha: false, arriba: false, abajo: false }
-  const apretadoEn = { izquierda: -Infinity, derecha: -Infinity }
-  const soltadoEn = { izquierda: -Infinity, derecha: -Infinity }
+  let dirs: DireccionesStick = { ...STICK_SUELTO }
+  const empujones = crearDetectorEmpujones()
+  publicarDepuracion('joystick', () => ({ dirs: { ...dirs }, bx, by, dx, dy, R, activo: joyId !== null }))
 
   /**
-   * Un tick de `dash` (latch). La dirección es la que esté sostenida en ese tick; sin
-   * ninguna, el motor la hace hacia atrás (esquivar).
+   * Un tick de `dash` (latch). La dirección es la horizontal que esté sostenida en ese tick;
+   * sin ninguna, el motor la hace hacia atrás (esquivar).
    */
-  const dash = () => {
+  const esquivar = () => {
     op.entrada.presionar('dash', 'joy-dash')
     op.entrada.soltar('dash', 'joy-dash')
     vibrar(12)
   }
 
-  const fijar = (c: Direccion, valor: boolean, ahora: number) => {
-    if (dirs[c] === valor) return
-    dirs[c] = valor
-    if (valor) {
-      op.entrada.presionar(c, 'joy')
-      if (c === 'izquierda' || c === 'derecha') {
-        // Doble deslizamiento al mismo lado (dos toques o un vaivén del pulgar) = dash.
-        if (ahora - soltadoEn[c] < VENTANA_DOBLE) {
-          soltadoEn[c] = -Infinity
-          dash()
-        }
-        apretadoEn[c] = ahora
-      }
-    } else {
-      op.entrada.soltar(c, 'joy')
-      if (c === 'izquierda' || c === 'derecha') {
-        soltadoEn[c] = ahora - apretadoEn[c] < EMPUJON_CORTO ? ahora : -Infinity
-      }
-    }
+  /** Las flechas de la base se encienden con la dirección que está leyendo (se ve que tomó la diagonal). */
+  const marcarFlechas = () => {
+    if (!base) return
+    const activas = DIRECCIONES.filter((c) => dirs[c]).join(' ')
+    if (activas) base.dataset.dir = activas
+    else delete base.dataset.dir
   }
 
-  const aplicar = (dx: number, dy: number, ahora: number) => {
-    const nx = dx / R
-    const ny = dy / R
-    let izq = false
-    let der = false
-    let arr = false
-    let aba = false
-    if (Math.hypot(nx, ny) > 0.2) {
-      // Histéresis: entrar cuesta un poco más que salir, así no titila en el borde.
-      const umbralH = dirs.izquierda || dirs.derecha ? 0.26 : 0.38
-      izq = nx < -umbralH
-      der = nx > umbralH
-      // Arriba = saltar, con umbral generoso: también en diagonal (salto con dirección).
-      arr = ny < (dirs.arriba ? -0.34 : -0.46)
-      aba = ny > (dirs.abajo ? 0.42 : 0.56)
+  const fijarDirecciones = (nuevas: DireccionesStick) => {
+    let cambio = false
+    for (const c of DIRECCIONES) {
+      if (nuevas[c] === dirs[c]) continue
+      cambio = true
+      if (nuevas[c]) op.entrada.presionar(c, 'joy')
+      else op.entrada.soltar(c, 'joy')
     }
-    fijar('izquierda', izq, ahora)
-    fijar('derecha', der, ahora)
-    fijar('arriba', arr, ahora)
-    fijar('abajo', aba, ahora)
+    dirs = nuevas
+    if (cambio) marcarFlechas()
   }
 
-  const pintar = (dx: number, dy: number) => {
+  /** Un punto del dedo (relativo a la zona): correa, lectura por ángulo y doble empujón. */
+  const moverDedo = (x: number, y: number, ahora: number) => {
+    dx = x - bx
+    dy = y - by
+    const d = Math.hypot(dx, dy)
+    const limite = R * CORREA
+    if (d > limite) {
+      // La base sigue al dedo: volver para el otro lado responde al toque.
+      const k = (d - limite) / d
+      bx += dx * k
+      by += dy * k
+      dx = x - bx
+      dy = y - by
+    }
+    if (!seMovio && Math.hypot(x - xIni, y - yIni) > 12) seMovio = true
+    const nuevas = leerStick(dx, dy, R, dirs)
+    fijarDirecciones(nuevas)
+    const costado = nuevas.derecha ? 1 : nuevas.izquierda ? -1 : 0
+    if (empujones.mover(x, costado, nuevas.arriba || nuevas.abajo, R, ahora)) esquivar()
+  }
+
+  const pintar = () => {
     if (!base || !perilla) return
     const d = Math.hypot(dx, dy)
     const k = d > R ? R / d : 1
@@ -134,16 +145,19 @@ export function conectarControlesTactiles(raiz: HTMLElement, op: OpcionesControl
 
   const reposar = () => {
     if (zonaJoy) delete zonaJoy.dataset.activo
-    if (base) base.style.transform = ''
+    if (base) {
+      base.style.transform = ''
+      delete base.dataset.dir
+    }
     if (perilla) perilla.style.transform = ''
   }
 
   const soltarJoystick = (ahora: number) => {
-    fijar('izquierda', false, ahora)
-    fijar('derecha', false, ahora)
-    fijar('arriba', false, ahora)
-    fijar('abajo', false, ahora)
+    fijarDirecciones({ ...STICK_SUELTO })
+    empujones.soltar(ahora)
     joyId = null
+    dx = 0
+    dy = 0
     reposar()
   }
 
@@ -160,47 +174,40 @@ export function conectarControlesTactiles(raiz: HTMLElement, op: OpcionesControl
       const ahora = performance.now()
       joyId = e.pointerId
       const r = zonaJoy.getBoundingClientRect()
-      rect = { left: r.left, top: r.top, width: r.width, height: r.height }
+      rect = { left: r.left, top: r.top }
       R = (base?.offsetWidth || 112) / 2
       const x = e.clientX - rect.left
       const y = e.clientY - rect.top
-      // La base aparece donde apoyás el pulgar (sin salirse de la zona).
-      bx = Math.min(Math.max(x, R * 0.85), Math.max(R * 0.85, rect.width - R * 0.85))
-      by = Math.min(Math.max(y, R * 0.85), Math.max(R * 0.85, rect.height - R * 0.85))
+      // La base aparece justo donde apoyás el pulgar: así arranca sin ninguna dirección.
+      bx = x
+      by = y
+      dx = 0
+      dy = 0
       inicio = ahora
       xIni = x
       yIni = y
       seMovio = false
       zonaJoy.dataset.activo = '1'
-      // Doble toque quieto = dash hacia atrás (esquivar). Se dispara al apoyar, sin esperar.
-      if (ahora - ultimoToqueQuieto < VENTANA_DOBLE) {
+      // Doble toque quieto = esquiva hacia atrás. Se dispara al apoyar, sin esperar.
+      if (ahora - ultimoToqueQuieto < VENTANA_DOBLE_TOQUE) {
         ultimoToqueQuieto = -Infinity
-        dash()
+        esquivar()
       }
-      pintar(x - bx, y - by)
-      aplicar(x - bx, y - by, ahora)
+      pintar()
     })
 
     escuchar(zonaJoy, 'pointermove', (e) => {
       if (e.pointerId !== joyId) return
       e.preventDefault()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
-      let dx = x - bx
-      let dy = y - by
-      const d = Math.hypot(dx, dy)
-      const limite = R * 1.3
-      if (d > limite) {
-        // La base sigue al dedo: volver para el otro lado responde al toque.
-        const k = (d - limite) / d
-        bx += dx * k
-        by += dy * k
-        dx = x - bx
-        dy = y - by
+      const ahora = performance.now()
+      // Los movimientos agrupados del cuadro, en orden: un empujón rápido no se pierde.
+      const agrupados = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : []
+      if (agrupados.length > 1) {
+        for (const pe of agrupados) moverDedo(pe.clientX - rect.left, pe.clientY - rect.top, ahora)
+      } else {
+        moverDedo(e.clientX - rect.left, e.clientY - rect.top, ahora)
       }
-      if (!seMovio && Math.hypot(x - xIni, y - yIni) > 12) seMovio = true
-      pintar(dx, dy)
-      aplicar(dx, dy, performance.now())
+      pintar()
     })
 
     const alLevantar = (e: PointerEvent) => {
@@ -241,7 +248,7 @@ export function conectarControlesTactiles(raiz: HTMLElement, op: OpcionesControl
   const apretarBoton = (b: HTMLElement, id: number) => {
     op.entrada.presionar(controlDe(b), `dedo:${id}`)
     b.dataset.activo = '1'
-    vibrar(8)
+    vibrar(controlDe(b) === 'dash' ? 12 : 8)
   }
   const soltarBoton = (b: HTMLElement, id: number) => {
     op.entrada.soltar(controlDe(b), `dedo:${id}`)
@@ -329,6 +336,8 @@ export function conectarControlesTactiles(raiz: HTMLElement, op: OpcionesControl
     reiniciar() {
       const ahora = performance.now()
       if (joyId !== null) soltarJoystick(ahora)
+      empujones.reiniciar()
+      ultimoToqueQuieto = -Infinity
       dedos.forEach((b, id) => soltarBoton(b, id))
       dedos.clear()
       dedosCarta.forEach((c) => delete c.dataset.activo)

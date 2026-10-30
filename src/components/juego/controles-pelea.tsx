@@ -1,6 +1,6 @@
 'use client'
 
-import { HandFist, Shield } from 'lucide-react'
+import { HandFist, Shield, Wind } from 'lucide-react'
 import { CARGA_MAX } from '@/lib/juego/tipos'
 import type { FichaPersonaje } from '@/lib/juego/tipos'
 import { nombreCortoEspecial } from '@/lib/juego/ui/textos'
@@ -8,7 +8,8 @@ import { IconoDeEspecial, IconoMaquina } from './iconos'
 
 /**
  * Estructura de los controles de la pelea: barra «CARGA DE LA MÁQUINA», las dos cartas
- * de especiales, el joystick flotante y los botones en arco. Los toques los maneja
+ * de especiales, el joystick flotante y los botones en arco (GOLPE, HERRAMIENTA, GUARDIA y
+ * ESQUIVA; dónde va cada uno lo decide disposicion.ts). Los toques los maneja
  * src/lib/juego/ui/controles-tactiles.ts y los valores, hud.ts: esto no se
  * re-renderiza durante la pelea.
  */
@@ -87,6 +88,11 @@ export function ControlesPelea({ ficha }: { ficha: FichaPersonaje }) {
         <div className="cf-bp cf-bp--guardia" data-boton="guardia">
           <Shield className="cf-bp__icono" />
           <span className="cf-bp__texto">Guardia</span>
+        </div>
+        {/* Sin dirección en el stick, esquiva hacia atrás; con dirección, hacia ese lado. */}
+        <div className="cf-bp cf-bp--esquiva" data-boton="dash">
+          <Wind className="cf-bp__icono" />
+          <span className="cf-bp__texto">Esquiva</span>
         </div>
       </div>
     </>

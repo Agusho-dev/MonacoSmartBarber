@@ -107,6 +107,8 @@ export interface InternoLuchador {
   poseT: number
   /** Ticks desde el punto más alto del salto. */
   tAire: number
+  /** Ticks seguidos en el piso (0 en el aire): el respiro antes de volver a saltar con arriba sostenido. */
+  tSuelo: number
   selloStun: number
   selloDash: number
   animSello: number

@@ -6,12 +6,14 @@
  *  - Cada llamada va con try/catch: si el audio falla, el juego sigue mudo.
  *  - Recuerda la música pedida para no reiniciar el mismo tema dos veces.
  */
-import { crearAudio, VOLUMEN_EFECTOS_POR_DEFECTO, VOLUMEN_MUSICA_POR_DEFECTO } from '../audio'
+import { crearAudio, diagnosticarAudio, VOLUMEN_EFECTOS_POR_DEFECTO, VOLUMEN_MUSICA_POR_DEFECTO } from '../audio'
 import type { AudioJuego, EventoJuego, Partida, SonidoUi, TemaMusica } from '../tipos'
+import { publicarDepuracion } from './depuracion'
 
 /**
- * Los niveles con los que se calibró la mezcla (música ≈ 6 dB por debajo de un golpe fuerte):
- * subirlos acá deja la música encima de los golpes y aprieta el limitador.
+ * Los niveles con los que se calibró la mezcla (la canción, con NIVEL_PISTA de musica.ts, queda
+ * ≈ 7 dB por debajo de un golpe fuerte): subirlos acá deja la música encima de los golpes y
+ * aprieta el limitador.
  */
 const VOLUMEN_EFECTOS = VOLUMEN_EFECTOS_POR_DEFECTO
 const VOLUMEN_MUSICA = VOLUMEN_MUSICA_POR_DEFECTO
@@ -27,9 +29,11 @@ export class AudioSeguro {
     if (this.roto || typeof window === 'undefined') return null
     if (!this.audio) {
       try {
-        this.audio = crearAudio()
-        this.audio.silenciar(this.silencio)
-        this.audio.volumen(VOLUMEN_EFECTOS, this.musicaPrendida ? VOLUMEN_MUSICA : 0)
+        const audio = crearAudio()
+        this.audio = audio
+        audio.silenciar(this.silencio)
+        audio.volumen(VOLUMEN_EFECTOS, this.musicaPrendida ? VOLUMEN_MUSICA : 0)
+        publicarDepuracion('audio', () => diagnosticarAudio(audio))
       } catch (error) {
         console.error('[juego] audio no disponible', error)
         this.roto = true
@@ -59,6 +63,9 @@ export class AudioSeguro {
   }
 
   procesar(eventos: readonly EventoJuego[], p: Partida): void {
+    // Es lo único de la UI que recibe la partida en cada cuadro: el gancho de pruebas
+    // (sólo en desarrollo) la toma de acá.
+    publicarDepuracion('partida', p)
     const a = this.audio ?? this.obtener()
     if (!a) return
     try {

@@ -33,6 +33,15 @@ import { emitir } from './interno'
 
 const BOTONES_BUFFER: readonly BotonBuffer[] = ['golpe', 'herramienta', 'especial1', 'especial2', 'salto', 'dash']
 
+/**
+ * Arriba SOSTENIDO vuelve a saltar, como en los juegos de pelea, cuando el luchador lleva
+ * esto en el piso (un respiro corto entre salto y salto). Es también lo que hace saltar a
+ * quien llevó el stick a la diagonal mientras no se podía mover (aturdido, recién caído):
+ * antes sólo contaba el instante en que se apretaba arriba y ese salto se perdía.
+ * La CPU no lo usa: aprieta arriba dos ticks y su salto sale siempre del buffer.
+ */
+const RESPIRO_SALTO = 6
+
 export function crearLuchador(id: IdPersonaje, lado: Lado): LuchadorEstado {
   const f = PERSONAJES[id]
   return {
@@ -110,6 +119,7 @@ export function crearInternoLuchador(vida: number): InternoLuchador {
     pose: null,
     poseT: 0,
     tAire: 0,
+    tSuelo: RESPIRO_SALTO,
     selloStun: 0,
     selloDash: 0,
     animSello: -1,
@@ -164,6 +174,7 @@ export function reiniciarLuchador(l: LuchadorEstado, li: InternoLuchador): void 
   li.pose = null
   li.poseT = 0
   li.tAire = 0
+  li.tSuelo = RESPIRO_SALTO
   li.danioRecibidoRound = 0
   li.danioHechoRound = 0
   li.vidaAntes = l.vida
@@ -347,6 +358,12 @@ export function decidir(p: Partida, I: EstadoInterno, lado: Lado, e: EntradaJuga
     saltar(p, I, lado, d !== 0 ? d : li.dirSalto)
     return
   }
+  // Arriba sostenido (el stick en la diagonal): salta apenas está libre en el piso, con la
+  // dirección que tenga en este tick.
+  if (e.arriba && li.tSuelo >= RESPIRO_SALTO) {
+    saltar(p, I, lado, dirDe(e))
+    return
+  }
 
   const dir = dirDe(e)
   li.guardia = e.guardia
@@ -386,6 +403,7 @@ function aterrizar(p: Partida, I: EstadoInterno, lado: Lado): void {
   l.vy = 0
   l.enSuelo = true
   li.tAire = 0
+  li.tSuelo = 0
   li.vMov = 0
   li.pateoAereo = false
   if (li.pose === 'ko') {
@@ -509,6 +527,8 @@ export function relojes(p: Partida, I: EstadoInterno, lado: Lado, pelea: boolean
   if (li.aterrizaje > 0) li.aterrizaje--
   for (const b of BOTONES_BUFFER) if (li.buf[b] > 0) li.buf[b]--
   if (li.sinBloquear < 100000) li.sinBloquear++
+  if (!l.enSuelo) li.tSuelo = 0
+  else if (li.tSuelo < 100000) li.tSuelo++
   if (li.pose !== null) li.poseT++
   if (pelea) {
     if (li.sinBloquear >= GUARDIA.espera && ef.guardiaRota === 0 && l.guardia < GUARDIA.max) {

@@ -1009,6 +1009,17 @@ html.cf-html body {
   animation: cf-bajar-suave 0.7s var(--cf-salida) 0.2s both;
 }
 
+.cf-inicio__monaco {
+  display: block;
+  width: clamp(132px, 40vw, 196px);
+  height: auto;
+  /* Blanco fino sobre la arena: dos sombras le dan lectura sin agregarle un fondo. */
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7)) drop-shadow(0 3px 12px rgba(0, 0, 0, 0.75));
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
 .cf-inicio__saludo {
   margin: 0;
   font-family: var(--cf-numeros);
@@ -3302,6 +3313,27 @@ html.cf-html body {
   border-right-width: 0;
 }
 
+/* La flecha de cada dirección que el stick está leyendo se enciende (se ve que tomó la diagonal). */
+.cf-joy[data-dir~='arriba'] .cf-joy__flecha--arr {
+  opacity: 1;
+  border-bottom-color: var(--cf-acento);
+}
+
+.cf-joy[data-dir~='abajo'] .cf-joy__flecha--aba {
+  opacity: 1;
+  border-top-color: var(--cf-acento);
+}
+
+.cf-joy[data-dir~='izquierda'] .cf-joy__flecha--izq {
+  opacity: 1;
+  border-right-color: var(--cf-acento);
+}
+
+.cf-joy[data-dir~='derecha'] .cf-joy__flecha--der {
+  opacity: 1;
+  border-left-color: var(--cf-acento);
+}
+
 /* ─── Botones en arco ─────────────────────────────────────────────────────── */
 
 .cf-zona-botones {
@@ -3352,6 +3384,24 @@ html.cf-html body {
   --x: var(--bd-x);
   --y: var(--bd-y);
   --r: var(--bd-r);
+}
+
+.cf-bp[data-boton='dash'] {
+  --x: var(--be-x);
+  --y: var(--be-y);
+  --r: var(--be-r);
+}
+
+/* ESQUIVA: borde frío para que no se confunda con los golpes. */
+.cf-bp--esquiva {
+  box-shadow:
+    inset 0 0 0 2px rgba(150, 225, 255, 0.55),
+    inset 0 -4px 0 rgba(0, 0, 0, 0.3),
+    0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.cf-bp--esquiva .cf-bp__texto {
+  letter-spacing: 0.02em;
 }
 
 .cf-bp--golpe {
@@ -3745,28 +3795,45 @@ html.cf-html body {
   height: 40%;
 }
 
+/* El arco de la pelea (disposicion.ts) a escala 0,86: MÁQUINA a 102°, ESQUIVA a 134° y GUARDIA a
+   166° de GOLPE, sin pisarse (antes MÁQUINA se montaba 13 px sobre GOLPE). Centros: GOLPE (142, 102),
+   MÁQUINA (126, 28), GUARDIA (68, 84), ESQUIVA (69, 26). */
 .cf-ilu-bp--golpe {
-  right: 8px;
-  bottom: 8px;
-  width: 86px;
-  height: 86px;
+  left: 104px;
+  top: 64px;
+  width: 76px;
+  height: 76px;
   background: radial-gradient(circle at 50% 30%, var(--cf-acento), color-mix(in srgb, var(--cf-acento) 30%, #000));
   color: #140d00;
   animation: cf-ilu-tap 1.2s ease-in-out infinite;
 }
 
 .cf-ilu-bp--herramienta {
-  right: 30px;
+  left: 98px;
   top: 0;
-  width: 60px;
-  height: 60px;
+  width: 56px;
+  height: 56px;
 }
 
 .cf-ilu-bp--guardia {
-  left: 30px;
-  bottom: 20px;
-  width: 60px;
-  height: 60px;
+  left: 40px;
+  top: 56px;
+  width: 56px;
+  height: 56px;
+}
+
+/* Como en la pelea: ESQUIVA arriba de GUARDIA, a la izquierda de MÁQUINA. */
+.cf-ilu-bp--esquiva {
+  left: 44px;
+  top: 1px;
+  width: 50px;
+  height: 50px;
+  box-shadow: inset 0 0 0 2px rgba(150, 225, 255, 0.55);
+}
+
+.cf-ilu-bp--esquiva span {
+  font-size: 10px;
+  letter-spacing: 0.02em;
 }
 
 @keyframes cf-ilu-tap {
@@ -4589,6 +4656,11 @@ html.cf-html body {
     gap: 14px;
   }
 
+  .cf-inicio__monaco {
+    width: auto;
+    height: clamp(26px, 8.6vh, 36px);
+  }
+
   .cf-inicio__marca {
     margin-top: -6px;
   }
@@ -4670,6 +4742,14 @@ html.cf-html body {
     height: 104px;
   }
 
+  /* Los botones de la tarjeta 2 miden 140 px de alto: en 104 quedaban cortados (GOLPE a la mitad).
+     Se achican y el margen negativo hace que la grilla los centre (si no, la fila mide 140 y
+     arranca arriba). */
+  .cf-ilu-botones {
+    margin: -20px 0;
+    transform: scale(0.72);
+  }
+
   .cf-tuto {
     gap: 8px;
     padding: 12px 16px;
@@ -4689,6 +4769,53 @@ html.cf-html body {
 
   .cf-resultado__titulo {
     font-size: clamp(44px, 14vh, 80px);
+  }
+}
+
+/* ─── Portada: el chip de la sala y la barra de abajo ─────────────────────────
+   Con otros jugadores en el local, la raíz pone el chip de la sala arriba a la derecha
+   (.cf-sala-flotante, hijo directo de .cf-juego; ver sala.css). El encabezado de la portada
+   (logo de Monaco, saludo y chip del turno) le deja ese rincón. En vertical baja un renglón:
+   el chip tapaba la «O» del logo en celulares de 360 a 390 px. En horizontal se recuesta a la
+   izquierda sin pasar de la mitad, que es lo máximo que ocupa el chip: tapaba entero el chip
+   del turno, que es lo que más le importa al que espera. */
+.cf-inicio__arriba {
+  transition: padding-top 0.3s var(--cf-salida);
+}
+
+.cf-juego:has(> .cf-sala-flotante) .cf-inicio__arriba {
+  padding-top: 40px;
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .cf-juego:has(> .cf-sala-flotante) .cf-inicio__arriba {
+    left: calc(var(--cf-sa-l) + 16px);
+    right: 50%;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    justify-items: start;
+    align-items: center;
+    gap: 6px 14px;
+    padding-top: 0;
+  }
+
+  .cf-juego:has(> .cf-sala-flotante) .cf-inicio__arriba .cf-inicio__saludo {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .cf-juego:has(> .cf-sala-flotante) .cf-inicio__arriba .cf-chip-turno {
+    grid-column: 1 / -1;
+  }
+
+  /* «Tocá para jugar» (≈ 260 px) va al medio mientras entre; si no, se centra en lo que deja la
+     barra de la derecha (≈ 230 px con su margen). En 667 × 375 (iPhone SE) se montaba sobre
+     «Ranking». La barra es absoluta: este relleno no la mueve. */
+  .cf-inicio__abajo {
+    padding-right: max(0px, calc(2 * var(--cf-sa-r) + 740px - 100%));
   }
 }
 

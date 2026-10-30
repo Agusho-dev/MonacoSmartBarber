@@ -10,6 +10,10 @@
  *  - Los eventos se drenan UNA vez por cuadro (`p.eventos.splice(0)`) y van al render y a
  *    `alCuadro` (HUD y audio).
  *  - Con `fin_partida`, espera `esperaFinMs` de pantalla (el festejo) y avisa.
+ *  - Online (lockstep, src/lib/juego/online): `tomarEntradas` da las DOS entradas del tick
+ *    que sigue, o null si todavía falta la del rival. Entonces el loop no avanza (sigue
+ *    dibujando) y reintenta en el cuadro siguiente, sin juntar atraso para después salir
+ *    corriendo. `ritmo` frena o apura apenas para quedar parejo con el otro celular.
  *
  * Sin React: lo maneja la pantalla de pelea desde un efecto.
  */
@@ -36,6 +40,15 @@ export interface OpcionesLoop {
   alRendimientoBajo?: () => void
   /** Un error del motor o del render: el loop se detiene y avisa. */
   alError?: (error: unknown) => void
+  /**
+   * Online: las entradas de los dos lados para el tick que sigue, o null si falta la del
+   * rival (el loop espera sin avanzar). Si está, reemplaza a `tomarEntrada`.
+   */
+  tomarEntradas?: () => readonly [EntradaJugador, EntradaJugador] | null
+  /** Online: multiplicador del ritmo de este cuadro (≈1; lo acota el loop a 0,5–1,5). */
+  ritmo?: () => number
+  /** Después de cada tick simulado (online: el hash del estado). */
+  alPaso?: (p: Partida) => void
 }
 
 export interface ControlLoop {
@@ -80,6 +93,12 @@ export function crearLoop(op: OpcionesLoop): ControlLoop {
     }
   }
 
+  function ritmoDelCuadro(): number {
+    if (!op.ritmo) return 1
+    const r = op.ritmo()
+    return Number.isFinite(r) ? Math.max(0.5, Math.min(1.5, r)) : 1
+  }
+
   function cuadro(ahora: number) {
     if (!corriendo) return
     raf = requestAnimationFrame(cuadro)
@@ -89,12 +108,28 @@ export function crearLoop(op: OpcionesLoop): ControlLoop {
     if (dt < 0) dt = 0
     try {
       const escala = Number.isFinite(p.escalaTiempo) ? Math.max(0, Math.min(2, p.escalaTiempo)) : 1
-      acumulado += dt * escala
+      acumulado += dt * escala * ritmoDelCuadro()
       let pasos = 0
-      while (acumulado >= PASO_MS && pasos < MAX_PASOS) {
-        op.avanzar(p, [op.tomarEntrada(), ENTRADA_VACIA])
-        acumulado -= PASO_MS
-        pasos++
+      const dos = op.tomarEntradas
+      if (dos) {
+        while (acumulado >= PASO_MS && pasos < MAX_PASOS) {
+          const entradas = dos()
+          if (!entradas) {
+            // Falta la del rival: no se avanza ni se junta atraso (sería salir corriendo después).
+            acumulado = Math.min(acumulado, PASO_MS)
+            break
+          }
+          op.avanzar(p, entradas)
+          op.alPaso?.(p)
+          acumulado -= PASO_MS
+          pasos++
+        }
+      } else {
+        while (acumulado >= PASO_MS && pasos < MAX_PASOS) {
+          op.avanzar(p, [op.tomarEntrada(), ENTRADA_VACIA])
+          acumulado -= PASO_MS
+          pasos++
+        }
       }
       if (pasos === MAX_PASOS && acumulado >= PASO_MS) acumulado = 0
 

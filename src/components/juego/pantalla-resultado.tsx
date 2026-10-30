@@ -14,7 +14,7 @@ import {
   Users,
   Zap,
 } from 'lucide-react'
-import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { guardarPartidaJuego } from '@/lib/actions/juego'
 import { ARENAS } from '@/lib/juego/arenas'
 import { PERSONAJES } from '@/lib/juego/personajes'
@@ -99,6 +99,8 @@ interface Props {
   onCambiarBarbero: () => void
   onRanking: () => void
   onGuardado: (apodo: string, puntaje: number) => void
+  /** El chip de la sala de la sucursal (si hay alguien más con el juego abierto). */
+  sala?: ReactNode
 }
 
 export function PantallaResultado({
@@ -111,6 +113,7 @@ export function PantallaResultado({
   onCambiarBarbero,
   onRanking,
   onGuardado,
+  sala,
 }: Props) {
   const jugador = PERSONAJES[resultado.eleccion.jugador]
   /** La CPU le dio el remate ¡AL CERO!: el retrato sale pelado (public/juego/personajes/<id>/retrato_rapado.webp). */
@@ -285,6 +288,7 @@ export function PantallaResultado({
       <div className="cf-resultado__scroll">
         <header className="cf-resultado__cabeza">
           <ChipTurno turno={turno} />
+          {sala}
         </header>
 
         <div className="cf-resultado__grilla">
