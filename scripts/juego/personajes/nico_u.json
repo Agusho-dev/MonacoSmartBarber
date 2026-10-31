@@ -182,16 +182,16 @@
           ]
         },
         "7": {
-          "_nota": "revisión 31/oct: flecos del remolino a la derecha de la rodilla, abajo y a la izquierda de la zapatilla de adelante y a la izquierda de la pierna de atrás",
+          "_nota": "revisión 31/oct: flecos del remolino a la derecha de la rodilla, abajo y a la izquierda de la zapatilla de adelante y a la izquierda de la pierna de atrás · tercera tanda (31/oct): en el 7 los rectángulos de la pierna de atrás (pared recta de 21 px) y del piso (piso recto de 16 px) pasan a polígonos inclinados, y sale el palito suelto de la izquierda",
           "excluir": [
             [1500, 352, 1527, 474],
             [[1474, 356], [1500, 356], [1500, 410], [1486, 410], [1486, 384], [1474, 380]],
             [1390, 360, 1416, 400],
             [1436, 467, 1500, 474],
             [[1473, 410], [1490, 410], [1490, 449], [1471, 449], [1470, 440], [1471, 430], [1473, 424]],
-            [1430, 460, 1478, 472],
+            [[1430, 462], [1445, 460], [1458, 461], [1470, 459], [1478, 460], [1478, 472], [1430, 472]],
             [1428, 444, 1439, 460],
-            [1378, 418, 1390, 446]
+            [[1378, 418], [1387, 418], [1390, 425], [1391, 433], [1389, 440], [1390, 446], [1389, 452], [1378, 452]]
           ]
         },
         "4": {
@@ -402,9 +402,9 @@
           "anclaZona": [[948, 512, 1002, 634]]
         },
         "2": {
-          "_nota": "revisión 31/oct: el fondo liso al costado de la cadera (x 1106-1113) quedaba como un bloque negro",
+          "_nota": "revisión 31/oct: el fondo liso al costado de la cadera (x 1106-1113) quedaba como un bloque negro · tercera tanda (31/oct): el polígono sigue la espalda (donde empieza la textura de la campera), antes era una pared recta de 30 px",
           "excluir": [
-            [[1093, 548], [1106, 548], [1106, 579], [1112, 580], [1113, 594], [1114, 598], [1112, 601], [1111, 604], [1110, 607], [1093, 607]]
+            [[1093, 548], [1104, 548], [1103, 550], [1101, 552], [1100, 557], [1100, 560], [1101, 563], [1103, 565], [1105, 567], [1107, 569], [1108, 573], [1109, 576], [1110, 578], [1112, 580], [1113, 594], [1114, 598], [1112, 601], [1111, 604], [1110, 607], [1093, 607]]
           ]
         }
       }

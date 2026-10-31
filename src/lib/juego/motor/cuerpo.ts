@@ -107,18 +107,75 @@ export function puedeActuarEnAire(l: LuchadorEstado, li: InternoLuchador): boole
 }
 
 /**
- * No puede hacer nada por culpa del rival: en el piso sin poder actuar y sin un movimiento propio
- * en curso (hitstun, guardia rota, congelado, aturdido, tirado, levantándose…), o en el aire
- * cayendo derribado o agarrado. Es la vara de los encierros (cadenas.mts mide lo mismo).
+ * No puede hacer nada: en el piso sin poder actuar y sin un movimiento propio en curso (hitstun,
+ * blockstun, guardia rota, congelado, aturdido, tirado, levantándose…), o en el aire cayendo
+ * derribado o agarrado.
  */
 export function sinControl(l: LuchadorEstado, li: InternoLuchador): boolean {
   if (!l.enSuelo) return li.caidaDerribo > 0 || li.agarradoPor !== null
   return !puedeActuar(l, li) && li.accion === null && li.dash === null
 }
 
-/** Lleva tanto sin poder actuar que ya nada lo controla más (ver TOPE_ENCIERRO). */
+/**
+ * Sólo se está cubriendo: el blockstun de un golpe que bloqueó, sin ningún otro estado encima. Para
+ * el encierro no suma ni corta (cubrirse no es estar encerrado, y tampoco le devuelve el control).
+ */
+export function bloqueoPuro(l: LuchadorEstado, li: InternoLuchador): boolean {
+  const ef = l.efectos
+  return (
+    l.enSuelo &&
+    li.stun > 0 &&
+    li.stunBloqueo &&
+    ef.guardiaRota === 0 &&
+    ef.congelado === 0 &&
+    ef.electrocutado === 0 &&
+    ef.aturdido === 0 &&
+    li.derribo === 0 &&
+    li.levantar === 0 &&
+    li.caidaDerribo === 0 &&
+    li.agarradoPor === null
+  )
+}
+
+/**
+ * Encerrado por el rival: sin control y no sólo cubriéndose. Es la vara de los encierros
+ * (TOPE_ENCIERRO; cadenas.mts mide lo mismo por su cuenta).
+ */
+export function encerrado(l: LuchadorEstado, li: InternoLuchador): boolean {
+  return sinControl(l, li) && !bloqueoPuro(l, li)
+}
+
+/**
+ * Lleva tanto encerrado que ya nada lo controla más, o acaba de salir de un encierro así y todavía
+ * no respiró (ver TOPE_ENCIERRO).
+ */
 export function inmuneAlControl(li: InternoLuchador): boolean {
-  return li.sinControl >= TOPE_ENCIERRO.inmuneDesde
+  return li.sinControl >= TOPE_ENCIERRO.inmuneDesde || li.respiroInmune > 0
+}
+
+/**
+ * Llegó al tope del encierro: lo soltaron de todo (soltarEncierro, luchador.ts) y, hasta que
+ * respire, aguanta los golpes como con armadura (le sacan vida pero no lo frenan ni lo tiran).
+ */
+export function aguantaGolpes(li: InternoLuchador): boolean {
+  return li.sinControl >= TOPE_ENCIERRO.tope
+}
+
+/**
+ * Invulnerable AHORA, con el estado de este mismo tick: la esquiva y los arranques intocables lo
+ * son desde su primer tick. `LuchadorEstado.invulnerable` es esto mismo calculado al cerrar el tick
+ * (lo que ve el render); hasta el 31/oct `golpeable` leía ese valor, que en el tick en que arrancaba
+ * la esquiva todavía era el del tick anterior: un golpe que entraba justo ahí le pegaba.
+ */
+export function invulnerableAhora(li: InternoLuchador): boolean {
+  return (
+    (li.dash !== null && li.dash.t < li.dash.invul) ||
+    invulnerablePorAccion(li) ||
+    li.derribo > 0 ||
+    li.levantar > 0 ||
+    li.caidaDerribo > 0 ||
+    li.pose !== null
+  )
 }
 
 /** El rival lo tiene a merced: le está pegando o no puede moverse. */
@@ -134,8 +191,9 @@ export function enCombo(l: LuchadorEstado, li: InternoLuchador): boolean {
   )
 }
 
-export function golpeable(l: LuchadorEstado, li: InternoLuchador, esProyectil: boolean): boolean {
-  if (l.invulnerable || li.pose !== null || li.agarradoPor !== null) return false
+/** Se le puede pegar en este tick (con la invulnerabilidad viva: ver invulnerableAhora). */
+export function golpeable(_l: LuchadorEstado, li: InternoLuchador, esProyectil: boolean): boolean {
+  if (invulnerableAhora(li) || li.agarradoPor !== null) return false
   if (esProyectil && li.invulnProyectil) return false
   return true
 }

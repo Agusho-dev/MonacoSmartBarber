@@ -39,6 +39,13 @@
  * cubre del Sillonazo en normal, ve en el super flash lo que TIRA y rompe la guardia y se va,
  * salta el molino hacia adelante, sabe que la herramienta de Brian aguanta los leves y la cura con
  * armadura se toma más cerca.
+ *
+ * Tercera tanda (31/oct): el balance quedó en dos balanzas. El KIT (movimientos.ts) se afina entre
+ * dos personas (la pelea online, que no tiene CPU) y la CPU se empareja con perillas que el online no
+ * ve: la `pericia` (ahora también en normal, y de −2 a 2), `periciaHumano`, `asistencia` y
+ * CONTRA_PERSONA. La reacción con decimales se sortea por round (sortearReaccion: antes se redondeaba
+ * y la pericia saltaba de a escalones de 10–20 puntos). Además castiga con la herramienta lo que aguanta
+ * los golpes leves (la Curación) y cruza el Sillonazo con la esquiva en el tick justo.
  */
 import type { Dificultad, EntradaJugador, Lado, LuchadorEstado, Partida, ProyectilEstado } from '../tipos'
 import { PERSONAJES } from '../personajes'
@@ -159,6 +166,11 @@ interface Observacion {
   mareado: boolean
   /** Golpe de la cadena de la MÁQUINA (lento, mucho daño a la guardia). */
   pesado: boolean
+  /**
+   * Lo que hace ahora tiene armadura contra los golpes leves (la Curación hasta su tick 42, la
+   * MÁQUINA de Chipi): castigarlo con el puño no lo frena, hay que ir con la herramienta.
+   */
+  aguantaLeves: boolean
   /** Tick de la esquiva en curso (-1 = no está esquivando), su dirección y su sello. */
   dashT: number
   dashDir: -1 | 0 | 1
@@ -171,6 +183,13 @@ const LARGO_HISTORIAL = 40
 export interface Cerebro {
   lado: Lado
   azar: Azar
+  /**
+   * Canal de azar aparte para sortear la reacción entera de cada round (ver sortearReaccion): así
+   * sortearla no corre la secuencia de las decisiones.
+   */
+  sorteo: Azar
+  /** Reacción (ticks enteros) de este round. */
+  reaccionRound: number
   base: ParamsCpu
   efectivos: ParamsCpu
   historial: Observacion[]
@@ -232,6 +251,11 @@ export interface Cerebro {
   pesadosRival: number
   /** Ya decidió qué hace con el derribo del rival (una vez por derribo). */
   tiradoVisto: boolean
+  /**
+   * Tick (de la partida) en que cruza con la esquiva hacia adelante por debajo del Sillonazo que vio en
+   * el super flash (0 = nada programado). Ver la reacción 2'' en pensarPelea.
+   */
+  cruzarEn: number
 }
 
 function observacionVacia(): Observacion {
@@ -260,6 +284,7 @@ function observacionVacia(): Observacion {
     rompe: false,
     mareado: false,
     pesado: false,
+    aguantaLeves: false,
     dashT: -1,
     dashDir: 0,
     dashAdelante: false,
@@ -281,19 +306,28 @@ const PROBABILIDADES = [
 ] as const
 
 /**
- * Los parámetros de `dificultad` corridos por la pericia del barbero (EstiloCpu.pericia, −1..1):
+ * Los parámetros de `dificultad` corridos por la pericia del barbero (EstiloCpu.pericia, −2..2):
  * con + van hacia los de la dificultad de arriba (en difícil siguen de largo en esa dirección) y
- * con − hacia los de abajo (en fácil, más torpes todavía). Con 0 son los de la tabla, el mismo
- * objeto. Se calcula una vez por cerebro, con sumas y productos (igual en todos los motores de JS);
- * `especiales` no cambia (es el modo de la dificultad) y `adapta` en 0 queda en 0: ese cero apaga
- * conductas enteras (cubrirse del que se acerca, cuidar la guardia baja) y prenderlas con una
- * pericia mínima era un salto, no un ajuste fino (medido: +0,026 en fácil movía 16 puntos).
+ * con − hacia los de abajo (en fácil, más torpes todavía); pasado 1, siguen desde la dificultad
+ * vecina. Con 0 son los de la tabla, el mismo objeto. Se calcula una vez por cerebro, con sumas y
+ * productos (igual en todos los motores de JS). La reacción queda con decimales y se sortea en cada
+ * round (sortearReaccion). `especiales` no cambia (es el modo de la dificultad) y `adapta` en 0 queda
+ * en 0: ese cero apaga conductas enteras (cubrirse del que se acerca, cuidar la guardia baja) y
+ * prenderlas con una pericia mínima era un salto, no un ajuste fino (medido: +0,026 en fácil movía 16
+ * puntos).
  */
 export function paramsConPericia(dificultad: Dificultad, pericia: number, tabla: Readonly<Record<Dificultad, ParamsCpu>> = PARAMS_CPU): ParamsCpu {
   const base = tabla[dificultad] ?? tabla.normal
-  const t = Math.max(-1, Math.min(1, Number(pericia) || 0))
-  if (t === 0) return base
   const i = Math.max(0, ESCALERA.indexOf(dificultad))
+  const t0 = Math.max(-2, Math.min(2, Number(pericia) || 0))
+  // Más de un escalón (|pericia| > 1): sigue desde la dificultad vecina con lo que sobra, con el modo
+  // de los especiales de ésta. Lo usa la CPU de Fabri en difícil (tercera tanda, 31/oct): con la
+  // Curación y los normales que necesita entre dos personas, con los parámetros de normal todavía
+  // le ganaba 3 de 4 a las otras CPU difíciles.
+  if (t0 < -1 && i > 0) return { ...paramsConPericia(ESCALERA[i - 1], t0 + 1, tabla), especiales: base.especiales }
+  if (t0 > 1 && i < ESCALERA.length - 1) return { ...paramsConPericia(ESCALERA[i + 1], t0 - 1, tabla), especiales: base.especiales }
+  const t = Math.max(-1, Math.min(1, t0))
+  if (t === 0) return base
   const arriba = tabla[ESCALERA[Math.min(ESCALERA.length - 1, i + 1)]]
   const abajo = tabla[ESCALERA[Math.max(0, i - 1)]]
   // hacia dónde se corre cada número: hacia el vecino, o lejos del otro vecino en las puntas
@@ -306,7 +340,8 @@ export function paramsConPericia(dificultad: Dificultad, pericia: number, tabla:
     if (clave === 'adapta' && base.adapta === 0) continue
     r[clave] = Math.min(1, Math.max(0, correr(base[clave], (q) => q[clave])))
   }
-  r.reaccion = Math.min(30, Math.max(2, Math.round(correr(base.reaccion, (q) => q.reaccion))))
+  // Sin redondear: la parte decimal se sortea en cada round (sortearReaccion).
+  r.reaccion = Math.min(30, Math.max(2, correr(base.reaccion, (q) => q.reaccion)))
   const c0 = Math.max(3, Math.round(correr(base.cadencia[0], (q) => q.cadencia[0])))
   const c1 = Math.max(c0, Math.round(correr(base.cadencia[1], (q) => q.cadencia[1])))
   r.cadencia = [c0, c1]
@@ -325,8 +360,14 @@ export function paramsConPericia(dificultad: Dificultad, pericia: number, tabla:
  * cerca con cada barbero (medido de 0,4 a 0,8: lo que separa a los dos se achica de 1,3–2,2 a
  * menos de 1 en logit en casi todos); lo demás lo emparejan `asistencia` y `periciaHumano`
  * (movimientos.ts).
+ *
+ * Normal: `reaccion` 9 → 9,5 (tercera tanda, 31/oct; con decimales se sortea por round). La meta B se
+ * mide ahora con personas que ven el ataque 14 ticks tarde (personas.mts): contra la tabla de normal
+ * el simple ganaba 15 % y el novato 28 %. Con 10 el que aprieta el especial apenas se enciende (el bot
+ * «especiales» de adversario.mts) pasaba de 46 % con todos; con 9,5 y la asistencia de cada barbero,
+ * el simple y el novato quedan en ≈ 37 % y los 52 marginales en 25–55.
  */
-export const CONTRA_PERSONA: Partial<Record<Dificultad, Partial<ParamsCpu>>> = { normal: { recibir: 0.6 } }
+export const CONTRA_PERSONA: Partial<Record<Dificultad, Partial<ParamsCpu>>> = { normal: { recibir: 0.6, reaccion: 9.5 } }
 
 /** La tabla de parámetros de la CPU contra una persona (PARAMS_CPU con CONTRA_PERSONA encima). */
 function tablaContraPersona(): Readonly<Record<Dificultad, ParamsCpu>> {
@@ -346,9 +387,12 @@ export function crearCerebro(lado: Lado, dificultad: Dificultad, semilla: number
   const base = paramsConPericia(dificultad, pericia, contraPersona ? tablaContraPersona() : PARAMS_CPU)
   const historial: Observacion[] = []
   for (let i = 0; i < LARGO_HISTORIAL; i++) historial.push(observacionVacia())
+  const sorteo = crearAzar(semilla, 41 + lado)
   return {
     lado,
     azar: crearAzar(semilla, 11 + lado),
+    sorteo,
+    reaccionRound: sortearReaccion(base.reaccion, sorteo),
     base,
     efectivos: { ...base },
     historial,
@@ -393,11 +437,26 @@ export function crearCerebro(lado: Lado, dificultad: Dificultad, semilla: number
     rango: 0,
     pesadosRival: 0,
     tiradoVisto: false,
+    cruzarEn: 0,
   }
+}
+
+/**
+ * La reacción del round, en ticks enteros: con la pericia la reacción tiene decimales (8,4 ticks) y se
+ * sortea el entero de abajo o el de arriba con esa proporción (8 con 60 %, 9 con 40 %). Hasta el 31/oct
+ * se redondeaba: un tick de reacción mueve 10 a 20 puntos y la pericia de un barbero saltaba de un
+ * escalón al otro sin nada en el medio (la CPU difícil de Luciano daba 40 % o 59 %). Una reacción
+ * entera no sortea nada.
+ */
+function sortearReaccion(reaccion: number, sorteo: Azar): number {
+  const piso = Math.floor(reaccion)
+  const resto = reaccion - piso
+  return resto > 1e-9 && azar(sorteo) < resto ? piso + 1 : piso
 }
 
 /** Al empezar cada round: sin planes viejos ni botones apretados. */
 export function reiniciarCerebro(c: Cerebro): void {
+  c.reaccionRound = sortearReaccion(c.base.reaccion, c.sorteo)
   c.dir = 0
   c.guardia = false
   c.abajo = false
@@ -413,6 +472,7 @@ export function reiniciarCerebro(c: Cerebro): void {
   c.llenos = 0
   c.enfriaEspecial = 0
   c.rango = 0
+  c.cruzarEn = 0
   for (const b of BOTONES_CPU) c.btn[b] = 0
 }
 
@@ -459,8 +519,11 @@ function observar(c: Cerebro, p: Partida, I: EstadoInterno, otro: Lado): void {
     o.agarre = !!(a.mov as DefEspecial).agarre
     o.rompe = a.especial !== 0 && PERSONAJES[l.id].especiales[a.especial - 1].efecto === 'rompe_guardia'
     o.pesado = a.especial === 0 && a.mov.boton === 'herramienta'
+    const ar = a.mov.armadura
+    o.aguantaLeves = !!ar && ar.contra.includes('leve') && a.t < ar.hasta
   } else {
     o.pesado = false
+    o.aguantaLeves = false
     o.especial = 0
     o.agarre = false
     o.rompe = false
@@ -522,7 +585,7 @@ function ponerPlan(c: Cerebro, plan: Plan, ticks: number): void {
 function ajustar(c: Cerebro, p: Partida, lado: Lado): ParamsCpu {
   const b = c.base
   const e = c.efectivos
-  e.reaccion = b.reaccion
+  e.reaccion = c.reaccionRound
   e.bloquear = b.bloquear
   e.agresividad = b.agresividad
   e.castigo = b.castigo
@@ -533,14 +596,14 @@ function ajustar(c: Cerebro, p: Partida, lado: Lado): ParamsCpu {
   const ventaja =
     yo.vida / yo.vidaMax - rv.vida / rv.vidaMax + (p.rondasGanadas[lado] - p.rondasGanadas[(1 - lado) as Lado]) * 0.25
   if (p.config.dificultad === 'facil' && ventaja > 0.4) {
-    e.reaccion = b.reaccion + 8
+    e.reaccion = c.reaccionRound + 8
     e.bloquear = b.bloquear * 0.6
     e.agresividad = b.agresividad * 0.65
     e.castigo = b.castigo * 0.5
     e.terminaCadena = b.terminaCadena * 0.7
   } else if (ventaja > 0.6) {
     // En normal afloja poco y sólo si va ganando muy cómodo (si no, el que machaca botones remonta).
-    e.reaccion = b.reaccion + 4
+    e.reaccion = c.reaccionRound + 4
     e.bloquear = b.bloquear * 0.85
     e.agresividad = b.agresividad * 0.85
     e.castigo = b.castigo * 0.8
@@ -1155,6 +1218,27 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
   const salioDeBloqueo = c.bloqueando
   c.bloqueando = false
 
+  // El cruce programado por debajo del Sillonazo (2''): quieto hasta el tick justo y ahí la esquiva
+  // hacia adelante, que es intocable los primeros ticks y lo deja a la espalda del que lo tiró.
+  if (c.cruzarEn > 0) {
+    if (p.tick > c.cruzarEn + 3) c.cruzarEn = 0
+    else if (p.tick >= c.cruzarEn) {
+      c.cruzarEn = 0
+      if (li.dashEspera === 0) {
+        c.dir = hacia
+        apretar(c, 'dash')
+        c.motivo = 'cruza el sillón'
+        ponerPlan(c, 'mantener', 8)
+        return
+      }
+    } else {
+      c.dir = 0
+      c.guardia = false
+      c.abajo = false
+      return
+    }
+  }
+
   // ─── Reacciones (una vez por estímulo) ───
 
   // 1) Castigar lo que bloqueó (fin de cadena, herramienta, especial): de cerca con el golpe, de lejos
@@ -1162,8 +1246,11 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
   if (salioDeBloqueo && ob.atacando && ob.inseguro && c.selloCastigo !== ob.sello) {
     c.selloCastigo = ob.sello
     const embestida = especialDeCastigo(k)
-    if (dist <= alcMio + 6 && castigoLlega(k, 'golpe', ob, prm.reaccion, I.kits[(1 - lado) as Lado]) && chance(c.azar, prm.castigo)) {
-      apretar(c, 'golpe')
+    // Contra lo que aguanta los leves (la Curación), el castigo va con la herramienta.
+    const atq: Ataque = ob.aguantaLeves ? 'herramienta' : 'golpe'
+    const alcAtq = atq === 'golpe' ? alcMio : alcanceAtaque(k, atq)
+    if (dist <= alcAtq + 6 && castigoLlega(k, atq, ob, prm.reaccion, I.kits[(1 - lado) as Lado]) && chance(c.azar, prm.castigo)) {
+      apretar(c, atq)
       c.motivo = 'castigo bloqueo'
       ponerPlan(c, 'esperar', 4)
       return
@@ -1239,6 +1326,33 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
   //      Se va para atrás con la esquiva (o salta) apenas termina el flash. Antes no reaccionaba al
   //      flash de lo que tira (sólo al proyectil, tarde) y el que tiraba el Sillonazo apenas se
   //      encendía le ganaba 2 de 3 a la CPU normal con Chipi (revisión del 30/oct, segunda tanda).
+  //      El Sillonazo (el sillón que vuela en arco y después se desliza) no se esquiva para atrás ni
+  //      saltando: tapa de 60 a 500 px a la altura del cuerpo. Lo único que lo pasa es la esquiva hacia
+  //      adelante en el tick justo (medido: 12–14 ticks después del flash a 120 px, 16–18 a 170, 20–24
+  //      a 220, 28–30 a 280). Sin esto, el que lo tiraba apenas se encendía, de cerca, le ganaba 7 a 9
+  //      de cada 10 a la CPU normal con Chipi (tercera tanda, 31/oct).
+  const kRival = I.kits[(1 - lado) as Lado]
+  const tiroRival = ob.especial !== 0 ? kRival.especiales[ob.especial - 1].proyectil : undefined
+  if (
+    tiroRival?.desliza &&
+    ob.lanza &&
+    ob.rompe &&
+    ob.fase === 1 &&
+    c.selloFlash !== ob.sello &&
+    prm.especiales !== 'torpe' &&
+    dist < 360 &&
+    p.congelamientoGolpe > 0
+  ) {
+    c.selloFlash = ob.sello
+    c.selloDefensa = ob.sello
+    if (chance(c.azar, Math.max(prm.bloquear, 0.6))) {
+      c.cruzarEn = p.tick + p.congelamientoGolpe + Math.max(10, Math.round(13 + (dist - 120) * 0.1))
+      c.motivo = 'espera para cruzar el sillón'
+      ponerPlan(c, 'mantener', c.cruzarEn - p.tick + 8)
+      c.dir = 0
+      return
+    }
+  }
   if (ob.especial !== 0 && ob.lanza && ob.rompe && ob.fase === 1 && c.selloFlash !== ob.sello && prm.especiales !== 'torpe' && dist < 260) {
     c.selloFlash = ob.sello
     c.selloDefensa = ob.sello
@@ -1506,8 +1620,13 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
     c.selloCastigo = ob.sello
     if (chance(c.azar, prm.castigo)) {
       const embestida = especialDeCastigo(k)
-      if (dist <= alcMio + 4 && castigoLlega(k, 'golpe', ob, prm.reaccion, I.kits[(1 - lado) as Lado])) {
-        apretar(c, 'golpe')
+      // La Curación (sin ventanas: para la CPU es un ataque que «falló») aguanta los golpes leves y
+      // medios: castigarla con el puño no la cortaba y el que se curaba recuperaba 16 % gratis (la
+      // CPU de Fabri ganaba 9 de 10 en difícil con la cura rápida, tercera tanda del 31/oct).
+      const atq: Ataque = ob.aguantaLeves ? 'herramienta' : 'golpe'
+      const alcAtq = atq === 'golpe' ? alcMio : alcanceAtaque(k, atq)
+      if (dist <= alcAtq + 4 && castigoLlega(k, atq, ob, prm.reaccion, I.kits[(1 - lado) as Lado])) {
+        apretar(c, atq)
         c.motivo = 'castigo fallo'
         ponerPlan(c, 'esperar', 4)
         return
@@ -1530,7 +1649,7 @@ function pensarPelea(c: Cerebro, p: Partida, I: EstadoInterno, lado: Lado): void
           apretar(c, 'dash')
           c.motivo = 'castigo dash'
         }
-        c.ataque = 'golpe'
+        c.ataque = atq
         ponerPlan(c, 'presionar', 30)
       }
     }

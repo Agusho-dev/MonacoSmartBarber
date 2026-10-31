@@ -10,9 +10,9 @@
  * rasteriza los contornos gruesos y el degradé: 40 ms con la CPU normal, 70–85 ms con un celular
  * medio) y caía justo en el primer cuadro del «ROUND 1», del «¡A PELEAR!» o del «K.O.». Se
  * pintan y se dibujan una vez antes, uno por cuadro y siempre sin el jugador en control: al
- * arrancar (cortina, presentación, anuncios) lo de la primera vez y lo que sale jugando (los
- * impactos, el combo, el TURBO, el remate del final); en el festejo de un round, el «ROUND N»
- * que viene. Quedan afuera «¡TIEMPO!» y «PERFECTO» (casi nunca salen).
+ * arrancar (cortina, presentación, anuncios) todo lo que puede salir en la pelea (lo de la primera
+ * vez, lo que sale jugando, los rounds que vienen, «PERFECTO» y «¡TIEMPO!»; ver previosDeLaPelea).
+ * Sólo un round fuera de lo común se pinta en el festejo del anterior.
  */
 import type { Lado, Partida } from '../tipos'
 import type { Escena } from './escena'
@@ -150,8 +150,14 @@ function previoAnuncio(clave: ClaveAnuncio, texto: string): Previo {
 
 /**
  * Lo que se precalienta al arrancar: lo que sale primero y lo que cae con el jugador en control
- * (el «¡A PELEAR!», el combo, los impactos, el TURBO, el remate del final) y el «K.O.». Los
- * «ROUND N» siguientes, en el festejo del round anterior (ver precalentar).
+ * (el «¡A PELEAR!», el combo, los impactos, el TURBO, el remate del final), el «K.O.», los anuncios
+ * de los rounds que pueden venir con dos rounds para ganar —«ROUND 2» y «ROUND FINAL» (el 3, con
+ * 1 a 1)— y lo que sale en el K.O. o al acabarse el reloj: «PERFECTO» y «¡TIEMPO!». Hasta la
+ * tercera tanda los rounds se pintaban en el festejo del round anterior y con la CPU ×4 dejaban un
+ * tirón de 81–102 ms entre rounds (las únicas tareas largas de una pelea de 131 s), y «PERFECTO»
+ * uno de ≈ 76 ms en el K.O.; ahora el costo cae con el resto, en la cortina y la presentación (en
+ * ninguna se juega). Un round que no está acá (un empate por tiempo, otra cantidad de rounds) se
+ * sigue pintando en el festejo del anterior (ver precalentar).
  */
 function previosDeLaPelea(): Previo[] {
   const impactos = (Object.keys(IMPACTOS) as ClaveImpacto[]).map((k): Previo => [k, IMPACTOS[k].texto, IMPACTOS[k].estilo, 0])
@@ -164,6 +170,10 @@ function previosDeLaPelea(): Previo[] {
     previoAnuncio('dejalo', '¡DEJALO AL CERO!'),
     previoAnuncio('alcero', '¡AL CERO!'),
     previoAnuncio('ko', 'K.O.'),
+    previoAnuncio('round', 'ROUND 2'),
+    previoAnuncio('round_final', 'ROUND FINAL'),
+    previoAnuncio('perfecto', 'PERFECTO'),
+    previoAnuncio('tiempo', '¡TIEMPO!'),
   ]
 }
 
@@ -455,15 +465,16 @@ export class Textos {
 
   /**
    * En el festejo de un round que no definió la pelea (no en el K.O.: su primer cuadro es el del
-   * «K.O.»), el anuncio del que viene («ROUND 2» o «ROUND FINAL», igual que lo arma el motor).
-   * null si no hay o ya está.
+   * «K.O.»), el anuncio del que viene («ROUND 2» o «ROUND FINAL», igual que lo arma el motor), si
+   * no se pintó al arrancar (ver previosDeLaPelea). null si no hay o ya está.
    */
   private previoDelProximoRound(p: Partida): Previo | null {
     if (p.fase !== 'entre_rounds' || p.ganadorPartida !== null) return null
     const r = p.config.rondasParaGanar - 1
     const final = p.rondasGanadas[0] === r && p.rondasGanadas[1] === r
     const previo = final ? previoAnuncio('round_final', 'ROUND FINAL') : previoAnuncio('round', `ROUND ${p.round + 1}`)
-    return previo[0] === this.proximoRound ? null : previo
+    if (previo[0] === this.proximoRound || this.cache.has(previo[0])) return null
+    return previo
   }
 
   vaciar(): void {

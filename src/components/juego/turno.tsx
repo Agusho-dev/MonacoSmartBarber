@@ -3,6 +3,7 @@
 import { BellRing, Clock, Scissors, X } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import type { EstadoTurnoJuego, FichaPersonaje } from '@/lib/juego/tipos'
+import { alTocar } from '@/lib/juego/ui/toque'
 import { ImagenJuego } from './imagen-juego'
 
 /** «Hay 2 antes que vos»: sólo si vino por QR y el servidor sabe algo. */
@@ -37,7 +38,7 @@ export function AvisoProximo({ onCerrar }: { onCerrar: () => void }) {
         <strong>¡Sos el próximo!</strong>
         <span>Andá acercándote: en un ratito te llaman.</span>
       </div>
-      <button type="button" className="cf-aviso-proximo__cerrar" onClick={onCerrar} aria-label="Cerrar aviso">
+      <button type="button" className="cf-aviso-proximo__cerrar" {...alTocar(onCerrar)} aria-label="Cerrar aviso">
         <X />
       </button>
     </div>
@@ -89,7 +90,8 @@ export function PantallaTeToca({
           'Acercate a la silla'
         )}
       </p>
-      <button type="button" className="cf-btn cf-btn--grande" onClick={onCerrar} autoFocus>
+      {/* Sale encima de la pelea: también con el pulgar en el stick (ui/toque.ts). */}
+      <button type="button" className="cf-btn cf-btn--grande" {...alTocar(onCerrar)} autoFocus>
         <span>Voy</span>
       </button>
       <p className="cf-te-toca__nota">La pelea queda en pausa. Seguís cuando vuelvas.</p>

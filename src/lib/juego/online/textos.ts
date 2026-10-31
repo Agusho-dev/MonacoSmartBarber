@@ -97,7 +97,8 @@ export function bajadaResultado(r: ResultadoDuelo, rival: string, seFue: EstadoD
       if (seFue === 'salir') return `${rival} se fue de la pelea`
       return `${rival} se quedó sin conexión`
     case 'abandone':
-      return 'Te desconectaste en el medio de la pelea'
+      // Provisoria (el rival todavía no dijo que ganó él): si a él también se le cortó, se anula.
+      return r.provisorio ? `Te desconectaste. Si a ${rival} también se le cortó, no cuenta` : 'Te desconectaste en el medio de la pelea'
     case 'ausente':
       return 'Te fuiste del juego más de 10 segundos'
     case 'desync':
@@ -131,4 +132,12 @@ export function textoRivalAusente(r: ResultadoDuelo, rival: string, seFue: Estad
       texto = `Sin revancha: ${rival} ya no está`
   }
   return texto === bajadaResultado(r, rival, seFue) ? 'Sin revancha' : texto
+}
+
+/**
+ * El pie del resultado cuando el que no tiene red es ESTE celular (EstadoDuelo.sinRed; va en lugar
+ * de REVANCHA). Antes decía «Sin revancha: Juan ya no está» aunque Juan siguiera en la sala.
+ */
+export function textoSinRed(): string {
+  return 'Sin revancha hasta que vuelva tu conexión'
 }

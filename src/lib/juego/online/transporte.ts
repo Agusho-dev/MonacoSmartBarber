@@ -7,14 +7,23 @@
  *
  * Si el SERVIDOR cierra el canal (un límite suyo: realtime-js lo saca de su lista y no reintenta),
  * se abre uno nuevo con el mismo tópico, con espera creciente. Los errores de conexión
- * (CHANNEL_ERROR, TIMED_OUT) los reintenta realtime-js solo.
+ * (CHANNEL_ERROR, TIMED_OUT) los reintenta realtime-js solo, con una espera que crece hasta 10 s
+ * para el socket y otro tanto para volver a unirse al canal: con el canal caído, el duelo llama a
+ * `reintentar` cada segundo y se reconecta apenas hay red (antes, con el wifi de vuelta, la pelea
+ * anulada tardaba 12–22 s más en llegar).
  *
  * `sondear()`: ¿este celular tiene red? Cuando el 4G se traba sin cerrar la conexión, el canal
  * sigue «unido»: realtime-js recién se entera con su latido (cada 25 s), entre 25 y 50 s después.
  * El sondeo hace una ida y vuelta REAL por el socket con ese mismo latido (el «heartbeat» de
  * Phoenix: no es un mensaje de Realtime, no gasta del presupuesto de la sala) y espera la
- * respuesta del servidor. API de realtime-js 2.98 (revisada el 30/oct/2026): `onHeartbeat`,
- * `sendHeartbeat`, `pendingHeartbeatRef`, `heartbeatTimer` y `heartbeatIntervalMs`, todos públicos.
+ * respuesta del servidor. Usa piezas de realtime-js 2.98 que son públicas pero no una API pensada
+ * para esto (revisadas el 30/oct/2026): `onHeartbeat`, `heartbeatCallback`, `sendHeartbeat`,
+ * `pendingHeartbeatRef`, `heartbeatTimer` y `heartbeatIntervalMs`. Por eso se miran al arrancar y
+ * en cada sondeo (`latidoConocido`): si falta alguna o el latido se comporta distinto (en un
+ * worker, sin dejar su pendiente al salir), el sondeo dice «no sé» (null) y el duelo decide como
+ * antes del sondeo. Así una actualización de @supabase/supabase-js nunca trae un «Sin conexión»
+ * falso ni un abandono falso; a lo sumo vuelve lo de antes del 31/oct (`duelo-corte.mts`,
+ * escenarios «api-*»).
  */
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 import type { TransporteDuelo } from './duelo'
@@ -27,6 +36,22 @@ const REUNIR_MS = 600
  * de Realtime es de ≈ 0,2 s (en 4G, hasta 0,6 s).
  */
 export const SONDEO_MS = 2000
+/**
+ * Entre dos intentos de abrir el socket: empieza en 1 s y crece (×1,5) hasta 3 s mientras la red no
+ * vuelve (con la red caída del todo, a lo sumo 20 intentos por minuto: sin red fallan en el celular,
+ * no llegan al servidor); vuelve a 1 s al unirse o cuando el navegador avisa que volvió la red
+ * (`online`). realtime-js solo espera 1, 2, 5 y después 10 s.
+ */
+const REINTENTO_MS = 1000
+const REINTENTO_MAX_MS = 3000
+/** Después de abrir el socket, se mira de nuevo a este rato: si ya abrió, el canal se une sin esperar al latido. */
+const MIRAR_SOCKET_MS = 500
+/**
+ * Entre dos veces que se vuelve a unir el canal con el socket abierto: la primera, enseguida; si el
+ * servidor la rechaza, el doble cada vez hasta 8 s (que un rechazo no se convierta en un join por segundo).
+ */
+const REUNION_MS = 1000
+const REUNION_MAX_MS = 8000
 
 type ClienteRealtime = SupabaseClient['realtime']
 type AlLatido = ClienteRealtime['heartbeatCallback']
@@ -39,6 +64,38 @@ interface Latidos {
 }
 
 const latidosPorCliente = new WeakMap<ClienteRealtime, Latidos>()
+/** Clientes cuyo latido no se comporta como el de realtime-js 2.98: su sondeo dice «no sé». */
+const latidoDesconocido = new WeakSet<ClienteRealtime>()
+let avisoDesconocido = false
+
+function marcarDesconocido(rt: ClienteRealtime, motivo: string): void {
+  latidoDesconocido.add(rt)
+  if (avisoDesconocido) return
+  avisoDesconocido = true
+  console.warn(`[juego] el sondeo de red no reconoce esta versión de realtime-js (${motivo}): el abandono se decide por el canal, como antes del 31/oct`)
+}
+
+/**
+ * ¿El latido de este cliente es el que se conoce? Están todas las piezas y no late en un worker
+ * (con el latido en un worker no hay reloj que reiniciar: su próximo latido podría encontrar el del
+ * sondeo pendiente y cortar un socket sano).
+ */
+function latidoConocido(rt: ClienteRealtime): boolean {
+  if (latidoDesconocido.has(rt)) return false
+  const x = rt as unknown as Record<string, unknown>
+  let falta: string | null = null
+  if (typeof x.onHeartbeat !== 'function') falta = 'onHeartbeat'
+  else if (typeof x.sendHeartbeat !== 'function') falta = 'sendHeartbeat'
+  else if (typeof x.isConnected !== 'function') falta = 'isConnected'
+  else if (typeof x.heartbeatCallback !== 'function') falta = 'heartbeatCallback'
+  else if (!('pendingHeartbeatRef' in x)) falta = 'pendingHeartbeatRef'
+  else if (!('heartbeatTimer' in x)) falta = 'heartbeatTimer'
+  else if (typeof x.heartbeatIntervalMs !== 'number' || !(x.heartbeatIntervalMs > 0)) falta = 'heartbeatIntervalMs'
+  else if (x.worker) falta = 'latido en un worker'
+  if (falta === null) return true
+  marcarDesconocido(rt, falta)
+  return false
+}
 
 /**
  * realtime-js tiene UN callback de latidos por cliente (`onHeartbeat` reemplaza al anterior) y el
@@ -75,7 +132,6 @@ function escucharLatidos(rt: ClienteRealtime, fn: (e: EstadoLatido) => void): ()
  * lo daba por vencido y cortaba un socket sano («heartbeat timeout» y reconexión).
  */
 function reiniciarRelojDeLatidos(rt: ClienteRealtime): void {
-  // Con el latido en un worker (o sin conexión) no hay reloj acá.
   if (rt.heartbeatTimer === undefined) return
   clearInterval(rt.heartbeatTimer)
   rt.heartbeatTimer = setInterval(() => {
@@ -83,14 +139,21 @@ function reiniciarRelojDeLatidos(rt: ClienteRealtime): void {
   }, rt.heartbeatIntervalMs)
 }
 
-/** Una ida y vuelta por el socket: true = llegó la respuesta del servidor a tiempo. */
-function sondearSocket(rt: ClienteRealtime): Promise<boolean> {
+/** Una ida y vuelta por el socket: true = llegó la respuesta del servidor a tiempo; null = no sé. */
+function sondearSocket(rt: ClienteRealtime): Promise<boolean | null> {
+  if (!latidoConocido(rt)) return Promise.resolve(null)
   if (!rt.isConnected()) return Promise.resolve(false)
-  return new Promise<boolean>((resolver) => {
+  // Con el socket abierto, realtime-js late con un setInterval propio: sin él, cambió cómo late.
+  if (rt.heartbeatTimer === undefined) {
+    marcarDesconocido(rt, 'sin reloj de latidos con el socket abierto')
+    return Promise.resolve(null)
+  }
+  return new Promise<boolean | null>((resolver) => {
     let listo = false
+    let salio = false
     let dejar: () => void = () => {}
     let timer: ReturnType<typeof setTimeout> | null = null
-    const terminar = (ok: boolean) => {
+    const terminar = (ok: boolean | null) => {
       if (listo) return
       listo = true
       if (timer !== null) clearTimeout(timer)
@@ -98,9 +161,9 @@ function sondearSocket(rt: ClienteRealtime): Promise<boolean> {
       resolver(ok)
     }
     dejar = escucharLatidos(rt, (estado) => {
-      if (estado === 'ok') terminar(true)
-      // 'error', 'timeout' o 'disconnected': sin red. 'sent' es el aviso de que salió.
-      else if (estado !== 'sent') terminar(false)
+      // 'sent' es el aviso de que salió; 'error', 'timeout' o 'disconnected': sin red.
+      if (estado === 'sent') salio = true
+      else terminar(estado === 'ok')
     })
     timer = setTimeout(() => terminar(false), SONDEO_MS)
     // Siempre un latido propio, soltando antes el que hubiera pendiente: con uno pendiente,
@@ -110,6 +173,13 @@ function sondearSocket(rt: ClienteRealtime): Promise<boolean> {
     // siempre y el que tenía red perdía). Si la respuesta del viejo llega, realtime-js la ignora.
     rt.pendingHeartbeatRef = null
     void rt.sendHeartbeat().catch(() => {})
+    // En 2.98, sendHeartbeat deja su latido pendiente y avisa 'sent' antes de volver. Si no pasó,
+    // cambió cómo late realtime-js: reiniciar su reloj o soltar su pendiente ya no es seguro.
+    if (!listo && (!salio || typeof rt.pendingHeartbeatRef !== 'string')) {
+      marcarDesconocido(rt, 'el latido no quedó pendiente al mandarlo')
+      terminar(null)
+      return
+    }
     reiniciarRelojDeLatidos(rt)
   })
 }
@@ -126,7 +196,21 @@ export function abrirTransportePelea(
   let unido = false
   let cerrado = false
   let reintentos = 0
-  let canal: RealtimeChannel
+  let canal: RealtimeChannel | null = null
+  let espera = REINTENTO_MS
+  let proximoReintento = -Infinity
+  let esperaReunion = 0
+  let proximaReunion = -Infinity
+  // Se mira al arrancar: con un latido que no es el conocido, el duelo no recibe `sondear` y
+  // decide el abandono como antes del sondeo (el canal unido alcanza).
+  const conSondeo = latidoConocido(cliente.realtime)
+
+  const reiniciarEsperas = () => {
+    espera = REINTENTO_MS
+    proximoReintento = -Infinity
+    esperaReunion = 0
+    proximaReunion = -Infinity
+  }
 
   const unir = () => {
     const c = cliente.channel(PREFIJO_PELEA + peleaId, {
@@ -141,6 +225,7 @@ export function abrirTransportePelea(
       unido = estado === 'SUBSCRIBED'
       if (unido) {
         reintentos = 0
+        reiniciarEsperas()
       } else if (estado === 'CLOSED' && reintentos < REUNIR_MAX) {
         reintentos++
         setTimeout(() => {
@@ -150,6 +235,36 @@ export function abrirTransportePelea(
     })
   }
   unir()
+
+  /** El canal viejo que se soltó para volver a unirse (hasta que sale de la lista del cliente). */
+  let saliendo: RealtimeChannel | null = null
+
+  /**
+   * El canal nuevo, recién cuando el viejo salió de la lista del cliente: si no, `channel()`
+   * devolvería el mismo. En realtime-js 2.98 sale en el acto; si otra versión tarda, lo hace el
+   * próximo `reintentar`.
+   */
+  const unirSiSalio = () => {
+    if (saliendo && cliente.getChannels().includes(saliendo)) return
+    saliendo = null
+    unir()
+  }
+
+  /**
+   * El socket ya está abierto y el canal sigue caído (realtime-js lo vuelve a unir con su propia
+   * espera, hasta 10 s): uno nuevo ya. El viejo se suelta antes y su CLOSED (lo dispara este
+   * `unsubscribe`) no se toma como un cierre del servidor.
+   */
+  const volverAUnir = () => {
+    const viejo = canal
+    canal = null
+    unido = false
+    if (viejo) {
+      saliendo = viejo
+      void viejo.unsubscribe().catch(() => {})
+    }
+    unirSiSalio()
+  }
 
   /**
    * El socket abierto. Cuando realtime-js lo cierra (por ejemplo, un latido vencido con la red
@@ -164,20 +279,61 @@ export function abrirTransportePelea(
     }
   }
 
+  /** Con el canal caído: el socket cerrado se abre ya; abierto, el canal se vuelve a unir ya. */
+  const reintentar = () => {
+    if (cerrado || unido) return
+    const t = Date.now()
+    try {
+      if (canal === null) {
+        unirSiSalio()
+        return
+      }
+      const rt = cliente.realtime
+      if (rt.isConnected()) {
+        if (!canal || String(canal.state) !== 'errored' || t < proximaReunion) return
+        proximaReunion = t + esperaReunion
+        esperaReunion = esperaReunion === 0 ? REUNION_MS : Math.min(REUNION_MAX_MS, esperaReunion * 2)
+        volverAUnir()
+        return
+      }
+      if (t < proximoReintento) return
+      proximoReintento = t + espera
+      espera = Math.min(REINTENTO_MAX_MS, Math.round(espera * 1.5))
+      // Sólo con el socket CERRADO: uno que todavía se está cerrando (un latido vencido con la red
+      // trabada) dispararía su cierre tarde, encima del socket nuevo.
+      if (String(rt.connectionState()) !== 'closed') return
+      rt.connect()
+      setTimeout(reintentar, MIRAR_SOCKET_MS)
+    } catch {
+      // Si algo de esto no está (otra versión de realtime-js), queda su propio reintento.
+    }
+  }
+
+  // El navegador avisa que volvió la red (el celular recuperó el wifi o los datos): sin esperar.
+  const alVolverLaRed = () => {
+    reiniciarEsperas()
+    reintentar()
+  }
+  const hayVentana = typeof window !== 'undefined' && typeof window.addEventListener === 'function'
+  if (hayVentana) window.addEventListener('online', alVolverLaRed)
+
   return {
     unido: () => unido,
     // Lo lee el duelo: sin canal unido no se reclama un abandono (el que se fue es éste).
     conectado: () => unido && !cerrado && socketAbierto(),
-    sondear() {
-      if (!unido || cerrado) return Promise.resolve(false)
-      try {
-        return sondearSocket(cliente.realtime)
-      } catch {
-        return Promise.resolve(false)
-      }
-    },
+    sondear: conSondeo
+      ? () => {
+          if (!unido || cerrado) return Promise.resolve(false)
+          try {
+            return sondearSocket(cliente.realtime)
+          } catch {
+            return Promise.resolve(false)
+          }
+        }
+      : undefined,
+    reintentar,
     enviar(m: MensajePelea) {
-      if (!unido || cerrado || !socketAbierto()) return false
+      if (!unido || cerrado || !canal || !socketAbierto()) return false
       void canal.send({ type: 'broadcast', event: 'p', payload: m }).catch(() => {})
       return true
     },
@@ -185,7 +341,8 @@ export function abrirTransportePelea(
       if (cerrado) return
       cerrado = true
       unido = false
-      void cliente.removeChannel(canal).catch(() => {})
+      if (hayVentana) window.removeEventListener('online', alVolverLaRed)
+      if (canal) void cliente.removeChannel(canal).catch(() => {})
     },
   }
 }

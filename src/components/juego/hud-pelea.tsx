@@ -3,6 +3,7 @@
 import { Pause, Zap } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import type { FichaPersonaje, Lado } from '@/lib/juego/tipos'
+import { alTocar } from '@/lib/juego/ui/toque'
 import { EstadosHud } from './estados-hud'
 import { IconoMaquina } from './iconos'
 import { ImagenJuego } from './imagen-juego'
@@ -33,7 +34,10 @@ export function HudPelea({
           <Zap />
           <span>Turbo</span>
         </div>
-        <button type="button" className="cf-hud__pausa" onClick={onPausa} aria-label="Pausa">
+        {/* También con el pulgar en el stick (un segundo dedo no genera click: ui/toque.ts). Sólo
+            un toque que empieza y termina sobre el botón: un dedo de los controles no lo dispara
+            (lo capturan sus zonas). */}
+        <button type="button" className="cf-hud__pausa" {...alTocar(onPausa)} aria-label="Pausa">
           <Pause />
         </button>
       </div>

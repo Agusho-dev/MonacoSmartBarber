@@ -48,6 +48,12 @@ Formato del JSON (coordenadas siempre en px de la HOJA):
     retrato     {"anim": "quieto", "cuadro": 0, "alto": 720, "cara": [x0, y0, lado],
                 "pelarOscuro": 1} (px del cuadro SIN achicar, que mira a la derecha; "espejo": true
                 lo da vuelta; pelarOscuro = pasadas que sacan el borde casi negro del recorte).
+                Opcionales de la cara (mismas coords que "cara", el cuadro ya recortado):
+                "caraQuitar": [formas] saca lo de otra figura pegado a la cabeza (el bebé de
+                Lucas) y pela 1 px del borde oscuro que deja el corte; "caraPintar": [{"zona",
+                "color": [r, g, b]}] pinta lo opaco de la zona (una mano ajena sobre la remera);
+                "caraNitida": {} (o {"radio", "pct", "umbral", "rampa", "suavizar"}) arma la cara
+                con cara_nitida en vez de ampliar: más nítida y con el borde de Simón y Chipi.
   por animación (un nombre que empieza con "_" es OCULTO: se extrae y se empaqueta para que otra
   animación lo tome prestado, pero no va al atlas.json)
     region      [x0,y0,x1,y1] el panel sin la franja del título.
@@ -67,8 +73,17 @@ Formato del JSON (coordenadas siempre en px de la HOJA):
       limite    [formas]: sólo queda lo que cae adentro (formas = cajas o polígonos).
       excluir   [formas]: se saca.
       incluir   [formas]: se agrega todo lo de adentro (huecos que el modelo dejó).
+      incluirColor [regla]: se agregan los píxeles que cumplen la regla de color (con su "zona",
+                como quitar; también limitado al lado de la costura). Para lo oscuro que sinFondo
+                se comió por parecerse al fondo: el cinturón negro de Joaquín tira a cálido
+                (bMenosRMax 2) y el fondo de la hoja a azul.
       agregar   [formas]: se agrega la máscara del panel aunque caiga del otro lado de la costura.
       quitar    [regla]: saca los píxeles que cumplen la regla de color (ver condicion()).
+      pelarOscuro [{"zona": forma, "lumMax": 30, "pasos": 4, "anillo": 1}]: pela desde el borde,
+                de a un píxel por paso, los casi negros de la zona (el contorno negro de más que el
+                modelo pega a la ropa clara sobre el fondo casi negro) y devuelve "anillo" px de
+                contorno pegado a lo que quedó. La zona no tiene que tocar pelo, cinturón ni
+                zapatillas (también son negros y están en el borde).
       quitarSaturados [{"zona": forma, "sat": 45, "lumMin": 50}]: saca lo de color (fuego, chispas,
                 destellos) dentro de la zona.
       quitarOscuro {"lumMax": 30, "desde": 0.4}: saca la sombra negra encerrada entre las piernas
@@ -350,6 +365,26 @@ def quitar_oscuro(rgb, M, lumMax=30, desde=0.35, anillo=1):
     return limpio
 
 
+def pelar_oscuro(rgb, M, zona, lumMax=30, pasos=4, anillo=1):
+    """Pela desde el borde de la máscara, de a un píxel por paso, los píxeles casi negros
+    (lum <= lumMax) que caen en `zona`: el contorno negro de 3-4 px que el modelo deja pegado a la
+    ropa clara cuando el fondo de la hoja es casi negro. Después devuelve `anillo` px de lo pelado
+    que toca a lo que quedó, para que el dibujo conserve su contorno de 1 px."""
+    lum = np.asarray(rgb).astype(np.int16).max(axis=2)
+    pelable = (lum <= int(lumMax)) & zona
+    out = M.copy()
+    for _ in range(int(pasos)):
+        borde = out & ~ndimage.binary_erosion(out, structure=np.ones((3, 3)), border_value=0)
+        sacar = borde & pelable
+        if not sacar.any():
+            break
+        out &= ~sacar
+    pelado = M & ~out
+    for _ in range(int(anillo)):
+        out = out | (ndimage.binary_dilation(out, structure=np.ones((3, 3))) & pelado)
+    return out
+
+
 def costura(M, xa, xb):
     """Camino de arriba abajo (±1 px por fila) entre xa y xb que cruza la menor cantidad de máscara
     (el mismo criterio que extraer_chipi.py)."""
@@ -477,6 +512,8 @@ def extraer_animacion(hoja, sucio, nombre, anim, cfg, carpeta_alfas):
             Mi = M & lado
         if o.get('incluir'):
             Mi = Mi | (rasterizar(o['incluir'], (x0, y0), (w, h)) & lado)
+        for regla in o.get('incluirColor') or []:
+            Mi = Mi | (condicion(rgb, regla, (x0, y0), (w, h)) & lado)
         if o.get('agregar'):
             Mi = Mi | (M & rasterizar(o['agregar'], (x0, y0), (w, h)))
         if o.get('limite'):
@@ -488,6 +525,10 @@ def extraer_animacion(hoja, sucio, nombre, anim, cfg, carpeta_alfas):
                                  q.get('sat', 45), q.get('lumMin', 50))
         for regla in o.get('quitar') or []:
             Mi = Mi & ~condicion(rgb, regla, (x0, y0), (w, h))
+        for po in o.get('pelarOscuro') or []:
+            po = dict(po)
+            zona_p = rasterizar([po.pop('zona')], (x0, y0), (w, h))
+            Mi = pelar_oscuro(rgb, Mi, zona_p, **po)
         if o.get('quitarOscuro'):
             qo = o['quitarOscuro']
             Mi = quitar_oscuro(rgb, ES.limpiar(Mi, o.get('componentes', 'principal')), **(qo if isinstance(qo, dict) else {}))
@@ -594,6 +635,50 @@ def ampliar(img, w, h, nitidez=(1.6, 70, 2)):
     return out
 
 
+def cara_nitida(img, lado=256, radio=2.5, pct=120, umbral=2, rampa=0.12, suavizar=None):
+    """La cara (un RGBA cuadrado con los píxeles de la hoja) llevada a lado×lado de UNA vez: color
+    sangrado (sin halo oscuro), LANCZOS y una máscara de enfoque del tamaño de un píxel de la hoja
+    agrandado. El alfa va aparte: el escalón del recorte se suaviza (sigma ≈ 0,3 × el aumento, si
+    no se pasa "suavizar") y el borde queda de ~1 px, como el de Simón y Chipi (con el alfa ancha de
+    ampliar/agrandar, el contorno era una franja borrosa de 2 a 5 px). La usan Lucas (acá) y Brian y
+    Stefano (extraer_stefano.procesar_retrato) con "caraNitida" en el JSON. Medido en la tanda 3 de
+    oct/2026 (laplaciano medio / halo): Brian 3,4 → 3,9 / 3,3 → 0,9 px, Stefano 6,3 → 7,8 / 2,4 →
+    0,6 px, Lucas 4,1 → 4,4 / 1,3 → 1,0 px (Simón 29,7 / 0,6 y Chipi 21,8 / 0,5 salen de un retrato
+    grande: con 38-50 px de cara en la hoja, la nitidez no llega más lejos sin un retrato del dueño)."""
+    aumento = lado / max(img.size)
+    rgb = sangrar(img).convert('RGB').resize((lado, lado), Image.LANCZOS)
+    if pct:
+        rgb = rgb.filter(ImageFilter.UnsharpMask(radius=radio, percent=int(pct), threshold=int(umbral)))
+    alfa = img.getchannel('A').resize((lado, lado), Image.LANCZOS)
+    sigma = 0.3 * aumento if suavizar is None else float(suavizar)
+    if sigma > 0:
+        alfa = alfa.filter(ImageFilter.GaussianBlur(sigma))
+    a = np.asarray(alfa).astype(np.float32) / 255.0
+    a = np.clip((a - 0.5) / (2 * rampa) + 0.5, 0, 1)
+    out = rgb.convert('RGBA')
+    out.putalpha(Image.fromarray(np.round(a * 255).astype(np.uint8)))
+    return out
+
+
+def retocar_cara(img, r, origen):
+    """"caraPintar" y "caraQuitar" sobre la cara cuadrada (origen = su esquina en coords del cuadro)."""
+    a = np.asarray(img.convert('RGBA')).copy()
+    tam = img.size
+    for p in r.get('caraPintar') or []:
+        z = rasterizar([p['zona']], origen, tam) & (a[..., 3] > 0)
+        a[..., :3][z] = [int(v) for v in p['color']]
+    zona = rasterizar(r.get('caraQuitar') or [], origen, tam)
+    if zona.any():
+        a[..., 3][zona] = 0
+        # el corte deja a la vista el contorno oscuro que separaba las dos figuras (2 px en la hoja,
+        # una franja de 13 px en la cara de 256): se pela 1 px, sólo al lado del corte
+        lum = a[..., :3].max(axis=2)
+        M = a[..., 3] >= 128
+        borde = M & ~ndimage.binary_erosion(M) & ndimage.binary_dilation(zona, iterations=2)
+        a[..., 3] = np.where(borde & (lum < 45), 0, a[..., 3])
+    return Image.fromarray(a)
+
+
 def hacer_retrato(r, cuadros, salida, revision=None):
     """"cara" = [x0, y0, lado] en px del cuadro SIN achicar (si la animación lleva "escala")."""
     c = cuadros[r.get('anim', 'quieto')][int(r.get('cuadro', 0))]
@@ -622,7 +707,12 @@ def hacer_retrato(r, cuadros, salida, revision=None):
         cuadrada = Image.new('RGBA', (lado, lado), (0, 0, 0, 0))
         cuadrada.alpha_composite(img.crop((max(0, cx0), max(0, cy0), min(img.width, cx0 + lado), min(img.height, cy0 + lado))),
                                  (max(0, -cx0), max(0, -cy0)))
-        cara = ampliar(cuadrada, 256, 256)
+        if r.get('caraQuitar') or r.get('caraPintar'):
+            cuadrada = retocar_cara(cuadrada, r, (cx0, cy0))
+        if r.get('caraNitida') is not None:
+            cara = cara_nitida(cuadrada, 256, **(r['caraNitida'] or {}))
+        else:
+            cara = ampliar(cuadrada, 256, 256)
         cara.save(os.path.join(salida, 'cara.webp'), 'WEBP', quality=90, method=6)
     if revision:
         ver = Image.new('RGBA', (ret.width + 300, max(ret.height, 256)), (58, 60, 70, 255))

@@ -29,6 +29,14 @@
  * que la presencia también lleva: de cada jugador se muestra el estado más nuevo de los dos. El
  * broadcast no agrega jugadores (la lista la manda la presencia) y cuesta un mensaje por jugador
  * de la sala por cambio (tres por duelo).
+ *
+ * Ese broadcast es una PISTA, no la verdad: el canal es público y cualquiera puede mandar uno con
+ * el id de otro (hasta el 31/oct, `{de: <otro>, e: 'peleando', s: 999999999}` dejaba a ese jugador
+ * «Peleando», con DESAFIAR deshabilitado para todos, mientras siguiera en la sala). Una pista vale
+ * sólo si su número es el de un cambio que la presencia todavía no trajo (hasta PISTA_ADELANTO_MAX
+ * por delante del de su presencia) y vence a los PISTA_CONFIRMA_MS si la presencia no la alcanza:
+ * ahí se vuelve a mostrar la presencia y no se le cree otra pista a ese jugador hasta que su
+ * presencia avance. Una pista falsa dura, como mucho, esos segundos.
  */
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 import type { Lado } from '../tipos'
@@ -67,8 +75,17 @@ const ESPERA_PRESENCIA_MS = 2500
 const MAX_JUGADORES = 40
 /** Entre un broadcast «estado» y el siguiente (siempre sale el último estado). */
 const ESTADO_MIN_MS = 300
-/** El estado por broadcast de alguien que la presencia no muestra: se guarda este rato, por si llega. */
-const PISTA_VIDA_MS = 15_000
+/**
+ * Una pista (el estado por broadcast) vale como mucho esto sin que la presencia la alcance: la
+ * presencia llega 0,3–2,8 s después (medido el 30/oct). También es lo que se guarda la de alguien
+ * que la presencia todavía no muestra.
+ */
+const PISTA_CONFIRMA_MS = 8000
+/**
+ * El número de una pista puede ir hasta esto por delante del de la presencia de ese jugador (cada
+ * cambio de estado suma uno; un duelo son tres). Más, no lo publicó nadie de verdad.
+ */
+const PISTA_ADELANTO_MAX = 4
 
 export interface JugadorSala {
   id: string
@@ -129,6 +146,24 @@ export interface OyentesSala {
 
 const ORDEN_ESTADO: Record<EstadoJugador, number> = { libre: 0, eligiendo: 1, peleando: 2 }
 
+/** Un estado que llegó por broadcast (`t`: cuándo llegó, reloj de `ahora`). */
+interface Pista {
+  e: EstadoJugador
+  s: number
+  t: number
+}
+
+/**
+ * ¿La pista vale contra la presencia `p` de ese jugador en el momento `t`? Sin vencer, y con un
+ * número que la presencia todavía no trajo pero creíble (no más de PISTA_ADELANTO_MAX adelante).
+ * Sin presencia todavía, vale (se guarda; la lista la arma la presencia).
+ */
+function pistaVale(pista: Pista, p: { s: number } | undefined, t: number): boolean {
+  if (t - pista.t >= PISTA_CONFIRMA_MS) return false
+  if (!p) return true
+  return p.s >= 0 && pista.s > p.s && pista.s <= p.s + PISTA_ADELANTO_MAX
+}
+
 export class Sala {
   private readonly o: OpcionesSala
   private readonly ahora: () => number
@@ -162,10 +197,16 @@ export class Sala {
   private timerEstado: ReturnType<typeof setTimeout> | null = null
   private nombre = 'Jugador'
   private jugadores = new Map<string, JugadorSala>()
-  /** El número del estado que trae la presencia de cada jugador (-1 = una versión que no lo manda). */
-  private secuenciaPresencia = new Map<string, number>()
-  /** El último estado de cada jugador que llegó por broadcast, si es más nuevo que su presencia. */
-  private pistas = new Map<string, { e: EstadoJugador; s: number; t: number }>()
+  /** El estado y el número que trae la presencia de cada jugador (s = -1: una versión que no lo manda). */
+  private presencias = new Map<string, { e: EstadoJugador; s: number }>()
+  /** El último estado de cada jugador que llegó por broadcast, si es más nuevo que su presencia (y creíble). */
+  private pistas = new Map<string, Pista>()
+  /**
+   * Jugadores con una pista que venció sin que su presencia la alcanzara (una falsa, o un cambio que
+   * nunca se publicó): no se les cree otra hasta que su presencia pase de este número.
+   */
+  private desconfiados = new Map<string, number>()
+  private timerPistas: ReturnType<typeof setTimeout> | null = null
   private vistos = new Set<string>()
   private entrante: DesafioEntrante | null = null
   private saliente: DesafioSaliente | null = null
@@ -341,9 +382,12 @@ export class Sala {
     this.timerTrack = null
     if (this.timerEstado !== null) clearTimeout(this.timerEstado)
     this.timerEstado = null
+    if (this.timerPistas !== null) clearTimeout(this.timerPistas)
+    this.timerPistas = null
     this.jugadores.clear()
-    this.secuenciaPresencia.clear()
+    this.presencias.clear()
     this.pistas.clear()
+    this.desconfiados.clear()
     if (this.entrante) this.entrante = null
     if (this.saliente?.estado === 'esperando') this.saliente = null
     this.pendientes = []
@@ -512,7 +556,7 @@ export class Sala {
     if (!canal) return
     const estado = canal.presenceState() as Record<string, unknown[]>
     const nuevos = new Map<string, JugadorSala>()
-    const secuencias = new Map<string, number>()
+    const presencias = new Map<string, { e: EstadoJugador; s: number }>()
     const miVersion = versionJuego()
     const t0 = this.ahora()
     for (const [clave, metas] of Object.entries(estado)) {
@@ -520,19 +564,27 @@ export class Sala {
       if (clave === this.id || !Array.isArray(metas) || metas.length === 0) continue
       const p = leerPresencia(metas[metas.length - 1])
       if (!p || p.id !== clave) continue
-      // Lo que llegó por broadcast gana si es más nuevo; si la presencia ya lo alcanzó, se suelta.
+      presencias.set(p.id, { e: p.e, s: p.s })
+      // Su presencia avanzó: se le vuelve a creer a sus pistas.
+      const desconfiado = this.desconfiados.get(p.id)
+      if (desconfiado !== undefined && p.s > desconfiado) this.desconfiados.delete(p.id)
+      // Lo que llegó por broadcast gana si es más nuevo y creíble; si la presencia ya lo alcanzó (o
+      // venció sin que lo alcanzara), se suelta.
       const pista = this.pistas.get(p.id)
       let e = p.e
-      if (pista && pista.s > p.s) e = pista.e
-      else if (pista) this.pistas.delete(p.id)
-      secuencias.set(p.id, p.s)
+      if (pista && pistaVale(pista, p, t0)) e = pista.e
+      else if (pista) {
+        this.pistas.delete(p.id)
+        if (pista.s > p.s && t0 - pista.t >= PISTA_CONFIRMA_MS) this.desconfiar(p.id, p.s)
+      }
       nuevos.set(p.id, { id: p.id, nombre: p.n, estado: e, compatible: p.v === miVersion })
     }
-    this.secuenciaPresencia = secuencias
+    this.presencias = presencias
     // Pistas de quien no está en la presencia: sólo un rato (la presencia puede llegar después).
     for (const [id, pista] of this.pistas) {
-      if (!nuevos.has(id) && t0 - pista.t > PISTA_VIDA_MS) this.pistas.delete(id)
+      if (!nuevos.has(id) && t0 - pista.t >= PISTA_CONFIRMA_MS) this.pistas.delete(id)
     }
+    for (const id of this.desconfiados.keys()) if (!nuevos.has(id)) this.desconfiados.delete(id)
 
     // Llegadas: una vez por jugador nuevo que viene a pelear.
     const llegaron: JugadorSala[] = []
@@ -708,19 +760,69 @@ export class Sala {
     this.avisar()
   }
 
-  /** Alguien cambió de estado (broadcast): se muestra ya, sin esperar a que llegue su presencia. */
+  /**
+   * Alguien cambió de estado (broadcast): se muestra ya, sin esperar a que llegue su presencia,
+   * si es creíble (ver el encabezado y `pistaVale`).
+   */
   private alEstadoSala(crudo: unknown): void {
     const m = leerEstadoSala(crudo)
     if (!m || m.de === this.id) return
+    const t = this.ahora()
+    const p = this.presencias.get(m.de)
+    const desconfiado = this.desconfiados.get(m.de)
+    if (desconfiado !== undefined && (!p || p.s <= desconfiado)) return
     const previa = this.pistas.get(m.de)
-    if (previa && previa.s >= m.s) return
-    const j = this.jugadores.get(m.de)
+    if (previa && previa.s >= m.s && t - previa.t < PISTA_CONFIRMA_MS) return
+    const pista: Pista = { e: m.e, s: m.s, t }
+    // Vieja para su presencia, o imposible (un número que nadie publicó): no se guarda.
+    if (p && !pistaVale(pista, p, t)) return
     // De alguien que la presencia no muestra (todavía): se guarda un rato, sin agregarlo a la lista.
-    if (!j && this.pistas.size >= MAX_JUGADORES * 2) return
-    this.pistas.set(m.de, { e: m.e, s: m.s, t: this.ahora() })
-    if (!j || m.s <= (this.secuenciaPresencia.get(m.de) ?? -1) || j.estado === m.e) return
+    if (!p && !previa && this.pistas.size >= MAX_JUGADORES * 2) return
+    this.pistas.set(m.de, pista)
+    this.programarVencimiento()
+    const j = this.jugadores.get(m.de)
+    if (!j || j.estado === m.e) return
     this.jugadores.set(m.de, { ...j, estado: m.e })
     this.avisar()
+  }
+
+  private desconfiar(id: string, s: number): void {
+    this.desconfiados.set(id, s)
+  }
+
+  /** Un reloj para la pista que vence primero (la presencia no la alcanzó: vuelve lo que dice la presencia). */
+  private programarVencimiento(): void {
+    if (this.timerPistas !== null) return
+    let primera = Infinity
+    for (const p of this.pistas.values()) primera = Math.min(primera, p.t + PISTA_CONFIRMA_MS)
+    if (primera === Infinity) return
+    this.timerPistas = setTimeout(
+      () => {
+        this.timerPistas = null
+        this.vencerPistas()
+      },
+      Math.max(0, primera - this.ahora()) + 1,
+    )
+  }
+
+  private vencerPistas(): void {
+    if (this.apagada || !this.canal) return
+    const t = this.ahora()
+    let cambio = false
+    for (const [id, pista] of this.pistas) {
+      if (t - pista.t < PISTA_CONFIRMA_MS) continue
+      this.pistas.delete(id)
+      const p = this.presencias.get(id)
+      if (!p) continue
+      if (pista.s > p.s) this.desconfiar(id, p.s)
+      const j = this.jugadores.get(id)
+      if (j && j.estado !== p.e) {
+        this.jugadores.set(id, { ...j, estado: p.e })
+        cambio = true
+      }
+    }
+    if (cambio) this.avisar()
+    this.programarVencimiento()
   }
 
   private alCancelar(crudo: unknown): void {

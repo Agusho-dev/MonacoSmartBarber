@@ -27,7 +27,7 @@ import { AudioSeguro } from '@/lib/juego/ui/audio-seguro'
 import { esPantallaTactil, prefiereMenosMovimiento, useConsultaMedia, usePestanaVisible } from '@/lib/juego/ui/media'
 import { pedirPantallaCompleta } from '@/lib/juego/ui/pantalla-completa'
 import { jugadorSugerido, personajeDelBarbero, rivalSugerido } from '@/lib/juego/ui/plantel'
-import { estadoPrecarga, precargar, usePrecarga } from '@/lib/juego/ui/precarga'
+import { cancelarPrecarga, estadoPrecarga, precargar, usePrecarga } from '@/lib/juego/ui/precarga'
 import { guardarPreferencias, registrarPelea, usePreferencias } from '@/lib/juego/ui/preferencias'
 import type { PeleaDePrueba } from '@/lib/juego/ui/prueba'
 import type { Eleccion, FuentesJuego, Pantalla, ResultadoPelea } from '@/lib/juego/ui/tipos-ui'
@@ -416,6 +416,9 @@ export function JuegoRaiz({
 
   const terminarDuelo = (d: Duelo, e: EstadoDuelo) => {
     const texto = textoCierre(e)
+    // Si se cerró mientras bajaban los atlas de la pelea, esa carga ya no sirve: que no siga
+    // compitiendo por la red (si ya terminó, no hace nada: queda para una revancha).
+    if (e.personajes) cancelarPrecarga(e.personajes[0], e.personajes[1], arenaOnline)
     d.destruir()
     setDuelo((actual) => (actual === d ? null : actual))
     setPeleaOnline(null)
@@ -744,6 +747,9 @@ export function JuegoRaiz({
             }}
             onVolver={() => {
               audio.ui('atras')
+              // La carga abandonada no sigue bajando (ni deja una bajada colgada para el próximo
+              // «¡A pelear!»): se cortan sus pedidos y lo ya bajado queda para retomar.
+              cancelarPrecarga(jugador, rival, arena)
               irA('seleccion')
             }}
           />
@@ -972,6 +978,14 @@ export function JuegoRaiz({
           />
         )}
 
+        {/* El escudo nace en el MISMO commit que el toque que llama a irA (setCortina va dentro del
+            click), así que tapa la pantalla vieja desde el primer cuadro. La cortina arranca afuera
+            (translateX(-120%)) y recién la tapa ≈ 165–183 ms después: un pulgar apoyado en ese rato
+            caía en la pantalla vieja (pan-y en la pausa, el resultado y la selección apaisada;
+            manipulation en la vertical) y su primer movimiento empezaba un paneo: pointercancel y
+            ningún toque nuevo (stick, botones, cartas) hasta levantar todos los dedos. El escudo va
+            con touch-action: none y vive lo mismo que la cortina (juego.css). */}
+        {cortina && <div className="cf-cortina-escudo" aria-hidden="true" />}
         {cortina && (
           <div className="cf-cortina" data-fase={cortina} aria-hidden="true">
             <span className="cf-cortina__filo" />

@@ -83,7 +83,12 @@ export function hashPartida(p: Partida): number {
   // El estado del azar del combate (críticos, desempates): si difiere, la partida ya se fue.
   const interno = internoSiExiste(p)
   h = mezclarEntero(h, interno ? interno.azar.s >>> 0 : 0)
-  // El reloj del encierro (TOPE_ENCIERRO): decide si un golpe agarra, congela o derriba.
-  for (const li of interno?.luchadores ?? []) h = mezclarEntero(h, li.sinControl)
+  // El reloj del encierro (TOPE_ENCIERRO): decide si un golpe agarra, congela o derriba; el
+  // respiro, que decide cuándo termina, y la inmunidad que queda después.
+  for (const li of interno?.luchadores ?? []) {
+    h = mezclarEntero(h, li.sinControl)
+    h = mezclarEntero(h, li.conControl)
+    h = mezclarEntero(h, li.respiroInmune)
+  }
   return h >>> 0
 }

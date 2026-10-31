@@ -85,25 +85,40 @@ export const ESCALADO_COMBO = { desde: 4, factor: 0.88, minimo: 0.45 } as const
 export const ESCALADO_STUN = { desde: 8, factor: 0.8, minimo: 0.3 } as const
 
 /**
- * Tope del encierro (revisión del 30/oct, segunda tanda): nadie queda más de 4 s (240 ticks de
- * pelea, sin contar el hitstop ni los super flash) seguidos sin poder hacer nada. Se medían 256
- * ticks con Brian (guardia rota → remate → agarre → derribo) y 298 forzándolo con Chipi (guardia
- * rota → máquina → Fijación → golpe → Sillonazo). InternoLuchador.sinControl cuenta esos ticks y
- * desde `inmuneDesde` el luchador queda INMUNE AL CONTROL hasta que vuelva a poder actuar: los
- * golpes le siguen pegando, pero ninguno lo agarra, lo congela, lo aturde, lo electrocuta, le rompe
- * la guardia, lo derriba ni lo arrastra, y el aturdimiento de cada golpe queda en el piso de
- * ESCALADO_STUN (el combo se cae enseguida). Lo que ya tenía encima termina normal.
+ * Tope del encierro: nadie queda más de 4,5 s EN PANTALLA (270 ticks, con el hitstop y los super
+ * flash) sin poder hacer nada, contando el encierro de punta a punta (tercera tanda, 31/oct).
  *
- * Por qué 135: lo más largo que puede arrancar en el último tick sin inmunidad es un congelado
- * (100 ticks) o un derribo (≈ 16 de caída + 50 en el piso + 26 al levantarse ≈ 92; el tirón del
- * agarre da lo mismo): 135 + 100 ≤ 240 queda garantizado por construcción. Con 150 el congelado
- * pasaba de 4 s. Es un tope del motor (entra en el hash online), no del simulador.
+ * Qué es un encierro: desde el primer tick encerrado (`encerrado`, cuerpo.ts: sin control y no sólo
+ * cubriéndose) hasta que el luchador tiene `respiro` ticks de pelea con control. Un hueco más corto
+ * (1 o 2 ticks, 33 ms) no lo corta: es la vara «práctica» de la verificación. InternoLuchador
+ * .sinControl lo mide en pantalla (luchador.ts, contarEncierro); cubrirse (el blockstun puro) y los
+ * ticks congelados hacen correr el reloj pero no dejan respirar, así ni cubrirse deja inmune a nadie
+ * ni un super flash le «devuelve» el control a la víctima.
+ *  - Desde `inmuneDesde` queda INMUNE AL CONTROL: los golpes le siguen pegando, pero ninguno lo
+ *    agarra, lo congela, lo aturde, lo electrocuta, le rompe la guardia, lo derriba ni lo arrastra,
+ *    y el aturdimiento de cada golpe queda en el piso de ESCALADO_STUN. Lo que ya tenía encima sigue,
+ *    salvo el piso: si ya viene largo, se queda menos tirado para terminar de levantarse a tiempo.
+ *  - Cuando termina un encierro que llegó a la inmunidad, le quedan `respiroInmune` ticks de pelea con
+ *    control de inmunidad: nadie lo vuelve a encerrar apenas sale.
+ *  - En `tope` lo sueltan de todo en ese mismo tick (soltarEncierro) y, hasta que respira, aguanta los
+ *    golpes como con armadura. Así los 4,5 s quedan garantizados por construcción. Es la red: llegan
+ *    menos de 1 de cada 1000 luchadores por pelea entre CPUs y 2 o 3 con novatos (los guiones que lo
+ *    buscan a propósito sí llegan, y quedan en 269).
+ *
+ * Por qué así (verificación del 31/oct): con el reloj de antes (ticks de pelea seguidos, sin el
+ * hitstop), un solo tick libre lo volvía a cero. Brian agarraba, tiraba y volvía a agarrar al que se
+ * levantaba cubriéndose o machacando: 511 ticks de pantalla (8,5 s) sin control, con el reloj del
+ * motor en 156; y en pantalla los encierros llegaban a 338 ticks (5,6 s). Con `respiro` 9 (huecos de
+ * hasta 8 unidos) la inmunidad saltaba en el 41 % de las peleas entre novatos, que se cambian golpes
+ * con huecos cortos todo el tiempo; con 3 salta en el 11–25 %, cerca del 12–15 % de antes, y entre
+ * CPUs el balance no se mueve (medido). 180 de pantalla es más o menos lo que antes eran 135 de pelea.
+ * Es un tope del motor (sus tres relojes entran en el hash online), no del simulador.
  *
  * Se eligió esto y no «la guardia rota termina con el primer golpe»: eso no acotaba el encierro
- * (esperar la ventana entera y recién ahí pegar y agarrar daba lo mismo, ≈ 240) y le sacaba casi
- * todo el premio a romper la guardia, que es parte del balance de varios kits.
+ * (esperar la ventana entera y recién ahí pegar y agarrar daba lo mismo) y le sacaba casi todo el
+ * premio a romper la guardia, que es parte del balance de varios kits.
  */
-export const TOPE_ENCIERRO = { inmuneDesde: 135 } as const
+export const TOPE_ENCIERRO = { inmuneDesde: 180, tope: 270, respiro: 3, respiroInmune: 20 } as const
 
 // ─── Guardia («romper escudos») ──────────────────────────────────────────────
 

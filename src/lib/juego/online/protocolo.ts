@@ -15,7 +15,8 @@ import type { EntradaJugador, IdPersonaje, Lado } from '../tipos'
 /**
  * Sube cuando cambia la forma o el sentido de algún mensaje: dos bundles con protocolos distintos
  * no se emparejan. 2 (30/oct/2026): lotes de 4 ticks, el resultado viaja en el «estado» y el
- * adiós «cerro».
+ * adiós «cerro». Los campos nuevos opcionales no lo suben (la versión emparejable ya lleva la de la
+ * app): el número del «estado» de la sala (31/oct) y la pelea y el «pierdo» del adiós (31/oct, tercera tanda).
  */
 export const PROTOCOLO = 2
 
@@ -265,6 +266,14 @@ export interface MsjAdios {
   t: 'adios'
   de: string
   m: MotivoAdios
+  /** La pelea del duelo en la que estaba al irse (null = no la mandó). */
+  k: number | null
+  /**
+   * true = se fue en plena pelea k, antes del final del motor: la pierde él (ya se la anotó) y la
+   * gana el otro, aunque el otro ya se hubiera dado por perdido por quedarse sin red (31/oct: con la
+   * red de uno trabada 10 s o más, el que se iba y el trabado se anotaban los dos una derrota).
+   */
+  p: boolean
 }
 
 /** El que manda cierra la pelea k: ganó por abandono del otro o se detectó desincronización. */
@@ -327,9 +336,13 @@ export function leerMensajePelea(v: unknown): MensajePelea | null {
     case 'pide':
       if (!esEntero(v.k, 1, 10_000) || !esEntero(v.desde, 1, MAX_TICK)) return null
       return { t: 'pide', de: v.de, k: v.k, desde: v.desde }
-    case 'adios':
+    case 'adios': {
       if (typeof v.m !== 'string' || !(MOTIVOS_ADIOS as readonly string[]).includes(v.m)) return null
-      return { t: 'adios', de: v.de, m: v.m as MotivoAdios }
+      // k y p son de la tercera tanda (31/oct): sin ellos, el adiós sólo avisa que se fue.
+      const k = v.k === undefined || v.k === null ? null : esEntero(v.k, 1, 10_000) ? v.k : undefined
+      if (k === undefined || (v.p !== undefined && typeof v.p !== 'boolean')) return null
+      return { t: 'adios', de: v.de, m: v.m as MotivoAdios, k, p: v.p === true && k !== null }
+    }
     case 'fin':
       if (!esEntero(v.k, 1, 10_000) || (v.m !== 'abandono' && v.m !== 'desync')) return null
       return { t: 'fin', de: v.de, k: v.k, m: v.m }

@@ -4,8 +4,15 @@
  * determinismo. Escenarios con entradas guionadas y, al final, miles de partidas CPU contra CPU y
  * de bots que buscan encierros (cuánto tiempo seguido queda alguien sin poder hacer nada).
  *
- *   cd scripts/juego/simulador && node --import ./cargador.mjs cadenas.mts [--partidas=N]
+ * Encierros (tercera tanda, 31/oct): la vara es la práctica de la verificación (encierros.mts:
+ * rachas sin control unidas por huecos de ≤ 2 ticks, de punta a punta en PANTALLA) y nada pasa de
+ * TOPE_ENCIERRO.tope (4,5 s); en ticks de pelea, de 240 (4 s). Con las víctimas que se cubren,
+ * machacan, esquivan o saltan al levantarse, contra los 13, con los guiones de la verificación
+ * (encierros-casos.json), una búsqueda propia y el agarre de Brian desde un arranque natural.
+ *
+ *   cd scripts/juego/simulador && node --import ./cargador.mjs cadenas.mts [--partidas=N] [--fuzz=N] [--azar=N] [--mut=N] [--hilos=K]
  */
+import { readFileSync } from 'node:fs'
 import type { EntradaJugador, EventoJuego, IdPersonaje, Lado, MetaAnimaciones, Partida } from '../../../src/lib/juego/tipos.ts'
 import { CLAVES_ANIMACION, ENTRADA_VACIA } from '../../../src/lib/juego/tipos.ts'
 import { avanzar, crearPartida } from '../../../src/lib/juego/motor/index.ts'
@@ -15,6 +22,12 @@ import { EFECTO, TOPE_ENCIERRO, X_MAX, X_MIN } from '../../../src/lib/juego/moto
 import { MOVIMIENTOS } from '../../../src/lib/juego/motor/movimientos.ts'
 import { IDS_PERSONAJES, PERSONAJES } from '../../../src/lib/juego/personajes.ts'
 import { hashPartida } from '../../../src/lib/juego/online/hash.ts'
+import type { CasoEncierro, PasoGuion, Politica } from './encierros.mts'
+import { agarreNatural, buscarEnHilos, correrCaso, POLITICAS, VaraMotor, VaraPractica } from './encierros.mts'
+
+/** Los topes que se prueban: en pantalla (el del motor) y en ticks de pelea (4 s). */
+const TOPE_PANTALLA = TOPE_ENCIERRO.tope
+const TOPE_PELEA = 240
 
 const K = MOVIMIENTOS
 const TIPICA: Record<string, [number, number[]]> = {
@@ -204,6 +217,56 @@ for (const id of ['gabriel', 'simon', 'nico_u', 'luciano', 'joaquin'] as IdPerso
   const b = reagarre(false)
   ok(b.agarres <= 2, 'agarre: sin carga no hay un tercero', `${b.agarres} agarres, carga ${b.carga.toFixed(1)}`)
 }
+{
+  // El que se cubre al levantarse (la guardia no para el agarre): si el segundo agarre lo toma
+  // apenas se levanta, es el MISMO encierro y no pasa del tope. Hasta el 31/oct el reloj volvía a
+  // cero con un tick libre y quedaban 8,5 s sin control.
+  let peor = { reloj: 0, pelea: 0, como: '' }
+  for (let w = 0; w <= 80; w += 2) {
+    const p = nueva(['brian', 'simon'], 330, 420)
+    p.luchadores[0].carga = 10
+    const vara = new VaraPractica(2)
+    let derribo = -1
+    let agarres = 0
+    for (let t = 0; t < 700 && p.fase === 'pelea'; t++) {
+      const brianLibre = p.luchadores[0].movimiento === null
+      const quiere = agarres === 0 ? t < 2 : derribo >= 0 && t >= derribo + w
+      const congelado = p.congelamientoGolpe > 0
+      avanzar(p, [{ ...ENTRADA_VACIA, especial1: brianLibre && quiere && cada2(t), derecha: Math.abs(p.luchadores[1].x - p.luchadores[0].x) > 90 }, { ...ENTRADA_VACIA, guardia: true }])
+      for (const e of p.eventos.splice(0)) {
+        if (e.tipo === 'agarre') agarres++
+        if (e.tipo === 'derribo' && e.quien === 1 && derribo < 0) derribo = t
+      }
+      vara.paso(p, p.luchadores[1], internoDe(p).luchadores[1], congelado)
+    }
+    if (vara.maxReloj > peor.reloj) peor = { reloj: vara.maxReloj, pelea: vara.maxPelea, como: `esperando ${w}, ${agarres} agarres` }
+  }
+  ok(peor.reloj <= TOPE_PANTALLA && peor.pelea <= TOPE_PELEA, 'agarre: al que se cubre al levantarse, el segundo agarre no lo deja más de 4,5 s', `${peor.reloj} ticks de pantalla, ${peor.pelea} de pelea (${peor.como})`)
+}
+
+// ─── La esquiva es intocable desde su primer tick ───
+{
+  // Un golpe que se activa en el mismo tick en que sale la esquiva no le pega (verificación del
+  // 31/oct: con k = 5 el puño de Simón y con k = 12 la MÁQUINA le pegaban en ese tick).
+  const casos: [IdPersonaje, 'golpe' | 'herramienta'][] = [['simon', 'golpe'], ['simon', 'herramienta'], ['brian', 'herramienta'], ['nico_u', 'golpe'], ['chipi', 'herramienta']]
+  const malos: string[] = []
+  for (const [a, boton] of casos) {
+    for (let k = 0; k <= 16; k++) {
+      const p = nueva([a, 'simon'], 400, 470)
+      let tDash = -1
+      let tGolpe = -1
+      for (let t = 0; t < 60; t++) {
+        avanzar(p, [{ ...ENTRADA_VACIA, [boton]: t === 0 }, { ...ENTRADA_VACIA, derecha: t >= k && t < k + 10, dash: t === k }])
+        for (const e of p.eventos.splice(0)) {
+          if (e.tipo === 'dash' && e.quien === 1 && tDash < 0) tDash = t
+          if (e.tipo === 'golpe' && e.atacante === 0 && tGolpe < 0) tGolpe = t
+        }
+      }
+      if (tDash >= 0 && tGolpe === tDash) malos.push(`${a} ${boton} k=${k}`)
+    }
+  }
+  ok(malos.length === 0, 'esquiva: nada le pega en el tick en que sale', malos.join(', ') || `${casos.length * 17} casos`)
+}
 
 // ─── El remate «¡AL CERO!» espera a que el ganador se pueda mover ───
 {
@@ -297,41 +360,41 @@ for (const id of ['gabriel', 'simon', 'nico_u', 'luciano', 'joaquin'] as IdPerso
   ok(limpio && revisados >= 1 && p.round >= 2, 'round nuevo: sin estados, proyectiles, quemadura ni agarre del anterior', `round ${p.round}, ${revisados} revisado(s)`)
 }
 
-// ─── Encierros: la vara ───
-/**
- * Ticks seguidos sin poder actuar, después de este tick: en el piso sin poder actuar ni un
- * movimiento propio en curso, o en el aire cayendo derribado o agarrado. Sin contar el hitstop ni
- * los super flash (el reloj de pelea del motor tampoco los cuenta: TOPE_ENCIERRO). Hasta el 30/oct
- * los ticks congelados del agarrado SÍ se contaban (en el aire no se miraba el congelamiento): por
- * eso el agarre de Brian medía ≈ 30 ticks de más que lo que mide el motor.
- */
-function encierro(p: Partida, lado: Lado, seguidos: number): number {
-  if (p.fase !== 'pelea' || p.congelamientoGolpe > 0) return seguidos
-  const l = p.luchadores[lado]
-  const li = internoDe(p).luchadores[lado]
-  const sinControl = l.enSuelo ? !puedeActuar(l, li) && li.accion === null && li.dash === null : li.caidaDerribo > 0 || li.agarradoPor !== null
-  return sinControl ? seguidos + 1 : 0
-}
-
 // ─── El motor lleva la misma cuenta y la usa (TOPE_ENCIERRO) ───
 {
-  // Guardia rota y un golpe: el reloj del motor (sinControl) y el de acá cuentan lo mismo (el
-  // motor cuenta el tick del golpe y no el último del hitstop: a lo sumo uno de diferencia).
+  // Guardia rota y un golpe: el reloj del motor (sinControl) y la regla contada acá aparte
+  // (VaraMotor, encierros.mts) dan lo mismo tick a tick.
   const p = nueva(['simon', 'brian'], 400, 470)
   p.luchadores[1].guardia = 1
-  let mio = 0
-  let difMax = 0
+  const vm = new VaraMotor()
+  let dif = 0
   let maxMotor = 0
-  let maxMio = 0
-  correr(p, 200, (t, q) => {
-    mio = encierro(q, 1, mio)
-    const motor = internoDe(q).luchadores[1].sinControl
-    difMax = Math.max(difMax, Math.abs(mio - motor))
-    maxMotor = Math.max(maxMotor, motor)
-    maxMio = Math.max(maxMio, mio)
-    return [{ herramienta: t < 2 || (t > 30 && t < 33) }, { guardia: t < 30 }]
+  for (let t = 0; t < 200 && p.fase === 'pelea'; t++) {
+    const congelado = p.congelamientoGolpe > 0
+    avanzar(p, [{ ...ENTRADA_VACIA, herramienta: t < 2 || (t > 30 && t < 33) }, { ...ENTRADA_VACIA, guardia: t < 30 }])
+    p.eventos.length = 0
+    const li = internoDe(p).luchadores[1]
+    vm.paso(p, p.luchadores[1], li, congelado)
+    if (vm.comparable && vm.c !== li.sinControl) dif++
+    maxMotor = Math.max(maxMotor, li.sinControl)
+  }
+  ok(dif === 0 && maxMotor >= 60, 'encierro: el motor cuenta lo mismo que cadenas', `máx motor ${maxMotor}, ${dif} ticks distintos`)
+  // El bloqueo puro no suma: mientras sólo se cubre de la MÁQUINA machacada (hasta que le rompen la
+  // guardia), el reloj no corre, así cubrirse no deja a nadie inmune a que le rompan la guardia.
+  const q = nueva(['chipi', 'brian'], 400, 470)
+  let maxBloq = 0
+  let enBloqueo = 0
+  let rota = false
+  correr(q, 400, (t, x) => {
+    const vi = internoDe(x).luchadores[1]
+    if (x.luchadores[1].efectos.guardiaRota > 0) rota = true
+    if (!rota) {
+      maxBloq = Math.max(maxBloq, vi.sinControl)
+      if (vi.stun > 0 && vi.stunBloqueo) enBloqueo++
+    }
+    return [{ herramienta: cada2(t) }, { guardia: true }]
   })
-  ok(difMax <= 1 && maxMotor >= 60 && Math.abs(maxMotor - maxMio) <= 1, 'encierro: el motor cuenta lo mismo que cadenas', `máx motor ${maxMotor}, acá ${maxMio}, diferencia ≤ ${difMax}`)
+  ok(maxBloq === 0 && enBloqueo >= 30, 'encierro: cubrirse no cuenta como estar encerrado', `reloj ${maxBloq} en ${enBloqueo} ticks de blockstun${rota ? ' (después le rompen la guardia)' : ''}`)
   // Inmune al control: con el reloj pasado del tope, el agarre no agarra, el congelado no entra y
   // el golpe que derriba sólo pega.
   const inmune = (pj: [IdPersonaje, IdPersonaje], n: 1 | 2, x1: number) => {
@@ -348,6 +411,50 @@ function encierro(p: Partida, lado: Lado, seguidos: number): number {
   ok(de(fr, 'congelado').length === 0 && de(fr, 'golpe').some((g) => g.atacante === 0 && g.herramienta === 'spray'), 'inmune al control: la Fijación pega pero no congela')
   const sl = inmune(['luciano', 'simon'], 1, 560)
   ok(de(sl, 'derribo').length === 0 && de(sl, 'golpe').some((g) => g.atacante === 0 && g.herramienta === 'moto'), 'inmune al control: la Moto pega pero no derriba')
+
+  // Respiro: un encierro que llegó a la inmunidad deja TOPE_ENCIERRO.respiroInmune ticks más de
+  // inmunidad cuando termina; con eso, el agarre no lo toma apenas se levanta.
+  const respiro = (ticks: number) => {
+    const r = nueva(['brian', 'simon'], 400, 470)
+    r.luchadores[0].carga = 10
+    internoDe(r).luchadores[1].respiroInmune = ticks
+    return de(correr(r, 140, (t) => [{ especial1: t < 2 }, { guardia: true }]), 'agarre').length
+  }
+  ok(respiro(400) === 0 && respiro(0) === 1, 'respiro: recién salido de un encierro largo no lo agarran', `con respiro ${respiro(400)} agarres, sin ${respiro(0)}`)
+  const fin = nueva(['simon', 'brian'], 400, 470)
+  const fi = internoDe(fin).luchadores[1]
+  fi.sinControl = TOPE_ENCIERRO.inmuneDesde
+  fi.stun = 30
+  let respiroAlSalir = -1
+  correr(fin, 120, (_t, x) => {
+    const vi = internoDe(x).luchadores[1]
+    if (respiroAlSalir < 0 && vi.sinControl === 0) respiroAlSalir = vi.respiroInmune
+    return [{}, {}]
+  })
+  ok(respiroAlSalir >= TOPE_ENCIERRO.respiroInmune - 1, 'respiro: al terminar un encierro inmune quedan los ticks de respiro', `respiro ${respiroAlSalir}`)
+
+  // Tope: en TOPE_ENCIERRO.tope se termina todo lo que lo tiene sin control (acá, aturdido y tirado)
+  // y queda libre en ese mismo tick.
+  const tope = nueva(['simon', 'brian'], 400, 470)
+  const ti = internoDe(tope).luchadores[1]
+  ti.sinControl = TOPE_ENCIERRO.tope - 1
+  tope.luchadores[1].efectos.aturdido = 80
+  ti.derribo = 40
+  correr(tope, 1, () => [{}, {}])
+  const libre = puedeActuar(tope.luchadores[1], ti)
+  ok(libre && tope.luchadores[1].efectos.aturdido === 0, 'tope: lo sueltan de todo en el tick en que llega', `libre ${libre}, reloj ${ti.sinControl}`)
+  // Y si le pegan antes de que respire, aguanta el golpe (le saca vida pero no lo frena): el puño de
+  // Simón se activa justo el tick siguiente a que lo sueltan.
+  const agu = nueva(['simon', 'brian'], 400, 470)
+  const ai = internoDe(agu).luchadores[1]
+  ai.stun = 200
+  const desde = K.simon.movimientos[K.simon.inicio.golpe]?.ventanas[0]?.desde ?? 4
+  correr(agu, desde - 1, (t) => [{ golpe: t === 0 }, {}])
+  ai.sinControl = TOPE_ENCIERRO.tope - 1
+  const vidaAntes = agu.luchadores[1].vida
+  const evsAg = correr(agu, 2, () => [{}, {}])
+  const golpeAg = de(evsAg, 'golpe').find((g) => g.atacante === 0)
+  ok(!!golpeAg && !golpeAg.bloqueado && agu.luchadores[1].vida < vidaAntes && ai.stun === 0, 'tope: hasta respirar aguanta los golpes', `golpe ${golpeAg ? golpeAg.danio : 'no'}, aturdimiento ${ai.stun}`)
 }
 
 // ─── Encierros forzados por un JUGADOR después de una guardia rota (los 13) ───
@@ -356,9 +463,9 @@ function encierro(p: Partida, lado: Lado, seguidos: number): number {
 // → golpe → Sillonazo). Acá cada atacante le rompe la guardia al rival (guardia en 5 y un golpe de
 // MÁQUINA) y sigue con guiones al azar y con planes deliberados (esperar W ticks, acercarse y
 // encadenar hacia cada especial); la víctima quiere irse (arriba y atrás sostenidos, salta apenas
-// puede). Nada puede pasar de 240 ticks (TOPE_ENCIERRO). Se informa también el reloj CON
-// congelamientos (lo que ve el que mira la pantalla).
-type PasoGuion = ['golpe' | 'herramienta' | 'especial1' | 'especial2' | 'nada' | 'adelante', number] | ['acercar', number]
+// puede). Con la vara práctica (huecos de ≤ 2 ticks unidos), nada pasa de TOPE_ENCIERRO.tope en
+// pantalla ni de 240 ticks de pelea.
+type PasoForzado = ['golpe' | 'herramienta' | 'especial1' | 'especial2' | 'nada' | 'adelante', number] | ['acercar', number]
 const PASOS_AZAR = ['golpe', 'herramienta', 'especial1', 'especial2', 'nada', 'adelante'] as const
 
 function rngGuion(semilla: number) {
@@ -372,8 +479,8 @@ function rngGuion(semilla: number) {
   }
 }
 
-/** Rompe la guardia y sigue el guion. Devuelve el encierro más largo (sin y con congelamientos). */
-function encierroForzado(atacante: IdPersonaje, victima: IdPersonaje, semilla: number, guionFijo: PasoGuion[] | null): { ticks: number; reloj: number } {
+/** Rompe la guardia y sigue el guion. Devuelve el encierro práctico más largo (en pelea y en pantalla). */
+function encierroForzado(atacante: IdPersonaje, victima: IdPersonaje, semilla: number, guionFijo: PasoForzado[] | null): { ticks: number; reloj: number } {
   const r = rngGuion(semilla)
   const p = crearPartida({ personajes: [atacante, victima], cpu: [false, false], dificultad: 'normal', arena: 'rondeau', rondasParaGanar: 2, segundosPorRound: 60, animaciones: [meta(), meta()], semilla })
   while (p.fase !== 'pelea') avanzar(p, [ENTRADA_VACIA, ENTRADA_VACIA])
@@ -382,7 +489,7 @@ function encierroForzado(atacante: IdPersonaje, victima: IdPersonaje, semilla: n
   p.luchadores[1].x = 480 + Math.floor(r() * 30)
   p.luchadores[0].carga = 10
   p.luchadores[1].guardia = 5
-  const guion: PasoGuion[] = guionFijo ? [...guionFijo] : []
+  const guion: PasoForzado[] = guionFijo ? [...guionFijo] : []
   for (let total = 0; !guionFijo && total < 320; ) {
     const b = PASOS_AZAR[Math.floor(r() * PASOS_AZAR.length)]
     const d = 1 + Math.floor(r() * (b === 'nada' ? 40 : 18))
@@ -392,10 +499,7 @@ function encierroForzado(atacante: IdPersonaje, victima: IdPersonaje, semilla: n
   let rota = -1
   let k = 0
   let kT = 0
-  let seguidos = 0
-  let reloj = 0
-  let mejor = 0
-  let mejorReloj = 0
+  const vara = new VaraPractica(2)
   for (let t = 0; t < 1200 && p.fase === 'pelea'; t++) {
     const a: EntradaJugador = { ...ENTRADA_VACIA }
     const v: EntradaJugador = { ...ENTRADA_VACIA }
@@ -424,28 +528,22 @@ function encierroForzado(atacante: IdPersonaje, victima: IdPersonaje, semilla: n
         }
       }
     }
+    const congelado = p.congelamientoGolpe > 0
     avanzar(p, [a, v])
     const evs = p.eventos.splice(0)
     if (rota < 0 && evs.some((e) => e.tipo === 'guardia_rota' && e.quien === 1)) rota = t
     if (rota < 0) continue
-    seguidos = encierro(p, 1, seguidos)
-    const li = internoDe(p).luchadores[1]
-    const l = p.luchadores[1]
-    // El reloj de pantalla: cuenta también los congelamientos mientras no pueda actuar.
-    const atrapado = p.fase === 'pelea' && (l.enSuelo ? !puedeActuar(l, li) && li.accion === null && li.dash === null : li.caidaDerribo > 0 || li.agarradoPor !== null)
-    reloj = atrapado ? reloj + 1 : 0
-    mejor = Math.max(mejor, seguidos)
-    mejorReloj = Math.max(mejorReloj, reloj)
-    if (k >= guion.length && seguidos === 0 && t > rota + 5) break
+    vara.paso(p, p.luchadores[1], internoDe(p).luchadores[1], congelado)
+    if (k >= guion.length && vara.reloj === 0 && t > rota + 5) break
   }
-  return { ticks: mejor, reloj: mejorReloj }
+  return { ticks: vara.maxPelea, reloj: vara.maxReloj }
 }
 
 {
   const FUZZ = Number(process.argv.slice(2).find((a) => a.startsWith('--fuzz='))?.split('=')[1] ?? 400)
   const victimas: IdPersonaje[] = ['simon', 'brian']
   // Planes deliberados: esperar W ticks con la guardia rota, acercarse a 100 px y encadenar.
-  const planes: Record<string, PasoGuion[]> = {
+  const planes: Record<string, PasoForzado[]> = {
     e1: [['especial1', 14]],
     e2: [['especial2', 14]],
     'golpe→e1': [['golpe', 40], ['especial1', 30]],
@@ -457,45 +555,139 @@ function encierroForzado(atacante: IdPersonaje, victima: IdPersonaje, semilla: n
   }
   const lineas: string[] = []
   let peorTodo = { ticks: 0, reloj: 0, quien: '', como: '' }
+  let peorPelea = 0
   for (const atacante of IDS_PERSONAJES) {
     let peor = { ticks: 0, reloj: 0, como: '' }
+    const anotar = (r: { ticks: number; reloj: number }, como: string) => {
+      if (r.reloj > peor.reloj) peor = { ...r, como }
+      peorPelea = Math.max(peorPelea, r.ticks)
+    }
     for (const victima of victimas) {
       for (let i = 0; i < FUZZ; i++) {
         const semilla = (Math.imul(i + 1, 0x9e3779b1) ^ Math.imul(atacante.length * 31 + victima.length, 0x5bd1e995)) >>> 0
-        const r = encierroForzado(atacante, victima, semilla, null)
-        if (r.ticks > peor.ticks) peor = { ...r, como: `azar ${semilla} contra ${victima}` }
-        else if (r.reloj > peor.reloj) peor.reloj = r.reloj
+        anotar(encierroForzado(atacante, victima, semilla, null), `azar ${semilla} contra ${victima}`)
       }
       for (const [nombre, plan] of Object.entries(planes)) {
         for (let w = 0; w <= 72; w += 3) {
-          const guion: PasoGuion[] = [...(w > 0 ? [['nada', w] as PasoGuion] : []), ['acercar', 100], ...plan]
-          const r = encierroForzado(atacante, victima, 12345 + w, guion)
-          if (r.ticks > peor.ticks) peor = { ...r, como: `«${nombre}» esperando ${w} contra ${victima}` }
-          else if (r.reloj > peor.reloj) peor.reloj = r.reloj
+          const guion: PasoForzado[] = [...(w > 0 ? [['nada', w] as PasoForzado] : []), ['acercar', 100], ...plan]
+          anotar(encierroForzado(atacante, victima, 12345 + w, guion), `«${nombre}» esperando ${w} contra ${victima}`)
         }
       }
     }
-    lineas.push(`${atacante} ${peor.ticks} (reloj ${peor.reloj}; ${peor.como})`)
-    if (peor.ticks > peorTodo.ticks) peorTodo = { ticks: peor.ticks, reloj: peor.reloj, quien: atacante, como: peor.como }
+    lineas.push(`${atacante} ${peor.reloj} (pelea ${peor.ticks}; ${peor.como})`)
+    if (peor.reloj > peorTodo.reloj) peorTodo = { ticks: peor.ticks, reloj: peor.reloj, quien: atacante, como: peor.como }
   }
-  console.log(`     encierros forzados (${FUZZ} guiones al azar y ${Object.keys(planes).length} planes por atacante y víctima): ${lineas.join(' · ')}`)
-  ok(peorTodo.ticks <= 240, 'encierros forzados después de una guardia rota: nadie pasa de 4 s (los 13)', `${peorTodo.ticks} ticks con ${peorTodo.quien} (${peorTodo.como}; con congelamientos ${peorTodo.reloj})`)
+  console.log(`     encierros forzados, en pantalla (${FUZZ} guiones al azar y ${Object.keys(planes).length} planes por atacante y víctima): ${lineas.join(' · ')}`)
+  ok(
+    peorTodo.reloj <= TOPE_PANTALLA && peorPelea <= TOPE_PELEA,
+    'encierros forzados después de una guardia rota: nadie pasa de 4,5 s en pantalla ni de 4 s de pelea (los 13)',
+    `${peorTodo.reloj} ticks de pantalla con ${peorTodo.quien} (${peorTodo.como}); de pelea, ${peorPelea}`,
+  )
 }
 
-// ─── Volumen: CPU contra CPU y bots, buscando encierros y bordes ───
+// ─── Encierros con los guiones de la verificación del 31/oct (la víctima que se cubre, machaca, esquiva o salta) ───
+// Los peores guiones que encontró la búsqueda de la verificación (motor-semillas, encierros.mts, con
+// huecos de ≤ 2 y de ≤ 8 ticks): Brian dejaba 511 ticks de pantalla sin control al que se cubría o
+// machacaba, Joaquín 592 y Luciano 546 al que machacaba la esquiva y Joaquín 675 al que saltaba.
+// Cada guion se corre con las cuatro maneras de escaparse.
+const ARGS = process.argv.slice(2)
+const argNum = (n: string, def: number) => Number(ARGS.find((a) => a.startsWith(`--${n}=`))?.split('=')[1] ?? def)
+{
+  interface CasoGuardado {
+    a: IdPersonaje
+    v: IdPersonaje
+    pol: Politica
+    arr: 'rota' | 'neutro'
+    x1: number
+    s: number
+    g: PasoGuion[]
+    antes: number
+  }
+  const casos = JSON.parse(readFileSync(new URL('./encierros-casos.json', import.meta.url), 'utf8')) as CasoGuardado[]
+  let peor = { reloj: 0, pelea: 0, como: '' }
+  let peorPelea = 0
+  let difMotor = 0
+  let sueltas = 0
+  const porPolitica: Record<string, number> = {}
+  for (const c of casos) {
+    for (const politica of POLITICAS) {
+      const caso: CasoEncierro = { atacante: c.a, victima: c.v, politica, arranque: c.arr, x1: c.x1, semilla: c.s, guion: c.g }
+      const m = correrCaso(caso, 2)
+      difMotor += m.difMotor
+      sueltas += m.sueltas
+      peorPelea = Math.max(peorPelea, m.pelea)
+      porPolitica[politica] = Math.max(porPolitica[politica] ?? 0, m.reloj)
+      if (m.reloj > peor.reloj) peor = { reloj: m.reloj, pelea: m.pelea, como: `${c.a} contra ${c.v} que ${politica === 'pega' ? 'machaca' : politica === 'guardia' ? 'se cubre' : politica} (antes ${c.antes})` }
+    }
+  }
+  console.log(`     guiones de la verificación (${casos.length} × 4 maneras): peor en pantalla por manera de escaparse ${POLITICAS.map((q) => `${q} ${porPolitica[q]}`).join(', ')}; el motor soltó en el tope ${sueltas} veces`)
+  ok(peor.reloj <= TOPE_PANTALLA && peorPelea <= TOPE_PELEA, 'encierros con los guiones de la verificación: ninguno pasa del tope', `${peor.reloj} ticks de pantalla (${peor.como}); de pelea, ${peorPelea}`)
+  ok(difMotor === 0, 'encierros con los guiones de la verificación: el motor cuenta lo mismo que la prueba', `${difMotor} ticks distintos`)
+}
+
+// ─── Búsqueda propia: guiones al azar y mutaciones de los peores, contra las 13 víctimas ───
+{
+  const azar = argNum('azar', 3)
+  const mut = argNum('mut', 60)
+  const hilos = argNum('hilos', 8)
+  const res = await buscarEnHilos(azar, mut, 7717, 2, hilos)
+  const sims = res.reduce((s, x) => s + x.sims, 0)
+  let peor = { reloj: 0, pelea: 0, como: '' }
+  let peorPelea = 0
+  const porPolitica: Record<string, number> = {}
+  for (const x of res) {
+    for (const q of POLITICAS) {
+      const w = x.peores[q]
+      if (!w) continue
+      porPolitica[q] = Math.max(porPolitica[q] ?? 0, w.m.reloj)
+      peorPelea = Math.max(peorPelea, w.m.pelea)
+      if (w.m.reloj > peor.reloj) peor = { reloj: w.m.reloj, pelea: w.m.pelea, como: `${x.atacante} contra ${w.c.victima} que ${q}, arranque ${w.c.arranque}` }
+    }
+  }
+  const dif = res.reduce((s, x) => s + x.difMotor, 0)
+  const sueltas = res.reduce((s, x) => s + x.sueltas, 0)
+  console.log(`     búsqueda (${sims} guiones; azar ${azar}, ${mut} mutaciones): peor en pantalla por manera de escaparse ${POLITICAS.map((q) => `${q} ${porPolitica[q]}`).join(', ')}; el motor soltó en el tope ${sueltas} veces`)
+  ok(peor.reloj <= TOPE_PANTALLA && peorPelea <= TOPE_PELEA && dif === 0, 'encierros buscados (13 atacantes × 13 víctimas × 4 maneras de escaparse): ninguno pasa del tope', `${peor.reloj} ticks de pantalla (${peor.como}); de pelea, ${peorPelea}; reloj distinto ${dif}`)
+}
+
+// ─── El agarre de Brian desde un arranque natural (la confirmación de la verificación) ───
+{
+  // Brian junta la carga, agarra al que se cubre, espera W ticks desde el derribo y vuelve a
+  // agarrar; la víctima se cubre, machaca, salta o machaca la esquiva al levantarse. Hasta el 31/oct,
+  // con W = 90–96 el segundo agarre la tomaba con 1 o 2 ticks libres: 396 ticks (6,6 s).
+  let peor = { practica: 0, como: '' }
+  let conDos = 0
+  let total = 0
+  for (const pol of ['guardia', 'golpe', 'salta', 'esquiva'] as const) {
+    for (const victima of IDS_PERSONAJES) {
+      for (let W = 0; W <= 140; W += 2) {
+        const m = agarreNatural(victima, W, pol)
+        total++
+        if (m.agarres >= 2) conDos++
+        if (m.practica > peor.practica) peor = { practica: m.practica, como: `${victima} que ${pol}, W ${W}, ${m.agarres} agarres` }
+      }
+    }
+  }
+  console.log(`     agarre de Brian desde un arranque natural: ${total} casos, ${conDos} con dos agarres; peor ${peor.practica} ticks de pantalla (${peor.como})`)
+  ok(peor.practica <= TOPE_PANTALLA, 'agarre de Brian desde un arranque natural: ningún encierro pasa del tope', `${peor.practica} ticks (${peor.como})`)
+}
+
+// ─── Volumen: CPU contra CPU, buscando encierros y bordes ───
 interface Encierro {
-  ticks: number
+  reloj: number
+  pelea: number
   quien: string
   contra: string
   semilla: number
 }
-const args = process.argv.slice(2)
-const PARTIDAS = Number(args.find((a) => a.startsWith('--partidas='))?.split('=')[1] ?? 2)
-let peor: Encierro = { ticks: 0, quien: '', contra: '', semilla: 0 }
+const PARTIDAS = argNum('partidas', 2)
+let peor: Encierro = { reloj: 0, pelea: 0, quien: '', contra: '', semilla: 0 }
+let peorPelea = 0
 let fueraDeBorde = 0
 let maxProy = 0
 let noTerminan = 0
 let vidaMala = 0
+let difVolumen = 0
 const hashes: string[] = []
 for (const dif of ['facil', 'normal', 'dificil'] as const) {
   for (const a of IDS_PERSONAJES) {
@@ -503,21 +695,29 @@ for (const dif of ['facil', 'normal', 'dificil'] as const) {
       for (let s = 0; s < PARTIDAS; s++) {
         const semilla = 1 + s * 1009 + a.length * 31 + b.length * 7
         const p = crearPartida({ personajes: [a, b], cpu: [true, true], dificultad: dif, arena: 'rondeau', rondasParaGanar: 2, segundosPorRound: 60, animaciones: [meta(), meta()], semilla })
-        const seguidos: [number, number] = [0, 0]
+        const I = internoDe(p)
+        const varas = [new VaraPractica(2), new VaraPractica(2)]
+        const vms = [new VaraMotor(), new VaraMotor()]
         let h = 0
         while (p.fase !== 'terminada' && p.tick < 6 * 3600) {
+          const congelado = p.fase === 'pelea' && p.congelamientoGolpe > 0
           avanzar(p, [ENTRADA_VACIA, ENTRADA_VACIA])
           p.eventos.length = 0
           if (p.tick % 60 === 0) h = (Math.imul(h ^ hashPartida(p), 0x01000193) >>> 0)
           maxProy = Math.max(maxProy, p.proyectiles.length)
           for (const lado of [0, 1] as const) {
             const l = p.luchadores[lado]
+            const li = I.luchadores[lado]
             if (l.x < X_MIN || l.x > X_MAX || l.y < 0 || !Number.isFinite(l.x)) fueraDeBorde++
             if (l.vida > l.vidaMax || l.vida < 0 || !Number.isFinite(l.vida)) vidaMala++
-            const n = encierro(p, lado, seguidos[lado])
-            seguidos[lado] = n
-            if (n > peor.ticks) peor = { ticks: n, quien: l.id, contra: p.luchadores[(1 - lado) as Lado].id, semilla }
+            varas[lado].paso(p, l, li, congelado)
+            vms[lado].paso(p, l, li, congelado)
+            if (vms[lado].comparable && vms[lado].c !== li.sinControl) difVolumen++
           }
+        }
+        for (const lado of [0, 1] as const) {
+          peorPelea = Math.max(peorPelea, varas[lado].maxPelea)
+          if (varas[lado].maxReloj > peor.reloj) peor = { reloj: varas[lado].maxReloj, pelea: varas[lado].maxPelea, quien: p.luchadores[lado].id, contra: p.luchadores[(1 - lado) as Lado].id, semilla }
         }
         if (p.fase !== 'terminada') noTerminan++
         if (dif === 'normal' && s === 0) hashes.push(`${a}-${b}:${h.toString(16)}`)
@@ -529,9 +729,13 @@ ok(fueraDeBorde === 0, 'bordes: nadie sale del escenario', `${fueraDeBorde} tick
 ok(vidaMala === 0, 'vida: nunca negativa ni por encima del máximo')
 ok(noTerminan === 0, 'todas las partidas terminan', `${noTerminan} sin terminar`)
 ok(maxProy <= 16, 'proyectiles: no se acumulan', `máx ${maxProy} a la vez`)
-// El encierro más largo (sin poder actuar, sin contar el hitstop ni los super flash): un derribo
-// largo + levantarse ronda los 80 ticks; guardia rota → agarre → derribo, ≈ 210. Nada debería pasar de 4 s.
-ok(peor.ticks <= 240, 'encierros: nadie queda más de 4 s seguidos sin poder hacer nada', `${peor.ticks} ticks (${peor.quien} contra ${peor.contra}, semilla ${peor.semilla})`)
+// El encierro más largo entre CPUs (vara práctica): un derribo largo + levantarse ronda los 80 ticks
+// de pelea; guardia rota → agarre → derribo, ≈ 210. Nada pasa del tope.
+ok(
+  peor.reloj <= TOPE_PANTALLA && peorPelea <= TOPE_PELEA && difVolumen === 0,
+  'encierros: nadie queda más de 4,5 s en pantalla (4 s de pelea) sin poder hacer nada',
+  `${peor.reloj} ticks de pantalla (${peor.quien} contra ${peor.contra}, semilla ${peor.semilla}); de pelea, ${peorPelea}; reloj distinto ${difVolumen}`,
+)
 
 // ─── Determinismo: dos corridas iguales dan el mismo hash, tick por tick ───
 {

@@ -105,6 +105,67 @@ const cambios = 2 + 2 + 2 + 3
 const estados = red.servidor.broadcasts - broadcastsAntes
 v.verificar(estados <= cambios * 2 + 4, `mensajes: ${estados} entregas de broadcast para ${cambios} cambios de estado y un desafío (tope ${cambios * 2 + 4})`)
 
+// ─── Un «estado» falso por broadcast (el canal es público) no le gana a la presencia ───────────
+// Hasta el 31/oct, {de: <otro>, e: 'peleando', s: 999999999} dejaba a ese jugador «Peleando» (con
+// DESAFIAR deshabilitado) para todos mientras siguiera en la sala.
+B.sala.setEstado('libre')
+await reloj.correrHasta(reloj.t + 6000)
+v.verificar(ve(A.sala, B.sala)?.estado === 'libre', 'antes de la prueba, Ana ve a Beto libre')
+const malo = red.crearCliente('M')
+const canalMalo = malo.channel('juego-sala:prueba', { config: { broadcast: { self: false, ack: false } } })
+canalMalo.subscribe()
+await reloj.correrMientras(() => String(canalMalo.state) === 'joined', reloj.t + 5000)
+const idBeto = B.sala.leer().yo.id
+/** El número de la presencia de Beto según Ana (privado: sólo para la prueba). */
+const sBeto = () => (A.sala as unknown as { presencias: Map<string, { s: number }> }).presencias.get(idBeto)?.s ?? -1
+const falso = (e: string, s: number) => void canalMalo.send({ type: 'broadcast', event: 'estado', payload: { de: idBeto, e, s } })
+/** Lo que Ana ve de Beto durante `ms` (cada 50 ms, los cambios). */
+async function mirar(ms: number): Promise<{ t: number; e: string }[]> {
+  const vistos: { t: number; e: string }[] = []
+  const t0 = reloj.t
+  while (reloj.t < t0 + ms) {
+    await reloj.correrHasta(reloj.t + 50)
+    const e = ve(A.sala, B.sala)?.estado ?? '—'
+    if (vistos[vistos.length - 1]?.e !== e) vistos.push({ t: reloj.t - t0, e })
+  }
+  return vistos
+}
+const texto = (x: { t: number; e: string }[]) => x.map((p) => `${(p.t / 1000).toFixed(2)}s ${p.e}`).join(' → ')
+
+// 1) Un número imposible: no se cree nunca.
+falso('peleando', 999_999_999)
+const imposible = await mirar(12_000)
+v.verificar(imposible.length === 1 && imposible[0].e === 'libre', `un «estado» falso con s = 999999999: Ana sigue viendo a Beto libre (${texto(imposible)})`)
+
+// 2) Un número creíble (el siguiente al de su presencia): dura a lo sumo lo que tarda en vencer.
+falso('peleando', sBeto() + 1)
+const creible = await mirar(12_000)
+const volvio = creible.find((p, i) => i > 0 && p.e === 'libre')
+v.verificar(
+  creible.every((p) => p.e === 'libre' || p.e === 'peleando') && creible[creible.length - 1].e === 'libre' && (volvio === undefined || volvio.t <= 8600),
+  `un «estado» falso creíble (s + 1): Beto vuelve a «libre» cuando vence, a lo sumo en 8,6 s (${texto(creible)})`,
+)
+
+// 3) Insistir: con la pista vencida sin que la presencia la alcanzara, a Beto no se le cree otra
+//    hasta que su presencia avance.
+falso('peleando', sBeto() + 2)
+await reloj.correrHasta(reloj.t + 3000)
+falso('eligiendo', sBeto() + 3)
+const insiste = await mirar(10_000)
+v.verificar(insiste.length === 1 && insiste[0].e === 'libre', `insistir con otro «estado» falso no sirve: Ana ve a Beto libre (${texto(insiste)})`)
+
+// 4) Beto cambia de verdad: su presencia avanza, se le vuelve a creer y el broadcast vuelve a adelantar.
+B.sala.setEstado('eligiendo')
+const tVerdad = await cuantoTarda(A.sala, B.sala, 'eligiendo')
+await reloj.correrHasta(reloj.t + 6000)
+B.sala.setEstado('libre')
+const tVuelve = await cuantoTarda(A.sala, B.sala, 'libre')
+v.verificar(
+  tVerdad !== null && tVuelve !== null && tVuelve < 600,
+  `después, los cambios de verdad de Beto se ven: «Eligiendo» en ${tVerdad} ms (por la presencia: su pista se ignoró) y «libre» en ${tVuelve} ms (por broadcast, confiable otra vez)`,
+)
+void malo.removeChannel(canalMalo)
+
 for (const x of [A, B, C]) x.sala.desconectar()
 await reloj.correrHasta(reloj.t + 2000)
 v.verificar(reloj.errores.length === 0, `sin excepciones en los temporizadores (${reloj.errores.length})`)

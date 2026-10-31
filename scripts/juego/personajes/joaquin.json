@@ -13,27 +13,42 @@
     "quieto": { "region": [12, 34, 351, 160], "cuadros": 6 },
     "caminar": { "region": [360, 34, 718, 160], "cuadros": 5 },
     "correr": {
-      "_nota": "revisión 30/oct: con la tolerancia global (14) quedaba el humo oscuro de la velocidad detrás de las piernas",
+      "_nota": "revisión 30/oct: con la tolerancia global (14) quedaba el humo oscuro de la velocidad detrás de las piernas. Tercera tanda: el contorno negro de 3-4 px que el modelo pegaba a las piernas (el fondo de la hoja es casi negro; sobre una arena clara se veía como un borde sucio y grueso) se pela a 1 px en los cuatro cuadros (pelarOscuro, de la cintura para abajo)",
       "sinFondo": { "tol": 24 },
       "region": [729, 34, 1086, 160],
       "cortes": [[790, 838], [888, 938], [968, 1012]],
       "quitar": [{ "zona": [1030, 115, 1088, 160], "bMenosRMin": 4, "lumMin": 55 }],
       "porCuadro": {
+        "0": {
+          "_nota": "tercera tanda: el cinturón negro se lo comía sinFondo (se parece al fondo) y sobre una arena clara la cintura se veía transparente; vuelve por color (tira a cálido, el fondo a azul)",
+          "incluirColor": [{ "zona": [[772, 86], [776, 84], [781, 86], [786, 88], [792, 89], [797, 88], [803, 88], [804, 92], [801, 93], [801, 101], [792, 101], [786, 99], [781, 96], [776, 93], [772, 90]], "bMenosRMax": 2, "lumMax": 90 }],
+          "pelarOscuro": [{ "zona": [727, 97, 838, 162], "lumMax": 25, "pasos": 3, "anillo": 1 }]
+        },
         "1": {
-          "_nota": "revisión 31/oct: sin el contorno negro del humo detrás de la pierna de atrás (lo oscuro en una franja pegada al borde de arriba del pantalón); el «quitar» de la animación se repite porque el del cuadro lo reemplaza",
+          "_nota": "revisión 31/oct: sin el contorno negro del humo detrás de la pierna de atrás (lo oscuro en una franja pegada al borde de arriba del pantalón); el «quitar» de la animación se repite porque el del cuadro lo reemplaza. Tercera tanda: vuelve el pelo oscuro debajo del ala del sombrero (sinFondo lo sacaba y quedaba una raya del fondo, dentada, entre el sombrero y la cabeza) y se pela el bloque negro pegado arriba de la zapatilla de atrás",
           "quitar": [
             { "zona": [1030, 115, 1088, 160], "bMenosRMin": 4, "lumMin": 55 },
             { "zona": [[818, 108], [852, 108], [852, 117], [844, 122], [836, 127], [829, 131], [823, 136], [818, 137]], "lumMax": 45 }
+          ],
+          "incluir": [[[898, 53], [904, 53], [919, 54], [919, 56], [910, 57], [904, 58], [899, 57]]],
+          "pelarOscuro": [
+            { "zona": [806, 100, 920, 162], "lumMax": 25, "pasos": 3, "anillo": 1 },
+            { "zona": [[804, 132], [823, 132], [823, 135], [818, 137], [818, 141], [812, 141], [811, 144], [809, 152], [804, 152]], "lumMax": 30, "pasos": 8, "anillo": 1 }
           ]
         },
-        "3": { "excluir": [[1040, 110, 1088, 160]] }
+        "2": { "pelarOscuro": [{ "zona": [896, 100, 1012, 164], "lumMax": 25, "pasos": 3, "anillo": 1 }] },
+        "3": {
+          "_nota": "tercera tanda: el rectángulo que sacaba el humo de la esquina le cortaba la rodilla de adelante en una recta (21 px); ahora sigue el contorno de la rodilla",
+          "excluir": [[[1059, 108], [1088, 108], [1088, 160], [1036, 160], [1036, 134], [1041, 131], [1045, 129], [1049, 128], [1053, 126], [1056, 124], [1059, 121]]],
+          "pelarOscuro": [{ "zona": [975, 104, 1060, 162], "lumMax": 25, "pasos": 3, "anillo": 1 }]
+        }
       }
     },
     "dash": {
       "sinFondo": { "tol": 24 },
       "region": [1097, 34, 1525, 160],
       "cuadros": 3,
-      "_nota": "revisión 31/oct: sin la sombra negra de la velocidad detrás de la rodilla y debajo del pie de adelante (parecía una capa negra), ni el negro del hueco de la rodilla doblada (quedaba un bloque de bordes rectos debajo del muslo); los tres cuadros son el mismo rectángulo del atlas (prestados) en vez de tres copias",
+      "_nota": "revisión 31/oct: sin la sombra negra de la velocidad detrás de la rodilla y debajo del pie de adelante (parecía una capa negra), ni el negro del hueco de la rodilla doblada (quedaba un bloque de bordes rectos debajo del muslo); los tres cuadros son el mismo rectángulo del atlas (prestados) en vez de tres copias. Tercera tanda: sin el bloque negro del fondo pegado a la zapatilla de adelante (a la derecha, entre la zapatilla y el humo) ni el gris azulado bajo el talón. Sigue siendo una sola pose a propósito: la hoja dibuja tres veces la misma figura, y con cuadros de correr prestados la cabeza salta ≈ 27 px de mundo en un cuarto de segundo (la pose del dash es más baja)",
       "usar": [0],
       "prestados": [{ "pos": 1, "de": "dash", "cuadro": 0 }, { "pos": 2, "de": "dash", "cuadro": 0 }],
       "quitar": [{ "zona": [1097, 105, 1525, 160], "bMenosRMin": 4, "lumMin": 55 }],
@@ -46,7 +61,9 @@
           "quitar": [
             { "zona": [1097, 105, 1525, 160], "bMenosRMin": 4, "lumMin": 55 },
             { "zona": [[1158, 120], [1186, 120], [1186, 127], [1178, 129], [1160, 129]], "lumMax": 60 },
-            { "zona": [[1196, 126], [1205, 126], [1205, 135], [1186, 135]], "lumMax": 45 }
+            { "zona": [[1196, 126], [1205, 126], [1205, 135], [1186, 135]], "lumMax": 45 },
+            { "zona": [[1174, 133], [1192, 133], [1192, 153], [1172, 153], [1175, 146]], "lumMax": 35 },
+            { "zona": [1157, 144, 1168, 152], "bMenosRMin": 4, "lumMax": 60 }
           ]
         }
       }
@@ -91,8 +108,9 @@
           ]
         },
         "6": {
-          "excluir": [[[1319, 449], [1352, 449], [1352, 472], [1319, 472]]],
-          "quitar": [{ "zona": [1296, 418, 1332, 472], "rMenosGMin": 60, "lumMin": 40 }]
+          "_nota": "tercera tanda (combo[5] = herramienta1[1], antes del último impacto): el rectángulo que sacaba el fuego bajo el cuerpo cortaba la botamanga y la punta de la zapatilla de atrás en recta, y el «quitar» del rojo se comía la piel del tobillo (también es naranja fuerte): la zapatilla colgaba de un hilo. Ahora el recorte sigue la botamanga y la zapatilla, y el fuego se distingue de la piel por g − b (el fuego ≤ 36, la piel 38-55)",
+          "excluir": [[[1338, 449], [1352, 449], [1352, 472], [1321, 472], [1321, 458], [1324, 455], [1330, 454], [1336, 452]]],
+          "quitar": [{ "zona": [1296, 418, 1340, 472], "rMenosGMin": 60, "lumMin": 40, "gMenosBMax": 36 }]
         },
         "7": {
           "excluir": [
@@ -101,14 +119,21 @@
             [[1488, 370], [1528, 370], [1528, 472], [1468, 472], [1468, 460], [1475, 445], [1485, 428], [1495, 418], [1508, 412], [1508, 390], [1500, 386], [1490, 386]],
             [[1402, 458], [1442, 452], [1442, 472], [1402, 472]]
           ],
-          "_nota": "revisión 31/oct (combo[6] = el impacto final y todo el Remate): además, sin el borde rojo del fuego a la derecha del sombrero ni el fondo rojo y negro detrás de la cabeza (por color, en la zona de afuera del sombrero y de la cara), y sin la cuña negra y bordó entre las piernas",
+          "_nota": "revisión 31/oct (combo[6] = el impacto final y todo el Remate): además, sin el borde rojo del fuego a la derecha del sombrero ni el fondo rojo y negro detrás de la cabeza (por color, en la zona de afuera del sombrero y de la cara), y sin la cuña negra y bordó entre las piernas. Tercera tanda: sin la banda bordó del fuego bajo el antebrazo y la mano (rojizos oscuros: r − g ≥ 30, el contorno negro neutro queda), sin los restos rojos alrededor de la zapatilla de adelante (la raya de la izquierda, el resplandor bajo la suela) ni el fondo negro encerrado entre la canilla y la pierna de atrás",
           "quitar": [
             { "zona": [1418, 368, 1447, 412], "rMenosGMin": 60, "lumMin": 40 },
             { "zona": [1438, 432, 1480, 472], "rMenosGMin": 60, "lumMin": 40 },
             { "zona": [[1469, 358], [1500, 358], [1500, 389], [1488, 391], [1488, 400], [1476, 400], [1472, 399], [1472, 386], [1469, 386]], "rMenosGMin": 110 },
             { "zona": [[1469, 358], [1500, 358], [1500, 389], [1488, 391], [1488, 400], [1476, 400], [1472, 399], [1472, 386], [1469, 386]], "gMenosBMax": 20 },
             { "zona": [[1405, 447], [1436, 437], [1447, 437], [1442, 443], [1440, 447], [1438, 458], [1405, 458]], "lumMax": 60 },
-            { "zona": [[1458, 437], [1480, 437], [1480, 447], [1462, 447]], "lumMax": 70 }
+            { "zona": [[1458, 437], [1480, 437], [1480, 447], [1462, 447]], "lumMax": 70 },
+            { "zona": [[1455, 404], [1478, 400], [1503, 397], [1503, 416], [1455, 416]], "rMenosGMin": 30, "lumMax": 110 },
+            { "zona": [1432, 445, 1445, 454], "rMenosGMin": 25, "lumMax": 110 },
+            { "zona": [1459, 442, 1468, 450], "rMenosGMin": 20, "lumMax": 110 },
+            { "zona": [1440, 452, 1449, 457], "rMenosGMin": 30, "lumMax": 120 },
+            { "zona": [1445, 457, 1456, 461], "rMenosGMin": 20 },
+            { "zona": [1456, 458, 1468, 461], "rMenosGMin": 30, "lumMax": 130 },
+            { "zona": [[1436, 436], [1451, 436], [1450, 439], [1449, 442], [1448, 444], [1445, 445], [1441, 446], [1436, 446]], "lumMax": 35 }
           ]
         }
       }
@@ -168,8 +193,8 @@
         "1": { "excluir": [[505, 950, 520, 975]] },
         "2": { "agregar": [[505, 950, 520, 975]] },
         "3": {
-          "_nota": "revisión 31/oct (el cuadro que queda quieto en el KO): en la hoja la cadera queda pegada a la figura anterior y terminaba en una recta; se le suman las piernas plegadas que asoman debajo (la zona bajo el cinturón de la figura anterior) y el sombrero caído al lado de la cabeza, que el modelo dejaba afuera",
-          "agregar": [[[597, 944], [591, 946], [588, 951], [578, 957], [568, 964], [564, 972], [566, 982], [575, 986], [600, 986], [600, 944]]],
+          "_nota": "revisión 31/oct (el cuadro que queda quieto en el KO): se suma el sombrero caído al lado de la cabeza, que el modelo dejaba afuera. Tercera tanda: en la hoja la cadera queda pegada a la figura anterior; el «agregar» de la segunda tanda se traía el cinturón y el puño de esa figura (dos cinturones en cada KO y cada derribo). Ahora la cadera termina en el contorno de la propia figura (excluir en arco, sin la recta de la costura)",
+          "excluir": [[[590, 930], [608, 930], [606, 936], [602, 942], [600, 950], [600, 958], [601, 965], [603, 972], [606, 980], [606, 990], [590, 990]]],
           "incluir": [[[660, 935], [659, 936], [659, 968], [662, 967], [665, 972], [670, 976], [674, 970], [675, 965], [680, 953], [677, 951], [664, 937]]]
         }
       }

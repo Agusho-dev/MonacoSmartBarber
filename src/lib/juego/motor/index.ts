@@ -7,7 +7,8 @@
  *   // por cuadro de pantalla: acumulador += dt * p.escalaTiempo; hasta 5 veces: avanzar(p, entradas)
  *   // después: const eventos = p.eventos.splice(0) → render, audio y HUD.
  */
-import type { AtlasPersonaje, ConfigPartida, DesglosePuntaje, EntradaJugador, Lado, MetaAnimaciones, Partida } from '../tipos'
+import type { AtlasPersonaje, ConfigPartida, DesglosePuntaje, EntradaJugador, Lado, LuchadorEstado, MetaAnimaciones, Partida } from '../tipos'
+import { especialListo as listo } from './acciones'
 import { metaDesdeAtlas as metaDeAtlas } from './animacion'
 import { avanzar as avanzarPartida, crearPartida as crearPartidaNueva } from './partida'
 import { calcularPuntaje as puntaje } from './puntaje'
@@ -30,4 +31,12 @@ export function calcularPuntaje(p: Partida, lado: Lado): DesglosePuntaje {
 /** Lo que el motor necesita del atlas: cuántos cuadros tiene cada animación y cuáles pegan. */
 export function metaDesdeAtlas(atlas: AtlasPersonaje): MetaAnimaciones {
   return metaDeAtlas(atlas)
+}
+
+/**
+ * ¿Apretar el especial `n` lo tira ahora? La carga y, en la Curación de Fabri, la vida por debajo del
+ * 90 % (con más, el motor no la tira ni gasta carga). Para encender la carta del especial en el HUD.
+ */
+export function especialListo(l: LuchadorEstado, n: 1 | 2): boolean {
+  return listo(l, n)
 }

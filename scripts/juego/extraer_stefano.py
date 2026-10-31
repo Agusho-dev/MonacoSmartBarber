@@ -28,7 +28,8 @@ lo que piden estas dos hojas:
     menos que el PNG (atlas.json dice cuál).
   - retrato.webp y cara.webp salen de un cuadro de la hoja (no hay foto de cuerpo entero): agrandados
     con LANCZOS en alfa premultiplicado (sin halo) y un poco de nitidez, con el tamaño y el encuadre
-    de los de Simón y Chipi (retrato de 720 de alto, cara de 256x256).
+    de los de Simón y Chipi (retrato de 720 de alto, cara de 256x256). Con "caraNitida", la cara sale
+    de extraer_joaquin.cara_nitida (borde de ~1 px como el de Simón y Chipi, más nitidez).
   - Con --revision: las tiras del compartido (revision_<anim>.png), la máscara de cada cuadro sobre
     la hoja (mascara_<anim>_<i>.png, de extraer_chipi), las costuras, y lamina.png: todos los
     cuadros a escala sobre la misma línea de piso.
@@ -42,7 +43,9 @@ Claves del JSON propias de este motor (el resto, ver extraer_sprites.py y extrae
     "retratoDesde": {"anim": "victoria", "cuadro": 0, "alto": 720, "cara": [x0, y0, x1, y1],
                      "caraDesde": {"anim": "especial2", "cuadro": 0}, "nitidez": 80}
                     (el cuadro SIN escalar; "cara" en px de la hoja; "caraDesde" opcional: la cara
-                    sale de otro cuadro, p. ej. de una fila dibujada más grande)
+                    sale de otro cuadro, p. ej. de una fila dibujada más grande; "caraNitida": {}
+                    arma cara.webp con extraer_joaquin.cara_nitida en vez de agrandar: borde de
+                    ~1 px y más nitidez; acepta "radio", "pct", "umbral", "rampa", "suavizar")
   por animación
     "alias": "combo", "usar": [...], "impactos": [...]   (sólo herramienta1 / herramienta2)
     "usar": [0, 2, "golpe:2"]        orden final; "otra:i" toma prestado el cuadro i de otra animación
@@ -50,6 +53,7 @@ Claves del JSON propias de este motor (el resto, ver extraer_sprites.py y extrae
     "ajusteYPorCuadro": {"i": px}    sube (+) o baja (-) el apoyo de un cuadro
     "axPorCuadro": {"i": px}         corre el apoyo X de un cuadro (en px del cuadro final)
     "retoques": {"i": {...}}, "retoqueTodos": {...}   ediciones del cuadro ya recortado (ver retocar):
+        "desaturar": [{"zona"?, regla de color}] (a gris sin tocar la silueta),
         "quitar": [formas], "limite": [formas], "quitarColor": [{"zona"?, "tono"?: [h0, h1],
         "satMin"?, "satMax"?, "lumMin"?, "lumMax"?, "invertir"?}], "pelarFondo": {...} y "pelar":
         [{...}] (ver pelar_fondo), "restaurar": [formas] (vuelve lo que había antes de quitar),
@@ -95,6 +99,7 @@ for _d in (_AQUI, os.path.join(_REPO, 'scripts', 'juego')):
         break
 import extraer_sprites as ES  # noqa: E402
 import extraer_chipi as CH  # noqa: E402
+from extraer_joaquin import cara_nitida  # noqa: E402  (la misma cara nítida que Lucas)
 
 CLAVES = ES.CLAVES
 _estado = {'cache': None, 'hoja': None, 'inferencias': 0, 'del_cache': 0}
@@ -300,6 +305,8 @@ def limpiar_por_color(hoja, reglas):
 
 def retocar(c, op):
     """Ediciones sobre el cuadro ya recortado (antes de escalar). Coordenadas de la HOJA. En orden:
+    desaturar     [{"zona"?, regla de color}]  esos píxeles pasan a gris (misma luminancia) sin
+                    cambiar la silueta: la gorra que se metió en la barra azul del título
     quitar        [formas]  se sacan
     limite        [formas]  sólo queda lo de adentro
     quitarColor   [{"zona"?: forma, "tono"?: [h0, h1], "satMin"?, "satMax"?, "lumMin"?, "lumMax"?,
@@ -317,6 +324,16 @@ def retocar(c, op):
     # el apoyo Y queda a la misma distancia del borde de abajo de la máscara (los pies)
     ajuste = c['ay'] - h
     alfa = arr[..., 3] > 0
+    for regla in op.get('desaturar') or []:
+        # el color de la barra del título o de un destello que tiñó el borde de la ropa: esos píxeles
+        # pasan a gris con su misma luminancia (la silueta no cambia, como pasaría con quitarColor)
+        zona = CH.rasterizar([regla['zona']], (ox, oy), (w, h)) if regla.get('zona') else np.ones((h, w), bool)
+        cond = zona & condicion_color(arr[..., :3], regla) & alfa
+        if cond.any():
+            _, _, lum = tono_sat_lum(arr[..., :3])
+            gris = np.clip(np.round(lum), 0, 255).astype(np.uint8)
+            for k in range(3):
+                arr[..., k] = np.where(cond, gris, arr[..., k])
     if op.get('quitar'):
         alfa &= ~CH.rasterizar(op['quitar'], (ox, oy), (w, h))
     if op.get('limite'):
@@ -478,8 +495,12 @@ def procesar_retrato(cfg, crudos, salida, revision=None):
     cuadrada = Image.new('RGBA', (lado, lado), (0, 0, 0, 0))
     # pegada abajo: los hombros llegan al borde, como en Simón y Chipi
     cuadrada.alpha_composite(cara, ((lado - cara.width) // 2, lado - cara.height))
-    cara_g = agrandar(cuadrada, 256, r.get('nitidez', 80))
-    cara_g = cara_g.resize((256, 256), Image.LANCZOS) if cara_g.size != (256, 256) else cara_g
+    if r.get('caraNitida') is not None:
+        # de una vez desde los píxeles de la hoja, con el borde de ~1 px (ver extraer_joaquin.cara_nitida)
+        cara_g = cara_nitida(cuadrada, 256, **(r['caraNitida'] or {}))
+    else:
+        cara_g = agrandar(cuadrada, 256, r.get('nitidez', 80))
+        cara_g = cara_g.resize((256, 256), Image.LANCZOS) if cara_g.size != (256, 256) else cara_g
     cara_g.save(os.path.join(salida, 'cara.webp'), 'WEBP', quality=90, method=6)
     if revision:
         fondo = (38, 40, 48, 255)

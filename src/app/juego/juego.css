@@ -486,6 +486,20 @@ html.cf-html body {
   animation: cf-cortina-entra 0.3s cubic-bezier(0.7, 0, 0.3, 1) forwards;
 }
 
+/* La cortina tarda ≈ 165–183 ms en tapar la pantalla vieja (arranca afuera, en translateX(-120%), con
+   una curva lenta al principio). En ese rato un pulgar que se apoyaba caía en la pantalla vieja y
+   tomaba SU touch-action (pan-y en la pausa, el resultado y la selección apaisada; manipulation en la
+   vertical): su primer movimiento en la pelea empezaba un paneo y quedaban muertos los controles. El
+   escudo, transparente y a pantalla completa, aparece en el mismo commit que el toque (juego-raiz.tsx)
+   y vive lo mismo que la cortina. touch-action: none en .cf-raiz no alcanza: un scroller con pan-y no
+   hereda la restricción de sus ancestros. */
+.cf-cortina-escudo {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+  touch-action: none;
+}
+
 .cf-cortina[data-fase='abriendo'] {
   transform: translateX(0) skewX(-14deg);
   animation: cf-cortina-sale 0.42s cubic-bezier(0.7, 0, 0.3, 1) 0.04s forwards;
@@ -786,6 +800,9 @@ html.cf-html body {
   background:
     radial-gradient(70% 50% at 50% 38%, color-mix(in srgb, var(--cf-acento) 38%, transparent), transparent 70%),
     rgba(4, 4, 6, 0.96);
+  /* Sale encima de la pelea, con el pulgar quizás en el stick, y al cerrarlo la pelea sigue en pausa:
+     un pulgar que se apoye acá no puede quedar con un touch-action que deje panear (ver .cf-capa--fija). */
+  touch-action: none;
   animation: cf-entrar-pantalla 0.45s var(--cf-salida) both;
 }
 
@@ -2607,7 +2624,18 @@ html.cf-html body {
   }
 }
 
+/* Vertical: un barbero arriba y otro abajo, y la franja del «VS» (letras y rayo) en el medio. Cada
+   retrato vive en su mitad y no entra en la franja: hasta la tercera tanda los dos ocupaban el 54 %
+   del alto, el rayo y las letras tapaban la cara del de abajo en TODAS las peleas, y el de arriba
+   salía cortado (9 px arriba y 16 a la izquierda: a Nico U. y a Brian se les cortaba el pelo o la
+   gorra). Los dos quedan del mismo alto. Las cuentas usan que cada lado mide el 56 % del alto y el
+   de abajo arranca en el 44 %: el centro de la pantalla está a 6/56 = 10,71 % de su borde. */
 @media (orientation: portrait) {
+  .cf-vs {
+    /* Alto de las letras «VS»: también el de la franja que los retratos no pisan. */
+    --cf-vs-letras: clamp(76px, 22vw, 150px);
+  }
+
   .cf-vs__placa {
     --cf-ancho-nombre: 86vw;
   }
@@ -2627,17 +2655,27 @@ html.cf-html body {
   }
 
   .cf-vs__retrato {
-    height: 96%;
     width: 70%;
+    height: auto;
   }
 
+  /* Arriba: desde el borde (con el área segura) hasta la franja; los pies pueden quedar apenas
+     detrás de las letras, la cabeza nunca contra el borde. */
   .cf-vs__lado--1 .cf-vs__retrato {
-    left: -4%;
-    bottom: 6%;
+    left: 0;
+    top: calc(var(--cf-sa-t) + 8px);
+    bottom: calc(10.71% + var(--cf-vs-letras) / 2 - 4px);
   }
 
+  /* Abajo: desde debajo de la franja hasta el borde: la cabeza ya no queda detrás del rayo. */
   .cf-vs__lado--2 .cf-vs__retrato {
-    right: -4%;
+    right: 0;
+    top: calc(10.71% + var(--cf-vs-letras) / 2 + 6px);
+    bottom: 0;
+  }
+
+  .cf-vs__letras {
+    font-size: var(--cf-vs-letras);
   }
 
   .cf-vs__lado--1 .cf-vs__placa {
@@ -2656,7 +2694,7 @@ html.cf-html body {
   }
 
   .cf-vs__rayo {
-    width: 70px;
+    width: 60px;
     height: 100vw;
     transform: rotate(90deg);
   }
@@ -3641,7 +3679,9 @@ html.cf-html body {
   padding: 0;
   pointer-events: auto;
   touch-action: none;
-  transition: transform 0.08s var(--cf-salida);
+  transition:
+    transform 0.08s var(--cf-salida),
+    opacity 0.2s;
 }
 
 .cf-carta[data-activo] {
@@ -4038,6 +4078,46 @@ html.cf-html body {
   text-shadow: none;
 }
 
+/* ─── Controles que tapan a un luchador, y controles en reposo ─────────────────
+   En horizontal los controles flotan sobre el lienzo: un luchador contra una pared quedaba
+   debajo de GOLPE, de las cartas o del joystick, y en el K.O. el cuerpo tirado y la cabeza pelada
+   del ¡AL CERO! casi no se veían. Se eligió no moverlos nunca (el pulgar los busca siempre en el
+   mismo lugar) y cambiar cuánto se ven:
+   - En la pelea, el control que tapa a un luchador (data-tapa, ui/apartar.ts) queda translúcido;
+     apretado vuelve entero, y GOLPE del «¡DEJALO AL CERO!» sigue latiendo.
+   - En las fases en que no se usan (data-reposo, ui/hud.ts: K.O., «¡TIEMPO!», festejo, pelea
+     terminada, o el remate que hace el rival) se apagan casi del todo; vuelven con el anuncio del
+     round siguiente. Los toques siguen llegando igual: sólo cambia lo que se ve. */
+.cf-zona-joy,
+.cf-zona-botones,
+.cf-cartas,
+.cf-carga {
+  transition: opacity 0.35s ease;
+}
+
+.cf-bp[data-tapa]:not([data-activo]) {
+  opacity: 0.38;
+}
+
+.cf-carta[data-tapa]:not([data-activo]) {
+  opacity: 0.5;
+}
+
+.cf-carga[data-tapa] {
+  opacity: 0.45;
+}
+
+.cf-zona-joy[data-tapa]:not([data-activo]) .cf-joy {
+  opacity: 0.14;
+}
+
+.cf-pelea[data-reposo] .cf-zona-joy,
+.cf-pelea[data-reposo] .cf-zona-botones,
+.cf-pelea[data-reposo] .cf-cartas,
+.cf-pelea[data-reposo] .cf-carga {
+  opacity: 0.12;
+}
+
 .cf-pelea[data-final] .cf-bp--golpe {
   animation: cf-pulso-final 0.45s ease-in-out infinite alternate;
 }
@@ -4074,6 +4154,19 @@ html.cf-html body {
 
 .cf-capa--tutorial {
   z-index: 45;
+}
+
+/* Pausa, tutorial y error (el componente Capa, capa.tsx): se tocan con el pulgar apoyado en el stick.
+   Con pan-y, ese pulgar que se movía (el paso 1 del tutorial pide «deslizá») empezaba un paneo y
+   Chrome cortaba TODOS los punteros hasta levantar los dedos; y como el touch-action se fija al
+   apoyar, al volver a la pelea el pulgar seguía con el de la capa. Sólo si el contenido no entra
+   (`data-desborda`, lo mide Capa) vuelve a pan-y para poder desplazarlo. */
+.cf-capa--fija {
+  touch-action: none;
+}
+
+.cf-capa--fija[data-desborda] {
+  touch-action: pan-y;
 }
 
 @keyframes cf-aparecer {
@@ -4608,6 +4701,21 @@ html.cf-html body {
   overscroll-behavior: contain;
   touch-action: pan-y;
   padding: calc(var(--cf-sa-t) + 10px) calc(var(--cf-sa-r) + 14px) 14px calc(var(--cf-sa-l) + 14px);
+}
+
+/* El resultado (contra la CPU y online) no deja panear salvo que haya algo que desplazar. Sus botones
+   responden al segundo dedo (alTocar, ui/toque.ts), así que «Revancha» puede arrancar la pelea con un
+   pulgar todavía apoyado acá: el touch-action de un toque se fija al apoyarlo, y con pan-y (el
+   scroller) o manipulation (los botones), su primer movimiento en la pelea empezaba un paneo y Chrome
+   cortaba TODOS los toques hasta levantar los dedos. Un scroller vuelve a dejar panear aunque su
+   ancestro diga none: por eso el scroller lleva su propia regla, y vuelve a pan-y sólo con
+   `data-desborda` (lo mide useDesborde, capa.tsx). */
+.cf-resultado {
+  touch-action: none;
+}
+
+.cf-resultado__scroll[data-sin-paneo]:not([data-desborda]) {
+  touch-action: none;
 }
 
 .cf-resultado__cabeza {
@@ -5461,6 +5569,118 @@ html.cf-html body {
 
   .cf-resultado__titulo {
     font-size: clamp(44px, 14vh, 80px);
+  }
+}
+
+/* ─── Pausa y tutorial en horizontal (celulares acostados) ─────────────────────
+   En una columna, la pausa medía 348 px y el tutorial 343–365: en 360 o 320 de alto no entraban y la
+   capa se desplazaba. Una capa desplazable deja panear (pan-y), y un pulgar apoyado en ella que se
+   mueve corta todos los toques (ver Capa, capa.tsx). En dos columnas entran enteras desde 568×320 y
+   la capa queda con touch-action: none. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .cf-pausa--menu {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      'titulo titulo'
+      'chip chip'
+      'seguir ajustes'
+      'acciones ajustes'
+      'teclas teclas';
+    grid-template-rows: auto auto auto 1fr auto;
+    align-items: start;
+    gap: 8px 14px;
+    width: min(100%, 660px);
+  }
+
+  .cf-pausa--menu .cf-pausa__titulo {
+    grid-area: titulo;
+    justify-self: center;
+    font-size: 42px;
+  }
+
+  .cf-pausa--menu > .cf-chip-turno {
+    grid-area: chip;
+    justify-self: center;
+  }
+
+  .cf-pausa--menu .cf-pausa__continuar {
+    --cf-btn-alto: 50px;
+    grid-area: seguir;
+    padding-inline: 18px;
+    font-size: 22px;
+  }
+
+  .cf-pausa--menu .cf-pausa__acciones {
+    grid-area: acciones;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .cf-pausa--menu .cf-pausa__acciones .cf-btn {
+    --cf-btn-alto: 42px;
+    padding-inline: 16px;
+    font-size: 18px;
+  }
+
+  .cf-pausa--menu .cf-ajustes {
+    grid-area: ajustes;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .cf-pausa--menu .cf-interruptor {
+    padding: 9px 12px 7px;
+    font-size: 16px;
+  }
+
+  .cf-pausa--menu .cf-leyenda-teclas {
+    grid-area: teclas;
+  }
+
+  .cf-tuto {
+    display: grid;
+    grid-template-columns: minmax(150px, 0.8fr) minmax(0, 1.2fr);
+    grid-template-areas:
+      'cabeza cabeza'
+      'ilu titulo'
+      'ilu texto'
+      'pie pie';
+    grid-template-rows: auto auto 1fr auto;
+    align-items: center;
+    gap: 8px 16px;
+    width: min(100%, 700px);
+    text-align: left;
+  }
+
+  .cf-tuto__cabeza {
+    grid-area: cabeza;
+  }
+
+  .cf-tuto__ilustracion {
+    grid-area: ilu;
+    align-self: stretch;
+    height: auto;
+    min-height: 120px;
+  }
+
+  .cf-tuto__titulo {
+    grid-area: titulo;
+    justify-self: start;
+    align-self: end;
+  }
+
+  .cf-tuto__texto {
+    grid-area: texto;
+    align-self: start;
+    min-height: 0;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .cf-tuto__pie {
+    grid-area: pie;
+    margin-top: 0;
   }
 }
 

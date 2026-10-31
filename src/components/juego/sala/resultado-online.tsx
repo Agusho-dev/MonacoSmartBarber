@@ -1,12 +1,14 @@
 'use client'
 
-import { Crosshair, Flame, LoaderCircle, RotateCcw, Sparkles, Swords, Timer, Trophy, Users, Wifi, Zap } from 'lucide-react'
-import type { CSSProperties } from 'react'
+import { Crosshair, Flame, LoaderCircle, RotateCcw, Sparkles, Swords, Timer, Trophy, Users, Wifi, WifiOff, Zap } from 'lucide-react'
+import { useRef, type CSSProperties } from 'react'
 import { ARENAS } from '@/lib/juego/arenas'
 import type { EstadoDuelo } from '@/lib/juego/online/duelo'
-import { bajadaResultado, textoRivalAusente, tituloResultado } from '@/lib/juego/online/textos'
+import { bajadaResultado, textoRivalAusente, textoSinRed, tituloResultado } from '@/lib/juego/online/textos'
 import { PERSONAJES } from '@/lib/juego/personajes'
 import { formatearDuracion, formatearPuntos, porcentaje } from '@/lib/juego/ui/textos'
+import { alTocar } from '@/lib/juego/ui/toque'
+import { useDesborde } from '../capa'
 import { ImagenJuego } from '../imagen-juego'
 
 /**
@@ -23,6 +25,10 @@ export function ResultadoOnline({
   onRevancha: () => void
   onVolverSala: () => void
 }) {
+  // Sin desborde, el scroller no deja panear (`data-sin-paneo`, juego.css): REVANCHA responde a un
+  // segundo dedo y la pelea nueva no puede arrancar con un pulgar apoyado en pan-y.
+  const scrollRef = useRef<HTMLDivElement>(null)
+  useDesborde(scrollRef)
   const r = estado.resultado
   if (!r || !estado.personajes) return null
   const rival = estado.rival.nombre
@@ -32,7 +38,7 @@ export function ResultadoOnline({
   const titulo = tituloResultado(r, rival)
   const bajada = bajadaResultado(r, rival, estado.rivalSeFue)
   const est = r.estadisticas
-  const puedeRevancha = estado.rivalPresente && !estado.revanchaPropia
+  const puedeRevancha = estado.rivalPresente && !estado.revanchaPropia && !estado.sinRed
 
   const stats = est
     ? [
@@ -74,7 +80,7 @@ export function ResultadoOnline({
       <div className="cf-resultado__velo" aria-hidden="true" />
       <span className="cf-resultado__rayos" aria-hidden="true" />
 
-      <div className="cf-resultado__scroll">
+      <div className="cf-resultado__scroll" ref={scrollRef} data-sin-paneo="">
         <header className="cf-resultado__cabeza">
           <span className="cf-online-etiqueta">
             <Wifi aria-hidden="true" />
@@ -148,17 +154,23 @@ export function ResultadoOnline({
 
       <footer className="cf-resultado__acciones">
         {/* Va pegado ARRIBA de los botones (en vertical tapaba el centro de REVANCHA y se comía el toque). */}
-        {estado.revanchaRival && !estado.revanchaPropia && estado.rivalPresente && (
+        {estado.revanchaRival && !estado.revanchaPropia && estado.rivalPresente && !estado.sinRed && (
           <p className="cf-resultado-online__pide" role="status">
             {rival} quiere la revancha
           </p>
         )}
-        {estado.rivalPresente ? (
+        {/* Sin red de este lado: ni REVANCHA (no saldría) ni «Juan ya no está» (el que no está es este celular). */}
+        {estado.sinRed ? (
+          <p className="cf-resultado-online__ausente" data-sin-red="" role="status">
+            <WifiOff aria-hidden="true" />
+            <span>{textoSinRed()}</span>
+          </p>
+        ) : estado.rivalPresente ? (
           <button
             type="button"
             className="cf-btn cf-btn--grande"
             data-pide={estado.revanchaRival && !estado.revanchaPropia ? '' : undefined}
-            onClick={onRevancha}
+            {...alTocar(onRevancha)}
             disabled={!puedeRevancha}
           >
             {estado.revanchaPropia ? (
@@ -173,7 +185,8 @@ export function ResultadoOnline({
             {textoRivalAusente(r, rival, estado.rivalSeFue)}
           </p>
         )}
-        <button type="button" className="cf-btn cf-btn--sec" onClick={onVolverSala}>
+        {/* Los dos con alTocar: con el pulgar todavía apoyado, Chrome no genera click para el segundo dedo. */}
+        <button type="button" className="cf-btn cf-btn--sec" {...alTocar(onVolverSala)}>
           <Users aria-hidden="true" />
           <span>Volver a la sala</span>
         </button>

@@ -121,6 +121,7 @@
         [1505, 184, 1590, 294]
       ],
       "usar": [["saltar", 3], ["saltar", 3], ["saltar", 3], 2, 4],
+      "apoyoX": {"2": 1280},
       "humo": {
         "2": {"zona": [1296, 236, 1320, 294], "lumMin": 60, "lumMax": 250, "satMax": 0.25, "pasos": 6}
       },
@@ -128,8 +129,8 @@
       "sombra": {
         "2": {"zona": [1222, 276, 1318, 294], "lumMax": 18, "recuperar": 1}
       },
-      "_nota": "revisión 31/oct: el excluir del humo del cuadro 2 (caer[3]) arrancaba en y=246 y le cortaba la parte de abajo al puño derecho: arranca en y=253",
-      "excluir": {"2": [[[1301, 253], [1320, 253], [1320, 294], [1307, 294], [1307, 272], [1301, 266]]]}
+      "_nota": "revisión 31/oct: el excluir del humo del cuadro 2 (caer[3]) arrancaba en y=246 y le cortaba la parte de abajo al puño derecho: arranca en y=253 · tercera tanda (31/oct): la cuña negra a la derecha de la rodilla y el fondo pegado al puño (piso recto de 15 px) salen con un polígono que sigue el puño, la rodilla y la zapatilla; apoyoX fija el apoyo de antes",
+      "excluir": {"2": [[[1309, 232], [1320, 232], [1320, 294], [1303, 294], [1302, 289], [1300, 285], [1294, 284], [1292, 282], [1292, 276], [1293, 270], [1295, 268], [1298, 266], [1299, 253], [1301, 252], [1303, 250], [1304, 247], [1306, 245], [1308, 243], [1309, 240]]]}
     },
     "golpe": {
       "inferencia": "ancho&panel",
@@ -275,12 +276,12 @@
       "usar": [0, 1, 2, 4, 6, 7, 8],
       "impactos": [2, 4, 6],
       "escala": 1.12,
+      "apoyoX": {"8": 1257},
       "excluir": {
-        "1": [[174, 668, 200, 700]],
         "2": [[294, 620, 310, 717], [240, 703, 284, 717]],
         "8": [
           [[1290, 662], [1322, 662], [1322, 717], [1302, 717], [1300, 700], [1290, 698]],
-          [[1283, 660], [1300, 655], [1300, 697], [1287, 697], [1283, 690]],
+          [[1280, 649], [1292, 646], [1302, 643], [1302, 699], [1288, 699], [1288, 696], [1287, 692], [1285, 689], [1285, 685], [1283, 682], [1283, 678], [1285, 674], [1284, 671], [1285, 668], [1284, 665], [1282, 662], [1281, 659], [1280, 656]],
           [1300, 643, 1316, 658]
         ]
       },
@@ -294,17 +295,30 @@
             "suavizar": 3,
             "bMenosRMin": 16
           },
+          {
+            "nota": "el fondo oscuro entre la pierna y el remolino (azul marino apagado, más oscuro que el pantalón)",
+            "zona": [[172, 660], [194, 660], [194, 700], [172, 700]],
+            "suavizar": 3,
+            "bMenosRMin": 7,
+            "lumMax": 32
+          },
           {"zona": [160, 700, 200, 717], "suavizar": 5, "bMenosRMin": 9, "lumMax": 110}
         ],
         "6": [
           {"zona": [915, 653, 960, 667], "bMenosRMin": 25, "bMenosGMin": 18, "lumMin": 18},
-          {"zona": [915, 653, 960, 667], "lumMin": 160, "bMenosRMin": 10}
+          {"zona": [915, 653, 960, 667], "lumMin": 160, "bMenosRMin": 10},
+          {"nota": "el núcleo blanco de la estela (blanco apenas azulado; la capucha es blanco rosado)", "zona": [915, 653, 940, 664], "lumMin": 235, "bMenosRMin": 0, "bMenosGMin": 3}
         ]
       },
-      "_nota": "revisión 31/oct: en el 1 (especial2[1]) la cuña azul marino a la derecha de la pierna y al costado de la zapatilla (x >= 174); en el 6 (especial2[4], impacto) la estela azul y blanca que cruzaba la cintura; en el 8 (especial2[6], último impacto) la botella de la mano izquierda quedaba cortada en recta por la caja (x=1210): «incluirFinal» la completa con su contorno (con una caja más ancha el modelo se tragaba el remolino azul de al lado) y «sombra» saca la cuña oscura del piso entre las piernas",
+      "_nota": "revisión 31/oct: en el 1 (especial2[1]) la cuña azul marino a la derecha de la pierna y al costado de la zapatilla (x >= 174); en el 6 (especial2[4], impacto) la estela azul y blanca que cruzaba la cintura; en el 8 (especial2[6], último impacto) la botella de la mano izquierda quedaba cortada en recta por la caja (x=1210): «incluirFinal» la completa con su contorno (con una caja más ancha el modelo se tragaba el remolino azul de al lado) y «sombra» saca la cuña oscura del piso entre las piernas · tercera tanda (31/oct): en el 1 sin el rectángulo (pared recta de 37 px): el fondo oscuro junto a la pierna sale por tinte y luz (b-r >= 7 y luma <= 32; el pantalón es más claro y neutro); en el 6 el núcleo blanco de la estela (blanco apenas azulado) y el bloque negro sobre la zapatilla de atrás («sombra»); en el 8 la cuña negra y la raya blanca a la derecha del torso salen con un polígono que sigue la campera (antes, una pared recta de 35 px) y la cuña entre las piernas con la «sombra» del piso; apoyoX fija el apoyo de antes",
       "sombra": {
         "2": {"zona": [212, 696, 296, 717], "lumMax": 26, "recuperar": 1},
-        "8": {"zona": [1238, 697, 1303, 717], "lumMax": 45, "recuperar": 1}
+        "6": {"zona": [[888, 680], [902, 680], [902, 694], [900, 698], [888, 698]], "lumMax": 48, "recuperar": 1},
+        "8": {
+          "zona": [[1238, 697], [1252, 697], [1253, 684], [1269, 684], [1271, 697], [1303, 697], [1303, 717], [1238, 717]],
+          "lumMax": 40,
+          "recuperar": 1
+        }
       },
       "incluir": {"4": [[[478, 694], [494, 690], [497, 704], [492, 714], [477, 714]]]},
       "incluirFinal": {"8": [[[1181, 641], [1183, 630], [1192, 622], [1200, 615], [1208, 610], [1214, 612], [1212, 620], [1204, 628], [1198, 636], [1196, 643], [1190, 648], [1184, 646]]]}

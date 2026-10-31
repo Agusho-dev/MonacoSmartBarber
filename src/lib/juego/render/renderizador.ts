@@ -67,6 +67,19 @@ import { Textos } from './textos'
 import { crearUtileria } from './utileria'
 import { acotar, azar, mezcla, pasoSuave } from './util'
 
+/** Un rectángulo del lienzo en px CSS, desde su esquina de arriba a la izquierda. */
+export interface CajaLienzo {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** El renderizador de este juego: el del contrato (tipos.ts) y lo que la UI usa además. */
+export interface RenderizadorJuego extends Renderizador {
+  cajasLuchadores(): readonly [CajaLienzo | null, CajaLienzo | null]
+}
+
 const LIMITE_PARTICULAS: Record<Calidad, number> = { alta: 250, media: 150, baja: 70 }
 const DENSIDAD: Record<Calidad, number> = { alta: 1, media: 0.6, baja: 0.35 }
 
@@ -110,7 +123,7 @@ export function crearRenderizadorImpl(
   canvas: HTMLCanvasElement,
   recursos: RecursosJuego,
   opciones: Partial<OpcionesRender> = {},
-): Renderizador {
+): RenderizadorJuego {
   const calidad: Calidad = opciones.calidad === 'media' || opciones.calidad === 'baja' ? opciones.calidad : 'alta'
   const ctx0 = canvas.getContext('2d', { alpha: false })
   if (!ctx0) throw new Error('Corte Final: el navegador no dio un contexto 2D para el juego')
@@ -537,6 +550,25 @@ export function crearRenderizadorImpl(
     mundo = null
   }
 
+  /**
+   * Dónde quedó cada luchador en el último cuadro (el rectángulo de su cuadro del atlas, con la
+   * cámara de ese cuadro), en px CSS desde la esquina del lienzo. Fuera del contrato de tipos.ts:
+   * la pantalla de pelea lo usa para volver translúcido un control que tapa a un luchador.
+   */
+  function cajasLuchadores(): readonly [CajaLienzo | null, CajaLienzo | null] {
+    const k = listo && !destruido && cam.anchoPx > 0 ? anchoCss / cam.anchoPx : 0
+    const caja = (v: VisualLuchador): CajaLienzo | null => {
+      if (k <= 0 || !mundo || !(v.cajaW > 0) || !(v.cajaH > 0)) return null
+      return {
+        x: (cam.tx + cam.esc * v.cajaX) * k,
+        y: (cam.ty + cam.esc * v.cajaY) * k,
+        w: cam.esc * v.cajaW * k,
+        h: cam.esc * v.cajaH * k,
+      }
+    }
+    return [caja(vis[0]), caja(vis[1])]
+  }
+
   autoTamano()
-  return { dibujar, redimensionar, destruir }
+  return { dibujar, redimensionar, destruir, cajasLuchadores }
 }

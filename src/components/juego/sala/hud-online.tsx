@@ -8,6 +8,8 @@ import { cartelEspera } from '@/lib/juego/online/textos'
 import { PERSONAJES } from '@/lib/juego/personajes'
 import { VISTA_ANCHO } from '@/lib/juego/tipos'
 import type { FichaPersonaje, IdArena, IdPersonaje, Lado, Partida } from '@/lib/juego/tipos'
+import { alTocar } from '@/lib/juego/ui/toque'
+import { Capa } from '../capa'
 import { EstadosHud } from '../estados-hud'
 import { IconoMaquina } from '../iconos'
 import { ImagenJuego } from '../imagen-juego'
@@ -47,7 +49,8 @@ export function HudOnline({
           <Zap />
           <span>Turbo</span>
         </div>
-        <button type="button" className="cf-hud__pausa" onClick={onMenu} aria-label="Menú de la pelea">
+        {/* Como la pausa de hud-pelea.tsx: también con el pulgar en el stick (ui/toque.ts). */}
+        <button type="button" className="cf-hud__pausa" {...alTocar(onMenu)} aria-label="Menú de la pelea">
           <Menu />
         </button>
         <span className="cf-online-senal" data-online="senal" data-calidad="buena" aria-hidden="true">
@@ -236,7 +239,11 @@ export function crearCapasOnline(
   }
 }
 
-/** El botón de pausa online: no hay pausa (la pelea sigue), sólo seguir o abandonar. */
+/**
+ * El botón de pausa online: no hay pausa (la pelea sigue), sólo seguir o abandonar. Va sobre la
+ * pelea VIVA, con el pulgar en el stick: `Capa` (touch-action: none, salvo que no entre) y los
+ * botones con alTocar, como la pausa contra la CPU.
+ */
 export function MenuOnline({
   rival,
   onSeguir,
@@ -248,13 +255,13 @@ export function MenuOnline({
 }) {
   const [confirmar, setConfirmar] = useState(false)
   return (
-    <div className="cf-capa cf-online-menu" role="dialog" aria-modal="true" aria-labelledby="cf-online-menu-titulo">
+    <Capa className="cf-online-menu" titulo="cf-online-menu-titulo">
       <div className="cf-pausa">
         <h2 id="cf-online-menu-titulo" className="cf-titulo cf-online-menu__titulo">
           Sin pausa
         </h2>
         <p className="cf-texto-suave">Es online: la pelea sigue mientras mirás esto.</p>
-        <button type="button" className="cf-btn cf-btn--grande cf-pausa__continuar" onClick={onSeguir} autoFocus>
+        <button type="button" className="cf-btn cf-btn--grande cf-pausa__continuar" {...alTocar(onSeguir)} autoFocus>
           <Play aria-hidden="true" />
           <span>Seguir peleando</span>
         </button>
@@ -262,12 +269,12 @@ export function MenuOnline({
           type="button"
           className="cf-btn cf-btn--sec"
           data-peligro={confirmar ? '' : undefined}
-          onClick={() => (confirmar ? onAbandonar() : setConfirmar(true))}
+          {...alTocar(() => (confirmar ? onAbandonar() : setConfirmar(true)))}
         >
           <Flag aria-hidden="true" />
           <span>{confirmar ? `Tocá de nuevo: gana ${rival}` : 'Abandonar'}</span>
         </button>
       </div>
-    </div>
+    </Capa>
   )
 }

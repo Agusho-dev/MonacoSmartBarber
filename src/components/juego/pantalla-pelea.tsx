@@ -8,7 +8,7 @@ import { hashPartida } from '@/lib/juego/online/hash'
 import { ABANDONO_MS, CADA_HASH, type Lockstep } from '@/lib/juego/online/lockstep'
 import { eventosParaHud, vistaParaAudio, vistaParaHud } from '@/lib/juego/online/vistas'
 import { PERSONAJES } from '@/lib/juego/personajes'
-import { crearRenderizador } from '@/lib/juego/render'
+import { crearRenderizador, type RenderizadorJuego } from '@/lib/juego/render'
 import { ENTRADA_VACIA, TPS } from '@/lib/juego/tipos'
 import type {
   DesglosePuntaje,
@@ -20,8 +20,8 @@ import type {
   OpcionesRender,
   Partida,
   RecursosJuego,
-  Renderizador,
 } from '@/lib/juego/tipos'
+import { crearApartado } from '@/lib/juego/ui/apartar'
 import type { AudioSeguro } from '@/lib/juego/ui/audio-seguro'
 import { conectarControlesTactiles, type ControlesTactiles } from '@/lib/juego/ui/controles-tactiles'
 import { depuracionHabilitada, publicarDepuracion } from '@/lib/juego/ui/depuracion'
@@ -33,6 +33,8 @@ import { useConsultaMedia } from '@/lib/juego/ui/media'
 import { metaPorDefecto } from '@/lib/juego/ui/meta-por-defecto'
 import { guardarPreferencias, type PreferenciasJuego } from '@/lib/juego/ui/preferencias'
 import type { Eleccion, FuentesJuego, ResultadoPelea } from '@/lib/juego/ui/tipos-ui'
+import { alTocar } from '@/lib/juego/ui/toque'
+import { Capa } from './capa'
 import { ControlesPelea } from './controles-pelea'
 import { HudPelea } from './hud-pelea'
 import { RecursosFaltantes } from './imagen-juego'
@@ -271,7 +273,7 @@ export function PantallaPelea({
     const personajes: [IdPersonaje, IdPersonaje] = enLinea ? enLinea.arranque.personajes : [jugador, rival]
 
     let partida: Partida
-    let render: Renderizador
+    let render: RenderizadorJuego
     try {
       partida = crearPartida({
         personajes,
@@ -294,6 +296,8 @@ export function PantallaPelea({
     entradaRef.current = entrada
     const ficha = PERSONAJES[personajes[lado]]
     const hud = crearHud(raiz, { entrada, costos: [ficha.especiales[0].costo, ficha.especiales[1].costo], faltantes })
+    // En horizontal, el control que tapa a un luchador (contra una pared) se vuelve translúcido.
+    const apartado = crearApartado(raiz)
 
     // ─── Online: lockstep, vistas del lado propio y capas ──────────────────
     let lock: Lockstep | null = null
@@ -367,6 +371,7 @@ export function PantallaPelea({
       if (ancho <= 0 || alto <= 0) return
       const d = calcularDisposicion(ancho, alto, leerInsets(sondaRef.current))
       aplicarDisposicion(raiz, d)
+      apartado.medir(d)
       lienzo = d.lienzo
       try {
         render.redimensionar(d.lienzo.w, d.lienzo.h, window.devicePixelRatio || 1)
@@ -396,6 +401,7 @@ export function PantallaPelea({
         : {}),
       alCuadro: (p, eventos, dt) => {
         hud.actualizar(vistaHud, enLinea ? eventosParaHud(eventos, lado) : eventos, dt)
+        apartado.actualizar(render.cajasLuchadores())
         audio.procesar(eventos, vistaAudio)
         if (!terminadaRef.current && eventos.some((e) => e.tipo === 'fin_partida')) {
           terminadaRef.current = true
@@ -475,6 +481,7 @@ export function PantallaPelea({
       document.removeEventListener('visibilitychange', alCambiarVisibilidad)
       desconectarTeclado()
       tactiles.destruir()
+      apartado.soltar()
       tactilesRef.current = null
       entradaRef.current = null
       try {
@@ -618,6 +625,7 @@ export function PantallaPelea({
   )
 }
 
+/** Se cortó la pelea: también con el pulgar en el stick (Capa y alTocar, como la pausa). */
 function ErrorPelea({
   onReintentar,
   onSalir,
@@ -628,7 +636,7 @@ function ErrorPelea({
   textoSalir?: string
 }) {
   return (
-    <div className="cf-capa" role="alertdialog" aria-modal="true" aria-labelledby="cf-error-titulo">
+    <Capa rol="alertdialog" titulo="cf-error-titulo">
       <div className="cf-pausa">
         <h2 id="cf-error-titulo" className="cf-titulo cf-pausa__titulo">
           Se cortó la pelea
@@ -639,16 +647,16 @@ function ErrorPelea({
             : 'Algo falló en el medio de la pelea online. Volvé a la sala y desafiá de nuevo.'}
         </p>
         {onReintentar && (
-          <button type="button" className="cf-btn cf-btn--grande" onClick={onReintentar} autoFocus>
+          <button type="button" className="cf-btn cf-btn--grande" {...alTocar(onReintentar)} autoFocus>
             <RotateCcw aria-hidden="true" />
             <span>Reintentar</span>
           </button>
         )}
-        <button type="button" className={onReintentar ? 'cf-btn cf-btn--sec' : 'cf-btn cf-btn--grande'} onClick={onSalir}>
+        <button type="button" className={onReintentar ? 'cf-btn cf-btn--sec' : 'cf-btn cf-btn--grande'} {...alTocar(onSalir)}>
           <LogOut aria-hidden="true" />
           <span>{textoSalir}</span>
         </button>
       </div>
-    </div>
+    </Capa>
   )
 }

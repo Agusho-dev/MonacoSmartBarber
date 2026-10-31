@@ -4,11 +4,15 @@ import { Check, Swords, X } from 'lucide-react'
 import { useEffect, useState, type CSSProperties } from 'react'
 import { DESAFIO_MS } from '@/lib/juego/online/sala'
 import type { AudioSeguro } from '@/lib/juego/ui/audio-seguro'
+import { alTocar } from '@/lib/juego/ui/toque'
 import { vibrar } from '@/lib/juego/ui/vibrar'
+import { Capa } from '../capa'
 
 /**
  * Alguien de la sala te desafía: ACEPTAR / AHORA NO con 15 s de reloj. En el medio de una
- * pelea contra la CPU es un cartel arriba (no la tapa): aceptar termina esa pelea.
+ * pelea contra la CPU es un cartel arriba (no la tapa): aceptar termina esa pelea. Los botones
+ * van con alTocar (con el pulgar en el stick, Chrome no genera click para el segundo dedo) y el
+ * modal con `Capa` (touch-action: none salvo que no entre).
  */
 export function DesafioEntrante({
   nombre,
@@ -48,11 +52,11 @@ export function DesafioEntrante({
           <span className="cf-desafio-banner__nota">Si aceptás, se termina esta pelea</span>
         </p>
         <div className="cf-desafio-banner__botones">
-          <button type="button" className="cf-desafio-banner__si" onClick={onAceptar}>
+          <button type="button" className="cf-desafio-banner__si" {...alTocar(onAceptar)}>
             <Check aria-hidden="true" />
             <span>Aceptar</span>
           </button>
-          <button type="button" className="cf-desafio-banner__no" onClick={onRechazar} aria-label="Ahora no">
+          <button type="button" className="cf-desafio-banner__no" {...alTocar(onRechazar)} aria-label="Ahora no">
             <X aria-hidden="true" />
           </button>
         </div>
@@ -62,7 +66,7 @@ export function DesafioEntrante({
   }
 
   return (
-    <div className="cf-capa cf-desafio-capa" role="alertdialog" aria-modal="true" aria-labelledby="cf-desafio-titulo">
+    <Capa className="cf-desafio-capa" rol="alertdialog" titulo="cf-desafio-titulo">
       <div className="cf-desafio" style={estiloReloj}>
         <span className="cf-desafio__rayos" aria-hidden="true" />
         <span className="cf-desafio__icono" aria-hidden="true">
@@ -78,15 +82,15 @@ export function DesafioEntrante({
           <span className="cf-desafio__segundos">{restante} s</span>
         </div>
         <div className="cf-desafio__botones">
-          <button type="button" className="cf-btn cf-btn--grande cf-desafio__aceptar" onClick={onAceptar} autoFocus>
+          <button type="button" className="cf-btn cf-btn--grande cf-desafio__aceptar" {...alTocar(onAceptar)} autoFocus>
             <Swords aria-hidden="true" />
             <span>Aceptar</span>
           </button>
-          <button type="button" className="cf-btn cf-btn--sec cf-desafio__rechazar" onClick={onRechazar}>
+          <button type="button" className="cf-btn cf-btn--sec cf-desafio__rechazar" {...alTocar(onRechazar)}>
             <span>Ahora no</span>
           </button>
         </div>
       </div>
-    </div>
+    </Capa>
   )
 }

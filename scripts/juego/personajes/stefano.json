@@ -14,11 +14,12 @@
    727
   ],
   "nitidez": 70,
+  "caraNitida": {},
   "caraDesde": {
    "anim": "especial2",
    "cuadro": 0
   },
-  "_nota": "revisión 31/oct: la cara centrada en la cabeza (con [47,682,99,734] la mejilla tocaba el borde derecho y en la grilla y el HUD se veía corrida)"
+  "_nota": "revisión 31/oct: la cara centrada en la cabeza (con [47,682,99,734] la mejilla tocaba el borde derecho y en la grilla y el HUD se veía corrida). Tanda 3 (31/oct): \"caraNitida\" arma la cara de una sola vez desde los píxeles de la hoja (extraer_joaquin.cara_nitida): borde de ~1 px como Simón y Chipi y algo más de nitidez, sin acercar el encuadre (la hoja no da más: la cara mide 50 px)."
  },
  "animaciones": {
   "quieto": {
@@ -209,27 +210,88 @@
       },
       {
        "zona": [
-        1158,
-        128,
-        1180,
-        146
+        [
+         1158,
+         134
+        ],
+        [
+         1164,
+         131
+        ],
+        [
+         1170,
+         133
+        ],
+        [
+         1176,
+         134
+        ],
+        [
+         1180,
+         134
+        ],
+        [
+         1180,
+         146
+        ],
+        [
+         1158,
+         146
+        ]
        ],
        "lumMax": 50
       },
       {
        "zona": [
-        1158,
-        128,
-        1180,
-        146
+        [
+         1158,
+         134
+        ],
+        [
+         1164,
+         131
+        ],
+        [
+         1170,
+         133
+        ],
+        [
+         1176,
+         134
+        ],
+        [
+         1180,
+         134
+        ],
+        [
+         1180,
+         146
+        ],
+        [
+         1158,
+         146
+        ]
        ],
        "satMax": 0.3,
        "lumMax": 200
+      },
+      {
+       "zona": [
+        1157,
+        158,
+        1176,
+        166
+       ],
+       "tono": [
+        210,
+        255
+       ],
+       "satMin": 0.1
       }
      ]
     }
    },
-   "_nota": "revisión 31/oct (dash[0]): sin el humo gris ni el fondo pegados entre los pies (una mancha gris oscura bajo las piernas) ni el brillo azul del piso"
+   "_nota": "revisión 31/oct (dash[0]): sin el humo gris ni el fondo pegados entre los pies (una mancha gris oscura bajo las piernas) ni el brillo azul del piso. Tercera tanda: el humo gris y el fondo debajo del muslo de atrás salen sólo por debajo del borde del muslo (con el rectángulo de antes, el «quitar» del gris se llevaba también el jean y el muslo terminaba en una recta de 22 px), y sale la mancha lavanda del humo bajo la zapatilla de adelante"
   },
   "guardia": {
    "mascara": [
@@ -1227,6 +1289,15 @@
     4
    ],
    "injertos": {
+    "3": {
+     "donante": "combo:2",
+     "corte": 446,
+     "corteDonante": 442,
+     "caderaX": [
+      1085,
+      1130
+     ]
+    },
     "6": {
      "donante": "combo:2",
      "corte": 446,
@@ -1237,7 +1308,7 @@
      ]
     }
    },
-   "_nota": "revisión 31/oct (combo[3] = herramienta1[1]): la pierna de atrás, la zapatilla y la campera de la figura siguiente, que bajan en diagonal dentro de la caja, se sacan con un polígono que las sigue (quedaba una pierna suelta abajo a la derecha), y se suma por color el borde derecho del mate, que la costura [1168,1185] cortaba en recta. combo[4] (= herramienta1[2], el cuadro 6): el límite sigue la espalda, la cara y la manga (sus lados verticales dejaban rectas a los dos lados, un pedazo del mate del cuadro anterior y el fondo negro entre la cara y el brazo)"
+   "_nota": "revisión 31/oct (combo[3] = herramienta1[1]): la pierna de atrás, la zapatilla y la campera de la figura siguiente, que bajan en diagonal dentro de la caja, se sacan con un polígono que las sigue (quedaba una pierna suelta abajo a la derecha), y se suma por color el borde derecho del mate, que la costura [1168,1185] cortaba en recta. combo[4] (= herramienta1[2], el cuadro 6): el límite sigue la espalda, la cara y la manga (sus lados verticales dejaban rectas a los dos lados, un pedazo del mate del cuadro anterior y el fondo negro entre la cara y el brazo). Tercera tanda: combo[3] = herramienta1[1] (el primer impacto del combo y el previo al del Remate) llevaba una sola pierna y la cadera cortada en vertical (la de adelante la tapa la figura vecina en la hoja): lleva las piernas de combo[2] injertadas, como el 6"
   },
   "especial1": {
    "cajas": [

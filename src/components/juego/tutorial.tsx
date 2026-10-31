@@ -4,6 +4,8 @@ import { ChevronRight, HandFist, Shield, Wind } from 'lucide-react'
 import { useState } from 'react'
 import { IDS_PERSONAJES, PERSONAJES } from '@/lib/juego/personajes'
 import type { FichaPersonaje } from '@/lib/juego/tipos'
+import { alTocar } from '@/lib/juego/ui/toque'
+import { Capa } from './capa'
 import { IconoDeEspecial, IconoHerramienta } from './iconos'
 
 interface Paso {
@@ -42,6 +44,11 @@ function pasos(herramienta: string): readonly Paso[] {
 /**
  * Tres tarjetas cortas antes de la primera pelea (y desde «Cómo se juega»), con los botones y
  * las cartas del barbero elegido.
+ *
+ * Se usa con un pulgar apoyado: el que venía del VS, o el que sigue lo que pide el paso 1
+ * («Apoyá el pulgar izquierdo donde quieras y deslizá»). Por eso la capa no deja panear (Capa) y
+ * «Omitir» y «Siguiente» responden también al segundo dedo (alTocar, ui/toque.ts): Chrome no le
+ * genera click. Un toque, un paso.
  */
 export function Tutorial({
   tactil,
@@ -59,14 +66,14 @@ export function Tutorial({
   const actual = PASOS[paso]
 
   return (
-    <div className="cf-capa cf-capa--tutorial" role="dialog" aria-modal="true" aria-labelledby="cf-tuto-titulo">
+    <Capa className="cf-capa--tutorial" titulo="cf-tuto-titulo">
       <div className="cf-tuto">
         <div className="cf-tuto__cabeza">
           <span className="cf-rotulo">
             Cómo se juega · {paso + 1} de {PASOS.length}
           </span>
           {/* «Omitir» y no «Saltar»: «Saltar» es el rótulo del salto en el dibujo del stick. */}
-          <button type="button" className="cf-enlace" onClick={onCerrar} aria-label="Omitir el tutorial">
+          <button type="button" className="cf-enlace" {...alTocar(onCerrar)} aria-label="Omitir el tutorial">
             Omitir
           </button>
         </div>
@@ -92,7 +99,7 @@ export function Tutorial({
           <button
             type="button"
             className="cf-btn"
-            onClick={() => (ultimo ? onCerrar() : setPaso(paso + 1))}
+            {...alTocar(() => (ultimo ? onCerrar() : setPaso((n) => Math.min(n + 1, PASOS.length - 1))))}
             autoFocus
           >
             <span>{ultimo ? '¡A pelear!' : 'Siguiente'}</span>
@@ -100,7 +107,7 @@ export function Tutorial({
           </button>
         </div>
       </div>
-    </div>
+    </Capa>
   )
 }
 

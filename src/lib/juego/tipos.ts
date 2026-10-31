@@ -559,12 +559,19 @@ export interface DesglosePuntaje {
 //     export function avanzar(p: Partida, entradas: readonly [EntradaJugador, EntradaJugador]): void
 //     export function calcularPuntaje(p: Partida, lado: Lado): DesglosePuntaje
 //     export function metaDesdeAtlas(atlas: AtlasPersonaje): MetaAnimaciones
+//     export function especialListo(l: LuchadorEstado, n: 1 | 2): boolean   (31/oct: la carta del
+//       especial se enciende si apretarlo lo tira; la Curación de Fabri pide además vida < 90 %)
 //
 //   src/lib/juego/render/index.ts
 //     export async function cargarRecursos(personajes: IdPersonaje[], arena: IdArena,
-//       alProgresar?: (fraccion: number) => void): Promise<RecursosJuego>
+//       alProgresar?: (fraccion: number) => void,
+//       opciones?: { senal?: AbortSignal }): Promise<RecursosJuego>
+//       (31/oct: `senal` opcional; cancelada, rechaza con un AbortError —`esCancelacion`— y lo
+//       bajado queda para retomar con Range)
 //     export function crearRenderizador(canvas: HTMLCanvasElement, recursos: RecursosJuego,
-//       opciones?: Partial<OpcionesRender>): Renderizador
+//       opciones?: Partial<OpcionesRender>): RenderizadorJuego
+//       (31/oct: `RenderizadorJuego` = este `Renderizador` + `cajasLuchadores()`, la caja en
+//       pantalla de cada luchador; la usa ui/apartar.ts. Los dos cambios son compatibles hacia atrás)
 //
 //   src/lib/juego/audio/index.ts
 //     export function crearAudio(): AudioJuego

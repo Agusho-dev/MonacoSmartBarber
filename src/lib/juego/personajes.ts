@@ -44,15 +44,16 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
       {
         nombre: 'Corte Relámpago',
         // 5 (era 4): barato y encadenado después de cada golpe que entraba, Simón le ganaba 6 de
-        // cada 10 a la CPU difícil y 3 de 10 en fácil (revisión del 30/oct, simulado).
-        costo: 5,
+        // cada 10 a la CPU difícil y 3 de 10 en fácil (revisión del 30/oct, simulado). 6 desde el
+        // 31/oct (tercera tanda): los costos de los 13 se afinaron entre dos personas (meta E).
+        costo: 6,
         icono: 'rayo',
         efecto: 'electrocuta',
         descripcion: 'Cruza la pantalla con la máquina cargada de electricidad y deja al rival electrocutado.',
       },
       {
         nombre: 'Tijera Tormenta',
-        costo: 6,
+        costo: 7,
         icono: 'tijera',
         efecto: 'multigolpe',
         descripcion: 'Lanza un tornado de tijeras que corta seis veces seguidas.',
@@ -80,14 +81,14 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
     especiales: [
       {
         nombre: 'Sillonazo Brutal',
-        costo: 5,
+        costo: 4,
         icono: 'sillon',
         efecto: 'rompe_guardia',
         descripcion: 'Revolea un sillón de barbero: rompe la guardia y tira al rival al piso.',
       },
       {
         nombre: 'Fijación Extrema',
-        costo: 6,
+        costo: 8,
         icono: 'spray',
         efecto: 'congela',
         descripcion: 'Spray de fijación al máximo: deja al rival duro como una estatua.',
@@ -115,14 +116,14 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
     especiales: [
       {
         nombre: 'Bombo Aturdidor',
-        costo: 4,
+        costo: 5,
         icono: 'bombo',
         efecto: 'aturde',
         descripcion: 'Larga el bombo rodando por el piso: si te alcanza, quedás aturdido. Se esquiva saltando.',
       },
       {
         nombre: 'Navajazo de Barbería',
-        costo: 5,
+        costo: 6,
         icono: 'navaja',
         efecto: 'critico',
         descripcion: 'Un tajo rapidísimo con la navaja, de corto alcance. Siempre es crítico.',
@@ -153,7 +154,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
         costo: 5,
         icono: 'cura',
         efecto: 'cura',
-        descripcion: 'Se toma la bebida verde y se cura de a poco. Los golpes leves no la cortan; un golpe fuerte o un especial, sí.',
+        descripcion: 'Se toma la bebida verde y se cura rápido. Sólo con la vida por debajo del 90 %. Los golpes leves no la cortan; un golpe fuerte o un especial, sí.',
       },
       {
         nombre: 'Modo Boxeador',
@@ -230,7 +231,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
         costo: 6,
         icono: 'graffiti',
         efecto: 'derriba',
-        descripcion: 'Pinta un graffiti a media distancia que estalla al ratito: si no salís a tiempo, te tira al piso, y cubriéndote te gasta mucha guardia.',
+        descripcion: 'Pinta un graffiti delante suyo que estalla al ratito: si no salís a tiempo, te tira al piso, y cubriéndote te gasta mucha guardia.',
       },
     ],
     pasiva: {
@@ -255,17 +256,17 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
     especiales: [
       {
         nombre: 'Trago Mareador',
-        costo: 4,
+        costo: 5,
         icono: 'trago',
         efecto: 'marea',
         descripcion: 'Te tira el trago encima: quedás mareado, no te podés cubrir y caminás lento.',
       },
       {
         nombre: 'Flair Bartender',
-        costo: 6,
+        costo: 5,
         icono: 'botella',
         efecto: 'multigolpe',
-        descripcion: 'Revolea tres botellas girando que caen a distintas distancias.',
+        descripcion: 'Revolea tres botellas girando: la primera sale baja y corta, las otras caen más lejos.',
       },
     ],
     pasiva: {
@@ -325,7 +326,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
     especiales: [
       {
         nombre: 'Gorro Lanzador',
-        costo: 4,
+        costo: 5,
         icono: 'gorro',
         efecto: 'multigolpe',
         descripcion: 'Tira el gorro chino como un bumerán: te puede pegar a la ida y a la vuelta.',
@@ -398,7 +399,7 @@ export const PERSONAJES: Record<IdPersonaje, FichaPersonaje> = {
         costo: 4,
         icono: 'mamadera',
         efecto: 'empuja',
-        descripcion: 'Un chorro de leche a presión que te pega varias veces y te va empujando.',
+        descripcion: 'Un chorro de leche a presión que te pega varias veces; el último chorrazo te empuja.',
       },
       {
         nombre: 'Pañalazo',

@@ -14,10 +14,19 @@
  *   scripts/juego/generar_rapado.py): viajan como `rapados` y el remate ¡AL CERO! deja pelado al
  *   que lo recibe. Sin ellos, el remate sólo hace volar el pelo.
  * - Un pedido que falla por la red (o un 5xx) se reintenta una vez: el 4G de un local es inestable.
- * - Ningún pedido espera para siempre: si pasan INACTIVIDAD_MS sin que llegue nada (ni los
- *   encabezados ni un trozo) o TOPE_MS en total, se corta y cuenta como una falla de red (un
- *   reintento y después el error de la carga, con «Reintentar» y «Volver»). Antes, una conexión
- *   que dejaba de traer bytes sin cortar dejaba «Calentando la máquina» fija para siempre.
+ * - Ningún pedido espera para siempre, pero tampoco se corta uno que sigue bajando: se corta si en
+ *   VENTANA_RITMO_MS no llegan ni los encabezados ni RITMO_MIN_BYTES (un pedido colgado, o uno que
+ *   trae gotas sueltas) y cuenta como una falla de red (un reintento y después el error de la
+ *   carga, con «Reintentar» y «Volver»). Antes, una conexión que dejaba de traer bytes sin cortar
+ *   dejaba «Calentando la máquina» fija para siempre; y del 31/oct hasta la tercera tanda hubo además
+ *   un tope de 60 s por pedido que cortaba un atlas que seguía llegando: por debajo de ≈ 135 kb/s la
+ *   pelea daba error (y en un navegador que no retoma la entrada cortada de su caché, nunca cargaba).
+ * - Lo bajado no se tira: el reintento (el automático y el «Reintentar» de la pantalla) pide sólo lo
+ *   que falta con `Range` e `If-Range` (el ETag de la primera respuesta). Un 206 se agrega; un 200
+ *   (el archivo cambió, o el servidor no hace rangos) empieza de cero. No depende de la caché del
+ *   navegador (Chrome retoma la entrada cortada de la suya; Safari quizás no).
+ * - Cada carga se puede cancelar (`señal`): «Volver» en la pantalla de carga corta sus pedidos y
+ *   ningún caché guarda una bajada cortada; si otra carga usa el mismo archivo, sigue para ésa.
  * - Lo opcional (caras, efectos, rapado) no frena la pelea: listos los atlas y la arena, tiene
  *   ESPERA_OPCIONALES_MS más; lo que no llegó, la pelea lo hace sin eso.
  * - La arena y las caras se piden con el `?dpl=` de Vercel, igual que las <img> de next/image que
@@ -38,12 +47,18 @@ interface Tarea {
 
 const MAX_CACHE = 10
 const RUTA_EFECTOS = '/juego/efectos/efectos.json'
-/** Sin que llegue nada (encabezados o un trozo) en este tiempo, el pedido se corta. */
-const INACTIVIDAD_MS = 15_000
-/** Tope de un intento aunque siga llegando de a gotas. */
-const TOPE_MS = 60_000
+/**
+ * El vigía de cada pedido: si en este tiempo no llegan los encabezados, o no llegan al menos
+ * RITMO_MIN_BYTES, el pedido se corta. Mide el ritmo, no el total: un atlas de 1 MB a 60 kb/s tarda
+ * más de 2 minutos y no se corta (antes había un tope de 60 s por pedido, TOPE_MS, que sí).
+ */
+const VENTANA_RITMO_MS = 15_000
+/** 2 KB en 15 s ≈ 1 kb/s: menos que eso es un pedido colgado que suelta gotas, no una red lenta. */
+const RITMO_MIN_BYTES = 2048
 /** Listos los atlas y la arena, cuánto más se espera a lo opcional (caras, efectos, rapado). */
 const ESPERA_OPCIONALES_MS = 8_000
+/** Bajadas cortadas que se guardan para retomar (por URL; las más viejas se tiran). */
+const MAX_PARCIALES = 4
 
 /**
  * public/juego/personajes/<id>/rapado.json: los cuadros de `danio` y `ko` con la cabeza pelada,
@@ -69,8 +84,68 @@ export interface RecursosConEfectos extends RecursosJuego {
   efectosComunes?: RecursoEfectos | null
   rapados?: Partial<Record<IdPersonaje, RecursoRapado>>
 }
-const cacheImagenes = new Map<string, Promise<Decodificada>>()
-const cacheAtlas = new Map<string, Promise<AtlasPersonaje>>()
+/**
+ * Una bajada (con su decodificación) que pueden esperar varias cargas a la vez. Se corta recién
+ * cuando la cancelan TODAS las que la esperan; cortada o fallida, sale del caché. Cada carga
+ * recibe el avance en su propia tarea, aunque se sume a una bajada empezada.
+ */
+interface Compartida<T> {
+  promesa: Promise<T>
+  control: AbortController
+  usuarios: number
+  hecha: boolean
+  avance: number
+  tareas: Set<Tarea>
+}
+
+const cacheImagenes = new Map<string, Compartida<Decodificada>>()
+const cacheAtlas = new Map<string, Compartida<AtlasPersonaje>>()
+
+/** Lo que ya bajó un pedido que se cortó, para pedir sólo el resto (Range). */
+interface Parcial {
+  partes: BlobPart[]
+  recibido: number
+  /** Largo total del archivo (0 si no se sabe). */
+  total: number
+  /** ETag FUERTE de la respuesta: va en If-Range (con uno débil el servidor no puede dar rangos). */
+  etag: string
+  tipo: string
+}
+const parciales = new Map<string, Parcial>()
+
+/** El error de una carga cancelada (no es una falla: nadie la muestra). */
+function cancelada(): Error {
+  try {
+    return new DOMException('La carga se canceló', 'AbortError')
+  } catch {
+    const e = new Error('La carga se canceló')
+    e.name = 'AbortError'
+    return e
+  }
+}
+
+export function esCancelacion(e: unknown): boolean {
+  return !!e && typeof e === 'object' && (e as { name?: unknown }).name === 'AbortError'
+}
+
+/** Espera `ms`, o menos si cancelan la carga (y entonces rechaza). */
+function esperarCancelable(ms: number, senal?: AbortSignal): Promise<void> {
+  return new Promise((listo, fallar) => {
+    if (senal?.aborted) {
+      fallar(cancelada())
+      return
+    }
+    const alCancelar = () => {
+      clearTimeout(t)
+      fallar(cancelada())
+    }
+    const t = setTimeout(() => {
+      senal?.removeEventListener('abort', alCancelar)
+      listo()
+    }, ms)
+    senal?.addEventListener('abort', alCancelar, { once: true })
+  })
+}
 
 function urlBase(): string {
   return typeof location !== 'undefined' && location.href ? location.href : 'http://localhost/'
@@ -179,12 +254,40 @@ class ErrorHttp extends Error {
   }
 }
 
+/** «bytes 1000-1999/5000» → { desde: 1000, total: 5000 } (total null con «/*»). */
+function leerContentRange(valor: string | null): { desde: number; total: number | null } | null {
+  const m = valor ? /^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i.exec(valor.trim()) : null
+  if (!m) return null
+  return { desde: Number(m[1]), total: m[3] === '*' ? null : Number(m[3]) }
+}
+
+/** Se puede retomar con Range: sin compresión (los bytes contados son los del archivo) y con ETag fuerte. */
+function etagReanudable(res: Response): string | null {
+  const codificacion = (res.headers.get('content-encoding') ?? '').trim().toLowerCase()
+  if (codificacion && codificacion !== 'identity') return null
+  const etag = res.headers.get('etag')
+  if (!etag || /^w\//i.test(etag.trim())) return null
+  return etag.trim()
+}
+
+function guardarParcial(url: string, p: Parcial): void {
+  parciales.delete(url)
+  parciales.set(url, p)
+  while (parciales.size > MAX_PARCIALES) {
+    const primera = parciales.keys().next().value
+    if (primera === undefined) break
+    parciales.delete(primera)
+  }
+}
+
 /**
- * Un intento de bajar `url`, con vigía: se corta si pasan INACTIVIDAD_MS sin que llegue nada (los
- * encabezados o un trozo del cuerpo) o TOPE_MS en total. Informa el avance (0..0,9 de la tarea:
- * el resto es decodificar).
+ * Un intento de bajar `url`, con vigía de ritmo (VENTANA_RITMO_MS / RITMO_MIN_BYTES). Si quedó algo
+ * de un intento anterior (`parciales`), pide sólo lo que falta; si este intento se corta con algo
+ * bajado, lo deja guardado para el próximo. Informa el avance (0..0,9 de la tarea: el resto es
+ * decodificar). `senal`: la carga se canceló.
  */
-async function bajarUnaVez(url: string, tarea: Tarea): Promise<Blob> {
+async function bajarUnaVez(url: string, tarea: Tarea, senal?: AbortSignal): Promise<Blob> {
+  if (senal?.aborted) throw cancelada()
   const control = new AbortController()
   /** Por qué lo cortó el vigía (null: no lo cortó). En un objeto: lo escribe un timer. */
   const vigilado: { corte: string | null } = { corte: null }
@@ -192,34 +295,81 @@ async function bajarUnaVez(url: string, tarea: Tarea): Promise<Blob> {
     vigilado.corte = motivoCorte
     control.abort()
   }
+  const alCancelar = () => control.abort()
+  senal?.addEventListener('abort', alCancelar, { once: true })
   let vigia: ReturnType<typeof setTimeout> | undefined
+  let enVentana = 0
   const rearmar = () => {
     clearTimeout(vigia)
-    vigia = setTimeout(() => cortar(`${INACTIVIDAD_MS / 1000} s sin datos`), INACTIVIDAD_MS)
+    enVentana = 0
+    vigia = setTimeout(
+      () => cortar(`menos de ${RITMO_MIN_BYTES / 1024} KB en ${VENTANA_RITMO_MS / 1000} s`),
+      VENTANA_RITMO_MS,
+    )
   }
-  const tope = setTimeout(() => cortar(`más de ${TOPE_MS / 1000} s`), TOPE_MS)
+  const pedir = (desde: Parcial | null) =>
+    fetch(url, {
+      credentials: 'same-origin',
+      signal: control.signal,
+      headers: desde ? { Range: `bytes=${desde.recibido}-`, 'If-Range': desde.etag } : undefined,
+    })
+
+  let previa = parciales.get(url) ?? null
+  parciales.delete(url)
+  let partes: BlobPart[] = []
+  let recibido = 0
+  let total = 0
+  let etag: string | null = null
+  let tipo = ''
   rearmar()
   try {
-    const res = await fetch(url, { credentials: 'same-origin', signal: control.signal })
+    let res = await pedir(previa)
     rearmar()
-    if (!res.ok) throw new ErrorHttp(res.status)
-    const total = Number(res.headers.get('content-length')) || 0
-    const tipo = res.headers.get('content-type') ?? ''
+    if (previa) {
+      const rango = res.status === 206 ? leerContentRange(res.headers.get('content-range')) : null
+      const sigue =
+        rango !== null &&
+        rango.desde === previa.recibido &&
+        (rango.total === null || previa.total === 0 || rango.total === previa.total)
+      if (sigue) {
+        partes = previa.partes
+        recibido = previa.recibido
+        total = rango.total ?? previa.total
+        etag = previa.etag
+        tipo = previa.tipo
+      } else if (res.status !== 200) {
+        // Un rango que no es el pedido (o un 416: el archivo se achicó): lo bajado no sirve. Se pide
+        // entero. Un 200 ya es el archivo entero (cambió, o el servidor no hace rangos): de cero.
+        try {
+          await res.body?.cancel()
+        } catch {
+          // ya no importa
+        }
+        res = await pedir(null)
+        rearmar()
+      }
+      previa = null
+    }
+    if (recibido === 0) {
+      if (!res.ok) throw new ErrorHttp(res.status)
+      total = Number(res.headers.get('content-length')) || 0
+      etag = etagReanudable(res)
+      tipo = res.headers.get('content-type') ?? ''
+    }
     if (!res.body) {
       const blob = await res.blob()
       tarea.avanzar(0.9)
-      return blob
+      return recibido > 0 ? new Blob([...partes, blob], { type: tipo }) : blob
     }
     const lector = res.body.getReader()
-    const partes: BlobPart[] = []
-    let recibido = 0
     for (;;) {
       const { done, value } = await lector.read()
       if (done) break
       if (value) {
-        rearmar()
         partes.push(value)
         recibido += value.byteLength
+        enVentana += value.byteLength
+        if (enVentana >= RITMO_MIN_BYTES) rearmar()
         // con compresión el Content-Length es del cuerpo comprimido: se acota (sin él, se avisa al final)
         if (total > 0) tarea.avanzar(0.9 * Math.min(1, recibido / total))
       }
@@ -227,25 +377,31 @@ async function bajarUnaVez(url: string, tarea: Tarea): Promise<Blob> {
     tarea.avanzar(0.9)
     return new Blob(partes, { type: tipo })
   } catch (e) {
+    // Lo que llegó queda para el próximo intento (el automático, o «Reintentar»), si se puede retomar.
+    // Si se cortó antes de contestar el pedido con Range, lo de antes sigue sirviendo tal cual.
+    if (previa) guardarParcial(url, previa)
+    else if (recibido > 0 && etag && !(e instanceof ErrorHttp)) guardarParcial(url, { partes, recibido, total, etag, tipo })
+    if (senal?.aborted) throw cancelada()
     if (vigilado.corte) throw new Error(`se colgó (${vigilado.corte})`)
     throw e
   } finally {
     clearTimeout(vigia)
-    clearTimeout(tope)
+    senal?.removeEventListener('abort', alCancelar)
   }
 }
 
 /**
  * Baja un archivo: un corte de red, un 5xx o un pedido colgado se reintentan una vez (el 4G de un
- * local es inestable); un 4xx no.
+ * local es inestable), retomando lo ya bajado; un 4xx no. Cancelada, no se reintenta.
  */
-async function bajar(url: string, tarea: Tarea): Promise<Blob> {
+async function bajar(url: string, tarea: Tarea, senal?: AbortSignal): Promise<Blob> {
   for (let intento = 0; ; intento++) {
     try {
-      return await bajarUnaVez(url, tarea)
+      return await bajarUnaVez(url, tarea, senal)
     } catch (e) {
+      if (senal?.aborted) throw cancelada()
       if (intento >= 1 || (e instanceof ErrorHttp && e.estado < 500)) throw e
-      await new Promise((r) => setTimeout(r, 450))
+      await esperarCancelable(450, senal)
     }
   }
 }
@@ -278,25 +434,98 @@ function recortarCache<T>(mapa: Map<string, T>, conservar: string): void {
   }
 }
 
-function cargarImagen(url: string, tarea: Tarea): Promise<Decodificada> {
-  const previa = cacheImagenes.get(url)
-  if (previa) {
-    previa.then(
-      () => tarea.avanzar(1),
-      () => undefined,
+/**
+ * Espera la bajada compartida `clave` (la arranca con `crear` si no hay una viva) con su propia
+ * tarea y su propia señal. Si la cancelan todas las cargas que la esperan, se corta y sale del caché;
+ * si falla, también sale (el próximo pedido empieza otra). Terminada bien, queda (la revancha arranca
+ * al instante).
+ */
+function compartida<T>(
+  mapa: Map<string, Compartida<T>>,
+  clave: string,
+  tarea: Tarea,
+  crear: (tarea: Tarea, senal: AbortSignal) => Promise<T>,
+  senal?: AbortSignal,
+): Promise<T> {
+  if (senal?.aborted) return Promise.reject(cancelada())
+  let c = mapa.get(clave)
+  if (!c) {
+    const control = new AbortController()
+    const nueva: Compartida<T> = {
+      promesa: Promise.resolve(null as T),
+      control,
+      usuarios: 0,
+      hecha: false,
+      avance: 0,
+      tareas: new Set(),
+    }
+    const reparto: Tarea = {
+      avanzar(f: number) {
+        if (f > nueva.avance) nueva.avance = f
+        for (const t of nueva.tareas) t.avanzar(f)
+      },
+    }
+    nueva.promesa = crear(reparto, control.signal)
+    nueva.promesa.then(
+      () => {
+        nueva.hecha = true
+      },
+      () => {
+        nueva.hecha = true
+        if (mapa.get(clave) === nueva) mapa.delete(clave)
+      },
     )
-    return previa
+    mapa.set(clave, nueva)
+    recortarCache(mapa, clave)
+    c = nueva
   }
-  const promesa = (async () => {
-    const blob = await bajar(url, tarea)
-    const img = await decodificar(blob)
-    tarea.avanzar(1)
-    return img
-  })()
-  cacheImagenes.set(url, promesa)
-  promesa.catch(() => cacheImagenes.delete(url))
-  recortarCache(cacheImagenes, url)
-  return promesa
+  const actual = c
+  actual.usuarios++
+  actual.tareas.add(tarea)
+  if (actual.avance > 0) tarea.avanzar(actual.avance)
+  return new Promise<T>((resolver, rechazar) => {
+    let listo = false
+    const salir = () => {
+      if (listo) return false
+      listo = true
+      senal?.removeEventListener('abort', alCancelar)
+      actual.tareas.delete(tarea)
+      actual.usuarios--
+      return true
+    }
+    function alCancelar() {
+      if (!salir()) return
+      if (actual.usuarios <= 0 && !actual.hecha) {
+        actual.control.abort()
+        if (mapa.get(clave) === actual) mapa.delete(clave)
+      }
+      rechazar(cancelada())
+    }
+    senal?.addEventListener('abort', alCancelar, { once: true })
+    actual.promesa.then(
+      (v) => {
+        if (salir()) resolver(v)
+      },
+      (e: unknown) => {
+        if (salir()) rechazar(e)
+      },
+    )
+  })
+}
+
+function cargarImagen(url: string, tarea: Tarea, senal?: AbortSignal): Promise<Decodificada> {
+  return compartida(
+    cacheImagenes,
+    url,
+    tarea,
+    async (t, s) => {
+      const blob = await bajar(url, t, s)
+      const img = await decodificar(blob)
+      t.avanzar(1)
+      return img
+    },
+    senal,
+  )
 }
 
 function validarAtlas(datos: unknown, id: IdPersonaje): AtlasPersonaje {
@@ -324,61 +553,64 @@ function validarAtlas(datos: unknown, id: IdPersonaje): AtlasPersonaje {
   }
 }
 
-async function cargarAtlas(id: IdPersonaje, tJson: Tarea, tPng: Tarea) {
+async function cargarAtlas(id: IdPersonaje, tJson: Tarea, tPng: Tarea, senal?: AbortSignal) {
   const ficha = PERSONAJES[id]
   if (!ficha) throw new Error(`Corte Final: no existe el personaje «${id}»`)
   const ruta = absoluta(ficha.rutas.atlas)
   let datos: AtlasPersonaje
   try {
-    let promesa = cacheAtlas.get(ruta)
-    if (!promesa) {
-      promesa = (async () => {
-        const blob = await bajar(ruta, tJson)
+    datos = await compartida(
+      cacheAtlas,
+      ruta,
+      tJson,
+      async (t, s) => {
+        const blob = await bajar(ruta, t, s)
         return validarAtlas(JSON.parse(await blob.text()), id)
-      })()
-      cacheAtlas.set(ruta, promesa)
-      promesa.catch(() => cacheAtlas.delete(ruta))
-      recortarCache(cacheAtlas, ruta)
-    }
-    datos = await promesa
+      },
+      senal,
+    )
     tJson.avanzar(1)
   } catch (e) {
+    if (esCancelacion(e)) throw e
     throw new Error(`Corte Final: no se pudo cargar el atlas de ${ficha.nombre} (${ficha.rutas.atlas}): ${motivo(e)}`)
   }
   const rutaPng = absoluta(datos.imagen, ruta)
   try {
-    const imagen = await cargarImagen(rutaPng, tPng)
+    const imagen = await cargarImagen(rutaPng, tPng, senal)
     return { id, datos, imagen }
   } catch (e) {
+    if (esCancelacion(e)) throw e
     throw new Error(`Corte Final: no se pudo cargar la hoja de sprites de ${ficha.nombre} (${rutaPng}): ${motivo(e)}`)
   }
 }
 
-async function cargarCara(id: IdPersonaje, tarea: Tarea): Promise<Decodificada | null> {
+async function cargarCara(id: IdPersonaje, tarea: Tarea, senal?: AbortSignal): Promise<Decodificada | null> {
   const ficha = PERSONAJES[id]
   if (!ficha?.rutas.cara) {
     tarea.avanzar(1)
     return null
   }
   try {
-    return await cargarImagen(conDespliegue(absoluta(ficha.rutas.cara)), tarea)
+    return await cargarImagen(conDespliegue(absoluta(ficha.rutas.cara)), tarea, senal)
   } catch (e) {
+    if (esCancelacion(e)) return null
     console.warn(`[juego] sin cara de ${ficha.nombre}: ${motivo(e)}`)
     tarea.avanzar(1)
     return null
   }
 }
 
-async function cargarEfectos(tJson: Tarea, tPng: Tarea): Promise<RecursoEfectos | null> {
+async function cargarEfectos(tJson: Tarea, tPng: Tarea, senal?: AbortSignal): Promise<RecursoEfectos | null> {
   const ruta = absoluta(RUTA_EFECTOS)
   try {
-    const blob = await bajar(ruta, tJson)
+    const blob = await bajar(ruta, tJson, senal)
     const datos = JSON.parse(await blob.text()) as AtlasEfectosComunes
     tJson.avanzar(1)
     if (!datos || typeof datos.imagen !== 'string' || !datos.animaciones) throw new Error('JSON sin imagen o animaciones')
-    const imagen = await cargarImagen(absoluta(datos.imagen, ruta), tPng)
+    const imagen = await cargarImagen(absoluta(datos.imagen, ruta), tPng, senal)
     return { datos, imagen }
   } catch (e) {
+    if (esCancelacion(e)) return null
     console.warn(`[juego] sin atlas de efectos compartidos (${motivo(e)}): se dibujan a mano`)
     tJson.avanzar(1)
     tPng.avanzar(1)
@@ -390,7 +622,7 @@ async function cargarEfectos(tJson: Tarea, tPng: Tarea): Promise<RecursoEfectos 
  * Los sprites pelados del remate (opcionales: sin ellos el remate no pela a nadie). Sólo se piden
  * si la ficha dice que existen (`rutas.rapado`): un barbero recién sumado no deja un 404.
  */
-async function cargarRapado(id: IdPersonaje, tJson: Tarea, tPng: Tarea): Promise<RecursoRapado | null> {
+async function cargarRapado(id: IdPersonaje, tJson: Tarea, tPng: Tarea, senal?: AbortSignal): Promise<RecursoRapado | null> {
   const ficha = PERSONAJES[id]
   if (ficha && !ficha.rutas.rapado) {
     tJson.avanzar(1)
@@ -400,15 +632,16 @@ async function cargarRapado(id: IdPersonaje, tJson: Tarea, tPng: Tarea): Promise
   try {
     if (!ficha?.rutas.rapado) throw new Error('personaje desconocido')
     const ruta = absoluta(ficha.rutas.rapado.atlas)
-    const blob = await bajar(ruta, tJson)
+    const blob = await bajar(ruta, tJson, senal)
     const datos = JSON.parse(await blob.text()) as AtlasRapado
     tJson.avanzar(1)
     if (!datos || typeof datos.imagen !== 'string' || !datos.animaciones || typeof datos.animaciones !== 'object') {
       throw new Error('JSON sin imagen o animaciones')
     }
-    const imagen = await cargarImagen(absoluta(datos.imagen, ruta), tPng)
+    const imagen = await cargarImagen(absoluta(datos.imagen, ruta), tPng, senal)
     return { datos, imagen }
   } catch (e) {
+    if (esCancelacion(e)) return null
     console.warn(`[juego] sin sprites rapados de ${ficha?.nombre ?? id} (${motivo(e)}): el remate sólo vuela pelo`)
     tJson.avanzar(1)
     tPng.avanzar(1)
@@ -416,13 +649,19 @@ async function cargarRapado(id: IdPersonaje, tJson: Tarea, tPng: Tarea): Promise
   }
 }
 
-async function cargarArena(arena: IdArena, tarea: Tarea): Promise<{ def: ArenaDef; imagen: CanvasImageSource }> {
+async function cargarArena(
+  arena: IdArena,
+  tarea: Tarea,
+  senal?: AbortSignal,
+): Promise<{ def: ArenaDef; imagen: CanvasImageSource }> {
   const def = ARENAS[arena] ?? ARENAS.rondeau
   if (def.imagen) {
     try {
-      const imagen = await cargarImagen(conDespliegue(absoluta(def.imagen)), tarea)
+      const imagen = await cargarImagen(conDespliegue(absoluta(def.imagen)), tarea, senal)
       return { def, imagen }
     } catch (e) {
+      // Cancelada no es «no hay arena»: la carga entera se corta (no se dibuja la de respaldo).
+      if (esCancelacion(e)) throw e
       console.warn(`[juego] no se pudo cargar la arena ${def.nombre} (${motivo(e)}): se dibuja una de respaldo`)
     }
   }
@@ -531,28 +770,39 @@ export async function cargarRecursosImpl(
   personajes: IdPersonaje[],
   arena: IdArena,
   alProgresar?: (fraccion: number) => void,
+  senal?: AbortSignal,
 ): Promise<RecursosJuego> {
   const unicos = Array.from(new Set(personajes))
   if (unicos.length === 0) throw new Error('Corte Final: no se pidió ningún personaje')
+  if (senal?.aborted) throw cancelada()
   const progreso = crearProgreso(alProgresar)
   // las tareas se registran todas antes del primer await: el total se conoce de entrada
-  const atlas = unicos.map((id) => cargarAtlas(id, progreso.tarea(1), progreso.tarea(10)))
-  const caras = unicos.map((id) => opcional(cargarCara(id, progreso.tarea(1))))
-  const fondo = cargarArena(arena, progreso.tarea(8))
-  const efectos = opcional(cargarEfectos(progreso.tarea(0.5), progreso.tarea(1.5)))
-  const rapados = unicos.map((id) => opcional(cargarRapado(id, progreso.tarea(0.2), progreso.tarea(0.8))))
+  const atlas = unicos.map((id) => cargarAtlas(id, progreso.tarea(1), progreso.tarea(10), senal))
+  const caras = unicos.map((id) => opcional(cargarCara(id, progreso.tarea(1), senal)))
+  const fondo = cargarArena(arena, progreso.tarea(8), senal)
+  const efectos = opcional(cargarEfectos(progreso.tarea(0.5), progreso.tarea(1.5), senal))
+  const rapados = unicos.map((id) => opcional(cargarRapado(id, progreso.tarea(0.2), progreso.tarea(0.8), senal)))
   progreso.inicio()
   const [listos, arenaLista] = await Promise.all([Promise.all(atlas), fondo])
   // Lo opcional nunca frena la pelea: tiene ESPERA_OPCIONALES_MS más y lo que no llegó se hace
   // sin eso (la banda del especial sin cara, los efectos a mano, el remate sin pelar).
+  // (Cancelar la carga también corta la espera: después se tira el error de cancelada.)
   let espera: ReturnType<typeof setTimeout> | undefined
-  await Promise.race([
-    Promise.all([...caras, efectos, ...rapados].map((o) => o.listo)),
-    new Promise<void>((r) => {
-      espera = setTimeout(r, ESPERA_OPCIONALES_MS)
-    }),
-  ])
-  clearTimeout(espera)
+  let cortarEspera: (() => void) | undefined
+  try {
+    await Promise.race([
+      Promise.all([...caras, efectos, ...rapados].map((o) => o.listo)),
+      new Promise<void>((r) => {
+        espera = setTimeout(r, ESPERA_OPCIONALES_MS)
+        cortarEspera = () => r()
+        senal?.addEventListener('abort', cortarEspera, { once: true })
+      }),
+    ])
+  } finally {
+    clearTimeout(espera)
+    if (cortarEspera) senal?.removeEventListener('abort', cortarEspera)
+  }
+  if (senal?.aborted) throw cancelada()
 
   const recursos: RecursosConEfectos = { atlas: {}, caras: {}, arena: arenaLista, efectosComunes: efectos.valor, rapados: {} }
   for (const a of listos) recursos.atlas[a.id] = { datos: a.datos, imagen: a.imagen }

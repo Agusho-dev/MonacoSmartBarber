@@ -140,8 +140,9 @@ const golpesDe = (evs: EventoJuego[], h: string) => de(evs, 'golpe').filter((g) 
     if (q.luchadores[0].estado === 'atacando') recup++
     return [{ especial1: t < 2 }, {}]
   })
-  // 46 ticks (se estira 24 px al arrancar; eran 52 sin estirarse: revisión del 30/oct, segunda tanda).
-  ok(recup >= 44, 'agarre al aire: queda regalado (recuperación larga)', `${recup} ticks atacando`)
+  // 24 del super flash más los 24 del agarre (se estira 36 px al arrancar; eran 46 en la segunda tanda y
+  // 52 antes: tercera tanda, 31/oct).
+  ok(recup >= 44 && recup <= 50, 'agarre al aire: queda regalado 24 ticks (más el flash)', `${recup} ticks atacando`)
 }
 
 // ─── Sismo: imbloqueable de pie, se salta ───
@@ -207,9 +208,11 @@ const golpesDe = (evs: EventoJuego[], h: string) => de(evs, 'golpe').filter((g) 
 
 // ─── Mareado: no se cubre, camina lento ───
 {
+  // El mareo dura 60 ticks desde la tercera tanda (eran 120): el trago pega en el tick ≈ 73 y se mira
+  // cuando ya pasó el aturdimiento del golpe (≈ 101), con el mareo todavía encima (hasta ≈ 133).
   const p = nueva(['guillermo', 'simon'])
   p.luchadores[0].carga = 10
-  const evs = correr(p, 120, (t) => [{ especial1: t < 2 }, {}])
+  const evs = correr(p, 104, (t) => [{ especial1: t < 2 }, {}])
   ok(de(evs, 'mareado').length === 1 && p.luchadores[1].efectos.mareado > 0, 'trago: marea')
   const x0 = p.luchadores[1].x
   correr(p, 10, () => [{}, { izquierda: true }])
@@ -251,9 +254,19 @@ const golpesDe = (evs: EventoJuego[], h: string) => de(evs, 'golpe').filter((g) 
   ok(p.luchadores[0].vida === 665 && p.estadisticas[0].curado === 165, 'cura: suma vida y estadística')
   const p2 = nueva(['fabri', 'simon'], 200, 800)
   p2.luchadores[0].carga = 10
-  p2.luchadores[0].vida = 980
+  p2.luchadores[0].vida = 890
   correr(p2, 140, (t) => [{ especial1: t < 2 }, {}])
   ok(p2.luchadores[0].vida === p2.luchadores[0].vidaMax, 'cura: nunca pasa de vidaMax', String(p2.luchadores[0].vida))
+  // Con la vida en 90 % o más no sale ni gasta carga (tercera tanda, 31/oct).
+  const p2b = nueva(['fabri', 'simon'], 200, 800)
+  p2b.luchadores[0].carga = 10
+  p2b.luchadores[0].vida = 900
+  const evs2b = correr(p2b, 60, (t) => [{ especial1: t < 2 }, {}])
+  ok(
+    de(evs2b, 'especial').length === 0 && de(evs2b, 'curacion').length === 0 && p2b.luchadores[0].carga >= 10,
+    'cura: con la vida en 90 % no sale ni gasta carga',
+    `${de(evs2b, 'especial').length} especiales, carga ${p2b.luchadores[0].carga.toFixed(1)}`,
+  )
   // Un golpe fuerte (la MÁQUINA de Simón) la corta.
   const p3 = nueva(['fabri', 'simon'], 330, 440)
   p3.luchadores[0].carga = 10
@@ -332,10 +345,16 @@ const golpesDe = (evs: EventoJuego[], h: string) => de(evs, 'golpe').filter((g) 
   const tGolpe = evsT.find((x) => x.e.tipo === 'golpe' && x.e.herramienta === 'graffiti')?.t ?? -1
   ok(tProy > 0 && tGolpe - tProy >= 29, 'graffiti: estalla a los 30 ticks', `${tGolpe - tProy} ticks`)
   ok(ancho1 > ancho0, 'graffiti: al estallar la caja crece', `${ancho0} → ${ancho1}`)
+  // Pinta a 180 px y el estallido tapa 240 (tercera tanda, 31/oct): pega también pegado (90 px), pero
+  // no al que está a 350.
   const p2 = nueva(['gabriel', 'simon'], 330, 420)
   p2.luchadores[0].carga = 10
   const evs2 = correr(p2, 120, (t) => [{ especial2: t < 2 }, {}])
-  ok(golpesDe(evs2, 'graffiti').length === 0, 'graffiti: pegado (90 px) no pega')
+  ok(golpesDe(evs2, 'graffiti').length === 1, 'graffiti: pegado (90 px) también pega')
+  const p2c = nueva(['gabriel', 'simon'], 330, 680)
+  p2c.luchadores[0].carga = 10
+  const evs2c = correr(p2c, 120, (t) => [{ especial2: t < 2 }, {}])
+  ok(golpesDe(evs2c, 'graffiti').length === 0, 'graffiti: a 350 px no pega')
   const p3 = nueva(['gabriel', 'simon'], 330, 580)
   p3.luchadores[0].carga = 10
   const g0 = p3.luchadores[1].guardia
@@ -345,7 +364,8 @@ const golpesDe = (evs: EventoJuego[], h: string) => de(evs, 'golpe').filter((g) 
 
 // ─── Chorro: crece desde la mano y se corta si le pegan al dueño ───
 {
-  const p = nueva(['lucas', 'simon'], 330, 560)
+  // A 150 px (el chorro dura 32 ticks desde la tercera tanda: a 230 no llegaban los 5 golpecitos).
+  const p = nueva(['lucas', 'simon'], 330, 480)
   p.luchadores[0].carga = 10
   const x1 = p.luchadores[1].x
   let maxAncho = 0
@@ -354,7 +374,8 @@ const golpesDe = (evs: EventoJuego[], h: string) => de(evs, 'golpe').filter((g) 
     if (ch) maxAncho = Math.max(maxAncho, ch.ancho)
     return [{ especial1: t < 2 }, {}]
   })
-  ok(golpesDe(evs, 'leche').length === 5 && p.luchadores[1].x > x1 + 30, 'chorro de leche: 5 golpecitos que empujan', `${golpesDe(evs, 'leche').length}, empujó ${(p.luchadores[1].x - x1).toFixed(0)} px`)
+  // Sólo el último empuja (tercera tanda, 31/oct): antes cada golpecito lo alejaba del resto.
+  ok(golpesDe(evs, 'leche').length === 5 && p.luchadores[1].x > x1 + 15, 'chorro de leche: 5 golpecitos y el último empuja', `${golpesDe(evs, 'leche').length}, empujó ${(p.luchadores[1].x - x1).toFixed(0)} px`)
   ok(maxAncho > 200, 'chorro: crece', maxAncho.toFixed(0))
   const p2 = nueva(['lucas', 'nahuel'], 300, 800)
   p2.luchadores[0].carga = 10
@@ -512,11 +533,12 @@ const golpesDe = (evs: EventoJuego[], h: string) => de(evs, 'golpe').filter((g) 
   const malos: string[] = []
   for (const id of Object.keys(PERSONAJES) as IdPersonaje[]) {
     const f = PERSONAJES[id]
-    for (const e of f.especiales) if (e.costo < 3 || e.costo > 7) malos.push(`${id} ${e.nombre} cuesta ${e.costo}`)
+    // Hasta 8: la Fijación de Chipi (tercera tanda, 31/oct).
+    for (const e of f.especiales) if (e.costo < 3 || e.costo > 8) malos.push(`${id} ${e.nombre} cuesta ${e.costo}`)
     if (f.alturaMundo < 195 || f.alturaMundo > 225) malos.push(`${id} alturaMundo ${f.alturaMundo}`)
   }
   if (malos.length) bien = false
-  ok(bien, 'fichas: costos entre 3 y 7, alturas 195–225', malos.join(' | '))
+  ok(bien, 'fichas: costos entre 3 y 8, alturas 195–225', malos.join(' | '))
 }
 
 // ─── Determinismo con el elenco nuevo ───

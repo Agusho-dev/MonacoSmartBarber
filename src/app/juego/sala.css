@@ -1173,6 +1173,69 @@ button.cf-sala-chip:active {
   }
 }
 
+/*
+ * Celular en vertical: el nombre del jugador va en su propio renglón, arriba del nombre del barbero
+ * (como la etiqueta de un jugador en los juegos de pelea). En la fila entra uno solo: en 390 de
+ * ancho la columna de las barras tiene ≈ 105 px y «GUILLERMO» pide 75, así que con un apodo de 8
+ * letras o más se cortaban los dos («GUILLE…» + «MAXI…»: prod-online, 31/oct). Así, el barbero tiene
+ * la fila entera (salvo los íconos de estado) y el apodo también (medido con las métricas de Teko:
+ * «GUILLERMO» 75 px; «MAXIMILIANO RUIZ», 16 letras de 11 px, 74 px con el relleno, y la fila en 360
+ * de ancho tiene 90). «Vos» también sube, para que las barras de los dos lados queden a la misma
+ * altura. La fila del barbero sigue midiendo 16 px (el nombre se centra como antes) y el HUD gana el
+ * renglón de la etiqueta (≈ 14 px + 2 de separación) con 3 px menos arriba: 7 + 14 + 2 + 16 + 3 + 15
+ * (vida) + 3 + 4 (guardia) + 3 + 11 (pie) = 78 px, el alto del HUD en 390 de ancho (20 % del ancho,
+ * entre 66 y 86: disposicion.ts). En 360 son 72: el pie (rounds y la carga del rival) pisa 6 px de
+ * la arena. Desde 601 px (tablets) hay lugar en una fila y queda como en horizontal.
+ */
+@media (max-width: 600px) {
+  .cf-pelea[data-orientacion='vertical'] .cf-hud.cf-hud--online {
+    padding-top: 7px;
+  }
+
+  .cf-pelea[data-orientacion='vertical'] .cf-hud--online .cf-hud__fila {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto 16px;
+    grid-template-areas:
+      'jugador jugador'
+      'nombre estados';
+    column-gap: 4px;
+    row-gap: 2px;
+    height: auto;
+  }
+
+  .cf-pelea[data-orientacion='vertical'] .cf-hud--online .cf-hud__lado[data-lado='1'] .cf-hud__fila {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      'jugador jugador'
+      'estados nombre';
+  }
+
+  .cf-pelea[data-orientacion='vertical'] .cf-hud--online .cf-hud__nombre {
+    grid-area: nombre;
+  }
+
+  .cf-pelea[data-orientacion='vertical'] .cf-hud--online .cf-hud__lado[data-lado='1'] .cf-hud__nombre {
+    text-align: right;
+  }
+
+  /* La etiqueta mide lo que su texto (no la fila entera) y, si no entra, se corta con «…». */
+  .cf-pelea[data-orientacion='vertical'] .cf-hud--online .cf-hud__jugador {
+    grid-area: jugador;
+    justify-self: start;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .cf-pelea[data-orientacion='vertical'] .cf-hud--online .cf-hud__lado[data-lado='1'] .cf-hud__jugador {
+    justify-self: end;
+  }
+
+  .cf-pelea[data-orientacion='vertical'] .cf-hud--online .cf-hud__estados {
+    grid-area: estados;
+  }
+}
+
 /* La mini carga del rival vive del lado del rival: a la izquierda, se llena desde la izquierda. */
 .cf-hud--online .cf-hud__lado[data-lado='0'] .cf-mini-carga__relleno {
   transform-origin: left center;
@@ -1276,10 +1339,17 @@ button.cf-sala-chip:active {
   }
 }
 
+/*
+ * El cartel va sobre la ARENA (las variables --lz-* del lienzo, disposicion.ts), no sobre la
+ * pantalla: en vertical, el 34 % de la pantalla (≈ 287 px en 390×844) caía al pie de la arena (que
+ * termina en 297) y el cartel bajaba hasta ≈ 345 px, encima del rótulo «CARGA DE LA MÁQUINA» (≈ 316).
+ * En horizontal da lo mismo que antes (la arena ocupa todo el alto: 34 % de 390 = 133 px). En
+ * vertical va al centro de la arena (en 390×844, de ≈ 145 a ≈ 230 px).
+ */
 .cf-online-lenta {
   position: absolute;
-  left: 50%;
-  top: 34%;
+  left: calc(var(--lz-x) + var(--lz-w) / 2);
+  top: calc(var(--lz-y) + var(--lz-h) * 0.34);
   z-index: 8;
   display: none;
   flex-direction: column;
@@ -1300,8 +1370,20 @@ button.cf-sala-chip:active {
   /* Con left: 50% el ancho «natural» era la mitad de la pantalla: en vertical (390) el número de
      «Conexión lenta… 7» se iba a otro renglón, fuera de la caja. */
   width: max-content;
-  max-width: calc(100% - 24px);
+  max-width: calc(var(--lz-w) - 24px);
   white-space: nowrap;
+}
+
+/* Vertical: al centro de la arena y un poco más chico (la arena de 390 de ancho mide 219 de alto). */
+.cf-pelea[data-orientacion='vertical'] .cf-online-lenta {
+  top: calc(var(--lz-y) + var(--lz-h) / 2);
+  padding: 9px 14px 8px;
+  font-size: 18px;
+}
+
+.cf-pelea[data-orientacion='vertical'] .cf-online-lenta svg {
+  width: 20px;
+  height: 20px;
 }
 
 .cf-online-lenta > span {
@@ -1496,6 +1578,21 @@ button.cf-sala-chip:active {
   line-height: 1.35;
   text-align: center;
   color: var(--cf-texto-2);
+}
+
+/* Sin red de este lado (EstadoDuelo.sinRed): el ícono va a la izquierda del texto, centrados juntos. */
+.cf-resultado-online__ausente[data-sin-red] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.cf-resultado-online__ausente[data-sin-red] svg {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--cf-rojo);
 }
 
 /* «Juan quiere la revancha»: pegado arriba de la barra de botones, en las dos orientaciones. Antes

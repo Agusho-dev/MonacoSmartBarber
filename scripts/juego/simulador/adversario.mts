@@ -5,18 +5,24 @@
  * debería ganarle más de ≈ 65 % a la CPU normal ni dejar a un rival sin chance.
  *
  *   cd scripts/juego/simulador && node --import ./cargador.mjs adversario.mts [opciones]
- *     --semillas=N    partidas por luchador, bot y rival (def. 10; con menos, una celda de 130
- *                     partidas tiene ±8 puntos y el tope salta por ruido)
+ *     --semillas=N    partidas por luchador, bot y rival en cada tanda (def. 60)
+ *     --sales=base,1  tandas de semillas que se juntan («base» = las de siempre; def. base,1)
+ *     --sal=K         una sola tanda de semillas nuevas (como --sales=K)
  *     --dif=normal    dificultad de la CPU (def. normal)
  *     --bots=a,b      sólo esos bots (def. todos)
  *     --solo=a,b      sólo esos luchadores para el bot
  *     --hilos=K       hilos (def. 6)
  *     --tope=65       % a partir del cual una celda (bot, barbero) es una estrategia degenerada
  *     --topeTodos=46  % máximo de un bot con todos los barberos juntos
- *     --sal=K         semillas nuevas (para validar con semillas que no usó ningún ajuste)
  *     --json=ruta     números crudos
  *     --ajuste=ruta   prueba otros números sin tocar el código (mismo formato que balance.mts:
  *                     kit, daño, vida, costo, pericia, periciaHumano y asistencia)
+ *
+ * Ruido (tercera tanda, 31/oct): una celda se DECIDE con ≥ 60 semillas y dos tandas (1560 partidas,
+ * ±2,4): con 20 semillas (260 partidas, ±6) una celda que en verdad da 63 % pasaba de 65 por azar una
+ * vez de cada cuatro. La corrida por defecto (60 semillas, dos tandas, ≈ 9 min por dificultad) decide;
+ * una más chica (por ejemplo --semillas=10 --sales=base, ≈ 45 s) sólo marca FALLA cuando todo el
+ * intervalo del 95 % queda arriba del tope, y lo demás que pasa del tope queda como «dudosa».
  *
  * Sale con código 1 si alguna celda pasa de `tope` o algún bot pasa de `topeTodos` (o si alguna
  * partida no termina). Topes por defecto según la dificultad (los de la revisión del 30/oct):
@@ -438,6 +444,13 @@ if (!isMainThread) {
 
 /** Topes por dificultad: [celda (bot, barbero), todos los barberos juntos] (ver el encabezado). */
 const TOPES: Record<Dificultad, [number, number]> = { facil: [101, 101], normal: [65, 46], dificil: [35, 10] }
+/** Semillas por tanda para que una corrida decida (con dos tandas, ver el encabezado). */
+const SEMILLAS_DECIDE = 60
+
+/** Medio intervalo del 95 % de un porcentaje con n partidas. */
+function ic95(v: number, n: number): number {
+  return n > 0 ? 196 * Math.sqrt(((v / 100) * (1 - v / 100)) / n) : 100
+}
 
 function mezcla32(x: number): number {
   x = x >>> 0
@@ -449,7 +462,7 @@ function mezcla32(x: number): number {
 async function principal(): Promise<void> {
   const args = process.argv.slice(2)
   const arg = (n: string) => args.find((a) => a.startsWith(`--${n}=`))?.split('=')[1]
-  const semillas = Number(arg('semillas') ?? 10)
+  const semillas = Number(arg('semillas') ?? 60)
   const dif = (arg('dif') ?? 'normal') as Dificultad
   const bots = arg('bots')?.split(',') ?? Object.keys(BOTS)
   const solo = (arg('solo')?.split(',') as IdPersonaje[] | undefined) ?? IDS_PERSONAJES
@@ -457,18 +470,22 @@ async function principal(): Promise<void> {
   const tope = Number(arg('tope') ?? TOPES[dif][0])
   const topeTodos = Number(arg('topeTodos') ?? TOPES[dif][1])
   const salArg = arg('sal')
-  const sal = salArg !== undefined ? Number(salArg) : null
+  const salesArg = arg('sales')
+  const sales: (number | null)[] = salesArg ? salesArg.split(',').map((x) => (x === 'base' ? null : Number(x))) : salArg !== undefined ? [Number(salArg)] : [null, 1]
+  const decide = semillas >= SEMILLAS_DECIDE && sales.length >= 2
   const rutaAjuste = arg('ajuste')
   const ajuste: Ajuste | null = rutaAjuste ? (JSON.parse(readFileSync(rutaAjuste, 'utf8')) as Ajuste) : null
   const trabajos: Trabajo[] = []
-  let base = 1
-  for (const bot of bots) {
-    if (!BOTS[bot]) throw new Error(`bot desconocido: ${bot}`)
-    for (const yo of solo) for (const rival of IDS_PERSONAJES) for (let s = 0; s < semillas; s++) {
-      const b = base++
-      // Sin --sal, las semillas de siempre; con --sal, un hash del contador y de la sal.
-      const semilla = sal === null ? (b * 48271) % 2147483647 : 1 + (mezcla32(mezcla32(b + 0x1b873593) ^ mezcla32(Math.imul(sal, 0x9e3779b1) + 47)) % 2147483646)
-      trabajos.push({ bot, yo, rival, dif, lado: (s % 2) as Lado, semilla })
+  for (const sal of sales) {
+    let base = 1
+    for (const bot of bots) {
+      if (!BOTS[bot]) throw new Error(`bot desconocido: ${bot}`)
+      for (const yo of solo) for (const rival of IDS_PERSONAJES) for (let s = 0; s < semillas; s++) {
+        const b = base++
+        // Sin sal, las semillas de siempre; con sal, un hash del contador y de la sal.
+        const semilla = sal === null ? (b * 48271) % 2147483647 : 1 + (mezcla32(mezcla32(b + 0x1b873593) ^ mezcla32(Math.imul(sal, 0x9e3779b1) + 47)) % 2147483646)
+        trabajos.push({ bot, yo, rival, dif, lado: (s % 2) as Lado, semilla })
+      }
     }
   }
   const lotes: Trabajo[][] = Array.from({ length: hilos }, () => [])
@@ -495,14 +512,29 @@ async function principal(): Promise<void> {
   }
   const seg = (performance.now() - t0) / 1000
   const nom = (id: IdPersonaje) => PERSONAJES[id].nombre
+  const salesTxt = sales.map((x) => (x === null ? 'las de siempre' : `sal ${x}`)).join(' + ')
   console.log(
-    `# Bots contra la CPU ${dif}: ${trabajos.length} partidas en ${seg.toFixed(0)} s (${semillas} por luchador, bot y rival; reacción ${REACCION} ticks; semillas ${sal === null ? 'de siempre' : `nuevas, sal ${sal}`})`,
+    `# Bots contra la CPU ${dif}: ${trabajos.length} partidas en ${seg.toFixed(0)} s (${semillas} por luchador, bot y rival en cada tanda; reacción ${REACCION} ticks; semillas: ${salesTxt})`,
+  )
+  console.log()
+  console.log(
+    decide
+      ? `Corrida que decide (≥ ${SEMILLAS_DECIDE} semillas y dos tandas): una celda falla si pasa del tope.`
+      : `Corrida que NO decide (hacen falta ≥ ${SEMILLAS_DECIDE} semillas y dos tandas): sólo falla una celda con todo su intervalo del 95 % arriba del tope; las demás que pasan quedan como dudosas.`,
   )
   console.log()
   console.log(`| bot | ${solo.map(nom).join(' | ')} | todos | por tiempo |`)
   console.log(`|---|${solo.map(() => '---:').join('|')}|---:|---:|`)
   const marcas: string[] = []
   const fallas: string[] = []
+  const dudosas: string[] = []
+  /** Una celda (o un bot entero) que pasa del tope: falla si la corrida decide o si es segura. */
+  const juzgar = (v: number, n: number, techo: number, texto: string): boolean => {
+    if (!(v > techo)) return false
+    if (decide || v - ic95(v, n) > techo) fallas.push(texto)
+    else dudosas.push(`${texto} — ±${ic95(v, n).toFixed(1)}`)
+    return true
+  }
   for (const bot of bots) {
     let n = 0
     let g = 0
@@ -523,12 +555,12 @@ async function principal(): Promise<void> {
       n += nn
       g += gg
       const v = (100 * gg) / Math.max(1, nn)
-      if (v > tope) fallas.push(`${bot} con ${nom(yo)}: ${v.toFixed(1)} % (${gg}/${nn}; tope ${tope})`)
-      return `${v.toFixed(0)}${v > tope ? ' (!)' : ''}`
+      const pasa = juzgar(v, nn, tope, `${bot} con ${nom(yo)}: ${v.toFixed(1)} % (${gg}/${nn}; tope ${tope})`)
+      return `${v.toFixed(0)}${pasa ? ' (!)' : ''}`
     })
     const vt = (100 * g) / Math.max(1, n)
-    if (vt > topeTodos) fallas.push(`${bot} con todos: ${vt.toFixed(1)} % (tope ${topeTodos})`)
-    console.log(`| ${bot} | ${celdas.join(' | ')} | ${vt.toFixed(1)}${vt > topeTodos ? ' (!)' : ''} | ${((100 * tiempo) / Math.max(1, rounds)).toFixed(1)} % |`)
+    const pasaTodos = juzgar(vt, n, topeTodos, `${bot} con todos: ${vt.toFixed(1)} % (tope ${topeTodos})`)
+    console.log(`| ${bot} | ${celdas.join(' | ')} | ${vt.toFixed(1)}${pasaTodos ? ' (!)' : ''} | ${((100 * tiempo) / Math.max(1, rounds)).toFixed(1)} % |`)
   }
   console.log()
   console.log(marcas.length ? `Cruces casi seguros (≥ 85 %, muestra chica):\n${marcas.map((m) => `- ${m}`).join('\n')}` : 'Ningún cruce casi seguro (≥ 85 %).')
@@ -538,7 +570,8 @@ async function principal(): Promise<void> {
   }
   const rutaJson = arg('json')
   if (rutaJson) writeFileSync(rutaJson, JSON.stringify(ac))
-  console.log(fallas.length ? `\nFALLAS (${fallas.length}; celda > ${tope} %, todos > ${topeTodos} %):\n${fallas.map((f) => `- ${f}`).join('\n')}` : `\nOK: ninguna celda pasa de ${tope} % ni ningún bot de ${topeTodos} %.`)
+  if (dudosas.length) console.log(`\nDUDOSAS (${dudosas.length}; pasan del tope pero esta corrida no decide):\n${dudosas.map((f) => `- ${f}`).join('\n')}`)
+  console.log(fallas.length ? `\nFALLAS (${fallas.length}; celda > ${tope} %, todos > ${topeTodos} %):\n${fallas.map((f) => `- ${f}`).join('\n')}` : `\nOK: ninguna celda ${decide ? 'pasa' : 'pasa con seguridad'} de ${tope} % ni ningún bot de ${topeTodos} %.`)
   if (fallas.length) process.exitCode = 1
 }
 

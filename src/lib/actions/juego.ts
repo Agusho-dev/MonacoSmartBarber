@@ -23,10 +23,12 @@ import { IDS_PERSONAJES } from '@/lib/juego/personajes'
 import { IDS_ARENAS } from '@/lib/juego/arenas'
 import { firmarTokenJuego, leerTokenJuego } from '@/lib/juego/token'
 import {
+  APODO_ANONIMO,
   LIMITE_GUARDAR_IP,
   LIMITE_GUARDAR_JUGADOR,
   claveJugador,
   normalizarDispositivo,
+  normalizarIdPartida,
   segundosHasta,
   type PartidaAGuardar,
   type RespuestaGuardado,
@@ -158,13 +160,15 @@ const entero = (min: number, max: number) =>
 
 /**
  * Rangos realistas para una partida al mejor de 3 (dura de ≈ 30 s a 4 min; la base tiene redes
- * más holgadas). `dispositivo` es opcional y nunca hace rechazar la partida: si no tiene forma de
- * UUID se toma como que no vino (la página de antes del 30/oct no lo manda).
+ * más holgadas). `dispositivo` e `idPartida` son opcionales y nunca hacen rechazar la partida: si
+ * no tienen forma de UUID se toman como que no vinieron (la página de antes del 30/oct no manda el
+ * dispositivo, y la de antes del 31/oct tampoco el id de la pelea).
  */
 const esquemaPartida = z.object({
   token: z.string().max(400).nullish(),
   sucursalSlug: z.string().max(64).nullish(),
   dispositivo: z.string().max(64).nullish().catch(null),
+  idPartida: z.string().max(64).nullish().catch(null),
   apodo: z.string().max(64),
   personaje: z.string().refine(esPersonaje),
   rival: z.string().refine(esPersonaje),
@@ -228,6 +232,110 @@ interface FilaEntradaParaGuardar {
   organization_id: string
 }
 
+type ClienteAdmin = ReturnType<typeof createAdminClient>
+
+/**
+ * Códigos de una base que todavía no tiene la migración 234: la columna `id_partida` (42703 de
+ * PostgreSQL; PGRST204, la columna que no está en el caché de PostgREST) o su índice único (42P10:
+ * ON CONFLICT sin un índice que le corresponda). En los tres la sentencia no llegó a insertar nada:
+ * se cae a un insert común, sin la clave, y la partida se guarda igual.
+ */
+const SIN_CLAVE_EN_LA_BASE = new Set(['42703', 'PGRST204', '42P10'])
+
+/**
+ * Inserta la partida. Con clave: `INSERT … ON CONFLICT (id_partida) DO NOTHING` (upsert con
+ * `ignoreDuplicates`); si esa pelea ya estaba guardada no inserta nada y devuelve 'repetida'. Sin
+ * clave, o con una base sin la migración 234, un insert común. Null si falló (queda en el log): no
+ * se sabe si se guardó.
+ */
+async function insertarPartida(
+  admin: ClienteAdmin,
+  fila: Record<string, unknown>,
+  idPartida: string | null,
+): Promise<'nueva' | 'repetida' | null> {
+  if (idPartida) {
+    const { data, error } = await admin
+      .from('juego_partidas')
+      .upsert({ ...fila, id_partida: idPartida }, { onConflict: 'id_partida', ignoreDuplicates: true })
+      .select('id')
+    if (!error) return Array.isArray(data) && data.length === 0 ? 'repetida' : 'nueva'
+    if (!SIN_CLAVE_EN_LA_BASE.has(error.code ?? '')) {
+      console.error('[juego] insert de la partida:', error.message)
+      return null
+    }
+    console.warn('[juego] juego_partidas sin la clave de la pelea (¿falta la migración 234?):', error.code, error.message)
+  }
+  const { error } = await admin.from('juego_partidas').insert(fila)
+  if (error) {
+    console.error('[juego] insert de la partida:', error.message)
+    return null
+  }
+  return 'nueva'
+}
+
+interface FilaRepetida {
+  apodo: string
+  branch_id: string | null
+}
+
+/**
+ * La pelea ya estaba guardada (otro intento llegó primero): con qué apodo y en qué sucursal quedó.
+ * Si quedó como «Anónimo» (se cerró sin confirmar apodo, o el apodo se rechazó) y ahora llega con un
+ * apodo confirmado, se lo pone a esa fila; un apodo confirmado no se pisa nunca (ni con «Anónimo» ni
+ * con otro). Null si no se pudo leer.
+ */
+async function filaDeLaRepetida(
+  admin: ClienteAdmin,
+  orgId: string,
+  idPartida: string,
+  apodoNuevo: string,
+): Promise<FilaRepetida | null> {
+  const leer = () =>
+    admin
+      .from('juego_partidas')
+      .select('apodo, branch_id')
+      .eq('id_partida', idPartida)
+      .eq('organization_id', orgId)
+      .maybeSingle()
+  const lectura = await leer()
+  if (lectura.error || !lectura.data) {
+    console.error('[juego] partida repetida:', lectura.error?.message ?? 'no está')
+    return null
+  }
+  const fila = lectura.data as FilaRepetida
+  if (fila.apodo !== APODO_ANONIMO || apodoNuevo === APODO_ANONIMO) return fila
+
+  const cambio = await admin
+    .from('juego_partidas')
+    .update({ apodo: apodoNuevo })
+    .eq('id_partida', idPartida)
+    .eq('organization_id', orgId)
+    .eq('apodo', APODO_ANONIMO)
+    .select('apodo, branch_id')
+  if (cambio.error) {
+    console.error('[juego] apodo de la partida repetida:', cambio.error.message)
+    return fila
+  }
+  const cambiada = (cambio.data as FilaRepetida[] | null)?.[0]
+  if (cambiada) return cambiada
+  // Otro pedido de la misma pelea le puso su apodo en el medio: vale ése.
+  const otra = await leer()
+  return (otra.data as FilaRepetida | null) ?? fila
+}
+
+/** Puesto del apodo en el ranking de HOY (null si no se pudo leer; «Anónimo» no compite). */
+async function puestoDeHoy(admin: ClienteAdmin, orgId: string, branchId: string | null, apodo: string): Promise<number | null> {
+  if (apodo === APODO_ANONIMO) return null
+  const { data, error } = await admin.rpc('juego_puesto', {
+    p_org: orgId,
+    p_branch: branchId,
+    p_periodo: 'hoy',
+    p_apodo: apodo,
+  })
+  if (error) console.error('[juego] puesto después de guardar:', error.message)
+  return typeof data === 'number' ? data : null
+}
+
 /**
  * Guarda una partida terminada y devuelve el puesto del apodo en el ranking
  * de HOY de esa sucursal (o el general si no hay sucursal). Organización y
@@ -237,31 +345,40 @@ interface FilaEntradaParaGuardar {
  * Rate limit: 24 cada 10 min por jugador y un techo de 150 por IP (los clientes
  * del local comparten el wifi). El jugador es, con QR, IP + entrada de la fila;
  * sin QR, IP + id del dispositivo; y con la página de antes del 30/oct, que no
- * manda el dispositivo, la IP. El rechazo por el tope pasa ANTES del insert y
- * vuelve con `motivo: 'tope'` y `esperarSeg`: es el único que el celular
- * reintenta solo (src/lib/juego/pendientes.ts), porque se sabe que no se guardó
- * nada. La forma de la respuesta es la de siempre; esos dos campos son nuevos y
- * opcionales (Known Risk #38).
+ * manda el dispositivo, la IP.
+ *
+ * Idempotente por pelea (mig 234): con `idPartida`, la misma pelea mandada dos
+ * veces deja una sola fila, y la segunda respuesta es la de la primera (ok, el
+ * puesto y con qué apodo quedó; si había quedado como «Anónimo» y llega con un
+ * apodo, se lo pone). Así el celular puede reintentar después de una falla que
+ * no dice si se guardó (src/lib/juego/pendientes.ts).
+ *
+ * Los rechazos que pasan ANTES de tocar la base vuelven con `motivo`: 'datos'
+ * (la partida no es válida), 'apodo' (no pasó el filtro: con otro, o como
+ * «Anónimo», se guarda) y 'tope' (con `esperarSeg`). Un `{ ok: false }` sin
+ * motivo es una falla que no dice si se guardó. La forma de la respuesta es la
+ * de siempre; `motivo`, `esperarSeg` y `apodo` son campos nuevos y opcionales
+ * que la página de antes ignora (Known Risk #38).
  */
 export async function guardarPartidaJuego(input: PartidaAGuardar): Promise<RespuestaGuardado> {
   const parseo = esquemaPartida.safeParse(input)
   if (!parseo.success) {
     console.warn('[juego] partida rechazada:', parseo.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
-    return { ok: false, error: ERROR_DATOS }
+    return { ok: false, error: ERROR_DATOS, motivo: 'datos' }
   }
   const p = parseo.data
 
   const apodo = validarApodo(p.apodo)
-  if (!apodo.ok) return { ok: false, error: apodo.error }
+  if (!apodo.ok) return { ok: false, error: apodo.error, motivo: 'apodo' }
 
   // Coherencia: un ganador ganó al menos una ronda, un perdedor perdió al menos una.
   if (p.resultado === 'victoria' ? p.rondasGanadas < 1 : p.rondasPerdidas < 1) {
     console.warn('[juego] partida incoherente: resultado', p.resultado, 'con rondas', p.rondasGanadas, '-', p.rondasPerdidas)
-    return { ok: false, error: ERROR_DATOS }
+    return { ok: false, error: ERROR_DATOS, motivo: 'datos' }
   }
   if (p.puntaje > techoDePuntaje(p)) {
     console.warn('[juego] puntaje imposible:', p.puntaje, 'techo', Math.round(techoDePuntaje(p)))
-    return { ok: false, error: ERROR_DATOS }
+    return { ok: false, error: ERROR_DATOS, motivo: 'datos' }
   }
 
   try {
@@ -297,44 +414,45 @@ export async function guardarPartidaJuego(input: PartidaAGuardar): Promise<Respu
     }
     if (!sucursal) sucursal = await sucursalPorSlug(admin, p.sucursalSlug, orgId)
 
-    const { error: errorAlta } = await admin.from('juego_partidas').insert({
-      organization_id: orgId,
-      branch_id: sucursal?.id ?? null,
-      queue_entry_id: queueEntryId,
-      client_id: clientId,
-      apodo: apodo.apodo,
-      personaje: p.personaje,
-      rival: p.rival,
-      arena: p.arena,
-      dificultad: p.dificultad,
-      resultado: p.resultado,
-      rondas_ganadas: p.rondasGanadas,
-      rondas_perdidas: p.rondasPerdidas,
-      puntaje: p.puntaje,
-      combo_max: p.comboMax,
-      criticos: p.criticos,
-      especiales: p.especiales,
-      danio_hecho: p.danioHecho,
-      danio_recibido: p.danioRecibido,
-      // Un perfecto es una ronda ganada, y el remate «AL CERO» sólo lo hace el que gana.
-      perfectos: Math.min(p.perfectos, p.rondasGanadas),
-      final_al_cero: p.finalAlCero && p.resultado === 'victoria',
-      duracion_seg: p.duracionSeg,
-    })
-    if (errorAlta) {
-      console.error('[juego] insert de la partida:', errorAlta.message)
-      return { ok: false, error: ERROR_GUARDAR }
-    }
+    const idPartida = normalizarIdPartida(p.idPartida)
+    const alta = await insertarPartida(
+      admin,
+      {
+        organization_id: orgId,
+        branch_id: sucursal?.id ?? null,
+        queue_entry_id: queueEntryId,
+        client_id: clientId,
+        apodo: apodo.apodo,
+        personaje: p.personaje,
+        rival: p.rival,
+        arena: p.arena,
+        dificultad: p.dificultad,
+        resultado: p.resultado,
+        rondas_ganadas: p.rondasGanadas,
+        rondas_perdidas: p.rondasPerdidas,
+        puntaje: p.puntaje,
+        combo_max: p.comboMax,
+        criticos: p.criticos,
+        especiales: p.especiales,
+        danio_hecho: p.danioHecho,
+        danio_recibido: p.danioRecibido,
+        // Un perfecto es una ronda ganada, y el remate «AL CERO» sólo lo hace el que gana.
+        perfectos: Math.min(p.perfectos, p.rondasGanadas),
+        final_al_cero: p.finalAlCero && p.resultado === 'victoria',
+        duracion_seg: p.duracionSeg,
+      },
+      idPartida,
+    )
+    if (!alta) return { ok: false, error: ERROR_GUARDAR }
 
     // La partida ya quedó guardada: si el puesto no se puede leer, se informa null (no se sabe).
-    const { data: puesto, error: errorPuesto } = await admin.rpc('juego_puesto', {
-      p_org: orgId,
-      p_branch: sucursal?.id ?? null,
-      p_periodo: 'hoy',
-      p_apodo: apodo.apodo,
-    })
-    if (errorPuesto) console.error('[juego] puesto después de guardar:', errorPuesto.message)
-    return { ok: true, puesto: typeof puesto === 'number' ? puesto : null }
+    if (alta === 'repetida' && idPartida) {
+      // Otro intento de esta misma pelea llegó primero: la respuesta de aquél.
+      const fila = await filaDeLaRepetida(admin, orgId, idPartida, apodo.apodo)
+      if (!fila) return { ok: true, puesto: null }
+      return { ok: true, puesto: await puestoDeHoy(admin, orgId, fila.branch_id, fila.apodo), apodo: fila.apodo }
+    }
+    return { ok: true, puesto: await puestoDeHoy(admin, orgId, sucursal?.id ?? null, apodo.apodo), apodo: apodo.apodo }
   } catch (e) {
     console.error('[juego] guardarPartidaJuego:', mensaje(e))
     return { ok: false, error: ERROR_GUARDAR }
@@ -390,7 +508,7 @@ export async function obtenerRankingJuego(
       .filter((f) => esPersonaje(f.personaje))
       // Las peleas que se cerraron sin confirmar apodo se guardan como «Anónimo» para las
       // estadísticas de los barberos, pero no compiten en el ranking.
-      .filter((f) => f.apodo !== 'Anónimo')
+      .filter((f) => f.apodo !== APODO_ANONIMO)
       .slice(0, 10)
       .map((f, i) => ({
         puesto: i + 1,

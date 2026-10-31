@@ -19,6 +19,8 @@ import type { EstadoTurnoJuego } from '@/lib/juego/tipos'
 import { usePantallaCompleta } from '@/lib/juego/ui/media'
 import { pedirPantallaCompleta, salirDePantallaCompleta, soportaPantallaCompleta } from '@/lib/juego/ui/pantalla-completa'
 import { guardarPreferencias, type PreferenciasJuego } from '@/lib/juego/ui/preferencias'
+import { alTocar } from '@/lib/juego/ui/toque'
+import { Capa } from './capa'
 import { ChipTurno } from './turno'
 
 interface Props {
@@ -33,6 +35,10 @@ interface Props {
   onSalir: () => void
 }
 
+/**
+ * La pausa de la pelea contra la CPU. Se abre y se usa con el pulgar todavía en el stick: la capa no
+ * deja panear (Capa) y cada botón responde también al segundo dedo (alTocar, ui/toque.ts).
+ */
 export function MenuPausa({
   prefs,
   turno,
@@ -49,24 +55,24 @@ export function MenuPausa({
   const puedePantallaCompleta = soportaPantallaCompleta()
 
   return (
-    <div className="cf-capa" role="dialog" aria-modal="true" aria-labelledby="cf-pausa-titulo">
-      <div className="cf-pausa">
+    <Capa titulo="cf-pausa-titulo">
+      <div className="cf-pausa cf-pausa--menu">
         <h2 id="cf-pausa-titulo" className="cf-titulo cf-pausa__titulo">
           Pausa
         </h2>
         <ChipTurno turno={turno} />
 
-        <button type="button" className="cf-btn cf-btn--grande cf-pausa__continuar" onClick={onContinuar} autoFocus>
+        <button type="button" className="cf-btn cf-btn--grande cf-pausa__continuar" {...alTocar(onContinuar)} autoFocus>
           <Play aria-hidden="true" />
           <span>Seguir peleando</span>
         </button>
 
         <div className="cf-pausa__acciones">
-          <button type="button" className="cf-btn cf-btn--sec" onClick={onReiniciar}>
+          <button type="button" className="cf-btn cf-btn--sec" {...alTocar(onReiniciar)}>
             <RotateCcw aria-hidden="true" />
             <span>Reiniciar</span>
           </button>
-          <button type="button" className="cf-btn cf-btn--sec" onClick={onComoSeJuega}>
+          <button type="button" className="cf-btn cf-btn--sec" {...alTocar(onComoSeJuega)}>
             <CircleHelp aria-hidden="true" />
             <span>Cómo se juega</span>
           </button>
@@ -74,7 +80,7 @@ export function MenuPausa({
             type="button"
             className="cf-btn cf-btn--sec"
             data-peligro={confirmarSalida ? '' : undefined}
-            onClick={() => (confirmarSalida ? onSalir() : setConfirmarSalida(true))}
+            {...alTocar(() => (confirmarSalida ? onSalir() : setConfirmarSalida(true)))}
           >
             <LogOut aria-hidden="true" />
             <span>{confirmarSalida ? 'Tocá de nuevo para salir' : 'Cambiar barbero'}</span>
@@ -170,7 +176,7 @@ export function MenuPausa({
           </dl>
         )}
       </div>
-    </div>
+    </Capa>
   )
 }
 
@@ -186,7 +192,7 @@ function Interruptor({
   onClick: () => void
 }) {
   return (
-    <button type="button" className="cf-interruptor" aria-pressed={activo} onClick={onClick}>
+    <button type="button" className="cf-interruptor" aria-pressed={activo} {...alTocar(onClick)}>
       <Icono aria-hidden="true" />
       <span>{texto}</span>
       <span className="cf-interruptor__estado">{activo ? 'Sí' : 'No'}</span>

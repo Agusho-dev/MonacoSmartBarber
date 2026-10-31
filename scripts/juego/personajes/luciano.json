@@ -10,6 +10,8 @@
     "_notaCara": "revisión 31/oct: la cara se recorta más cerrada (38 px en vez de 46, centrada en la cabeza): en la grilla de 43 px y en el HUD la cara se veía chica al lado de las de Simón y Chipi",
     "cara": [1476, 842, 1514, 880],
     "nitidez": 110,
+    "nitidezCara": 100,
+    "caraNitida": {"previa": 120, "radioPrevio": 1.0, "alfa": 0.08, "_nota": "revisión 31/oct, tercera tanda: la cara salía blanda al lado de las de Simón y Chipi; se afina a su tamaño antes de agrandarla y el borde es más corto (ver _escalar_cara en extraer_nico_u.py)"},
     "fondoLiso": {
       "std": 4.5,
       "azul": 2,
@@ -137,7 +139,9 @@
           "inferencia": "ancho",
           "incluir": [
             [[768, 256], [797, 258], [797, 264], [794, 270], [791, 276], [789, 282], [785, 287], [780, 291], [773, 294], [760, 292], [758, 286], [763, 272]]
-          ]
+          ],
+          "_nota2": "revisión 31/oct, tercera tanda: un hueco cerrado de 42 px en la gorra (lo oscuro y liso de la gorra se iba como fondo): «rellenar»",
+          "rellenar": 60
         },
         "2": {
           "caja": [842, 176, 931, 314],
@@ -156,7 +160,9 @@
         "0": {
           "incluir": [
             [[1088, 228], [1092, 224], [1101, 220], [1105, 215], [1118, 213], [1123, 210], [1127, 210], [1131, 208], [1134, 207], [1140, 207], [1144, 208], [1148, 209], [1151, 212], [1156, 214], [1158, 218], [1159, 236], [1158, 241], [1153, 245], [1145, 246], [1136, 245], [1128, 248], [1120, 253], [1103, 257], [1095, 258], [1088, 256]]
-          ]
+          ],
+          "_nota": "revisión 31/oct, tercera tanda: quedaba un hueco cerrado de 77 px en el pantalón de la pierna doblada (lo liso del pantalón se iba como fondo): «rellenar» tapa los huecos de menos de 100 px",
+          "rellenar": 100
         }
       },
       "sumar": [[
@@ -201,7 +207,7 @@
       "porCuadro": {
         "4": {
           "_nota": "lo que queda del destello delante de los nudillos (x >= 399; el render dibuja su propio destello en el impacto)",
-          "excluir": [[399, 380, 406, 401]]
+          "excluir": [[[386, 366], [412, 366], [412, 410], [386, 410], [386, 400], [392, 399], [396, 399], [400, 397], [402, 395], [403, 393], [403, 386], [402, 382], [398, 380], [392, 380], [386, 381]]]
         }
       }
     },

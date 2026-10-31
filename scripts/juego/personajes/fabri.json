@@ -10,6 +10,8 @@
     "_notaCara": "revisión 31/oct: la cara se recorta más cerrada (38 px en vez de 46, centrada en la cabeza): en la grilla de 43 px y en el HUD la cara se veía chica al lado de las de Simón y Chipi",
     "cara": [956, 856, 994, 894],
     "nitidez": 110,
+    "nitidezCara": 100,
+    "caraNitida": {"previa": 120, "radioPrevio": 1.0, "alfa": 0.08, "_nota": "revisión 31/oct, tercera tanda: la cara salía blanda al lado de las de Simón y Chipi; se afina a su tamaño antes de agrandarla y el borde es más corto (ver _escalar_cara en extraer_nico_u.py)"},
     "fondoLiso": [
       {
         "std": 4.5,
@@ -82,14 +84,26 @@
           "quitarLiso": [{"zona": [[44, 280], [58, 280], [68, 300], [68, 311], [28, 311], [34, 296]]}],
           "excluir": [[29, 311, 67, 318]]
         },
+        "1": {
+          "quitarLiso": [{"zona": [[109, 282], [151, 282], [153, 310], [105, 310]]}],
+          "excluir": [[108, 311, 150, 318]]
+        },
+        "2": {
+          "quitarLiso": [{"zona": [[189, 281], [231, 281], [233, 310], [187, 310]]}],
+          "excluir": [[189, 311, 229, 318]]
+        },
         "3": {
           "excluir": [[271, 311, 299, 318]]
         }
       }
     },
     "agachado": {
+      "_nota": "revisión 31/oct, tercera tanda: la misma sombra azul oscura entre las piernas que se sacó de guardia[0] (quitarLiso)",
       "panel": [356, 198, 646, 317],
-      "cuadros": 3
+      "cuadros": 3,
+      "porCuadro": {
+        "0": {"quitarLiso": [{"zona": [[373, 291], [417, 291], [419, 311], [373, 311]]}], "excluir": [[375, 312, 414, 318]]}
+      }
     },
     "saltar": {
       "_nota": "revisión 30/oct: la cabeza de los cuadros 1 y 2 sube a la barra del título; sin esto saltar[2] salía sin cabeza",
@@ -114,10 +128,14 @@
         ]]
     },
     "golpe": {
+      "_nota": "revisión 31/oct, tercera tanda: la sombra azul oscura entre las piernas del cuadro 0 (quitarLiso, como en guardia[0])",
       "panel": [9, 352, 451, 469],
       "cuadros": 5,
       "usar": [0, 1, 2, 3],
-      "impactos": [3]
+      "impactos": [3],
+      "porCuadro": {
+        "0": {"quitarLiso": [{"zona": [[31, 434], [73, 434], [75, 463], [27, 463]]}], "excluir": [[30, 464, 72, 470]]}
+      }
     },
     "patada": {
       "_nota": "revisión 31/oct: sin la luz violeta del piso a la derecha de la zapatilla del cuadro 2",
@@ -377,15 +395,22 @@
           "gMax": 75,
           "satMin": 0.45,
           "color": [27, 24, 24]
+        },
+        {
+          "nota": "revisión 31/oct, tercera tanda: el resplandor naranja blando que baja del antebrazo del cuadro 0 (la piel del brazo y la mano del 1 tienen borde: stdMax los deja)",
+          "zona": [[1244, 924], [1252, 920], [1257, 930], [1258, 952], [1249, 952], [1246, 935]],
+          "rojoMin": 25,
+          "lumMin": 25,
+          "stdMax": 14
         }
       ],
       "porCuadro": {
         "0": {
-          "excluir": [[[1252, 928], [1265, 928], [1265, 977], [1249, 977], [1247, 965], [1247, 945], [1249, 936]]]
+          "excluir": [[[1252, 928], [1265, 928], [1265, 977], [1249, 977], [1247, 965], [1247, 945], [1249, 936]], [[1250, 924], [1254, 924], [1258, 930], [1258, 952], [1249, 952], [1248, 944], [1248, 936]]]
         },
         "1": {
           "excluir": [
-            [[1250, 948], [1263, 948], [1263, 976], [1260, 977], [1259, 987], [1250, 987]],
+            [[1250, 948], [1263, 948], [1263, 976], [1260, 977], [1259, 987], [1250, 987]], [[1250, 912], [1256, 912], [1257, 920], [1258, 928], [1259, 936], [1259, 941], [1258, 944], [1257, 948], [1250, 948]], [[1321, 974], [1334, 974], [1334, 997], [1322, 997], [1321, 990], [1320, 983]],
             [[1283, 950], [1287, 950], [1291, 962], [1294, 970], [1296, 976], [1296, 991], [1276, 991], [1276, 976], [1280, 968], [1282, 960]],
             [1276, 990, 1296, 997],
             [[1303, 946], [1320, 946], [1320, 978], [1307, 978], [1307, 969], [1303, 968]]

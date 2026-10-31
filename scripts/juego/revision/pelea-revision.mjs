@@ -205,11 +205,13 @@ try {
   }
   await esperar(600)
 
-  // 7. Los dos especiales: super flash, cuadro de golpe, proyectil y efecto en el rival.
+  // 7. Los dos especiales: super flash, cuadro de golpe, proyectil y efecto en el rival. La Curación
+  // de Fabri sólo sale con la vida bajo el 90 % (`cura.soloBajo`, tercera tanda): se la baja al 60 %.
   for (const k of [1, 2]) {
     const d = DIST[ID][k - 1]
+    const bajarVida = ID === 'fabri' && k === 1 ? 'A.vida = Math.min(A.vida, Math.floor(A.vidaMax * 0.6)); ' : ''
     await esperar(600)
-    await ev(`A.carga = 10; B.carga = 0; return true`)
+    await ev(`A.carga = 10; B.carga = 0; ${bajarVida}return true`)
     await poner(300, Math.min(880, 300 + d))
     await esperar(120)
     const t0 = await c.evaluar('__rev.p.tick')
@@ -218,7 +220,7 @@ try {
     for (let intento = 0; intento < 3; intento++) {
       const salio = await c.esperarQue(`__rev.ev.some((e) => e.tipo === 'especial' && e.quien === 0 && e.t >= ${t0})`, 1300)
       if (salio) break
-      await ev(`A.carga = 10; B.carga = 0; return true`)
+      await ev(`A.carga = 10; B.carga = 0; ${bajarVida}return true`)
       await poner(300, Math.min(880, 300 + d))
       await toque(carta[k - 1], 60)
     }

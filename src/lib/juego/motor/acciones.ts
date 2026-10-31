@@ -3,7 +3,7 @@
  * embestidas por el piso y por el aire, ráfagas de proyectiles, curación, agarre, eventos de
  * swing) y el remate «AL CERO».
  */
-import type { ClaveAnimacion, Herramienta, Lado, Partida } from '../tipos'
+import type { ClaveAnimacion, Herramienta, Lado, LuchadorEstado, Partida } from '../tipos'
 import { PERSONAJES } from '../personajes'
 import { contarAcierto, progresarAgarre } from './combate'
 import { SUPER_FLASH } from './constantes'
@@ -11,6 +11,7 @@ import { finVentanas, mirarA } from './cuerpo'
 import type { Accion, EstadoInterno } from './interno'
 import { emitir } from './interno'
 import type { DefEspecial, DefMovimiento } from './movimientos'
+import { MOVIMIENTOS } from './movimientos'
 import { crearRayo, lanzarProyectil } from './proyectiles'
 
 const SIN_CANCEL = 1e9
@@ -71,8 +72,20 @@ export function iniciarMovimiento(
 }
 
 /**
+ * ¿Apretar el especial `n` lo tira ahora? Hace falta la carga y, en una cura con `soloBajo` (la
+ * Curación de Fabri), la vida por debajo de esa fracción. Es la misma cuenta que intentarEspecial;
+ * la usa la UI para encender la carta del especial.
+ */
+export function especialListo(l: LuchadorEstado, n: 1 | 2): boolean {
+  if (l.carga + 1e-9 < PERSONAJES[l.id].especiales[n - 1].costo) return false
+  const cura = MOVIMIENTOS[l.id]?.especiales[n - 1]?.cura
+  return cura?.soloBajo === undefined || l.vida < l.vidaMax * cura.soloBajo
+}
+
+/**
  * Si hay un especial en el buffer: con carga, lo tira (super flash: el mundo se congela
- * SUPER_FLASH ticks); sin carga, avisa `sin_carga` y no pasa nada más.
+ * SUPER_FLASH ticks); sin carga, avisa `sin_carga` y no pasa nada más. La cura con la vida en su
+ * `soloBajo` o más tampoco sale (sin aviso ni gasto de carga).
  */
 export function intentarEspecial(p: Partida, I: EstadoInterno, lado: Lado): boolean {
   const l = p.luchadores[lado]
@@ -86,6 +99,11 @@ export function intentarEspecial(p: Partida, I: EstadoInterno, lado: Lado): bool
       emitir(p, { tipo: 'sin_carga', quien: lado })
       continue
     }
+    // La cura con la vida casi llena no sale ni gasta carga: apretada apenas se encendía (lo que
+    // hace el que recién empieza) se tiraba con la vida entera, no curaba nada y dejaba 82 ticks
+    // regalados. Entre dos personas Fabri ganaba 7–15 % (verificación del 31/oct).
+    const cura = I.kits[lado].especiales[n - 1].cura
+    if (cura?.soloBajo !== undefined && l.vida >= l.vidaMax * cura.soloBajo) continue
     l.carga = Math.max(0, l.carga - ficha.costo)
     iniciarMovimiento(p, I, lado, I.kits[lado].especiales[n - 1], n)
     p.congelamientoGolpe = Math.max(p.congelamientoGolpe, SUPER_FLASH)

@@ -6,6 +6,7 @@
  * transform de las barras, el número del reloj, atributos para el CSS. Los efectos
  * de una sola vez (sacudir una carta, destellar un segmento) van con Web Animations.
  */
+import { especialListo } from '../motor'
 import { PERSONAJES } from '../personajes'
 import { CARGA_MAX, TPS } from '../tipos'
 import type { EventoJuego, FuerzaGolpe, IdPersonaje, LuchadorEstado, Partida } from '../tipos'
@@ -107,6 +108,7 @@ export function crearHud(raiz: HTMLElement, op: OpcionesHud): ControlHud {
     urgente: false,
     turbo: false,
     final: false,
+    reposo: false,
     segs: segmentos.map(() => -1),
     cargaNum: -1,
     cargaRival: -1,
@@ -317,6 +319,21 @@ export function crearHud(raiz: HTMLElement, op: OpcionesHud): ControlHud {
         atributo(raiz, 'data-final', final)
       }
 
+      // Fases en que el jugador no controla nada (el K.O., «¡TIEMPO!», el festejo, la pelea ya
+      // decidida, o el «¡DEJALO AL CERO!» cuando el que remata es el rival): los controles se
+      // apagan (juego.css) y se ve lo que tapaban, como el cuerpo tirado contra una pared o la
+      // cabeza pelada del ¡AL CERO!. Vuelven con el anuncio del round siguiente.
+      const reposo =
+        p.fase === 'ko' ||
+        p.fase === 'tiempo' ||
+        p.fase === 'entre_rounds' ||
+        p.fase === 'terminada' ||
+        (p.fase === 'final' && ganadorFinal !== 0)
+      if (reposo !== ult.reposo) {
+        ult.reposo = reposo
+        atributo(raiz, 'data-reposo', reposo)
+      }
+
       // Carga de la máquina del jugador: 10 segmentos, el último a medio llenar.
       const carga = Math.max(0, Math.min(CARGA_MAX, p.luchadores[0].carga))
       for (let i = 0; i < segmentos.length; i++) {
@@ -345,7 +362,10 @@ export function crearHud(raiz: HTMLElement, op: OpcionesHud): ControlHud {
           const ll = llenados[i]
           if (ll) ll.style.transform = `scaleY(${llenado})`
         }
-        const lista = carga + 1e-6 >= costo
+        // Encendida si apretarla lo tira: la carga y, en la Curación de Fabri, la vida bajo el 90 %
+        // (con más, el motor no la tira ni avisa `sin_carga`: una carta encendida que no hace nada).
+        // El llenado sigue siendo sólo la carga.
+        const lista = especialListo(p.luchadores[0], i === 0 ? 1 : 2)
         if (lista !== ult.lista[i]) {
           ult.lista[i] = lista
           atributo(cartas[i], 'data-lista', lista)

@@ -107,6 +107,7 @@
       "inferencia": "ancho",
       "region": [448, 377, 845, 508],
       "cajas": [[448, 377, 535, 508], [535, 377, 675, 508], [668, 377, 726, 508], [721, 377, 845, 508]],
+      "apoyoX": {"1": 588},
       "inferenciaPorCuadro": {"1": "panel", "3": "panel"},
       "usar": [0, 1, 3, 0],
       "impactos": [2],
@@ -152,7 +153,18 @@
           ]
         ]
       },
-      "quitarColor": {"3": [{"tono": [25, 95], "satMin": 0.35, "lumMin": 100}]}
+      "quitarColor": {
+        "1": [
+          {
+            "nota": "revisión 31/oct, tercera tanda: el fondo azul marino entre la pierna levantada y la de apoyo (la ropa es negra neutra)",
+            "zona": [547, 391, 672, 508],
+            "suavizar": 3,
+            "bMenosRMin": 10,
+            "lumMax": 70
+          }
+        ],
+        "3": [{"tono": [25, 95], "satMin": 0.35, "lumMin": 100}]
+      }
     },
     "combo": {
       "inferencia": "ancho",
@@ -168,11 +180,43 @@
       ],
       "impactos": [1, 3, 5, 7],
       "pintar": "azules",
-      "_nota": "revisión 31/oct: «purpuras» saca el orbe rosa de la mano del 6 y el resplandor violeta del puño del 7; en el 6 se excluye el humo azul oscuro a la derecha de la zapatilla y en el 7 «sombra» saca la cuña oscura debajo de la pierna de atrás",
-      "quitarColor": ["azules", "magentas", "purpuras"],
+      "_nota": "revisión 31/oct: «purpuras» saca el orbe rosa de la mano del 6 y el resplandor violeta del puño del 7; en el 6 se excluye el humo azul oscuro a la derecha de la zapatilla y en el 7 «sombra» saca la cuña oscura debajo de la pierna de atrás · tercera tanda (31/oct): en el 5 y en el 7 el fondo azul marino pegado detrás de la espalda, entre las piernas y bajo el muslo sale por tinte (b-r >= 10 con luma <= 70: la ropa es negra neutra); apoyoX fija el apoyo de antes",
+      "quitarColor": {
+        "0": ["azules", "magentas", "purpuras"],
+        "1": ["azules", "magentas", "purpuras"],
+        "2": ["azules", "magentas", "purpuras"],
+        "3": ["azules", "magentas", "purpuras"],
+        "4": ["azules", "magentas", "purpuras"],
+        "5": [
+          "azules",
+          "magentas",
+          "purpuras",
+          {
+            "nota": "el fondo azul marino pegado detrás de la espalda y entre las piernas (la ropa es negra neutra: b-r <= 7)",
+            "zona": [[1200, 452], [1244, 452], [1252, 458], [1270, 458], [1278, 426], [1306, 426], [1306, 508], [1200, 508]],
+            "suavizar": 3,
+            "bMenosRMin": 10,
+            "lumMax": 70
+          }
+        ],
+        "6": ["azules", "magentas", "purpuras"],
+        "7": [
+          "azules",
+          "magentas",
+          "purpuras",
+          {
+            "nota": "la cuña azul marino bajo el muslo (la ropa es negra neutra)",
+            "zona": [1388, 397, 1505, 508],
+            "suavizar": 3,
+            "bMenosRMin": 10,
+            "lumMax": 70
+          }
+        ]
+      },
       "pegados": 2,
       "region": [851, 377, 1527, 508],
       "inferenciaPorCuadro": {"4": "ancho&panel", "5": "ancho&panel", "6": "ancho&panel", "7": "panel"},
+      "apoyoX": {"5": 1273, "7": 1458},
       "limite": {
         "2": [
           [

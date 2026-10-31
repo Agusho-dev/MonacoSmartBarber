@@ -86,6 +86,9 @@ try {
   await c.foto(`${DIR}/${nombre}_1_pelea.png`)
 
   // 2) Los dos especiales con la carta: evento, lo que tira y el sonido.
+  // La Curación de Fabri sólo sale con la vida bajo el 90 % (`cura.soloBajo`, tercera tanda): con más,
+  // apretarla no hace nada. Para medirla, el gancho le baja la vida al 60 % (como la carga a 10).
+  const CURA_SOLO_BAJO = { fabri: 1 }
   for (const n of [1, 2]) {
     // Hasta 3 intentos: si la CPU le pega justo cuando toca la carta, el especial no sale (está
     // aturdido) y eso es el juego funcionando, no una falla.
@@ -93,7 +96,7 @@ try {
       // espera un momento en que el jugador pueda actuar (en pelea, sin estar tirado ni agarrado)
       let listo = false
       for (let i = 0; i < 60 && !listo; i++) {
-        listo = await c.evaluar(`(() => { const p = window.__corteFinal.partida; const l = p.luchadores[0]; if (p.fase !== 'pelea') return false; const libre = ['quieto', 'caminando', 'agachado', 'guardia'].includes(l.estado) && l.enSuelo; if (libre) { l.carga = 10; const r = p.luchadores[1]; if (Math.abs(r.x - l.x) > 260) l.x = r.x - 200 * Math.sign(r.x - l.x || 1) } return libre })()`)
+        listo = await c.evaluar(`(() => { const p = window.__corteFinal.partida; const l = p.luchadores[0]; if (p.fase !== 'pelea') return false; const libre = ['quieto', 'caminando', 'agachado', 'guardia'].includes(l.estado) && l.enSuelo; if (libre) { l.carga = 10; if (${JSON.stringify(CURA_SOLO_BAJO)}[l.id] === ${n}) l.vida = Math.min(l.vida, Math.floor(l.vidaMax * 0.6)); const r = p.luchadores[1]; if (Math.abs(r.x - l.x) > 260) l.x = r.x - 200 * Math.sign(r.x - l.x || 1) } return libre })()`)
         if (!listo) await esperar(100)
       }
       if (!listo) { verificar(false, `${nombre}: el jugador nunca quedó libre para el especial ${n}`); continue }

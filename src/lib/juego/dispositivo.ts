@@ -12,6 +12,9 @@
 // bloqueado vale lo que dure la pestaña. Sin crypto (nunca pasó en un
 // navegador que corre el juego) devuelve null y el servidor usa la IP.
 // Sólo se llama desde handlers y efectos (nunca durante el render).
+//
+// `uuidNuevo` lo usa también el resultado (pantalla-resultado.tsx) para la
+// clave de idempotencia de una pelea cuyo id no es un UUID (guardado.ts).
 // =============================================================================
 
 const CLAVE = 'cf.dispositivo.v1'
@@ -19,8 +22,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 let enMemoria: string | null = null
 
-/** UUID v4 nuevo. `crypto.randomUUID` sólo existe con HTTPS (o localhost): si no, `getRandomValues`. */
-function uuidNuevo(): string | null {
+/**
+ * UUID v4 nuevo (en minúsculas), o null sin crypto. `crypto.randomUUID` sólo existe con HTTPS (o
+ * localhost) y desde Safari 15.4: si no, `getRandomValues`.
+ */
+export function uuidNuevo(): string | null {
   const c = globalThis.crypto
   try {
     if (typeof c?.randomUUID === 'function') return c.randomUUID()

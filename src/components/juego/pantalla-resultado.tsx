@@ -12,15 +12,33 @@ import {
   Swords,
   Timer,
   Trophy,
+  UserX,
   Users,
   Zap,
 } from 'lucide-react'
-import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type FormEvent,
+  type ReactNode,
+} from 'react'
 import { guardarPartidaJuego } from '@/lib/actions/juego'
 import { ARENAS } from '@/lib/juego/arenas'
-import { idDispositivo } from '@/lib/juego/dispositivo'
-import { esRechazoPorTope, type PartidaAGuardar, type RespuestaGuardado } from '@/lib/juego/guardado'
-import { encolarPendiente, reintentarPendientes } from '@/lib/juego/pendientes'
+import { idDispositivo, uuidNuevo } from '@/lib/juego/dispositivo'
+import {
+  APODO_ANONIMO,
+  esRechazoPorApodo,
+  esRechazoPorDatos,
+  esRechazoPorTope,
+  normalizarIdPartida,
+  type PartidaAGuardar,
+  type RespuestaGuardado,
+} from '@/lib/juego/guardado'
+import { encolarSiCorresponde, quitarPendiente, reintentarPendientes } from '@/lib/juego/pendientes'
 import { PERSONAJES } from '@/lib/juego/personajes'
 import type { DatosEntradaJuego, EstadoTurnoJuego } from '@/lib/juego/tipos'
 import type { AudioSeguro } from '@/lib/juego/ui/audio-seguro'
@@ -33,7 +51,9 @@ import {
   porcentaje,
   sanearApodo,
 } from '@/lib/juego/ui/textos'
+import { alTocar } from '@/lib/juego/ui/toque'
 import type { ResultadoPelea } from '@/lib/juego/ui/tipos-ui'
+import { useDesborde } from './capa'
 import { ImagenJuego } from './imagen-juego'
 import { ChipTurno } from './turno'
 
@@ -58,9 +78,34 @@ function IconoStat({ clave }: { clave: ClaveStat }) {
 
 /** Partidas ya mandadas al ranking (StrictMode monta dos veces; una revancha rápida no duplica). */
 const enviadas = new Set<string>()
-/** Lo que pasó con cada envío y si ya se contó el puntaje: volver del ranking no repite nada. */
+/**
+ * Peleas que salieron como «Anónimo» al irse de la pantalla, con clave: si vuelve (del ranking) y
+ * confirma un apodo, se mandan de nuevo y el servidor se lo pone a esa misma fila.
+ */
+const anonimas = new Set<string>()
+/**
+ * Lo que pasó con cada envío y si ya se contó el puntaje: volver del ranking no repite nada. `envios`
+ * se lee con useSyncExternalStore: una respuesta que llega después de ir al ranking y volver se ve
+ * en la pantalla nueva (antes quedaba en la que ya se había desmontado, con «Guardar» muerto).
+ */
 const envios = new Map<string, Envio>()
+const oyentesEnvios = new Set<() => void>()
 const contados = new Set<string>()
+
+function suscribirEnvios(oyente: () => void): () => void {
+  oyentesEnvios.add(oyente)
+  return () => {
+    oyentesEnvios.delete(oyente)
+  }
+}
+
+/** Anota cómo va el guardado de esa pelea y avisa a la pantalla que la muestra. */
+function anotarEnvio(id: string, e: Envio) {
+  envios.set(id, e)
+  for (const oyente of oyentesEnvios) oyente()
+}
+/** La clave de las peleas cuyo id no es un UUID (sin `crypto.randomUUID`): una sola por pelea. */
+const clavesPropias = new Map<string, string | null>()
 
 type Envio =
   | { tipo: 'nada' }
@@ -68,7 +113,21 @@ type Envio =
   | { tipo: 'listo'; apodo: string; puesto: number | null }
   /** El servidor la frenó por el tope: está en la cola de pendientes.ts y se guarda sola más tarde. */
   | { tipo: 'pendiente'; apodo: string }
-  | { tipo: 'error'; mensaje: string }
+  /** `reintentar`: si tiene sentido mandarla de nuevo igual (una falla de red o de la base; no un apodo ni datos rechazados). */
+  | { tipo: 'error'; mensaje: string; reintentar: boolean }
+  /** Salió como «Anónimo» al irse y no tiene clave: mandarla otra vez con un apodo la duplicaría. */
+  | { tipo: 'anonima' }
+
+/**
+ * La clave de idempotencia de la pelea (guardado.ts): su id, que es un UUID (`crypto.randomUUID` en
+ * pantalla-pelea.tsx); si no lo es, uno propio que se recuerda. Null sólo sin crypto.
+ */
+function claveDePelea(id: string): string | null {
+  const directa = normalizarIdPartida(id)
+  if (directa) return directa
+  if (!clavesPropias.has(id)) clavesPropias.set(id, uuidNuevo())
+  return clavesPropias.get(id) ?? null
+}
 
 function armarPartida(r: ResultadoPelea, datos: DatosEntradaJuego, apodo: string): PartidaAGuardar {
   const e = r.estadisticas
@@ -77,6 +136,8 @@ function armarPartida(r: ResultadoPelea, datos: DatosEntradaJuego, apodo: string
     sucursalSlug: datos.sucursal?.slug ?? null,
     // Sin QR, el tope del guardado es por celular y no por el wifi del local (guardado.ts).
     dispositivo: idDispositivo(),
+    // La misma en cada intento de esta pelea: el servidor no la guarda dos veces (mig 234).
+    idPartida: claveDePelea(r.id),
     apodo,
     personaje: r.eleccion.jugador,
     rival: r.eleccion.rival,
@@ -141,34 +202,55 @@ export function PantallaResultado({
   // Con un apodo ya guardado de antes, la partida va sola al ranking.
   const [apodoAuto] = useState(() => (prefs.apodo.trim().length >= 2 ? prefs.apodo.trim() : null))
   const [apodo, setApodo] = useState(() => prefs.apodo || datos.cliente?.nombre || '')
-  const [envio, setEnvioLocal] = useState<Envio>(
-    () =>
-      envios.get(resultado.id) ??
-      (apodoAuto && !enviadas.has(resultado.id) ? { tipo: 'guardando' } : { tipo: 'nada' }),
+  const [envioInicial] = useState<Envio>(() =>
+    apodoAuto && !enviadas.has(resultado.id) ? { tipo: 'guardando' } : { tipo: 'nada' },
   )
-  const setEnvio = (e: Envio) => {
-    envios.set(resultado.id, e)
-    setEnvioLocal(e)
-  }
+  const envioAnotado = useSyncExternalStore(
+    suscribirEnvios,
+    () => envios.get(resultado.id),
+    () => undefined,
+  )
+  const envio = envioAnotado ?? envioInicial
+  const setEnvio = (e: Envio) => anotarEnvio(resultado.id, e)
   const [contado, setContado] = useState(() => contados.has(resultado.id))
   const [aviso, setAviso] = useState<string | null>(null)
   const numeroRef = useRef<HTMLSpanElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // Sin desborde, el scroller va con touch-action: none (`data-sin-paneo`, juego.css): un pulgar
+  // apoyado acá mientras otro dedo toca «Revancha» llega a la pelea con el touch-action de donde se
+  // apoyó, y con pan-y su primer movimiento empezaba un paneo y dejaba muertos los controles.
+  useDesborde(scrollRef)
 
-  const terminarEnvio = (nombre: string, partida: PartidaAGuardar, r: RespuestaGuardado) => {
-    if (r.ok) {
-      guardarPreferencias({ apodo: nombre })
-      setEnvio({ tipo: 'listo', apodo: nombre, puesto: r.puesto })
-      onGuardado(nombre, total)
-      // El servidor ya acepta a este celular: van las que había frenado por el tope antes.
+  /** Lo que vuelve de un guardado de la pantalla. `r` null: el pedido tiró (sin conexión). */
+  const terminarEnvio = (nombre: string, partida: PartidaAGuardar, r: RespuestaGuardado | null) => {
+    if (r?.ok) {
+      // Si otro intento de esta pelea había llegado primero, el servidor dice con qué apodo quedó.
+      const guardadoComo = r.apodo ?? nombre
+      anonimas.delete(resultado.id)
+      // Una falla anterior pudo haberla dejado en la cola: ya no hace falta mandarla.
+      quitarPendiente(resultado.id)
+      if (nombre !== APODO_ANONIMO) guardarPreferencias({ apodo: nombre })
+      setEnvio({ tipo: 'listo', apodo: guardadoComo, puesto: r.puesto })
+      onGuardado(guardadoComo, total)
+      // El servidor ya acepta a este celular: van las que habían quedado en la cola.
       void reintentarPendientes(guardarPartidaJuego)
     } else if (esRechazoPorTope(r)) {
       // Frenada ANTES de insertar (no se guardó nada): a la cola, que la manda sola cuando se
       // libere el cupo. El apodo ya pasó el filtro del servidor (se revisa antes que el tope).
-      encolarPendiente(resultado.id, partida, r.esperarSeg)
-      guardarPreferencias({ apodo: nombre })
+      encolarSiCorresponde(resultado.id, partida, r)
+      if (nombre !== APODO_ANONIMO) guardarPreferencias({ apodo: nombre })
       setEnvio({ tipo: 'pendiente', apodo: nombre })
+    } else if (esRechazoPorApodo(r)) {
+      // El filtro corre antes de tocar la base: no se guardó nada. Se libera la pelea: con otro
+      // apodo sale de nuevo y, si se va sin guardar, como «Anónimo» (guardarAlSalir).
+      enviadas.delete(resultado.id)
+      setEnvio({ tipo: 'error', mensaje: r.error, reintentar: false })
     } else {
-      setEnvio({ tipo: 'error', mensaje: r.error || 'No se pudo guardar' })
+      // Red caída, un timeout o la base (pudo haberse guardado), o datos inválidos. Con clave, la
+      // falla ambigua queda además en la cola: si se va sin reintentar, sale sola más tarde y el
+      // servidor no la duplica. Sin clave, sólo a mano con «Reintentar».
+      encolarSiCorresponde(resultado.id, partida, r)
+      setEnvio({ tipo: 'error', mensaje: r?.error || 'Sin conexión', reintentar: !esRechazoPorDatos(r) })
     }
   }
 
@@ -178,10 +260,12 @@ export function PantallaResultado({
   useEffect(() => {
     if (!apodoAuto || enviadas.has(resultado.id)) return
     enviadas.add(resultado.id)
+    // Anotado (no sólo el estado inicial): si va al ranking y vuelve antes de la respuesta, ve esto.
+    anotarEnvio(resultado.id, { tipo: 'guardando' })
     const partida = armarPartida(resultado, datos, apodoAuto)
     guardarPartidaJuego(partida)
       .then((r) => alTerminarEnvio(apodoAuto, partida, r))
-      .catch(() => alTerminarEnvio(apodoAuto, partida, { ok: false, error: 'Sin conexión' }))
+      .catch(() => alTerminarEnvio(apodoAuto, partida, null))
   }, [resultado, datos, apodoAuto])
 
   // El puntaje cuenta hasta el total; después aparece el rango.
@@ -227,14 +311,27 @@ export function PantallaResultado({
     return () => window.clearTimeout(t)
   }, [aviso])
 
+  /**
+   * Manda la pelea con ese apodo si no salió ya. Una que salió como «Anónimo» al irse (con clave)
+   * sale de nuevo: el servidor le pone el apodo a esa misma fila.
+   */
   const enviarManual = (nombre: string) => {
-    if (enviadas.has(resultado.id)) return
+    if (enviadas.has(resultado.id) && !anonimas.has(resultado.id)) return
+    anonimas.delete(resultado.id)
     enviadas.add(resultado.id)
     setEnvio({ tipo: 'guardando' })
     const partida = armarPartida(resultado, datos, nombre)
     guardarPartidaJuego(partida)
       .then((r) => terminarEnvio(nombre, partida, r))
-      .catch(() => setEnvio({ tipo: 'error', mensaje: 'Sin conexión' }))
+      .catch(() => terminarEnvio(nombre, partida, null))
+  }
+
+  const reintentar = () => {
+    // Con un pedido en vuelo no sale otro (dos toques antes de que se redibuje la pantalla).
+    if (envios.get(resultado.id)?.tipo === 'guardando') return
+    enviadas.delete(resultado.id)
+    const nombre = sanearApodo(apodo).trim() || apodoAuto || APODO_ANONIMO
+    enviarManual(nombre)
   }
 
   const alGuardar = (e: FormEvent) => {
@@ -246,32 +343,33 @@ export function PantallaResultado({
       return
     }
     audio.ui('confirmar')
-    enviarManual(nombre)
-  }
-
-  const reintentar = () => {
-    enviadas.delete(resultado.id)
-    const nombre = sanearApodo(apodo).trim() || apodoAuto || 'Anónimo'
-    enviarManual(nombre)
+    // Después de un error, «Guardar» (y Enter) hace lo mismo que «Reintentar», con el apodo que
+    // está escrito (hasta el 31/oct no hacía nada y la partida se perdía).
+    if (envio.tipo === 'error') reintentar()
+    else enviarManual(nombre)
   }
 
   /**
-   * Si se va sin tocar «Guardar», la pelea igual cuenta para las estadísticas, pero como
-   * «Anónimo»: el nombre precargado no se publica en el ranking sin que lo confirme. La pantalla
-   * ya se va, pero la respuesta se mira igual: si el servidor la frenó por el tope, queda en la
-   * cola (pendientes.ts), y si se guardó, van las que estaban en la cola. Un error de red o
-   * desconocido NO se reintenta: pudo haberse guardado y no hay forma de saberlo.
+   * Si se va sin tocar «Guardar» (o con el apodo rechazado por el servidor, que no guardó nada), la
+   * pelea igual cuenta para las estadísticas, pero como «Anónimo»: el nombre precargado no se publica
+   * en el ranking sin que lo confirme. Si ya salió (guardándose, guardada, en la cola o con una falla
+   * que no dice si se guardó) no se manda nada más. La pantalla ya se va, pero la respuesta se mira
+   * igual: si no se guardó y se puede reintentar sin duplicarla (el tope; una falla de red o de la
+   * base, sólo con clave), queda en la cola (pendientes.ts); si se guardó, van las de la cola.
    */
   const guardarAlSalir = () => {
     if (enviadas.has(resultado.id)) return
     enviadas.add(resultado.id)
-    const partida = armarPartida(resultado, datos, 'Anónimo')
+    const partida = armarPartida(resultado, datos, APODO_ANONIMO)
+    // Con clave, si vuelve del ranking todavía puede ponerle su apodo; sin clave, no sale nada más.
+    if (partida.idPartida) anonimas.add(resultado.id)
+    else anotarEnvio(resultado.id, { tipo: 'anonima' })
     void guardarPartidaJuego(partida)
       .then((r) => {
         if (r.ok) void reintentarPendientes(guardarPartidaJuego)
-        else if (esRechazoPorTope(r)) encolarPendiente(resultado.id, partida, r.esperarSeg)
+        else encolarSiCorresponde(resultado.id, partida, r)
       })
-      .catch(() => {})
+      .catch(() => encolarSiCorresponde(resultado.id, partida, null))
   }
 
   const compartir = async () => {
@@ -293,6 +391,12 @@ export function PantallaResultado({
       setAviso('No se pudo compartir')
     }
   }
+
+  // «Guardar» es el submit del form: el click (mouse, teclado, el primer dedo) ya lo envía, así que del
+  // helper van sólo los punteros, que piden el submit (por el form del botón) con un segundo dedo.
+  const { onClick: _clickDelForm, ...segundoDedoGuardar } = alTocar((boton) =>
+    (boton as HTMLButtonElement).form?.requestSubmit(),
+  )
 
   const stats: { clave: ClaveStat; etiqueta: string; valor: string }[] = [
     { clave: 'danio', etiqueta: 'Daño hecho', valor: formatearPuntos(est.danioHecho) },
@@ -317,7 +421,7 @@ export function PantallaResultado({
       <div className="cf-resultado__velo" aria-hidden="true" />
       <span className="cf-resultado__rayos" aria-hidden="true" />
 
-      <div className="cf-resultado__scroll">
+      <div className="cf-resultado__scroll" ref={scrollRef} data-sin-paneo="">
         <header className="cf-resultado__cabeza">
           <ChipTurno turno={turno} />
           {sala}
@@ -392,6 +496,11 @@ export function PantallaResultado({
                     Se guarda como <b>{envio.apodo}</b> en unos minutos
                   </span>
                 </p>
+              ) : envio.tipo === 'anonima' ? (
+                <p className="cf-apodo__listo">
+                  <UserX aria-hidden="true" />
+                  <span>Sin apodo: esta pelea no entra al ranking</span>
+                </p>
               ) : (
                 <form className="cf-apodo__form" onSubmit={alGuardar}>
                   <label htmlFor="cf-apodo" className="cf-rotulo">
@@ -409,16 +518,24 @@ export function PantallaResultado({
                       placeholder="Ej: El Facha"
                       onChange={(e) => setApodo(sanearApodo(e.target.value))}
                     />
-                    <button type="submit" className="cf-btn">
+                    {/* El click ya envía el form (y Enter también): del helper van sólo los
+                        punteros, para el segundo dedo (ui/toque.ts). Un toque que además genere
+                        click no manda dos: `enviadas` y el «guardando» lo frenan. */}
+                    <button type="submit" className="cf-btn" {...segundoDedoGuardar}>
                       <span>Guardar</span>
                     </button>
                   </div>
                   {envio.tipo === 'error' && (
                     <p className="cf-apodo__error" role="alert">
-                      {envio.mensaje.replace(/\.$/, '')}.{' '}
-                      <button type="button" className="cf-enlace" onClick={reintentar}>
-                        Reintentar
-                      </button>
+                      {envio.mensaje.replace(/\.$/, '')}.
+                      {envio.reintentar && (
+                        <>
+                          {' '}
+                          <button type="button" className="cf-enlace" {...alTocar(reintentar)}>
+                            Reintentar
+                          </button>
+                        </>
+                      )}
                     </p>
                   )}
                 </form>
@@ -452,14 +569,16 @@ export function PantallaResultado({
         </div>
       </div>
 
+      {/* Con el pulgar todavía apoyado (en el stick de la pelea que terminó), Chrome no genera
+          click para el segundo dedo: los botones van con alTocar (ui/toque.ts). */}
       <footer className="cf-resultado__acciones">
         <button
           type="button"
           className="cf-btn cf-btn--grande"
-          onClick={() => {
+          {...alTocar(() => {
             guardarAlSalir()
             onRevancha()
-          }}
+          })}
         >
           <RotateCcw aria-hidden="true" />
           <span>Revancha</span>
@@ -467,10 +586,10 @@ export function PantallaResultado({
         <button
           type="button"
           className="cf-btn cf-btn--sec"
-          onClick={() => {
+          {...alTocar(() => {
             guardarAlSalir()
             onCambiarBarbero()
-          }}
+          })}
         >
           <Users aria-hidden="true" />
           <span>Cambiar barbero</span>
@@ -478,15 +597,15 @@ export function PantallaResultado({
         <button
           type="button"
           className="cf-btn cf-btn--sec"
-          onClick={() => {
+          {...alTocar(() => {
             guardarAlSalir()
             onRanking()
-          }}
+          })}
         >
           <Trophy aria-hidden="true" />
           <span>Ranking</span>
         </button>
-        <button type="button" className="cf-btn cf-btn--sec" onClick={compartir}>
+        <button type="button" className="cf-btn cf-btn--sec" {...alTocar(() => void compartir())}>
           <Share2 aria-hidden="true" />
           <span>Compartir</span>
         </button>

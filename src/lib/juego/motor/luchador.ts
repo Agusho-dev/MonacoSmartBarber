@@ -23,12 +23,24 @@ import {
   GUARDIA,
   INMUNIDAD,
   TICKS_BUFFER,
+  TOPE_ENCIERRO,
   VEL_SALTO,
   X_INICIO,
   X_MAX,
   X_MIN,
 } from './constantes'
-import { dirDe, franjaEmpuje, invulnerablePorAccion, limitar, mirarA, puedeActuar, puedeActuarEnAire, sinControl } from './cuerpo'
+import {
+  aguantaGolpes,
+  bloqueoPuro,
+  dirDe,
+  encerrado,
+  franjaEmpuje,
+  invulnerableAhora,
+  limitar,
+  mirarA,
+  puedeActuar,
+  puedeActuarEnAire,
+} from './cuerpo'
 import type { BotonBuffer, EstadoControl, EstadoInterno, InternoLuchador } from './interno'
 import { emitir } from './interno'
 import type { DefEspecial, KitPersonaje } from './movimientos'
@@ -159,6 +171,8 @@ export function crearInternoLuchador(vida: number): InternoLuchador {
     quema: null,
     agarradoPor: null,
     sinControl: 0,
+    conControl: 0,
+    respiroInmune: 0,
   }
 }
 
@@ -219,6 +233,8 @@ export function reiniciarLuchador(l: LuchadorEstado, li: InternoLuchador): void 
   li.quema = null
   li.agarradoPor = null
   li.sinControl = 0
+  li.conControl = 0
+  li.respiroInmune = 0
 }
 
 export function vaciarBuffer(li: InternoLuchador): void {
@@ -483,7 +499,9 @@ function aterrizar(p: Partida, I: EstadoInterno, lado: Lado): void {
     li.invulnProyectil = false
     // Si pegó, se recupera rápido; bloqueada o al aire, queda expuesto.
     li.aterrizaje = emb ? (a.acerto ? emb.recuperacionGolpe : emb.recuperacionBloqueo) : ATERRIZAJE_TICKS
-  } else if (!a && l.efectos.congelado === 0 && li.stun === 0) {
+  } else if (!a && l.efectos.congelado === 0 && li.stun === 0 && !aguantaGolpes(li)) {
+    // Al que soltaron en el tope del encierro (cayendo de un agarre o de un golpe en el aire) no le
+    // queda ni la recuperación del aterrizaje: cae parado y ya se mueve.
     li.aterrizaje = ATERRIZAJE_TICKS
   }
   li.aterrizajeTotal = Math.max(1, li.aterrizaje)
@@ -635,9 +653,87 @@ export function relojes(p: Partida, I: EstadoInterno, lado: Lado, pelea: boolean
       l.guardia = Math.min(GUARDIA.max, l.guardia + GUARDIA.regen)
     }
     sumarCarga(p, lado, ((p.turbo ? CARGA.turboMult : 1) * (k.pasiva?.multCarga ?? 1)) / CARGA.ticksPorUnidad)
-    // Encierro (TOPE_ENCIERRO): ticks de pelea seguidos sin poder actuar. Este reloj no corre en el
-    // hitstop ni en el super flash, así que tampoco los cuenta.
-    li.sinControl = sinControl(l, li) ? li.sinControl + 1 : 0
+    contarEncierro(p, I, lado, false)
+  }
+}
+
+/**
+ * Un tick del encierro (TOPE_ENCIERRO) en la fase de pelea. Lo llaman `relojes` (ticks de pelea) y
+ * partida.ts en cada tick congelado (hitstop o super flash: `congelado`), así el encierro se mide
+ * en tiempo de PANTALLA, lo que ve el que juega, y de punta a punta: desde el primer tick encerrado
+ * (`encerrado`, cuerpo.ts) cuenta cada tick hasta que respira, huecos incluidos.
+ *  - Encerrado: el respiro vuelve a cero (si llega al tope, `soltarEncierro`).
+ *  - Con control, en un tick de pelea: respira. Con `respiro` ticks así el encierro termina y el
+ *    reloj vuelve a cero: un hueco más corto no lo corta. Hasta el 31/oct un solo tick libre volvía
+ *    el reloj a cero y Brian agarraba otra vez al que se levantaba cubriéndose: 8,5 s sin control.
+ *    Si el encierro había llegado a la inmunidad, le quedan `respiroInmune` ticks así de inmunidad
+ *    al control: nadie lo vuelve a encerrar apenas sale.
+ *  - Sólo cubriéndose (blockstun puro) o en un tick congelado: el reloj corre pero no respira.
+ */
+export function contarEncierro(p: Partida, I: EstadoInterno, lado: Lado, congelado: boolean): void {
+  const l = p.luchadores[lado]
+  const li = I.luchadores[lado]
+  if (encerrado(l, li)) {
+    li.conControl = 0
+    li.sinControl++
+    if (li.sinControl >= TOPE_ENCIERRO.tope) {
+      soltarEncierro(p, I, lado)
+      return
+    }
+    // Tirado en un encierro que ya viene largo: se queda menos en el piso, así termina de
+    // levantarse justo en el tope (si no, la suelta lo pondría de pie en medio del levantarse).
+    const resto = TOPE_ENCIERRO.tope - li.sinControl - EFECTO.levantarse
+    if (li.derribo > 0 && li.derribo > resto) li.derribo = Math.max(1, resto)
+    return
+  }
+  if (li.sinControl > 0) li.sinControl++
+  if (congelado || bloqueoPuro(l, li)) return
+  if (li.respiroInmune > 0) li.respiroInmune--
+  if (li.sinControl === 0) return
+  li.conControl++
+  if (li.conControl >= TOPE_ENCIERRO.respiro) {
+    if (li.sinControl >= TOPE_ENCIERRO.inmuneDesde) li.respiroInmune = TOPE_ENCIERRO.respiroInmune
+    li.sinControl = 0
+    li.conControl = 0
+  }
+}
+
+/**
+ * Tope del encierro: se termina todo lo que lo tiene sin control (hielo, aturdido, electrocutado,
+ * guardia rota, aturdimiento del golpe, el piso, la caída, el agarre) y queda libre en este mismo
+ * tick. Hasta que respire, aguanta los golpes (`aguantaGolpes`): no vuelve a quedar encerrado.
+ */
+export function soltarEncierro(p: Partida, I: EstadoInterno, lado: Lado): void {
+  const l = p.luchadores[lado]
+  const li = I.luchadores[lado]
+  const ef = l.efectos
+  if (ef.congelado > 0) {
+    ef.congelado = 0
+    li.inmune.congelado = INMUNIDAD.congelado
+    emitir(p, { tipo: 'descongelado', quien: lado, roto: false })
+  }
+  if (ef.electrocutado > 0) {
+    ef.electrocutado = 0
+    li.inmune.electrocutado = INMUNIDAD.electrocutado
+  }
+  if (ef.aturdido > 0) {
+    ef.aturdido = 0
+    li.inmune.aturdido = INMUNIDAD.aturdido
+  }
+  if (ef.guardiaRota > 0) {
+    ef.guardiaRota = 0
+    l.guardia = Math.max(l.guardia, GUARDIA.vuelve)
+  }
+  li.stun = 0
+  li.stunBloqueo = false
+  li.caidaDerribo = 0
+  li.derribo = 0
+  li.levantar = 0
+  li.aterrizaje = 0
+  // El que lo agarraba lo nota en su próximo tick (progresarAgarre) y termina el agarre.
+  if (li.agarradoPor !== null) {
+    li.agarradoPor = null
+    if (!l.enSuelo) l.vy = Math.min(l.vy, 0)
   }
 }
 
@@ -662,11 +758,5 @@ export function actualizarEstado(l: LuchadorEstado, li: InternoLuchador): void {
   else if (li.agachado) l.estado = 'agachado'
   else if (li.vMov !== 0) l.estado = 'caminando'
   else l.estado = 'quieto'
-  l.invulnerable =
-    (li.dash !== null && li.dash.t < li.dash.invul) ||
-    invulnerablePorAccion(li) ||
-    li.derribo > 0 ||
-    li.levantar > 0 ||
-    li.caidaDerribo > 0 ||
-    li.pose !== null
+  l.invulnerable = invulnerableAhora(li)
 }

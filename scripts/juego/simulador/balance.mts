@@ -1,20 +1,33 @@
 /**
  * Balance del elenco de «Corte Final»: CPU contra CPU en TODOS los cruces (los dos lados, espejos
  * incluidos) y en las 3 dificultades, repartido en hilos (worker_threads); además, lo que vive un
- * cliente: dos «humanos» de bot (el simple y el novato) contra la CPU con cada barbero, de los dos
- * lados y contra cada rival, y novato contra novato (la pelea online entre dos personas).
+ * cliente: personas de bot (personas.mts) contra la CPU con cada barbero, de los dos lados y contra
+ * cada rival, y persona contra persona (la pelea online), con y sin la demora del online.
  *
  *   cd scripts/juego/simulador && node --import ./cargador.mjs balance.mts [opciones]
  *     --semillas=N        partidas por cruce ORDENADO y dificultad (def. 60)
- *     --semillasNormal=N  ídem sólo para normal (def. = semillas): la matriz 13×13 sale de normal
- *     --humano=N          partidas de CADA humano (simple y novato) por barbero del humano y
- *                         dificultad, repartidas entre los 13 rivales y los dos lados (def. 52).
- *                         Con un múltiplo de 26 cada celda de la matriz humano×CPU tiene lo mismo
+ *     --semillasNormal=N  ídem sólo para normal (def. = semillas): la matriz 13×13 sale de normal. Un
+ *                         cruce de normal se decide con ≥ 400 partidas (los dos lados): 200 o más
+ *     --humano=N          partidas de CADA humano por barbero del humano y dificultad, repartidas
+ *                         entre los 13 rivales y los dos lados (def. 52). Con un múltiplo de 26 cada
+ *                         celda de la matriz humano×CPU tiene lo mismo. Todos los humanos juegan las
+ *                         MISMAS partidas (rival, lado y semilla): las diferencias entre ellos son de
+ *                         a pares
  *     --humanoNormal=N    ídem sólo para normal (def. = humano): la matriz humano×CPU sale de normal
- *     --humanos=simple    qué humanos corren (def. simple,novato)
- *     --novatos=N         novato contra novato: partidas por cruce ordenado (def. 10; 0 = no corre)
+ *     --humanos=a,b       qué personas juegan contra la CPU (def. simple,novato,simple@0,novato@0,
+ *                         botonero). «simple» y «novato» ven el ataque con REACCION_HUMANA ticks de
+ *                         retraso: son los OFICIALES de la meta B. «simple@0» y «novato@0» son los de
+ *                         antes (lo ven en el mismo tick): referencia. El botonero mide el salto entre
+ *                         dificultades
+ *     --novatos=N         persona contra persona: partidas por cruce ordenado de cada persona y
+ *                         demora (def. 10; 0 = no corre). Corre además la referencia de antes
+ *                         (novato@0 contra novato@0, sin demora)
+ *     --personas=a,b      qué personas pelean entre sí (def. novato,apunta,botonero,casual,casual2)
+ *     --demoras=0,17,20   demora de entrada del online, en ticks (def. 0,17,20; ver personas.mts)
+ *     --matricesE         escribe también la matriz 13×13 de cada persona y demora
  *     --sal=K             semillas NUEVAS (un hash del contador y de K): para validar con semillas
- *                         distintas de las que usó el ajuste. Sin --sal, las de siempre.
+ *                         distintas de las que usó el ajuste. Sin --sal, las de siempre
+ *     --sales=base,1      varias tandas de semillas juntas en un solo informe («base» = las de siempre)
  *     --dif=facil,normal  dificultades (def. las 3)
  *     --solo=a,b          sólo esos luchadores (contra todos)
  *     --hilos=K           hilos (def. 6)
@@ -31,23 +44,27 @@
  * Usa la meta real de los atlas si existen (public/juego/personajes/<id>/atlas.json); si no, la típica.
  * Metas (pedido del dueño: «todos los players deben estar equilibrados, todos deben de ser
  * competitivos»):
- *  - CPU contra CPU: cada luchador 45–55 % en cada dificultad; ningún cruce fuera de 35–65 % en
- *    normal; sesgo de lado < 3 %; espejos ≈ 50 %; casi ningún round por tiempo; todos los
- *    especiales se usan y aciertan.
- *  - Humanos contra la CPU NORMAL (la dificultad por defecto): con los dos humanos, el % que gana
- *    el humano queda entre 25 y 55 % para cada barbero, de los dos lados de la matriz (el que elige
- *    el humano y el que maneja la CPU). En fácil el simple gana ≥ 70 % con cada barbero y en
- *    difícil ningún humano pasa de 20 %.
- *  - La CPU usa los DOS especiales: contra el humano simple, cada especial es ≥ 20 % de los que
- *    tira con cada barbero, en cada dificultad.
- *  - Novato contra novato: cada barbero entre 35 y 65 % (el pedido de la revisión del 30/oct,
- *    segunda tanda: es un solo bot haciendo de las dos personas, la vara es gruesa a propósito).
+ *  - C, CPU contra CPU: cada luchador 45–55 % en cada dificultad; ningún cruce fuera de 35–65 % en
+ *    normal (decidido con ≥ 400 partidas por cruce: con menos, el informe lo marca como indicativo);
+ *    sesgo de lado < 3 %; espejos ≈ 50 %; casi ningún round por tiempo; todos los especiales se usan.
+ *  - B, humanos contra la CPU NORMAL (la dificultad por defecto): con los dos oficiales (el simple y
+ *    el novato CON reacción humana), el % que gana el humano queda entre 25 y 55 % para cada barbero,
+ *    de los dos lados de la matriz (el que elige el humano y el que maneja la CPU). En fácil el simple
+ *    gana ≥ 70 % con cada barbero y en difícil ninguno de los dos pasa de 20 %.
+ *  - D, la CPU usa los DOS especiales: contra el simple, cada especial es ≥ 20 % de los que tira con
+ *    cada barbero, en cada dificultad.
+ *  - E, persona contra persona (la pelea online): con las cinco personas (novato, apunta, botonero,
+ *    casual y casual2) y las tres demoras (0, 17 y 20), el promedio de cada barbero entre 35 y 65 %
+ *    y ninguna columna (persona y demora) fuera de 30–70. Es la balanza del KIT: el online no tiene
+ *    CPU, así que ni la pericia ni la asistencia la tocan (tercera tanda, 31/oct). «simple contra
+ *    simple» (sólo GOLPE) se puede pedir con --personas, pero no es meta: sólo mide los normales.
+ * Ruido: con n partidas, el error de un porcentaje es ≈ ±100/√n (al 95 %): 260 por fila de B dan ±6.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { availableParallelism } from 'node:os'
 import { join } from 'node:path'
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads'
-import type { AtlasPersonaje, Dificultad, EntradaJugador, IdPersonaje, Lado, MetaAnimaciones, Partida } from '../../../src/lib/juego/tipos.ts'
+import type { AtlasPersonaje, Dificultad, EntradaJugador, IdPersonaje, Lado, MetaAnimaciones } from '../../../src/lib/juego/tipos.ts'
 import { CLAVES_ANIMACION, ENTRADA_VACIA, TPS } from '../../../src/lib/juego/tipos.ts'
 import { avanzar, crearPartida, metaDesdeAtlas } from '../../../src/lib/juego/motor/index.ts'
 import { internoDe } from '../../../src/lib/juego/motor/interno.ts'
@@ -57,6 +74,8 @@ import type { KitPersonaje } from '../../../src/lib/juego/motor/movimientos.ts'
 import { CONTRA_PERSONA, PARAMS_CPU } from '../../../src/lib/juego/motor/cpu.ts'
 import type { ParamsCpu } from '../../../src/lib/juego/motor/cpu.ts'
 import { IDS_PERSONAJES, PERSONAJES } from '../../../src/lib/juego/personajes.ts'
+import type { Persona } from './personas.mts'
+import { conDemora, crearPersona, leerNombre, reaccionDe } from './personas.mts'
 
 const REPO = new URL('../../../', import.meta.url).pathname.replace(/\/$/, '')
 const MAX_TICKS = 6 * 60 * TPS
@@ -68,6 +87,17 @@ const TOPE_HUMANO_DIFICIL = 20
 const MIN_SIMPLE_FACIL = 70
 const MIN_ESPECIAL_CPU = 20
 const META_NOVATOS: readonly [number, number] = [35, 65]
+/** E: ninguna columna (persona y demora) fuera de esto. */
+const META_E_CELDA: readonly [number, number] = [30, 70]
+/** Partidas por cruce de normal para decidir si está fuera de 35–65 (con menos: ±5 o más). */
+const CRUCE_DECIDE = 400
+/** Los humanos de la meta B (con reacción humana); los demás se informan como referencia. */
+const OFICIALES = ['simple', 'novato']
+const HUMANOS_DEF = ['simple', 'novato', 'simple@0', 'novato@0', 'botonero']
+const PERSONAS_DEF = ['novato', 'apunta', 'botonero', 'casual', 'casual2']
+const DEMORAS_DEF = [0, 17, 20]
+/** La referencia de E de antes del 31/oct: novato contra novato que ven el ataque en el mismo tick, sin demora. */
+const NOVATO_REF = 'novato@0'
 
 // ─── Meta de animaciones ─────────────────────────────────────────────────────
 
@@ -91,125 +121,22 @@ function metaDe(id: IdPersonaje): { meta: MetaAnimaciones; origen: string } {
   return { meta: m, origen: 'típica' }
 }
 
-// ─── Humanos de bot ──────────────────────────────────────────────────────────
-
-function rng(semilla: number) {
-  let s = semilla >>> 0
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0
-    let t = s
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-interface Humano {
-  r: () => number
-  guardiaT: number
-  golpeT: number
-  movRival: string | null
-  /** Lo que apretó el tick anterior (el motor lee flancos). */
-  prev: Partial<EntradaJugador>
-  /** Novato: ticks que tarda en apretar el especial que se encendió (−1 = no hay ninguno listo). */
-  esperaEsp: number
-}
-type NombreHumano = 'simple' | 'novato'
-const HUMANOS: readonly NombreHumano[] = ['simple', 'novato']
-
-function humanoNuevo(semilla: number): Humano {
-  return { r: rng(semilla), guardiaT: 0, golpeT: 0, movRival: null, prev: {}, esperaEsp: -1 }
-}
-
-/** «Humano simple» (el mismo de simular.mts): camina hacia el rival, machaca GOLPE de cerca y a veces se cubre. */
-function entradaSimple(h: Humano, p: Partida, lado: Lado): EntradaJugador {
-  const yo = p.luchadores[lado]
-  const rv = p.luchadores[lado === 0 ? 1 : 0]
-  const e: EntradaJugador = { ...ENTRADA_VACIA }
-  const nuevoAtaque = rv.movimiento !== null && rv.movimiento !== h.movRival
-  h.movRival = rv.movimiento
-  if (p.fase !== 'pelea' && p.fase !== 'final') return e
-  if (h.guardiaT > 0) {
-    h.guardiaT--
-    e.guardia = true
-    return e
-  }
-  const d = Math.abs(rv.x - yo.x)
-  if (nuevoAtaque && d < 260 && h.r() < 0.3) {
-    h.guardiaT = 20
-    e.guardia = true
-    return e
-  }
-  if (d < 135) {
-    h.golpeT = (h.golpeT + 1) % 5
-    e.golpe = h.golpeT < 2
-  } else if (rv.x > yo.x) e.derecha = true
-  else e.izquierda = true
-  return e
-}
-
-/**
- * «Novato» (el de la verificación del 30/oct, confirmar-servidor-datos/sim/humano.mts): como el
- * simple, pero alterna GOLPE y MÁQUINA y aprieta un especial cuando se le enciende (sin apuntar,
- * con 0,3–1,3 s de demora), que es lo que hace alguien que ve el botón prendido.
- */
-function entradaNovato(h: Humano, p: Partida, lado: Lado): EntradaJugador {
-  const yo = p.luchadores[lado]
-  const rv = p.luchadores[lado === 0 ? 1 : 0]
-  const e: EntradaJugador = { ...ENTRADA_VACIA }
-  const nuevoAtaque = rv.movimiento !== null && rv.movimiento !== h.movRival
-  h.movRival = rv.movimiento
-  if (p.fase !== 'pelea' && p.fase !== 'final') return e
-  if (h.guardiaT > 0) {
-    h.guardiaT--
-    e.guardia = true
-    return e
-  }
-  const d = Math.abs(rv.x - yo.x)
-  if (nuevoAtaque && d < 260 && h.r() < 0.3) {
-    h.guardiaT = 20
-    e.guardia = true
-    return e
-  }
-  const f = PERSONAJES[yo.id]
-  const listo2 = yo.carga + 1e-9 >= f.especiales[1].costo
-  const listo1 = yo.carga + 1e-9 >= f.especiales[0].costo
-  if (listo1 || listo2) {
-    if (h.esperaEsp < 0) h.esperaEsp = 18 + Math.floor(h.r() * 60)
-    if (h.esperaEsp === 0) {
-      h.esperaEsp = -1
-      const boton = listo2 && h.r() < 0.5 ? 'especial2' : 'especial1'
-      if (!h.prev[boton]) {
-        e[boton] = true
-        return e
-      }
-    } else h.esperaEsp--
-  } else h.esperaEsp = -1
-  if (d < 140) {
-    h.golpeT = (h.golpeT + 1) % 10
-    if (h.golpeT < 2) e.golpe = true
-    else if (h.golpeT >= 5 && h.golpeT < 7) e.herramienta = true
-  } else if (rv.x > yo.x) e.derecha = true
-  else e.izquierda = true
-  return e
-}
-
-const ENTRADA_HUMANO: Record<NombreHumano, (h: Humano, p: Partida, lado: Lado) => EntradaJugador> = {
-  simple: entradaSimple,
-  novato: entradaNovato,
-}
-
 // ─── Una partida ─────────────────────────────────────────────────────────────
+
+type TipoTrabajo = 'cpu' | 'humano' | 'personas' | 'novatos'
 
 interface Trabajo {
   a: IdPersonaje
   b: IdPersonaje
   dif: Dificultad
   semilla: number
-  /** Lado del humano contra la CPU (null = CPU contra CPU, o los dos humanos si `novatos`). */
+  tipo: TipoTrabajo
+  /** Lado del humano contra la CPU (tipo 'humano'). */
   humano: Lado | null
-  bot: NombreHumano | null
-  /** Novato contra novato (los dos lados son personas: como online). */
-  novatos: boolean
+  /** La persona (tipo 'humano' o 'personas'). */
+  bot: string | null
+  /** Demora del online en ticks (tipo 'personas'). */
+  demora: number
 }
 
 interface ResultadoPartida {
@@ -227,9 +154,10 @@ interface ResultadoPartida {
 }
 
 function jugar(t: Trabajo, metas: Record<string, MetaAnimaciones>): ResultadoPartida {
+  const dosPersonas = t.tipo === 'personas' || t.tipo === 'novatos'
   const p = crearPartida({
     personajes: [t.a, t.b],
-    cpu: t.novatos ? [false, false] : [t.humano !== 0, t.humano !== 1],
+    cpu: dosPersonas ? [false, false] : [t.humano !== 0, t.humano !== 1],
     dificultad: t.dif,
     arena: 'rondeau',
     rondasParaGanar: 2,
@@ -238,13 +166,13 @@ function jugar(t: Trabajo, metas: Record<string, MetaAnimaciones>): ResultadoPar
     semilla: t.semilla,
   })
   const I = internoDe(p)
-  // El humano del lado `t.humano` (o los dos, novato contra novato), cada uno con su azar.
-  const humanos: [Humano | null, Humano | null] = [null, null]
-  if (t.novatos) {
-    humanos[0] = humanoNuevo(t.semilla * 7 + 3)
-    humanos[1] = humanoNuevo(t.semilla * 13 + 11)
-  } else if (t.humano !== null) humanos[t.humano] = humanoNuevo(t.semilla * 7 + 3)
-  const entrada = ENTRADA_HUMANO[t.bot ?? 'simple']
+  // Las personas de cada lado, cada una con su azar (como siempre: semilla·7+3 y semilla·13+11).
+  const personas: [Persona | null, Persona | null] = [null, null]
+  if (dosPersonas) {
+    const nombre = t.tipo === 'novatos' ? NOVATO_REF : (t.bot ?? 'novato')
+    personas[0] = conDemora(crearPersona(nombre, t.semilla * 7 + 3), t.demora)
+    personas[1] = conDemora(crearPersona(nombre, t.semilla * 13 + 11), t.demora)
+  } else if (t.tipo === 'humano' && t.humano !== null) personas[t.humano] = crearPersona(t.bot ?? 'simple', t.semilla * 7 + 3)
   const selloNumero = new Map<number, 1 | 2>()
   const ultimo: [number, number] = [0, 0]
   const usos: [[number, number], [number, number]] = [
@@ -260,11 +188,8 @@ function jugar(t: Trabajo, metas: Record<string, MetaAnimaciones>): ResultadoPar
   while (p.fase !== 'terminada' && p.tick < MAX_TICKS) {
     const ent: [EntradaJugador, EntradaJugador] = [ENTRADA_VACIA, ENTRADA_VACIA]
     for (const lado of [0, 1] as const) {
-      const h = humanos[lado]
-      if (!h) continue
-      const e = entrada(h, p, lado)
-      h.prev = e
-      ent[lado] = e
+      const persona = personas[lado]
+      if (persona) ent[lado] = persona(p, lado)
     }
     avanzar(p, ent)
     for (const ev of p.eventos.splice(0)) {
@@ -316,8 +241,10 @@ interface Acum {
   humanos: Record<string, [number, number]>
   /** clave `${bot}|${dif}|${idCpu}` → [usos del especial 1, usos del especial 2, partidas] de la CPU contra ese humano. */
   especialesCpu: Record<string, [number, number, number]>
-  /** clave `${a}|${b}` (a en el lado 0) → [partidas, ganó lado 0, ganó lado 1] de novato contra novato. */
+  /** clave `${a}|${b}` (a en el lado 0) → [partidas, ganó lado 0, ganó lado 1]: la referencia de E (novato@0, sin demora). */
   novatos: Record<string, [number, number, number]>
+  /** clave `${persona}|${demora}|${a}|${b}` → [partidas, ganó lado 0, ganó lado 1]: persona contra persona. */
+  personas: Record<string, [number, number, number]>
   noTerminan: number
   violaciones: string[]
   curado: Record<string, number>
@@ -333,6 +260,7 @@ function acumVacio(): Acum {
     humanos: {},
     especialesCpu: {},
     novatos: {},
+    personas: {},
     noTerminan: 0,
     violaciones: [],
     curado: {},
@@ -347,11 +275,16 @@ function sumarEn<T extends number[]>(r: Record<string, T>, k: string, v: readonl
 function sumar(ac: Acum, t: Trabajo, r: ResultadoPartida): void {
   if (!r.terminada) ac.noTerminan++
   if (r.violacion && ac.violaciones.length < 10) ac.violaciones.push(r.violacion)
-  if (t.novatos) {
-    sumarEn(ac.novatos, `${t.a}|${t.b}`, [1, r.ganador === 0 ? 1 : 0, r.ganador === 1 ? 1 : 0], () => [0, 0, 0])
+  const resultado = [1, r.ganador === 0 ? 1 : 0, r.ganador === 1 ? 1 : 0]
+  if (t.tipo === 'novatos') {
+    sumarEn(ac.novatos, `${t.a}|${t.b}`, resultado, () => [0, 0, 0])
     return
   }
-  if (t.humano !== null) {
+  if (t.tipo === 'personas') {
+    sumarEn(ac.personas, `${t.bot}|${t.demora}|${t.a}|${t.b}`, resultado, () => [0, 0, 0])
+    return
+  }
+  if (t.tipo === 'humano' && t.humano !== null) {
     const bot = t.bot ?? 'simple'
     const id = t.humano === 0 ? t.a : t.b
     const cpu = (1 - t.humano) as Lado
@@ -361,7 +294,7 @@ function sumar(ac: Acum, t: Trabajo, r: ResultadoPartida): void {
     return
   }
   const k = `${t.dif}|${t.a}|${t.b}`
-  sumarEn(ac.cruces, k, [1, r.ganador === 0 ? 1 : 0, r.ganador === 1 ? 1 : 0], () => [0, 0, 0])
+  sumarEn(ac.cruces, k, resultado, () => [0, 0, 0])
   ;(ac.rounds[t.dif] ??= []).push(...r.rounds)
   ac.tiempos[t.dif] = (ac.tiempos[t.dif] ?? 0) + r.tiempos
   ac.totalRounds[t.dif] = (ac.totalRounds[t.dif] ?? 0) + r.rounds.length
@@ -381,6 +314,7 @@ function fusionar(a: Acum, b: Acum): Acum {
   for (const [k, v] of Object.entries(b.humanos)) sumarEn(a.humanos, k, v, () => [0, 0])
   for (const [k, v] of Object.entries(b.especialesCpu)) sumarEn(a.especialesCpu, k, v, () => [0, 0, 0])
   for (const [k, v] of Object.entries(b.novatos)) sumarEn(a.novatos, k, v, () => [0, 0, 0])
+  for (const [k, v] of Object.entries(b.personas ?? {})) sumarEn(a.personas, k, v, () => [0, 0, 0])
   for (const [k, v] of Object.entries(b.curado)) a.curado[k] = (a.curado[k] ?? 0) + v
   a.noTerminan += b.noTerminan
   a.violaciones.push(...b.violaciones.slice(0, Math.max(0, 10 - a.violaciones.length)))
@@ -482,8 +416,9 @@ function mezcla32(x: number): number {
 
 /**
  * Semilla del trabajo número `b` de la clase `mult` (7919 CPU contra CPU, 104729 humanos, 1299709
- * novatos). Sin sal, la fórmula de siempre: las tablas publicadas se reproducen. Con sal, un hash
- * del contador, de la sal y de la clase: semillas que no tocó ningún ajuste.
+ * persona contra persona). Sin sal, la fórmula de siempre. Con sal, un hash del contador, de la sal y
+ * de la clase: semillas que no tocó ningún ajuste. Cada clase lleva su propio contador (desde el
+ * 31/oct): sumar o sacar humanos no cambia las semillas de CPU contra CPU.
  */
 function semillaDe(b: number, mult: number, sal: number | null): number {
   if (sal === null) return (b * mult) % 2147483647
@@ -499,11 +434,15 @@ async function principal(): Promise<void> {
   const semillasNormal = Number(arg('semillasNormal') ?? semillas)
   const semillasHumano = Number(arg('humano') ?? 52)
   const semillasHumanoNormal = Number(arg('humanoNormal') ?? semillasHumano)
-  const humanos = (arg('humanos')?.split(',') ?? HUMANOS) as NombreHumano[]
-  for (const h of humanos) if (!ENTRADA_HUMANO[h]) throw new Error(`humano desconocido: ${h}`)
+  const humanos = arg('humanos') !== undefined ? (arg('humanos') ?? '').split(',').filter(Boolean) : HUMANOS_DEF
+  for (const h of humanos) leerNombre(h)
   const semillasNovatos = Number(arg('novatos') ?? 10)
+  const personas = arg('personas') !== undefined ? (arg('personas') ?? '').split(',').filter(Boolean) : PERSONAS_DEF
+  for (const h of personas) leerNombre(h)
+  const demoras = arg('demoras') !== undefined ? (arg('demoras') ?? '').split(',').filter(Boolean).map(Number) : DEMORAS_DEF
   const salArg = arg('sal')
-  const sal = salArg !== undefined ? Number(salArg) : null
+  const salesArg = arg('sales')
+  const sales: (number | null)[] = salesArg ? salesArg.split(',').map((s) => (s === 'base' ? null : Number(s))) : [salArg !== undefined ? Number(salArg) : null]
   const difs = (arg('dif')?.split(',') ?? DIFS) as Dificultad[]
   const ids: IdPersonaje[] = [...IDS_PERSONAJES]
   const solo = arg('solo')?.split(',') as IdPersonaje[] | undefined
@@ -513,35 +452,47 @@ async function principal(): Promise<void> {
   aplicarAjuste(ajuste)
 
   const trabajos: Trabajo[] = []
-  let base = 1
-  for (const dif of difs) {
-    const n = dif === 'normal' ? semillasNormal : semillas
-    for (const a of ids) {
-      for (const b of ids) {
-        if (solo && !solo.includes(a) && !solo.includes(b)) continue
-        for (let s = 0; s < n; s++) trabajos.push({ a, b, dif, semilla: semillaDe(base++, 7919, sal), humano: null, bot: null, novatos: false })
+  for (const sal of sales) {
+    // Un contador por clase de trabajo (ver semillaDe).
+    let bCpu = 1
+    let bHum = 1
+    let bPer = 1
+    for (const dif of difs) {
+      const n = dif === 'normal' ? semillasNormal : semillas
+      for (const a of ids) {
+        for (const b of ids) {
+          for (let s = 0; s < n; s++) {
+            const semilla = semillaDe(bCpu++, 7919, sal)
+            if (!solo || solo.includes(a) || solo.includes(b)) trabajos.push({ a, b, dif, semilla, tipo: 'cpu', humano: null, bot: null, demora: 0 })
+          }
+        }
       }
-    }
-    // Los humanos: cada barbero del humano contra los 13 rivales, alternando el lado de la pantalla.
-    const nh = dif === 'normal' ? semillasHumanoNormal : semillasHumano
-    for (const bot of humanos) {
+      // Los humanos: cada barbero del humano contra los 13 rivales, alternando el lado de la pantalla.
+      // Todos los humanos juegan las mismas partidas (la misma semilla para la misma celda y vuelta).
+      const nh = dif === 'normal' ? semillasHumanoNormal : semillasHumano
       for (const yo of ids) {
         for (let s = 0; s < nh; s++) {
           const rival = ids[Math.floor(s / 2) % ids.length]
+          const semilla = semillaDe(bHum++, 104729, sal)
           if (solo && !solo.includes(yo) && !solo.includes(rival)) continue
           const lado = (s % 2) as Lado
           const [a, b] = lado === 0 ? [yo, rival] : [rival, yo]
-          trabajos.push({ a, b, dif, semilla: semillaDe(base++, 104729, sal), humano: lado, bot, novatos: false })
+          for (const bot of humanos) trabajos.push({ a, b, dif, semilla, tipo: 'humano', humano: lado, bot, demora: 0 })
         }
       }
     }
-  }
-  // Novato contra novato (no hay CPU: la dificultad no cambia nada; va como normal).
-  for (const a of ids) {
-    for (const b of ids) {
-      if (solo && !solo.includes(a) && !solo.includes(b)) continue
-      for (let s = 0; s < semillasNovatos; s++) {
-        trabajos.push({ a, b, dif: 'normal', semilla: semillaDe(base++, 1299709, sal), humano: null, bot: 'novato', novatos: true })
+    // Persona contra persona (no hay CPU: la dificultad no cambia nada; va como normal). Todas las
+    // personas y demoras juegan las mismas partidas.
+    if (semillasNovatos > 0) {
+      for (const a of ids) {
+        for (const b of ids) {
+          for (let s = 0; s < semillasNovatos; s++) {
+            const semilla = semillaDe(bPer++, 1299709, sal)
+            if (solo && !solo.includes(a) && !solo.includes(b)) continue
+            trabajos.push({ a, b, dif: 'normal', semilla, tipo: 'novatos', humano: null, bot: NOVATO_REF, demora: 0 })
+            for (const bot of personas) for (const demora of demoras) trabajos.push({ a, b, dif: 'normal', semilla, tipo: 'personas', humano: null, bot, demora })
+          }
+        }
       }
     }
   }
@@ -565,7 +516,24 @@ async function principal(): Promise<void> {
   const origenes = ids.map((id) => `${id}=${metaDe(id).origen}`).join(' ')
   informe(
     ac,
-    { difs, ids, seg, partidas: trabajos.length, semillas, semillasNormal, semillasHumano, semillasHumanoNormal, humanos, semillasNovatos, sal, origenes, hilos },
+    {
+      difs,
+      ids,
+      seg,
+      partidas: trabajos.length,
+      semillas,
+      semillasNormal,
+      semillasHumano,
+      semillasHumanoNormal,
+      humanos,
+      personas,
+      demoras,
+      semillasNovatos,
+      sales,
+      origenes,
+      hilos,
+      matricesE: args.includes('--matricesE'),
+    },
     arg('informe'),
     arg('json'),
   )
@@ -593,11 +561,20 @@ interface Opciones {
   semillasNormal: number
   semillasHumano: number
   semillasHumanoNormal: number
-  humanos: NombreHumano[]
+  humanos: string[]
+  personas: string[]
+  demoras: number[]
   semillasNovatos: number
-  sal: number | null
+  sales: (number | null)[]
   origenes: string
   hilos: number
+  matricesE: boolean
+}
+
+/** Cómo se llama una persona en el informe: «novato (reacción 14)». */
+function rotulo(bot: string): string {
+  const r = reaccionDe(bot)
+  return `${bot} (reacción ${r}${r ? ` = ${Math.round((r * 1000) / 60)} ms` : ''})`
 }
 
 function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): void {
@@ -605,12 +582,13 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
   const fallas: string[] = []
   const L = (s = '') => lineas.push(s)
   const nombre = (id: IdPersonaje) => PERSONAJES[id].nombre
+  const salesTxt = o.sales.map((s) => (s === null ? 'las de siempre' : `sal ${s}`)).join(' + ')
   L(`# Balance de «Corte Final» — ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`)
   L()
   L(
     `${o.partidas} partidas en ${o.seg.toFixed(0)} s (${o.hilos} hilos). CPU contra CPU: ${o.semillas} por cruce ordenado (normal ${o.semillasNormal}); ` +
       `humanos (${o.humanos.join(', ') || 'ninguno'}): ${o.semillasHumano} por barbero y dificultad (normal ${o.semillasHumanoNormal}); ` +
-      `novato contra novato: ${o.semillasNovatos} por cruce ordenado. Semillas: ${o.sal === null ? 'las de siempre' : `nuevas (sal ${o.sal})`}.`,
+      `persona contra persona (${o.personas.join(', ') || 'ninguna'}; demoras ${o.demoras.join(', ')}): ${o.semillasNovatos} por cruce ordenado. Semillas: ${salesTxt}.`,
   )
   L(`Meta de animaciones: ${o.origenes}.`)
   L()
@@ -638,7 +616,7 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
     s[1] += g0
   }
   if (Object.keys(ac.cruces).length) {
-    L('## Victorias por luchador (CPU contra CPU, sin espejos)')
+    L('## C. Victorias por luchador (CPU contra CPU, sin espejos)')
     L()
     L(`| Luchador | ${o.difs.join(' | ')} |`)
     L(`|---|${o.difs.map(() => '---:').join('|')}|`)
@@ -647,7 +625,7 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
         const x = porLuchador[d]?.[id]
         const v = x ? pct(x[1], x[0]) : NaN
         if (Number.isFinite(v) && (v < 45 || v > 55)) fallas.push(`${nombre(id)} gana ${f1(v)} % en ${d} (meta 45–55)`)
-        return `${f1(v)} %${Number.isFinite(v) && (v < 45 || v > 55) ? ' (!)' : ''}`
+        return `${f1(v)} ±${f1(ic(v, x?.[0] ?? 0))}${Number.isFinite(v) && (v < 45 || v > 55) ? ' (!)' : ''}`
       })
       L(`| ${nombre(id)} | ${celdas.join(' | ')} |`)
     }
@@ -665,12 +643,14 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
 
     // Matriz de normal (fila contra columna, los dos lados juntos).
     const dm: Dificultad = o.difs.includes('normal') ? 'normal' : o.difs[0]
-    L(`## Cruces en ${dm} (gana la fila contra la columna, los dos lados juntos)`)
+    L(`## C. Cruces en ${dm} (gana la fila contra la columna, los dos lados juntos)`)
     L()
     L(`| | ${o.ids.map((id) => nombre(id)).join(' | ')} |`)
     L(`|---|${o.ids.map(() => '---:').join('|')}|`)
-    let fuera = 0
+    const fueraLista: string[] = []
+    const indicativos: string[] = []
     let peor = { v: 50, a: '', b: '', n: 0 }
+    let nMin = Infinity
     for (const a of o.ids) {
       const celdas = o.ids.map((b) => {
         if (a === b) return '·'
@@ -679,20 +659,26 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
         const n = (x?.[0] ?? 0) + (y?.[0] ?? 0)
         const g = (x?.[1] ?? 0) + (y?.[2] ?? 0)
         const v = pct(g, n)
+        if (n > 0) nMin = Math.min(nMin, n)
         if (Number.isFinite(v) && Math.abs(v - 50) > Math.abs(peor.v - 50)) peor = { v, a: nombre(a), b: nombre(b), n }
         const malo = Number.isFinite(v) && (v < 35 || v > 65)
-        if (malo && a < b) fuera++
+        if (malo && a < b) (n >= CRUCE_DECIDE ? fueraLista : indicativos).push(`${nombre(a)}–${nombre(b)} ${f1(v)} (${n})`)
         return `${Number.isFinite(v) ? v.toFixed(0) : '–'}${malo ? '(!)' : ''}`
       })
       L(`| ${nombre(a)} | ${celdas.join(' | ')} |`)
     }
     L()
-    L(`Cruces fuera de 35–65 %: ${fuera}. El más desparejo: ${peor.a} contra ${peor.b}, ${f1(peor.v)} % (${peor.n} partidas; error estándar ≈ ±${f1(100 * Math.sqrt(0.25 / Math.max(1, peor.n)))} %).`)
-    if (fuera > 0 && dm === 'normal') fallas.push(`${fuera} cruces fuera de 35–65 % en normal`)
+    L(
+      `Cruces fuera de 35–65 % con ≥ ${CRUCE_DECIDE} partidas: ${fueraLista.length}${fueraLista.length ? ` (${fueraLista.join(', ')})` : ''}.` +
+        (indicativos.length ? ` Con menos partidas (indicativos, no deciden): ${indicativos.join(', ')}.` : '') +
+        ` El más desparejo: ${peor.a} contra ${peor.b}, ${f1(peor.v)} % (${peor.n} partidas, ±${f1(ic(peor.v, peor.n))}).`,
+    )
+    if (fueraLista.length > 0 && dm === 'normal') fallas.push(`${fueraLista.length} cruces fuera de 35–65 % en normal: ${fueraLista.join(', ')}`)
+    if (dm === 'normal' && Number.isFinite(nMin) && nMin < CRUCE_DECIDE) L(`Los cruces tienen ${nMin} partidas: para decidirlos hacen falta ${CRUCE_DECIDE} (--semillasNormal=${CRUCE_DECIDE / 2} o dos sales).`)
     L()
 
     // Rounds.
-    L('## Rounds (CPU contra CPU)')
+    L('## C. Rounds (CPU contra CPU)')
     L()
     for (const d of o.difs) {
       const rs = (ac.rounds[d] ?? []).map((x) => x / TPS).sort((a, b) => a - b)
@@ -705,7 +691,7 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
     L()
 
     // Especiales.
-    L('## Especiales (CPU contra CPU, todas las dificultades): usos por partida, % que acierta y parte de cada uno')
+    L('## C. Especiales (CPU contra CPU, todas las dificultades): usos por partida, % que acierta y parte de cada uno')
     L()
     L('| Luchador | Especial 1 | usos | acierta | Especial 2 | usos | acierta | e1 / e2 |')
     L('|---|---|---:|---:|---|---:|---:|---:|')
@@ -748,9 +734,29 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
     }
     return [n, g]
   }
-  for (const bot of o.humanos) {
-    if (!Object.keys(ac.humanos).some((k) => k.startsWith(`${bot}|`))) continue
-    L(`## Humano «${bot}» contra la CPU: % que gana el humano con cada barbero (los 13 rivales, los dos lados)`)
+  const botsHumanos = o.humanos.filter((bot) => Object.keys(ac.humanos).some((k) => k.startsWith(`${bot}|`)))
+  if (botsHumanos.length) {
+    // Resumen de B: cada persona contra la CPU en cada dificultad (todas las celdas juntas).
+    L('## B. Personas contra la CPU: % que gana la persona (los 13 barberos y los 13 rivales, los dos lados)')
+    L()
+    L(`Oficiales para la meta B: ${OFICIALES.filter((b) => botsHumanos.includes(b)).map(rotulo).join(', ') || 'ninguno'}. Referencia: ${botsHumanos.filter((b) => !OFICIALES.includes(b)).map(rotulo).join(', ') || 'ninguna'}.`)
+    L()
+    L(`| Persona | ${o.difs.join(' | ')} |`)
+    L(`|---|${o.difs.map(() => '---:').join('|')}|`)
+    for (const bot of botsHumanos) {
+      L(`| ${bot}${OFICIALES.includes(bot) ? ' (oficial)' : ''} | ${o.difs.map((d) => {
+        const [n, g] = hum(bot, d, () => true)
+        const v = pct(g, n)
+        return `${f1(v)} ±${f1(ic(v, n))}`
+      }).join(' | ')} |`)
+    }
+    L()
+  }
+  for (const bot of botsHumanos) {
+    const oficial = OFICIALES.includes(bot)
+    L(`## B. Humano «${bot}»${oficial ? ' (oficial)' : ' (referencia)'} contra la CPU: % que gana con cada barbero (los 13 rivales, los dos lados)`)
+    L()
+    L(`Reacción: ${rotulo(bot)}.`)
     L()
     L(`| Barbero del humano | ${o.difs.join(' | ')} |`)
     L(`|---|${o.difs.map(() => '---:').join('|')}|`)
@@ -758,8 +764,8 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
       const celdas = o.difs.map((d) => {
         const [n, g] = hum(bot, d, (yo) => yo === id)
         const v = pct(g, n)
-        if (d === 'dificil' && Number.isFinite(v) && v > TOPE_HUMANO_DIFICIL) fallas.push(`humano ${bot} con ${nombre(id)} gana ${f1(v)} % en difícil (tope ${TOPE_HUMANO_DIFICIL})`)
-        if (d === 'facil' && bot === 'simple' && Number.isFinite(v) && v < MIN_SIMPLE_FACIL) fallas.push(`humano simple con ${nombre(id)} gana ${f1(v)} % en fácil (mínimo ${MIN_SIMPLE_FACIL})`)
+        if (oficial && d === 'dificil' && Number.isFinite(v) && v > TOPE_HUMANO_DIFICIL) fallas.push(`humano ${bot} con ${nombre(id)} gana ${f1(v)} % en difícil (tope ${TOPE_HUMANO_DIFICIL})`)
+        if (oficial && d === 'facil' && bot === 'simple' && Number.isFinite(v) && v < MIN_SIMPLE_FACIL) fallas.push(`humano simple con ${nombre(id)} gana ${f1(v)} % en fácil (mínimo ${MIN_SIMPLE_FACIL})`)
         return `${f1(v)} %`
       })
       L(`| ${nombre(id)} | ${celdas.join(' | ')} |`)
@@ -786,14 +792,14 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
       })
       const [n, g] = hum(bot, 'normal', (y) => y === yo)
       const v = pct(g, n)
-      const malo = Number.isFinite(v) && (v < lo || v > hi)
+      const malo = oficial && Number.isFinite(v) && (v < lo || v > hi)
       if (malo) fallas.push(`humano ${bot} en normal con ${nombre(yo)} gana ${f1(v)} % (meta ${lo}–${hi})`)
       L(`| ${nombre(yo)} | ${celdas.join(' | ')} | ${f1(v)} ±${f1(ic(v, n))}${malo ? ' (!)' : ''} |`)
     }
     const porCpu = o.ids.map((cpu) => {
       const [n, g] = hum(bot, 'normal', (_y, c) => c === cpu)
       const v = pct(g, n)
-      const malo = Number.isFinite(v) && (v < lo || v > hi)
+      const malo = oficial && Number.isFinite(v) && (v < lo || v > hi)
       if (malo) fallas.push(`humano ${bot} en normal contra la CPU ${nombre(cpu)} gana ${f1(v)} % (meta ${lo}–${hi})`)
       return `${f1(v)}${malo ? ' (!)' : ''}`
     })
@@ -802,9 +808,9 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
     L()
   }
 
-  // ─── Reparto de especiales de la CPU contra el humano simple ───
+  // ─── Reparto de especiales de la CPU contra el humano simple (oficial) ───
   if (Object.keys(ac.especialesCpu).some((k) => k.startsWith('simple|'))) {
-    L('## Especiales de la CPU contra el humano simple: parte de cada especial (y usos por partida)')
+    L('## D. Especiales de la CPU contra el humano simple (oficial): parte de cada especial (y usos por partida)')
     L()
     L(`| CPU | ${o.difs.map((d) => `${d}: e1 / e2 (usos)`).join(' | ')} |`)
     L(`|---|${o.difs.map(() => '---:').join('|')}|`)
@@ -827,45 +833,111 @@ function informe(ac: Acum, o: Opciones, rutaMd?: string, rutaJson?: string): voi
     L()
   }
 
-  // ─── Novato contra novato ───
-  if (Object.keys(ac.novatos).length) {
-    const [lo, hi] = META_NOVATOS
-    L('## Novato contra novato (dos personas, como online): % que gana cada barbero')
-    L()
-    L(`| | ${o.ids.map((id) => nombre(id)).join(' | ')} | total |`)
-    L(`|---|${o.ids.map(() => '---:').join('|')}|---:|`)
+  // ─── Persona contra persona ───
+  /** % de cada barbero (los dos lados juntos) y lado izquierdo, desde un registro `a|b` → [n, g0, g1]. */
+  const marginales = (reg: Record<string, [number, number, number]>) => {
+    const fila: Record<string, [number, number]> = {}
     let n0 = 0
     let g0 = 0
+    for (const [k, [n, x0, x1]] of Object.entries(reg)) {
+      const [a, b] = k.split('|')
+      n0 += x0 + x1
+      g0 += x0
+      if (a === b) continue
+      ;(fila[a] ??= [0, 0])[0] += n
+      fila[a][1] += x0
+      ;(fila[b] ??= [0, 0])[0] += n
+      fila[b][1] += x1
+    }
+    return { fila, lado: pct(g0, n0), n: n0 }
+  }
+  const matriz = (reg: Record<string, [number, number, number]>) => {
+    L(`| | ${o.ids.map((id) => nombre(id)).join(' | ')} | total |`)
+    L(`|---|${o.ids.map(() => '---:').join('|')}|---:|`)
+    const { fila } = marginales(reg)
     for (const a of o.ids) {
-      let na = 0
-      let ga = 0
       const celdas = o.ids.map((b) => {
-        const x = ac.novatos[`${a}|${b}`]
-        const y = ac.novatos[`${b}|${a}`]
-        if (a === b) {
-          if (x) {
-            n0 += x[1] + x[2]
-            g0 += x[1]
-          }
-          return '·'
-        }
+        if (a === b) return '·'
+        const x = reg[`${a}|${b}`]
+        const y = reg[`${b}|${a}`]
         const n = (x?.[0] ?? 0) + (y?.[0] ?? 0)
         const g = (x?.[1] ?? 0) + (y?.[2] ?? 0)
-        na += n
-        ga += g
-        if (x) {
-          n0 += x[1] + x[2]
-          g0 += x[1]
-        }
         return n ? pct(g, n).toFixed(0) : '–'
       })
+      const [na, ga] = fila[a] ?? [0, 0]
       const v = pct(ga, na)
-      const malo = Number.isFinite(v) && (v < lo || v > hi)
-      if (malo) fallas.push(`novato contra novato: ${nombre(a)} gana ${f1(v)} % (meta ${lo}–${hi})`)
-      L(`| ${nombre(a)} | ${celdas.join(' | ')} | ${f1(v)} ±${f1(ic(v, na))}${malo ? ' (!)' : ''} |`)
+      L(`| ${nombre(a)} | ${celdas.join(' | ')} | ${f1(v)} ±${f1(ic(v, na))} |`)
     }
     L()
-    L(`Lado: gana el de la izquierda ${f1(pct(g0, n0))} % (${n0} partidas, espejos incluidos).`)
+  }
+  const regPersona: Record<string, Record<string, [number, number, number]>> = {}
+  for (const [k, v] of Object.entries(ac.personas)) {
+    const [bot, demora, a, b] = k.split('|')
+    ;(regPersona[`${bot}|${demora}`] ??= {})[`${a}|${b}`] = v
+  }
+  const combos = o.personas.flatMap((bot) => o.demoras.map((d) => `${bot}|${d}`)).filter((c) => regPersona[c])
+  if (combos.length) {
+    const [lo, hi] = META_NOVATOS
+    const [clo, chi] = META_E_CELDA
+    // «simple contra simple» (sólo GOLPE) se informa pero no cuenta para la meta (ver el encabezado).
+    const cuenta = (c: string) => !c.startsWith('simple|') && !c.startsWith('simple@')
+    L('## E. Persona contra persona (la pelea online): % que gana cada barbero, por persona y demora de entrada')
+    L()
+    L(
+      `Cada columna es una persona contra sí misma con la demora del online (D ticks: lo que aprieta en el tick n se aplica en n + D; ` +
+        `se suma a su reacción). Medido entre dos jugadores el 30/oct: RTT ≈ 370–400 ms por Realtime → D = 17–18 (lockstep.ts). ` +
+        `Meta: el promedio de las columnas entre ${lo} y ${hi} % y ninguna columna fuera de ${clo}–${chi} («simple» no cuenta).`,
+    )
+    L()
+    const cab = combos.map((c) => {
+      const [bot, d] = c.split('|')
+      return `${bot}, D ${d}`
+    })
+    L(`| Barbero | ${cab.join(' | ')} | promedio | mín–máx |`)
+    L(`|---|${combos.map(() => '---:').join('|')}|---:|---:|`)
+    const fueraCelda: string[] = []
+    const fueraPromedio: string[] = []
+    const margs = Object.fromEntries(combos.map((c) => [c, marginales(regPersona[c])]))
+    for (const id of o.ids) {
+      const vs: number[] = []
+      const celdas = combos.map((c) => {
+        const [n, g] = margs[c].fila[id] ?? [0, 0]
+        const v = pct(g, n)
+        const malo = cuenta(c) && Number.isFinite(v) && (v < clo || v > chi)
+        if (cuenta(c) && Number.isFinite(v)) vs.push(v)
+        if (malo) {
+          const [bot, d] = c.split('|')
+          fueraCelda.push(`${nombre(id)} ${bot}·D${d} ${f1(v)}`)
+        }
+        return `${f1(v)}${malo ? ' (!)' : ''}`
+      })
+      const prom = vs.length ? vs.reduce((x, y) => x + y, 0) / vs.length : NaN
+      const malo = Number.isFinite(prom) && (prom < lo || prom > hi)
+      if (malo) fueraPromedio.push(`${nombre(id)} ${f1(prom)}`)
+      const rango = vs.length ? `${Math.min(...vs).toFixed(0)}–${Math.max(...vs).toFixed(0)}` : '–'
+      L(`| ${nombre(id)} | ${celdas.join(' | ')} | ${f1(prom)}${malo ? ' (!)' : ''} | ${rango} |`)
+    }
+    L(`| lado izquierdo | ${combos.map((c) => f1(margs[c].lado)).join(' | ')} | | |`)
+    const nPorFila = combos.map((c) => Object.values(margs[c].fila)[0]?.[0] ?? 0)
+    L()
+    L(`Partidas por barbero en cada columna: ${Math.min(...nPorFila)} (±${f1(ic(50, Math.min(...nPorFila)))} en el medio).`)
+    L()
+    if (fueraPromedio.length) fallas.push(`E: ${fueraPromedio.length} barberos con el promedio fuera de ${lo}–${hi}: ${fueraPromedio.join(', ')}`)
+    if (fueraCelda.length) fallas.push(`E: ${fueraCelda.length} columnas fuera de ${clo}–${chi}: ${fueraCelda.join(', ')}`)
+    if (o.matricesE) {
+      for (const c of combos) {
+        const [bot, d] = c.split('|')
+        L(`### E. ${rotulo(bot)}, demora ${d}: gana la fila contra la columna`)
+        L()
+        matriz(regPersona[c])
+      }
+    }
+  }
+  if (Object.keys(ac.novatos).length) {
+    L(`## E. Referencia: novato contra novato que ven el ataque en el mismo tick, sin demora (la tabla de antes del 31/oct)`)
+    L()
+    matriz(ac.novatos)
+    L(`Lado: gana el de la izquierda ${f1(marginales(ac.novatos).lado)} % (${marginales(ac.novatos).n} partidas, espejos incluidos).`)
     L()
   }
 

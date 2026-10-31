@@ -24,7 +24,11 @@
  *        quedó sin conexión 10 s, o tuvo la página oculta 10 s, pierde (`rendirsePorAusencia`).
  *        «Tener red» es una ida y vuelta REAL por el socket (`sondear` del transporte): con el
  *        4G trabado sin que se cierre la conexión el canal sigue unido, y antes los dos
- *        reclamaban (ver `vigilarRed`).
+ *        reclamaban (ver `vigilarRed`);
+ *      · esa derrota que un celular se da a sí mismo (sin red o con la página oculta) es
+ *        PROVISORIA (`ResultadoDuelo.provisorio`): cuenta cuando el rival la confirma; si el rival
+ *        también la perdió, la pelea se anula; si el duelo se cierra antes, no cuenta. Y si el
+ *        rival se fue de la pelea por la mitad (su adiós dice «pierdo»), la gana este celular.
  *
  * Sin React ni Supabase: recibe un transporte (enviar/cerrar) y le pasan lo que llega con
  * `recibir`. Sin `@/`: se prueba con Node.
@@ -36,6 +40,7 @@ import {
   type MensajePelea,
   type MotivoAdios,
   type MotivoFinal,
+  type MsjAdios,
   type MsjEstado,
   type ResumenFinal,
 } from './protocolo'
@@ -73,6 +78,21 @@ const SONDEO_CADA_MS = 2500
 const SONDEO_CADA_SIN_RED_MS = 1000
 /** Ya cumplida la espera, el sondeo que decide el abandono sale enseguida (sólo esta pausa). */
 const SONDEO_DECIDE_MS = 500
+/**
+ * En el resultado, sin red con el canal unido (la red trabada): se sondea para saber cuándo vuelve,
+ * pero sólo este rato. Cada sondeo es un latido y le reinicia el reloj a realtime-js: si se
+ * sondeara siempre, un socket muerto sin aviso no se daría por muerto nunca. Pasado esto, el latido
+ * de realtime-js decide (en 25 s) y, si lo cierra, el transporte reconecta apenas hay red.
+ */
+const SONDEO_RESULTADO_MAX_MS = 20_000
+/** En el resultado, el rival callado (sin despedirse) desde esto: se sondea para saber de quién es la culpa. */
+const SONDEO_SILENCIO_MS = 3000
+/**
+ * La pantalla de pelea no dibuja un cuadro hace esto: la página está oculta o congelada (el
+ * navegador frena los cuadros pero el socket sigue recibiendo). Si en ese rato el rival da a este
+ * celular por ido, es que se fue del juego, no que se quedó sin red.
+ */
+const SIN_CUADROS_MS = 4000
 
 export interface JugadorDuelo {
   id: string
@@ -85,6 +105,14 @@ export interface ResultadoDuelo {
   ganador: 'yo' | 'rival' | null
   /** 'abandone': me desconecté (o el otro me dio por ido); 'ausente': tuve la página oculta 10 s. */
   motivo: 'pelea' | 'abandono_rival' | 'turno_rival' | 'abandone' | 'ausente' | 'desync' | 'corte'
+  /**
+   * La derrota la decidió este celular solo (se quedó sin red o tuvo la página oculta 10 s) y el
+   * rival todavía no la confirmó: no cuenta. Cuando llega el «estado» del rival que dice que ganó
+   * él, cuenta; si dice que él también la perdió, la pelea se anula ('corte'); si el duelo se cierra
+   * antes, no cuenta nunca. Hasta el 31/oct contaba enseguida: con el wifi del local caído, los dos
+   * celulares se anotaban una derrota.
+   */
+  provisorio: boolean
   /** Rounds [yo, rival]. */
   rondas: [number, number]
   estadisticas: EstadisticasLuchador | null
@@ -133,6 +161,11 @@ export interface EstadoDuelo {
   rivalPresente: boolean
   /** Por qué se fue el rival (si se fue). */
   rivalSeFue: MotivoAdios | 'sin_conexion' | null
+  /**
+   * En el resultado: el que no tiene red es ESTE celular (el canal caído o el último sondeo sin
+   * respuesta). El pie no culpa al rival («Sin revancha: Juan ya no está») ni ofrece REVANCHA.
+   */
+  sinRed: boolean
   cierre: MotivoCierre | null
 }
 
@@ -143,16 +176,24 @@ export interface TransporteDuelo {
   /** ¿El canal está unido? (sin esto, el duelo lo da por conectado siempre). */
   conectado?(): boolean
   /**
-   * Ida y vuelta REAL por el socket: true = este celular tiene red. Con la red trabada sin que se
-   * cierre la conexión el canal sigue unido y sólo esto lo nota. Sin esto, el canal unido alcanza
-   * para reclamar un abandono (lo de antes del 30/oct).
+   * Ida y vuelta REAL por el socket: true = este celular tiene red; null = no sé (el transporte no
+   * reconoce cómo late esta versión de realtime-js: desde ahí el duelo decide como si no hubiera
+   * sondeo). Con la red trabada sin que se cierre la conexión el canal sigue unido y sólo esto lo
+   * nota. Sin esto, el canal unido alcanza para reclamar un abandono (lo de antes del 30/oct).
    */
-  sondear?(): Promise<boolean>
+  sondear?(): Promise<boolean | null>
+  /**
+   * El canal no está unido: que vuelva apenas haya red, sin la espera creciente de realtime-js
+   * (hasta 10 s para el socket y otro tanto para volver a unirse al canal). Lo llama el latido.
+   */
+  reintentar?(): void
 }
 
-/** Un sondeo de la red propia en vuelo: de qué pelea, de qué espera del lockstep y de qué conexión es. */
+/** Un sondeo de la red propia en vuelo: de qué pelea, de qué fase, de qué espera del lockstep y de qué conexión es. */
 interface SondeoRed {
   k: number
+  /** En plena pelea (decide el abandono) o en el resultado (sólo dice si volvió la red). */
+  enPelea: boolean
   espera: number
   desde: number
   /** `conexionDesde` al salir: si el canal se cayó o volvió mientras tanto, la respuesta ya no dice nada. */
@@ -175,8 +216,8 @@ export interface OpcionesDuelo {
   /**
    * Cada vez que cambia lo que una pelea cuenta (para guardar las victorias y el marcador):
    * `ahora` true = gané, false = perdí, null = no cuenta; `antes` lo que se había informado de
-   * ESA pelea (undefined = es la primera vez). Cambia sólo si los dos celulares, al conciliar,
-   * corrigen un abandono (ver el comentario de arriba).
+   * ESA pelea (undefined = es la primera vez). Cambia si los dos celulares, al conciliar,
+   * corrigen un abandono o anulan la pelea, o si el rival confirma una derrota provisoria.
    */
   alResultado?: (ahora: boolean | null, antes: boolean | null | undefined) => void
 }
@@ -198,6 +239,10 @@ function mediana(v: number[]): number {
 
 /** Precedencia al conciliar dos resultados de la misma pelea. */
 const PESO_FINAL: Record<MotivoFinal, number> = { abandono: 0, pelea: 1, desync: 2, corte: 2 }
+
+function paginaOculta(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden'
+}
 
 export class Duelo {
   readonly peleaId: string
@@ -242,6 +287,8 @@ export class Duelo {
   private conexionDesde: number
   /** Sondeo de la red propia en vuelo (ver vigilarRed). */
   private sondeo: SondeoRed | null = null
+  /** El transporte dijo «no sé» (otra versión de realtime-js): se decide como si no hubiera sondeo. */
+  private sinSondeo = false
   /** La espera del lockstep (su número, `stats.esperas`) a la que pertenecen redOk y sinRedDesde. */
   private esperaVigilada = -1
   /** Lo que dijo el último sondeo de esta espera (null = todavía nada). La pantalla lo muestra. */
@@ -250,6 +297,17 @@ export class Duelo {
   private sinRedDesde: number | null = null
   /** Cuándo volvió el último sondeo de esta espera. */
   private finSondeo = -Infinity
+  /**
+   * Fuera de la pelea (el resultado): false = este celular está sin red (se dio por perdido sin red
+   * o el último sondeo no volvió); null = no se sabe (se da por buena); true = volvió.
+   */
+  private redPropia: boolean | null = null
+  /** Cuándo empezó el resultado de esta pelea (los sondeos del resultado duran un rato). */
+  private resultadoDesde = 0
+  /** Recién volvió la red de este celular: hasta acá no se da al rival por ido (puede tardar en hablar). */
+  private graciaRivalHasta = 0
+  /** El último cuadro de la pantalla de pelea (estaConectado y abandonoDelRival los cuentan); null = ninguno. */
+  private ultimoCuadro: number | null = null
   private rival: JugadorDuelo
   private ultimoDelRival: number
   private lockstep: Lockstep | null = null
@@ -319,6 +377,7 @@ export class Duelo {
       revanchaRival: this.revanchaRival,
       rivalPresente: this.rivalPresente,
       rivalSeFue: this.rivalSeFue,
+      sinRed: this.fase === 'resultado' && this.sinRedPantalla(),
       cierre: this.cierre,
     }
   }
@@ -382,7 +441,11 @@ export class Duelo {
     }
   }
 
-  /** El resultado propio en lados del mundo (lo que viaja en el «estado»). */
+  /**
+   * El resultado propio en lados del mundo (lo que viaja en el «estado»). Una derrota provisoria
+   * viaja igual que una confirmada: es lo que el rival necesita para confirmarla (si él ganó) o
+   * para anular la pelea (si él también la perdió).
+   */
   private resumenPropio(): ResumenFinal | null {
     const r = this.resultado
     if (!r) return null
@@ -404,20 +467,46 @@ export class Duelo {
     if (c !== this.conectado) {
       this.conectado = c
       this.conexionDesde = this.ahora()
-      // Volvió el canal (el join hizo ida y vuelta con el servidor): la red anda.
+      // Volvió el canal (el join hizo ida y vuelta con el servidor): la red anda. El rival puede
+      // tardar un toque en volver a hablar: no se lo da por ido enseguida.
       if (c) {
         this.redOk = null
         this.sinRedDesde = null
+        this.redPropia = null
+        this.graciaRivalHasta = this.ahora() + RECONEXION_MS
       }
     }
+  }
+
+  /** ¿El que no tiene red es este celular? (el canal caído o, fuera de la pelea, el último sondeo sin respuesta). */
+  private sinRedPropia(): boolean {
+    return !this.conectado || this.redPropia === false
+  }
+
+  /**
+   * Para el pie del resultado (EstadoDuelo.sinRed): sin red, o con la red recién vuelta y el rival
+   * callado desde antes: hasta que hable (o pase la gracia) no se sabe si sigue ahí, así que ni
+   * REVANCHA (aparecía unos segundos y se iba) ni «ya no está».
+   */
+  private sinRedPantalla(): boolean {
+    if (this.sinRedPropia()) return true
+    const t = this.ahora()
+    return t < this.graciaRivalHasta && t - this.ultimoDelRival > SILENCIO_MS
+  }
+
+  /** ¿Hay un sondeo que sabe lo que dice? (el transporte lo tiene y no dijo «no sé»). */
+  private puedeSondear(): boolean {
+    return !!this.o.transporte.sondear && !this.sinSondeo
   }
 
   /**
    * Para la pantalla de pelea, en cada cuadro: «Sin conexión / Reconectando…» en vez de la cuenta
    * hacia el abandono del rival cuando el que no tiene red es ESTE celular (el canal caído o, con
-   * el canal unido, el último sondeo sin respuesta). De paso vigila la red mientras espera.
+   * el canal unido, el último sondeo sin respuesta). De paso vigila la red mientras espera, y cuenta
+   * el cuadro (sin cuadros, la página está oculta: ver motivoDerrotaPropia).
    */
   estaConectado(): boolean {
+    if (this.fase === 'peleando') this.ultimoCuadro = this.ahora()
     this.revisarConexion()
     this.vigilarRed()
     return this.conectado && this.redOk !== false
@@ -427,12 +516,18 @@ export class Duelo {
   private latido(): void {
     if (this.fase === 'cerrado') return
     this.revisarConexion()
+    // El canal caído: que vuelva apenas haya red. Con la espera creciente de realtime-js (el socket
+    // y después el canal), la pelea anulada llegaba 12–22 s después de que volvía el wifi.
+    if (!this.conectado) this.o.transporte.reintentar?.()
     if (this.fase === 'peleando') this.vigilarRed()
+    else if (this.fase === 'resultado') this.vigilarRedResultado()
     const peleandoConLotes = this.fase === 'peleando' && this.recibioLoteDelRival
     if (!peleandoConLotes) this.mandarEstado()
-    if (this.fase !== 'peleando' && this.ahora() - this.ultimoDelRival > SILENCIO_MS) {
+    const t = this.ahora()
+    if (this.fase !== 'peleando' && t - this.ultimoDelRival > SILENCIO_MS) {
       if (this.fase === 'resultado') {
-        if (this.rivalPresente) {
+        // Si el que no tiene red es este celular, el rival no «se fue»: el pie lo dice (sinRed).
+        if (this.rivalPresente && !this.sinRedPropia() && t >= this.graciaRivalHasta) {
           this.rivalPresente = false
           this.rivalSeFue = this.rivalSeFue ?? 'sin_conexion'
           this.revanchaRival = false
@@ -442,6 +537,7 @@ export class Duelo {
         this.cerrar('sin_conexion')
       }
     }
+    if (this.fase === 'resultado' && this.foto.sinRed !== this.sinRedPantalla()) this.avisar()
   }
 
   private despues(ms: number, fn: () => void): void {
@@ -456,6 +552,9 @@ export class Duelo {
     // Sólo el rival de ESTE duelo (en un canal público cualquiera podría mandar algo).
     if (!m || m.de !== this.rival.id) return
     this.ultimoDelRival = this.ahora()
+    // Llegó algo: la red de este celular anda.
+    const sinRedAntes = this.fase === 'resultado' && this.foto.sinRed
+    if (this.redPropia === false) this.redPropia = true
     switch (m.t) {
       case 'estado':
         this.alEstado(m)
@@ -477,15 +576,17 @@ export class Duelo {
         this.alLockstep(m.k, m)
         break
       case 'adios':
-        this.alAdios(m.m)
+        this.alAdios(m)
         break
       case 'fin':
         // Con el motor ya en 'terminada' manda el motor (el «fin» llegó tarde: el otro no vio la cola).
         if (m.k !== this.k || this.fase !== 'peleando' || this.finMotor) break
-        if (m.m === 'abandono') this.fijarResultado('rival', 'abandone', null)
+        if (m.m === 'abandono') this.fijarResultado('rival', this.motivoDerrotaPropia(), null)
         else this.fijarResultado(null, 'desync', null)
         break
     }
+    // Volvió la red y lo que llegó no avisó a la pantalla (un lote tardío, un pedido): que se entere.
+    if (sinRedAntes && this.fase === 'resultado' && this.foto.sinRed !== this.sinRedPantalla()) this.avisar()
   }
 
   private alEstado(m: MsjEstado): void {
@@ -546,11 +647,12 @@ export class Duelo {
     this.avisar()
   }
 
-  private alAdios(motivo: MotivoAdios): void {
+  private alAdios(m: MsjAdios): void {
     this.adiosRecibido = true
     this.rivalPresente = false
-    this.rivalSeFue = motivo
+    this.rivalSeFue = m.m
     this.revanchaRival = false
+    const gane: ResultadoDuelo['motivo'] = m.m === 'turno' ? 'turno_rival' : 'abandono_rival'
     if (this.fase === 'peleando') {
       // Se fue durante MI festejo: el resultado es el del motor (lo fija terminarPelea).
       if (this.finMotor) {
@@ -562,12 +664,31 @@ export class Duelo {
         this.adoptar(this.resRival)
         return
       }
-      this.fijarResultado('yo', motivo === 'turno' ? 'turno_rival' : 'abandono_rival', null)
+      this.fijarResultado('yo', gane, null)
     } else if (this.fase === 'resultado') {
+      // Se fue en plena pelea k (se la anotó como perdida) y este celular la había dado por perdida
+      // por su cuenta (sin red, con la página oculta): la ganó este celular. Antes cada uno decía
+      // que había ganado el otro y los dos se anotaban una derrota (el adiós llegaba al volver la red).
+      const r = this.resultado
+      if (m.p && m.k === this.k && r && r.k === this.k && r.ganador === 'rival' && (r.motivo === 'abandone' || r.motivo === 'ausente')) {
+        this.reemplazarResultado('yo', gane, r.rondas)
+        return
+      }
       this.avisar()
     } else {
-      this.cerrar(motivo === 'turno' ? 'rival_turno' : motivo === 'cerro' ? 'rival_cerro' : 'rival_salio')
+      this.cerrar(m.m === 'turno' ? 'rival_turno' : m.m === 'cerro' ? 'rival_cerro' : 'rival_salio')
     }
+  }
+
+  /**
+   * El rival decidió que este celular se fue (su «fin» o su resultado): si la pantalla de pelea no
+   * dibuja hace SIN_CUADROS_MS (o la página está oculta), se fue del juego; si no, se quedó sin red.
+   * En Android y en la compu una pestaña oculta sigue recibiendo por el socket: el «fin» del rival
+   * llegaba antes de volver a mostrarse y decía «Te desconectaste» en vez de «Te fuiste del juego».
+   */
+  private motivoDerrotaPropia(): 'abandone' | 'ausente' {
+    const u = this.ultimoCuadro
+    return paginaOculta() || (u !== null && this.ahora() - u >= SIN_CUADROS_MS) ? 'ausente' : 'abandone'
   }
 
   /** Me quedo con lo que decidió el otro (en lados del mundo) para la pelea k. */
@@ -575,7 +696,7 @@ export class Duelo {
     const el: Lado = this.lado === 0 ? 1 : 0
     const ganador: Ganador = x.g === null ? null : x.g === this.lado ? 'yo' : 'rival'
     const motivo: ResultadoDuelo['motivo'] =
-      x.m === 'abandono' ? (ganador === 'yo' ? 'abandono_rival' : 'abandone') : x.m
+      x.m === 'abandono' ? (ganador === 'yo' ? 'abandono_rival' : this.motivoDerrotaPropia()) : x.m
     const rondas: [number, number] = [x.r[this.lado], x.r[el]]
     if (this.fase === 'peleando') this.fijarResultado(ganador, motivo, null, rondas)
     else if (this.fase === 'resultado') this.reemplazarResultado(ganador, motivo, rondas)
@@ -584,7 +705,8 @@ export class Duelo {
   /**
    * Los dos resultados de la misma pelea tienen que decir lo mismo. Anulada > motor > abandono:
    * el que tiene menos peso adopta el del otro; dos abandonos que no coinciden (los dos creen que
-   * ganaron, o los dos que perdieron: se cortó la red de los dos) anulan la pelea.
+   * ganaron, o los dos que perdieron: se cortó la red de los dos) anulan la pelea; dos que
+   * coinciden confirman la derrota provisoria del que se quedó sin red.
    */
   private conciliar(): void {
     const mio = this.resumenPropio()
@@ -594,8 +716,9 @@ export class Duelo {
       this.adoptar(suyo)
       return
     }
-    if (mio.m === 'abandono' && suyo.m === 'abandono' && mio.g !== suyo.g) {
-      this.reemplazarResultado(null, 'corte', this.resultado?.rondas ?? [0, 0])
+    if (mio.m === 'abandono' && suyo.m === 'abandono') {
+      if (mio.g !== suyo.g) this.reemplazarResultado(null, 'corte', this.resultado?.rondas ?? [0, 0])
+      else this.confirmarResultado()
       return
     }
     // Los dos motores terminaron la pelea y no dicen lo mismo: se desincronizaron sin que el hash
@@ -607,11 +730,20 @@ export class Duelo {
     }
   }
 
+  /** El rival dice lo mismo que la derrota provisoria de este celular: ahora cuenta. */
+  private confirmarResultado(): void {
+    const r = this.resultado
+    if (!r || !r.provisorio) return
+    this.resultado = { ...r, provisorio: false }
+    this.aplicarGanador(r.k, r.ganador)
+    this.avisar()
+  }
+
   /** Corrige el resultado de la pelea k ya mostrado (lo ve la pantalla de resultado al toque). */
   private reemplazarResultado(ganador: Ganador, motivo: ResultadoDuelo['motivo'], rondas: [number, number]): void {
     const r = this.resultado
     if (!r || (r.ganador === ganador && r.motivo === motivo)) return
-    this.resultado = { ...r, ganador, motivo, rondas }
+    this.resultado = { ...r, ganador, motivo, rondas, provisorio: false }
     this.aplicarGanador(r.k, ganador)
     this.mandarEstado()
     this.avisar()
@@ -687,6 +819,8 @@ export class Duelo {
     this.redOk = null
     this.sinRedDesde = null
     this.finSondeo = -Infinity
+    this.redPropia = null
+    this.ultimoCuadro = null
     const k = this.k
     if (this.lado === 0) this.medirRtt()
     this.despues(ARRANQUE_MS, () => {
@@ -745,11 +879,16 @@ export class Duelo {
     this.avisar()
   }
 
+  /**
+   * Cierra la pelea k con este resultado. `provisorio`: la derrota la decidió este celular solo
+   * (sin red, oculta): no se anota hasta que el rival la confirme (ver ResultadoDuelo.provisorio).
+   */
   private fijarResultado(
     ganador: Ganador,
     motivo: ResultadoDuelo['motivo'],
     fin: FinPeleaLocal | null,
     rondas?: [number, number],
+    provisorio = false,
   ): void {
     if (this.fase !== 'peleando') return
     this.lockstep?.cerrar()
@@ -759,14 +898,16 @@ export class Duelo {
       k: this.k,
       ganador,
       motivo,
+      provisorio,
       rondas: fin ? [fin.rondasPorLado[yo], fin.rondasPorLado[el]] : (rondas ?? [0, 0]),
       estadisticas: fin ? { ...fin.estadisticasPorLado[yo] } : null,
       duracionSeg: fin ? fin.duracionSeg : 0,
     }
-    this.aplicarGanador(this.k, ganador)
+    this.aplicarGanador(this.k, provisorio ? null : ganador)
     this.revanchaPropia = false
     this.revanchaRival = false
     this.fase = 'resultado'
+    this.resultadoDesde = this.ahora()
     this.mandarEstado()
     // Si el resultado del otro llegó antes que el mío (yo seguía en el festejo), se concilian ya.
     this.conciliar()
@@ -879,6 +1020,7 @@ export class Duelo {
    */
   abandonoDelRival(): void {
     if (this.fase !== 'peleando' || this.finMotor) return
+    this.ultimoCuadro = this.ahora()
     this.revisarConexion()
     this.vigilarRed()
     this.decidirAbandono(null)
@@ -894,17 +1036,20 @@ export class Duelo {
     if (this.fase !== 'peleando' || this.finMotor || !l || l.msEsperando() < ABANDONO_MS) return
     const t = this.ahora()
     // Sin red desde hace ABANDONO_MS (el canal caído o, con el canal unido, desde el primer sondeo
-    // que falló): el que se fue es este celular. El otro, con red, reclama lo mismo.
+    // que falló): el que se fue es este celular. El otro, con red, reclama lo mismo. Provisoria: si
+    // al otro también se le cortó (el wifi del local), la pelea no la ganó nadie.
     const caido = this.conectado ? null : this.conexionDesde
     const sinRed =
       caido === null ? this.sinRedDesde : this.sinRedDesde === null ? caido : Math.min(caido, this.sinRedDesde)
     if (sinRed !== null && t - sinRed >= ABANDONO_MS) {
-      this.fijarResultado('rival', 'abandone', null)
+      this.redPropia = false
+      this.fijarResultado('rival', 'abandone', null, undefined, true)
       return
     }
     if (!this.conectado || t - this.conexionDesde < RECONEXION_MS) return
-    const sondear = this.o.transporte.sondear
-    if (!sondear || sondeo === true) {
+    if (!this.puedeSondear() || sondeo === true) {
+      // Con un sondeo que volvió, el resultado ya sabe que este celular tiene red.
+      if (sondeo === true) this.redPropia = true
       this.reclamarAbandono()
       return
     }
@@ -946,18 +1091,42 @@ export class Duelo {
       this.finSondeo = -Infinity
       if (espera === 0) return
     }
-    if (espera < SONDEO_DESDE_MS || !this.conectado || this.sondeo || !this.o.transporte.sondear) return
+    if (espera < SONDEO_DESDE_MS || !this.conectado || this.sondeo || !this.puedeSondear()) return
     const pausa = this.redOk === false ? SONDEO_CADA_SIN_RED_MS : SONDEO_CADA_MS
     if (this.ahora() - this.finSondeo >= pausa) this.sondearRed()
   }
 
+  /**
+   * En el resultado, con el canal unido, durante SONDEO_RESULTADO_MAX_MS y un sondeo cada
+   * SONDEO_CADA_MS: si este celular está sin red (la red trabada sin cerrar el socket), para saber
+   * cuándo vuelve —mientras tanto el socket trabado sigue vivo y, al volver, llega lo que el rival
+   * mandó: su resultado, su adiós—; y si el rival se calló sin despedirse, para saber de quién es la
+   * culpa antes de decir «Sin revancha: Juan ya no está». Con el canal caído no hace falta: el
+   * latido llama a `reintentar`.
+   */
+  private vigilarRedResultado(): void {
+    if (!this.conectado || this.sondeo || !this.puedeSondear()) return
+    const t = this.ahora()
+    if (t - this.resultadoDesde > SONDEO_RESULTADO_MAX_MS || t - this.finSondeo < SONDEO_CADA_MS) return
+    const dudoso = this.redPropia === null && !this.adiosRecibido && t - this.ultimoDelRival >= SONDEO_SILENCIO_MS
+    if (this.redPropia === false || dudoso) this.sondearRed()
+  }
+
   private sondearRed(): void {
     const sondear = this.o.transporte.sondear
+    if (!sondear || this.sondeo || this.sinSondeo) return
+    const enPelea = this.fase === 'peleando'
     const l = this.lockstep
-    if (!sondear || !l || this.sondeo) return
-    const s: SondeoRed = { k: this.k, espera: l.stats.esperas, desde: this.ahora(), conexion: this.conexionDesde }
+    if (enPelea && !l) return
+    const s: SondeoRed = {
+      k: this.k,
+      enPelea,
+      espera: enPelea && l ? l.stats.esperas : -1,
+      desde: this.ahora(),
+      conexion: this.conexionDesde,
+    }
     this.sondeo = s
-    let respuesta: Promise<boolean>
+    let respuesta: Promise<boolean | null>
     try {
       respuesta = sondear.call(this.o.transporte)
     } catch {
@@ -969,9 +1138,23 @@ export class Duelo {
     )
   }
 
-  private alSondeo(s: SondeoRed, ok: boolean): void {
+  private alSondeo(s: SondeoRed, ok: boolean | null): void {
     if (this.sondeo === s) this.sondeo = null
+    if (this.fase === 'cerrado') return
+    if (ok === null) {
+      // El transporte no sabe (otra versión de realtime-js): desde acá, como antes del sondeo. Nunca
+      // un «Sin conexión» que no se midió ni un abandono decidido por un sondeo que no se entiende.
+      this.sinSondeo = true
+      this.redOk = null
+      this.sinRedDesde = null
+      if (s.enPelea) this.decidirAbandono(null)
+      return
+    }
     this.revisarConexion()
+    if (!s.enPelea) {
+      this.alSondeoResultado(s, ok)
+      return
+    }
     const l = this.lockstep
     // De otra pelea, de otra espera, la espera ya terminó o el canal se cayó (o volvió) mientras
     // tanto: no dice nada de ahora (si no, un «sin red» de antes de reconectar contaba como de ahora).
@@ -995,13 +1178,26 @@ export class Duelo {
     this.decidirAbandono(ok)
   }
 
+  /** Un sondeo del resultado volvió: ¿este celular ya tiene red? (para el pie y la revancha). */
+  private alSondeoResultado(s: SondeoRed, ok: boolean): void {
+    if (this.fase !== 'resultado' || this.k !== s.k || this.conexionDesde !== s.conexion) return
+    this.finSondeo = this.ahora()
+    const antes = this.sinRedPropia()
+    // Sin respuesta, pero algo del rival llegó después de mandarlo: la red anda (el sondeo se demoró).
+    if (ok || this.ultimoDelRival >= s.desde) this.redPropia = true
+    else this.redPropia = false
+    if (antes && !this.sinRedPropia()) this.graciaRivalHasta = this.ahora() + RECONEXION_MS
+    if (this.foto.sinRed !== this.sinRedPantalla()) this.avisar()
+  }
+
   /**
    * Este celular tuvo la página oculta ABANDONO_MS o más en plena pelea (bloqueó la pantalla,
    * se fue a otra app): el que se fue es él. Lo que reclamó o va a reclamar el otro coincide.
+   * Provisoria: si el otro también se fue (o se quedó sin red), no la ganó nadie.
    */
   rendirsePorAusencia(): void {
     if (this.fase !== 'peleando' || this.finMotor) return
-    this.fijarResultado('rival', 'ausente', null)
+    this.fijarResultado('rival', 'ausente', null, undefined, true)
   }
 
   /** Los hashes no coincidieron: la pelea no cuenta para nadie. */
@@ -1012,7 +1208,7 @@ export class Duelo {
   }
 
   pedirRevancha(): void {
-    if (this.fase !== 'resultado' || !this.rivalPresente || this.revanchaPropia) return
+    if (this.fase !== 'resultado' || !this.rivalPresente || this.revanchaPropia || this.sinRedPantalla()) return
     this.revanchaPropia = true
     this.mandarEstado()
     if (this.revanchaRival) this.aRevancha()
@@ -1021,22 +1217,28 @@ export class Duelo {
 
   /**
    * Se va del duelo: abandona la pelea, lo llamaron a cortarse o vuelve a la sala. Si estaba
-   * peleando, la pierde (el rival gana por abandono).
+   * peleando, la pierde (el rival gana por abandono): el adiós lo dice («pierdo» en la pelea k),
+   * así el otro la gana aunque mientras tanto se hubiera dado por perdido sin red. Una derrota
+   * provisoria que el rival no llegó a confirmar se va sin contar.
    */
   salir(motivo: MotivoAdios): void {
     if (this.fase === 'cerrado') return
-    const adios: MensajePelea = { t: 'adios', de: this.o.yo.id, m: motivo }
+    let pierdo = false
     if (this.fase === 'peleando') {
       // En pleno festejo la pelea ya tiene resultado (el del motor): se fija y el otro lo recibe
       // antes que el adiós. Si no, la pierde el que se va.
       if (this.finMotor) this.terminarPelea(this.finMotor)
-      else this.aplicarGanador(this.k, 'rival')
+      else {
+        this.aplicarGanador(this.k, 'rival')
+        pierdo = true
+      }
     }
     this.lockstep?.cerrar()
     if (this.resultado && this.resultado.k === this.k) {
       this.o.transporte.enviar(this.mensajeEstado())
       this.enviados++
     }
+    const adios: MensajePelea = { t: 'adios', de: this.o.yo.id, m: motivo, k: this.k, p: pierdo }
     // Dos veces, por las dudas: es lo único que el otro necesita saber.
     this.o.transporte.enviar(adios)
     this.enviados++

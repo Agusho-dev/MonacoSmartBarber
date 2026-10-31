@@ -391,17 +391,120 @@
      ]
     ]
    },
-   "_nota": "revisión 31/oct: la zapatilla de atrás de cada corredor cae del lado del cuadro anterior en la hoja (las piernas se cruzan): cada una vuelve a su dueño (excluir en el anterior, agregar en el suyo); antes cada cuadro llevaba la del siguiente y le faltaba la propia; en el 2 vuelve también la canilla de atrás (el pelado del fondo se la comía: es del mismo negro)",
+   "_nota": "revisión 31/oct: la zapatilla de atrás de cada corredor cae del lado del cuadro anterior en la hoja (las piernas se cruzan): cada una vuelve a su dueño (excluir en el anterior, agregar en el suyo); antes cada cuadro llevaba la del siguiente y le faltaba la propia; en el 2 vuelve también la canilla de atrás (el pelado del fondo se la comía: es del mismo negro). Tercera tanda: en el 1 y el 2 sale el tobillo de atrás (piel borrosa, anaranjada, que quedaba como una mancha arriba y detrás de la zapatilla; la zapatilla sigue unida al pantalón) y en los tres el fondo casi negro (lum ≤ 22) encerrado entre el mentón y el puño y debajo del puño (en el 1 era un bloque negro de bordes rectos pegado al borde del cuadro); el «restaurar» del 2 arranca después del tobillo",
    "retoques": {
+    "0": {
+     "quitarColor": [
+      {
+       "zona": [
+        [
+         683,
+         58
+        ],
+        [
+         700,
+         58
+        ],
+        [
+         700,
+         70
+        ],
+        [
+         692,
+         71
+        ],
+        [
+         684,
+         69
+        ]
+       ],
+       "lumMax": 22
+      },
+      {
+       "zona": [
+        684,
+        79,
+        700,
+        87
+       ],
+       "lumMax": 22
+      }
+     ]
+    },
+    "1": {
+     "quitar": [
+      [
+       [
+        678,
+        100
+       ],
+       [
+        692,
+        100
+       ],
+       [
+        693,
+        106
+       ],
+       [
+        692,
+        111
+       ],
+       [
+        690,
+        114
+       ],
+       [
+        684,
+        115
+       ],
+       [
+        678,
+        116
+       ]
+      ]
+     ],
+     "quitarColor": [
+      {
+       "zona": [
+        [
+         759,
+         57
+        ],
+        [
+         780,
+         57
+        ],
+        [
+         780,
+         72
+        ],
+        [
+         768,
+         72
+        ],
+        [
+         761,
+         70
+        ],
+        [
+         759,
+         66
+        ]
+       ],
+       "lumMax": 22
+      }
+     ]
+    },
     "2": {
      "restaurar": [
       [
        [
-        762,
-        108
+        769,
+        107
        ],
        [
-        768,
+        771,
         104
        ],
        [
@@ -433,10 +536,78 @@
         113
        ],
        [
-        765,
+        770,
         114
        ]
       ]
+     ],
+     "quitar": [
+      [
+       [
+        754,
+        100
+       ],
+       [
+        768,
+        100
+       ],
+       [
+        769,
+        106
+       ],
+       [
+        767,
+        111
+       ],
+       [
+        765,
+        114
+       ],
+       [
+        758,
+        115
+       ],
+       [
+        754,
+        116
+       ]
+      ]
+     ],
+     "quitarColor": [
+      {
+       "zona": [
+        [
+         829,
+         58
+        ],
+        [
+         846,
+         58
+        ],
+        [
+         846,
+         70
+        ],
+        [
+         838,
+         71
+        ],
+        [
+         829,
+         69
+        ]
+       ],
+       "lumMax": 22
+      },
+      {
+       "zona": [
+        826,
+        79,
+        848,
+        88
+       ],
+       "lumMax": 22
+      }
      ]
     }
    }
@@ -1406,6 +1577,22 @@
      ]
     },
     "2": {
+     "desaturar": [
+      {
+       "zona": [
+        748,
+        150,
+        770,
+        162
+       ],
+       "tono": [
+        190,
+        262
+       ],
+       "satMin": 0.15,
+       "satMax": 0.55
+      }
+     ],
      "quitarColor": [
       {
        "zona": [
@@ -1440,7 +1627,7 @@
      ]
     }
    },
-   "_nota": "revisión 31/oct: la gorra del cuadro 2 sube a la barra del título (y 150-163): la región arranca en 148 y la franja azul (y las letras, en el cuadro 0) se sacan por color"
+   "_nota": "revisión 31/oct: la gorra del cuadro 2 sube a la barra del título (y 150-163): la región arranca en 148 y la franja azul (y las letras, en el cuadro 0) se sacan por color. Tercera tanda: en el 2 las 3 filas de arriba de la gorra quedaban azules (la barra, menos saturada que la que sale por color): pasan a gris con su luminancia (desaturar), así la copa no se mella"
   },
   "caer": {
    "mascara": [
@@ -1969,6 +2156,21 @@
       "stdMax": 7,
       "pasos": 25
      }
+    ],
+    "quitarColor": [
+     {
+      "zona": [
+       0,
+       528,
+       1100,
+       540
+      ],
+      "tono": [
+       210,
+       275
+      ],
+      "satMin": 0.2
+     }
     ]
    },
    "escalaPorCuadro": {
@@ -1995,12 +2197,24 @@
         536
        ],
        [
-        205,
+        206,
         536
        ],
        [
-        205,
-        507
+        206,
+        529
+       ],
+       [
+        207,
+        518
+       ],
+       [
+        208,
+        513
+       ],
+       [
+        210,
+        511
        ],
        [
         210,
@@ -2199,6 +2413,24 @@
        [
         460,
         440
+       ]
+      ],
+      [
+       [
+        396,
+        519
+       ],
+       [
+        414,
+        519
+       ],
+       [
+        414,
+        533
+       ],
+       [
+        396,
+        533
        ]
       ]
      ]
@@ -2408,7 +2640,7 @@
     1,
     5
    ],
-   "_nota": "revisión 31/oct (el Agarre): la víctima se saca con polígonos que siguen su contorno (los de antes tenían lados rectos que se llevaban la cintura, el costado y la pierna de adelante de Brian, y en el cuadro 4 la mano que sostiene); en el 1, «restaurar» devuelve el torso que el pelado del fondo se comía por el hueco que abría el polígono (las bandas transparentes en la cintura)"
+   "_nota": "revisión 31/oct (el Agarre): la víctima se saca con polígonos que siguen su contorno (los de antes tenían lados rectos que se llevaban la cintura, el costado y la pierna de adelante de Brian, y en el cuadro 4 la mano que sostiene); en el 1, «restaurar» devuelve el torso que el pelado del fondo se comía por el hueco que abría el polígono (las bandas transparentes en la cintura). Tercera tanda: en el 1 el lado del polígono que saca a la víctima sigue la canilla de Brian (era una pared recta de 30 px que le cortaba la canilla) y en todos sale la franja violeta del borde de abajo del panel, que quedaba bajo los pies (tono 210-275); en el 2 sale la sombra suelta del piso entre las piernas (la unía la franja violeta)"
   },
   "especial2": {
    "cajas": [
@@ -2449,9 +2681,88 @@
       "stdMax": 7,
       "pasos": 25
      }
+    ],
+    "quitarColor": [
+     {
+      "zona": [
+       0,
+       664,
+       400,
+       672
+      ],
+      "tono": [
+       210,
+       275
+      ],
+      "satMin": 0.2
+     }
     ]
    },
    "retoques": {
+    "0": {
+     "restaurar": [
+      [
+       [
+        12,
+        640
+       ],
+       [
+        36,
+        640
+       ],
+       [
+        36,
+        646
+       ],
+       [
+        31,
+        651
+       ],
+       [
+        28,
+        656
+       ],
+       [
+        15,
+        657
+       ],
+       [
+        11,
+        654
+       ],
+       [
+        12,
+        648
+       ]
+      ],
+      [
+       [
+        58,
+        640
+       ],
+       [
+        88,
+        640
+       ],
+       [
+        88,
+        654
+       ],
+       [
+        72,
+        657
+       ],
+       [
+        62,
+        655
+       ],
+       [
+        58,
+        648
+       ]
+      ]
+     ]
+    },
     "1": {
      "quitar": [
       [
@@ -2550,13 +2861,41 @@
         669
        ]
       ]
+     ],
+     "quitarColor": [
+      {
+       "zona": [
+        0,
+        664,
+        400,
+        672
+       ],
+       "tono": [
+        210,
+        275
+       ],
+       "satMin": 0.2
+      },
+      {
+       "zona": [
+        338,
+        580,
+        347,
+        589
+       ],
+       "tono": [
+        195,
+        232
+       ],
+       "satMin": 0.25
+      }
      ]
     }
    },
    "impactos": [
     2
    ],
-   "_nota": "revisión 31/oct (especial2[2] = el impacto del Puño Sísmico y el final del Agarre): la caja y el límite llegan a x 364 alrededor de la cabeza (la cara terminaba en una recta en 352) y el límite sube a y 665 bajo el puño (quedaba la franja violeta del piso)"
+   "_nota": "revisión 31/oct (especial2[2] = el impacto del Puño Sísmico y el final del Agarre): la caja y el límite llegan a x 364 alrededor de la cabeza (la cara terminaba en una recta en 352) y el límite sube a y 665 bajo el puño (quedaba la franja violeta del piso). Tercera tanda: sin el piquito de fondo azul petróleo pegado a la gorra (tono 195-232, sat ≥ 0,25; la gorra es gris neutro) ni la franja violeta del borde del panel bajo los pies; en el 0 vuelven las botamangas (el pelado del humo claro se las comía y las zapatillas quedaban sueltas)"
   },
   "danio": {
    "mascara": [
@@ -3046,11 +3385,12 @@
    460
   ],
   "nitidez": 70,
+  "caraNitida": {},
   "caraDesde": {
    "anim": "especial1",
    "cuadro": 3
   },
-  "_nota": "revisión 31/oct: la cara sale de la fila del Agarre, dibujada ~1,35 veces más grande (más nítida), con un recorte cerrado en la cabeza (antes la cara ocupaba ~10 % del cuadro, contra 21-26 % en Simón y Chipi)"
+  "_nota": "revisión 31/oct: la cara sale de la fila del Agarre, dibujada ~1,35 veces más grande (más nítida), con un recorte cerrado en la cabeza (antes la cara ocupaba ~10 % del cuadro, contra 21-26 % en Simón y Chipi). Tanda 3 (31/oct): \"caraNitida\" arma la cara de una sola vez desde los píxeles de la hoja (extraer_joaquin.cara_nitida): borde de ~1 px como Simón y Chipi y algo más de nitidez, sin acercar el encuadre (la hoja no da más: la cara mide 38 px)."
  },
  "efectos": {
   "roca": {

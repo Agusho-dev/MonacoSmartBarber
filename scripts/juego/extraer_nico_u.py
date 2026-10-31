@@ -28,6 +28,9 @@ Formato del JSON (rutas relativas al JSON; coordenadas SIEMPRE en px de la hoja)
                    humo) y además se restan de toda máscara.
     retrato        {"caja": [...], "espejo": true, "alto": 720, "cara": [x0,y0,x1,y1], "nitidez": 90,
                     + ediciones}: el cuadro que hace de retrato (no hay foto de cuerpo entero).
+                   "caraNitida": {"previa", "radioPrevio", "alfa"} (31/oct, tercera tanda): la cara se
+                   afina a su tamaño antes de agrandarla y su borde es más corto (_escalar_cara); sin la
+                   clave, la cara sale como el retrato (_escalar_limpio)
   por animación
     panel+cuadros  UNA inferencia sobre el panel (sin la franja del título) y separación por manchas
                    (ES.separar_cuadros), como el modo por defecto del extractor, pero cada cuadro admite
@@ -681,6 +684,32 @@ def _escalar_limpio(rgb, alfa, tam, nitidez):
     return Image.fromarray(np.ascontiguousarray(np.dstack([np.asarray(img), (a * 255).astype(np.uint8)])))
 
 
+def _escalar_cara(rgb, alfa, tam, nitidez, opc):
+    """La cara de la grilla (43 px en pantalla) sale de ~40 px de la hoja: agrandada como el retrato queda
+    blanda (31/oct, tercera tanda). Así queda más nítida sin agrandar el recorte: el color se extiende hacia
+    afuera como en _escalar_limpio, se le saca el ruido del JPG a su tamaño (bilateral, conserva los bordes),
+    se afina A SU TAMAÑO (radio ≈ 1 px de la hoja: los bordes del dibujo, no el ruido), se agranda con
+    LANCZOS, se afina otra vez suave y el alfa tiene una transición más corta (borde ≈ 1 px, como Simón y
+    Chipi). opc = retrato.caraNitida: {"previa": %, "radioPrevio": px, "alfa": media transición (0..0,5)}."""
+    import cv2
+    _, (iy, ix) = ndimage.distance_transform_edt(alfa < 0.5, return_indices=True)
+    ext = np.ascontiguousarray(rgb[iy, ix].astype(np.uint8))
+    limpio = cv2.bilateralFilter(ext, 3, 18, 3)
+    img = Image.fromarray(limpio)
+    previa = int(opc.get('previa', 70))
+    if previa:
+        img = img.filter(ImageFilter.UnsharpMask(radius=float(opc.get('radioPrevio', 0.8)), percent=previa, threshold=1))
+    img = img.resize(tam, Image.LANCZOS)
+    if nitidez:
+        img = img.filter(ImageFilter.UnsharpMask(radius=2.2, percent=int(nitidez), threshold=2))
+    a = Image.fromarray((alfa * 255).astype(np.uint8)).resize(tam, Image.LANCZOS)
+    a = np.asarray(a).astype(np.float32) / 255.0
+    m = float(opc.get('alfa', 0.1))
+    t = np.clip((a - (0.5 - m)) / (2 * m), 0, 1)
+    a = t * t * (3 - 2 * t)
+    return Image.fromarray(np.ascontiguousarray(np.dstack([np.asarray(img), (a * 255).astype(np.uint8)])))
+
+
 def hacer_retrato(hoja, cfg, salida, carpeta_rev):
     r = cfg['retrato']
     x0, y0, x1, y1 = (int(v) for v in r['caja'])
@@ -715,7 +744,10 @@ def hacer_retrato(hoja, cfg, salida, carpeta_rev):
         ac[sy0 - oy:sy1 - oy, sx0 - ox:sx1 - ox] = alfa[sy0:sy1, sx0:sx1]
         if r.get('espejo', True):
             rc, ac = rc[:, ::-1], ac[:, ::-1]
-        cara = _escalar_limpio(rc, ac, (256, 256), r.get('nitidezCara', r.get('nitidez', 90)))
+        if r.get('caraNitida'):
+            cara = _escalar_cara(rc, ac, (256, 256), r.get('nitidezCara', r.get('nitidez', 90)), r['caraNitida'])
+        else:
+            cara = _escalar_limpio(rc, ac, (256, 256), r.get('nitidezCara', r.get('nitidez', 90)))
         cara.save(os.path.join(salida, 'cara.webp'), 'WEBP', quality=90, method=6)
     if carpeta_rev:
         fondo = Image.new('RGBA', (cuerpo.width + 300, max(cuerpo.height, 256)), (70, 72, 78, 255))

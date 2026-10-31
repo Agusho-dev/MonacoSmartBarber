@@ -11,10 +11,16 @@
  *
  * Mientras una combinación carga, la canción del juego no compite por la red (`retenerPista`,
  * audio/pista.ts): en 3G le sumaba ≈ 5 s a la pantalla de carga.
+ *
+ * Una carga se puede cancelar (`cancelarPrecarga`: «Volver» en la pantalla de carga): se cortan sus
+ * pedidos, suelta la red para la canción y la combinación queda como si nunca hubiera empezado (el
+ * próximo «¡A pelear!» la pide de nuevo y retoma lo ya bajado, render/recursos.ts). Antes la carga
+ * abandonada seguía ≈ 20 s compitiendo por la red y el siguiente «¡A pelear!» esperaba esa bajada
+ * colgada hasta que el vigía la cortaba.
  */
 import { useEffect, useSyncExternalStore } from 'react'
 import { retenerPista } from '../audio/pista'
-import { cargarRecursos } from '../render'
+import { cargarRecursos, esCancelacion } from '../render'
 import type { IdArena, IdPersonaje, RecursosJuego } from '../tipos'
 
 export interface EstadoPrecarga {
@@ -28,6 +34,9 @@ interface Entrada {
   estado: EstadoPrecarga
   iniciada: boolean
   oyentes: Set<() => void>
+  /** La carga en curso (para cancelarla) y su retención de la red. */
+  control: AbortController | null
+  soltarRed: (() => void) | null
 }
 
 const MAX_ENTRADAS = 2
@@ -54,7 +63,7 @@ function podar() {
 function entradaDe(clave: string): Entrada {
   let e = entradas.get(clave)
   if (!e) {
-    e = { estado: ESPERANDO, iniciada: false, oyentes: new Set() }
+    e = { estado: ESPERANDO, iniciada: false, oyentes: new Set(), control: null, soltarRed: null }
     entradas.set(clave, e)
   }
   return e
@@ -74,9 +83,10 @@ export function precargar(jugador: IdPersonaje, rival: IdPersonaje, arena: IdAre
   avisar(e)
   podar()
 
+  const control = new AbortController()
   let ultimoAviso = 0
   const alProgresar = (fraccion: number) => {
-    if (e.estado.estado !== 'cargando' || !Number.isFinite(fraccion)) return
+    if (e.control !== control || e.estado.estado !== 'cargando' || !Number.isFinite(fraccion)) return
     const f = Math.max(0, Math.min(0.99, fraccion))
     if (f - ultimoAviso < 0.02) return
     ultimoAviso = f
@@ -85,22 +95,52 @@ export function precargar(jugador: IdPersonaje, rival: IdPersonaje, arena: IdAre
   }
   const personajes = [...new Set<IdPersonaje>([jugador, rival])]
   const soltarRed = retenerPista()
+  e.control = control
+  e.soltarRed = soltarRed
+  /** Esta carga sigue siendo la de la entrada (no la cancelaron ni la reemplazó otra). */
+  const vigente = () => e.control === control
   Promise.resolve()
-    .then(() => cargarRecursos(personajes, arena, alProgresar))
+    .then(() => cargarRecursos(personajes, arena, alProgresar, { senal: control.signal }))
     .then(
       (recursos) => {
         soltarRed()
+        if (!vigente()) return
+        e.control = null
+        e.soltarRed = null
         e.estado = { estado: 'listo', progreso: 1, recursos }
         avisar(e)
       },
       (error: unknown) => {
         soltarRed()
+        // Cancelada: el estado ya lo dejó cancelarPrecarga (y no es un error que haya que mostrar).
+        if (!vigente() || control.signal.aborted || esCancelacion(error)) return
+        e.control = null
+        e.soltarRed = null
         console.error('[juego] no se pudieron cargar los recursos', error)
         e.estado = { estado: 'error', progreso: 0, recursos: null }
         avisar(e)
       },
     )
   return clave
+}
+
+/**
+ * Cancela la carga en curso de una combinación («Volver» mientras carga): corta sus pedidos (los que
+ * no comparte con otra carga), le devuelve la red a la canción y la deja sin empezar. Si ya terminó
+ * (o falló), no hace nada: lo cargado queda para la revancha.
+ */
+export function cancelarPrecarga(jugador: IdPersonaje, rival: IdPersonaje, arena: IdArena): void {
+  const e = entradas.get(clavePrecarga(jugador, rival, arena))
+  if (!e || e.estado.estado !== 'cargando') return
+  const control = e.control
+  const soltarRed = e.soltarRed
+  e.control = null
+  e.soltarRed = null
+  e.iniciada = false
+  e.estado = ESPERANDO
+  control?.abort()
+  soltarRed?.()
+  avisar(e)
 }
 
 /** Para leer fuera del render (handlers): el estado actual de una combinación. */

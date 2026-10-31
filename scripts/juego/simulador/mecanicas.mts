@@ -16,11 +16,14 @@ import { cuadroDeAtaque, cuadrosDeImpacto } from '../../../src/lib/juego/motor/a
 import { MOVIMIENTOS } from '../../../src/lib/juego/motor/movimientos.ts'
 import { EFECTO } from '../../../src/lib/juego/motor/constantes.ts'
 import { internoDe } from '../../../src/lib/juego/motor/interno.ts'
+import { PERSONAJES } from '../../../src/lib/juego/personajes.ts'
 
 // Los daños salen de los kits (ya con el factor de balance de DANIO_KIT): las pruebas miden la
 // mecánica (reducción de Chipi, escalado, crítico), no los números de diseño.
 const S = MOVIMIENTOS.simon
 const C = MOVIMIENTOS.chipi
+// Los costos salen de la ficha (cambiaron en la tercera tanda, 31/oct: Simón 6/7, Chipi 4/8).
+const COSTO = (id: 'simon' | 'chipi', n: 1 | 2) => PERSONAJES[id].especiales[n - 1].costo
 const PUNO_S = S.movimientos.puno.ventanas[0].danio
 const PUNO_C = C.movimientos.puno.ventanas[0].danio
 
@@ -301,9 +304,9 @@ function acercar(p: Partida, d = 100) {
   ok(de(evs, 'sin_carga').length === 1 && de(evs, 'especial').length === 0, 'sin carga: evento sin_carga y nada más')
 }
 {
-  // Corte Relámpago: flash, rayo, electrocutado, carga −4.
+  // Corte Relámpago: flash, rayo, electrocutado, gasta su costo.
   const p = nueva()
-  p.luchadores[0].carga = 5
+  p.luchadores[0].carga = COSTO('simon', 1)
   let flash = 0
   let invProy = false
   const evs = correr(p, 80, (t, q) => {
@@ -319,13 +322,13 @@ function acercar(p: Partida, d = 100) {
   const corte = Math.round(S.especiales[0].ventanas[0].danio * 0.88)
   ok(!!g && !g.bloqueado && g.danio === corte, `Corte Relámpago (−12 %) = ${corte}`, g ? String(g.danio) : 'no pegó')
   ok(de(evs, 'electrocutado').length === 1, 'electrocutado')
-  ok(p.luchadores[0].carga < 1.6, 'gastó 4 de carga', p.luchadores[0].carga.toFixed(2))
+  ok(p.luchadores[0].carga < 1.6, `gastó ${COSTO('simon', 1)} de carga`, p.luchadores[0].carga.toFixed(2))
   ok(p.estadisticas[0].especialesUsados === 1 && p.estadisticas[0].especialesAcertados === 1, 'estadísticas de especiales')
 }
 {
   // Corte bloqueado: queda pegado (castigable), 40 a la guardia.
   const p = nueva()
-  p.luchadores[0].carga = 5
+  p.luchadores[0].carga = COSTO('simon', 1)
   const evs = correr(p, 80, (t) => [{ especial1: t < 2 }, { guardia: true }])
   const g = de(evs, 'golpe').find((x) => x.herramienta === 'rayo')
   const gCorte = S.especiales[0].ventanas[0].danioGuardia
@@ -335,7 +338,7 @@ function acercar(p: Partida, d = 100) {
 {
   // Tijera Tormenta: 6 contactos de 28, arrastra.
   const p = nueva()
-  p.luchadores[0].carga = 6
+  p.luchadores[0].carga = COSTO('simon', 2)
   const x1 = p.luchadores[1].x
   const evs = correr(p, 200, (t) => [{ especial2: t < 2 }, {}])
   const g = de(evs, 'golpe').filter((x) => x.herramienta === 'tornado')
@@ -346,7 +349,7 @@ function acercar(p: Partida, d = 100) {
 {
   // Sillonazo: 190, derriba, levantarse invulnerable.
   const p = nueva(['chipi', 'simon'])
-  p.luchadores[0].carga = 5
+  p.luchadores[0].carga = COSTO('chipi', 1)
   let derribado = 0
   let levantInv = true
   let vioLevantarse = false
@@ -365,15 +368,17 @@ function acercar(p: Partida, d = 100) {
   ok(de(evs, 'derribo').length === 1 && derribado > 50, 'derribo', `${derribado} ticks derribado`)
   ok(vioLevantarse && levantInv, 'se levanta invulnerable')
   const p2 = nueva(['chipi', 'simon'])
-  p2.luchadores[0].carga = 5
+  p2.luchadores[0].carga = COSTO('chipi', 1)
   const evs2 = correr(p2, 200, (t) => [{ especial1: t < 2 }, { guardia: true }])
   ok(de(evs2, 'guardia_rota').length === 1, 'Sillonazo rompe la guardia aunque bloquee (guardia llena)')
 }
 {
-  // Fijación Extrema: congela 100, pegarle lo rompe con ×1,3.
+  // Fijación Extrema: congela lo que dice su ticksEfecto (60 desde la tercera tanda; si falta, los 100
+  // de EFECTO.congelado), pegarle lo rompe con ×1,3.
+  const tCongela = C.especiales[1].proyectil?.ticksEfecto || EFECTO.congelado
   const p = nueva(['chipi', 'simon'])
   acercar(p, 140)
-  p.luchadores[0].carga = 6
+  p.luchadores[0].carga = COSTO('chipi', 2)
   let congelado = 0
   const evs = correr(p, 160, (t, q) => {
     if (q.luchadores[1].estado === 'congelado') congelado++
@@ -383,16 +388,16 @@ function acercar(p: Partida, d = 100) {
   void evs
   const p2 = nueva(['chipi', 'simon'])
   acercar(p2, 140)
-  p2.luchadores[0].carga = 6
+  p2.luchadores[0].carga = COSTO('chipi', 2)
   const evs2 = correr(p2, 200, (t, q) => {
     if (q.luchadores[1].estado === 'congelado') congelado++
     return [{ especial2: t < 2 }, {}]
   })
-  ok(de(evs2, 'congelado').length === 1 && congelado >= 95, 'congelado ≈100 ticks', String(congelado))
+  ok(de(evs2, 'congelado').length === 1 && congelado >= tCongela - 5, `congelado ≈${tCongela} ticks`, String(congelado))
   ok(de(evs2, 'descongelado').some((d) => !d.roto), 'se descongela solo (roto: false)')
   const p3 = nueva(['chipi', 'simon'])
   acercar(p3, 140)
-  p3.luchadores[0].carga = 6
+  p3.luchadores[0].carga = COSTO('chipi', 2)
   const evs3 = correr(p3, 140, (t, q) => {
     const congeladoAhora = q.luchadores[1].efectos.congelado > 0
     return [{ especial2: t < 2, golpe: congeladoAhora && t > 60 && t % 6 < 2, derecha: congeladoAhora && t > 50 }, {}]
@@ -403,7 +408,7 @@ function acercar(p: Partida, d = 100) {
   ok(!!golpeRompe && (golpeRompe.danio === Math.round(PUNO_C * 1.3) || golpeRompe.danio === Math.round(PUNO_C * 1.3 * 1.6)), 'el golpe que rompe el hielo hace ×1,3', golpeRompe ? String(golpeRompe.danio) : '-')
   const p4 = nueva(['chipi', 'simon'])
   acercar(p4, 140)
-  p4.luchadores[0].carga = 6
+  p4.luchadores[0].carga = COSTO('chipi', 2)
   let cong4 = 0
   correr(p4, 200, (t, q) => {
     if (q.luchadores[1].efectos.congelado > 0) cong4++

@@ -9,6 +9,7 @@ import type { RecursosJuego } from '@/lib/juego/tipos'
 import type { EstadoPrecarga } from '@/lib/juego/ui/precarga'
 import { consejosDePelea, TIPS } from '@/lib/juego/ui/textos'
 import type { Eleccion } from '@/lib/juego/ui/tipos-ui'
+import { alTocar } from '@/lib/juego/ui/toque'
 import { IconoMaquina } from './iconos'
 import { LogoCorteFinal } from './logo-corte-final'
 
@@ -76,11 +77,11 @@ export function PantallaCarga({
           <h2 className="cf-titulo cf-carga-pantalla__titulo">No pudimos cargar la pelea</h2>
           <p className="cf-texto-suave">Revisá la conexión y probá de nuevo.</p>
           <div className="cf-fila-botones">
-            <button type="button" className="cf-btn" onClick={onReintentar}>
+            <button type="button" className="cf-btn" {...alTocar(onReintentar)}>
               <RotateCcw aria-hidden="true" />
               <span>Reintentar</span>
             </button>
-            <button type="button" className="cf-btn cf-btn--sec" onClick={onVolver}>
+            <button type="button" className="cf-btn cf-btn--sec" {...alTocar(onVolver)}>
               <ChevronLeft aria-hidden="true" />
               <span>Volver</span>
             </button>
@@ -114,7 +115,7 @@ export function PantallaCarga({
             <span>{consejos[tip]}</span>
           </p>
           {puedeVolver && (
-            <button type="button" className="cf-btn cf-btn--sec cf-carga-pantalla__volver" onClick={onVolver}>
+            <button type="button" className="cf-btn cf-btn--sec cf-carga-pantalla__volver" {...alTocar(onVolver)}>
               <ChevronLeft aria-hidden="true" />
               <span>Volver</span>
             </button>

@@ -27,6 +27,7 @@ import {
   X_MIN,
 } from './constantes'
 import {
+  aguantaGolpes,
   altoParado,
   bloquea,
   cajaCuerpo,
@@ -406,7 +407,9 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
   }
 
   // ─── Super armadura (Chipi con la herramienta, Brian mientras ataca: contra golpes leves) ───
-  if (tieneArmadura(kitV, vi.accion, imp.fuerza) && imp.efecto === null) {
+  // Y el que llegó al tope del encierro (TOPE_ENCIERRO.tope), hasta que respire: aguanta cualquier
+  // golpe así (le saca vida, pero no lo frena, no lo tira ni le pone ningún efecto).
+  if ((tieneArmadura(kitV, vi.accion, imp.fuerza) && imp.efecto === null) || aguantaGolpes(vi)) {
     const danio = Math.max(1, Math.round(imp.danio * (1 - kitV.reduccionDanio) * furia))
     hacerDanio(p, I, imp.atacante, imp.victima, danio)
     stA.golpesAcertados++
@@ -498,10 +501,11 @@ export function aplicarImpacto(p: Partida, I: EstadoInterno, imp: Impacto): 'gol
     herramienta: imp.herramienta,
   })
   if (vic.vida > 0) {
-    if (ef === 'electrocuta' && ponerEstado(p, I, imp.victima, 'electrocutado', EFECTO.electrocutado)) {
+    // La duración del electrocutado y del congelado también la puede decir el especial (ticksEfecto).
+    if (ef === 'electrocuta' && ponerEstado(p, I, imp.victima, 'electrocutado', imp.ticksEfecto || EFECTO.electrocutado)) {
       emitir(p, { tipo: 'electrocutado', quien: imp.victima })
     }
-    if (ef === 'congela') congelar(p, I, imp.victima, imp.atacante, EFECTO.congelado)
+    if (ef === 'congela') congelar(p, I, imp.victima, imp.atacante, imp.ticksEfecto || EFECTO.congelado)
     if (ef === 'aturde' && ponerEstado(p, I, imp.victima, 'aturdido', imp.ticksEfecto || EFECTO.aturdido)) {
       emitir(p, { tipo: 'aturdido', quien: imp.victima })
     }

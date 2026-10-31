@@ -2,22 +2,32 @@
 // Cola de partidas pendientes de «Corte Final» (localStorage, `cf.pendientes.v1`,
 // sólo de este celular).
 //
-// QUÉ ENTRA: sólo una partida que el servidor rechazó por el tope del rate
-// limit (`motivo: 'tope'`, ver guardado.ts). Ese rechazo pasa ANTES del insert:
-// se sabe que no se guardó nada y reintentarla no duplica. Un error de red, un
-// timeout o uno desconocido NO entra nunca: el insert pudo haber pasado igual
-// (el timeout de 8 s corta la respuesta, no la escritura) y `juego_partidas` no
-// tiene clave de idempotencia.
+// QUÉ ENTRA (`encolarSiCorresponde`): una partida que el servidor no guardó y
+// que se puede volver a mandar SIN duplicarla (ver guardado.ts):
+// - frenada por el tope del rate limit (`motivo: 'tope'`): pasó ANTES del
+//   insert, no se guardó nada;
+// - frenada por el apodo (`motivo: 'apodo'`; `validarApodo` corre antes de
+//   tocar la base): entra como «Anónimo», que cuenta para el % de victorias de
+//   cada barbero y no para el ranking;
+// - una falla que no dice si se guardó (red caída, el timeout de 8 s —corta la
+//   respuesta, no la escritura—, un error de la base), SÓLO si la partida lleva
+//   `idPartida`: con esa clave (mig 234) el servidor no inserta dos veces la
+//   misma pelea. Sin clave (la página de antes del 31/oct o un navegador sin
+//   crypto) no entra nunca: pudo haberse guardado y no hay forma de saberlo.
+// Los datos inválidos (`motivo: 'datos'`) no entran: se rechazan siempre.
 //
 // CUÁNDO SE REINTENTA (`reintentarPendientes`): en el próximo resultado, apenas
 // su partida se guarda bien (la mejor señal de que el servidor ya acepta a este
 // celular), y al volver al inicio. Nunca antes de lo que pidió el servidor
-// (`esperarHasta`) ni sin red (`navigator.onLine === false`). Cada partida se
-// SACA de la cola antes de mandarla: si la página se cierra a mitad de camino se
-// pierde, pero nunca se guarda dos veces. Si el servidor la vuelve a frenar por
-// el tope, vuelve a la cola. Con cualquier otra respuesta que no sea «guardada»
-// (red caída, error de la base, datos inválidos) queda afuera y la vuelta se
-// corta: las demás esperan a la próxima, así una caída de red pierde una sola.
+// (`esperarHasta`) ni sin red (`navigator.onLine === false`). Sin clave, cada
+// partida se SACA de la cola antes de mandarla: si la página se cierra a mitad
+// de camino se pierde, pero nunca se guarda dos veces. Con clave queda en la
+// cola hasta la respuesta (si la página se cierra, la manda la próxima vuelta).
+// Si vuelve el tope, vuelve a la cola con la espera nueva y la vuelta se corta;
+// si el apodo no pasa, vuelve como «Anónimo» y sale enseguida; si vuelve a
+// fallar sin decir si se guardó, vuelve con `ESPERA_TRAS_FALLA_SEG` y la vuelta
+// se corta (una red caída no la quema entera), y a las `MAX_INTENTOS` fallas se
+// descarta (una partida que el servidor no acepta nunca no tapa la cola).
 //
 // CHICA Y CON VENCIMIENTO: hasta 8 partidas (si se llena, se va la más vieja)
 // y 6 h (la vida del token del QR; además el ranking de «hoy» cuenta la hora en
@@ -29,7 +39,13 @@
 // =============================================================================
 
 import type { PartidaAGuardar, RespuestaGuardado } from './guardado'
-import { esRechazoPorTope } from './guardado'
+import {
+  APODO_ANONIMO,
+  esRechazoPorApodo,
+  esRechazoPorTope,
+  pudoHaberseGuardado,
+  tieneClave,
+} from './guardado'
 
 const CLAVE = 'cf.pendientes.v1'
 
@@ -37,6 +53,10 @@ const CLAVE = 'cf.pendientes.v1'
 export const MAX_PENDIENTES = 8
 /** Una partida pendiente más vieja que esto se tira sin mandarla. */
 export const VIDA_PENDIENTE_MS = 6 * 60 * 60 * 1000
+/** Fallas que no dicen si se guardó (sólo con clave) antes de descartar la partida. */
+export const MAX_INTENTOS = 5
+/** Después de una de esas fallas, la cola espera esto antes de la próxima vuelta. */
+export const ESPERA_TRAS_FALLA_SEG = 30
 /** Si el servidor no dijo cuánto esperar (no debería pasar). */
 const ESPERA_POR_DEFECTO_SEG = 60
 /** Más de esto no se espera nunca (un reloj que se atrasó a mano no traba la cola). */
@@ -49,8 +69,10 @@ export interface Pendiente {
   /** El id del resultado (único por pelea). */
   id: string
   partida: PartidaAGuardar
-  /** Cuándo entró a la cola (ms, reloj del celular). */
+  /** Cuándo entró a la cola (ms, reloj del celular). Con el id, identifica ESTA versión de la partida. */
   creada: number
+  /** Fallas que no dijeron si se guardó (sólo con clave). Sin el campo, 0. */
+  intentos?: number
 }
 
 export interface ColaPendientes {
@@ -61,7 +83,10 @@ export interface ColaPendientes {
 }
 
 export type GuardarPartida = (partida: PartidaAGuardar) => Promise<RespuestaGuardado>
-/** Lo que pasó con una pendiente que se mandó: la respuesta, o null si falló la red o tiró. */
+/**
+ * Lo que pasó con una pendiente que salió de la cola para siempre (guardada o descartada): la
+ * respuesta, o null si falló la red o tiró. Una que vuelve a la cola no avisa.
+ */
 export type AlTerminarPendiente = (item: Pendiente, respuesta: RespuestaGuardado | null) => void
 
 export function colaVacia(): ColaPendientes {
@@ -83,12 +108,13 @@ export function sanearCola(crudo: unknown, ahora: number): ColaPendientes {
   const vistos = new Set<string>()
   for (const x of Array.isArray(crudo.items) ? crudo.items : []) {
     if (!esObjeto(x)) continue
-    const { id, partida, creada } = x
+    const { id, partida, creada, intentos } = x
     if (typeof id !== 'string' || id.length === 0 || id.length > LARGO_MAXIMO_ID || vistos.has(id)) continue
     if (typeof creada !== 'number' || !Number.isFinite(creada) || !vigente(creada, ahora)) continue
     if (!esObjeto(partida)) continue
     vistos.add(id)
-    items.push({ id, partida: partida as unknown as PartidaAGuardar, creada })
+    const n = typeof intentos === 'number' && Number.isFinite(intentos) ? Math.min(MAX_INTENTOS, Math.max(0, Math.floor(intentos))) : 0
+    items.push({ id, partida: partida as unknown as PartidaAGuardar, creada, ...(n > 0 ? { intentos: n } : {}) })
   }
   items.sort((a, b) => a.creada - b.creada)
   const espera = crudo.esperarHasta
@@ -98,14 +124,29 @@ export function sanearCola(crudo: unknown, ahora: number): ColaPendientes {
 }
 
 /**
- * Suma una partida (la misma pelea no entra dos veces) y deja la cola de la más vieja a la más
- * nueva. Si pasa del máximo, se va la más vieja. `devuelta`: la que acaba de volver de un intento
- * (otro tope) va primera entre las de la misma hora, como estaba.
+ * Suma una partida (la misma pelea no entra dos veces: la nueva reemplaza a la que estaba) y deja la
+ * cola de la más vieja a la más nueva. Si pasa del máximo, se va la más vieja. `devuelta`: la que
+ * acaba de volver de un intento va primera entre las de la misma hora, como estaba.
  */
 export function agregarPendiente(cola: ColaPendientes, item: Pendiente, devuelta = false): ColaPendientes {
   const otras = cola.items.filter((p) => p.id !== item.id)
   const items = (devuelta ? [item, ...otras] : [...otras, item]).sort((a, b) => a.creada - b.creada)
   return { esperarHasta: cola.esperarHasta, items: items.slice(-MAX_PENDIENTES) }
+}
+
+/**
+ * La cola sin ESA versión de la partida (mismo id y misma hora). Si mientras viajaba la pantalla dejó
+ * otra más nueva de la misma pelea (otro apodo, otro tope), ésa queda.
+ */
+export function sacarPendiente(cola: ColaPendientes, item: Pendiente): ColaPendientes {
+  return { ...cola, items: cola.items.filter((p) => !(p.id === item.id && p.creada === item.creada)) }
+}
+
+/** Vuelve a poner una partida que salió, salvo que la pantalla haya dejado otra más nueva de la misma pelea. */
+function devolverPendiente(cola: ColaPendientes, item: Pendiente): ColaPendientes {
+  const actual = cola.items.find((p) => p.id === item.id)
+  if (actual && actual.creada !== item.creada) return cola
+  return agregarPendiente(cola, item, true)
 }
 
 /** El servidor pidió esperar `esperarSeg`: no se reintenta antes (nunca más que ESPERA_MAXIMA_MS). */
@@ -126,6 +167,21 @@ export function siguientePendiente(
   const item = items[0]
   if (!item) return null
   return { item, resto: { esperarHasta: 0, items: items.slice(1) } }
+}
+
+/**
+ * La partida para volver a mandar después de esta respuesta, o null si no se puede (o no hace falta).
+ * El tope: la misma. El apodo rechazado: la misma como «Anónimo» (null si ya lo era). Una falla que no
+ * dice si se guardó: la misma, sólo con clave. Guardada o con datos inválidos: null.
+ */
+export function partidaParaReintentar(
+  partida: PartidaAGuardar,
+  respuesta: RespuestaGuardado | null | undefined,
+): PartidaAGuardar | null {
+  if (esRechazoPorTope(respuesta)) return partida
+  if (esRechazoPorApodo(respuesta)) return partida.apodo === APODO_ANONIMO ? null : { ...partida, apodo: APODO_ANONIMO }
+  if (pudoHaberseGuardado(respuesta)) return tieneClave(partida) ? partida : null
+  return null
 }
 
 // ── Storage ─────────────────────────────────────────────────────────────────
@@ -185,18 +241,48 @@ function escribirCola(cola: ColaPendientes): void {
 // ── Lo que usa la UI ────────────────────────────────────────────────────────
 
 /**
- * Deja una partida en la cola. Llamarla SÓLO con un rechazo por el tope
- * (`esRechazoPorTope`): con cualquier otro error la partida pudo haberse
- * guardado y reintentarla la duplicaría.
+ * Deja una partida en la cola con la espera que pidió el servidor. Es la del rechazo por el tope;
+ * para cualquier otra respuesta, `encolarSiCorresponde` (que decide si se puede).
  */
 export function encolarPendiente(id: string, partida: PartidaAGuardar, esperarSeg: number | null | undefined): void {
   const ahora = Date.now()
   escribirCola(conEspera(agregarPendiente(leerCola(ahora), { id, partida, creada: ahora }), esperarSeg, ahora))
 }
 
+/**
+ * Deja en la cola la partida de una respuesta que no la guardó, si se puede reintentar sin duplicarla
+ * (`partidaParaReintentar`): el tope con su espera; el apodo rechazado como «Anónimo» y una falla
+ * ambigua con clave, sin espera nueva. Si ya había una versión de esa pelea, la reemplaza. Devuelve si
+ * quedó en la cola.
+ */
+export function encolarSiCorresponde(
+  id: string,
+  partida: PartidaAGuardar,
+  respuesta: RespuestaGuardado | null | undefined,
+): boolean {
+  const otra = partidaParaReintentar(partida, respuesta)
+  if (!otra) return false
+  if (esRechazoPorTope(respuesta)) {
+    encolarPendiente(id, otra, respuesta.esperarSeg)
+    return true
+  }
+  const ahora = Date.now()
+  escribirCola(agregarPendiente(leerCola(ahora), { id, partida: otra, creada: ahora }))
+  return true
+}
+
+/** Saca esa pelea de la cola (la pantalla la acaba de guardar: mandarla de nuevo sería un pedido de más). */
+export function quitarPendiente(id: string): void {
+  const cola = leerCola()
+  if (cola.items.some((p) => p.id === id)) escribirCola({ ...cola, items: cola.items.filter((p) => p.id !== id) })
+}
+
 let enCurso: Promise<number> | null = null
 
-/** Sin red segura (el navegador lo sabe): no se intenta, porque una falla de red tira la partida. */
+/**
+ * Sin red segura (el navegador lo sabe): no se intenta. Sin clave, una falla de red tira la partida;
+ * con clave, gasta uno de sus MAX_INTENTOS.
+ */
 function sinRed(): boolean {
   try {
     return typeof navigator !== 'undefined' && navigator.onLine === false
@@ -205,11 +291,20 @@ function sinRed(): boolean {
   }
 }
 
+function avisar(alTerminar: AlTerminarPendiente | undefined, item: Pendiente, respuesta: RespuestaGuardado | null) {
+  try {
+    alTerminar?.(item, respuesta)
+  } catch {
+    // Lo que haga la UI con la respuesta no frena la cola.
+  }
+}
+
 /**
  * Manda las pendientes, de a una y de la más vieja a la más nueva, si ya pasó
- * la espera que pidió el servidor. Se corta en la primera que no se guarda.
- * Devuelve cuántas se guardaron. Si ya hay una vuelta en marcha, devuelve esa
- * (no se mandan dos veces). Nunca tira.
+ * la espera que pidió el servidor. Se corta en la primera que vuelve por el
+ * tope o por una falla que no dice si se guardó. Devuelve cuántas se guardaron.
+ * Si ya hay una vuelta en marcha, devuelve esa (no se mandan dos veces). Nunca
+ * tira.
  */
 export function reintentarPendientes(guardar: GuardarPartida, alTerminar?: AlTerminarPendiente): Promise<number> {
   if (enCurso) return enCurso
@@ -217,7 +312,8 @@ export function reintentarPendientes(guardar: GuardarPartida, alTerminar?: AlTer
   const vuelta = (async () => {
     let guardadas = 0
     try {
-      for (let i = 0; i < MAX_PENDIENTES; i++) {
+      // Cada pendiente sale a lo sumo dos veces por vuelta (la segunda, como «Anónimo»).
+      for (let i = 0; i < 2 * MAX_PENDIENTES; i++) {
         const ahora = Date.now()
         const cola = leerCola(ahora)
         const siguiente = siguientePendiente(cola, ahora)
@@ -226,29 +322,41 @@ export function reintentarPendientes(guardar: GuardarPartida, alTerminar?: AlTer
           if (cola.items.length === 0) escribirCola(colaVacia())
           break
         }
-        // Se saca ANTES de mandarla: si algo sale mal se pierde, nunca se guarda dos veces.
-        escribirCola(siguiente.resto)
+        const { item } = siguiente
+        // Sin clave se saca ANTES de mandarla: si algo sale mal se pierde, nunca se guarda dos
+        // veces. Con clave queda hasta la respuesta: el servidor no la duplica.
+        if (!tieneClave(item.partida)) escribirCola(siguiente.resto)
         let respuesta: RespuestaGuardado | null
         try {
-          respuesta = await guardar(siguiente.item.partida)
+          respuesta = await guardar(item.partida)
         } catch {
           respuesta = null
         }
-        if (esRechazoPorTope(respuesta)) {
-          // No se guardó nada: vuelve a la cola y se espera lo que pidió el servidor.
-          const despues = Date.now()
-          escribirCola(conEspera(agregarPendiente(leerCola(despues), siguiente.item, true), respuesta.esperarSeg, despues))
+        const despues = Date.now()
+        if (respuesta?.ok) {
+          escribirCola(sacarPendiente(leerCola(despues), item))
+          guardadas++
+          avisar(alTerminar, item, respuesta)
+          continue
+        }
+        const otra = partidaParaReintentar(item.partida, respuesta)
+        const ambigua = pudoHaberseGuardado(respuesta)
+        const intentos = (item.intentos ?? 0) + (ambigua ? 1 : 0)
+        if (otra && intentos < MAX_INTENTOS) {
+          // No se guardó (o no se sabe, y tiene clave): vuelve a la cola, primera entre las de su hora.
+          let nueva = devolverPendiente(leerCola(despues), { ...item, partida: otra, ...(intentos > 0 ? { intentos } : {}) })
+          if (esRechazoPorTope(respuesta)) nueva = conEspera(nueva, respuesta.esperarSeg, despues)
+          else if (ambigua) nueva = conEspera(nueva, ESPERA_TRAS_FALLA_SEG, despues)
+          escribirCola(nueva)
+          // El apodo rechazado vuelve como «Anónimo» y sale ya; el tope y la red cortan la vuelta.
+          if (esRechazoPorApodo(respuesta)) continue
           break
         }
-        try {
-          alTerminar?.(siguiente.item, respuesta)
-        } catch {
-          // Lo que haga la UI con la respuesta no frena la cola.
-        }
-        // Red caída, error o datos inválidos: esa queda afuera (pudo haberse guardado) y las
-        // demás esperan a la próxima vuelta.
-        if (!respuesta?.ok) break
-        guardadas++
+        // Datos inválidos, una falla ambigua sin clave o la última de MAX_INTENTOS: afuera.
+        escribirCola(sacarPendiente(leerCola(despues), item))
+        avisar(alTerminar, item, respuesta)
+        // Los datos inválidos no dicen nada de la red: siguen las demás. Una red caída corta la vuelta.
+        if (ambigua) break
       }
     } catch {
       // El storage o algo inesperado: lo que quedó en la cola se intenta la próxima vez.

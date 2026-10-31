@@ -19,6 +19,10 @@
  * sin levantarlo; para que eso pase, esas capas van con `touch-action: none` (juego.css): con un
  * paneo empezado, Chrome no entrega más toques hasta levantar todos los dedos.
  *
+ * Si el navegador no le da la captura al dedo del stick (WebKit podría no dársela a un puntero
+ * adoptado, que no se apoyó en la zona), ese dedo se sigue también desde window: se mueve y se
+ * suelta aunque esté fuera de la zona. Si no, al levantarlo afuera el stick quedaba apretado.
+ *
  * Elementos que busca dentro de `raiz`:
  *   [data-zona="joystick"]  con  [data-joy="base"] > [data-joy="perilla"]
  *   [data-zona="botones"]   con  [data-boton="golpe"|"herramienta"|"guardia"|"dash"]
@@ -62,6 +66,11 @@ export function conectarControlesTactiles(raiz: HTMLElement, op: OpcionesControl
     limpiezas.push(() => el.removeEventListener(tipo, fn as EventListener))
   }
 
+  const escucharVentana = <K extends keyof WindowEventMap>(tipo: K, fn: (e: WindowEventMap[K]) => void) => {
+    window.addEventListener(tipo, fn as EventListener, { passive: true })
+    limpiezas.push(() => window.removeEventListener(tipo, fn as EventListener))
+  }
+
   // Un toque largo en Android abre el menú contextual; en iOS, la lupa o el «callout».
   escuchar(raiz, 'contextmenu', (e) => e.preventDefault())
 
@@ -82,6 +91,8 @@ export function conectarControlesTactiles(raiz: HTMLElement, op: OpcionesControl
   let xIni = 0
   let yIni = 0
   let seMovio = false
+  /** La zona tiene la captura del dedo del stick (si no, se lo sigue desde window). */
+  let capturado = false
   let ultimoToqueQuieto = -Infinity
   let dirs: DireccionesStick = { ...STICK_SUELTO }
   const empujones = crearDetectorEmpujones()
@@ -169,10 +180,14 @@ export function conectarControlesTactiles(raiz: HTMLElement, op: OpcionesControl
    * pointermove): no cuenta como toque quieto ni dispara la esquiva del doble toque.
    */
   const tomarJoystick = (zona: HTMLElement, e: PointerEvent, adoptado: boolean) => {
+    // Con un puntero adoptado la captura puede fallar (tirar, o no tomarse sin avisar): entonces el
+    // dedo se sigue desde window (más abajo) y el stick se suelta igual cuando se levanta afuera.
+    capturado = false
     try {
       zona.setPointerCapture(e.pointerId)
+      capturado = zona.hasPointerCapture(e.pointerId)
     } catch {
-      // Puntero que ya no existe: sigue igual sin captura.
+      capturado = false
     }
     const ahora = performance.now()
     joyId = e.pointerId
@@ -199,6 +214,29 @@ export function conectarControlesTactiles(raiz: HTMLElement, op: OpcionesControl
     pintar()
   }
 
+  /** Un movimiento del dedo del stick (con los agrupados del cuadro, en orden). */
+  const seguirDedo = (e: PointerEvent) => {
+    const ahora = performance.now()
+    // Los movimientos agrupados del cuadro, en orden: un empujón rápido no se pierde.
+    const agrupados = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : []
+    if (agrupados.length > 1) {
+      for (const pe of agrupados) moverDedo(pe.clientX - rect.left, pe.clientY - rect.top, ahora)
+    } else {
+      moverDedo(e.clientX - rect.left, e.clientY - rect.top, ahora)
+    }
+    pintar()
+  }
+
+  /** El dedo del stick se levantó (o lo cortaron): idempotente, lo pueden avisar la zona y window. */
+  const alLevantarJoy = (e: PointerEvent) => {
+    if (e.pointerId !== joyId) return
+    const ahora = performance.now()
+    const quieto = !seMovio && ahora - inicio < TOQUE_CORTO
+    soltarJoystick(ahora)
+    capturado = false
+    ultimoToqueQuieto = quieto ? ahora : -Infinity
+  }
+
   if (zonaJoy) {
     escuchar(zonaJoy, 'pointerdown', (e) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return
@@ -222,27 +260,23 @@ export function conectarControlesTactiles(raiz: HTMLElement, op: OpcionesControl
         return
       }
       e.preventDefault()
-      const ahora = performance.now()
-      // Los movimientos agrupados del cuadro, en orden: un empujón rápido no se pierde.
-      const agrupados = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : []
-      if (agrupados.length > 1) {
-        for (const pe of agrupados) moverDedo(pe.clientX - rect.left, pe.clientY - rect.top, ahora)
-      } else {
-        moverDedo(e.clientX - rect.left, e.clientY - rect.top, ahora)
-      }
-      pintar()
+      seguirDedo(e)
     })
 
-    const alLevantar = (e: PointerEvent) => {
-      if (e.pointerId !== joyId) return
-      const ahora = performance.now()
-      const quieto = !seMovio && ahora - inicio < TOQUE_CORTO
-      soltarJoystick(ahora)
-      ultimoToqueQuieto = quieto ? ahora : -Infinity
-    }
-    escuchar(zonaJoy, 'pointerup', alLevantar)
-    escuchar(zonaJoy, 'pointercancel', alLevantar)
-    escuchar(zonaJoy, 'lostpointercapture', alLevantar)
+    escuchar(zonaJoy, 'pointerup', alLevantarJoy)
+    escuchar(zonaJoy, 'pointercancel', alLevantarJoy)
+    escuchar(zonaJoy, 'lostpointercapture', alLevantarJoy)
+
+    // Sin captura (ver tomarJoystick), lo que el dedo del stick hace fuera de la zona llega sólo
+    // a window: se sigue y se suelta desde acá. Con captura, todo llega a la zona primero y esto
+    // no hace nada (el dedo ya se soltó, o el movimiento ya se procesó).
+    escucharVentana('pointermove', (e) => {
+      if (e.pointerId !== joyId || capturado) return
+      if (e.target instanceof Node && zonaJoy.contains(e.target)) return
+      seguirDedo(e)
+    })
+    escucharVentana('pointerup', alLevantarJoy)
+    escucharVentana('pointercancel', alLevantarJoy)
   }
 
   // ─── Botones en arco (una zona grande, gana el botón más cercano) ─────────

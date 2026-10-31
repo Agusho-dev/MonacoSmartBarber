@@ -157,10 +157,22 @@ export interface InternoLuchador {
   /** Lo tiene agarrado ese lado (el Agarre de Brian). */
   agarradoPor: Lado | null
   /**
-   * Ticks de pelea seguidos sin poder actuar (sin contar el hitstop ni los super flash; ver
-   * `sinControl` en cuerpo.ts). Desde TOPE_ENCIERRO.inmuneDesde queda inmune al control.
+   * El encierro en curso (TOPE_ENCIERRO), de punta a punta y en ticks de PANTALLA (con el hitstop y
+   * los super flash): desde el primer tick encerrado (`encerrado` en cuerpo.ts) cuenta todos los
+   * ticks, los huecos más cortos que el respiro incluidos, hasta que respira (0 = no hay encierro).
+   * Desde TOPE_ENCIERRO.inmuneDesde queda inmune al control y en TOPE_ENCIERRO.tope lo sueltan de todo.
    */
   sinControl: number
+  /**
+   * Ticks de pelea con control desde la última vez que estuvo encerrado (cubrirse no suma ni
+   * corta). Cuando llega al respiro, el encierro termina y `sinControl` vuelve a 0.
+   */
+  conControl: number
+  /**
+   * Ticks de pelea con control que le quedan de inmunidad al control después de un encierro que
+   * llegó a TOPE_ENCIERRO.inmuneDesde (TOPE_ENCIERRO.respiroInmune al terminar).
+   */
+  respiroInmune: number
 }
 
 export interface EstadoFinal {

@@ -21,6 +21,7 @@ import { emitir, guardarInterno, internoDe } from './interno'
 import {
   actualizarEstado,
   cargaDeInicio,
+  contarEncierro,
   crearEstadisticas,
   crearInternoLuchador,
   crearLuchador,
@@ -322,6 +323,8 @@ function pasoPelea(p: Partida, I: EstadoInterno, e: readonly [EntradaJugador, En
   for (const lado of LADOS) registrarEntrada(p, I, lado, e[lado], !I.cerebros[lado], true)
   if (p.congelamientoGolpe > 0) {
     p.congelamientoGolpe--
+    // El encierro se mide en pantalla: el hitstop y el super flash también cuentan (TOPE_ENCIERRO).
+    for (const lado of LADOS) contarEncierro(p, I, lado, true)
     cerrarTick(p, I, false)
     return
   }
